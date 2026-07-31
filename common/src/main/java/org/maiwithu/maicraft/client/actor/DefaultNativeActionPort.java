@@ -298,3 +298,27 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     private static DefaultLocalPlayerContext requireSubmission(LocalPlayerContext context) {
         if (!(context instanceof DefaultLocalPlayerContext current)) {
+            throw new IllegalArgumentException("unsupported LocalPlayerContext implementation");
+        }
+        current.requireSubmissionAuthority();
+        return current;
+    }
+
+    private void requireIdle() {
+        if (active != null && !active.terminal()) {
+            throw new IllegalStateException("a native action is already awaiting confirmation");
+        }
+    }
+
+    private void requireActive(NativeActionReceipt receipt, NativeActionReceipt.Kind kind) {
+        if (receipt == null || receipt != active || receipt.kind() != kind) {
+            throw new IllegalArgumentException("the receipt is not the active native action");
+        }
+    }
+    void advance(LocalPlayerContext context) {
+        NativeActionReceipt receipt = active;
+        if (receipt != null && !receipt.terminal()) {
+            poll(context, receipt);
+        }
+    }
+}
