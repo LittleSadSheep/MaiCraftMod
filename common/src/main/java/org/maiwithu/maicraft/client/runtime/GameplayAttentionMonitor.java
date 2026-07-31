@@ -598,3 +598,23 @@ public final class GameplayAttentionMonitor {
             long gameTime,
             Map<String, Integer> inventory,
             int inventoryTotal,
+            boolean recoverAfterDeath) {
+        private DeathSnapshot {
+            inventory = Map.copyOf(inventory);
+        }
+    }
+
+    private static String weather(ClientLevel level) {
+        if (level.isThundering()) return "thunder";
+        if (level.isRaining()) return "rain";
+        return "clear";
+    }
+
+    private static String timePhase(long dayTime) {
+        long time = Math.floorMod(dayTime, 24_000L);
+        if (time <= 999L || time >= 23_000L) return "dawn";
+        if (time <= 11_999L) return "day";
+        if (time <= 12_999L) return "dusk";
+        return "night";
+    }
+}
