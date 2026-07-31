@@ -298,3 +298,108 @@ public final class CompanionTickDispatcher {
 
     private static void abandonPendingIfDisconnected() {
         Handoff pending = pendingHandoff;
+        if (pending == null) return;
+        if (System.nanoTime() <= pending.expiresAtNanos()
+                && connectionAlive(pending.connection())) {
+            return;
+        }
+        pendingHandoff = null;
+        abandon(pending.record(),
+                "authorised dimension handoff ended with a disconnect or expired");
+    }
+
+    private static void abandon(TaskRecord record, String reason) {
+        if (!record.getState().isTerminal()) {
+            record.setState(TaskState.CANCELLED);
+        }
+        if (record.getResult() == null) {
+            record.setResult(TaskResult.cancelled(reason));
+        }
+        String callId = record.getToolCallId();
+        if (callId != null && !callId.isBlank()) {
+            LocalToolDispatcher.deliver(callId, record.getResult().toJson());
+        }
+    }
+
+    private static boolean connectionAlive(ClientPacketListener connection) {
+        return connection != null
+                && Minecraft.getInstance().getConnection() == connection
+                && connection.getConnection() != null
+                && connection.getConnection().isConnected();
+    }
+
+    private static boolean validExpectedSource(Handoff handoff, LocalPlayer player) {
+        return handoff != null
+                && boundPlayer == player
+                && boundLevel == handoff.sourceLevel()
+                && brain != null
+                && brain.current() == handoff.record()
+                && player.level() == handoff.sourceLevel()
+                && handoff.playerId().equals(player.getUUID())
+                && System.nanoTime() <= handoff.expiresAtNanos()
+                && connectionAlive(handoff.connection())
+                && touchesAuthorisedPortal(player, handoff);
+    }
+
+    private static boolean validDestinationBody(Handoff handoff, LocalPlayer player) {
+        return handoff != null
+                && player != null
+                && handoff.playerId().equals(player.getUUID())
+                && handoff.destinationDimension().equals(
+                        player.level().dimension().location().toString())
+                && System.nanoTime() <= handoff.expiresAtNanos()
+                && connectionAlive(handoff.connection());
+    }
+
+    private static boolean touchesAuthorisedPortal(LocalPlayer player, Handoff handoff) {
+        ClientLevel level = handoff.sourceLevel();
+        AABB body = player.getBoundingBox().inflate(0.35D);
+        BlockPos feet = player.blockPosition();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    BlockPos position = feet.offset(dx, dy, dz);
+                    if (!handoff.portalCells().contains(position.asLong())
+                            || !level.isLoaded(position)
+                            || !level.getBlockState(position).is(handoff.portalBlock())) {
+                        continue;
+                    }
+                    if (body.intersects(new AABB(position))) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static Set<Long> connectedPortalCells(
+            ClientLevel level, BlockPos origin, Block portalBlock, int limit) {
+        Set<Long> cells = new HashSet<>();
+        ArrayDeque<BlockPos> open = new ArrayDeque<>();
+        open.add(origin.immutable());
+        while (!open.isEmpty() && cells.size() < limit) {
+            BlockPos cell = open.removeFirst();
+            if (!level.isLoaded(cell)
+                    || !level.getBlockState(cell).is(portalBlock)
+                    || !cells.add(cell.asLong())) {
+                continue;
+            }
+            open.add(cell.above());
+            open.add(cell.below());
+            open.add(cell.north());
+            open.add(cell.south());
+            open.add(cell.east());
+            open.add(cell.west());
+        }
+        return Set.copyOf(cells);
+    }
+
+    private record Handoff(
+            long token, TaskRecord record, UUID playerId, String destinationDimension,
+            ClientPacketListener connection, long expiresAtNanos,
+            ClientLevel sourceLevel, Block portalBlock, Set<Long> portalCells) {}
+    private static void requireClientThread() {
+        if (!Minecraft.getInstance().isSameThread()) {
+            throw new IllegalStateException("task runtime is client-thread only");
+        }
+    }
+}
