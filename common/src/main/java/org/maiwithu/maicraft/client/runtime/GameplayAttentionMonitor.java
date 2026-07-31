@@ -298,3 +298,303 @@ public final class GameplayAttentionMonitor {
             return;
         }
         requestNativeRespawn(player, effect == DeathDecisionEffect.REQUEST_NATIVE_SPECTATE, false);
+    }
+
+    private static synchronized void deathDetected(LocalPlayer player) {
+        IntentTaskRecord active = currentIntent();
+        boolean hardcore = player.level().getLevelData().isHardcore();
+        boolean spectator = player.isSpectator();
+        boolean autoRequested = active != null && semanticBoolean(active, "auto_respawn");
+        boolean recoverRequested = active != null && semanticBoolean(active, "recover_after_death");
+        IntentRuntime runtime = IntentRuntime.get();
+        boolean checkpointSaved = active != null && runtime.checkpointDeath();
+        Map<String, Integer> inventory = inventoryCounts(player);
+        lastDeath = new DeathSnapshot(
+                active == null ? null : active.externalId(),
+                player.level().dimension().location().toString(),
+                player.position(), player.level().getGameTime(), inventory,
+                totalItems(inventory), recoverRequested);
+        lifeState = LifeState.DEAD_REPORTED;
+        activeReflexes.clear();
+
+        boolean autoAllowed = autoRequested && nativeRespawnAvailable(player);
+        JsonObject data = new JsonObject();
+        data.addProperty("hardcore", hardcore);
+        data.addProperty("spectator", spectator);
+        data.addProperty("auto_respawn_requested", autoRequested);
+        data.addProperty("auto_respawn_allowed", autoAllowed);
+        data.addProperty("recover_after_death_requested", recoverRequested);
+        data.addProperty("semantic_task_checkpointed", checkpointSaved);
+        data.addProperty("checkpoint_save_failed", active != null && !checkpointSaved);
+        data.addProperty("requires_llm_decision", active != null && !autoAllowed);
+        data.addProperty("manual_respawn_required", active == null);
+        data.addProperty("inventory_total_at_death", lastDeath.inventoryTotal());
+        data.add("inventory_summary_at_death", inventorySummary(inventory));
+        data.addProperty("item_recovery_started", false);
+        data.addProperty("item_recovery_claimed", false);
+        if (active != null) {
+            data.addProperty("task_id", active.externalId().toString());
+            data.addProperty("task_outcome", safeText(active.goal().outcome(), 160));
+        }
+        publish("agent.died", "The agent died; semantic recovery state was captured for review.", data);
+
+        if (active == null) return;
+        if (autoAllowed) {
+            if (active.pauseSnapshot() == null
+                    && active.pause(player.level().getGameTime(), "death_respawning")) {
+                runtime.paused(active, "Task paused while an authorised native respawn is requested.");
+            }
+            runtime.checkpointDeath();
+            if (!requestNativeRespawn(player, false, true)) {
+                runtime.requestDeathDecision(active, hardcore, spectator, deathDecisionContext());
+            }
+            return;
+        }
+        runtime.requestDeathDecision(active, hardcore, spectator, deathDecisionContext());
+        runtime.checkpointDeath();
+    }
+
+    private static boolean requestNativeRespawn(
+            LocalPlayer player, boolean explicitSpectate, boolean automatic) {
+        if (player == null || !connectionAlive()
+                || (!explicitSpectate && !nativeRespawnAvailable(player))) {
+            JsonObject data = new JsonObject();
+            data.addProperty("automatic", automatic);
+            data.addProperty("explicit_spectate", explicitSpectate);
+            data.addProperty("outcome_known", true);
+            data.addProperty("requested", false);
+            publish("agent.respawn_request_failed",
+                    "Native respawn could not be requested; the agent remains on the death screen.", data);
+            return false;
+        }
+        try {
+            if (!IntentRuntime.get().prepareRespawnHandoff()) {
+                JsonObject data = new JsonObject();
+                data.addProperty("automatic", automatic);
+                data.addProperty("requested", false);
+                data.addProperty("checkpoint_saved", false);
+                publish("agent.respawn_request_failed",
+                        "Respawn was not requested because the semantic checkpoint could not be saved.", data);
+                return false;
+            }
+            lifeState = LifeState.RESPAWN_REQUESTED;
+            JsonObject data = new JsonObject();
+            data.addProperty("automatic", automatic);
+            data.addProperty("explicit_spectate", explicitSpectate);
+            data.addProperty("native_request_sent", true);
+            data.addProperty("item_recovery_started", false);
+            publish("agent.respawn_requested", explicitSpectate
+                    ? "Native spectate was explicitly requested."
+                    : "Native respawn was requested.", data);
+            player.respawn();
+            return true;
+        } catch (RuntimeException failure) {
+            lifeState = LifeState.DEAD_REPORTED;
+            JsonObject data = new JsonObject();
+            data.addProperty("automatic", automatic);
+            data.addProperty("outcome_known", false);
+            data.addProperty("requested", false);
+            data.addProperty("recheck_death_state", true);
+            publish("agent.respawn_request_failed",
+                    "The native respawn request had an unknown outcome; recheck before retrying.", data);
+            return false;
+        }
+    }
+
+    private static JsonObject deathDecisionContext() {
+        JsonObject context = new JsonObject();
+        context.addProperty("decision_kind", "death_recovery");
+        context.addProperty("item_recovery_started", false);
+        context.addProperty("item_recovery_claimed", false);
+        context.addProperty("recovery_requires_fresh_owned_drop_evidence", true);
+        return context;
+    }
+
+    private static IntentTaskRecord currentIntent() {
+        TaskRecord current = CompanionTickDispatcher.current();
+        return current instanceof IntentTaskRecord intent && !intent.getState().isTerminal()
+                ? intent : null;
+    }
+
+    private static boolean semanticBoolean(IntentTaskRecord record, String key) {
+        if (record == null) return false;
+        if (record.stepIndex() >= 0 && record.stepIndex() < record.steps().size()
+                && goalBoolean(record.steps().get(record.stepIndex()), key)) {
+            return true;
+        }
+        return goalBoolean(record.goal(), key);
+    }
+
+    private static boolean goalBoolean(org.maiwithu.maicraft.intent.Goal goal, String key) {
+        if (goal == null) return false;
+        try {
+            if (goal.parameters().has(key)) return goal.parameters().get(key).getAsBoolean();
+            if (goal.preferences().has(key)) return goal.preferences().get(key).getAsBoolean();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+        return false;
+    }
+
+    private static boolean nativeRespawnAvailable(LocalPlayer player) {
+        return player != null && !player.level().getLevelData().isHardcore()
+                && !player.isSpectator() && connectionAlive();
+    }
+
+    private static boolean connectionAlive() {
+        Minecraft minecraft = Minecraft.getInstance();
+        return minecraft.getConnection() != null
+                && minecraft.getConnection().getConnection().isConnected();
+    }
+
+    private static Map<String, Integer> inventoryCounts(LocalPlayer player) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        if (player == null) return counts;
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = player.getInventory().getItem(i);
+            if (stack.isEmpty()) continue;
+            String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            counts.merge(id, stack.getCount(), Integer::sum);
+        }
+        return counts;
+    }
+
+    private static JsonArray inventorySummary(Map<String, Integer> counts) {
+        JsonArray result = new JsonArray();
+        counts.entrySet().stream()
+                .sorted((left, right) -> Integer.compare(right.getValue(), left.getValue()))
+                .limit(12)
+                .forEach(entry -> {
+                    JsonObject item = new JsonObject();
+                    item.addProperty("item_id", entry.getKey());
+                    item.addProperty("count", entry.getValue());
+                    result.add(item);
+                });
+        return result;
+    }
+
+    private static int totalItems(Map<String, Integer> counts) {
+        return counts.values().stream().mapToInt(Integer::intValue).sum();
+    }
+
+    private static int missingCount(Map<String, Integer> before, Map<String, Integer> after) {
+        int missing = 0;
+        for (Map.Entry<String, Integer> entry : before.entrySet()) {
+            missing += Math.max(0, entry.getValue() - after.getOrDefault(entry.getKey(), 0));
+        }
+        return missing;
+    }
+
+    private static String string(JsonObject source, String key) {
+        return source != null && source.has(key) && !source.get(key).isJsonNull()
+                ? source.get(key).getAsString() : null;
+    }
+
+    private static void damaged(
+            LocalPlayer player, float before, float after, boolean freshMobAttack) {
+        LivingEntity attacker = freshMobAttack ? player.getLastHurtByMob() : null;
+        Player attackingPlayer = attacker instanceof Player value ? value : null;
+
+        JsonObject cause = new JsonObject();
+        if (attacker != null) {
+            cause.addProperty(
+                    "causing_entity_type_id",
+                    BuiltInRegistries.ENTITY_TYPE.getKey(attacker.getType()).toString());
+        }
+        if (attackingPlayer != null) {
+            cause.addProperty("causing_player_name", attackingPlayer.getGameProfile().getName());
+            ItemStack held = attackingPlayer.getMainHandItem();
+            if (!held.isEmpty()) {
+                cause.addProperty(
+                        "causing_item_id",
+                        BuiltInRegistries.ITEM.getKey(held.getItem()).toString());
+            }
+            cause.addProperty("interpretation", "possible_stop_or_follow_request");
+            cause.addProperty("requires_llm_decision", true);
+        }
+
+        JsonObject data = new JsonObject();
+        data.addProperty("effective_health_before", before);
+        data.addProperty("effective_health_after", after);
+        data.addProperty("fatal", player.getHealth() <= 0.0F);
+        data.add("position", position(player));
+        data.add("cause", cause);
+
+        if (attackingPlayer != null && player.getHealth() > 0.0F) {
+            TaskRecord active = CompanionTickDispatcher.current();
+            if (active instanceof IntentTaskRecord intent
+                    && intent.pause(player.level().getGameTime(), "player_attention")) {
+                data.addProperty("paused_task_id", intent.externalId().toString());
+                IntentRuntime.get().paused(
+                        intent,
+                        "Another player hit the agent; the task paused for the LLM to interpret a possible stop or follow request.");
+            }
+        }
+
+        String message = attackingPlayer == null
+                ? "The agent took damage"
+                : attackingPlayer.getGameProfile().getName()
+                        + " hit the agent; a possible stop or follow request must not be guessed automatically.";
+        publish("agent.damaged", message, data);
+    }
+
+    private static void remember(ClientLevel level, String dimension, String phase,
+                                 String weather, float health, int hurtByMobTimestamp) {
+        previousLevel = level;
+        previousDimension = dimension;
+        previousTimePhase = phase;
+        previousWeather = weather;
+        previousEffectiveHealth = health;
+        previousHurtByMobTimestamp = hurtByMobTimestamp;
+    }
+
+    private static void publish(String type, String message, JsonObject data) {
+        IntentRuntime.get().gameEvent(type, message, data);
+    }
+
+    private static JsonObject position(LocalPlayer player) {
+        JsonObject result = new JsonObject();
+        result.addProperty("x", player.getX());
+        result.addProperty("y", player.getY());
+        result.addProperty("z", player.getZ());
+        result.addProperty("dimension", player.level().dimension().location().toString());
+        return result;
+    }
+
+    private static JsonObject reflexEnvelope(String reflex, String phase) {
+        JsonObject data = new JsonObject();
+        data.addProperty("reflex", reflex);
+        data.addProperty("phase", phase);
+        data.addProperty("contains_internal_target_handles", false);
+        return data;
+    }
+
+    private static String safeText(String value, int maxChars) {
+        if (value == null) return "";
+        String clean = value.strip();
+        return clean.length() <= maxChars ? clean : clean.substring(0, maxChars);
+    }
+
+    private static final class ReflexEpisode {
+        private final long startedNanos;
+        private boolean escalated;
+
+        private ReflexEpisode(long startedNanos) {
+            this.startedNanos = startedNanos;
+        }
+    }
+
+    private enum LifeState {
+        ALIVE,
+        DEAD_REPORTED,
+        RESPAWN_REQUESTED,
+        RESPAWN_OBSERVED
+    }
+
+    private record DeathSnapshot(
+            UUID taskId,
+            String dimension,
+            Vec3 position,
+            long gameTime,
+            Map<String, Integer> inventory,
+            int inventoryTotal,
