@@ -1,0 +1,300 @@
+package org.maiwithu.maicraft.core.act;
+
+import org.maiwithu.maicraft.entity.InputDriver;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
+import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+
+import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.core.FailureType;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+
+/**
+ * First-person interaction primitive for the local player: aim the camera at a target,
+ * then submit and reconcile one native button press
+ * one mouse button (left = ATTACK, right = USE) with a {@link Timing}. Every
+ * higher-level action is a thin layer on top: mining = ATTACK a block (hold),
+ * {@code attack} = ATTACK an entity, eat/bow = hold USE in the air.
+ *
+ * <h2>Native dispatch</h2>
+ * <ul>
+ *   <li>ATTACK + block  → {@link BlockDigger} with a progressive break receipt;</li>
+ *   <li>ATTACK + entity → a cooldown-gated native attack receipt;</li>
+ *   <li>USE + block     → a native block-use receipt with loaded-world confirmation;</li>
+ *   <li>USE + entity    → a native interaction receipt with inventory/menu/riding confirmation;</li>
+ *   <li>USE + air       → a native item-use receipt, optionally followed by a release receipt.</li>
+ * </ul>
+ *
+ * <p>准星语义的 USE({@link #forHit} 建的)另有一步收尾:方块/实体没吃掉点击时落到
+ * 物品自用——真客户端的完整右键顺序。指定命中面的外科
+ * 原语({@link #useBlock(LocalPlayer, BlockHitResult, InteractionHand)})没有这一步。
+ *
+ * <h2>Timing</h2>
+ * {@link Timing#once()} taps once; {@link Timing#repeat} taps N times spaced by an
+ * interval (auto-click a button, grind a mob); {@link Timing#hold()} holds the
+ * button until the action self-completes (a block breaks, food finishes);
+ * {@link Timing#hold(int)} holds up to N ticks then releases (draw + loose a bow).
+ *
+ * <p>Stateful + ticked (like {@link BlockDigger} / {@code PlayerNav}). The caller
+ * walks the body within reach first; this only aims and presses.
+ */
+public final class Interaction {
+
+    public enum Status { RUNNING, DONE, FAILED }
+    public enum Button { ATTACK, USE }
+
+    /** Vanilla block-interaction reach (survival); creative is 5. */
+    private static final double REACH = 4.5;
+
+    /**
+     * When and how often the button fires
+     * (once / continuous / interval). {@code hold} actions press-and-hold until
+     * the action finishes on its own (breaking, eating) or {@code maxHold} elapses
+     * (bow); discrete actions fire {@code limit} times spaced by {@code interval}.
+     */
+    public static final class Timing {
+        final boolean hold;
+        final int limit;     // discrete fires (>=1); ignored for hold
+        final int interval;  // ticks between discrete fires (>=1)
+        final int maxHold;   // hold: release after this many ticks; 0 = until self-complete
+
+        private Timing(boolean hold, int limit, int interval, int maxHold) {
+            this.hold = hold;
+            this.limit = limit;
+            this.interval = interval;
+            this.maxHold = maxHold;
+        }
+
+        /** One single press. */
+        public static Timing once() {
+            return new Timing(false, 1, 1, 0);
+        }
+
+        /** {@code times} presses, each spaced {@code interval} ticks apart. */
+        public static Timing repeat(int times, int interval) {
+            return new Timing(false, Math.max(1, times), Math.max(1, interval), 0);
+        }
+
+        /** Hold until the action finishes on its own (block broken / food eaten). */
+        public static Timing hold() {
+            return new Timing(true, -1, 1, 0);
+        }
+
+        /** Hold up to {@code maxTicks}, then release (e.g. draw a bow and loose). */
+        public static Timing hold(int maxTicks) {
+            return new Timing(true, -1, 1, Math.max(1, maxTicks));
+        }
+    }
+
+    private final LocalPlayer player;
+    private final Button button;
+    private final BlockPos block;     // non-null → block target
+    private final Entity entity;      // non-null → entity target
+    private final InteractionHand hand;
+    private final Timing timing;
+
+    private final BlockDigger digger; // only for ATTACK + block
+    private BlockHitResult presetHit; // USE+block: an exact hit the caller already resolved (placement)
+    /**
+     * 准星语义的 USE 才有的兜底:方块/实体没吃掉点击时,同一次按键落到物品自用
+     * ——真客户端也是方块/实体未消费点击后再尝试物品自用；桶找水、船找水面、
+     * 掷物出手都住在那条路上。
+     * 外科原语(指定命中面的放置、开台)不设兜底:那里落空就该落空,兜底会把
+     * 手里的东西扔出去。false = 兜底关闭或被任务层否决(身体约束物品)。
+     */
+    private boolean itemFallthrough;
+    private MenuReceipt closeReceipt;
+    private NativeActionReceipt receipt;
+    private boolean fallingThrough;
+    private boolean releasing;
+    private static final int CONFIRM_TIMEOUT_TICKS = 20;
+    private int fires;
+    private int cooldown;             // ticks until the next discrete press
+    private int held;                 // USE+air: ticks held so far
+    private boolean hardFail;         // a fire hit an unrecoverable error
+    private String failReason = "interaction failed";
+    private FailureType failType = FailureType.UNKNOWN;
+    private String lastUseOutcome = "not fired";
+
+    private Interaction(LocalPlayer player, Button button, BlockPos block, Entity entity,
+                        InteractionHand hand, Timing timing) {
+        this.player = player;
+        this.button = button;
+        this.block = block == null ? null : block.immutable();
+        this.entity = entity;
+        this.hand = hand;
+        this.timing = timing;
+        this.digger = (button == Button.ATTACK && block != null) ? new BlockDigger(player) : null;
+    }
+
+    // ---- factories (default timings; overloads take an explicit Timing) ----
+
+    /** Left-click a block: break it (held until gone; creative insta / survival timed). */
+    public static Interaction attackBlock(LocalPlayer p, BlockPos pos) {
+        return new Interaction(p, Button.ATTACK, pos, null, InteractionHand.MAIN_HAND, Timing.hold());
+    }
+
+    /** Left-click an entity once (cooldown-gated native attack). */
+    public static Interaction attackEntity(LocalPlayer p, Entity target) {
+        return attackEntity(p, target, Timing.once());
+    }
+
+    public static Interaction attackEntity(LocalPlayer p, Entity target, Timing timing) {
+        return new Interaction(p, Button.ATTACK, null, target, InteractionHand.MAIN_HAND, timing);
+    }
+
+    /** Right-click a block: place / activate with the held item (raycasts to {@code pos}). */
+    public static Interaction useBlock(LocalPlayer p, BlockPos pos, InteractionHand hand) {
+        return new Interaction(p, Button.USE, pos, null, hand, Timing.once());
+    }
+
+    /** Right-click a pre-resolved block hit — placement / precise activation supplies
+     *  the exact support face, so this skips the raycast and presses against {@code hit}. */
+    public static Interaction useBlock(LocalPlayer p, BlockHitResult hit, InteractionHand hand) {
+        Interaction i = new Interaction(p, Button.USE, hit.getBlockPos(), null, hand, Timing.once());
+        i.presetHit = hit;
+        return i;
+    }
+
+    /** Right-click in the air with the held item, on the given {@link Timing}
+     *  ({@code hold()} eats food / {@code hold(n)} draws and looses a bow). */
+    public static Interaction useInAir(LocalPlayer p, InteractionHand hand, Timing timing) {
+        return new Interaction(p, Button.USE, null, null, hand, timing);
+    }
+
+    /** vanilla {@code Minecraft.rightClickDelay} — held right-click re-fires this often. */
+    private static final int RIGHT_CLICK_DELAY = 4;
+    /** A "hold forever" fire count; the owning task stops us after hold_ticks / on completion. */
+    private static final int CONTINUOUS = 1_000_000;
+
+    /**
+     * The vanilla crosshair pick: one ray from the eyes along the CURRENT
+     * look, resolving the CLOSER of a block or an entity (else MISS). A wall occludes a mob behind
+     * it (entities are searched only as near as the block hit). {@code reach} 4.5 = survival.
+     */
+    public static HitResult nativeRaytrace(LocalPlayer player, double reach) {
+        Level level = player.level();
+        Vec3 eye = player.getEyePosition();
+        Vec3 reachVec = player.getViewVector(1.0f).scale(reach);
+        Vec3 end = eye.add(reachVec);
+        BlockHitResult block = level.clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        double maxSq = block.getType() == HitResult.Type.MISS
+                ? reach * reach : block.getLocation().distanceToSqr(eye);
+        AABB box = player.getBoundingBox().expandTowards(reachVec).inflate(1.0);
+        EntityHitResult ent = ProjectileUtil.getEntityHitResult(
+                player, eye, end, box, e -> !e.isSpectator() && e.isPickable(), maxSq);
+        return ent != null ? ent : block;   // entity (closer than the block) wins, else the block/miss
+    }
+
+    /**
+     * Build the native action for a resolved crosshair {@code hit} + {@code button}, mapping
+     * {@code holdTicks} to the cell's natural cadence — a 6-cell (button × target) dispatch:
+     * <ul>
+     *   <li>ATTACK·BLOCK → break (BlockDigger holds till the block is gone);</li>
+     *   <li>ATTACK·ENTITY → hit (tap = one cooldown-gated hit; hold = keep hitting);</li>
+     *   <li>USE·BLOCK → activate (tap once; hold re-clicks every rightClickDelay — modded crank);</li>
+     *   <li>USE·ENTITY → interact (tap once; hold re-clicks);</li>
+     *   <li>USE·AIR → useItem (tap = throw; hold = charge/eat up to ticks, or self-complete);</li>
+     *   <li>ATTACK·AIR → {@code null} (left-click air does nothing).</li>
+     * </ul>
+     * {@code holdTicks}: 0 = tap, &gt;0 / -1 = hold. The block/entity hit is used as-is (the
+     * native raytrace already resolved the exact face/point — no re-raycast). The caller drives
+     * the returned object to completion and enforces the hold duration.
+     *
+     * @param itemFallthrough USE 的准星兜底开关(见 {@link #itemFallthrough}):方块/实体
+     *                        没吃掉点击就落到物品自用。任务层拿它挡身体约束物品——
+     *                        手里是食物/末影珍珠时传 false,免得点了块石头把自己喂了。
+     */
+    public static Interaction forHit(LocalPlayer p, HitResult hit, Button button, int holdTicks,
+                                     boolean itemFallthrough) {
+        boolean hold = holdTicks != 0;
+        switch (hit.getType()) {
+            case BLOCK -> {
+                BlockHitResult bh = (BlockHitResult) hit;
+                if (button == Button.ATTACK) {
+                    return attackBlock(p, bh.getBlockPos());
+                }
+                Interaction i = new Interaction(p, Button.USE, bh.getBlockPos(), null,
+                        InteractionHand.MAIN_HAND,
+                        hold ? Timing.repeat(CONTINUOUS, RIGHT_CLICK_DELAY) : Timing.once());
+                i.presetHit = bh;   // use the robust native hit, no re-raycast
+                i.itemFallthrough = itemFallthrough;
+                return i;
+            }
+            case ENTITY -> {
+                Entity e = ((EntityHitResult) hit).getEntity();
+                if (button == Button.ATTACK) {
+                    return attackEntity(p, e, hold ? Timing.repeat(CONTINUOUS, 1) : Timing.once());
+                }
+                Interaction i = new Interaction(p, Button.USE, null, e, InteractionHand.MAIN_HAND,
+                        hold ? Timing.repeat(CONTINUOUS, RIGHT_CLICK_DELAY) : Timing.once());
+                i.itemFallthrough = itemFallthrough;
+                return i;
+            }
+            default -> {   // MISS = air
+                if (button == Button.ATTACK) {
+                    return null;
+                }
+                Timing t = hold ? (holdTicks > 0 ? Timing.hold(holdTicks) : Timing.hold()) : Timing.once();
+                return useInAir(p, InteractionHand.MAIN_HAND, t);
+            }
+        }
+    }
+
+    public String failReason() {
+        return failReason;
+    }
+
+    /** Structured cause of a {@link Status#FAILED}, for the reactive task layer to branch on. */
+    public FailureType failType() {
+        return failType;
+    }
+
+    public Status tick() {
+        if (receipt == null
+                && (closeReceipt != null || player.containerMenu != player.inventoryMenu)) {
+            Status menuStatus = awaitWorldInputReady();
+            if (menuStatus != null) {
+                return menuStatus;
+            }
+        }
+        if (button == Button.ATTACK && block != null) {
+            return breakBlock();                       // inherently continuous
+        }
+        if (button == Button.USE && block == null && entity == null) {
+            return useAir();
+        }
+        return discrete();                             // attack entity / use block / use entity
+    }
+
+    /** World buttons cannot be pressed through an open container screen. */
+    private Status awaitWorldInputReady() {
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (closeReceipt == null) {
+            closeReceipt = context.menus().close(context, CONFIRM_TIMEOUT_TICKS);
+            return Status.RUNNING;
+        }
+        if (!closeReceipt.terminal()) {
+            closeReceipt = context.menus().poll(context, closeReceipt);
+        }
+        if (!closeReceipt.terminal()) {
+            return Status.RUNNING;
+        }
+        MenuReceipt.Status status = closeReceipt.status();
+        String detail = closeReceipt.detail();
+        closeReceipt = null;
+        if (status == MenuReceipt.Status.CONFIRMED_APPLIED) {
