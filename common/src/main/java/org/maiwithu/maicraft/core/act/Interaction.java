@@ -298,3 +298,303 @@ public final class Interaction {
         String detail = closeReceipt.detail();
         closeReceipt = null;
         if (status == MenuReceipt.Status.CONFIRMED_APPLIED) {
+            return null;
+        }
+        failReason = "could not close the active menu before the world action: " + detail;
+        failType = FailureType.UNKNOWN;
+        return Status.FAILED;
+    }
+
+    // ---- ATTACK + block: continuous break ----
+
+    private Status breakBlock() {
+        if (!player.level().isLoaded(block)) {
+            failType = FailureType.TARGET_LOST;
+            failReason = "the target block is outside the local client's loaded world";
+            return Status.FAILED;
+        }
+        if (player.level().getBlockState(block).isAir()) return Status.DONE;
+        BlockDigger.DigResult result = digger.digStep(block);
+        if (result == BlockDigger.DigResult.BROKE_TARGET) {
+            return Status.DONE;
+        }
+        if (result == BlockDigger.DigResult.NO_SHOT) {
+            boolean beyondReach = player.getEyePosition().distanceToSqr(Vec3.atCenterOf(block))
+                    > REACH * REACH;
+            failType = beyondReach ? FailureType.OUT_OF_REACH : FailureType.OCCLUDED;
+            failReason = beyondReach
+                    ? "the target block is outside first-person reach"
+                    : "no visible safe face or removable occluder reaches the target block";
+            return Status.FAILED;
+        }
+        return Status.RUNNING;
+    }
+
+    // ---- USE + air: tap or hold (food / bow) ----
+
+    private Status useAir() {
+        InputDriver.halt(player);
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (receipt == null) {
+            ItemStack before = player.getItemInHand(hand).copy();
+            int beforeMenu = player.containerMenu.containerId;
+            NativeConfirmation confirmation = NativeConfirmation.anyOf(
+                    NativeConfirmation.heldItemChanged(hand, before),
+                    NativeConfirmation.menuChanged(beforeMenu),
+                    c -> c.player().isUsingItem()
+                            ? NativeConfirmation.Verdict.APPLIED
+                            : NativeConfirmation.Verdict.PENDING);
+            receipt = context.actions().useItem(
+                    context, hand, confirmation, CONFIRM_TIMEOUT_TICKS);
+            return Status.RUNNING;
+        }
+        receipt = context.actions().poll(context, receipt);
+        if (!receipt.terminal()) {
+            return Status.RUNNING;
+        }
+        if (releasing) {
+            if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+                return Status.DONE;
+            }
+            failReason = "native item release was not confirmed: " + receipt.detail();
+            return Status.FAILED;
+        }
+        if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            failReason = "native item use was not confirmed: " + receipt.detail();
+            failType = FailureType.UNKNOWN;
+            return Status.FAILED;
+        }
+        if (!timing.hold) {
+            return Status.DONE;
+        }
+        if (!player.isUsingItem()) {
+            return Status.DONE;
+        }
+        if (timing.maxHold > 0 && ++held >= timing.maxHold) {
+            receipt = context.actions().releaseUsingItem(context, receipt);
+            releasing = true;
+            return Status.RUNNING;
+        }
+        return Status.RUNNING;
+    }
+
+    // ---- discrete: attack entity / use block / use entity (once or repeat) ----
+
+    private Status discrete() {
+        if (cooldown > 0) {
+            cooldown--;
+            return Status.RUNNING;
+        }
+        boolean fired = switch (button) {
+            case ATTACK -> fireAttackEntity();
+            case USE -> entity != null ? fireUseEntity() : fireUseBlock();
+        };
+        if (hardFail) return Status.FAILED;
+        if (!fired) return Status.RUNNING;             // soft wait (attack cooldown not ready)
+        if (++fires >= timing.limit) return Status.DONE;
+        cooldown = timing.interval;
+        return Status.RUNNING;
+    }
+
+    private boolean fireAttackEntity() {
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (receipt != null) {
+            receipt = context.actions().poll(context, receipt);
+            if (!receipt.terminal()) {
+                return false;
+            }
+            NativeActionReceipt.Status status = receipt.status();
+            String detail = receipt.detail();
+            receipt = null;
+            if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+                return true;
+            }
+            failReason = "native attack was not confirmed: " + detail;
+            failType = FailureType.UNKNOWN;
+            hardFail = true;
+            return false;
+        }
+        if (entity == null || !entity.isAlive()) {
+            failReason = "the attack target is gone";
+            failType = FailureType.TARGET_LOST;
+            hardFail = true;
+            return false;
+        }
+        InputDriver.halt(player);
+        InputDriver.lookAt(player, entity.getEyePosition());
+        if (!aimReady(entity.getEyePosition())) {
+            return false;
+        }
+        HitResult aimed = nativeRaytrace(player, REACH);
+        if (!(aimed instanceof EntityHitResult entityHit)
+                || entityHit.getEntity() != entity) {
+            return false;
+        }
+        boolean recovering = entity instanceof net.minecraft.world.entity.LivingEntity living
+                && living.hurtTime > 0;
+        if (!org.maiwithu.maicraft.core.combat.Swing.mayStrike(
+                false, recovering, player.getAttackStrengthScale(0.0f))) {
+            return false;
+        }
+        receipt = context.actions().attack(
+                context,
+                entity,
+                NativeConfirmation.entityHurt(entity),
+                CONFIRM_TIMEOUT_TICKS);
+        return false;
+    }
+
+    private boolean fireUseBlock() {
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (receipt != null) {
+            return settleUseReceipt(context, "block use");
+        }
+        if (!player.level().isLoaded(block)) {
+            failReason = "the target block is outside the local client's loaded world";
+            failType = FailureType.TARGET_LOST;
+            hardFail = true;
+            return false;
+        }
+        InputDriver.halt(player);
+        BlockHitResult hit;
+        if (presetHit != null) {
+            InputDriver.lookAt(player, presetHit.getLocation());
+            HitResult aimed = nativeRaytrace(player, REACH);
+            if (!(aimed instanceof BlockHitResult blockHit)
+                    || !blockHit.getBlockPos().equals(block)
+                    || blockHit.getDirection() != presetHit.getDirection()) {
+                return false;
+            }
+            hit = blockHit;
+        } else {
+            InputDriver.lookAt(player, Vec3.atCenterOf(block));
+            hit = raycastBlock();
+            if (hit == null) {
+                return false;
+            }
+        }
+        if (!aimReady(hit.getLocation())) {
+            return false;
+        }
+        if (fallingThrough) {
+            ItemStack before = player.getItemInHand(hand).copy();
+            receipt = context.actions().useItem(
+                    context, hand, itemUseConfirmation(hand, before),
+                    CONFIRM_TIMEOUT_TICKS);
+        } else {
+            receipt = context.actions().useBlock(
+                    context, hand, hit, blockUseConfirmation(hit, hand),
+                    CONFIRM_TIMEOUT_TICKS);
+        }
+        return false;
+    }
+
+    private boolean settleUseReceipt(LocalPlayerContext context, String action) {
+        receipt = context.actions().poll(context, receipt);
+        if (!receipt.terminal()) {
+            return false;
+        }
+        NativeActionReceipt.Status status = receipt.status();
+        String detail = receipt.detail();
+        receipt = null;
+        if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            lastUseOutcome = "confirmed (" + action + ")";
+            fallingThrough = false;
+            return true;
+        }
+        if (itemFallthrough && !fallingThrough) {
+            fallingThrough = true;
+            return false;
+        }
+        failReason = action + " was not confirmed: " + detail;
+        failType = FailureType.UNKNOWN;
+        hardFail = true;
+        return false;
+    }
+
+    private NativeConfirmation blockUseConfirmation(BlockHitResult hit, InteractionHand usedHand) {
+        BlockPos clicked = hit.getBlockPos().immutable();
+        BlockPos adjacent = clicked.relative(hit.getDirection()).immutable();
+        var clickedBefore = player.level().getBlockState(clicked);
+        ItemStack heldBefore = player.getItemInHand(usedHand).copy();
+        int beforeMenu = player.containerMenu.containerId;
+        NativeConfirmation adjacentChanged = player.level().isLoaded(adjacent)
+                ? NativeConfirmation.blockChanged(
+                        adjacent, player.level().getBlockState(adjacent))
+                : NativeConfirmation.pending();
+        return NativeConfirmation.anyOf(
+                NativeConfirmation.blockChanged(clicked, clickedBefore),
+                adjacentChanged,
+                NativeConfirmation.heldItemChanged(usedHand, heldBefore),
+                NativeConfirmation.menuChanged(beforeMenu));
+    }
+
+    private NativeConfirmation itemUseConfirmation(InteractionHand usedHand, ItemStack heldBefore) {
+        int beforeMenu = player.containerMenu.containerId;
+        return NativeConfirmation.anyOf(
+                NativeConfirmation.heldItemChanged(usedHand, heldBefore),
+                NativeConfirmation.menuChanged(beforeMenu),
+                c -> c.player().isUsingItem()
+                        ? NativeConfirmation.Verdict.APPLIED
+                        : NativeConfirmation.Verdict.PENDING);
+    }
+
+    /**
+     * The vanilla verdict of the most recent USE-on-block press: {@code "consumed (...)"}
+     * or the per-hand results (e.g. {@code "main_hand=FAIL, off_hand=PASS"}). A press that
+     * consumes can STILL have placed nothing (the item's own rules refused) — placement
+     * callers must verify the world afterwards, and this string is what they log when a
+     * press quietly did nothing.
+     */
+    public String lastUseOutcome() {
+        return lastUseOutcome;
+    }
+
+    private boolean fireUseEntity() {
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (receipt != null) {
+            return settleUseReceipt(context, "entity interaction");
+        }
+        if (entity == null || !entity.isAlive()) {
+            failReason = "the entity is gone";
+            failType = FailureType.TARGET_LOST;
+            hardFail = true;
+            return false;
+        }
+        InputDriver.halt(player);
+        InputDriver.lookAt(player, entity.getEyePosition());
+        if (!aimReady(entity.getEyePosition())) {
+            return false;
+        }
+        HitResult aimed = nativeRaytrace(player, REACH);
+        if (!(aimed instanceof EntityHitResult entityHit)
+                || entityHit.getEntity() != entity) {
+            return false;
+        }
+        if (fallingThrough) {
+            ItemStack before = player.getItemInHand(hand).copy();
+            receipt = context.actions().useItem(
+                    context, hand, itemUseConfirmation(hand, before),
+                    CONFIRM_TIMEOUT_TICKS);
+        } else {
+            receipt = context.actions().interact(
+                    context, entity, hand, entityUseConfirmation(entity, hand),
+                    CONFIRM_TIMEOUT_TICKS);
+        }
+        return false;
+    }
+
+    private NativeConfirmation entityUseConfirmation(Entity target, InteractionHand usedHand) {
+        Entity vehicleBefore = player.getVehicle();
+        int passengersBefore = target.getPassengers().size();
+        ItemStack heldBefore = player.getItemInHand(usedHand).copy();
+        int beforeMenu = player.containerMenu.containerId;
+        NativeConfirmation ridingChanged = c ->
+                c.player().getVehicle() != vehicleBefore
+                        || target.getPassengers().size() != passengersBefore
+                        ? NativeConfirmation.Verdict.APPLIED
+                        : NativeConfirmation.Verdict.PENDING;
+        return NativeConfirmation.anyOf(
+                NativeConfirmation.heldItemChanged(usedHand, heldBefore),
+                NativeConfirmation.menuChanged(beforeMenu),
+                ridingChanged);
