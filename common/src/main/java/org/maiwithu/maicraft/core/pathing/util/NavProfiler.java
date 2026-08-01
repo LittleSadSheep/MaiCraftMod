@@ -298,3 +298,10 @@ public final class NavProfiler {
         phases.clear();
         searchCount.set(0L);
         searchTotalNanos.set(0L);
+        searchMaxNanos.set(0L);
+        lastPulseMs = 0L;
+        pulseGapMax = 0L;
+        pulseOver60 = 0L;
+        pulseOver100 = 0L;
+    }
+}
