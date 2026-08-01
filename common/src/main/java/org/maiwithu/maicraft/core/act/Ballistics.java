@@ -298,3 +298,81 @@ public final class Ballistics {
                 from.x - hitboxRadius, from.y - hitboxRadius, from.z - hitboxRadius,
                 from.x + hitboxRadius, from.y + hitboxRadius, from.z + hitboxRadius);
         AABB sweep = hitbox.expandTowards(to.subtract(from)).inflate(1.0);
+        EntityHitResult hit = ProjectileUtil.getEntityHitResult(
+                shooter, from, to, sweep,
+                e -> e != shooter && e != target && !e.isSpectator() && e.isPickable() && e.isAlive(),
+                Double.MAX_VALUE);
+        return hit == null ? Double.MAX_VALUE : hit.getLocation().distanceToSqr(from);
+    }
+
+    private static double distanceToSegment(Vec3 point, Vec3 from, Vec3 to) {
+        Vec3 segment = to.subtract(from);
+        double lengthSqr = segment.lengthSqr();
+        if (lengthSqr < EPS) {
+            return point.distanceTo(from);
+        }
+        double t = clamp(point.subtract(from).dot(segment) / lengthSqr, 0.0, 1.0);
+        return point.distanceTo(from.add(segment.scale(t)));
+    }
+
+    private static List<Vec3> sampleBox(AABB box) {
+        double[] xs = axisSamples(box.minX, box.maxX);
+        double[] ys = axisSamples(box.minY, box.maxY);
+        double[] zs = axisSamples(box.minZ, box.maxZ);
+        List<Vec3> out = new ArrayList<>(xs.length * ys.length * zs.length);
+        for (double x : xs) {
+            for (double y : ys) {
+                for (double z : zs) {
+                    out.add(new Vec3(x, y, z));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static double[] axisSamples(double min, double max) {
+        double size = max - min;
+        if (size <= 0.2) {
+            return new double[] { (min + max) * 0.5 };
+        }
+        double inset = Math.min(0.15, size * 0.25);
+        return new double[] { (min + max) * 0.5, min + inset, max - inset };
+    }
+
+    private static Vec3 boxCenter(AABB box) {
+        return new Vec3((box.minX + box.maxX) * 0.5,
+                (box.minY + box.maxY) * 0.5,
+                (box.minZ + box.maxZ) * 0.5);
+    }
+
+    private record TimeSearchResult(double ticks, double delta) {}
+
+    private static TimeSearchResult findMinimum(double from, double to, DoubleUnaryOperator function) {
+        double lower = from;
+        double upper = to;
+        while (upper - lower > 1.0e-4) {
+            double mid = (lower + upper) * 0.5;
+            double leftValue = function.applyAsDouble((lower + mid) * 0.5);
+            double rightValue = function.applyAsDouble((mid + upper) * 0.5);
+            if (leftValue < rightValue) {
+                upper = mid;
+            } else {
+                lower = mid;
+            }
+        }
+        double ticks = (lower + upper) * 0.5;
+        return new TimeSearchResult(ticks, function.applyAsDouble(ticks));
+    }
+
+    private static boolean allFinite(Vec3 value) {
+        return Double.isFinite(value.x) && Double.isFinite(value.y) && Double.isFinite(value.z);
+    }
+
+    private static Vec3 projectileStart(Entity shooter) {
+        return projectileStart(shooter.getX(), shooter.getEyeY(), shooter.getZ());
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+}
