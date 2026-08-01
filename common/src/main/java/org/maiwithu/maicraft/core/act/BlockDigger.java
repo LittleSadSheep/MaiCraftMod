@@ -298,3 +298,101 @@ public final class BlockDigger {
         reset();
     }
 
+    /** Clear logical state. Deliberately does not touch the post-break cooldown. */
+    private void reset() {
+        pos = null;
+        receipt = null;
+        toolSelectReceipt = null;
+        toolCloseReceipt = null;
+        toolStageReceipt = null;
+        pendingToolSlot = -1;
+        destroyingItem = null;
+    }
+
+    private boolean aimReady(Vec3 target) {
+        Vec3 direction = target.subtract(player.getEyePosition());
+        if (direction.lengthSqr() < 1.0e-8) {
+            return true;
+        }
+        return player.getViewVector(1.0f).normalize().dot(direction.normalize())
+                >= Math.cos(Math.toRadians(7.0));
+    }
+
+    /**
+     * The first point ON {@code pos} the eye can
+     * actually raycast to — the block's shape centre first, then its six face centres. The
+     * returned {@link BlockHitResult} carries the exact aim point ({@code getLocation}) AND
+     * the face the ray hits ({@code getDirection}), so the dig looks at the real interaction
+     * face like a player would. {@code null} if nothing on the block is in line of sight.
+     */
+    private BlockHitResult reachableHit(BlockPos pos) {
+        Level level = player.level();
+        if (!level.isLoaded(pos)) {
+            return null;
+        }
+        Vec3 eye = player.getEyePosition();
+        double reach = org.maiwithu.maicraft.core.pathing.moves.AimGeometry.blockReachDistance(player);
+        BlockState state = level.getBlockState(pos);
+        VoxelShape shape = state.getShape(level, pos);
+        if (shape.isEmpty()) {
+            shape = Shapes.block();
+        }
+        // Collision-shape centre first (empty collision → whole-cell centre),
+        // then the six face centres on the outline shape.
+        Vec3[] aims = {
+                org.maiwithu.maicraft.core.pathing.moves.AimGeometry.collisionCenter(level, pos, state),
+                offsetOn(pos, shape, 0.5, 0.0, 0.5),
+                offsetOn(pos, shape, 0.5, 1.0, 0.5),
+                offsetOn(pos, shape, 0.5, 0.5, 0.0),
+                offsetOn(pos, shape, 0.5, 0.5, 1.0),
+                offsetOn(pos, shape, 0.0, 0.5, 0.5),
+                offsetOn(pos, shape, 1.0, 0.5, 0.5),
+        };
+        for (Vec3 aim : aims) {
+            Vec3 dir = aim.subtract(eye);
+            if (dir.lengthSqr() < 1.0e-8) continue;
+            Vec3 end = eye.add(dir.normalize().scale(reach));
+            BlockHitResult res = level.clip(new ClipContext(
+                    eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+            if (res.getType() == HitResult.Type.BLOCK && res.getBlockPos().equals(pos)) {
+                return res;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A single ray from the eye to {@code target}'s shape centre — the break-the-occluder
+     * fallback when {@link #reachableHit} finds no clear face: the ray lands on the
+     * occluder (a leaf / a tight overhead), and we break THAT to open the way. Null on a miss / out
+     * of reach. ({@link #reachableHit} already tries the centre first, so if that hit the target it
+     * would have returned it; reaching here means the centre ray hits something else.)
+     */
+    private BlockHitResult centerRaycast(BlockPos target) {
+        Level level = player.level();
+        if (!level.isLoaded(target)) {
+            return null;
+        }
+        Vec3 eye = player.getEyePosition();
+        double reach = org.maiwithu.maicraft.core.pathing.moves.AimGeometry.blockReachDistance(player);
+        Vec3 center = Vec3.atCenterOf(target);
+        Vec3 dir = center.subtract(eye);
+        if (dir.lengthSqr() < 1.0e-8) {
+            return null;
+        }
+        Vec3 end = eye.add(dir.normalize().scale(reach));
+        BlockHitResult res = level.clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        return res.getType() == HitResult.Type.BLOCK ? res : null;
+    }
+
+    /** A point on the block's shape:
+     *  {@code min*m + max*(1-m)} on each axis. */
+    private static Vec3 offsetOn(BlockPos pos, VoxelShape shape, double mx, double my, double mz) {
+        double x = shape.min(Direction.Axis.X) * mx + shape.max(Direction.Axis.X) * (1 - mx);
+        double y = shape.min(Direction.Axis.Y) * my + shape.max(Direction.Axis.Y) * (1 - my);
+        double z = shape.min(Direction.Axis.Z) * mz + shape.max(Direction.Axis.Z) * (1 - mz);
+        return new Vec3(pos.getX() + x, pos.getY() + y, pos.getZ() + z);
+    }
+
+}
