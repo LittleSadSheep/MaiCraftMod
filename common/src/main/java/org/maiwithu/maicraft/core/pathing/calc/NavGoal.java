@@ -598,3 +598,110 @@ public interface NavGoal {
         @Override public BlockPos center() {
             return ore;
         }
+    }
+
+    /**
+     * {@link #avoid} 的产物。判定与估价<b>都转交给内核目标</b>,不在这里再写一份公式——
+     * 同一片势场若两处各算各的,调参时必然只改到一处。
+     */
+    final class Avoid implements NavGoal {
+        public final GoalAvoidEntities engine;
+        private final BlockPos centroid;
+
+        Avoid(double penaltyFactor, List<GoalAvoidEntities.Threat> threats) {
+            this.engine = new GoalAvoidEntities(penaltyFactor,
+                    threats.toArray(GoalAvoidEntities.Threat[]::new));
+            double x = 0.0;
+            double y = 0.0;
+            double z = 0.0;
+            for (GoalAvoidEntities.Threat t : threats) {
+                x += t.x();
+                y += t.y();
+                z += t.z();
+            }
+            int n = threats.size();
+            this.centroid = BlockPos.containing(x / n, y / n, z / n);
+        }
+
+        @Override public boolean isAt(BlockPos feet) {
+            return engine.isInGoal(feet.getX(), feet.getY(), feet.getZ());
+        }
+
+        @Override public double heuristic(BlockPos fromPos) {
+            return engine.heuristic(fromPos.getX(), fromPos.getY(), fromPos.getZ());
+        }
+
+        /** 威胁群的重心:它一挪动就触发重规划,快照因此不会用旧太久。 */
+        @Override public BlockPos center() {
+            return centroid;
+        }
+    }
+
+    /** {@link #approachAvoiding} 的产物。判定归吸引项,估价是吸引项加势场。 */
+    final class ApproachAvoiding implements NavGoal {
+        public final NavGoal approach;
+        public final GoalAvoidEntities repulsion;
+
+        ApproachAvoiding(NavGoal approach, double penaltyFactor,
+                         List<GoalAvoidEntities.Threat> threats) {
+            this.approach = approach;
+            this.repulsion = new GoalAvoidEntities(penaltyFactor,
+                    threats.toArray(GoalAvoidEntities.Threat[]::new));
+        }
+
+        /** 走到了,而且脚下这一格不在任何一只的危险半径里。见 GoalApproachAvoiding。 */
+        @Override public boolean isAt(BlockPos feet) {
+            return approach.isAt(feet)
+                    && repulsion.isInGoal(feet.getX(), feet.getY(), feet.getZ());
+        }
+
+        @Override public double heuristic(BlockPos fromPos) {
+            return approach.heuristic(fromPos)
+                    + repulsion.heuristic(fromPos.getX(), fromPos.getY(), fromPos.getZ());
+        }
+
+        /** 进度只看走没走近目标。危险场是"值不值得走那条路",不是"走到哪了"。 */
+        @Override public double progressHeuristic(BlockPos fromPos) {
+            return approach.progressHeuristic(fromPos);
+        }
+
+        /** 跟着要去的那个目标走:它一挪动就触发重规划。 */
+        @Override public BlockPos center() {
+            return approach.center();
+        }
+    }
+
+    /** {@link #runAway} 的产物:持高度外逃,永不"到达"。 */
+    final class RunAway implements NavGoal {
+        public final BlockPos from;
+        public final int maintainY;
+
+        RunAway(BlockPos from, int maintainY) {
+            this.from = from.immutable();
+            this.maintainY = maintainY;
+        }
+
+        @Override public boolean isAt(BlockPos feet) {
+            return false;   // never done — keep exploring outward
+        }
+
+        @Override public double heuristic(BlockPos fromPos) {
+            // Run-away heuristic: −(octile×weight) — negated so farther = lower h
+            // = preferred — then blended with the y-hold term:
+            // min*0.6 + yLevelTerm*1.5.
+            double dx = Math.abs(from.getX() - fromPos.getX());
+            double dz = Math.abs(from.getZ() - fromPos.getZ());
+            double xz = (Math.min(dx, dz) * SQRT_2 + Math.abs(dx - dz))
+                    * COST_HEURISTIC;
+            double min = -xz;
+            int cy = fromPos.getY();
+            double yLevel = cy > maintainY ? (cy - maintainY) * DESCEND_ONE_BLOCK
+                    : cy < maintainY ? (maintainY - cy) * JUMP_ONE_BLOCK : 0.0;
+            return min * 0.6 + yLevel * 1.5;
+        }
+
+        @Override public BlockPos center() {
+            return from;
+        }
+    }
+}
