@@ -298,3 +298,139 @@ public final class BlockHelper {
                 || state.is(Blocks.SWEET_BERRY_BUSH)
                 || state.getBlock() instanceof BaseFireBlock
                 || state.is(Blocks.END_PORTAL)
+                || state.is(Blocks.COBWEB)
+                || state.is(Blocks.BUBBLE_COLUMN);
+    }
+
+    /**
+     * Can we aim at the given {@code face} of this block and place against it. The face must
+     * be sturdy — the same face test vanilla uses to judge whether a block is supported —
+     * so a full cube, glass, a TOP slab's top face, a stair's solid back, or soul sand's top
+     * all qualify, while a bottom slab's top (the face sits inside the cell, a ray at the
+     * boundary misses it) does not. Judged per shared face, not per block, so a half-height
+     * platform is real support from above even though its sides are not.
+     *
+     * <p>A handful of behaviour-special blocks are refused outright regardless of face
+     * sturdiness: bamboo and pointed dripstone snap, a moving piston is mid-teleport,
+     * scaffolding shifts, shulker boxes animate their lid into the click, amethyst clusters
+     * shatter — none is a face worth aiming a placement at. GUI blocks (crafting tables,
+     * chests, hoppers) need no refusal here: placement always sneaks, and a sneaked click
+     * places against the block instead of opening it.
+     */
+    public static boolean canPlaceAgainst(BlockGetter level, BlockPos pos, Direction face) {
+        BlockState state = level.getBlockState(pos);
+        Block b = state.getBlock();
+        if (b instanceof BambooStalkBlock || b instanceof MovingPistonBlock
+                || b instanceof ScaffoldingBlock || b instanceof ShulkerBoxBlock
+                || b instanceof PointedDripstoneBlock || b instanceof AmethystClusterBlock) {
+            return false;
+        }
+        return state.isFaceSturdy(level, pos, face);
+    }
+
+    /**
+     * The neighbour direction whose fluid would pour into {@code pos} if it
+     * were broken — {@link Direction#UP} or a horizontal, never {@code DOWN}
+     * (vanilla fluids spread to the cardinals + down, so only an overhead or
+     * sideways source can fill a cell you just emptied; a fluid below can't
+     * flow up into it). Lava is returned in preference to water as the worse
+     * hazard. Returns {@code null} when breaking releases no flow.
+     *
+     * <p>The single source of truth for "breaking this unleashes a fluid",
+     * consulted by the A* break cost ({@link #breakWouldCreateFlow}) so
+     * "safe to route through" and "safe to mine on purpose" never disagree.
+     */
+    public static Direction fluidReleasedByBreaking(BlockGetter level, BlockPos pos) {
+        Direction water = null;
+        for (Direction dir : Direction.values()) {
+            if (dir == Direction.DOWN) continue;
+            FluidState fluid = level.getBlockState(pos.relative(dir)).getFluidState();
+            if (fluid.isEmpty()) continue;
+            if (fluid.is(FluidTags.LAVA)) return dir;   // worst hazard wins
+            if (water == null) water = dir;
+        }
+        return water;
+    }
+
+    /**
+     * Boolean form of {@link #fluidReleasedByBreaking} for the A* break cost:
+     * would breaking {@code pos} expose the cell to an adjacent fluid that
+     * then floods or lava-bathes the route?
+     */
+    public static boolean breakWouldCreateFlow(BlockGetter level, BlockPos pos) {
+        return fluidReleasedByBreaking(level, pos) != null;
+    }
+
+    /**
+     * Is this block breakable at all? Bedrock / unbreakable (hardness < 0) are
+     * never breakable; air is a no-op (return false — nothing to break).
+     */
+    public static boolean isBreakable(BlockGetter level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        if (state.isAir()) return false;
+        if (!state.getFluidState().isEmpty()) return false;
+        float hardness = state.getDestroySpeed(asBlockGetterLevel(level), pos);
+        return hardness >= 0.0f;
+    }
+
+    /**
+     * {@code getDestroySpeed} takes a {@code BlockGetter}; this is just an
+     * identity pass-through kept as a seam in case we need to adapt the
+     * argument type per loader/version.
+     */
+    private static BlockGetter asBlockGetterLevel(BlockGetter level) {
+        return level;
+    }
+
+    /**
+     * Can {@code inv}'s tools actually HARVEST {@code state}'s drops — i.e. break it and get the
+     * item, not just destroy it? True when the block drops without a tool, or ANY inventory slot
+     * holds the correct tool. Mining a {@code requiresCorrectToolForDrops} block with the wrong
+     * tool removes it for nothing, so the cost model vetoes it and the break/mine tools refuse it.
+     * Single source of truth — paired with {@code switchToBestTool}, which can swap a backpack
+     * tool into the hand. DELIBERATELY scans the WHOLE inventory, not just the
+     * hotbar (a real player's quick-switch set): a companion can dig into its own pack, so the
+     * gate + cost + execution all scan the whole inventory together.
+     */
+    public static boolean canHarvest(Container inv, BlockState state) {
+        if (!state.requiresCorrectToolForDrops()) {
+            return true;
+        }
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            if (inv.getItem(i).isCorrectToolForDrops(state)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Convenience: full-block solid we are happy to place scaffolding against. */
+    public static boolean isReplaceableForPlacement(BlockGetter level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        return state.isAir() || state.canBeReplaced();
+    }
+
+    /**
+     * 命中 do_not_break 方块标签的方块:硬禁挖的唯一真源,任何开关
+     * 也不解除。默认成员是设施类(床/门/活板门/栅栏门,见
+     * ModBlockTagData);工作台/熔炉/箱子/陷阱箱等常规功能方块不在
+     * 硬禁内,它们走 NavSettings.blocksToAvoidBreaking 软清单
+     * (挖掘成本 ×10,无路可走仍会破坏)。数据包可往此标签追加任何要
+     * 硬禁挖的方块;带方块实体的方块(漏斗/潜影盒/刷怪笼/信标等)默认
+     * 与泥土一样可破坏、无惩罚,除非数据包把它们加进此标签。
+     */
+    public static boolean shouldAvoidBreaking(BlockGetter level, BlockPos pos) {
+        // 标签成员测试只读不可变 BlockState holder,off-thread 搜索可安全调用。
+        BlockState state = level.getBlockState(pos);
+        return state.is(org.maiwithu.maicraft.core.init.InitTag.DO_NOT_BREAK);
+    }
+
+    /**
+     * Would breaking {@code pos} drop a {@link FallingBlock} (sand / gravel /
+     * anvil / concrete powder) sitting directly above it onto the bot? Refuse so
+     * we never bury or suffocate ourselves.
+     */
+    public static boolean breakReleasesFallingBlock(BlockGetter level, BlockPos pos) {
+        return level.getBlockState(pos.above()).getBlock() instanceof FallingBlock;
+    }
+}
