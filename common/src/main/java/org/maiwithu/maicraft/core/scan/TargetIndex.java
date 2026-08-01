@@ -298,3 +298,112 @@ public final class TargetIndex {
             }
         });
         if (counts.isEmpty()) {
+            return e;   // maybeHas 的假阳性(GlobalPalette 恒真)
+        }
+        Reference2ObjectOpenHashMap<Block, ShortArrayList> collecting = new Reference2ObjectOpenHashMap<>();
+        for (var it = counts.reference2IntEntrySet().fastIterator(); it.hasNext(); ) {
+            var en = it.next();
+            if (en.getIntValue() > SATURATION) {
+                e.hits.put(en.getKey(), SATURATED);
+            } else {
+                collecting.put(en.getKey(), new ShortArrayList(en.getIntValue()));
+            }
+        }
+        if (!collecting.isEmpty()) {
+            var states = section.getStates();
+            for (int y = 0; y < 16; y++) {
+                for (int z = 0; z < 16; z++) {
+                    for (int x = 0; x < 16; x++) {
+                        ShortArrayList list = collecting.get(states.get(x, y, z).getBlock());
+                        if (list != null) {
+                            list.add((short) (y << 8 | z << 4 | x));
+                        }
+                    }
+                }
+            }
+            for (var it = collecting.reference2ObjectEntrySet().fastIterator(); it.hasNext(); ) {
+                var en = it.next();
+                e.hits.put(en.getKey(), en.getValue().toShortArray());
+            }
+        }
+        return e;
+    }
+
+    /** 把条目中所请求目标的位置追加进 {@code out};饱和目标对该一个 section 现场取位。 */
+    private static void collect(SectionEntry e, LevelChunkSection section,
+                                int cx, int sy, int cz, Collection<Block> targets,
+                                int want, List<BlockPos> out) {
+        if (e.hits.isEmpty()) {
+            return;
+        }
+        int baseX = SectionPos.sectionToBlockCoord(cx);
+        int baseY = SectionPos.sectionToBlockCoord(sy);
+        int baseZ = SectionPos.sectionToBlockCoord(cz);
+        for (Block b : targets) {
+            short[] arr = e.hits.get(b);
+            if (arr == null) {
+                continue;
+            }
+            if (arr == SATURATED) {
+                // 铺天盖地的目标:就地对这一个 section 取位,凑到 want 即止
+                var states = section.getStates();
+                for (int y = 0; y < 16 && out.size() < want; y++) {
+                    for (int z = 0; z < 16 && out.size() < want; z++) {
+                        for (int x = 0; x < 16 && out.size() < want; x++) {
+                            if (states.get(x, y, z).getBlock() == b) {
+                                out.add(new BlockPos(baseX | x, baseY + y, baseZ | z));
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            for (short p : arr) {
+                out.add(new BlockPos(baseX | (p & 15), baseY + (p >> 8 & 15), baseZ | (p >> 4 & 15)));
+            }
+        }
+    }
+
+    // ==================== 生命周期 ====================
+
+    /** Called from END_CLIENT_TICK; periodically evicts entries for chunks no longer loaded. */
+    public static void clientTick(ClientLevel level) {
+        if (INDEXES.isEmpty() || ++sweepTimer < EVICT_SWEEP_TICKS) {
+            return;
+        }
+        sweepTimer = 0;
+        for (Map.Entry<ResourceKey<Level>, LevelIndex> entry : INDEXES.entrySet()) {
+            if (!entry.getKey().equals(level.dimension())) {
+                entry.getValue().sections.clear();
+                continue;
+            }
+            long lastChunkKey = Long.MIN_VALUE;
+            boolean lastLoaded = false;
+            var iterator = entry.getValue().sections.long2ObjectEntrySet().fastIterator();
+            while (iterator.hasNext()) {
+                long key = iterator.next().getLongKey();
+                int chunkX = SectionPos.x(key);
+                int chunkZ = SectionPos.z(key);
+                long chunkKey = (long) chunkX << 32 | (chunkZ & 0xFFFFFFFFL);
+                if (chunkKey != lastChunkKey) {
+                    lastChunkKey = chunkKey;
+                    lastLoaded = level.getChunkSource().getChunkNow(chunkX, chunkZ) != null;
+                }
+                if (!lastLoaded) {
+                    iterator.remove();
+                }
+            }
+        }
+    }
+
+    /** Clear all observations when the local body or world disappears. */
+    public static void dropAll() {
+        INDEXES.clear();
+        anyActive = false;
+        sweepTimer = 0;
+    }
+
+    private static short pack(BlockPos pos) {
+        return (short) ((pos.getY() & 15) << 8 | (pos.getZ() & 15) << 4 | (pos.getX() & 15));
+    }
+}
