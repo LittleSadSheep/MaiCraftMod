@@ -598,3 +598,40 @@ public final class Interaction {
                 NativeConfirmation.heldItemChanged(usedHand, heldBefore),
                 NativeConfirmation.menuChanged(beforeMenu),
                 ridingChanged);
+    }
+
+    private boolean aimReady(Vec3 target) {
+        Vec3 direction = target.subtract(player.getEyePosition());
+        if (direction.lengthSqr() < 1.0e-8) {
+            return true;
+        }
+        return player.getViewVector(1.0f).normalize().dot(direction.normalize())
+                >= Math.cos(Math.toRadians(7.0));
+    }
+
+    /** Raycast from the eyes along the current look; the hit must be the target block. */
+    private BlockHitResult raycastBlock() {
+        Level level = player.level();
+        Vec3 eye = player.getEyePosition();
+        Vec3 look = player.getViewVector(1.0f);
+        Vec3 end = eye.add(look.x * REACH, look.y * REACH, look.z * REACH);
+        BlockHitResult hit = level.clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(block)) {
+            return hit;
+        }
+        return null;
+    }
+
+    /** Stop issuing work. Native use release still owns a receipt and must be drained by the runtime. */
+    public void stop() {
+        if (digger != null) digger.cancel();
+        if (receipt != null && receipt.kind() == NativeActionReceipt.Kind.USE_ITEM
+                && player.isUsingItem() && !releasing) {
+            LocalPlayerContext context = ClientRuntime.requireContext(player);
+            receipt = context.actions().releaseUsingItem(context, receipt);
+            releasing = true;
+        }
+        InputDriver.halt(player);
+    }
+}
