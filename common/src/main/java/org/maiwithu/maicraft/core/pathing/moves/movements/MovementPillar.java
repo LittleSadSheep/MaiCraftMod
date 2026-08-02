@@ -298,3 +298,41 @@ public class MovementPillar extends Movement {
                         org.maiwithu.maicraft.core.Constants.LOG.info(
                                 "[maicraft-pillar] 未就绪 src={} 蹲={} 看准={} 高度够={} y={} dy={} dist={} "
                                         + "横速={} 在地={} 请求跳={} 竖速={} 手持={}",
+                                src.toShortString(), crouched, looking, highEnough,
+                                String.format("%.2f", player.getY()),
+                                String.format("%.2f", player.getY() - dest.getY()),
+                                String.format("%.2f", dist),
+                                String.format("%.3f", flatMotion), player.onGround(),
+                                state.getInputStates().getOrDefault(Input.JUMP, false),
+                                String.format("%.3f", player.getDeltaMovement().y),
+                                player.getMainHandItem().getItem());
+                    }
+                }
+            }
+        }
+
+        if (feet(player).equals(dest) && blockIsThere) {
+            org.maiwithu.maicraft.core.Constants.LOG.info(
+                    "[maicraft-pillar] 垫柱成功 src={} feet={}", src.toShortString(),
+                    feet(player).toShortString());
+            return state.setStatus(MovementStatus.SUCCESS);
+        }
+        return state;
+    }
+
+    /** 站梯/藤上挖掘时按住潜行;头顶目标格上方是水则不做准备挖掘。 */
+    @Override
+    protected boolean prepared(MovementState state) {
+        BlockPos feet = feet(player);
+        if (feet.equals(src) || feet.equals(src.below())) {
+            Block block = player.level().getBlockState(src.below()).getBlock();
+            if (block == Blocks.LADDER || block == Blocks.VINE) {
+                state.setInput(Input.SNEAK, true);
+            }
+        }
+        if (MovementHelper.isWater(player.level().getBlockState(dest.above()))) {
+            return true;
+        }
+        return super.prepared(state);
+    }
+}
