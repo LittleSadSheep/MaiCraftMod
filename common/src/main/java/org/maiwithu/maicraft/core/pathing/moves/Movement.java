@@ -298,3 +298,204 @@ public abstract class Movement {
                             new AABB(0, 0, 0, 1, 1.1, 1).move(pos)).isEmpty()) {
                 return false;
             }
+            if (!MovementHelper.canWalkThrough(player.level(), pos)) {
+                beginBreaking(state, pos);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 状态机推进,子类覆写并先走本实现:未就绪 → PREPPING;
+     * 就绪后 PREPPING → WAITING → RUNNING。
+     */
+    public MovementState updateState(MovementState state) {
+        if (!prepared(state)) {
+            return state.setStatus(MovementStatus.PREPPING);
+        } else if (state.getStatus() == MovementStatus.PREPPING) {
+            state.setStatus(MovementStatus.WAITING);
+        }
+        if (state.getStatus() == MovementStatus.WAITING) {
+            state.setStatus(MovementStatus.RUNNING);
+        }
+        return state;
+    }
+
+    /** 当前是否可被安全中断(默认恒可;悬空放置中的子类覆写)。 */
+    public boolean safeToCancel() {
+        return safeToCancel(currentState);
+    }
+
+    protected boolean safeToCancel(MovementState state) {
+        return true;
+    }
+
+    /** 重置状态机(路径回退重执行时用)。 */
+    public void reset() {
+        currentState = new MovementState().setStatus(MovementStatus.PREPPING);
+    }
+
+    // ==================== 执行层钩子(经注入代理落地) ====================
+
+    /**
+     * 执行代理:四个钩子的真实落点。移动原语只描述"要看哪、按什么键、
+     * 挖哪格",代理负责把这些落到实体上(视角步进、输入字段、渐进挖掘)。
+     */
+    public enum ItemSelection {
+        READY,
+        WAITING,
+        UNAVAILABLE
+    }
+
+    @FunctionalInterface
+    public interface ItemSelector {
+        ItemSelection select(Predicate<ItemStack> desired);
+    }
+    public interface ExecutionDelegate {
+
+        /** 开挖一格:选可视面、转头,视线就位后按左键。 */
+        void beginBreaking(MovementState state, BlockPos pos);
+
+        /** 应用期望视角(按鼠标步进量化逼近,不瞬间对准)。 */
+        void applyRotation(MovementState.MovementTarget target);
+
+        /** 清空全部按键。 */
+        void clearInputs();
+
+        /** 应用单个按键。 */
+        void applyInput(Input input, boolean held);
+
+        /** 这次导航对地形的许可:执行期"顺手"的放置(跑酷落点补块)只在可改地形时做。 */
+
+        /** Select or stage one matching stack through receipt-backed client ports. */
+        ItemSelection selectItem(Predicate<ItemStack> desired);
+        TerrainPermit permit();
+    }
+
+    private ExecutionDelegate executionDelegate;
+
+    /** 注入执行代理;未注入时四个钩子为空操作(纯规划用途)。 */
+    public void setExecutionDelegate(ExecutionDelegate delegate) {
+        this.executionDelegate = delegate;
+    }
+
+    /** 开挖一格,转发执行代理。 */
+    protected void beginBreaking(MovementState state, BlockPos pos) {
+        if (executionDelegate != null) {
+            executionDelegate.beginBreaking(state, pos);
+        }
+    }
+
+    /** 应用期望视角,转发执行代理。 */
+    protected void applyRotation(MovementState.MovementTarget target) {
+        if (executionDelegate != null) {
+            executionDelegate.applyRotation(target);
+        }
+    }
+
+    /** 清空全部按键,转发执行代理。 */
+    protected void clearInputs() {
+        if (executionDelegate != null) {
+            executionDelegate.clearInputs();
+        }
+    }
+
+    /** 应用单个按键,转发执行代理。 */
+    protected void applyInput(Input input, boolean held) {
+        if (executionDelegate != null) {
+            executionDelegate.applyInput(input, held);
+        }
+    }
+
+    /** 执行期能不能改地形;未注入代理(纯规划)按不能算——规划已由上下文成本裁决。 */
+    protected boolean mayAlterTerrain() {
+        return executionDelegate != null && executionDelegate.permit().mayAlter();
+    }
+
+    /** Receipt-aware material selection for movement helpers. */
+    protected ItemSelection selectItem(Predicate<ItemStack> desired) {
+        return executionDelegate == null
+                ? ItemSelection.UNAVAILABLE
+                : executionDelegate.selectItem(desired);
+    }
+
+    /** Callback form used by the shared placement helper. */
+    protected ItemSelector itemSelector() {
+        return this::selectItem;
+    }
+
+    // ==================== 元数据 ====================
+
+    public BlockPos getSrc() {
+        return src;
+    }
+
+    public BlockPos getDest() {
+        return dest;
+    }
+
+    public BlockPos getDirection() {
+        return dest.subtract(src);
+    }
+
+    public BlockPos[] toBreakAll() {
+        return positionsToBreak;
+    }
+
+    /** 丢弃三类格集缓存,下次查询按当前世界重算。 */
+    public void resetBlockCache() {
+        toBreakCached = null;
+        toPlaceCached = null;
+        toWalkIntoCached = null;
+    }
+
+    /** 此刻仍不可穿行、需要挖掉的格(缓存到 {@link #resetBlockCache()})。 */
+    public List<BlockPos> toBreak(net.minecraft.world.level.BlockGetter level) {
+        if (toBreakCached != null) {
+            return toBreakCached;
+        }
+        List<BlockPos> result = new ArrayList<>();
+        for (BlockPos pos : positionsToBreak) {
+            if (!MovementHelper.canWalkThrough(level, pos)) {
+                result.add(pos);
+            }
+        }
+        toBreakCached = result;
+        return result;
+    }
+
+    /** 此刻仍不可站立、需要放上方块的格(缓存到 {@link #resetBlockCache()})。 */
+    public List<BlockPos> toPlace(net.minecraft.world.level.BlockGetter level) {
+        if (toPlaceCached != null) {
+            return toPlaceCached;
+        }
+        List<BlockPos> result = new ArrayList<>();
+        if (positionToPlace != null && !MovementHelper.canWalkOn(level, positionToPlace)) {
+            result.add(positionToPlace);
+        }
+        toPlaceCached = result;
+        return result;
+    }
+
+    /** 会用身体挤进去的格(基类恒空;对角移动覆写产出切角柱)。 */
+    public List<BlockPos> toWalkInto(net.minecraft.world.level.BlockGetter level) {
+        if (toWalkIntoCached == null) {
+            toWalkIntoCached = new ArrayList<>();
+        }
+        return toWalkIntoCached;
+    }
+
+    public BlockPos getToPlace() {
+        return positionToPlace;
+    }
+
+    /** 记录成本计算时 dest 所在 chunk 是否已加载。 */
+    public void checkLoadedChunk(CalculationContext context) {
+        calculatedWhileLoaded = context.isLoaded(dest.getX(), dest.getZ());
+    }
+
+    public boolean calculatedWhileLoaded() {
+        return calculatedWhileLoaded;
+    }
+}
