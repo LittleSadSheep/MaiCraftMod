@@ -298,3 +298,303 @@ public final class PlayerNav {
                     return ContextFactory.forSearch(player, sacred, deniedPlace, permit);
                 }
 
+                @Override
+                public CalculationContext forExecution(LocalPlayer player, LongSet sacred, LongSet deniedPlace) {
+                    return ContextFactory.forExecution(player, sacred, deniedPlace, permit);
+                }
+
+                @Override
+                public TerrainPermit permit() {
+                    return permit;
+                }
+            };
+        }
+
+        CalculationContext forSearch(LocalPlayer player, LongSet sacred, LongSet deniedPlace);
+        CalculationContext forExecution(LocalPlayer player, LongSet sacred, LongSet deniedPlace);
+        /** 本提供者建出的上下文所带的地形许可(执行器据此决定顺手的放置能不能做)。 */
+        TerrainPermit permit();
+    }
+
+    /** ARRIVED-IN-PLACE 已打点(边沿去重)。 */
+    private boolean arrivedInPlaceLogged;
+
+    public Status tick() {
+        NavProfiler.tickFrame();
+        if (reached.getAsBoolean()) {
+            return Status.ARRIVED;
+        }
+        if (failedTerminal) {
+            return Status.FAILED;
+        }
+        if (stopped) {
+            failReason = "target lost";
+            failType = FailureType.TARGET_LOST;
+            return Status.FAILED;
+        }
+        if (terraformProbe != null) {
+            return pollTerraformProbe();
+        }
+        // 步行导航驱动的是脚下的身体:坐着任何载具都先下来——乘客的行走输入对载具
+        // 无效,不在这儿下就坐着"走"到失速。全仓步行任务共用这一处,别在任务层各判各的。
+        // 放在 reached 之后:已经到位就不惊动座驾(跟主人同船漂着的 follow 不该把她甩下去)。
+        if (player.isPassenger()) {
+            player.stopRiding();
+        }
+
+        // goal 与 sacred 一体拉取——两者是同一份契约
+        long tCompile = NavProfiler.begin();
+        GoalCompiler.Compiled compiled = compiledSupplier.get();
+        NavProfiler.end("goal.compile", tCompile);
+        if (compiled == null) {
+            return fail(FailureType.TARGET_LOST, "target lost");
+        }
+        sacred = compiled.sacred();
+        NavGoal navGoal = compiled.goal();
+
+        // 目标中心移动 >2 格:重根(进度量尺随之复位,状态机自会软取消旧段)
+        if (plannedCenter != null && navGoal.center().distSqr(plannedCenter) > GOAL_MOVED_SQR) {
+            searchSatisfied = false;
+            bestGoalH = Double.MAX_VALUE;
+            ticksSincePlan = 0;
+            plannedCenter = navGoal.center();
+            withSprintGate(() -> core.setGoalAndPath(compiled.engineGoal()));
+            return Status.RUNNING;
+        }
+        // 活目标:到点就重取一次。进度量尺不复位——那是给"卡住了"用的,不该被节拍抹平。
+        if (revalidateGoalEachTick && ++ticksSincePlan >= LIVE_GOAL_REPLAN_TICKS) {
+            ticksSincePlan = 0;
+            searchSatisfied = false;
+            plannedCenter = navGoal.center();
+            withSprintGate(() -> core.setGoalAndPath(compiled.engineGoal()));
+            return Status.RUNNING;
+        }
+        if (plannedCenter == null) {
+            plannedCenter = navGoal.center();
+        }
+
+        if (searchSatisfied) {
+            if (!revalidateGoalEachTick) {
+                return Status.ARRIVED;
+            }
+            BlockPos feet = PathExecutor.playerFeet(player);
+            if (compiled.engineGoal().isInGoal(feet.getX(), feet.getY(), feet.getZ())) {
+                return Status.ARRIVED;
+            }
+            searchSatisfied = false;
+        }
+
+        PathExecutor before = core.getCurrent();
+        long tExec = NavProfiler.begin();
+        withSprintGate(() -> {
+            // 状态机空闲(初次、或结果被判孤儿丢弃)时(重新)下发目标;
+            // setGoalAndPath 已在目标内/已有段/已有在飞搜索时自会不派发
+            if (revalidateGoalEachTick || core.getGoal() == null
+                    || (core.getCurrent() == null && !core.hasInProgressSearch())) {
+                core.setGoalAndPath(compiled.engineGoal());
+            }
+            core.tick();
+        });
+        NavProfiler.end("core.tick", tExec);
+
+        // 首段搜索失败:验尸并终局。裁定前再问一次 caller 谓词——本 tick
+        // 身体可能已挪进满足位,ARRIVED 优先于失败结论
+        if (core.calcFailedLastTick()) {
+            if (reached.getAsBoolean()) {
+                return Status.ARRIVED;
+            }
+            // 只走不改找不到路:先探一条可改地形的路,把它会动什么列出来再裁决——
+            // 模型要的是"授权什么"的具体清单,不是一句 no path
+            if (terrainProbe && contextProvider.permit() == TerrainPermit.PRESERVE
+                    && submitTerraformProbe(compiled.engineGoal(), navGoal)) {
+                InputDriver.halt(player);
+                return Status.RUNNING;
+            }
+            return fail(FailureType.NO_PATH, noPathAutopsy(navGoal,
+                    contextProvider.permit() == TerrainPermit.PRESERVE ? " without altering terrain" : ""));
+        }
+
+        // 执行失败(段被取消,状态机已自动重搜):做放弃判定的记账
+        PathExecutor after = core.getCurrent();
+        if (before != null && after != before && before.failed()) {
+            lastExecFailure = before.failureCause();
+            Status verdict = accountReplan(navGoal);
+            if (verdict != null) {
+                return verdict;
+            }
+        }
+
+        // 到达判定:状态机归于空闲且脚下满足搜索目标 → 稳定 ARRIVED。
+        // 覆盖两种情形:路径走完进入目标;以及"原地即满足"(setGoalAndPath
+        // 因脚下已在目标内根本不派发搜索)。
+        Goal engineGoal = core.getGoal();
+        if (engineGoal != null && core.getCurrent() == null && !core.hasInProgressSearch()) {
+            BlockPos feet = PathExecutor.playerFeet(player);
+            if (engineGoal.isInGoal(feet.getX(), feet.getY(), feet.getZ())) {
+                searchSatisfied = true;
+                if (!arrivedInPlaceLogged) {
+                    // 只在进入边沿打一次:任务层反复重建导航时,同一驻留会逐 tick 重进
+                    // 这个分支,连续打点是日志洪水
+                    arrivedInPlaceLogged = true;
+                    Constants.LOG.info(
+                            "[maicraft-path] ARRIVED-IN-PLACE feet={} goal-center={} —— 搜索目标在脚下"
+                                    + "即满足,钉稳结论交任务层裁决",
+                            feet.toShortString(), plannedCenter.toShortString());
+                }
+                return Status.ARRIVED;
+            }
+        }
+        return Status.RUNNING;
+    }
+
+    /**
+     * speed 参数的落点:本导航的每一段驱动都包在 allowSprint 门里,
+     * slow(speed&lt;1.0)时全局禁疾跑——搜索上下文的 canSprint 快照与
+     * 执行器的逐 tick 疾跑决策读的都是这一个开关,包夹后原值复原,
+     * 不影响别的同伴。
+     */
+    private void withSprintGate(Runnable body) {
+        NavSettings settings = NavSettings.get();
+        boolean saved = settings.allowSprint;
+        settings.allowSprint = saved && sprintAllowed;
+        try {
+            body.run();
+        } finally {
+            settings.allowSprint = saved;
+        }
+    }
+
+    /**
+     * 一次失败重规划的记账。进度按目标自己的启发函数在脚下的取值度量
+     * (yLevel 只看竖直、column 只看水平、composite 看最近成员、runAway
+     * 负值随逃离下降,各自天然正确);有真实改善清零连击,否则连击到
+     * {@link #MAX_STALLED_REPLANS} 判 BOXED_IN。返回 null 表示继续跑。
+     */
+    private Status accountReplan(NavGoal liveGoal) {
+        BlockPos feet = PathExecutor.playerFeet(player);
+        double h = liveGoal.progressHeuristic(feet);
+        if (bestGoalH - h >= REPLAN_PROGRESS_EPS_H) {
+            bestGoalH = h;
+            stalledReplans = 0;
+        } else if (++stalledReplans >= MAX_STALLED_REPLANS) {
+            Status verdict = fail(FailureType.BOXED_IN,
+                    "gave up: no real progress toward the target over "
+                            + MAX_STALLED_REPLANS + " consecutive attempts"
+                            + (lastExecFailure != null
+                                    ? "; the recurring failure: " + lastExecFailure : ""));
+            return reached.getAsBoolean() ? Status.ARRIVED : verdict;
+        }
+        if (replans++ >= MAX_REPLANS) {
+            Status verdict = fail(FailureType.BOXED_IN,
+                    "gave up after " + MAX_REPLANS + " replans");
+            return reached.getAsBoolean() ? Status.ARRIVED : verdict;
+        }
+        return null;
+    }
+
+    /** 终局裁定:停下身体、钉住原因,此后 tick 稳定返回 FAILED。 */
+    private Status fail(FailureType type, String reason) {
+        failReason = reason;
+        failType = type;
+        failedTerminal = true;
+        core.forceCancel();
+        return Status.FAILED;
+    }
+
+    /**
+     * 派一次"若许改地形则此路"的探针:与状态机同一派发器、同一目标、同一起点,只换成
+     * TERRAFORM 上下文;只搜不走——结论到手只产出清单,绝不执行。
+     *
+     * @return 是否真的派出去了(派不出去时直接按 NO_PATH 裁决)
+     */
+    private boolean submitTerraformProbe(Goal engineGoal, NavGoal navGoal) {
+        BlockPos start = core.pathStart();
+        if (start == null) {
+            return false;
+        }
+        CalculationContext probeContext = ContextFactory.forSearch(player, sacred, deniedPlace,
+                TerrainPermit.TERRAFORM);
+        NavSettings settings = NavSettings.get();
+        terraformProbe = PoolSearchDispatcher.INSTANCE.submit(PathExecutor.playerFeet(player), start,
+                engineGoal, probeContext, Favoring.empty(),
+                settings.primaryTimeoutMS, settings.failureTimeoutMS);
+        terraformProbeGoal = navGoal;
+        Constants.LOG.info("[maicraft-path] 只走不改无路,探一条可改地形的路 start={} goal={}",
+                start.toShortString(), navGoal.center().toShortString());
+        return true;
+    }
+
+    /**
+     * 探针出结论:有路 → 列清单,TERRAIN_BLOCKED;无路 → 连挖都到不了,NO_PATH。
+     * 等结论期间身体原地站住。裁决前仍让 caller 的 reached 谓词先说话。
+     */
+    private Status pollTerraformProbe() {
+        PathCalcResult result = terraformProbe.poll();
+        if (result == null) {
+            InputDriver.halt(player);
+            return Status.RUNNING;
+        }
+        terraformProbe = null;
+        NavGoal goal = terraformProbeGoal;
+        terraformProbeGoal = null;
+        if (reached.getAsBoolean()) {
+            return Status.ARRIVED;
+        }
+        // 搜索器交出的路径已经装配过(postProcess 在 calculate 模板里),直接读移动原语
+        NavPath path = result.getPath().orElse(null);
+        TerrainBill bill = path == null ? null : TerrainBill.planned(path, player.level());
+        if (bill == null || bill.isEmpty()) {
+            // 连可改地形都搜不出路(或搜出的路根本不动地形——那就是清洁搜索自己的预算问题):
+            // 如实说没路,别把"挖"当万能解
+            return fail(FailureType.NO_PATH, noPathAutopsy(goal,
+                    path == null ? ", not even by digging or bridging" : ""));
+        }
+        BlockPos feet = PathExecutor.playerFeet(player);
+        BlockPos center = goal.center();
+        // 措辞对任何任务都成立:goto 自己重发带标记,别的任务先 goto 开路再做事
+        String reason = String.format(
+                "no route without altering terrain (from %s toward %s, about %.0f blocks away). %s would %s."
+                        + " Altering terrain needs consent: if that is acceptable, goto there with"
+                        + " may_alter_terrain=true; otherwise pick another spot or ask.",
+                feet.toShortString(), center.toShortString(), Math.sqrt(feet.distSqr(center)),
+                result.getType() == PathCalcResult.Type.SUCCESS_TO_GOAL
+                        ? "The cheapest route through" : "Even the first leg of a route through",
+                bill.describe());
+        Constants.LOG.info("[maicraft-path] TERRAIN-BLOCKED start={} goal={} | {}",
+                feet.toShortString(), center.toShortString(), reason);
+        return fail(FailureType.TERRAIN_BLOCKED, reason);
+    }
+
+    /**
+     * 空搜索结果的教学式验尸——直接喂给模型的人话:离目标多远、有无
+     * 搭路耗材、还有什么可解锁的手段。搜索器统计面未随异步句柄暴露,
+     * 此处按可得素材给结构化结论。
+     */
+    /** @param qualifier 紧跟 "no path to target" 之后的限定语(地形许可的说明),可为空串 */
+    private String noPathAutopsy(NavGoal goal, String qualifier) {
+        BlockPos feet = PathExecutor.playerFeet(player);
+        BlockPos center = goal.center();
+        double dist = Math.sqrt(feet.distSqr(center));
+        StringBuilder r = new StringBuilder("no path to target").append(qualifier);
+        r.append(String.format(" (from %s toward %s, about %.0f blocks away;"
+                        + " the search burned its whole budget without finding a route",
+                feet.toShortString(), center.toShortString(), dist));
+        if (lastSearchContext != null && !lastSearchContext.hasThrowaway) {
+            r.append("; carrying no scaffolding blocks to bridge or pillar with");
+        }
+        if (!deniedPlace.isEmpty()) {
+            r.append("; ").append(deniedPlace.size())
+                    .append(" scaffold spot(s) already proven unplaceable this navigation");
+        }
+        r.append(')');
+        String reason = r.toString();
+        Constants.LOG.info("[maicraft-path] NO-PATH start={} goal={} | {}",
+                feet.toShortString(), center.toShortString(), reason);
+        return reason;
+    }
+
+    public boolean isSafeToCancel() {
+        return core.isSafeToCancel();
+    }
+
+    public BlockPos pathStart() {
