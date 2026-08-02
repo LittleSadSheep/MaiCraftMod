@@ -598,3 +598,71 @@ public final class PlayerNav {
     }
 
     public BlockPos pathStart() {
+        return core.pathStart();
+    }
+
+    /**
+     * 这次导航真挖了什么、真放了什么。任务层在 stopNav 时并进旅程账,回执末尾如实相告。
+     * PRESERVE 导航的账本通常为空(规划不出动地形的路,执行器也不会顺手动),但窒息自救
+     * 的挖出算在内——那是反射,不是寻路决定,也该如实报。
+     */
+    public TerrainBill ledger() {
+        return core.ledger();
+    }
+
+    /** FAILED 后的人话验尸(直接喂 LLM)。 */
+    public String failReason() {
+        return failReason;
+    }
+
+    /** FAILED 的结构化归因,任务层恢复梯按枚举分支。 */
+    public FailureType failType() {
+        return failType;
+    }
+
+    /**
+     * 距上次真实推进(移动完成/重定位/活跃挖掘)的 tick 数——进度租约
+     * 型任务 deadline 的 liveness 信号。规划间隙(无执行段)读 0:预算内
+     * 的搜索本身就是进度,只是不是走路那种。
+     */
+    public int stallTicks() {
+        PathExecutor current = core.getCurrent();
+        return current == null ? 0 : current.ticksSinceProgress();
+    }
+
+    /** 搜索结论分布摘要,转发自内核(排障日志用)。 */
+    public String outcomeSummary() {
+        return core.outcomeSummary();
+    }
+
+    /**
+     * 规划器在飞且当前无路段在执行——身体站着等异步搜索返回。任务层用它
+     * 冻结任务 deadline:deadline 度量的是身体干活的刻,搜索的墙钟延迟不该
+     * 折算成任务超时(tick 越快于真实时间,这笔折算越离谱,无上限 tick 的
+     * 测试服上足以在首次搜索返回前烧光整个预算)。
+     */
+    public boolean planningInFlight() {
+        return core.hasInProgressSearch() && core.getCurrent() == null;
+    }
+
+    /** 停止导航:取消在飞搜索、丢段、清键停挖,并把身体停稳、松潜行。 */
+    public void stop() {
+        stopped = true;
+        searchSatisfied = false;
+        if (terraformProbe != null) {
+            terraformProbe.cancel();
+            terraformProbe = null;
+        }
+        core.forceCancel();
+        InputDriver.halt(player);
+    }
+
+    /**
+     * 本 tick 原地站住:清移动输入、松潜行,但目标、当前路径段与在飞搜索全部保留,
+     * 下一次 {@link #tick()} 从当前状态续跑——不产生任何冷启动搜索。身体必须静止的
+     * 就地作业(如站桩挖掘)期间逐 tick 调用;与 {@link #stop()}(终局释放)互不替代。
+     */
+    public void pause() {
+        InputDriver.halt(player);
+    }
+}
