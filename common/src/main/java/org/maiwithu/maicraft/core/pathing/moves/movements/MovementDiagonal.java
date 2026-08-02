@@ -298,3 +298,34 @@ public class MovementDiagonal extends Movement {
         toWalkIntoCached = result;
         return toWalkIntoCached;
     }
+
+    /**
+     * 在角上且两角都没脚踩时,检查玩家包围盒四角 ±0.25 有无支撑,
+     * 没有支撑说明正悬在角缝里,中断会掉下去。
+     */
+    @Override
+    protected boolean safeToCancel(MovementState state) {
+        Level level = player.level();
+        BlockPos feet = feet(player);
+        double offset = 0.25;
+        double x = player.getX();
+        double y = player.getY() - 1;
+        double z = player.getZ();
+        if (feet.equals(src)) {
+            return true;
+        }
+        BlockPos cornerA = new BlockPos(src.getX(), src.getY() - 1, dest.getZ());
+        BlockPos cornerB = new BlockPos(dest.getX(), src.getY() - 1, src.getZ());
+        if (MovementHelper.canWalkOn(level, cornerA) && MovementHelper.canWalkOn(level, cornerB)) {
+            return true;
+        }
+        if (feet.equals(new BlockPos(src.getX(), src.getY(), dest.getZ()))
+                || feet.equals(new BlockPos(dest.getX(), src.getY(), src.getZ()))) {
+            return MovementHelper.canWalkOn(level, BlockPos.containing(x + offset, y, z + offset))
+                    || MovementHelper.canWalkOn(level, BlockPos.containing(x + offset, y, z - offset))
+                    || MovementHelper.canWalkOn(level, BlockPos.containing(x - offset, y, z + offset))
+                    || MovementHelper.canWalkOn(level, BlockPos.containing(x - offset, y, z - offset));
+        }
+        return true;
+    }
+}
