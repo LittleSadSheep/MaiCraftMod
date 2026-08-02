@@ -298,3 +298,303 @@ public final class PathExecutor {
             int deadFuture = firstFutureImpossible(path.movements(), pathPosition, lookahead, context);
             if (deadFuture != -1 && canCancel) {
                 Constants.LOG.debug("世界已变化,后续移动不可行,取消");
+                cancel("世界已变化," + describe(path.movements().get(deadFuture)) + " 不再可行");
+                return true;
+            }
+        }
+        double currentCost = movement.recalculateCost(context);
+        if (currentCost >= COST_INF && canCancel) {
+            Constants.LOG.debug("世界已变化,当前移动不可行,取消");
+            cancel("世界已变化," + describe(movement) + " 不再可行");
+            return true;
+        }
+        if (!movement.calculatedWhileLoaded()
+                && costIncreaseExceedsTolerance(currentMovementOriginalCostEstimate, currentCost,
+                        NavSettings.get().maxCostIncrease)
+                && canCancel) {
+            // 只对"当时在未加载区块里估出来的"移动生效:加载后货不对板;
+            // 加载时算的涨价属于自己路径的连锁反应,不管
+            Constants.LOG.debug("移动估价 {} 涨到 {},取消", currentMovementOriginalCostEstimate, currentCost);
+            cancel(describe(movement) + " 加载后估价从 "
+                    + (int) (double) currentMovementOriginalCostEstimate + " 涨到 " + (int) currentCost);
+            return true;
+        }
+        if (shouldPause()) {
+            Constants.LOG.debug("在飞搜索的最优路径会回头经过脚下,暂停");
+            harness.clearAllKeys();
+            return true;
+        }
+        MovementStatus movementStatus = movement.update();
+        if (movementStatus == MovementStatus.UNREACHABLE || movementStatus == MovementStatus.FAILED) {
+            Constants.LOG.debug("移动报 {},取消", movementStatus);
+            cancel(describe(movement) + " 执行报 " + movementStatus);
+            return true;
+        }
+        if (movementStatus == MovementStatus.SUCCESS) {
+            pathPosition++;
+            recordStep("success ->" + pathPosition + " feet=" + playerFeet(player));
+            onChangeInPathPosition();
+            onTick0();
+            return true;
+        } else {
+            // 先没收移动原语请求的 SPRINT 键(疾跑由执行器直接写实体状态,
+            // 不靠按键),把请求作为事实交给策略;裁决的全部副作用在此统一施加。
+            boolean sprintRequested = harness.isKeyRequested(Input.SPRINT);
+            harness.forceKey(Input.SPRINT, false);
+            SprintPolicy.Decision d = sprint.decide(pathPosition, sprintRequested);
+            if (d.skipTo() >= 0) {
+                pathPosition = d.skipTo();
+                onChangeInPathPosition();
+                onTick0();
+            }
+            if (d.jumpUp()) {
+                harness.forceKey(Input.JUMP, true);
+            }
+            if (d.jumpDown()) {
+                harness.forceKey(Input.JUMP, false);
+            }
+            if (d.steer() != null) {
+                // 疾跑冲下坡不减速:清键、直接压目标视线与前进
+                harness.clearAllKeys();
+                Vec3 eye = player.getEyePosition();
+                harness.applyRotation(new MovementState.MovementTarget(
+                        AimGeometry.yawTo(eye, d.steer()),
+                        AimGeometry.pitchTo(eye, d.steer()), false));
+                harness.forceKey(Input.MOVE_FORWARD, true);
+            }
+            sprintNextTick = d.sprint();
+            ticksOnCurrent++;
+            // 活跃挖掘算真实推进(硬方块一挖几十 tick 是正常工作)
+            if (harness.isDigging()) {
+                ticksSinceProgress = 0;
+            } else {
+                ticksSinceProgress++;
+            }
+            if (ticksOnCurrent > timedOutAt(currentMovementOriginalCostEstimate,
+                    NavSettings.get().movementTimeoutTicks)) {
+                // 卡死的动作必须留声:类型、起讫、四邻实况、身位一次性摊开。
+                // 动作卡住是寻路故障里最常见的一类,所以这条是 INFO 不是 debug——
+                // 发布态不落盘的话,线上出问题只能靠猜。这是排障的第一现场。
+                Constants.LOG.info(
+                        "[maicraft-path] 动作卡死 {} 耗时{}刻(估价{}) 无进展{}刻 身位{} 精确({}) "
+                                + "起点格={} 终点格={} 终点上={} 终点下={}",
+                        describe(movement), ticksOnCurrent,
+                        (int) (double) currentMovementOriginalCostEstimate, ticksSinceProgress,
+                        playerFeet(player).toShortString(),
+                        String.format("%.2f,%.2f,%.2f", player.getX(), player.getY(), player.getZ()),
+                        blockName(movement.getSrc()), blockName(movement.getDest()),
+                        blockName(movement.getDest().above()), blockName(movement.getDest().below()));
+                cancel(describe(movement) + " 卡住:耗时 " + ticksOnCurrent
+                        + " tick,远超估价 " + (int) (double) currentMovementOriginalCostEstimate);
+                return true;
+            }
+        }
+        return canCancel;
+    }
+
+    // ==================== 重定位(纯逻辑,可测) ====================
+
+    /** 回退扫:在 [0, pathPosition) 里找第一个合法位含 feet 的移动;无则 -1。 */
+    static int findBackwardMatch(List<Movement> movements, int pathPosition, BlockPos feet) {
+        for (int i = 0; i < pathPosition && i < movements.size(); i++) {
+            if (movements.get(i).getValidPositions().contains(feet)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 前跳扫:在 [pathPosition+3, movements.size()) 里找第一个合法位含
+     * feet 的移动;无则 -1。刻意跳过 +1(该移动自己会报 SUCCESS)与 +2。
+     */
+    static int findForwardSkip(List<Movement> movements, int pathPosition, BlockPos feet) {
+        for (int i = pathPosition + 3; i < movements.size(); i++) {
+            if (movements.get(i).getValidPositions().contains(feet)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 提前接段判定(纯逻辑):空中且不在液体里不接;严格下沉(竖速
+     * < -0.1)不接(可能正穿水下坠);feet 恰在格位序列里 → 返回该
+     * 下标,否则 -1。
+     */
+    static int snipsnapIndex(List<BlockPos> positions, BlockPos feet,
+                             boolean onGround, boolean feetInLiquid, double deltaY) {
+        if (!onGround && !feetInLiquid) {
+            return -1;
+        }
+        if (deltaY < -0.1) {
+            return -1;
+        }
+        return positions.indexOf(feet);
+    }
+
+    // ==================== 成本核验 / 超时(纯逻辑,可测) ====================
+
+    /**
+     * 从当前步后一格起向前看 {@code lookahead} 个移动,返回第一个成本
+     * {@code >= COST_INF} 的下标;全可行返回 -1。窗口不含当前步与路径
+     * 末位(末位无对应移动)。
+     */
+    static int firstFutureImpossible(List<Movement> movements, int pathPosition,
+                                      int lookahead, CalculationContext context) {
+        for (int i = 1; i < lookahead && pathPosition + i < movements.size(); i++) {
+            Movement future = movements.get(pathPosition + i);
+            if (future.calculateCost(context, new MutableMoveResult()) >= COST_INF) {
+                return pathPosition + i;
+            }
+        }
+        return -1;
+    }
+
+    /** 成本涨幅是否超过容差(仅对猜价移动生效,调用方负责 calculatedWhileLoaded)。 */
+    static boolean costIncreaseExceedsTolerance(double originalEstimate, double currentCost,
+                                                double maxCostIncrease) {
+        return currentCost - originalEstimate > maxCostIncrease;
+    }
+
+    /** 单移动超时阈值:估价 tick + 宽限。 */
+    static double timedOutAt(double originalCostEstimate, int movementTimeoutTicks) {
+        return originalCostEstimate + movementTimeoutTicks;
+    }
+
+    // ==================== 脱轨 ====================
+
+    /** 玩家到全路径所有合法位格中心的最小距离。 */
+    private double closestPathPosDist() {
+        return closestPathPosDist(path.movements(), player.getX(), player.getY(), player.getZ());
+    }
+
+    /** 纯逻辑:给定路径与玩家坐标,返回到全路径合法位格中心的最小距离。 */
+    static double closestPathPosDist(List<Movement> movements, double px, double py, double pz) {
+        double best = -1;
+        for (Movement movement : movements) {
+            for (BlockPos pos : movement.getValidPositions()) {
+                double dist = distanceToCenter(pos, px, py, pz);
+                if (dist < best || best == -1) {
+                    best = dist;
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * 是否可能脱轨。坠落中同时远离起点与终点属正常,当前移动是坠落时
+     * 改用到坠落终点的水平距离判定。
+     */
+    private boolean possiblyOffPath(double distanceFromPath, double leniency) {
+        return possiblyOffPath(path, pathPosition, distanceFromPath, leniency,
+                player.getX(), player.getZ(), pos -> entityFlatDistanceToCenter(pos));
+    }
+
+    /**
+     * 纯逻辑:给定路径、当前下标、玩家到路径最小距离与容差,判定是否
+     * 可能脱轨。当前移动是坠落时改用到坠落终点(下标+1)的水平距离。
+     * flatDist 按格位算玩家到该格中心的水平距离(坠落终点用)。
+     */
+    static boolean possiblyOffPath(NavPath path, int pathPosition, double distanceFromPath,
+                                    double leniency, double px, double pz,
+                                    java.util.function.Function<BlockPos, Double> flatDist) {
+        if (distanceFromPath <= leniency) {
+            return false;
+        }
+        if (path.movements().get(pathPosition) instanceof MovementFall) {
+            BlockPos fallDest = path.positions().get(pathPosition + 1);
+            return flatDist.apply(fallDest) >= leniency;
+        }
+        return true;
+    }
+
+    /** 纯逻辑:玩家坐标到格位中心的 3D 距离。 */
+    static double distanceToCenter(BlockPos pos, double px, double py, double pz) {
+        double dx = pos.getX() + 0.5 - px;
+        double dy = pos.getY() + 0.5 - py;
+        double dz = pos.getZ() + 0.5 - pz;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    private double entityFlatDistanceToCenter(BlockPos pos) {
+        return flatDistanceToCenter(pos, player.getX(), player.getZ());
+    }
+
+    /** 纯逻辑:玩家坐标到格位中心的水平距离。 */
+    static double flatDistanceToCenter(BlockPos pos, double px, double pz) {
+        double dx = pos.getX() + 0.5 - px;
+        double dz = pos.getZ() + 0.5 - pz;
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    // ==================== 回头暂停 / 提前接段 ====================
+
+    /**
+     * 在飞搜索的最优部分路径(≥3 格,去掉首格后)包含脚下 → 新路径
+     * 会经过这里,不必再往前走。仅在站稳、身位通透、当前移动可取消
+     * 时生效。
+     */
+    private boolean shouldPause() {
+        Optional<NavPath> currentBest = inProgressBestPath.get();
+        if (currentBest.isEmpty()) {
+            return false;
+        }
+        if (!player.onGround()) {
+            return false;
+        }
+        BlockPos feet = playerFeet(player);
+        var level = org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(player.level());
+        if (!MovementHelper.canWalkOn(level, feet.below())) {
+            return false; // 站位本身可疑(可能跑酷中),别停
+        }
+        if (!MovementHelper.canWalkThrough(level, feet)
+                || !MovementHelper.canWalkThrough(level, feet.above())) {
+            return false; // 身位被埋,别停
+        }
+        if (!path.movements().get(pathPosition).safeToCancel()) {
+            return false;
+        }
+        List<BlockPos> positions = currentBest.get().positions();
+        if (positions.size() < 3) {
+            return false; // 太短,远不能确定真会走这条
+        }
+        return positions.subList(1, positions.size()).contains(feet);
+    }
+
+    /** 无论当前推进到哪,身位恰在路径格位上时直接吸附过去。 */
+    public boolean snipsnapifpossible() {
+        BlockPos feet = playerFeet(player);
+        boolean feetInLiquid = !player.level().getFluidState(feet).isEmpty();
+        int index = snipsnapIndex(path.positions(), feet,
+                player.onGround(), feetInLiquid, player.getDeltaMovement().y);
+        if (index == -1) {
+            return false;
+        }
+        pathPosition = index;
+        harness.clearAllKeys();
+        return true;
+    }
+
+    // ==================== 备货 / 状态迁移 ====================
+
+    /** Dangerous falls must wait for a confirmed water-bucket staging transaction. */
+    private Movement.ItemSelection prepareSupplies(Movement movement) {
+        if (movement instanceof MovementFall
+                && movement.getSrc().getY() - movement.getDest().getY() > NavSettings.get().maxFallHeightNoWater
+                && !MovementHelper.isWater(player.level().getBlockState(movement.getDest()))) {
+            return harness.ensureWaterBucketInHotbar();
+        }
+        // Placement movements select the exact build/scaffold predicate themselves. This avoids
+        // staging a generic block ahead of a provider-specific construction material.
+        return Movement.ItemSelection.READY;
+    }
+
+    private void onChangeInPathPosition() {
+        harness.clearAllKeys();
+        ticksOnCurrent = 0;
+        ticksSinceProgress = 0;
+    }
+
+    /** 方块的短名(排障日志用)。 */
