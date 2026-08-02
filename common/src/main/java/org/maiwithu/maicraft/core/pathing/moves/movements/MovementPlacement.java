@@ -298,3 +298,64 @@ final class MovementPlacement {
     static boolean isFacing(LocalPlayer player, MovementState.MovementTarget target) {
         if (!target.hasRotation()) {
             return false;
+        }
+        return Math.abs(normalizeDegrees(player.getYRot() - target.getYaw())) < 0.01
+                && Math.abs(player.getXRot() - target.getPitch()) < 0.01;
+    }
+
+    /** 角度归一到 [-180, 180)。 */
+    static float normalizeDegrees(float degrees) {
+        float wrapped = degrees % 360.0f;
+        if (wrapped < -180.0f) {
+            wrapped += 360.0f;
+        }
+        if (wrapped >= 180.0f) {
+            wrapped -= 360.0f;
+        }
+        return wrapped;
+    }
+
+    /** 执行期霜行者判定:装备有霜行者且目标格是静水源。 */
+    static boolean canUseFrostWalker(LocalPlayer player, BlockState state) {
+        return frostWalkerLevel(player) != 0
+                && state.getBlock() == Blocks.WATER
+                && state.getValue(LiquidBlock.LEVEL) == 0;
+    }
+
+    /** 全身装备的霜行者附魔最高等级。 */
+    static int frostWalkerLevel(LocalPlayer player) {
+        int level = 0;
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            ItemEnchantments itemEnchantments = player.getItemBySlot(slot).getEnchantments();
+            for (Holder<Enchantment> enchant : itemEnchantments.keySet()) {
+                if (enchant.is(Enchantments.FROST_WALKER)) {
+                    level = Math.max(level, itemEnchantments.getLevel(enchant));
+                }
+            }
+        }
+        return level;
+    }
+
+    /** 沿指定转角从 eye 出发的轮廓射线(不含流体)。 */
+    static BlockHitResult rayTrace(LocalPlayer player, Vec3 eye, float yaw, float pitch, double reach) {
+        Vec3 end = eye.add(direction(yaw, pitch).scale(reach));
+        return player.level().clip(new ClipContext(eye, end,
+                ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+    }
+
+    /** 转角 → 单位视线向量。 */
+    static Vec3 direction(float yaw, float pitch) {
+        double yawRad = Math.toRadians(yaw);
+        double pitchRad = Math.toRadians(pitch);
+        double cosPitch = Math.cos(pitchRad);
+        return new Vec3(-Math.sin(yawRad) * cosPitch, -Math.sin(pitchRad), Math.cos(yawRad) * cosPitch);
+    }
+
+    /** 眼位;wouldSneak 时按潜行眼高取(提前用放置那一刻的视角算贴面)。 */
+    static Vec3 eyePosition(LocalPlayer player, boolean wouldSneak) {
+        if (wouldSneak) {
+            return new Vec3(player.getX(), player.getY() + SNEAK_EYE_HEIGHT, player.getZ());
+        }
+        return player.getEyePosition();
+    }
+}
