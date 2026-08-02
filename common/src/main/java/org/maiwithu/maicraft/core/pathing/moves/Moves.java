@@ -298,3 +298,66 @@ public enum Moves {
         this.yOffset = y;
         this.zOffset = z;
         this.dynamicXZ = dynamicXZ;
+        this.dynamicY = dynamicY;
+    }
+
+    Moves(int x, int y, int z) {
+        this(x, y, z, false, false);
+    }
+
+    /**
+     * 从 src 构造可执行的移动实例(路径装配期用);
+     * 动态成员在成本不可行时返回 null。
+     */
+    public abstract Movement apply0(CalculationContext context, BlockPos src);
+
+    /**
+     * 计算从 (x,y,z) 走本方向的落点与成本。静态成员直接按偏移填
+     * 结果;动态成员覆写并由成本函数写实际落点。
+     */
+    public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+        if (dynamicXZ || dynamicY) {
+            throw new UnsupportedOperationException("动态偏移的移动必须覆写 apply");
+        }
+        result.x = x + xOffset;
+        result.y = y + yOffset;
+        result.z = z + zOffset;
+        result.cost = cost(context, x, y, z);
+    }
+
+    public double cost(CalculationContext context, int x, int y, int z) {
+        throw new UnsupportedOperationException("移动必须覆写 cost 或 apply");
+    }
+
+    /** 下降方向的分派:落点恰低一格是下降,更低是坠落,不可行为 null。 */
+    private static Movement descendOrFall(CalculationContext context, BlockPos src, Moves move) {
+        MutableMoveResult res = new MutableMoveResult();
+        move.apply(context, src.getX(), src.getY(), src.getZ(), res);
+        if (res.cost >= ActionCosts.COST_INF) {
+            return null;
+        }
+        BlockPos dest = new BlockPos(res.x, res.y, res.z);
+        if (res.y == src.getY() - 1) {
+            return new MovementDescend(context.player, src, dest);
+        }
+        return new MovementFall(context.player, src, dest);
+    }
+
+    private static Movement diagonal(CalculationContext context, BlockPos src, Moves move) {
+        MutableMoveResult res = new MutableMoveResult();
+        move.apply(context, src.getX(), src.getY(), src.getZ(), res);
+        if (res.cost >= ActionCosts.COST_INF) {
+            return null;
+        }
+        return new MovementDiagonal(context.player, src, new BlockPos(res.x, res.y, res.z));
+    }
+
+    private static Movement parkour(CalculationContext context, BlockPos src, Direction direction) {
+        MutableMoveResult res = new MutableMoveResult();
+        MovementParkour.cost(context, src.getX(), src.getY(), src.getZ(), direction, res);
+        if (res.cost >= ActionCosts.COST_INF) {
+            return null;
+        }
+        return new MovementParkour(context.player, src, new BlockPos(res.x, res.y, res.z));
+    }
+}
