@@ -598,3 +598,147 @@ public final class PathExecutor {
     }
 
     /** 方块的短名(排障日志用)。 */
+    private String blockName(BlockPos pos) {
+        return player.level().getBlockState(pos).getBlock()
+                .builtInRegistryHolder().key().location().getPath();
+    }
+
+    /** 移动的人话描述(失败原因素材):类型 + 起讫格。 */
+    private static String describe(Movement movement) {
+        return movement.getClass().getSimpleName()
+                + " " + movement.getSrc().toShortString()
+                + " -> " + movement.getDest().toShortString();
+    }
+
+    /** 取消:记录原因、清键、停挖、把推进下标押出末尾并标失败。 */
+    private void cancel(String cause) {
+        failureCause = cause;
+        harness.clearAllKeys();
+        harness.stopBreaking();
+        pathPosition = path.length() + 3;
+        failed = true;
+    }
+
+    // ==================== 拼接 / 历史裁剪 ====================
+
+    /**
+     * 把下一段拼进当前路径(保持推进状态);无法拼接或无下一段时,
+     * 已执行历史超限则裁掉开头一截。
+     */
+    public PathExecutor trySplice(PathExecutor next) {
+        if (next == null) {
+            return cutIfTooLong();
+        }
+        return SplicedPath.trySplice(path, next.path, false).map(spliced -> {
+            if (!spliced.getDest().equals(next.getPath().getDest())) {
+                throw new IllegalStateException(
+                        "拼接后终点 " + spliced.getDest() + " 与下一段终点 " + next.getPath().getDest() + " 不符");
+            }
+            PathExecutor ret = newWithSamePlumbing(spliced);
+            ret.pathPosition = pathPosition;
+            ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
+            ret.costEstimateIndex = costEstimateIndex;
+            ret.ticksOnCurrent = ticksOnCurrent;
+            ret.ticksSinceProgress = ticksSinceProgress;
+            return ret;
+        }).orElseGet(this::cutIfTooLong);
+    }
+
+    private PathExecutor cutIfTooLong() {
+        if (pathPosition > NavSettings.get().maxPathHistoryLength) {
+            int cutoffAmt = NavSettings.get().pathHistoryCutoffAmount;
+            CutoffPath newPath = new CutoffPath(path, cutoffAmt, path.length() - 1);
+            if (!newPath.getDest().equals(path.getDest())) {
+                throw new IllegalStateException("裁剪历史后终点变了:" + newPath.getDest() + " != " + path.getDest());
+            }
+            Constants.LOG.debug("已执行历史过长,路径从 {} 裁到 {}", path.length(), newPath.length());
+            PathExecutor ret = newWithSamePlumbing(newPath);
+            ret.pathPosition = pathPosition - cutoffAmt;
+            ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
+            if (costEstimateIndex != null) {
+                ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
+            }
+            ret.ticksOnCurrent = ticksOnCurrent;
+            ret.ticksSinceProgress = ticksSinceProgress;
+            return ret;
+        }
+        return this;
+    }
+
+    private PathExecutor newWithSamePlumbing(NavPath newPath) {
+        return new PathExecutor(newPath, player, harness, contextSupplier, inProgressBestPath, loadedTest);
+    }
+
+    // ==================== 只读面 ====================
+
+    public int getPosition() {
+        return pathPosition;
+    }
+
+    public NavPath getPath() {
+        return path;
+    }
+
+    public Goal getGoal() {
+        return path.getGoal();
+    }
+
+    public boolean failed() {
+        return failed;
+    }
+
+    /** 失败原因(人话);未失败为 null。 */
+    public String failureCause() {
+        return failureCause;
+    }
+
+    public boolean finished() {
+        return pathPosition >= path.length();
+    }
+
+    /** 距上次真实推进(移动完成/重定位/活跃挖掘)的 tick 数。 */
+    /** 卡在哪一步、哪种动作上(排障用):第几步/共几步 + 动作类型 + 起讫 + 无进展刻。 */
+    public String progressSummary() {
+        if (pathPosition >= path.movements().size()) {
+            return pathPosition + "/" + path.length() + " 已走完";
+        }
+        Movement m = path.movements().get(pathPosition);
+        var view = org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(player.level());
+        StringBuilder toBreak = new StringBuilder();
+        for (BlockPos p : m.toBreak(view)) {
+            toBreak.append(p.toShortString()).append('=')
+                    .append(player.level().getBlockState(p).getBlock().builtInRegistryHolder()
+                            .key().location().getPath()).append(' ');
+        }
+        return pathPosition + "/" + path.length() + " " + m.getClass().getSimpleName()
+                + " " + m.getSrc().toShortString() + "->" + m.getDest().toShortString()
+                + " 无进展" + ticksSinceProgress + "刻 身位" + playerFeet(player).toShortString()
+                + " 起点格=" + blockName(m.getSrc()) + " 起点下=" + blockName(m.getSrc().below())
+                + " 终点格=" + blockName(m.getDest())
+                + " 待挖[" + toBreak.toString().trim() + "]";
+    }
+
+    public int ticksSinceProgress() {
+        return ticksSinceProgress;
+    }
+
+    /** 本 tick 执行器的疾跑决策结果(由拥有者落到实体上)。 */
+    public boolean isSprinting() {
+        return sprintNextTick;
+    }
+
+    /** 剩余路径将要挖穿的全部格(只读)。 */
+    public Set<BlockPos> toBreak() {
+        return Collections.unmodifiableSet(toBreak);
+    }
+
+    /** 剩余路径将要放方块的全部格(只读)。 */
+    public Set<BlockPos> toPlace() {
+        return Collections.unmodifiableSet(toPlace);
+    }
+
+    /** 剩余路径将要挤身而过的全部格(只读)。 */
+    public Set<BlockPos> toWalkInto() {
+        return Collections.unmodifiableSet(toWalkInto);
+    }
+}
