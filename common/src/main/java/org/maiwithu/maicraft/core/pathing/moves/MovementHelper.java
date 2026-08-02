@@ -298,3 +298,303 @@ public final class MovementHelper {
         return canWalkOnBlockState(state, settings.allowVines,
                 settings.assumeWalkOnLava, settings.allowWalkOnBottomSlab);
     }
+
+    private static Ternary canWalkOnBlockState(BlockState state, boolean allowVines,
+                                                boolean assumeWalkOnLava, boolean allowBottomSlab) {
+        Block block = state.getBlock();
+        if (isBlockNormalCube(state) && block != Blocks.MAGMA_BLOCK
+                && block != Blocks.BUBBLE_COLUMN && block != Blocks.HONEY_BLOCK) {
+            return Ternary.YES;
+        }
+        if (block instanceof AzaleaBlock) {
+            return Ternary.YES;
+        }
+        if (block == Blocks.LADDER || (block == Blocks.VINE && allowVines)) {
+            return Ternary.YES;
+        }
+        if (block == Blocks.FARMLAND || block == Blocks.DIRT_PATH || block == Blocks.SOUL_SAND) {
+            return Ternary.YES;
+        }
+        if (block == Blocks.ENDER_CHEST || block == Blocks.CHEST || block == Blocks.TRAPPED_CHEST) {
+            return Ternary.YES;
+        }
+        if (block == Blocks.GLASS || block instanceof StainedGlassBlock) {
+            return Ternary.YES;
+        }
+        if (block instanceof StairBlock) {
+            return Ternary.YES;
+        }
+        if (isWater(state)) {
+            return Ternary.MAYBE;
+        }
+        if (isLava(state) && assumeWalkOnLava) {
+            return Ternary.MAYBE;
+        }
+        if (block instanceof SlabBlock) {
+            if (!allowBottomSlab) {
+                // 只许站非下半台阶
+                return state.getValue(SlabBlock.TYPE) != SlabType.BOTTOM ? Ternary.YES : Ternary.NO;
+            }
+            return Ternary.YES;
+        }
+        return Ternary.NO;
+    }
+
+    /**
+     * MAYBE 的位置精判(水/岩浆)。水的"游泳位"语义:默认只能站在
+     * 上方还有水的水格里(浮在水柱中);开水面行走则只能站在上方
+     * 无水的水面上——两者按 XOR 互斥。
+     */
+    public static boolean canWalkOnPosition(BlockGetter view, ChunkLoadedTest loaded,
+                                            int x, int y, int z, BlockState state) {
+        NavSettings settings = NavSettings.get();
+        return canWalkOnPosition(view, loaded, x, y, z, state,
+                settings.assumeWalkOnWater, settings.assumeWalkOnLava);
+    }
+
+    private static boolean canWalkOnPosition(
+            BlockGetter view, ChunkLoadedTest loaded, int x, int y, int z,
+            BlockState state, boolean assumeWalkOnWater, boolean assumeWalkOnLava) {
+        if (isWater(state)) {
+            BlockState upState = view.getBlockState(new BlockPos(x, y + 1, z));
+            Block up = upState.getBlock();
+            if (up == Blocks.LILY_PAD || up instanceof CarpetBlock) {
+                return true;
+            }
+            if (isFlowing(view, x, y, z, state) || upState.getFluidState().getType() == Fluids.FLOWING_WATER) {
+                // 流水上唯一能站的情形:压在静水下面且未开水面行走
+                return isWater(upState) && !assumeWalkOnWater;
+            }
+            return isWater(upState) ^ assumeWalkOnWater;
+        }
+
+        if (isLava(state) && !isFlowing(view, x, y, z, state) && assumeWalkOnLava) {
+            return true;
+        }
+
+        return false; // 未识别的一律不站,宁可绕
+    }
+
+    /** 霜行者能否把该格冻成冰面(静水源且有附魔)。 */
+    public static boolean canUseFrostWalker(CalculationContext context, BlockState state) {
+        return context.frostWalker != 0
+                && state.getBlock() == Blocks.WATER
+                && state.getValue(LiquidBlock.LEVEL) == 0;
+    }
+
+    /**
+     * 若要站上/走过该格,它是否必须是实心的(霜行者判定用):
+     * 梯子/藤蔓不算;流体上盖着上半台阶/顶部楼梯/关着的顶部活板门/
+     * 脚手架/树叶等仍算有实心顶面。
+     */
+    public static boolean mustBeSolidToWalkOn(CalculationContext context, int x, int y, int z, BlockState state) {
+        Block block = state.getBlock();
+        if (block == Blocks.LADDER || block == Blocks.VINE) {
+            return false;
+        }
+        if (!state.getFluidState().isEmpty()) {
+            if (block instanceof SlabBlock) {
+                if (state.getValue(SlabBlock.TYPE) != SlabType.BOTTOM) {
+                    return true;
+                }
+            } else if (block instanceof StairBlock) {
+                if (state.getValue(StairBlock.HALF) == Half.TOP) {
+                    return true;
+                }
+                StairsShape shape = state.getValue(StairBlock.SHAPE);
+                if (shape == StairsShape.INNER_LEFT || shape == StairsShape.INNER_RIGHT) {
+                    return true;
+                }
+            } else if (block instanceof TrapDoorBlock) {
+                if (!state.getValue(TrapDoorBlock.OPEN) && state.getValue(TrapDoorBlock.HALF) == Half.TOP) {
+                    return true;
+                }
+            } else if (block == Blocks.SCAFFOLDING) {
+                return true;
+            } else if (block instanceof LeavesBlock) {
+                return true;
+            }
+            if (context.assumeWalkOnWater) {
+                return false;
+            }
+            if (context.getBlock(x, y + 1, z) instanceof LiquidBlock) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // ==================== 禁挖判定 ====================
+
+    /**
+     * 挖 (x,y,z) 是否被<b>物理上</b>禁止:世界边界外拒绝(内缩一格,边界外的方块
+     * 没法贴放/挖到);冰(挖了变水搅乱路径)、被虫蚀方块,以及上方/四个
+     * 水平邻格的液体与悬空落沙规则。保护性的硬禁挖(do_not_break 标签)不在
+     * 这里——那是 {@link CalculationContext#breakCostMultiplierAt} 的事,
+     * 硬禁挖的唯一真源是那个标签。
+     */
+    public static boolean avoidBreaking(CalculationContext context, int x, int y, int z, BlockState state) {
+        if (!placeableWithinBorder(context.worldBorder, x, z)) {
+            return true;
+        }
+        Block b = state.getBlock();
+        return b == Blocks.ICE
+                || b instanceof InfestedBlock
+                || avoidAdjacentBreaking(context, x, y + 1, z, true)
+                || avoidAdjacentBreaking(context, x + 1, y, z, false)
+                || avoidAdjacentBreaking(context, x - 1, y, z, false)
+                || avoidAdjacentBreaking(context, x, y, z + 1, false)
+                || avoidAdjacentBreaking(context, x, y, z - 1, false);
+    }
+
+    /**
+     * 邻格 (x,y,z) 是否让"挖它旁边那格"变得危险。只查上方与四个
+     * 水平向,不查下方。上方是落沙类不禁(整根沙柱的连锁挖掘成本
+     * 已计入);上方是液体必禁。水平向:悬空的落沙类会被更新塌下
+     * 来 → 禁;液体源爱水平漫延 → 禁;流动液体只要下方不是液体
+     * (会向水平流)→ 禁。
+     */
+    public static boolean avoidAdjacentBreaking(CalculationContext context, int x, int y, int z, boolean directlyAbove) {
+        BlockState state = context.get(x, y, z);
+        Block block = state.getBlock();
+        if (!directlyAbove
+                && block instanceof FallingBlock
+                && context.avoidUpdatingFallingBlocks
+                && FallingBlock.isFree(context.get(x, y - 1, z))) {
+            return true;
+        }
+        // 只按纯液体方块判(含水方块可能有封闭底面,不算)
+        if (block instanceof LiquidBlock) {
+            if (directlyAbove || context.strictLiquidCheck) {
+                return true;
+            }
+            int level = state.getValue(LiquidBlock.LEVEL);
+            if (level == 0) {
+                return true; // 源方块爱水平漫延
+            }
+            return !(context.getBlock(x, y - 1, z) instanceof LiquidBlock);
+        }
+        return !state.getFluidState().isEmpty();
+    }
+
+    // ==================== 破坏成本 ====================
+
+    public static double getMiningDurationTicks(CalculationContext context, int x, int y, int z, boolean includeFalling) {
+        return getMiningDurationTicks(context, x, y, z, context.get(x, y, z), includeFalling);
+    }
+
+    /**
+     * 挖穿该格的成本(tick)。本就可穿行 → 0;流体 → INF;
+     * 禁挖 → INF;否则 1/速度 + 附加罚金,再乘上下文乘数。
+     * {@code includeFalling} 时向上递归叠加整根落沙柱的成本。
+     */
+    public static double getMiningDurationTicks(CalculationContext context, int x, int y, int z,
+                                                BlockState state, boolean includeFalling) {
+        if (!canWalkThrough(context, x, y, z, state)) {
+            if (!state.getFluidState().isEmpty()) {
+                return COST_INF;
+            }
+            double mult = context.breakCostMultiplierAt(x, y, z, state);
+            if (mult >= COST_INF) {
+                return COST_INF;
+            }
+            if (avoidBreaking(context, x, y, z, state)) {
+                return COST_INF;
+            }
+            double strVsBlock = context.toolSet.getStrVsBlock(state);
+            if (strVsBlock <= 0) {
+                return COST_INF;
+            }
+            double result = 1 / strVsBlock;
+            result += context.breakBlockAdditionalCost;
+            result *= mult;
+            if (includeFalling) {
+                BlockState above = context.get(x, y + 1, z);
+                if (above.getBlock() instanceof FallingBlock) {
+                    result += getMiningDurationTicks(context, x, y + 1, z, above, true);
+                }
+            }
+            return result;
+        }
+        return 0; // 无需真挖,也就不必查上方落沙
+    }
+
+    // ==================== 放置相关 ====================
+
+    /**
+     * 该格是否可被放置动作替换掉:空气、单层雪(未加载 chunk 放行)、
+     * 高草/大型蕨,及其余原版可替换方块。
+     */
+    public static boolean isReplaceable(int x, int y, int z, BlockState state, ChunkLoadedTest loaded) {
+        Block block = state.getBlock();
+        if (block instanceof AirBlock) {
+            return true;
+        }
+        if (block instanceof SnowLayerBlock) {
+            if (!loaded.isLoaded(x, z)) {
+                return true;
+            }
+            return state.getValue(SnowLayerBlock.LAYERS) == 1;
+        }
+        if (block == Blocks.LARGE_FERN || block == Blocks.TALL_GRASS) {
+            return true;
+        }
+        return state.canBeReplaced();
+    }
+
+    public static boolean canPlaceAgainst(CalculationContext context, int x, int y, int z) {
+        return canPlaceAgainst(context, x, y, z, context.get(x, y, z));
+    }
+
+    public static boolean canPlaceAgainst(CalculationContext context, int x, int y, int z, BlockState state) {
+        if (!placeableWithinBorder(context.worldBorder, x, z)) {
+            return false;
+        }
+        return canPlaceAgainst(state);
+    }
+
+    public static boolean canPlaceAgainst(BlockGetter level, BlockPos pos) {
+        if (level instanceof net.minecraft.world.level.Level live
+                && !placeableWithinBorder(live.getWorldBorder(), pos.getX(), pos.getZ())) {
+            return false;
+        }
+        return canPlaceAgainst(level.getBlockState(pos));
+    }
+
+    /**
+     * 贴面格是否离世界边界足够远:各向内缩一格——贴着边界的方块无法
+     * 被右键选面。边界未知(null)按不限制。
+     */
+    public static boolean placeableWithinBorder(CalculationContext.BorderSnapshot border,
+                                                int x, int z) {
+        return border == null || border.placeableWithin(x, z);
+    }
+
+    /**
+     * Live client-thread overload for direct execution-time geometry checks.
+     */
+    public static boolean placeableWithinBorder(net.minecraft.world.level.border.WorldBorder border,
+                                                int x, int z) {
+        if (border == null) {
+            return true;
+        }
+        return x > border.getMinX() && x + 1 < border.getMaxX()
+                && z > border.getMinZ() && z + 1 < border.getMaxZ();
+    }
+
+    /**
+     * 能否瞄准该方块侧面中心作为放置贴面:完整实心方块或玻璃。
+     * 技术上能贴、实际瞄不准的薄片方块(地毯之类)不算。
+     */
+    public static boolean canPlaceAgainst(BlockState state) {
+        return isBlockNormalCube(state)
+                || state.getBlock() == Blocks.GLASS
+                || state.getBlock() instanceof StainedGlassBlock;
+    }
+
+    // ==================== 门 / 栅栏门通行 ====================
+
+    /** 木门当下能否直接走过(玩家在门格里 → 不行)。 */
+    public static boolean isDoorPassable(BlockGetter level, BlockPos doorPos, BlockPos playerPos) {
+        if (playerPos.equals(doorPos)) {
+            return false;
