@@ -298,3 +298,100 @@ public class CalculationContext {
         OUTER:
         for (EquipmentSlot slot : EquipmentSlot.values()) {
             ItemEnchantments itemEnchantments = player.getItemBySlot(slot).getEnchantments();
+            for (Holder<Enchantment> enchant : itemEnchantments.keySet()) {
+                List<EnchantmentAttributeEffect> effects =
+                        enchant.value().getEffects(EnchantmentEffectComponents.ATTRIBUTES);
+                for (EnchantmentAttributeEffect effect : effects) {
+                    if (effect.attribute().is(Attributes.WATER_MOVEMENT_EFFICIENCY.unwrapKey().orElseThrow())) {
+                        waterSpeedMultiplier = effect.amount().calculate(itemEnchantments.getLevel(enchant));
+                        break OUTER;
+                    }
+                }
+            }
+        }
+        return ActionCosts.WALK_ONE_IN_WATER_COST * (1 - waterSpeedMultiplier)
+                + ActionCosts.WALK_ONE_BLOCK_COST * waterSpeedMultiplier;
+    }
+
+    // ==================== 世界读取 ====================
+
+    /** 单线程游标,省去每次读取的 BlockPos 分配(域回调只在一个线程跑)。 */
+    private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+    public BlockState get(int x, int y, int z) {
+        return view.getBlockState(cursor.set(x, y, z));
+    }
+
+    public BlockState get(BlockPos pos) {
+        return view.getBlockState(pos);
+    }
+
+    public Block getBlock(int x, int y, int z) {
+        return get(x, y, z).getBlock();
+    }
+
+    public boolean isLoaded(int x, int z) {
+        return loadedTest.isLoaded(x, z);
+    }
+
+    // ==================== 成本函数 ====================
+
+    /**
+     * 在 (x,y,z) 放一个方块的成本。无耗材、sacred/denied 命中、
+     * 贴着世界边界(边界格无法右键贴放)、流体规则不许 → INF;
+     * 否则放置罚金。
+     */
+    public double costOfPlacingAt(int x, int y, int z, BlockState current) {
+        if (!hasThrowaway) { // 构造时已含许可与 allowPlace 判定
+            return COST_INF;
+        }
+        long key = BlockPos.asLong(x, y, z);
+        if (sacred.contains(key) || deniedPlace.contains(key)) {
+            return COST_INF;
+        }
+        if (!MovementHelper.placeableWithinBorder(worldBorder, x, z)) {
+            return COST_INF;
+        }
+        if (!allowPlaceInFluidsSource && current.getFluidState().isSource()) {
+            return COST_INF;
+        }
+        if (!allowPlaceInFluidsFlow && !current.getFluidState().isEmpty()
+                && !current.getFluidState().isSource()) {
+            return COST_INF;
+        }
+        return placeBlockCost;
+    }
+
+    /** 挖掘保护判定的专用游标(与 {@link #cursor} 分开,免得互相踩)。 */
+    private final BlockPos.MutableBlockPos protectionCursor = new BlockPos.MutableBlockPos();
+
+    /**
+     * 挖 (x,y,z) 的成本乘数。两层禁令,从严到宽:
+     * <ol>
+     *   <li>sacred(自身目标格)永远 INF,任何开关都不可穿透;</li>
+     *   <li>do_not_break 标签成员(默认设施类:床/门/活板门/栅栏门,
+     *       数据包可追加)直接 INF,任何开关都不可解除;</li>
+     *   <li>许可为 PRESERVE、或总开关 {@code allowBreak} 关闭,且不在例外清单 → INF。</li>
+     * </ol>
+     * 功能方块(工作台/熔炉/箱子等)的 ×10 软惩罚由 {@link ToolSet}
+     * 的 {@code avoidanceMultiplier}(NavSettings.blocksToAvoidBreaking)
+     * 在 {@code getStrVsBlock} 里实现,此处不参与。
+     */
+    public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
+        if (sacred.contains(BlockPos.asLong(x, y, z))) {
+            return COST_INF;
+        }
+        if (BlockHelper.shouldAvoidBreaking(view, protectionCursor.set(x, y, z))) {
+            return COST_INF;
+        }
+        if (!allowBreak && !allowBreakAnyway.contains(current.getBlock())) {
+            return COST_INF;
+        }
+        return 1;
+    }
+
+    /** 坠落中放水桶的成本(与放置罚金同价)。 */
+    public double placeBucketCost() {
+        return placeBlockCost;
+    }
+}
