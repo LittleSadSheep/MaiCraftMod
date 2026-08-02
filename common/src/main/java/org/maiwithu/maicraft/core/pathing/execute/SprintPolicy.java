@@ -298,3 +298,12 @@ final class SprintPolicy {
             return true;
         }
         if (!MovementHelper.canWalkOn(player.level(),
+                current.getDest().offset(current.getDirection()))) {
+            return false;
+        }
+        if (next instanceof MovementTraverse && next.getDirection().equals(current.getDirection())) {
+            return true;
+        }
+        return next instanceof MovementDiagonal && NavSettings.get().allowOvershootDiagonalDescend;
+    }
+}
