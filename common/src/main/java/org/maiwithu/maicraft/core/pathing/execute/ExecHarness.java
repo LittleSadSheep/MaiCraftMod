@@ -298,3 +298,297 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
         breakingBefore = null;
     }
 
+    private void breakingTick(LocalPlayerContext context, BlockHitResult hit) {
+        if (breakingReceipt != null) {
+            if (hit == null) {
+                cancelBreaking(context);
+                return;
+            }
+            BlockPos hitPos = hit.getBlockPos();
+            if (!hitPos.equals(breakingTarget)
+                    && (breakingTarget == null
+                    || hitPos.distManhattan(breakingTarget) > 2
+                    || player.level().getBlockState(breakingTarget).isAir())) {
+                cancelBreaking(context);
+                return;
+            }
+            breakingReceipt = context.actions().continueBreaking(context, breakingReceipt);
+            settleBreakingReceipt(context);
+            return;
+        }
+        if (hit == null) {
+            return;
+        }
+        BlockPos pos = hit.getBlockPos().immutable();
+        breakingTarget = pos;
+        breakingBefore = player.level().getBlockState(pos);
+        breakingReceipt = context.actions().startBreaking(context, hit, 600);
+        settleBreakingReceipt(context);
+    }
+
+    private void cancelBreaking(LocalPlayerContext context) {
+        if (breakingReceipt != null && !breakingReceipt.terminal()) {
+            breakingReceipt = context.actions().cancelBreaking(context, breakingReceipt);
+        }
+        settleBreakingReceipt(context);
+    }
+
+    private void settleUseReceipt(LocalPlayerContext context) {
+        if (useReceipt == null) {
+            return;
+        }
+        if (!useReceipt.terminal()) {
+            return;
+        }
+        if (useReceipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            recordConfirmedPlacement(usePlaceAt, usePlaceBefore);
+            if (useClickedAt == null || !useClickedAt.equals(usePlaceAt)) {
+                recordConfirmedPlacement(useClickedAt, useClickedBefore);
+            }
+        }
+        useReceipt = null;
+        useHand = null;
+        usePlaceAt = null;
+        usePlaceBefore = null;
+        useClickedAt = null;
+        useClickedBefore = null;
+    }
+
+    private void recordConfirmedPlacement(BlockPos pos, BlockState before) {
+        if (pos == null || before == null || !before.canBeReplaced() || !player.level().isLoaded(pos)) {
+            return;
+        }
+        BlockState now = player.level().getBlockState(pos);
+        if (!now.canBeReplaced()) {
+            ledger.addPlace(pos, now.getBlock());
+        }
+    }
+
+    // ==================== 右键 ====================
+
+    /** 沿当前准星提交一次原生方块使用,结果由后续客户端事实确认。 */
+    private void rightClickTick(LocalPlayerContext context) {
+        if (player.getControlledVehicle() instanceof net.minecraft.world.entity.vehicle.Boat
+                && (isKeyRequested(Input.MOVE_FORWARD) || isKeyRequested(Input.MOVE_BACK)
+                        || isKeyRequested(Input.MOVE_LEFT) || isKeyRequested(Input.MOVE_RIGHT))) {
+            return; // 驾船且本 tick 有移动输入(手在桨上)不右键;副座/静坐可点击
+        }
+        BlockHitResult hit = pickAlongView();
+        if (hit == null) {
+            return; // 未命中方块或被实体遮挡:不对空挥右键,也不扣冷却
+        }
+        rightClickCooldown = NavSettings.get().rightClickSpeed - 1;
+        useClickedAt = hit.getBlockPos().immutable();
+        useClickedBefore = player.level().getBlockState(useClickedAt);
+        usePlaceAt = (useClickedBefore.canBeReplaced()
+                ? useClickedAt : useClickedAt.relative(hit.getDirection())).immutable();
+        usePlaceBefore = player.level().getBlockState(usePlaceAt);
+        useHand = chooseUseHand();
+        ItemStack beforeHand = player.getItemInHand(useHand).copy();
+        NativeConfirmation confirmation = NativeConfirmation.anyOf(
+                NativeConfirmation.blockChanged(useClickedAt, useClickedBefore),
+                NativeConfirmation.blockChanged(usePlaceAt, usePlaceBefore),
+                NativeConfirmation.menuChanged(player.containerMenu.containerId),
+                NativeConfirmation.heldItemChanged(useHand, beforeHand));
+        useReceipt = context.actions().useBlock(context, useHand, hit, confirmation, 20);
+        settleUseReceipt(context);
+    }
+
+    private InteractionHand chooseUseHand() {
+        ItemStack main = player.getMainHandItem();
+        ItemStack off = player.getOffhandItem();
+        if (!off.isEmpty() && safeForOffhand(main)) {
+            return InteractionHand.OFF_HAND;
+        }
+        return InteractionHand.MAIN_HAND;
+    }
+
+    // ==================== 视线判定 ====================
+
+    /** 实际视角的射线是否命中该格(实体遮挡视为未命中)。 */
+    public boolean isLookingAt(BlockPos pos) {
+        BlockHitResult hit = pickAlongView();
+        return hit != null && hit.getBlockPos().equals(pos);
+    }
+
+    /**
+     * 视线拾取:方块射线命中、且眼与命中点之间没有可拾取实体遮挡时
+     * 返回命中;否则 null(实体挡视线的 tick 点击不落地)。
+     */
+    private BlockHitResult pickAlongView() {
+        BlockHitResult hit = clipAlongView();
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            return null;
+        }
+        Vec3 eye = player.getEyePosition();
+        Vec3 end = hit.getLocation();
+        var entityHit = net.minecraft.world.entity.projectile.ProjectileUtil.getEntityHitResult(
+                player, eye, end, new net.minecraft.world.phys.AABB(eye, end).inflate(1.0),
+                e -> !e.isSpectator() && e.isPickable(), end.distanceToSqr(eye));
+        return entityHit == null ? hit : null;
+    }
+
+    /** 实际视角是否已贴住目标转角(角度容差 0.01°;量化残差下很少成立,主判据是射线)。 */
+    public boolean isFacingTarget(MovementState.MovementTarget target) {
+        if (!target.hasRotation()) {
+            return false;
+        }
+        return Math.abs(AimProcessor.normalizeDelta(player.getYRot() - target.getYaw())) < 0.01
+                && Math.abs(player.getXRot() - target.getPitch()) < 0.01;
+    }
+
+    /** 准星此刻命中的方块;未命中或被实体遮挡返回 null。 */
+    public BlockPos crosshairBlock() {
+        BlockHitResult hit = pickAlongView();
+        return hit != null ? hit.getBlockPos() : null;
+    }
+
+    /** 沿实体当前视角的轮廓射线(不穿流体);触及距离创造 5.0/生存按设置。 */
+    private BlockHitResult clipAlongView() {
+        Vec3 eye = player.getEyePosition();
+        Vec3 end = eye.add(player.getViewVector(1.0f)
+                .scale(AimGeometry.blockReachDistance(player)));
+        return player.level().clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+    }
+
+    /**
+     * 该格上眼睛能实际射到的第一个瞄点(形状中心优先,再六面心);
+     * 全部被挡返回 null。
+     */
+    private Vec3 reachableAimPoint(BlockPos pos) {
+        return AimGeometry.reachableAimPoint(player, pos);
+    }
+
+    // ==================== 换手 / 备货 ====================
+
+    @Override
+    public Movement.ItemSelection selectItem(java.util.function.Predicate<ItemStack> desired) {
+        return ensureItem(desired, true);
+    }
+
+    /** Ensure a scaffold stack is staged before entering a placement movement. */
+    public Movement.ItemSelection ensureThrowawayInHotbar() {
+        var acceptable = ScaffoldMaterials.of(player);
+        return ensureItem(
+                stack -> !stack.isEmpty() && acceptable.contains(stack.getItem()), false);
+    }
+
+    /** Ensure a water bucket is staged before entering a guarded fall. */
+    public Movement.ItemSelection ensureWaterBucketInHotbar() {
+        return ensureItem(stack -> stack.is(Items.WATER_BUCKET), false);
+    }
+
+    private Movement.ItemSelection ensureItem(
+            java.util.function.Predicate<ItemStack> desired, boolean select) {
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        settleUseReceipt(context);
+        settleBreakingReceipt(context);
+        Movement.ItemSelection selected = settleHotbarReceipt(context);
+        if (selected == Movement.ItemSelection.WAITING) {
+            return selected;
+        }
+        Movement.ItemSelection staged = settleStagingReceipt(context);
+        if (staged == Movement.ItemSelection.WAITING) {
+            return staged;
+        }
+        if (breakingReceipt != null || useReceipt != null) {
+            return Movement.ItemSelection.WAITING;
+        }
+
+        Inventory inv = player.getInventory();
+        for (int i = 0; i < 9; i++) {
+            if (desired.test(inv.getItem(i))) {
+                return select ? selectHotbar(context, i) : Movement.ItemSelection.READY;
+            }
+        }
+
+        if (desired.test(player.getOffhandItem())) {
+            if (!select || safeForOffhand(inv.getSelected())) {
+                return Movement.ItemSelection.READY;
+            }
+            for (int i = 0; i < 9; i++) {
+                if (safeForOffhand(inv.getItem(i))) {
+                    return selectHotbar(context, i);
+                }
+            }
+            return Movement.ItemSelection.UNAVAILABLE;
+        }
+
+        if (!NavSettings.get().allowInventory) {
+            return Movement.ItemSelection.UNAVAILABLE;
+        }
+        if (player.containerMenu != player.inventoryMenu) {
+            return Movement.ItemSelection.UNAVAILABLE;
+        }
+        int upper = Math.min(36, inv.items.size());
+        for (int i = 9; i < upper; i++) {
+            if (desired.test(inv.getItem(i))) {
+                int targetSlot = inv.selected;
+                try {
+                    stagingHotbar = targetSlot;
+                    stagingReceipt = context.menus().swapInventoryToHotbar(
+                            context, i, targetSlot, 20);
+                    return settleStagingReceipt(context);
+                } catch (RuntimeException unavailable) {
+                    stagingReceipt = null;
+                    stagingHotbar = -1;
+                    return Movement.ItemSelection.UNAVAILABLE;
+                }
+            }
+        }
+        return Movement.ItemSelection.UNAVAILABLE;
+    }
+
+    private Movement.ItemSelection selectHotbar(LocalPlayerContext context, int slot) {
+        if (player.getInventory().selected == slot) {
+            return Movement.ItemSelection.READY;
+        }
+        if (hotbarReceipt != null) {
+            return settleHotbarReceipt(context);
+        }
+        try {
+            hotbarTarget = slot;
+            hotbarReceipt = InputDriver.selectHotbar(player, slot);
+            return settleHotbarReceipt(context);
+        } catch (RuntimeException unavailable) {
+            hotbarReceipt = null;
+            hotbarTarget = -1;
+            return Movement.ItemSelection.WAITING;
+        }
+    }
+
+    private Movement.ItemSelection settleHotbarReceipt(LocalPlayerContext context) {
+        if (hotbarReceipt == null) {
+            return Movement.ItemSelection.READY;
+        }
+        if (!hotbarReceipt.terminal()) {
+            return Movement.ItemSelection.WAITING;
+        }
+        boolean applied = hotbarReceipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED
+                && player.getInventory().selected == hotbarTarget;
+        hotbarReceipt = null;
+        hotbarTarget = -1;
+        return applied ? Movement.ItemSelection.READY : Movement.ItemSelection.UNAVAILABLE;
+    }
+
+    private Movement.ItemSelection settleStagingReceipt(LocalPlayerContext context) {
+        if (stagingReceipt == null) {
+            return Movement.ItemSelection.READY;
+        }
+        if (!stagingReceipt.terminal()) {
+            return Movement.ItemSelection.WAITING;
+        }
+        boolean applied = stagingReceipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED
+                && stagingHotbar >= 0 && stagingHotbar < 9;
+        stagingReceipt = null;
+        stagingHotbar = -1;
+        return applied ? Movement.ItemSelection.READY : Movement.ItemSelection.UNAVAILABLE;
+    }
+
+    private static boolean safeForOffhand(ItemStack stack) {
+        return stack.isEmpty()
+                || stack.getItem().components().has(
+                        net.minecraft.core.component.DataComponents.TOOL);
+    }
+}
