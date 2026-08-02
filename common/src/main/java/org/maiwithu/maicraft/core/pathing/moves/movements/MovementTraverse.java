@@ -298,3 +298,107 @@ public class MovementTraverse extends Movement {
                 if (against == null) {
                     return state.setStatus(MovementStatus.UNREACHABLE);
                 }
+            }
+            AimGeometry.moveTowards(player, state, against);
+            return state;
+        } else {
+            // 搭桥执行:桥块不在(或被挖掉了),现场放
+            wasTheBridgeBlockAlwaysThere = false;
+            Block standingOn = level.getBlockState(feet.below()).getBlock();
+            if (standingOn == Blocks.SOUL_SAND || standingOn instanceof SlabBlock) {
+                // 顶面矮一截的方块上潜行容易滑出去,离得近就倒着走稳住
+                double dist = Math.max(Math.abs(dest.getX() + 0.5 - player.getX()),
+                        Math.abs(dest.getZ() + 0.5 - player.getZ()));
+                if (dist < 0.85) { // 0.5 + 0.3 + 容差
+                    AimGeometry.moveTowards(player, state, dest);
+                    return state.setInput(Input.MOVE_FORWARD, false)
+                            .setInput(Input.MOVE_BACK, true);
+                }
+            }
+            double dist1 = Math.max(Math.abs(player.getX() - (dest.getX() + 0.5)),
+                    Math.abs(player.getZ() - (dest.getZ() + 0.5)));
+            MovementPlacement.PlaceResult p = MovementPlacement.attemptToPlaceABlock(
+                    state, player, dest.below(), false, true, itemSelector());
+            if ((p == MovementPlacement.PlaceResult.READY_TO_PLACE || dist1 < 0.6)
+                    && !NavSettings.get().assumeSafeWalk) {
+                state.setInput(Input.SNEAK, true);
+            }
+            switch (p) {
+                case READY_TO_PLACE: {
+                    // 潜行确认后下一 tick 才右键(先蹲住再放,防滑落)
+                    if (player.isCrouching() || NavSettings.get().assumeSafeWalk) {
+                        state.setInput(Input.CLICK_RIGHT, true);
+                    }
+                    return state;
+                }
+                case ATTEMPTING: {
+                    if (dist1 > 0.83) {
+                        // 还没贴上去,放置目标又在正前方时才敢继续前进
+                        float yaw = AimGeometry.yawTo(player.getEyePosition(),
+                                AimGeometry.blockCenter(dest));
+                        if (Math.abs(state.getTarget().getYaw() - yaw) < 0.1) {
+                            return state.setInput(Input.MOVE_FORWARD, true);
+                        }
+                    } else if (MovementPlacement.isFacing(player, state.getTarget())) {
+                        // 对准了还放不上,说明有东西挡着,打掉
+                        return state.setInput(Input.CLICK_LEFT, true);
+                    }
+                    return state;
+                }
+                default:
+                    break;
+            }
+            if (feet.equals(dest)) {
+                // 已潜行悬在目标格上空:回身贴 src 脚下那块的侧面放(背贴)
+                double faceX = (dest.getX() + src.getX() + 1.0) * 0.5;
+                double faceY = (dest.getY() + src.getY() - 1.0) * 0.5;
+                double faceZ = (dest.getZ() + src.getZ() + 1.0) * 0.5;
+                Vec3 face = new Vec3(faceX, faceY, faceZ);
+                BlockPos goalLook = src.below(); // 刚离开的脚下块,就贴它
+                float facePitch = AimGeometry.pitchTo(player.getEyePosition(), face);
+                double dist2 = Math.max(Math.abs(player.getX() - faceX),
+                        Math.abs(player.getZ() - faceZ));
+                if (dist2 < 0.29) {
+                    // 贴面太近瞄不到,反向 yaw 倒退拉开距离
+                    float yaw = AimGeometry.yawTo(AimGeometry.blockCenter(dest),
+                            player.getEyePosition());
+                    state.setTarget(new MovementState.MovementTarget(yaw, facePitch, true));
+                    state.setInput(Input.MOVE_BACK, true);
+                } else {
+                    state.setTarget(new MovementState.MovementTarget(
+                            AimGeometry.yawTo(player.getEyePosition(), face), facePitch, true));
+                }
+                if (MovementPlacement.isLookingAt(player, goalLook)) {
+                    return state.setInput(Input.CLICK_RIGHT, true);
+                }
+                if (MovementPlacement.isFacing(player, state.getTarget())) {
+                    // 对准了还不行,有杂物挡视线,打掉
+                    state.setInput(Input.CLICK_LEFT, true);
+                }
+                return state;
+            }
+            AimGeometry.moveTowards(player, state, positionsToBreak[0]);
+            return state;
+        }
+    }
+
+    /** 正在潜行悬空放置时不可中断,其余时刻可。 */
+    @Override
+    protected boolean safeToCancel(MovementState state) {
+        return state.getStatus() != MovementStatus.RUNNING
+                || MovementHelper.canWalkOn(player.level(), dest.below());
+    }
+
+    /** 站在梯/藤上挖掘时按住潜行防滑落。 */
+    @Override
+    protected boolean prepared(MovementState state) {
+        BlockPos feet = feet(player);
+        if (feet.equals(src) || feet.equals(src.below())) {
+            Block block = player.level().getBlockState(src.below()).getBlock();
+            if (block == Blocks.LADDER || block == Blocks.VINE) {
+                state.setInput(Input.SNEAK, true);
+            }
+        }
+        return super.prepared(state);
+    }
+}
