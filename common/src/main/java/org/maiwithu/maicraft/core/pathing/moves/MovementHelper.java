@@ -598,3 +598,135 @@ public final class MovementHelper {
     public static boolean isDoorPassable(BlockGetter level, BlockPos doorPos, BlockPos playerPos) {
         if (playerPos.equals(doorPos)) {
             return false;
+        }
+        BlockState state = level.getBlockState(doorPos);
+        if (!(state.getBlock() instanceof DoorBlock)) {
+            return true;
+        }
+        return isHorizontalBlockPassable(doorPos, state, playerPos, DoorBlock.OPEN);
+    }
+
+    /** 栅栏门当下能否走过(只看 OPEN)。 */
+    public static boolean isGatePassable(BlockGetter level, BlockPos gatePos, BlockPos playerPos) {
+        if (playerPos.equals(gatePos)) {
+            return false;
+        }
+        BlockState state = level.getBlockState(gatePos);
+        if (!(state.getBlock() instanceof FenceGateBlock)) {
+            return true;
+        }
+        return state.getValue(FenceGateBlock.OPEN);
+    }
+
+    /**
+     * 带朝向的门板通行判定:接近轴与门板朝向轴同向时,开着才能过;
+     * 垂直时反而是关着才不挡路(门板收在格边)。
+     */
+    public static boolean isHorizontalBlockPassable(BlockPos blockPos, BlockState blockState,
+                                                    BlockPos playerPos, BooleanProperty propertyOpen) {
+        if (playerPos.equals(blockPos)) {
+            return false;
+        }
+        var facing = blockState.getValue(HorizontalDirectionalBlock.FACING).getAxis();
+        boolean open = blockState.getValue(propertyOpen);
+
+        net.minecraft.core.Direction.Axis playerFacing;
+        if (playerPos.north().equals(blockPos) || playerPos.south().equals(blockPos)) {
+            playerFacing = net.minecraft.core.Direction.Axis.Z;
+        } else if (playerPos.east().equals(blockPos) || playerPos.west().equals(blockPos)) {
+            playerFacing = net.minecraft.core.Direction.Axis.X;
+        } else {
+            return true;
+        }
+        return (facing == playerFacing) == open;
+    }
+
+    // ==================== 危险格 ====================
+
+    /** 绝不能走进去的格:任何流体、岩浆块、仙人掌、浆果丛、火等。 */
+    public static boolean avoidWalkingInto(BlockState state) {
+        Block block = state.getBlock();
+        return !state.getFluidState().isEmpty()
+                || block == Blocks.MAGMA_BLOCK
+                || block == Blocks.CACTUS
+                || block == Blocks.SWEET_BERRY_BUSH
+                || block instanceof BaseFireBlock
+                || block == Blocks.END_PORTAL
+                || block == Blocks.COBWEB
+                || block == Blocks.BUBBLE_COLUMN;
+    }
+
+    // ==================== 台阶 / 流体基础判定 ====================
+
+    /** 占据下半格的台阶。 */
+    public static boolean isBottomSlab(BlockState state) {
+        return state.getBlock() instanceof SlabBlock
+                && state.getValue(SlabBlock.TYPE) == SlabType.BOTTOM;
+    }
+
+    /** 是否为水(含流动态)。 */
+    public static boolean isWater(BlockState state) {
+        Fluid f = state.getFluidState().getType();
+        return f == Fluids.WATER || f == Fluids.FLOWING_WATER;
+    }
+
+    /** 是否为岩浆(含流动态)。 */
+    public static boolean isLava(BlockState state) {
+        Fluid f = state.getFluidState().getType();
+        return f == Fluids.LAVA || f == Fluids.FLOWING_LAVA;
+    }
+
+    /** 是否为任意液体。 */
+    public static boolean isLiquid(BlockState state) {
+        return !state.getFluidState().isEmpty();
+    }
+
+    /** 可能在流动:流体类且非满格。 */
+    public static boolean possiblyFlowing(BlockState state) {
+        FluidState fluidState = state.getFluidState();
+        return fluidState.getType() instanceof FlowingFluid
+                && fluidState.getAmount() != 8;
+    }
+
+    /**
+     * 该格流体是否在流动:非满格即流动;满格源方块若四个水平邻格
+     * 任一可能在流动(池边),也按流动处理。
+     */
+    public static boolean isFlowing(BlockGetter view, int x, int y, int z, BlockState state) {
+        FluidState fluidState = state.getFluidState();
+        if (!(fluidState.getType() instanceof FlowingFluid)) {
+            return false;
+        }
+        if (fluidState.getAmount() != 8) {
+            return true;
+        }
+        return possiblyFlowing(view.getBlockState(new BlockPos(x + 1, y, z)))
+                || possiblyFlowing(view.getBlockState(new BlockPos(x - 1, y, z)))
+                || possiblyFlowing(view.getBlockState(new BlockPos(x, y, z + 1)))
+                || possiblyFlowing(view.getBlockState(new BlockPos(x, y, z - 1)));
+    }
+
+    /**
+     * 完整实心立方体判定:碰撞形状为满格,并排除一批形状异常/
+     * 会动的方块(竹、活塞移动方块、脚手架、潜影盒、滴水石锥、
+     * 紫水晶簇)。取形状抛异常时按 false。
+     */
+    public static boolean isBlockNormalCube(BlockState state) {
+        Block block = state.getBlock();
+        if (block instanceof BambooStalkBlock
+                || block instanceof MovingPistonBlock
+                || block instanceof ScaffoldingBlock
+                || block instanceof ShulkerBoxBlock
+                || block instanceof PointedDripstoneBlock
+                || block instanceof AmethystClusterBlock) {
+            return false;
+        }
+        try {
+            return Block.isShapeFullBlock(state.getCollisionShape(null, null));
+        } catch (Exception ignored) {
+            // 拿不到碰撞形状的异类按非实心处理
+        }
+        return false;
+    }
+
+}
