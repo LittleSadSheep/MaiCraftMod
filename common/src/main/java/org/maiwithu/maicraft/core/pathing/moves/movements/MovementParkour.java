@@ -298,3 +298,7 @@ public class MovementParkour extends Movement {
                     AimGeometry.moveTowards(player, state, src.relative(direction, -1));
                 }
             }
+        }
+        return state;
+    }
+}
