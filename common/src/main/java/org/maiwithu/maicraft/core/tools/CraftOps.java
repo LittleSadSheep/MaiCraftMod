@@ -298,3 +298,175 @@ public final class CraftOps {
 
         List<IngredientFact> facts = new ArrayList<>();
         for (int index = 0; index < ingredients.size(); index++) {
+            IndexedIngredient indexed = ingredients.get(index);
+            int satisfied = batches - needEdges[index].capacity;
+            facts.add(new IngredientFact(
+                    indexed.recipeSlot(),
+                    QueryExtraOps.describeIngredient(indexed.ingredient()),
+                    acceptableItemIds(indexed.ingredient()),
+                    batches,
+                    satisfied));
+        }
+        int requiredTotal = ingredients.size() * batches;
+        return new Allocation(List.copyOf(facts), satisfiedTotal,
+                requiredTotal - satisfiedTotal);
+    }
+
+    private static List<String> acceptableItemIds(Ingredient ingredient) {
+        return java.util.Arrays.stream(ingredient.getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .map(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    private static String missingSummary(Allocation allocation) {
+        return allocation.ingredients().stream()
+                .filter(ingredient -> ingredient.missing() > 0)
+                .map(ingredient -> ingredient.missing() + "x " + ingredient.description())
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("unknown ingredient");
+    }
+
+    private static List<IndexedIngredient> indexedIngredients(CraftingRecipe recipe) {
+        List<IndexedIngredient> result = new ArrayList<>();
+        for (int index = 0; index < recipe.getIngredients().size(); index++) {
+            Ingredient ingredient = recipe.getIngredients().get(index);
+            if (ingredient != null && !ingredient.isEmpty()) {
+                result.add(new IndexedIngredient(index, ingredient));
+            }
+        }
+        return result;
+    }
+
+    private static boolean currentGridFits(LocalPlayer player, CraftingRecipe recipe) {
+        int width = -1;
+        int height = -1;
+        boolean result = false;
+        for (Slot slot : player.containerMenu.slots) {
+            if (slot instanceof ResultSlot) {
+                result = true;
+            } else if (slot.container instanceof CraftingContainer crafting) {
+                width = Math.max(width, crafting.getWidth());
+                height = Math.max(height, crafting.getHeight());
+            }
+        }
+        return result && width > 0 && height > 0 && fits(recipe, width, height);
+    }
+
+    private static boolean fits(CraftingRecipe recipe, int width, int height) {
+        if (recipe instanceof ShapedRecipe shaped) {
+            return shaped.getWidth() <= width && shaped.getHeight() <= height;
+        }
+        return indexedIngredients(recipe).size() <= width * height;
+    }
+
+    private static BlockPos nearestLoadedCraftingTable(LocalPlayer player) {
+        BlockPos base = player.blockPosition();
+        Vec3 eye = player.getEyePosition();
+        int radius = (int) Math.ceil(STATION_REACH);
+        BlockPos best = null;
+        double bestDistance = STATION_REACH * STATION_REACH;
+        for (BlockPos pos : BlockPos.betweenClosed(
+                base.offset(-radius, -radius, -radius),
+                base.offset(radius, radius, radius))) {
+            if (!player.level().isLoaded(pos)) {
+                continue;
+            }
+            double distance = eye.distanceToSqr(Vec3.atCenterOf(pos));
+            if (distance >= bestDistance) {
+                continue;
+            }
+            if (player.level().getBlockState(pos).getBlock() instanceof CraftingTableBlock) {
+                best = pos.immutable();
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    /** Small integral max-flow used only for at most nine ingredient nodes and 36 inventory slots. */
+    private static final class Flow {
+        private final List<List<Edge>> graph;
+        private int[] level;
+        private int[] cursor;
+
+        private Flow(int nodeCount) {
+            graph = new ArrayList<>(nodeCount);
+            for (int node = 0; node < nodeCount; node++) {
+                graph.add(new ArrayList<>());
+            }
+        }
+
+        private Edge add(int from, int to, int capacity) {
+            Edge forward = new Edge(to, graph.get(to).size(), Math.max(0, capacity));
+            Edge reverse = new Edge(from, graph.get(from).size(), 0);
+            graph.get(from).add(forward);
+            graph.get(to).add(reverse);
+            return forward;
+        }
+
+        private int max(int source, int sink) {
+            int total = 0;
+            while (levels(source, sink)) {
+                cursor = new int[graph.size()];
+                int pushed;
+                while ((pushed = push(source, sink, Integer.MAX_VALUE)) > 0) {
+                    total += pushed;
+                }
+            }
+            return total;
+        }
+
+        private boolean levels(int source, int sink) {
+            level = new int[graph.size()];
+            java.util.Arrays.fill(level, -1);
+            ArrayDeque<Integer> queue = new ArrayDeque<>();
+            level[source] = 0;
+            queue.add(source);
+            while (!queue.isEmpty()) {
+                int node = queue.removeFirst();
+                for (Edge edge : graph.get(node)) {
+                    if (edge.capacity > 0 && level[edge.to] < 0) {
+                        level[edge.to] = level[node] + 1;
+                        queue.addLast(edge.to);
+                    }
+                }
+            }
+            return level[sink] >= 0;
+        }
+
+        private int push(int node, int sink, int amount) {
+            if (node == sink) {
+                return amount;
+            }
+            List<Edge> edges = graph.get(node);
+            while (cursor[node] < edges.size()) {
+                Edge edge = edges.get(cursor[node]);
+                if (edge.capacity > 0 && level[edge.to] == level[node] + 1) {
+                    int pushed = push(edge.to, sink, Math.min(amount, edge.capacity));
+                    if (pushed > 0) {
+                        edge.capacity -= pushed;
+                        graph.get(edge.to).get(edge.reverse).capacity += pushed;
+                        return pushed;
+                    }
+                }
+                cursor[node]++;
+            }
+            return 0;
+        }
+
+        private static final class Edge {
+            private final int to;
+            private final int reverse;
+            private int capacity;
+
+            private Edge(int to, int reverse, int capacity) {
+                this.to = to;
+                this.reverse = reverse;
+                this.capacity = capacity;
+            }
+        }
+    }
+}
