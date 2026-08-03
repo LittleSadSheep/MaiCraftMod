@@ -298,3 +298,12 @@ int z,
         }
         BlockState state = self.level().getBlockState(pos);
         String coord = x + "," + y + "," + z;
+        if (state.isAir()) {
+            return TaskResult.fail("block at " + coord + " is air — nothing to read.").toJson();
+        }
+        String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        return TaskResult.ok(id + " at " + coord + ". Generic mod storage contents are not "
+                + "authoritative on the client until its menu is synchronized; interact with it "
+                + "then use inspect_gui.").toJson();
+    }
+}
