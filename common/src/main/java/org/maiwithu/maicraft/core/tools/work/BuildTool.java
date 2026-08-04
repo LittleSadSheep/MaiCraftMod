@@ -298,3 +298,216 @@ public final class BuildTool implements MaiCraftTool {
         } else {
             setTask(companion, plan, args, reply);
         }
+    }
+
+    /**
+     * Expand and de-duplicate an internal semantic op stream through the same parser used at
+     * execution time. This gives planners an exact bounded-cell count instead of a second,
+     * inevitably drifting geometry estimate.
+     */
+    public static int resolvedCellCount(JsonArray ops) {
+        if (ops == null || ops.size() == 0) {
+            throw new IllegalArgumentException("ops must contain at least one instruction");
+        }
+        JsonObject wrapper = new JsonObject();
+        wrapper.add("ops", ops.deepCopy());
+        Args parsed = GSON.fromJson(wrapper, Args.class);
+        return resolveTargets(parsed.ops()).size();
+    }
+
+    private static List<BuildTaskRecord.Target> resolveTargets(List<OpSpec> ops) {
+        List<BuildTaskRecord.Target> expanded = new ArrayList<>();
+        for (OpSpec op : ops) expanded.addAll(expandOp(op));
+        // 单指令流:顺序即语义,后写覆盖先写,去重保留最后一笔
+        Map<Long, BuildTaskRecord.Target> byPos = new LinkedHashMap<>();
+        for (BuildTaskRecord.Target target : expanded) {
+            byPos.put(target.pos().asLong(), target);
+        }
+        return new ArrayList<>(byPos.values());
+    }
+
+    /** 一条指令展开为目标格集。set/set_door 携带状态;体积算子单一方块类型。 */
+    private static List<BuildTaskRecord.Target> expandOp(OpSpec spec) {
+        if (spec == null || spec.op() == null || spec.block_id() == null) {
+            throw new IllegalArgumentException("each op needs op and block_id");
+        }
+        if ("set".equals(spec.op())) {
+            if (spec.x() == null || spec.y() == null || spec.z() == null) {
+                throw new IllegalArgumentException("set needs x, y, z");
+            }
+            BuildTaskRecord.Target target = parseTarget(new BlockSpec(
+                    spec.block_id(), spec.x(), spec.y(), spec.z(),
+                    spec.facing(), spec.axis(), spec.half(), spec.properties()));
+            // 分岔线:提了任何摆放要求就是图纸语义(照图直写),什么都没提就是玩家
+            // 动作(物品原生落位,朝向随她视线,模组的放置钩子照常跑)。
+            boolean plain = spec.facing() == null && spec.axis() == null && spec.half() == null
+                    && (spec.properties() == null || spec.properties().isEmpty());
+            return List.of(plain ? target.asItemPlace() : target);
+        }
+        if ("set_door".equals(spec.op())) {
+            return expandDoor(spec);
+        }
+        BuildPalette palette = BuildPalette.parse(spec.block_id());
+        boolean hollow = spec.hollow() != null && spec.hollow();
+        if (spec.x1() == null || spec.y1() == null || spec.z1() == null) {
+            throw new IllegalArgumentException("op " + spec.op() + " needs x1, y1, z1");
+        }
+        if ("roof".equals(spec.op())) {
+            return expandRoof(spec, palette);
+        }
+        List<BlockPos> cells = "scatter".equals(spec.op())
+                ? BuildShapes.scatterCells(spec.x1(), spec.y1(), spec.z1(),
+                        req(spec.x2(), "x2"), req(spec.z2(), "z2"),
+                        spec.density() == null ? 0.25 : spec.density())
+                : BuildShapes.shapeCells(spec.op(), hollow, spec.x1(), spec.y1(), spec.z1(),
+                        spec.x2(), spec.y2(), spec.z2(), spec.radius(), spec.height());
+        List<BuildTaskRecord.Target> out = new ArrayList<>(cells.size());
+        for (BlockPos pos : cells) {
+            BuildPalette.Entry e = palette.pick(pos);
+            out.add(new BuildTaskRecord.Target(e.block(), e.item(), pos, e.label(), null, null, null));
+        }
+        return out;
+    }
+
+    /**
+     * 屋顶:半砖三态砌出的连续坡面 + 垂脊 + 正脊 + 檐口。
+     *
+     * <p>做法是从四栋手工中式建筑(悬山、歇山、庑殿、攒尖)里逐格量出来的,不是推的。
+     * 三条量出来的事实决定了整个引擎:
+     *
+     * <ol>
+     *   <li><b>坡面主料是半砖,不是楼梯。</b>四栋里半砖比楼梯多 6~43 倍,而且
+     *       bottom/top/double 三态的占比四栋几乎一致(37/27/35)。砌法是同一个
+     *       高度上<b>下半砖当踏面、双层砖当立面</b>交替,顶面每格升半格,连一级
+     *       整块的台阶都没有。此前这里是"下半砖 + 上半砖",顶面轮廓一样,但上半砖
+     *       底下那半格是空的——从底下看是一排悬空的砖。</li>
+     *   <li><b>举架量的是每格的抬升,不是每层的收分。</b>量出来的顶面高度序列是
+     *       每格抬一个半砖(五举),接近脊时抬两个(十举),平均 1.2,即屋顶高
+     *       ≈ 0.6 × 半跨。所以这里<b>按每格到檐口的距离直接定高度</b>,不再逐层
+     *       收分——四条垂脊(到两边檐口等距的那条对角线)也就自然落出来了,而逐层
+     *       收分的写法必须另外拼角,拼一次错一次。</li>
+     *   <li><b>脊高出屋面,不齐平。</b>四栋的脊都是异色实心块压在瓦面之上:庑殿、
+     *       攒尖的四条垂脊是一格宽的正 45° 对角线,悬山两端是外探的博风板,正脊
+     *       再高出两格。此前脊是嵌进最后一层里的,所以四坡顶怎么调都不像中式。</li>
+     * </ol>
+     *
+     * <p>结构定死,换料换风格:石砖 + 铜是中式,深板岩 + 深色橡木是哥特,陶瓦是
+     * 地中海。所以每一个结构件都单独收一个 palette 参数。
+     */
+    private static List<BuildTaskRecord.Target> expandRoof(OpSpec spec, BuildPalette palette) {
+        return BuildShapes.roofCells(spec.x1(), spec.y1(), spec.z1(),
+                req(spec.x2(), "x2"), req(spec.z2(), "z2"),
+                spec.block_id(), spec.roof_shape(), spec.roof_curve(),
+                spec.overhang(), spec.corner_lift(),
+                spec.gable_block(), spec.ridge_block(), spec.eave_block(), spec.soffit_block(),
+                spec.hollow());
+    }
+
+    /** 整扇门:下半 + 上半两格,朝向正确,一笔成型——半格错位的卡门病从原语层消灭。 */
+    private static List<BuildTaskRecord.Target> expandDoor(OpSpec spec) {
+        if (spec.x() == null || spec.y() == null || spec.z() == null) {
+            throw new IllegalArgumentException("set_door needs x, y, z (lower half)");
+        }
+        Item item = ToolArgs.parseItem(spec.block_id());
+        if (!(item instanceof BlockItem blockItem)
+                || !(blockItem.getBlock() instanceof net.minecraft.world.level.block.DoorBlock door)) {
+            throw new IllegalArgumentException(spec.block_id() + " is not a door");
+        }
+        Direction facing = spec.facing() == null ? Direction.NORTH : Direction.byName(spec.facing());
+        if (facing == null || facing.getAxis().isVertical()) {
+            throw new IllegalArgumentException("set_door facing must be north/south/east/west");
+        }
+        BlockPos lower = new BlockPos(spec.x(), spec.y(), spec.z());
+        String label = spec.block_id().contains(":")
+                ? spec.block_id().split(":", 2)[1] : spec.block_id();
+        BlockState base = door.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.DoorBlock.FACING, facing);
+        List<BuildTaskRecord.Target> out = new ArrayList<>(2);
+        out.add(new BuildTaskRecord.Target(base.setValue(
+                net.minecraft.world.level.block.DoorBlock.HALF,
+                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER),
+                item, lower, label, null, null, null));
+        out.add(new BuildTaskRecord.Target(base.setValue(
+                net.minecraft.world.level.block.DoorBlock.HALF,
+                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER),
+                item, lower.above(), label, null, null, null));
+        return out;
+    }
+
+    static BuildTaskRecord.Target parseTarget(BlockSpec spec) {
+        if (spec == null || spec.block_id() == null || spec.block_id().isBlank()) {
+            throw new IllegalArgumentException("each block needs block_id, x, y and z");
+        }
+        // 与调色板同一处解析:按方块查、air 与水合法、岩浆挡掉。此前这里另抄
+        // 了一遍 ToolArgs.parseItem + if(AIR) 的写法,而那个 AIR 分支永远到不了。
+        BuildPalette.Entry resolved = BuildPalette.resolve(spec.block_id(), 1);
+        Item item = resolved.item();
+        net.minecraft.world.level.block.Block block = resolved.block();
+        BlockPos pos = new BlockPos(spec.x(), spec.y(), spec.z());
+        Direction facing = opt(spec.facing()) == null ? null : Direction.byName(opt(spec.facing()));
+        if (opt(spec.facing()) != null && facing == null) {
+            throw new IllegalArgumentException("invalid facing: " + spec.facing());
+        }
+        Direction.Axis axis = opt(spec.axis()) == null ? null : Direction.Axis.byName(opt(spec.axis()));
+        if (opt(spec.axis()) != null && axis == null) {
+            throw new IllegalArgumentException("invalid axis: " + spec.axis());
+        }
+        String half = opt(spec.half());
+        if (half != null && !half.equals("top") && !half.equals("bottom")) {
+            throw new IllegalArgumentException("invalid half: " + spec.half());
+        }
+        String label = BuiltInRegistries.BLOCK.getKey(block).getPath();
+        Boolean topHalf = half == null ? null : half.equals("top");
+        BlockState desiredState = applyProperties(
+                new BuildTaskRecord.Target(block, item, pos, label,
+                        facing, axis, topHalf).desiredState(), spec.properties());
+        return new BuildTaskRecord.Target(desiredState, item, pos, label, facing, axis, topHalf);
+    }
+
+
+    private static BlockState applyProperties(BlockState state, Map<String, String> properties) {
+        if (properties == null || properties.isEmpty()) {
+            return state;
+        }
+        BlockState out = state;
+        for (Map.Entry<String, String> entry : properties.entrySet()) {
+            String name = opt(entry.getKey());
+            String value = opt(entry.getValue());
+            if (name == null || value == null) {
+                throw new IllegalArgumentException("block-state properties need non-empty names and values");
+            }
+            Property<?> property = out.getBlock().getStateDefinition().getProperty(name);
+            if (property == null) {
+                throw new IllegalArgumentException(out.getBlock().getName().getString()
+                        + " has no property " + name);
+            }
+            out = setProperty(out, property, value);
+        }
+        return out;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static BlockState setProperty(BlockState state, Property property, String value) {
+        java.util.Optional parsed = property.getValue(value);
+        if (parsed.isEmpty()) {
+            throw new IllegalArgumentException("invalid value " + value
+                    + " for property " + property.getName());
+        }
+        return state.setValue(property, (Comparable) parsed.get());
+    }
+
+    private static String opt(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim().toLowerCase();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static int req(Integer v, String name) {
+        if (v == null) {
+            throw new IllegalArgumentException(name + " is required");
+        }
+        return v;
+    }
+}
