@@ -298,3 +298,194 @@ public final class BuildShapes {
      * {@code 4,4,5,6,7,8,9,10,11,12,14,15,17}——前段每格抬一,近脊抬二,平均 1.2,
      * 也就是屋顶高 ≈ 0.6 × 半跨。下面这条 {@code 1 + 0.6f²} 的抬升量累出来正是这个
      * 数,而且中段会自然出现一二相间,和量到的一样。
+     *
+     * <p>第一格单独低一档:那是檐口的薄唇({@code skinCell} 的 thin 分支)。存档里
+     * 四栋都用上半砖收边,檐口因此是薄的、利的,不是一刀切齐的墩子。
+     */
+    private static int[] surfaceHalves(int reach, boolean concave) {
+        int n = Math.max(1, reach) + 1;
+        int[] h = new int[n];
+        double acc = 1.0;
+        int cur = 1;
+        for (int k = 0; k < n; k++) {
+            double f = reach <= 0 ? 1.0 : (double) k / reach;
+            acc += concave ? 1.0 + 0.6 * f * f : 2.0;
+            cur = Math.max(cur + 1, (int) Math.round(acc));
+            h[k] = cur;
+        }
+        return h;
+    }
+
+    /**
+     * 屋面一格。顶面高度以半砖计:<b>偶数用双层砖</b>(占满整格,当立面),
+     * <b>奇数用下半砖</b>(占下半格,当踏面)。两者交替,顶面每格升半格,底下不留空。
+     *
+     * <p>{@code thin} 是檐口那一格,改用上半砖:顶面同高但只有半格厚,檐口收成一道
+     * 薄边。存档里四栋的檐口都是这么收的。
+     */
+    private static void skinCell(Map<Long, BuildTaskRecord.Target> out, BuildPalette pal,
+                                 int x, int z, int y0, int halves, boolean thin) {
+        BlockPos pos = new BlockPos(x, y0 + (halves - 1) / 2, z);
+        BuildPalette.Entry e = pal.pick(pos);
+        Block slab = slabFor(e.block());
+        if (slab == null) {
+            // 给的料推不出半砖(原木、玻璃之类),照整块砌:糙一点,但不漏
+            out.put(pos.asLong(), new BuildTaskRecord.Target(e.block(), e.item(), pos, e.label(),
+                    null, null, null));
+            return;
+        }
+        putSlabAt(out, pos, slab,
+                thin ? SlabType.TOP : (halves % 2 == 1 ? SlabType.BOTTOM : SlabType.DOUBLE));
+    }
+
+    /**
+     * 望板:瓦面底下的第二层皮,顶面恒比瓦面低一格,而且<b>实心一格厚</b>——半格处用
+     * "上半砖 + 下半砖"两块拼齐。
+     *
+     * <p>存档里四栋都有这一层(瓦面石砖、望板木)。没有它,从屋里往上看就是一排半砖
+     * 的背面和一格格的空档,屋顶是个壳;有了它,屋里屋外都是一道光滑斜面。
+     */
+    private static void soffitCell(Map<Long, BuildTaskRecord.Target> out, BuildPalette pal,
+                                   int x, int z, int y0, int halves) {
+        int s = halves - 2;
+        if (s < 1) {
+            return;
+        }
+        int y = y0 + (s - 1) / 2;
+        BuildPalette.Entry e = pal.pick(new BlockPos(x, y, z));
+        Block slab = slabFor(e.block());
+        if (slab == null) {
+            putSolidAt(out, pal, new BlockPos(x, y, z), false);
+            return;
+        }
+        if (s % 2 == 0) {
+            putSlabAt(out, new BlockPos(x, y, z), slab, SlabType.DOUBLE);
+        } else {
+            putSlabAt(out, new BlockPos(x, y, z), slab, SlabType.BOTTOM);
+            putSlabAt(out, new BlockPos(x, y - 1, z), slab, SlabType.TOP);
+        }
+    }
+
+    /**
+     * 脊:压在屋面之上的异色实心块,{@code n} 格高。
+     *
+     * <p>{@code y0 + halves / 2} 这一格正好骑在顶面上:顶面落在整格时(halves 偶)
+     * 它整格露在外面,落在半格时(halves 奇)它盖掉那块半砖、把顶面抬到整格。所以
+     * 坡面走到哪一档,脊都是明确高出来的一条,不会时隐时现。
+     */
+    private static void putProud(Map<Long, BuildTaskRecord.Target> out, BuildPalette pal,
+                                 int x, int z, int y0, int halves, int n) {
+        for (int k = 0; k < n; k++) {
+            BlockPos pos = new BlockPos(x, y0 + halves / 2 + k, z);
+            BuildPalette.Entry e = pal.pick(pos);
+            if (e.block() instanceof SlabBlock) {
+                // 脊料常常也是半砖(没给 ridge_block 时就直接是屋面主料)。半砖的
+                // 默认状态是下半砖,照放就是一条悬空的半砖;脊必须实心,所以铺双层。
+                putSlabAt(out, pos, e.block(), SlabType.DOUBLE);
+            } else {
+                putSolidAt(out, pal, pos, true);
+            }
+        }
+    }
+
+    /** 不留阁楼时把屋面底下填实。 */
+    private static void fillUnder(Map<Long, BuildTaskRecord.Target> out, BuildPalette pal,
+                                  int x, int z, int y0, int halves) {
+        for (int y = y0; y < y0 + (halves - 1) / 2; y++) {
+            putSolidAt(out, pal, new BlockPos(x, y, z), false);
+        }
+    }
+
+    /**
+     * 檐角起翘(飞檐):四个檐角往上挑起来。
+     *
+     * <p>这是东亚屋顶最认得出的一笔——尖角一挑,整片屋面就"活"了。做法是在檐口那一层
+     * 的四角往上叠几格,并把紧挨着角的两格也抬一格,让翘起来的是一条弧,不是四根柱子。
+     * 用脊料,因为翘角本来就是垂脊的末端。
+     */
+    private static void liftEaveCorners(Map<Long, BuildTaskRecord.Target> out, BuildPalette palette,
+                                        int ax, int bx, int az, int bz, int y0, int lift) {
+        int[][] corners = {{ax, az}, {bx, az}, {ax, bz}, {bx, bz}};
+        for (int[] c : corners) {
+            int cx = c[0];
+            int cz = c[1];
+            for (int k = 1; k <= lift; k++) {
+                putSolidAt(out, palette, new BlockPos(cx, y0 + k, cz), true);
+            }
+            if (lift >= 2) {
+                int inx = cx == ax ? 1 : -1;
+                int inz = cz == az ? 1 : -1;
+                putSolidAt(out, palette, new BlockPos(cx + inx, y0 + 1, cz), false);
+                putSolidAt(out, palette, new BlockPos(cx, y0 + 1, cz + inz), false);
+            }
+        }
+    }
+
+    /**
+     * 从给的料推它的半砖——屋面主料是半砖,而模型给过来的可能是整块、楼梯或木板。
+     *
+     * <p>{@code stone_bricks → stone_brick_slab} 这类要去掉复数才对得上,所以按几条
+     * 命名规律依次试,而不是硬拼一个后缀。推不出就退回整块砌。
+     */
+    private static Block slabFor(Block block) {
+        if (block instanceof SlabBlock) {
+            return block;
+        }
+        var id = BuiltInRegistries.BLOCK.getKey(block);
+        if (id == null) {
+            return null;
+        }
+        String p = id.getPath();
+        List<String> tries = new ArrayList<>();
+        for (String suf : new String[]{"_stairs", "_planks", "_wall"}) {
+            if (p.endsWith(suf)) {
+                tries.add(p.substring(0, p.length() - suf.length()) + "_slab");
+            }
+        }
+        if (p.endsWith("s")) {
+            tries.add(p.substring(0, p.length() - 1) + "_slab");
+        }
+        tries.add(p + "_slab");
+        for (String t : tries) {
+            Block b = BuiltInRegistries.BLOCK.get(
+                    net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(id.getNamespace(), t));
+            if (b instanceof SlabBlock) {
+                return b;
+            }
+        }
+        return null;
+    }
+
+    private static void putSlabAt(Map<Long, BuildTaskRecord.Target> out, BlockPos pos,
+                                  Block slab, SlabType type) {
+        BlockState state = slab.defaultBlockState().setValue(SlabBlock.TYPE, type);
+        // topHalf 是状态的镜像,不是自由字段:双层砖没有上下之分,那里必须是 null,
+        // 否则 Target 自己的一致性校验当场拒收(它按同一条规则反推)。
+        Boolean topHalf = type == SlabType.DOUBLE ? null : type == SlabType.TOP;
+        out.put(pos.asLong(), new BuildTaskRecord.Target(state, slab.asItem(), pos,
+                BuiltInRegistries.BLOCK.getKey(slab).getPath(), null, null, topHalf));
+    }
+
+    private static void putSolidAt(Map<Long, BuildTaskRecord.Target> out, BuildPalette palette,
+                                   BlockPos pos, boolean overwrite) {
+        BuildPalette.Entry e = palette.pick(pos);
+        BuildTaskRecord.Target t =
+                new BuildTaskRecord.Target(e.block(), e.item(), pos, e.label(), null, null, null);
+        if (overwrite) {
+            out.put(pos.asLong(), t);
+        } else {
+            out.putIfAbsent(pos.asLong(), t);
+        }
+    }
+
+    private static void add(Set<BlockPos> out, int x, int y, int z) {
+        out.add(new BlockPos(x, y, z));
+    }
+
+    private static int req(Integer v, String name) {
+        if (v == null) {
+            throw new IllegalArgumentException(name + " is required");
+        }
+        return v;
+    }
+}
