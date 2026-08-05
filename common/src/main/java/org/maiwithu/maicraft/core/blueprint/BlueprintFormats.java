@@ -298,3 +298,68 @@ final class BlueprintFormats {
         return out;
     }
 
+    // ------------------------------------------------------------------
+
+    /** 三维坐标压成一个键——两种格式都要按坐标去认方块实体。 */
+    private static long key3(int x, int y, int z) {
+        return ((long) (x & 0xFFFFF) << 42) | ((long) (y & 0x1FFFFF) << 21) | (z & 0x1FFFFF);
+    }
+
+    private static CompoundTag cell(int x, int y, int z, int stateIndex) {
+        return cell(x, y, z, stateIndex, null);
+    }
+
+    private static CompoundTag cell(int x, int y, int z, int stateIndex, CompoundTag data) {
+        CompoundTag cell = new CompoundTag();
+        ListTag pos = new ListTag();
+        pos.add(IntTag.valueOf(x));
+        pos.add(IntTag.valueOf(y));
+        pos.add(IntTag.valueOf(z));
+        cell.put("pos", pos);
+        cell.putInt("state", stateIndex);
+        if (data != null && !data.isEmpty()) {
+            cell.put("nbt", data);   // 原版结构格式里方块实体数据就挂在这个键上
+        }
+        return cell;
+    }
+
+    /**
+     * 一只实体 → 原版结构格式的条目({@code pos} 双精度相对坐标 + {@code nbt})。
+     *
+     * <p>只收展示框、盔甲架、画这类"摆设":它们是建筑的一部分。活物不收——图纸里
+     * 存着的牛马村民不是设计,照搬等于凭空造生物。
+     */
+    private static CompoundTag entityCell(double x, double y, double z, CompoundTag nbt) {
+        CompoundTag out = new CompoundTag();
+        ListTag pos = new ListTag();
+        pos.add(net.minecraft.nbt.DoubleTag.valueOf(x));
+        pos.add(net.minecraft.nbt.DoubleTag.valueOf(y));
+        pos.add(net.minecraft.nbt.DoubleTag.valueOf(z));
+        out.put("pos", pos);
+        ListTag blockPos = new ListTag();
+        blockPos.add(IntTag.valueOf((int) Math.floor(x)));
+        blockPos.add(IntTag.valueOf((int) Math.floor(y)));
+        blockPos.add(IntTag.valueOf((int) Math.floor(z)));
+        out.put("blockPos", blockPos);
+        out.put("nbt", nbt);
+        return out;
+    }
+
+    private static CompoundTag assemble(int sx, int sy, int sz, ListTag palette, ListTag blocks) {
+        return assemble(sx, sy, sz, palette, blocks, new ListTag());
+    }
+
+    private static CompoundTag assemble(int sx, int sy, int sz, ListTag palette, ListTag blocks,
+                                        ListTag entities) {
+        CompoundTag out = new CompoundTag();
+        ListTag size = new ListTag();
+        size.add(IntTag.valueOf(sx));
+        size.add(IntTag.valueOf(sy));
+        size.add(IntTag.valueOf(sz));
+        out.put("size", size);
+        out.put("palette", palette);
+        out.put("blocks", blocks);
+        out.put("entities", entities);
+        return out;
+    }
+}
