@@ -298,3 +298,10 @@ public final class BlueprintSafety {
     public static void stripPayload(net.minecraft.nbt.CompoundTag data) {
         if (data == null) {
             return;
+        }
+        for (String key : PAYLOAD_KEYS) {
+            data.remove(key);
+        }
+    }
+
+}
