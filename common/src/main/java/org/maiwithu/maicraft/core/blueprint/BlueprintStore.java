@@ -298,3 +298,19 @@ public final class BlueprintStore {
                     return BlueprintFormats.fromLitematic(
                             NbtIo.readCompressed(litematic, NbtAccounter.unlimitedHeap()));
                 }
+                if (Files.exists(schem)) {
+                    return BlueprintFormats.fromSchem(
+                            NbtIo.readCompressed(schem, NbtAccounter.unlimitedHeap()));
+                }
+            } catch (Exception e) {
+                throw new IllegalArgumentException("blueprint " + name + " cannot be read: " + e.getMessage(), e);
+            }
+        }
+        throw new IllegalArgumentException("blueprint " + name + " not found; use blueprint_list first");
+    }
+
+    private static Path gameDirectory(LocalPlayerContext context) {
+        context.requireCurrent();
+        return context.minecraft().gameDirectory.toPath().toAbsolutePath().normalize();
+    }
+}
