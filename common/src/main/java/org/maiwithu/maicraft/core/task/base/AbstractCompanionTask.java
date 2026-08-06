@@ -298,3 +298,45 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     protected TaskState runChild(Task c) {
         if (child != c) {
             child = c;
+            childStarted = false;
+        }
+        if (!childStarted) {
+            child.start(player);
+            childStarted = true;
+        }
+        TaskState st = child.tick(player);
+        if (st.isTerminal()) {
+            if (child instanceof AbstractCompanionTask<?> a) {
+                this.failType = a.lastFailure();
+            }
+            child = null;
+            childStarted = false;
+            return st;
+        }
+        return null;   // still running
+    }
+
+    // ---------------------------------------------------------------------
+    // Suspendable (scheduler preemption)
+    // ---------------------------------------------------------------------
+
+    /**
+     * Preempted by a higher-priority survival chain: release the BODY (zero the
+     * locomotion inputs, drop sneak) but keep every logical field — including the
+     * nav PLAN — intact. Deliberately does NOT call {@code nav.stop()}: the plan
+     * is what lets {@link #resume()} pick straight back up on the next tick.
+     */
+    @Override
+    public void stop(LocalPlayer companion, StopReason why) {
+        // 被抢占:只松开身体(归零移动输入、放开潜行),<b>逻辑字段一个不动</b>——
+        // 尤其是寻路计划,它正是下次拿回身体时能接着走的原因。不调 nav.stop()。
+        // 被换掉/身体没了不需要额外收尾:buildResult 里的 cleanup() 会跑。
+        InputDriver.halt(player);
+        ClientRuntime.requireContext(player).body().releaseAll();
+    }
+
+    @Override
+    public String name() {
+        return getClass().getSimpleName();
+    }
+}
