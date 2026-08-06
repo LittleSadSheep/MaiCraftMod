@@ -298,3 +298,42 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
                 new Vec3(box.minX, y, box.maxZ), new Vec3(box.maxX, y, box.maxZ),
         };
         BlockPos best = null;
+        double bestDrop = Double.MAX_VALUE;
+        for (Vec3 from : origins) {
+            BlockHitResult hit = companion.level().clip(new ClipContext(
+                    from, from.add(0.0, -PROBE_DEPTH, 0.0),
+                    ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, companion));
+            if (hit.getType() != HitResult.Type.BLOCK) {
+                continue;
+            }
+            double drop = y - hit.getLocation().y;
+            if (drop < bestDrop) {
+                bestDrop = drop;
+                best = hit.getBlockPos();
+            }
+        }
+        return best;
+    }
+
+    private static int waterBucketSlot(LocalPlayer companion) {
+        return slotWith(companion, Items.WATER_BUCKET);
+    }
+
+    private static int slotWith(LocalPlayer companion, net.minecraft.world.item.Item item) {
+        Inventory inv = companion.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            if (inv.getItem(i).is(item)) return i;
+        }
+        return -1;
+    }
+
+    /** Slot of a placeable fall-dampening block (hay / slime), or -1. */
+    private static int softBlockSlot(LocalPlayer companion) {
+        Inventory inv = companion.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.is(Items.HAY_BLOCK) || s.is(Items.SLIME_BLOCK)) return i;
+        }
+        return -1;
+    }
+}
