@@ -298,3 +298,250 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 // Recovery ladder — ONE retry rung, land nav only: re-plan accepting
                 // anywhere within NEAR_SUCCESS_RADIUS of the destination. Goal-consistent,
                 // not scope creep: a stop within that radius already counts as arrival
+                // (closeEnoughToSucceed above), the retry just lets the SEARCH aim for it.
+                // YLEVEL has no looser near-equivalent (its goal is already any-x/z), and
+                // the water-settle path above is untouched.
+                if (!nearRetried && !player.isInWater()
+                        && r.kind != MoveToTaskRecord.Kind.YLEVEL
+                        && r.kind != MoveToTaskRecord.Kind.FIND) {
+                    nearRetried = true;
+                    stopNav();
+                    NavGoal retry = nearRetryGoal();
+                    nav = PlayerNav.toGoal(player, () -> retry, WALK_SPEED, this::closeEnoughToSucceed,
+                            terrain()).withTerrainProbe();
+                    yield TaskState.RUNNING;
+                }
+                String also = nearRetried
+                        ? " (also retried accepting anywhere within "
+                                + (int) NEAR_SUCCESS_RADIUS + " blocks — no path either)"
+                        : "";
+                fail(blockedMessage(nav.failReason() + also), nav.failType());
+                yield TaskState.FAILED;
+            }
+        };
+    }
+
+    /**
+     * 船腿的一刻:驾船朝目标推进,终态(靠岸或搁浅)都走同一条接力——到不了目标的
+     * 水路不算失败,只是"这条腿到此为止",剩下的路归步行段(步行导航起步自会下船)。
+     * 目标就在水上时她留在船里,不往水里跳。船留在原地,那是她的船,不是垃圾。
+     */
+    private TaskState tickBoatLeg() {
+        // 船腿的续约与步行段同一制式:还在消耗航线就把期限保持在租约窗口里
+        if (boatLeg.progressing() && leaseCapGameTime > 0) {
+            long now = player.level().getGameTime();
+            r.extendDeadlineTo(Math.min(now + PROGRESS_LEASE_TICKS, leaseCapGameTime));
+        }
+        var status = boatLeg.tick();
+        if (status == org.maiwithu.maicraft.core.pathing.execute.BoatNav.Status.RUNNING) {
+            return TaskState.RUNNING;
+        }
+        String how = status == org.maiwithu.maicraft.core.pathing.execute.BoatNav.Status.ARRIVED
+                ? "靠岸" : boatLeg.failReason();
+        boatLeg.stop();
+        boatLeg = null;
+        if (reached()) {
+            org.maiwithu.maicraft.core.Constants.LOG.info(
+                    "[maicraft-task] 船腿结束({}),目标已在船下 feet={}", how,
+                    player.blockPosition().toShortString());
+            return TaskState.SUCCESS;
+        }
+        org.maiwithu.maicraft.core.Constants.LOG.info(
+                "[maicraft-task] 船腿结束({}),接步行 feet={}", how,
+                player.blockPosition().toShortString());
+        startWalkingNav();
+        return TaskState.RUNNING;
+    }
+
+    /** The retry rung's loosened goal — the destination widened to the SAME radius that
+     *  already counts as arrival ({@link #NEAR_SUCCESS_RADIUS}), never wider. */
+    private NavGoal nearRetryGoal() {
+        if (r.kind == MoveToTaskRecord.Kind.BLOCK) {
+            return NavGoal.near(blockTarget, NEAR_SUCCESS_RADIUS);
+        }
+        // COLUMN: within the radius HORIZONTALLY at any height (NavGoal.near is 3D and
+        // needs a Y this kind doesn't have; heuristic/center reuse the column's own).
+        final int targetX = bx;
+        final int targetZ = bz;
+        final NavGoal column = NavGoal.column(targetX, targetZ);
+        final double radiusSqr = NEAR_SUCCESS_RADIUS * NEAR_SUCCESS_RADIUS;
+        return new NavGoal() {
+            @Override public boolean isAt(BlockPos feet) {
+                double dx = feet.getX() - targetX;
+                double dz = feet.getZ() - targetZ;
+                return dx * dx + dz * dz <= radiusSqr;
+            }
+            @Override public double heuristic(BlockPos from) {
+                return column.heuristic(from);
+            }
+            @Override public BlockPos center() {
+                return column.center();
+            }
+        };
+    }
+
+    /** Did we get close enough to the destination to call it done (teaching success)?
+     *  Requires solid footing (or water — the settle path): as a live arrival
+     *  predicate on the near-retry nav this must not fire during a mid-air jump
+     *  or a sneak-hover over the edge, for the same reason as {@link #reached}. */
+    private boolean closeEnoughToSucceed() {
+        if (!player.onGround() && !player.isInWater()) {
+            return false;
+        }
+        return switch (r.kind) {
+            case BLOCK, COLUMN -> horizontalDistSqr(bx, bz) <= NEAR_SUCCESS_RADIUS * NEAR_SUCCESS_RADIUS;
+            case YLEVEL -> Math.abs(feet().getY() - by) <= 1;
+            // FIND 候选众多,失败梯已在候选间轮换过,不设贴近成功档
+            case FIND -> false;
+        };
+    }
+
+    private double horizontalDistSqr(int cellX, int cellZ) {
+        double dx = (cellX + 0.5) - player.getX();
+        double dz = (cellZ + 0.5) - player.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    /** Representative remaining distance (blocks) for the deadline estimate. */
+    private double repDistance() {
+        return switch (r.kind) {
+            case BLOCK -> Math.sqrt(player.distanceToSqr(bx + 0.5, by, bz + 0.5));
+            case COLUMN -> Math.sqrt(horizontalDistSqr(bx, bz));
+            case YLEVEL -> Math.abs(player.getY() - by);
+            case FIND -> {
+                BlockPos n = finder.nearest();
+                yield n == null ? NearestBlockFinder.BUDGET_BLOCKS
+                        : Math.sqrt(player.distanceToSqr(n.getX() + 0.5, n.getY() + 0.5, n.getZ() + 0.5));
+            }
+        };
+    }
+
+    // ==================== FIND(就近方块)驱动 ====================
+
+    /**
+     * 候选发现期(导航尚未建立)推进一步:收割扫描 -> 有候选即建导航
+     * (返回 null 表示落入正常驱动),扫完仍无候选 -> 失败,否则继续等。
+     */
+    private TaskState tickFindDiscovery() {
+        finder.drain();
+        if (finder.hasCandidates()) {
+            nav = PlayerNav.to(player, finder::contract, WALK_SPEED, this::reached, terrain())
+                    .withTerrainProbe();
+            return null;
+        }
+        if (finder.exhausted()) {
+            fail("no " + r.block + " found in the loaded area around me — explore"
+                    + " closer to one, or give exact coordinates (scan_blocks/locate can find some).",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        return TaskState.RUNNING;
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        int gy = player.blockPosition().getY();
+        Map<String, Object> data = new HashMap<>();
+        data.put("final_x", player.getX());
+        data.put("final_y", player.getY());
+        data.put("final_z", player.getZ());
+        data.put("ground_y", gy);
+        return data;
+    }
+
+    /** Success copy — always names the real position so the model learns the terrain. */
+    @Override
+    protected String successMessage() {
+        int gy = player.blockPosition().getY();
+        return switch (r.kind) {
+            case BLOCK -> {
+                if (feet().equals(blockTarget)) {
+                    yield "reached the exact cell " + bx + "," + by + "," + bz + ".";
+                }
+                // Got to the column but not the exact y (the usual "guessed Y was in
+                // the air" case) — teach the model to drop Y for a location.
+                int dy = by - gy;
+                yield "arrived at location x=" + bx + " z=" + bz + ", standing on the ground at y=" + gy
+                        + ". The exact cell y=" + by + " wasn't reachable (" + Math.abs(dy) + " blocks "
+                        + (dy > 0 ? "up — likely mid-air" : "down — likely blocked")
+                        + "); for a location, omit y and I resolve the surface.";
+            }
+            case COLUMN -> "arrived at location x=" + bx + " z=" + bz
+                    + ", standing on the ground at y=" + gy + ".";
+            case YLEVEL -> "reached elevation y=" + gy
+                    + (gy == by ? "." : " (requested y=" + by + ").");
+            case FIND -> {
+                BlockPos n = finder.nearest();
+                yield n == null
+                        ? "arrived beside the target block."
+                        : "arrived beside " + r.block + " at " + n.getX() + "," + n.getY()
+                                + "," + n.getZ() + " — within reach to use.";
+            }
+        };
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        int gy = player.blockPosition().getY();
+        double remaining = repDistance();
+        // Two different stories for the model: a stall (progress dried up — something is
+        // wrong, reconsider) vs a check-in (journey healthy but longer than the cap —
+        // resuming is the right move).
+        boolean stalled = nav == null || nav.stallTicks() > PROGRESS_GRACE_TICKS;
+        return "timed out " + String.format("%.1f", remaining) + " blocks from target (now at "
+                + bx(gy) + "); "
+                + (stalled
+                        ? "progress had stopped — likely blocked; call goto again to retry, or"
+                                + " try a nearer waypoint / scan_blocks for a way through."
+                        : "the journey was still progressing and simply exceeded its check-in budget;"
+                                + " call goto again with the same target to resume.");
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "cancelled before reaching target";
+    }
+
+    private String bx(int gy) {
+        return String.format("%.0f,%d,%.0f", player.getX(), gy, player.getZ());
+    }
+
+    /** Release the nav (base) and drop a FIND lookup that is still walking rings for a
+     *  destination nobody is going to any more. */
+    @Override
+    protected void cleanup() {
+        super.cleanup();
+        if (finder != null) {
+            finder.cancelScan();
+        }
+        if (boatLeg != null) {
+            boatLeg.stop();   // 中途被取消/让位:收桨,别让船带着按下的前进键漂走
+            boatLeg = null;
+        }
+    }
+
+    /** The give-up message for a planner failure that wasn't close enough to count as arrival.
+     *  Captured at the fail site (nav still alive) so its {@code failReason} is readable before
+     *  the base's {@code cleanup()} releases the nav. */
+    private String blockedMessage(String failReason) {
+        int gy = player.blockPosition().getY();
+        double remaining = repDistance();
+        String where = switch (r.kind) {
+            case BLOCK, COLUMN -> "location x=" + bx + " z=" + bz;
+            case YLEVEL -> "elevation y=" + by;
+            case FIND -> "the nearest " + r.block;
+        };
+        // 地形封路的验尸自带下一步(清单 + 重发提示),不再叠几何建议;其余无路才是
+        // 几何问题:换近一点的路点或扫描。除非她只是没有垫路的料——读起来同样是死路,
+        // 其实不是。
+        String advice = "";
+        if (nav.failType() != FailureType.TERRAIN_BLOCKED) {
+            advice = ScaffoldMaterials.shortageAdvice(player);
+            if (advice == null) {
+                advice = " Try a nearer waypoint or scan_blocks for a way through.";
+            }
+        }
+        return "blocked: got within " + String.format("%.1f", remaining) + " blocks of " + where
+                + " (now on the ground at y=" + gy + "). " + failReason + "." + advice;
+    }
+}
