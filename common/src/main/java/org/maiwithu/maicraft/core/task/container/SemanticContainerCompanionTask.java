@@ -898,3 +898,53 @@ public final class SemanticContainerCompanionTask
         return data;
     }
 
+    private static List<String> recoveryOptions(String code, boolean partial) {
+        if (partial) return List.of(
+                "request only the remaining amount using verified moved_count, or use an idempotent target_count",
+                "wait until the container is stable and no other player is using it",
+                "choose another container", "cancel");
+        return switch (code) {
+            case "insufficient_source", "source_slots_locked" -> List.of(
+                    "lower the requested count or choose another source/container",
+                    "acquire the missing selected items, then retry", "cancel");
+            case "destination_full_or_locked" -> List.of(
+                    "free destination capacity or choose another container",
+                    "lower the requested count", "cancel");
+            case "ambiguous_container" -> List.of(
+                    "retry with selection=nearest if any nearest safe match is acceptable",
+                    "narrow block_id or landmark_label", "cancel");
+            case "specialized_storage_required" -> List.of(
+                    "use the dedicated storage-network supply or acquisition ability",
+                    "choose an ordinary block container", "cancel");
+            case "other_player_near_container", "menu_changed_externally" -> List.of(
+                    "wait until the container is no longer being used, then retry",
+                    "choose another container", "cancel");
+            case "container_locked" -> List.of(
+                    "obtain authorization or the required key, then retry",
+                    "choose another container", "cancel");
+            case "unsupported_modded_slots", "unsupported_menu_layout" -> List.of(
+                    "use the storage system's dedicated semantic ability",
+                    "choose an ordinary chest, barrel, shulker box or furnace-family block",
+                    "perform this transfer manually", "cancel");
+            default -> List.of(
+                    "retry after the container and surrounding players are stable",
+                    "choose another loaded ordinary container", "cancel");
+        };
+    }
+
+    @Override protected String successMessage() {
+        return "verified " + movedCount + " semantic item(s) against "
+                + (containerKind == null ? "the selected container" : containerKind)
+                + " and closed its native menu";
+    }
+
+    @Override protected String timeoutMessage() {
+        return "container management timed out after " + movedCount
+                + " verified item(s); no unverified retry was attempted";
+    }
+
+    @Override protected String cancelledMessage() {
+        return "container management was interrupted after " + movedCount
+                + " verified item(s)";
+    }
+}
