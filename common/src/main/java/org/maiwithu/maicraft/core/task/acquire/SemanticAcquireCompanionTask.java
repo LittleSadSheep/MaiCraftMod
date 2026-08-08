@@ -898,3 +898,303 @@ public final class SemanticAcquireCompanionTask
             String detail) {
         activeNeed = need;
         activeSource = source;
+        activeRecord = record;
+        activeChild = TaskFactory.create(player, record);
+        activeDetail = detail;
+        activeBeforeCount = count(need.itemIds);
+        return TaskState.RUNNING;
+    }
+
+    private TaskState startHuntChild(
+            Need need,
+            TaskRecord record,
+            HuntChildStage stage,
+            UUID targetUuid,
+            String detail) {
+        TaskState state = startChild(
+                need, SemanticAcquireTaskRecord.Source.HUNT, record, detail);
+        activeHuntStage = stage;
+        activeHuntTarget = targetUuid;
+        return state;
+    }
+
+    private void cancelActiveBecauseSatisfied() {
+        if (activeChild == null) return;
+        activeChild.stop(player, Task.StopReason.REPLACED);
+        TaskResult result = activeChild.result(TaskState.CANCELLED);
+        int after = count(activeNeed.itemIds);
+        recordAttempt(TaskState.CANCELLED, result, after,
+                Math.max(0, after - activeBeforeCount), true);
+        clearActive();
+    }
+
+    private void clearActive() {
+        activeChild = null;
+        activeRecord = null;
+        activeNeed = null;
+        activeSource = null;
+        activeDetail = null;
+        activeBeforeCount = 0;
+        activeHuntStage = HuntChildStage.NONE;
+        activeHuntTarget = null;
+    }
+
+    private int huntAttemptLimit(Need need) {
+        return Math.min(MAX_HUNT_TARGETS, Math.max(3, missing(need)));
+    }
+
+    private static boolean huntDefeated(TaskResult result) {
+        return result != null && result.data() != null
+                && positiveNumber(result.data().get("defeated_targets"));
+    }
+
+    private static boolean positiveNumber(Object value) {
+        return value instanceof Number number && number.intValue() > 0;
+    }
+
+    private TaskState exhaustNeed(Need need) {
+        if (need.depth == 0) {
+            DimensionBarrier barrier = preferredDimensionBarrier();
+            if (barrier != null) {
+                failureDimension = barrier;
+                return failAcquisition(
+                        "requires_dimension",
+                        "a known physical source is valid only in another dimension; no movement "
+                                + "or attack was started for that source",
+                        FailureType.NO_MATERIAL);
+            }
+            return failAcquisition(
+                    "allowed_sources_exhausted",
+                    "none of the allowed source families could make the final inventory fact true",
+                    FailureType.NO_MATERIAL);
+        }
+        if (!needs.isEmpty() && needs.peek() == need) needs.pop();
+        Need parent = needs.peek();
+        if (parent == null) {
+            return failAcquisition(
+                    "recursive_need_parent_missing",
+                    "a recursive recipe need ended without its parent",
+                    FailureType.INTERNAL);
+        }
+        if (need.parentRecipeId != null) parent.rejectedRecipes.add(need.parentRecipeId);
+        addIssue("craft", "recursive_ingredient_unmet",
+                "one recipe branch was abandoned after its ingredient need exhausted allowed sources",
+                Map.of("recipe_id", need.parentRecipeId == null ? "unknown" : need.parentRecipeId,
+                        "ingredient_item_ids", itemStrings(need.itemIds),
+                        "required_final_count", need.requiredFinalCount,
+                        "observed_final_count", count(need.itemIds)));
+        return TaskState.RUNNING;
+    }
+
+    private void collectCraftCandidates(
+            ResourceLocation output, TaskResult immediate, List<CraftCandidate> target) {
+        if (immediate == null || immediate.data() == null) return;
+        Object raw = immediate.data().get("candidate_recipes");
+        if (!(raw instanceof List<?> values)) return;
+        for (Object value : values) {
+            if (!(value instanceof Map<?, ?> map)) continue;
+            Map<String, Object> data = stringKeyMap(map);
+            String recipeId = string(data.get("recipe_id"));
+            if (recipeId == null) continue;
+            target.add(new CraftCandidate(
+                    output,
+                    recipeId,
+                    data,
+                    integer(data.get("ingredients_missing"), Integer.MAX_VALUE),
+                    bool(data.get("crafting_surface_supported")),
+                    bool(data.get("crafting_surface_ready"))));
+        }
+    }
+
+    private IngredientNeed chooseIngredient(CraftCandidate candidate, Need parent) {
+        Object raw = candidate.data().get("ingredients");
+        if (!(raw instanceof List<?> values)) return null;
+        List<IngredientNeed> choices = new ArrayList<>();
+        for (Object value : values) {
+            if (!(value instanceof Map<?, ?> map)) continue;
+            Map<String, Object> fact = stringKeyMap(map);
+            int missing = integer(fact.get("missing"), 0);
+            if (missing <= 0) continue;
+            List<ResourceLocation> ids = new ArrayList<>();
+            Object acceptable = fact.get("acceptable_item_ids");
+            if (acceptable instanceof List<?> list) {
+                for (Object element : list) {
+                    ResourceLocation id = ResourceLocation.tryParse(String.valueOf(element));
+                    if (id != null && BuiltInRegistries.ITEM.containsKey(id)
+                            && !parent.lineageItems.contains(id)) ids.add(id);
+                }
+            }
+            ids = ids.stream().distinct().toList();
+            if (!ids.isEmpty()) choices.add(new IngredientNeed(ids, missing, fact));
+        }
+        return choices.stream()
+                .sorted(Comparator.comparingInt(IngredientNeed::missing))
+                .findFirst().orElse(null);
+    }
+
+    private NearbySurvey surveyNearby(List<ResourceLocation> ids) {
+        Set<ResourceLocation> accepted = Set.copyOf(ids);
+        int safe = 0;
+        int protectedCount = 0;
+        List<Map<String, Object>> samples = new ArrayList<>();
+        AABB box = player.getBoundingBox().inflate(r.searchRadius);
+        for (ItemEntity item : player.clientLevel.getEntitiesOfClass(
+                ItemEntity.class, box, entity -> !entity.isRemoved()
+                        && !entity.hasPickUpDelay()
+                        && accepted.contains(BuiltInRegistries.ITEM.getKey(
+                                entity.getItem().getItem())))) {
+            Entity owner = item.getOwner();
+            List<String> reasons = new ArrayList<>();
+            // Item thrower/target ownership is not part of the ItemStack synced-data field. A null
+            // client owner therefore means "not proven", not "wild/free". Only a drop whose owner
+            // resolves to this exact LocalPlayer is safe for the broad collector.
+            if (owner == null) reasons.add("owner_not_proven_by_client_facts");
+            else if (owner != player) reasons.add("owned_by_other_entity");
+            reasons.addAll(landmarkReasons(item.blockPosition()));
+            if (reasons.isEmpty()) {
+                safe++;
+            } else {
+                protectedCount++;
+                if (samples.size() < 8) {
+                    samples.add(Map.of(
+                            "item_id", BuiltInRegistries.ITEM.getKey(
+                                    item.getItem().getItem()).toString(),
+                            "reasons", List.copyOf(reasons)));
+                }
+            }
+        }
+        return new NearbySurvey(safe, protectedCount, List.copyOf(samples));
+    }
+
+    private List<String> worldSourceProtectionProblems(int reach) {
+        List<String> result = new ArrayList<>();
+        IntentRuntime runtime = IntentRuntime.get();
+        for (String label : r.protectedLabels) {
+            if (runtime.landmark(label) == null) result.add("unknown protected label: " + label);
+        }
+        String dimension = player.level().dimension().location().toString();
+        BlockPos feet = player.blockPosition();
+        for (IntentRuntime.Landmark landmark : runtime.landmarks()) {
+            Goal.WorldPosition position = landmark.position();
+            if (position.dimension() != null && !position.dimension().equals(dimension)) continue;
+            long dx = (long) position.x() - feet.getX();
+            long dz = (long) position.z() - feet.getZ();
+            if (dx * dx + dz * dz <= (long) reach * reach) {
+                result.add("remembered landmark inside child search scope: " + landmark.label());
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private List<String> landmarkReasons(BlockPos position) {
+        List<String> result = new ArrayList<>();
+        IntentRuntime runtime = IntentRuntime.get();
+        String dimension = player.level().dimension().location().toString();
+        for (String label : r.protectedLabels) {
+            IntentRuntime.Landmark landmark = runtime.landmark(label);
+            if (landmark == null) {
+                result.add("unknown_protected_label:" + label);
+                continue;
+            }
+            if (insideLandmark(position, landmark, dimension)) {
+                result.add("protected_landmark:" + landmark.label());
+            }
+        }
+        for (IntentRuntime.Landmark landmark : runtime.landmarks()) {
+            if (insideLandmark(position, landmark, dimension)) {
+                result.add("remembered_landmark:" + landmark.label());
+            }
+        }
+        return result.stream().distinct().toList();
+    }
+
+    private static boolean insideLandmark(
+            BlockPos position, IntentRuntime.Landmark landmark, String dimension) {
+        Goal.WorldPosition center = landmark.position();
+        if (center.dimension() != null && !center.dimension().equals(dimension)) return false;
+        long dx = (long) position.getX() - center.x();
+        long dz = (long) position.getZ() - center.z();
+        return dx * dx + dz * dz
+                <= (long) LANDMARK_PROTECTION_RADIUS * LANDMARK_PROTECTION_RADIUS;
+    }
+
+    private int count(List<ResourceLocation> ids) {
+        int result = 0;
+        for (ResourceLocation id : ids) {
+            result += PlayerInv.buildableCount(
+                    player.getInventory(), BuiltInRegistries.ITEM.get(id));
+        }
+        return result;
+    }
+
+    private Map<ResourceLocation, Integer> counts(List<ResourceLocation> ids) {
+        Map<ResourceLocation, Integer> result = new LinkedHashMap<>();
+        for (ResourceLocation id : ids) {
+            result.put(id, PlayerInv.buildableCount(
+                    player.getInventory(), BuiltInRegistries.ITEM.get(id)));
+        }
+        return Map.copyOf(result);
+    }
+
+    private int missing(Need need) {
+        return Math.max(0, need.requiredFinalCount - count(need.itemIds));
+    }
+
+    private SemanticAcquireTaskRecord.SourceHint sourceHint(Need need) {
+        SemanticAcquireTaskRecord.SourceHint inferred =
+                SemanticSourceKnowledge.infer(need.itemIds);
+        return need.depth == 0
+                ? SemanticSourceKnowledge.merge(inferred, r.sourceHint)
+                : inferred;
+    }
+
+    /**
+     * Gate only the physical source currently under consideration. Inventory, storage, recipes,
+     * cooking and trade have already had (or will still receive) their own independent chance.
+     * A failed gate advances this one source without spending work or constructing a child.
+     */
+    private boolean sourceDimensionAllowed(
+            Need need, SemanticAcquireTaskRecord.Source source) {
+        List<ResourceLocation> allowed = SemanticSourceKnowledge.inferPlan(need.itemIds)
+                .allowedDimensions(source);
+        if (allowed.isEmpty()) return true;
+        ResourceLocation current = player.level().dimension().location();
+        if (allowed.contains(current)) return true;
+
+        rememberDimensionBarrier(need, allowed, current);
+        addIssue(source.name().toLowerCase(java.util.Locale.ROOT), "requires_dimension",
+                "this physical source family is not valid in the current dimension; no movement "
+                        + "or attack was started",
+                Map.of("target_item_family", itemStrings(need.itemIds),
+                        "allowed_dimensions", stringIds(allowed),
+                        "current_dimension", current.toString()));
+        advanceSource(need);
+        return false;
+    }
+
+    private void rememberDimensionBarrier(
+            Need need,
+            List<ResourceLocation> allowed,
+            ResourceLocation current) {
+        for (int index = 0; index < dimensionBarriers.size(); index++) {
+            DimensionBarrier known = dimensionBarriers.get(index);
+            if (!known.itemIds().equals(need.itemIds)
+                    || !known.currentDimension().equals(current)) {
+                continue;
+            }
+            LinkedHashSet<ResourceLocation> merged = new LinkedHashSet<>(
+                    known.allowedDimensions());
+            merged.addAll(allowed);
+            dimensionBarriers.set(index, new DimensionBarrier(
+                    known.itemIds(), List.copyOf(merged), current,
+                    Math.min(known.depth(), need.depth)));
+            return;
+        }
+        dimensionBarriers.add(new DimensionBarrier(
+                need.itemIds, allowed, current, need.depth));
+    }
+
+    private DimensionBarrier preferredDimensionBarrier() {
+        return dimensionBarriers.stream()
+                .min(Comparator
+                        .comparingInt(DimensionBarrier::depth)
