@@ -598,3 +598,289 @@ public final class SemanticCookCompanionTask
                 phase = Phase.LOAD_FUEL;
             }
             case LOAD_FUEL -> {
+                effectsStarted = true;
+                phase = Phase.WAIT_COOK;
+                markCookEvidence();
+            }
+            case TAKE_OUTPUT -> phase = finishRequested || outputCount() >= r.count
+                    ? Phase.CLEANUP : Phase.PREPARE;
+            case CLEAN_RESULT, CLEAN_INPUT, CLEAN_FUEL -> phase = Phase.CLEANUP;
+            case CLOSE -> {
+                openedMenu = false;
+                return finishCleanup();
+            }
+        }
+        if (finishRequested && phase != Phase.CLEANUP) phase = Phase.CLEANUP;
+        return TaskState.RUNNING;
+    }
+
+    private static Map<String, Object> semanticPrerequisiteFailure(TaskResult result) {
+        if (result == null || result.data() == null) return Map.of();
+        Map<String, Object> safe = new LinkedHashMap<>();
+        for (String key : List.of(
+                "failure_type", "failure_code", "requires_decision",
+                "requires_narration", "recovery_options", "issues")) {
+            Object value = result.data().get(key);
+            if (value != null) safe.put(key, value);
+        }
+        return Map.copyOf(safe);
+    }
+
+    private TaskState start(TaskRecord record, Purpose purpose) {
+        activeRecord = record;
+        activeChild = TaskFactory.create(player, record);
+        activePurpose = purpose;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState failOrClean(String code, String message, FailureType type) {
+        if (failureMessage == null) {
+            failureCode = code;
+            failureMessage = message;
+            failureType = type == null ? FailureType.UNKNOWN : type;
+        }
+        if (openedMenu && player.containerMenu instanceof AbstractFurnaceMenu) {
+            phase = Phase.CLEANUP;
+            return TaskState.RUNNING;
+        }
+        phase = Phase.COMPLETE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState menuLost() {
+        outcomeUncertain |= effectsStarted;
+        openedMenu = false;
+        return failOrClean("cooking_menu_lost",
+                effectsStarted
+                        ? "The synchronized workstation menu changed after cooking effects began; "
+                                + "blind retry is unsafe."
+                        : "The synchronized workstation menu changed before cooking began.",
+                FailureType.TARGET_LOST);
+    }
+
+    private String childFailureCode(Purpose purpose) {
+        return switch (purpose) {
+            case ACQUIRE_INPUT -> "missing_recipe_input";
+            case ACQUIRE_FUEL -> "missing_allowed_fuel";
+            case ACQUIRE_STATION -> "missing_workstation";
+            case PLACE_STATION -> "station_placement_failed";
+            case MOVE_STATION -> "station_unreachable";
+            case OPEN_STATION -> "station_open_failed";
+            case CLOSE -> "menu_close_unconfirmed";
+            default -> "menu_transaction_unconfirmed";
+        };
+    }
+
+    private String childFailureMessage(Purpose purpose) {
+        return switch (purpose) {
+            case ACQUIRE_INPUT ->
+                    "Could not obtain enough selected recipe input from allowed_sources.";
+            case ACQUIRE_FUEL ->
+                    "Could not obtain enough allowed fuel from allowed_sources.";
+            case ACQUIRE_STATION ->
+                    "Could not obtain the selected cooking workstation from allowed_sources.";
+            case PLACE_STATION ->
+                    "Could not place the selected workstation through first-person building.";
+            case MOVE_STATION ->
+                    "Could not approach the selected workstation without altering terrain.";
+            case OPEN_STATION ->
+                    "Could not open the selected workstation through first-person interaction.";
+            case CLOSE -> "The workstation menu close was not confirmed.";
+            default -> "A synchronized workstation inventory transaction was not confirmed.";
+        };
+    }
+
+    private AbstractFurnaceMenu furnaceMenu() {
+        return player.containerMenu instanceof AbstractFurnaceMenu menu ? menu : null;
+    }
+
+    private boolean menuMatches() {
+        return switch (candidate.device) {
+            case FURNACE -> player.containerMenu instanceof FurnaceMenu;
+            case BLAST_FURNACE -> player.containerMenu instanceof BlastFurnaceMenu;
+            case SMOKER -> player.containerMenu instanceof SmokerMenu;
+            case CAMPFIRE -> false;
+        };
+    }
+
+    private int data(AbstractFurnaceMenu menu, int index) {
+        List<net.minecraft.world.inventory.DataSlot> data =
+                ((MenuDataSlotsAccessor) (Object) menu).maicraft$dataSlots();
+        return index >= 0 && index < data.size() ? data.get(index).get() : 0;
+    }
+
+    private void markCookEvidence() {
+        AbstractFurnaceMenu menu = furnaceMenu();
+        lastCookEvidenceTick = player.level().getGameTime();
+        lastCookEvidence = menu == null ? "" : data(menu, 0) + ":" + data(menu, 2)
+                + ":" + data(menu, 3) + ":" + menu.getSlot(0).getItem().getCount()
+                + ":" + menu.getSlot(2).getItem().getCount();
+    }
+
+    private boolean stationReady(Device device) {
+        return nearest(device.block, 16, 8) != null
+                || PlayerInv.buildableCount(
+                        player.getInventory(), device.block.asItem()) > 0;
+    }
+
+    private BlockPos nearest(Block block, int horizontal, int vertical) {
+        BlockPos origin = player.blockPosition();
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dx = -horizontal; dx <= horizontal; dx++) {
+            for (int dz = -horizontal; dz <= horizontal; dz++) {
+                for (int dy = -vertical; dy <= vertical; dy++) {
+                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    if (!player.level().isLoaded(cursor)
+                            || !player.level().getBlockState(cursor).is(block)) continue;
+                    double distance = origin.distSqr(cursor);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        best = cursor.immutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private BlockPos placementSite() {
+        BlockPos origin = player.blockPosition();
+        for (int radius = 1; radius <= 5; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.abs(dx) != radius && Math.abs(dz) != radius) continue;
+                    for (int dy = -2; dy <= 2; dy++) {
+                        BlockPos cell = origin.offset(dx, dy, dz);
+                        if (validSite(cell)) return cell;
+                    }
+                    int surfaceY = player.clientLevel.getHeight(
+                            Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                            origin.getX() + dx, origin.getZ() + dz);
+                    BlockPos surface = new BlockPos(
+                            origin.getX() + dx, surfaceY, origin.getZ() + dz);
+                    if (validSite(surface)) return surface;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean validSite(BlockPos cell) {
+        if (!player.level().isLoaded(cell)
+                || !player.level().getBlockState(cell).canBeReplaced()
+                || player.getBoundingBox().intersects(new AABB(cell))) return false;
+        BlockPos support = cell.below();
+        return player.level().isLoaded(support)
+                && player.level().getBlockState(support)
+                        .isFaceSturdy(player.level(), support, Direction.UP);
+    }
+
+    private boolean withinReach(BlockPos pos) {
+        return player.distanceToSqr(Vec3.atCenterOf(pos)) <= 4.25D * 4.25D;
+    }
+
+    private int rawRemaining() {
+        int missing = Math.max(0, r.count - outputCount());
+        return Math.max(1, ceilDiv(missing, candidate.outputCount));
+    }
+
+    private int outputCount() {
+        return PlayerInv.buildableCount(
+                player.getInventory(), BuiltInRegistries.ITEM.get(r.itemId));
+    }
+
+    private String childId(String label) {
+        return r.getToolCallId() + "-cook-" + label + "-" + (++childSerial);
+    }
+
+    private long childDeadline(long ticks) {
+        return Math.min(r.getDeadlineGameTime(), player.level().getGameTime() + ticks);
+    }
+
+    private static int ceilDiv(long numerator, long denominator) {
+        if (numerator <= 0L) return 0;
+        return (int) Math.min(
+                Integer.MAX_VALUE, (numerator + denominator - 1L) / denominator);
+    }
+
+    @Override
+    protected void cleanup() {
+        if (activeChild != null) {
+            activeChild.stop(player, Task.StopReason.REPLACED);
+            activeChild = null;
+            activeRecord = null;
+            activePurpose = null;
+        }
+        if (openedMenu && player.containerMenu instanceof AbstractFurnaceMenu) {
+            try {
+                var context = ClientRuntime.requireContext(player);
+                context.menus().close(context, 20);
+            } catch (RuntimeException ignored) {
+                outcomeUncertain = true;
+            }
+        }
+        super.cleanup();
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        int observed = outputCount();
+        data.put("goal", "final_main_inventory_count");
+        data.put("item_id", r.itemId.toString());
+        data.put("required_final_count", r.count);
+        data.put("initial_count", initialOutputCount);
+        data.put("observed_final_count", observed);
+        data.put("goal_satisfied", observed >= r.count);
+        data.put("recipe_preference", r.preference.name().toLowerCase());
+        data.put("allow_harm", r.allowHarm);
+        data.put("supported_execution_devices",
+                List.of("minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker"));
+        data.put("campfire_execution_supported", false);
+        if (candidate != null) {
+            data.put("recipe_id", candidate.recipeId.toString());
+            data.put("device", BuiltInRegistries.BLOCK.getKey(candidate.device.block).toString());
+            data.put("input_item_id", BuiltInRegistries.ITEM.getKey(candidate.input).toString());
+            data.put("recipe_output_count", candidate.outputCount);
+        }
+        if (fuel != null) {
+            data.put("fuel_item_id", BuiltInRegistries.ITEM.getKey(fuel).toString());
+        }
+        data.put("station_placed", stationPlaced);
+        data.put("outcome_uncertain", outcomeUncertain);
+        if (!prerequisiteFailure.isEmpty()) {
+            data.put("prerequisite_failure", prerequisiteFailure);
+        }
+        if (failureCode != null) {
+            data.put("decision", Map.of(
+                    "required", true,
+                    "reason_code", failureCode,
+                    "recovery_options", List.of(
+                            "change recipe_preference",
+                            "expand allowed_sources or allowed_fuels",
+                            "provide or clear a compatible workstation",
+                            "retry after checking the synchronized workstation state")));
+        }
+        return data;
+    }
+
+    @Override
+    protected String successMessage() {
+        return "cooked " + r.itemId + " until the main inventory held at least "
+                + r.count + " item(s), confirmed by live inventory state";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "cooking timed out; observed " + outputCount() + " of required final "
+                + r.count + " in the main inventory";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "cooking interrupted; observed " + outputCount() + " of required final "
+                + r.count + " in the main inventory";
+    }
+}
