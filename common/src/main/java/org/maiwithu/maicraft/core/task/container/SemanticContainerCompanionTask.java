@@ -598,3 +598,303 @@ public final class SemanticContainerCompanionTask
                 List.of(pendingMove.move())), Purpose.TRANSFER);
     }
 
+    private TaskState verifyTransfer() {
+        if (!menuValid() || pendingMove == null) {
+            outcomeUncertain = true;
+            return menuLost("The menu changed before the transfer delta could be verified.");
+        }
+        if (!player.containerMenu.getCarried().isEmpty()) {
+            outcomeUncertain = true;
+            return failFinal("cursor_rollback_unconfirmed", "A transfer receipt completed without "
+                    + "an empty menu cursor.", FailureType.UNKNOWN);
+        }
+        int afterPlayer = count(view.playerSlots());
+        int afterContainer = count(view.containerSlots());
+        Map<String, Integer> afterItems = itemCounts(view.playerSlots());
+        String itemId = pendingMove.itemId().toString();
+        int playerItemDelta = afterItems.getOrDefault(itemId, 0)
+                - beforeItems.getOrDefault(itemId, 0);
+        int expectedPlayerDelta = direction == Direction.DEPOSIT
+                ? -pendingMove.count() : pendingMove.count();
+        int playerDelta = afterPlayer - beforePlayerCount;
+        int containerDelta = afterContainer - beforeContainerCount;
+        if (playerDelta != expectedPlayerDelta
+                || containerDelta != -expectedPlayerDelta
+                || playerItemDelta != expectedPlayerDelta) {
+            outcomeUncertain = true;
+            return failFinal("transfer_delta_diverged", "The real menu did not show equal and "
+                    + "opposite container/main-inventory deltas for the confirmed semantic item. "
+                    + "Blind retry was stopped.", FailureType.UNKNOWN);
+        }
+        effectsStarted = true;
+        movedCount += pendingMove.count();
+        movedByItem.merge(itemId, pendingMove.count(), Integer::sum);
+        lastPlayerCount = afterPlayer;
+        lastContainerCount = afterContainer;
+        stableFingerprint = fingerprint(player.containerMenu);
+        pendingMove = null;
+        planIndex++;
+        phase = Phase.TRANSFER;
+        return TaskState.RUNNING;
+    }
+
+    private boolean goalSatisfied() {
+        if (r.operation == SemanticContainerTaskRecord.Operation.BALANCE) {
+            return lastPlayerCount == r.targetCount;
+        }
+        if (r.targetCount != null) {
+            return r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT
+                    ? lastContainerCount >= r.targetCount : lastPlayerCount >= r.targetCount;
+        }
+        return movedCount == plannedAmount;
+    }
+
+    private TaskState cleanupMenu() {
+        if (player.containerMenu == player.inventoryMenu) {
+            openedMenu = false;
+            openRequested = false;
+            if (!player.inventoryMenu.getCarried().isEmpty()) outcomeUncertain = true;
+            phase = Phase.COMPLETE;
+            return TaskState.RUNNING;
+        }
+        return start(new CloseMenuTaskRecord(
+                childId("close"), childDeadline(30L * 20L)), Purpose.CLOSE);
+    }
+
+    private TaskState tickChild() {
+        TaskState terminal = runChild(activeChild);
+        if (terminal == null) return TaskState.RUNNING;
+        TaskResult result = activeChild.result(terminal);
+        Purpose purpose = activePurpose;
+        activeChild = null;
+        activePurpose = null;
+        boolean success = terminal == TaskState.SUCCESS && result != null && result.success();
+        if (!success) {
+            return switch (purpose) {
+                case OPEN -> {
+                    if (player.containerMenu != player.inventoryMenu) {
+                        openedMenu = true;
+                        yield failFinal("container_open_unconfirmed", "A menu appeared but the "
+                                + "native open receipt was not confirmed.", lastFailure());
+                    }
+                    yield failFinal("container_interaction_failed", "The selected container could "
+                            + "not be opened through ordinary first-person interaction.",
+                            lastFailure());
+                }
+                case TRANSFER -> {
+                    outcomeUncertain = true;
+                    yield failFinal("container_transfer_unconfirmed", "A menu transfer did not "
+                            + "receive a complete cursor-safe confirmation. Blind retry stopped.",
+                            lastFailure());
+                }
+                case CLOSE -> {
+                    outcomeUncertain = true;
+                    if (failureMessage == null) {
+                        failureCode = "container_close_unconfirmed";
+                        failureMessage = "The native container close was not confirmed.";
+                        failureType = lastFailure();
+                    }
+                    phase = Phase.COMPLETE;
+                    yield TaskState.RUNNING;
+                }
+            };
+        }
+        return switch (purpose) {
+            case OPEN -> {
+                waitMenuSince = player.level().getGameTime();
+                phase = Phase.WAIT_MENU;
+                yield TaskState.RUNNING;
+            }
+            case TRANSFER -> verifyTransfer();
+            case CLOSE -> {
+                openedMenu = false;
+                openRequested = false;
+                if (player.containerMenu != player.inventoryMenu
+                        || !player.inventoryMenu.getCarried().isEmpty()) {
+                    outcomeUncertain = true;
+                    if (failureMessage == null) {
+                        failureCode = "container_close_unconfirmed";
+                        failureMessage = "The menu did not return to an empty native inventory state.";
+                        failureType = FailureType.UNKNOWN;
+                    }
+                }
+                phase = Phase.COMPLETE;
+                yield TaskState.RUNNING;
+            }
+        };
+    }
+
+    private TaskState start(TaskRecord record, Purpose purpose) {
+        activeChild = TaskFactory.create(player, record);
+        activePurpose = purpose;
+        return TaskState.RUNNING;
+    }
+
+    private boolean menuValid() {
+        return view != null && player.containerMenu != player.inventoryMenu
+                && player.containerMenu.containerId == expectedContainerId
+                && player.containerMenu.getClass() == expectedMenuClass;
+    }
+
+    private TaskState menuLost(String message) {
+        outcomeUncertain |= effectsStarted;
+        openedMenu = player.containerMenu != player.inventoryMenu;
+        return failFinal("container_menu_lost", message, FailureType.TARGET_LOST);
+    }
+
+    private TaskState failFinal(String code, String message, FailureType type) {
+        if (failureMessage == null) {
+            failureCode = code;
+            failureMessage = message;
+            failureType = type == null ? FailureType.UNKNOWN : type;
+        }
+        if (player.containerMenu != player.inventoryMenu) {
+            openedMenu = true;
+            phase = Phase.CLEANUP;
+        } else {
+            openedMenu = false;
+            phase = Phase.COMPLETE;
+        }
+        return TaskState.RUNNING;
+    }
+
+    private boolean targetStillValid() {
+        if (target == null || !player.level().isLoaded(target.position())) return false;
+        BlockEntity entity = player.level().getBlockEntity(target.position());
+        if (!(entity instanceof Container)) return false;
+        var state = player.level().getBlockState(target.position());
+        if (!BuiltInRegistries.BLOCK.getKey(state.getBlock()).equals(target.blockId())) return false;
+        return state.getMenuProvider(player.level(), target.position()) != null;
+    }
+
+    private boolean withinReach() {
+        return target != null && player.getEyePosition().distanceToSqr(
+                Vec3.atCenterOf(target.position())) <= REACH * REACH;
+    }
+
+    private boolean otherPlayerNearTarget() {
+        if (target == null) return false;
+        AABB bounds = new AABB(target.position()).inflate(OTHER_PLAYER_RADIUS);
+        return !player.clientLevel.getEntitiesOfClass(Player.class, bounds, candidate ->
+                candidate != player && !candidate.getUUID().equals(player.getUUID())
+                        && candidate.isAlive() && !candidate.isSpectator()).isEmpty();
+    }
+
+    private int count(List<Integer> slots) {
+        int total = 0;
+        AbstractContainerMenu menu = player.containerMenu;
+        for (int slot : slots) {
+            ItemStack stack = menu.getSlot(slot).getItem();
+            if (matches(stack)) total += stack.getCount();
+        }
+        return total;
+    }
+
+    private Map<String, Integer> itemCounts(List<Integer> slots) {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        AbstractContainerMenu menu = player.containerMenu;
+        for (int slot : slots) {
+            ItemStack stack = menu.getSlot(slot).getItem();
+            if (!matches(stack)) continue;
+            String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            result.merge(id, stack.getCount(), Integer::sum);
+        }
+        return result;
+    }
+
+    private boolean matches(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (itemTag != null) return stack.is(itemTag);
+        return r.itemIds.contains(BuiltInRegistries.ITEM.getKey(stack.getItem()));
+    }
+
+    private static String fingerprint(AbstractContainerMenu menu) {
+        StringBuilder result = new StringBuilder(menu.getClass().getName())
+                .append(':').append(menu.containerId).append('|');
+        for (Slot slot : menu.slots) appendStack(result, slot.getItem());
+        result.append("cursor=");
+        appendStack(result, menu.getCarried());
+        return result.toString();
+    }
+
+    private static void appendStack(StringBuilder result, ItemStack stack) {
+        if (stack.isEmpty()) {
+            result.append("_;");
+            return;
+        }
+        result.append(BuiltInRegistries.ITEM.getKey(stack.getItem()))
+                .append('@').append(stack.getCount())
+                .append('#').append(stack.getComponentsPatch().hashCode()).append(';');
+    }
+
+    private boolean sameDimension(Goal.WorldPosition position) {
+        return position != null && (position.dimension() == null
+                || position.dimension().equals(
+                        player.level().dimension().location().toString()));
+    }
+
+    private static boolean specializedStorage(ResourceLocation blockId) {
+        return blockId != null && (blockId.getNamespace().equals("ae2")
+                || blockId.getNamespace().equals("appeng"));
+    }
+
+    private static boolean specializedStorage(String className) {
+        String value = className == null ? "" : className.toLowerCase(Locale.ROOT);
+        return value.contains("appeng") || value.contains(".ae2.");
+    }
+
+    private static long squared(BlockPos left, BlockPos right) {
+        long dx = (long) left.getX() - right.getX();
+        long dy = (long) left.getY() - right.getY();
+        long dz = (long) left.getZ() - right.getZ();
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    private String childId(String label) {
+        return r.getToolCallId() + "-container-" + label + "-" + (++childSerial);
+    }
+
+    private long childDeadline(long ticks) {
+        return Math.min(r.getDeadlineGameTime(), player.level().getGameTime() + ticks);
+    }
+
+    @Override protected void cleanup() {
+        stopNav();
+        if (activeChild != null) {
+            activeChild.stop(player, Task.StopReason.REPLACED);
+            activeChild = null;
+            activePurpose = null;
+        }
+        if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
+            try {
+                var context = ClientRuntime.requireContext(player);
+                context.menus().close(context, 20);
+            } catch (RuntimeException ignored) {
+                outcomeUncertain = true;
+            }
+        }
+        super.cleanup();
+    }
+
+    @Override protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("operation", r.operation.name().toLowerCase(Locale.ROOT));
+        if (containerKind != null) data.put("container_kind", containerKind);
+        data.put("initial_main_count", initialPlayerCount);
+        data.put("observed_final_main_count", lastPlayerCount);
+        data.put("initial_container_count", initialContainerCount);
+        data.put("observed_final_container_count", lastContainerCount);
+        data.put("moved_count", movedCount);
+        data.put("moved_items", Map.copyOf(movedByItem));
+        data.put("goal_satisfied", goalSatisfied);
+        data.put("outcome_partial", movedCount > 0 && !goalSatisfied);
+        data.put("outcome_uncertain", outcomeUncertain);
+        if (r.count != null) data.put("requested_count", r.count);
+        if (r.targetCount != null) data.put("target_count", r.targetCount);
+        if (failureCode != null) {
+            data.put("decision", Map.of("required", true, "reason_code", failureCode,
+                    "recovery_options", recoveryOptions(failureCode, movedCount > 0)));
+        }
+        return data;
+    }
+
