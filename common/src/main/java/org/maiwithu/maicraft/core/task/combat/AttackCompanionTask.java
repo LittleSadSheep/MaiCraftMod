@@ -298,3 +298,303 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     private Entity liveEntity(int id) {
         Entity e = player.clientLevel.getEntity(id);
+        return e == null || e.isRemoved() || e == player ? null : e;
+    }
+
+    /** 把已经有结果的目标记进账本(死了 / 不见了)。 */
+    private void settleFinishedTargets() {
+        for (int id : r.indiscriminate ? List.copyOf(touchedIds) : r.entityIds) {
+            if (r.terminal(id)) {
+                continue;
+            }
+            Entity e = player.clientLevel.getEntity(id);
+            if (e == null || e.isRemoved()) {
+                if (r.strikes(id) > 0) {
+                    r.defeated(id);
+                    beginLoot(lastTargetPosition);
+                } else {
+                    r.lost(id);
+                }
+            } else if (e instanceof LivingEntity living && living.isDeadOrDying()) {
+                r.defeated(id);
+                beginLoot(lastTargetPosition);
+            }
+        }
+    }
+
+    /**
+     * 搜不出路那一刻裁一次:<b>射得到就改用弓,连弹道都没有就是无解</b>,这一只不打了。
+     *
+     * <pre>
+     * 有路           → 剑
+     * 没路 + 有弹道  → 弓
+     * 没路 + 没弹道  → 放弃这只(换下一只,没别的就收工)
+     * </pre>
+     *
+     * <p>只在 NO-PATH 落定那一刻取一次样。搜索烧完整个预算才给得出这个结论,不是抖出来
+     * 的;而"这一刻恰好没弹道"确实会抖,所以它不单独构成放弃 —— 两个条件同时成立才算。
+     */
+    private void judgeNoPath(Entity foe) {
+        noPath.add(foe.getId());
+        if (Loadout.forTarget(player, foe).hasRanged() && shotExistsTo(foe)) {
+            return;   // 走不到但射得到:顶层下一刻自然改判弓
+        }
+        r.unreachable(foe.getId());
+        Constants.LOG.info("[maicraft-attack] 放弃 目标={} 走不到,也没有弹道", foe.getId());
+    }
+
+    /** 这一刻算不算得出一条能打到它的箭道。射不到的角落里的怪就是无解。 */
+    private boolean shotExistsTo(Entity foe) {
+        double maxRange = r.strictAuthorized && foe instanceof EndCrystal
+                ? STRICT_CRYSTAL_MAX_DISTANCE : MAX_FIRING_RANGE;
+        return Ballistics.findArrowShot(player.level(), player, foe,
+                BOW_FULL_SPEED * RangedShot.bowPowerForTicks(15), ARROW_GRAVITY, ARROW_DRAG,
+                ARROW_HITBOX_RADIUS, maxRange, true) != null;
+    }
+
+    /** 打完了 —— 名单清空(点名),或没人再追她(无差别)。 */
+    private TaskState finish() {
+        InputDriver.halt(player);
+        stopNav();
+        if (r.indiscriminate || !r.defeated().isEmpty()) {
+            succeed();
+            return TaskState.SUCCESS;
+        }
+        fail("none of the requested entity ids could be attacked", FailureType.TARGET_LOST);
+        return TaskState.FAILED;
+    }
+
+    private void logMove(AttackPlan.Move move, Battlefield field) {
+        if (move.action() == lastLoggedAction && player.tickCount - lastPlanLogTick < 40) return;
+        lastLoggedAction = move.action();
+        lastPlanLogTick = player.tickCount;
+        Constants.LOG.info("[maicraft-attack] {} foe={} dist={} melee={} ranged={} hp_eff={} 场上={}",
+                move.action(),
+                move.foeId() == AttackPlan.NO_FOE ? "全场" : move.foeId(),
+                move.foeId() == AttackPlan.NO_FOE ? "-"
+                        : String.format("%.1f", distanceOf(field, move.foeId())),
+                field.hasMelee(), field.hasRanged(),
+                String.format("%.0f", field.effectiveHealth()), field.foes().size());
+    }
+
+    private static double distanceOf(Battlefield field, int id) {
+        var f = field.byId(id);
+        return f == null ? -1 : f.distance();
+    }
+
+    // ==================== 近战 ====================
+
+    /**
+     * 盾。与攻击、寻路并列的<b>第三层</b>,同样每刻问一次,同样不管别人在干嘛。
+     *
+     * <pre>
+     * 弓战斗中                       → 不碰(拉弓和举盾抢同一个 useItem,原版硬约束)
+     * 有谁进了它的危险半径 且 盾能举 → 举
+     * 否则                           → 放
+     * </pre>
+     *
+     * <p>不看攻击冷却:原版举着盾照样能挥刀,两件事不冲突;也不拦攻击层 —— 那样两层就又
+     * 耦上了。举着会减速,代价认了:能挡住的那一下比早退半格值。盾被斧子破了会进冷却,
+     * 那时她就正常跑。
+     *
+     * <p>同行没有可抄的(AltoClef 完全没有用盾逻辑,Meteor 管的是怎么破<b>对手</b>的盾),
+     * 这套判据与 PR #13 的 {@code ShieldCombatPolicy} 同源,只是去掉了"冷却好了放盾"
+     * 那一步 —— 既然能边举边砍,那一步是多余的。
+     */
+    private void tickShield() {
+        if (bowFighting) {
+            return;
+        }
+        boolean raised = shieldRaised();
+        boolean threatened = false;
+        for (var mob : hostiles) {
+            if (Menace.tooClose(mob, player)) {
+                threatened = true;
+                break;
+            }
+        }
+        if (!threatened) {
+            if (shieldAction != null) shieldAction.stop();
+            shieldAction = null;
+            return;
+        }
+        if (raised || player.isUsingItem()) {
+            return;   // 已经举着,或者手上占着别的东西
+        }
+        ItemStack shield = player.getOffhandItem().is(Items.SHIELD)
+                ? player.getOffhandItem() : ItemStack.EMPTY;
+        if (shield.isEmpty() || player.getCooldowns().isOnCooldown(shield.getItem())) {
+            return;   // 没盾,或者被斧子破了还在冷却 —— 正常跑
+        }
+        if (shieldAction == null) {
+            shieldAction = Interaction.useInAir(
+                    player, InteractionHand.OFF_HAND, Interaction.Timing.hold());
+        }
+        if (shieldAction.tick() == Interaction.Status.FAILED) shieldAction = null;
+    }
+
+    private boolean shieldRaised() {
+        return player.isUsingItem()
+                && player.getUsedItemHand() == InteractionHand.OFF_HAND
+                && player.getUseItem().is(Items.SHIELD);
+    }
+
+    /**
+     * 副手空着就从背包里拿一面盾装上 —— <b>剑早就能自动换手,盾没道理不能</b>。
+     *
+     * <p>只在副手<b>空着</b>时装:主人可能正指望那一格放别的东西,不该替他决定。
+     */
+    /**
+     * 攻击系统。<b>与移动正交</b>:每刻问一次「冷却好了吗、够得着谁吗」,够得着就挥 ——
+     * 不看她这一刻在靠近、在拉开还是站着,也不改变她的去向。
+     *
+     * <p>目标<b>自己挑</b>,不用判据那个 {@code move.foeId()}:拉开({@code AVOID})是全场的
+     * 动作,那时判据给的目标是"全场"、任务里的 {@code target} 是空 —— 手里那把剑等于不存在。
+     * 实测她躲的时候一刀不还。
+     *
+     * @param field 这一刻的局面,复用 onTick 已经扫好的那份
+     */
+    private void tickWeapon(Battlefield field) {
+        if (meleeAction != null) {
+            Entity planned = liveEntity(meleeVictimId);
+            if (r.strictAuthorized && (planned == null
+                    || !r.entityIds.contains(planned.getId())
+                    || !strictMeleeClear(planned))) {
+                meleeAction.stop();
+                meleeAction = null;
+                meleeVictimId = -1;
+                meleeSelection.reset();
+                return;
+            }
+            Interaction.Status status = meleeAction.tick();
+            if (status == Interaction.Status.DONE) r.strike(meleeVictimId);
+            if (status != Interaction.Status.RUNNING) {
+                meleeAction = null;
+                meleeVictimId = -1;
+                meleeSelection.reset();
+            }
+            return;
+        }
+        if (player.isUsingItem() && !shieldRaised()) {
+            return;   // 正在拉弓或吃东西,别打断
+        }
+        // <b>举着盾照样挥刀</b> —— 原版这两件事不冲突。这条守卫本意是拦"正在拉弓",
+        // 却写成了"手上用着任何东西";副手多了一面盾之后,它把攻击层整个锁死:
+        // 实测她站在带里(距离 2.0~2.9、带 [2.02, 3.30])一刀不挥,看着像只躲不打。
+        // 武器是<b>可选的</b>:拳头一点伤害,鸡四血、羊八血、牛十血,照样打得动。
+        // 这里曾经"没有近战武器就直接返回" —— 那是按"打怪"写的前提(赤手对上会还手的
+        // 东西不是出路),模型让她打一只鸡时那个前提不成立,她会走到跟前站着不动。
+        Loadout loadout = Loadout.forTarget(player, player);
+        Entity victim = null;
+        double best = Double.MAX_VALUE;
+        for (var f : field.foes()) {
+            if (r.strictAuthorized && !f.authorized()) {
+                continue;
+            }
+            // <b>名单只决定去打谁,不决定砍不砍眼前的。</b>"够得着就打"本来就是攻击层的
+            // 定义,掺进"这只在不在名单里"就又把两层耦上了 —— 而且点名模式下路上被贴脸
+            // 也不还手,得挨完一路才到目标。
+            if (f.armed() || f.distance() >= best) {
+                continue;   // 引信在走的不碰:打它等于自己引爆
+            }
+            Entity e = liveEntity(f.id());
+            if (e != null && f.distance() <= Swing.reachTo(
+                    player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE), e.getBbWidth())) {
+                victim = e;
+                best = f.distance();
+            }
+        }
+        if (victim == null) {
+            return;
+        }
+        if (loadout.hasMelee()) {
+            FirstPersonActionGate.Status selected = meleeSelection.select(player, loadout.melee().slot());
+            if (selected != FirstPersonActionGate.Status.READY) {
+                if (selected == FirstPersonActionGate.Status.FAILED) meleeSelection.reset();
+                return;
+            }
+        }
+        if (!Swing.mayStrike(false, victim instanceof LivingEntity hurt && hurt.hurtTime > 0,
+                player.getAttackStrengthScale(0.0f))) {
+            return;
+        }
+        if (r.strictAuthorized && !strictMeleeClear(victim)) return;
+        InputDriver.lookAt(player, victim.getEyePosition());
+        // 疾跑会让原版取消暴击判定(Player.attack 里 flag1 带 !isSprinting)。
+        meleeVictimId = victim.getId();
+        meleeAction = Interaction.attackEntity(player, victim);
+    }
+
+    /** A vanilla sweeping sword hit must not splash an unlisted living entity. */
+    private boolean strictMeleeClear(Entity victim) {
+        return player.level().getEntities(player, victim.getBoundingBox().inflate(1.5D),
+                candidate -> candidate instanceof LivingEntity living
+                        && living.isAlive()
+                        && candidate != victim
+                        && !r.entityIds.contains(candidate.getId())).isEmpty();
+    }
+
+    private boolean targetRecovering() {
+        return target instanceof LivingEntity living && living.hurtTime > 0;
+    }
+
+    /**
+     * 弓战斗:<b>和剑战斗同一段走位</b>,只是环换了一副(内沿 {@link #BOW_MIN_DISTANCE},
+     * 外沿射程)。带内导航自然到达、她停下来,这时才拉弓 —— "什么时候该站定"不用另写。
+     */
+    private TaskState closeIn() {
+        driveApproach();
+        return TaskState.RUNNING;
+    }
+
+    private TaskState bowFight() {
+        // <b>两层并行</b>:脚一直在走位,手一直在拉弓。原版拉弓时本来就能走(只是慢),
+        // 是我在 shootAt 里主动 halt 的 —— 于是每刻建一次导航、拆一次,看着像被打断。
+        driveApproach();
+        return shootAt(Loadout.forTarget(player, target));
+    }
+
+
+
+
+    /**
+     * 走位:保持在目标够得着的距离上,同时离别的敌对生物远一点。
+     *
+     * <p>{@code MELEE} 与 {@code CLOSE_IN} 共用这一段 —— 它们只差"要不要挥",站位是一样的。
+     * 分开写的时候,姿态一变就会拆掉刚算好的路径,而击退每砍一刀就让姿态变一次。
+     */
+    private PlayerNav.Status driveApproach() {
+        if (nav == null) {
+            // <b>没有目标也要走。</b>判据的 SKIRMISH 可以是"对全场的"(挑不出能打的,但还有
+            // 东西追她),那时该退开等机会 —— 这里曾经第一行就 {@code target == null} 早退,
+            // 于是判据每刻正确地喊"走位"、执行层每刻安静地什么都不做,日志看着一切正常,
+            // 直到她被苦力怕炸死。什么时候不用走由 standoffGoal 说(既无目标也无怪才返回 null)。
+            //
+            // 目标会动:要 trackGoal 而不是 toGoal —— 后者一旦到达就永久 ARRIVED,
+            // 她会站在原地不再跟位,别的怪就能从容贴上来。
+            nav = PlayerNav.trackGoal(player, this::standoffGoal, CHASE_SPEED, () -> false);
+        }
+        PlayerNav.Status status = nav.tick();
+        // <b>只有真 NO-PATH 才算够不着</b>:搜索烧完整个预算也没找出路线。目标丢了、被围死、
+        // 重规划抖动都是另外的事,拿它们当够不着会把两格外的普通僵尸也判死。
+        boolean noRoute = status == PlayerNav.Status.FAILED
+                && (nav.failType() == FailureType.NO_PATH
+                        || nav.failType() == FailureType.TERRAIN_BLOCKED);
+        if (status == PlayerNav.Status.FAILED) {
+            // 别的失败也要留声:走位导航当刻就失败、下一刻重建,在日志里是一片安静的
+            // SKIRMISH——站着不动却什么都没说,排查时只能靠猜。
+            if (!noRoute) {
+                Constants.LOG.info("[maicraft-attack] 走位导航失败({}),重建: {}",
+                        nav.failType(), nav.failReason());
+            }
+            stopNav();
+        }
+        // 弓那一套的环在 8~12 格,和近战的环问的不是同一个问题,它的成败说明不了可达性。
+        if (target != null && !bowFighting) {
+            if (noRoute) {
+                judgeNoPath(target);
+            } else {
+                noPath.remove(target.getId());
+            }
+        }
+        return status;
