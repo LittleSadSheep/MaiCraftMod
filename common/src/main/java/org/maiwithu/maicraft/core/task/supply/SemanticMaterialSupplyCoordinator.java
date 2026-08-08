@@ -298,3 +298,110 @@ public final class SemanticMaterialSupplyCoordinator {
             receipt.put("returned_to_investigation_site", true);
             String message = pendingMessage;
             if (returnNavigation != null) returnNavigation.stop();
+            clear();
+            return new Tick(Status.SUPPLIED_REPLAN, Map.copyOf(receipt),
+                    FailureType.UNKNOWN, message);
+        }
+        if (returnNavigation == null) {
+            BlockPos origin = investigationOrigin;
+            returnNavigation = new PlayerNav(player, origin, 1.0,
+                    () -> player.blockPosition().distSqr(origin) <= 4.0D);
+        }
+        PlayerNav.Status status = returnNavigation.tick();
+        if (status == PlayerNav.Status.RUNNING) {
+            return new Tick(Status.RUNNING, Map.of(), FailureType.UNKNOWN,
+                    "returning to the investigated worksite");
+        }
+        if (status == PlayerNav.Status.ARRIVED
+                && player.blockPosition().distSqr(investigationOrigin) <= 4.0D) {
+            receipt.put("returned_to_investigation_site", true);
+            String message = pendingMessage;
+            returnNavigation.stop();
+            clear();
+            return new Tick(Status.SUPPLIED_REPLAN, Map.copyOf(receipt),
+                    FailureType.UNKNOWN, message);
+        }
+        String detail = returnNavigation.failReason();
+        returnNavigation.stop();
+        receipt.put("goal_satisfied", false);
+        receipt.put("failure_code", "supply_return_path_blocked");
+        receipt.put("requires_decision", true);
+        receipt.put("recovery_options", List.of(
+                Map.of("id", "make_return_path_accessible", "risk", "world_change"),
+                Map.of("id", "return_to_worksite", "risk", "none"),
+                Map.of("id", "stop", "risk", "none")));
+        receipt.put("returned_to_investigation_site", false);
+        clear();
+        return new Tick(Status.FAILED, Map.copyOf(receipt), FailureType.NO_PATH,
+                "materials were obtained, but the worksite return path failed: " + detail);
+    }
+
+    private static FailureType failureType(TaskResult result, TaskState terminal) {
+        if (terminal == TaskState.TIMEOUT || result != null && result.timedOut()) {
+            return FailureType.TIMED_OUT;
+        }
+        if (terminal == TaskState.CANCELLED || result != null && result.interrupted()) {
+            return FailureType.INTERRUPTED;
+        }
+        Object raw = result == null || result.data() == null
+                ? null : result.data().get("failure_type");
+        if (raw != null) {
+            try {
+                return FailureType.valueOf(raw.toString().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                // Fall through to the prerequisite-safe default.
+            }
+        }
+        return FailureType.NO_MATERIAL;
+    }
+
+    private static List<Map<String, Object>> safeOptions(List<?> values) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object value : values) {
+            if (value instanceof Map<?, ?> map) {
+                Map<String, Object> safe = new LinkedHashMap<>();
+                copyUnknown(map, safe, "id", "summary", "risk");
+                if (!safe.isEmpty()) result.add(Map.copyOf(safe));
+            } else if (value != null) {
+                result.add(Map.of("id", value.toString()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<Map<String, Object>> safeIssues(List<?> values) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object value : values) {
+            if (!(value instanceof Map<?, ?> map)) continue;
+            Map<String, Object> safe = new LinkedHashMap<>();
+            copyUnknown(map, safe, "source", "code", "summary");
+            if (!safe.isEmpty()) result.add(Map.copyOf(safe));
+        }
+        return List.copyOf(result);
+    }
+
+    private static void copy(
+            Map<String, Object> source, Map<String, Object> target, String... keys) {
+        for (String key : keys) if (source.containsKey(key)) target.put(key, source.get(key));
+    }
+
+    private static void copyUnknown(
+            Map<?, ?> source, Map<String, Object> target, String... keys) {
+        for (String key : keys) {
+            Object value = source.get(key);
+            if (value != null) target.put(key, value);
+        }
+    }
+
+    private void clear() {
+        child = null;
+        demand = null;
+        sources = List.of();
+        childDeadline = 0L;
+        investigationOrigin = null;
+        originDimension = null;
+        returnNavigation = null;
+        pendingReceipt = null;
+        pendingMessage = null;
+    }
+}
