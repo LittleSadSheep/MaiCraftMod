@@ -298,3 +298,126 @@ public final class SemanticSourceKnowledge {
         };
     }
 
+    private static String toolFamily(BlockState state) {
+        if (state.is(BlockTags.MINEABLE_WITH_PICKAXE)) return "pickaxe";
+        if (state.is(BlockTags.MINEABLE_WITH_AXE)) return "axe";
+        if (state.is(BlockTags.MINEABLE_WITH_SHOVEL)) return "shovel";
+        if (state.is(BlockTags.MINEABLE_WITH_HOE)) return "hoe";
+        return "harvesting_tool";
+    }
+
+    private static Map<String, Profile> profiles() {
+        Map<String, Profile> result = new LinkedHashMap<>();
+        block(result, "minecraft:coal", List.of("#minecraft:coal_ores"), "coal ore");
+        block(result, "minecraft:raw_iron", List.of("#minecraft:iron_ores"), "iron ore");
+        block(result, "minecraft:raw_copper", List.of("#minecraft:copper_ores"), "copper ore");
+        block(result, "minecraft:raw_gold", List.of("#minecraft:gold_ores"), "gold ore");
+        block(result, "minecraft:diamond", List.of("#minecraft:diamond_ores"), "diamond ore");
+        block(result, "minecraft:emerald", List.of("#minecraft:emerald_ores"), "emerald ore");
+        block(result, "minecraft:lapis_lazuli", List.of("#minecraft:lapis_ores"), "lapis ore");
+        block(result, "minecraft:redstone", List.of("#minecraft:redstone_ores"), "redstone ore");
+        block(result, "minecraft:quartz", List.of("minecraft:nether_quartz_ore"),
+                "nether quartz ore", List.of("minecraft:the_nether"));
+        block(result, "minecraft:ancient_debris", List.of("minecraft:ancient_debris"),
+                "ancient debris", List.of("minecraft:the_nether"));
+        block(result, "minecraft:nether_quartz_ore", List.of("minecraft:nether_quartz_ore"),
+                "nether quartz ore block", List.of("minecraft:the_nether"));
+        block(result, "minecraft:nether_gold_ore", List.of("minecraft:nether_gold_ore"),
+                "nether gold ore block", List.of("minecraft:the_nether"));
+        block(result, "minecraft:netherrack", List.of("minecraft:netherrack"),
+                "natural netherrack", List.of("minecraft:the_nether"));
+        block(result, "minecraft:blackstone", List.of("minecraft:blackstone"),
+                "natural blackstone", List.of("minecraft:the_nether"));
+        block(result, "minecraft:glowstone_dust", List.of("minecraft:glowstone"),
+                "natural glowstone", List.of("minecraft:the_nether"));
+        block(result, "minecraft:end_stone", List.of("minecraft:end_stone"),
+                "natural end stone", List.of("minecraft:the_end"));
+        block(result, "minecraft:chorus_fruit",
+                List.of("minecraft:chorus_plant", "minecraft:chorus_flower"),
+                "natural chorus plant", List.of("minecraft:the_end"));
+        block(result, "minecraft:cobblestone", List.of("minecraft:stone"), "stone that drops cobblestone");
+        block(result, "minecraft:cobbled_deepslate", List.of("minecraft:deepslate"), "deepslate");
+        block(result, "minecraft:flint", List.of("minecraft:gravel"), "gravel that can drop flint");
+
+        entity(result, "minecraft:white_wool", List.of("minecraft:sheep"), "sheep wool");
+        for (String color : List.of("orange", "magenta", "light_blue", "yellow", "lime",
+                "pink", "gray", "light_gray", "cyan", "purple", "blue", "brown", "green",
+                "red", "black")) {
+            entity(result, "minecraft:" + color + "_wool", List.of("minecraft:sheep"),
+                    "matching sheep wool");
+        }
+        entity(result, "minecraft:mutton", List.of("minecraft:sheep"), "sheep drop");
+        entity(result, "minecraft:beef", List.of("minecraft:cow"), "cow drop");
+        entity(result, "minecraft:porkchop", List.of("minecraft:pig", "minecraft:hoglin"), "pig-family drop");
+        entity(result, "minecraft:chicken", List.of("minecraft:chicken"), "chicken drop");
+        entity(result, "minecraft:feather", List.of("minecraft:chicken"), "chicken drop");
+        entity(result, "minecraft:rabbit", List.of("minecraft:rabbit"), "rabbit drop");
+        entity(result, "minecraft:rabbit_hide", List.of("minecraft:rabbit"), "rabbit drop");
+        entity(result, "minecraft:rabbit_foot", List.of("minecraft:rabbit"), "rare rabbit drop");
+        entity(result, "minecraft:leather", List.of("minecraft:cow"), "cow drop");
+        entity(result, "minecraft:string", List.of("minecraft:spider", "minecraft:cave_spider"), "spider drop");
+        entity(result, "minecraft:ender_pearl", List.of("minecraft:enderman"), "enderman drop");
+        entity(result, "minecraft:blaze_rod", List.of("minecraft:blaze"),
+                "blaze drop", List.of("minecraft:the_nether"));
+        entity(result, "minecraft:bone", List.of("minecraft:skeleton", "minecraft:stray"), "skeleton-family drop");
+        entity(result, "minecraft:rotten_flesh", List.of("minecraft:zombie", "minecraft:husk"), "zombie-family drop");
+        entity(result, "minecraft:gunpowder", List.of("minecraft:creeper", "minecraft:witch", "minecraft:ghast"), "hostile mob drop");
+        entity(result, "minecraft:slime_ball", List.of("minecraft:slime"), "slime drop");
+        entity(result, "minecraft:ink_sac", List.of("minecraft:squid"), "squid drop");
+        entity(result, "minecraft:glow_ink_sac", List.of("minecraft:glow_squid"), "glow squid drop");
+        entity(result, "minecraft:phantom_membrane", List.of("minecraft:phantom"), "phantom drop");
+        entity(result, "minecraft:shulker_shell", List.of("minecraft:shulker"),
+                "shulker drop", List.of("minecraft:the_end"));
+        entity(result, "minecraft:ghast_tear", List.of("minecraft:ghast"),
+                "ghast drop", List.of("minecraft:the_nether"));
+        entity(result, "minecraft:magma_cream", List.of("minecraft:magma_cube"),
+                "magma cube drop", List.of("minecraft:the_nether"));
+        entity(result, "minecraft:wither_skeleton_skull", List.of("minecraft:wither_skeleton"),
+                "wither skeleton drop", List.of("minecraft:the_nether"));
+        entity(result, "minecraft:prismarine_shard", List.of("minecraft:guardian", "minecraft:elder_guardian"), "guardian drop");
+        entity(result, "minecraft:prismarine_crystals", List.of("minecraft:guardian", "minecraft:elder_guardian"), "guardian drop");
+        return Map.copyOf(result);
+    }
+
+    private static <T> List<T> bounded(Set<T> values, int maximum) {
+        return List.copyOf(values.stream().limit(maximum).toList());
+    }
+
+    private static void block(
+            Map<String, Profile> target, String item, List<String> blocks, String description) {
+        block(target, item, blocks, description, List.of());
+    }
+
+    private static void block(
+            Map<String, Profile> target,
+            String item,
+            List<String> blocks,
+            String description,
+            List<String> allowedDimensions) {
+        target.put(item, new Profile(
+                blocks, List.of(), sourceDimensions(
+                        SemanticAcquireTaskRecord.Source.MINE, allowedDimensions), description));
+    }
+
+    private static void entity(
+            Map<String, Profile> target, String item, List<String> entities, String description) {
+        entity(target, item, entities, description, List.of());
+    }
+
+    private static void entity(
+            Map<String, Profile> target,
+            String item,
+            List<String> entities,
+            String description,
+            List<String> allowedDimensions) {
+        target.put(item, new Profile(
+                List.of(), entities, sourceDimensions(
+                        SemanticAcquireTaskRecord.Source.HUNT, allowedDimensions), description));
+    }
+
+    private static Map<SemanticAcquireTaskRecord.Source, List<String>> sourceDimensions(
+            SemanticAcquireTaskRecord.Source source, List<String> allowedDimensions) {
+        if (allowedDimensions == null || allowedDimensions.isEmpty()) return Map.of();
+        return Map.of(source, List.copyOf(allowedDimensions));
+    }
+}
