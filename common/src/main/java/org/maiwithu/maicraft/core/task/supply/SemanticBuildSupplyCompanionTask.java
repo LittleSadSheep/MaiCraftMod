@@ -298,3 +298,212 @@ final class SemanticBuildSupplyCompanionTask
                     FailureType.NO_MATERIAL);
             return false;
         }
+    }
+
+    private Map<ResourceLocation, ResourceLocation> selectedVariants(TaskResult result) {
+        if (materialProposal == null || materialProposal.empty()) {
+            throw new IllegalArgumentException("no material proposal was awaiting selection");
+        }
+        Object rawDeltas = result.data().get("actual_delta");
+        if (!(rawDeltas instanceof List<?> deltas)) {
+            throw new IllegalArgumentException("the PREPARE result omitted actual_delta");
+        }
+        Map<ResourceLocation, SemanticBuildMaterialBinding.Family> expected =
+                new LinkedHashMap<>();
+        for (SemanticBuildMaterialBinding.Family family : materialProposal.families()) {
+            expected.put(family.groupId(), family);
+        }
+        Map<ResourceLocation, ResourceLocation> selected = new LinkedHashMap<>();
+        for (Object rawDelta : deltas) {
+            if (!(rawDelta instanceof Map<?, ?> delta)
+                    || !(delta.get("item_id") instanceof String groupText)
+                    || !(delta.get("selected_item_id") instanceof String selectedText)) {
+                throw new IllegalArgumentException(
+                        "a PREPARE material group omitted its selected item identity");
+            }
+            ResourceLocation groupId = ResourceLocation.tryParse(groupText);
+            ResourceLocation selectedId = ResourceLocation.tryParse(selectedText);
+            if (groupId == null || selectedId == null || !expected.containsKey(groupId)) {
+                throw new IllegalArgumentException(
+                        "the PREPARE result contained an unknown material group");
+            }
+            if (selected.putIfAbsent(groupId, selectedId) != null) {
+                throw new IllegalArgumentException(
+                        "the PREPARE result repeated a material group selection");
+            }
+        }
+        if (selected.size() != expected.size()) {
+            throw new IllegalArgumentException(
+                    "the PREPARE result selected " + selected.size() + " of "
+                            + expected.size() + " material families");
+        }
+        return Map.copyOf(selected);
+    }
+
+    private Map<Item, Integer> inventoryCounts() {
+        Map<Item, Integer> counts = new LinkedHashMap<>();
+        for (int slot = 0; slot <= 35; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty()) counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
+        }
+        return counts;
+    }
+
+    private int inventoryCount(Item item) {
+        int count = 0;
+        for (int slot = 0; slot <= 35; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && stack.is(item)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private int capacityFor(Item item) {
+        ItemStack sample = new ItemStack(item);
+        int capacity = 0;
+        for (int slot = 0; slot <= 35; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty()) capacity += sample.getMaxStackSize();
+            else if (stack.is(item)) capacity += Math.max(0, stack.getMaxStackSize() - stack.getCount());
+        }
+        return capacity;
+    }
+
+    private static ResourceLocation itemId(Item item) {
+        return BuiltInRegistries.ITEM.getKey(item);
+    }
+
+    private void recordRound(ChildKind kind, TaskState state, TaskResult result) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("kind", kind.name().toLowerCase());
+        value.put("terminal_state", state.name().toLowerCase());
+        value.put("remaining_cells", remainingCellCount());
+        if (result != null) {
+            value.put("success", result.success());
+            value.put("message", result.message() == null ? "" : result.message());
+            if (result.data() != null && !result.data().isEmpty()) {
+                value.put("data", kind == ChildKind.PREPARE
+                        ? prepareRoundData(result.data()) : result.data());
+            }
+        }
+        rounds.add(Map.copyOf(value));
+    }
+
+    /** Keep AE palette candidates and concrete terminal mechanics inside the Mod runtime. */
+    private Map<String, Object> prepareRoundData(Map<String, Object> raw) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        for (String key : List.of("failure_code", "status", "operation",
+                "network_supply_prepared", "allow_crafting", "crafting_requests",
+                "crafting_jobs_submitted", "effects_started", "outcome_uncertain",
+                "mechanical_retry_allowed")) {
+            if (raw.containsKey(key)) summary.put(key, raw.get(key));
+        }
+        Object deltas = raw.get("actual_delta");
+        if (deltas instanceof List<?> values) {
+            summary.put("material_family_count", values.size());
+        }
+        return Map.copyOf(summary);
+    }
+
+    private void stopFromChild(
+            String code, String message, TaskResult result, FailureType type) {
+        if (result != null && result.data() != null
+                && Boolean.TRUE.equals(result.data().get("outcome_uncertain"))) {
+            message += "; the child outcome is uncertain and must be observed before retry";
+        }
+        stopWith(code, message, type);
+    }
+
+    private void stopWith(String code, String message, FailureType type) {
+        failureCode = code;
+        issues.add(Map.of("code", code, "summary", message));
+        fail(message, type);
+    }
+
+    private String childId(String suffix) {
+        return r.getToolCallId() + "-internal-" + suffix + '-' + (++childSerial);
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("material_policy", "storage_available");
+        data.put("complete_supply_prepared_before_construction", prepared);
+        data.put("total_material_ledger", stringLedger(fullLedger));
+        data.put("initial_remaining_material_ledger", stringLedger(initialRemaining));
+        data.put("remaining_material_ledger", stringLedger(ledger(true)));
+        data.put("remaining_cells", remainingCellCount());
+        boolean traversalSatisfied = activePlan.traversabilityContract() == null
+                || traversabilityResult != null && traversabilityResult.valid();
+        data.put("goal_satisfied", allMatched() && traversalSatisfied);
+        data.put("batches", List.copyOf(rounds));
+        if (!issues.isEmpty()) data.put("issues", List.copyOf(issues));
+        if (failureCode != null) {
+            data.put("failure_code", failureCode);
+            data.put("requires_decision", true);
+            data.put("recovery_options", List.of(
+                    Map.of("id", "free_inventory_space", "risk", "none"),
+                    Map.of("id", "repair_ae_supply", "risk", "none"),
+                    Map.of("id", "change_material_policy", "risk", "design_change"),
+                    Map.of("id", "stop", "risk", "none")));
+        }
+        if (traversabilityResult != null) {
+            data.put("traversability_verification", traversabilityResult.evidence());
+        }
+        if (allMatched() && traversalSatisfied) {
+            data.put("verified_position", verifiedCenter());
+            if (!activePlan.semanticFacts().isEmpty()) {
+                data.put("aggregate_verification", Map.of(
+                        "status", "verified",
+                        "basis", activePlan.traversabilityContract() == null
+                                ? "every contract-bearing target cell was re-read after construction"
+                                : "every target cell plus all planner-required traversal endpoints were re-read",
+                        "facts", activePlan.semanticFacts()));
+            }
+        }
+        else if (!finalBuildData.isEmpty()) data.put("last_build_evidence", finalBuildData);
+        return data;
+    }
+
+    private Map<String, Integer> stringLedger(Map<Item, Integer> ledger) {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        ledger.forEach((item, count) -> result.put(itemId(item).toString(), count));
+        return result;
+    }
+
+    private Map<String, Object> verifiedCenter() {
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (BuildTaskRecord.Target target : activePlan.targets) {
+            BlockPos pos = target.pos();
+            minX = Math.min(minX, pos.getX()); minY = Math.min(minY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ()); maxX = Math.max(maxX, pos.getX());
+            maxZ = Math.max(maxZ, pos.getZ());
+        }
+        return Map.of("x", Math.floorDiv(minX + maxX, 2), "y", minY,
+                "z", Math.floorDiv(minZ + maxZ, 2),
+                "dimension", player.level().dimension().location().toString(),
+                "kind", "verified_site_center");
+    }
+
+    @Override protected String successMessage() {
+        return "complete material ledger prepared, supplied in " + buildRounds
+                + " carried batch(es), and every requested build cell"
+                + (activePlan.traversabilityContract() == null ? "" : " and required route")
+                + " re-verified";
+    }
+
+    @Override protected String timeoutMessage() {
+        if (failureCode == null) failureCode = "semantic_build_supply_timeout";
+        return "semantic build supply timed out; review the remaining ledger before retrying";
+    }
+
+    @Override protected void cleanup() {
+        if (activeChild != null) {
+            activeChild.stop(player, Task.StopReason.REPLACED);
+            activeChild.result(TaskState.CANCELLED);
+            activeChild = null;
+        }
+        super.cleanup();
+    }
+}
