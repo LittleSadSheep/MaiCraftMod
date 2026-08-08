@@ -298,3 +298,303 @@ public final class SemanticCookCompanionTask
         if (stationPos == null
                 || !player.level().getBlockState(stationPos).is(candidate.device.block)) {
             stationPos = nearest(candidate.device.block, 32, 16);
+        }
+        if (stationPos == null) {
+            if (PlayerInv.buildableCount(
+                    player.getInventory(), candidate.device.block.asItem()) < 1) {
+                return acquire(
+                        candidate.device.block.asItem(), 1, Purpose.ACQUIRE_STATION);
+            }
+            BlockPos site = placementSite();
+            if (site == null) {
+                return failOrClean("no_safe_station_site",
+                        "No safe loaded nearby cell can receive the required cooking workstation.",
+                        FailureType.TERRAIN_BLOCKED);
+            }
+            stationPos = site;
+            BuildTaskRecord.Target target = new BuildTaskRecord.Target(
+                    candidate.device.block, candidate.device.block.asItem(), site,
+                    BuiltInRegistries.BLOCK.getKey(candidate.device.block).toString(),
+                    null, null, null).asItemPlace();
+            return start(new BuildTaskRecord(
+                    childId("place"), childDeadline(3L * 60L * 20L),
+                    List.of(target), false, true, false), Purpose.PLACE_STATION);
+        }
+        if (!withinReach(stationPos)) {
+            return start(new MoveToTaskRecord(
+                    childId("move"), childDeadline(3L * 60L * 20L),
+                    null, null, null,
+                    BuiltInRegistries.BLOCK.getKey(candidate.device.block).toString(), false),
+                    Purpose.MOVE_STATION);
+        }
+        phase = Phase.OPEN;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState acquire(Item item, int finalCount, Purpose purpose) {
+        if (openedMenu) {
+            replenishAfterClose = true;
+            phase = Phase.CLEANUP;
+            return TaskState.RUNNING;
+        }
+        SemanticAcquireTaskRecord child = new SemanticAcquireTaskRecord(
+                childId("acquire"), childDeadline(8L * 60L * 20L),
+                List.of(BuiltInRegistries.ITEM.getKey(item)), finalCount,
+                r.allowedSources.stream()
+                        .filter(source -> source != SemanticAcquireTaskRecord.Source.COOK)
+                        .toList(),
+                r.allowHarm, SemanticAcquireTaskRecord.SourceHint.empty(),
+                r.protectedLabels, 16, 6, 64);
+        return start(child, purpose);
+    }
+
+    private TaskState openStation() {
+        if (stationPos == null
+                || !player.level().getBlockState(stationPos).is(candidate.device.block)) {
+            stationPos = null;
+            phase = Phase.PREPARE;
+            return TaskState.RUNNING;
+        }
+        if (!withinReach(stationPos)) {
+            phase = Phase.PREPARE;
+            return TaskState.RUNNING;
+        }
+        openAttempts++;
+        return start(new InteractAtTaskRecord(
+                childId("open"), childDeadline(30L * 20L),
+                MouseButton.RIGHT, stationPos, 0, null), Purpose.OPEN_STATION);
+    }
+
+    private TaskState waitMenu() {
+        if (player.containerMenu instanceof AbstractFurnaceMenu) {
+            if (!menuMatches()) {
+                return failOrClean("wrong_station_menu",
+                        "The opened workstation does not match the selected cooking recipe.",
+                        FailureType.TARGET_LOST);
+            }
+            openedMenu = true;
+            phase = Phase.VALIDATE;
+            return TaskState.RUNNING;
+        }
+        if (player.level().getGameTime() - waitMenuSince > 60L) {
+            if (openAttempts < 2) {
+                phase = Phase.OPEN;
+                return TaskState.RUNNING;
+            }
+            return failOrClean("station_open_unconfirmed",
+                    "The selected workstation did not open a synchronized furnace-family menu.",
+                    FailureType.TARGET_LOST);
+        }
+        return TaskState.RUNNING;
+    }
+
+    private TaskState validateMenu() {
+        AbstractFurnaceMenu menu = furnaceMenu();
+        if (menu == null || !menuMatches()) return menuLost();
+        ItemStack input = menu.getSlot(0).getItem();
+        ItemStack fuelSlot = menu.getSlot(1).getItem();
+        ItemStack result = menu.getSlot(2).getItem();
+        if (!stationClaimed && (!input.isEmpty() || !fuelSlot.isEmpty()
+                || !result.isEmpty() || data(menu, 0) > 0 || data(menu, 2) > 0)) {
+            return failOrClean("station_in_use",
+                    "The resolved workstation already contains items or active progress; "
+                            + "MaiCraft will not claim or disturb it automatically.",
+                    FailureType.UNKNOWN);
+        }
+        if (stationClaimed && (!input.isEmpty() || !result.isEmpty())) {
+            return failOrClean("station_state_diverged",
+                    "The claimed workstation contains unexpected input or output before a new batch.",
+                    FailureType.UNKNOWN);
+        }
+        if (!fuelSlot.isEmpty() && !AbstractFurnaceBlockEntity.isFuel(fuelSlot)) {
+            return failOrClean("station_fuel_diverged",
+                    "The claimed workstation fuel slot contains a non-fuel item.",
+                    FailureType.UNKNOWN);
+        }
+        stationClaimed = true;
+        phase = Phase.LOAD_INPUT;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState loadInput() {
+        return transferTo(candidate.input, batchRaw, 0, Purpose.LOAD_INPUT);
+    }
+
+    private TaskState loadFuel() {
+        AbstractFurnaceMenu menu = furnaceMenu();
+        if (menu == null) return menuLost();
+        int availableBurn = Math.max(0, data(menu, 0));
+        ItemStack fuelSlot = menu.getSlot(1).getItem();
+        if (!fuelSlot.isEmpty()) {
+            availableBurn += fuelSlot.getCount()
+                    * AbstractFurnaceBlockEntity.getFuel()
+                            .getOrDefault(fuelSlot.getItem(), 0);
+        }
+        int neededTicks = batchRaw * candidate.recipe.getCookingTime();
+        int toLoad = ceilDiv(
+                Math.max(0L, (long) neededTicks - availableBurn), fuelBurnTicks);
+        if (toLoad <= 0) {
+            phase = Phase.WAIT_COOK;
+            markCookEvidence();
+            return TaskState.RUNNING;
+        }
+        return transferTo(fuel, toLoad, 1, Purpose.LOAD_FUEL);
+    }
+
+    private TaskState waitCook() {
+        AbstractFurnaceMenu menu = furnaceMenu();
+        if (menu == null) return menuLost();
+        ItemStack result = menu.getSlot(2).getItem();
+        if (!result.isEmpty() && !result.is(BuiltInRegistries.ITEM.get(r.itemId))) {
+            return failOrClean("cooking_output_diverged",
+                    "The synchronized workstation output no longer matches the selected recipe.",
+                    FailureType.UNKNOWN);
+        }
+        ItemStack input = menu.getSlot(0).getItem();
+        if ((!result.isEmpty() && input.isEmpty())
+                || (!result.isEmpty() && outputCount() + result.getCount() >= r.count)) {
+            return startTransfer(List.of(
+                    new ContainerTransferTaskRecord.Move(2, -1, 0)), Purpose.TAKE_OUTPUT);
+        }
+        String evidence = data(menu, 0) + ":" + data(menu, 2) + ":" + data(menu, 3)
+                + ":" + input.getCount() + ":" + result.getCount();
+        if (!evidence.equals(lastCookEvidence)) {
+            lastCookEvidence = evidence;
+            lastCookEvidenceTick = player.level().getGameTime();
+        }
+        if (!input.isEmpty() && data(menu, 0) <= 0
+                && menu.getSlot(1).getItem().isEmpty()) {
+            return failOrClean("fuel_exhausted",
+                    "The workstation has recipe input but no synchronized burn time or fuel remaining.",
+                    FailureType.NO_MATERIAL);
+        }
+        long quietLimit = Math.max(200L, candidate.recipe.getCookingTime() + 100L);
+        if (player.level().getGameTime() - lastCookEvidenceTick > quietLimit) {
+            return failOrClean("cooking_stalled",
+                    "Synchronized furnace data and output stopped advancing.",
+                    FailureType.UNKNOWN);
+        }
+        return TaskState.RUNNING;
+    }
+
+    private TaskState transferTo(
+            Item item, int count, int destination, Purpose purpose) {
+        List<ContainerTransferTaskRecord.Move> moves = new ArrayList<>();
+        int remaining = count;
+        for (int slot = 3;
+                slot < player.containerMenu.slots.size() && remaining > 0; slot++) {
+            ItemStack stack = player.containerMenu.getSlot(slot).getItem();
+            if (!stack.is(item)) continue;
+            int moved = Math.min(remaining, stack.getCount());
+            moves.add(new ContainerTransferTaskRecord.Move(slot, destination, moved));
+            remaining -= moved;
+        }
+        if (remaining > 0) {
+            return failOrClean(
+                    purpose == Purpose.LOAD_INPUT
+                            ? "input_inventory_changed" : "fuel_inventory_changed",
+                    "Prepared cooking resources are no longer present in the synchronized inventory.",
+                    FailureType.NO_MATERIAL);
+        }
+        return startTransfer(moves, purpose);
+    }
+
+    private TaskState startTransfer(
+            List<ContainerTransferTaskRecord.Move> moves, Purpose purpose) {
+        if (moves.isEmpty()) {
+            return failOrClean("empty_menu_transaction",
+                    "No synchronized menu transfer could be planned.", FailureType.INTERNAL);
+        }
+        return start(new ContainerTransferTaskRecord(
+                childId("menu"), childDeadline(2L * 60L * 20L),
+                player.containerMenu.containerId, moves), purpose);
+    }
+
+    private TaskState cleanupMachine() {
+        if (!openedMenu || !(player.containerMenu instanceof AbstractFurnaceMenu menu)) {
+            openedMenu = false;
+            return finishCleanup();
+        }
+        if (!menu.getSlot(2).getItem().isEmpty()) {
+            return startTransfer(List.of(
+                    new ContainerTransferTaskRecord.Move(2, -1, 0)), Purpose.CLEAN_RESULT);
+        }
+        if (!menu.getSlot(0).getItem().isEmpty()) {
+            return startTransfer(List.of(
+                    new ContainerTransferTaskRecord.Move(0, -1, 0)), Purpose.CLEAN_INPUT);
+        }
+        if (!menu.getSlot(1).getItem().isEmpty()) {
+            return startTransfer(List.of(
+                    new ContainerTransferTaskRecord.Move(1, -1, 0)), Purpose.CLEAN_FUEL);
+        }
+        return start(new CloseMenuTaskRecord(
+                childId("close"), childDeadline(30L * 20L)), Purpose.CLOSE);
+    }
+
+    private TaskState finishCleanup() {
+        if (failureMessage != null) {
+            phase = Phase.COMPLETE;
+            return TaskState.RUNNING;
+        }
+        if (finishRequested || outputCount() >= r.count) {
+            finishRequested = true;
+            phase = Phase.COMPLETE;
+            return TaskState.RUNNING;
+        }
+        replenishAfterClose = false;
+        phase = Phase.PREPARE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickChild() {
+        TaskState terminal = runChild(activeChild);
+        if (terminal == null) return TaskState.RUNNING;
+        TaskResult result = activeChild.result(terminal);
+        Purpose purpose = activePurpose;
+        activeChild = null;
+        activeRecord = null;
+        activePurpose = null;
+        if (terminal != TaskState.SUCCESS || result == null || !result.success()) {
+            if (purpose == Purpose.ACQUIRE_INPUT || purpose == Purpose.ACQUIRE_FUEL
+                    || purpose == Purpose.ACQUIRE_STATION) {
+                prerequisiteFailure = semanticPrerequisiteFailure(result);
+            }
+            if (purpose == Purpose.LOAD_INPUT || purpose == Purpose.LOAD_FUEL
+                    || purpose == Purpose.TAKE_OUTPUT || purpose == Purpose.CLEAN_RESULT
+                    || purpose == Purpose.CLEAN_INPUT || purpose == Purpose.CLEAN_FUEL) {
+                outcomeUncertain = true;
+            }
+            return failOrClean(
+                    childFailureCode(purpose), childFailureMessage(purpose), lastFailure());
+        }
+        switch (purpose) {
+            case ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION -> phase = Phase.PREPARE;
+            case PLACE_STATION -> {
+                stationPlaced = true;
+                if (stationPos == null
+                        || !player.level().getBlockState(stationPos)
+                                .is(candidate.device.block)) {
+                    return failOrClean("station_placement_unconfirmed",
+                            "The first-person build task did not leave the required workstation.",
+                            FailureType.UNKNOWN);
+                }
+                phase = Phase.PREPARE;
+            }
+            case MOVE_STATION -> {
+                stationPos = nearest(candidate.device.block, 8, 8);
+                if (stationPos == null) {
+                    return failOrClean("station_target_lost",
+                            "The workstation was not visible after approach completed.",
+                            FailureType.TARGET_LOST);
+                }
+                phase = Phase.OPEN;
+            }
+            case OPEN_STATION -> {
+                waitMenuSince = player.level().getGameTime();
+                phase = Phase.WAIT_MENU;
+            }
+            case LOAD_INPUT -> {
+                effectsStarted = true;
+                phase = Phase.LOAD_FUEL;
+            }
+            case LOAD_FUEL -> {
