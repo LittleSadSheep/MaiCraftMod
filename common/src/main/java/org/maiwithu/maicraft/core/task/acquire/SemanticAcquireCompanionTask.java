@@ -1498,3 +1498,38 @@ public final class SemanticAcquireCompanionTask
         return result;
     }
 
+    private static int integer(Object value, int fallback) {
+        return value instanceof Number number ? number.intValue() : fallback;
+    }
+
+    private static boolean bool(Object value) {
+        return value instanceof Boolean flag && flag;
+    }
+
+    private static String string(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private static List<String> itemStrings(List<ResourceLocation> ids) {
+        return ids.stream().map(ResourceLocation::toString).toList();
+    }
+
+    private static List<String> stringIds(java.util.Collection<ResourceLocation> ids) {
+        return ids.stream().map(ResourceLocation::toString).sorted().toList();
+    }
+
+    private static String shortLabel(List<ResourceLocation> ids) {
+        String first = ids.getFirst().getPath();
+        return ids.size() == 1 ? first : first + "+" + (ids.size() - 1);
+    }
+
+    private static String blockLabel(Set<Block> blocks) {
+        String first = BuiltInRegistries.BLOCK.getKey(blocks.iterator().next()).getPath();
+        return blocks.size() == 1 ? first : first + "+" + (blocks.size() - 1);
+    }
+
+    private static List<String> blockStrings(Set<Block> blocks) {
+        return blocks.stream().map(BuiltInRegistries.BLOCK::getKey)
+                .map(ResourceLocation::toString).sorted().toList();
+    }
+}
