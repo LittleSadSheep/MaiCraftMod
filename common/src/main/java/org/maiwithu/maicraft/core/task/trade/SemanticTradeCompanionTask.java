@@ -898,3 +898,49 @@ public final class SemanticTradeCompanionTask
             case "insufficient_payment", "payment_inventory_changed" -> List.of(
                     "acquire one of the observed payment items, then retry",
                     "allow another payment item or merchant family",
+                    "use a different acquisition source",
+                    "cancel");
+            case "payment_policy_rejected" -> List.of(
+                    "retry with an explicit allowed_payment_items policy chosen from the observed candidates",
+                    "use another acquisition source",
+                    "cancel");
+            case "inventory_space_required" -> List.of(
+                    "free main-inventory space, then retry",
+                    "lower the requested final count",
+                    "cancel");
+            case "unknown_protected_label", "only_protected_loaded_merchants" -> List.of(
+                    "resolve or revise protected labels explicitly",
+                    "travel to a clearly unprotected trading area",
+                    "use another acquisition source",
+                    "cancel");
+            case "ambiguous_offer_selection" -> List.of(
+                    "use another merchant whose payment tuple is unambiguous",
+                    "perform this trade manually",
+                    "use another acquisition source",
+                    "cancel");
+            default -> List.of(
+                    "travel until another eligible merchant is loaded, then retry",
+                    "change merchant or payment policy",
+                    "use another acquisition source",
+                    "cancel");
+        };
+    }
+
+    @Override
+    protected String successMessage() {
+        return "traded until the real main inventory held at least " + r.count
+                + " of " + r.itemId;
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "trading timed out; the real main inventory holds " + outputCount()
+                + " of required final " + r.count;
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "trading interrupted; the real main inventory holds " + outputCount()
+                + " of required final " + r.count;
+    }
+}
