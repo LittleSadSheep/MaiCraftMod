@@ -1198,3 +1198,303 @@ public final class SemanticAcquireCompanionTask
         return dimensionBarriers.stream()
                 .min(Comparator
                         .comparingInt(DimensionBarrier::depth)
+                        .thenComparing(barrier -> String.join(",", itemStrings(
+                                barrier.itemIds()))))
+                .orElse(null);
+    }
+
+    private boolean spendWork() {
+        if (workUsed >= r.workBudget) return false;
+        workUsed++;
+        return true;
+    }
+
+    private void advanceSource(Need need) {
+        need.sourceCursor++;
+    }
+
+    private String childId(String kind) {
+        String parent = r.getToolCallId() == null ? "acquire" : r.getToolCallId();
+        return parent + "-internal-" + kind + '-' + (++childSerial);
+    }
+
+    private TaskState failAcquisition(String code, String message, FailureType type) {
+        failureCode = code;
+        fail(message, type);
+        return TaskState.FAILED;
+    }
+
+    private void addIssue(
+            String source, String code, String summary, Map<String, ?> facts) {
+        if (issues.size() >= MAX_REPORTED_ISSUES) return;
+        Map<String, Object> issue = new LinkedHashMap<>();
+        issue.put("source", source);
+        issue.put("code", code);
+        issue.put("summary", summary == null ? "" : summary);
+        if (facts != null && !facts.isEmpty()) issue.put("facts", new LinkedHashMap<>(facts));
+        issues.add(Map.copyOf(issue));
+    }
+
+    private void recordAttempt(
+            TaskState state,
+            TaskResult result,
+            int after,
+            int progress,
+            boolean stoppedBecauseSatisfied) {
+        if (attempts.size() >= MAX_REPORTED_ATTEMPTS) return;
+        Map<String, Object> attempt = new LinkedHashMap<>();
+        attempt.put("source", activeSource.name().toLowerCase());
+        attempt.put("detail", activeDetail);
+        attempt.put("child_tool", activeRecord.getToolName());
+        attempt.put("terminal_state", state.name().toLowerCase());
+        attempt.put("inventory_before", activeBeforeCount);
+        attempt.put("inventory_after", after);
+        attempt.put("inventory_progress", progress);
+        attempt.put("stopped_because_final_fact_satisfied", stoppedBecauseSatisfied);
+        if (result != null) {
+            attempt.put("child_success", result.success());
+            attempt.put("child_message", result.message() == null ? "" : result.message());
+            if (result.data() != null && !result.data().isEmpty()) {
+                attempt.put("child_data", childDataForAttempt(result.data()));
+            }
+        }
+        attempts.add(Map.copyOf(attempt));
+    }
+
+    private Map<String, Object> childDataForAttempt(Map<String, Object> data) {
+        if (activeSource != SemanticAcquireTaskRecord.Source.HUNT
+                || !AttackTaskRecord.TOOL_NAME.equals(activeRecord.getToolName())) {
+            return data;
+        }
+        Map<String, Object> safe = new LinkedHashMap<>();
+        safe.put("mode", "semantic_loaded_target");
+        copyIfPresent(data, safe, "requested_targets");
+        copyIfPresent(data, safe, "defeated_targets");
+        copyIfPresent(data, safe, "lost_targets");
+        copyIfPresent(data, safe, "unreachable_targets");
+        copyIfPresent(data, safe, "strikes");
+        copyIfPresent(data, safe, "loot_gained");
+        copyIfPresent(data, safe, "unreachable_drop_count");
+        return Map.copyOf(safe);
+    }
+
+    private static void copyIfPresent(
+            Map<String, Object> source, Map<String, Object> target, String key) {
+        if (source.containsKey(key) && source.get(key) != null) {
+            target.put(key, source.get(key));
+        }
+    }
+
+    private Map<String, Object> needFacts(Need need) {
+        return Map.of(
+                "item_ids", itemStrings(need.itemIds),
+                "required_final_count", need.requiredFinalCount,
+                "observed_final_count", count(need.itemIds),
+                "missing", missing(need),
+                "depth", need.depth);
+    }
+
+    private List<Map<String, Object>> recoveryOptions() {
+        List<Map<String, Object>> options = new ArrayList<>();
+        Set<SemanticAcquireTaskRecord.Source> allowed = Set.copyOf(r.allowedSources);
+        for (SemanticAcquireTaskRecord.Source source : List.of(
+                SemanticAcquireTaskRecord.Source.STORAGE,
+                SemanticAcquireTaskRecord.Source.COOK,
+                SemanticAcquireTaskRecord.Source.MINE,
+                SemanticAcquireTaskRecord.Source.TRADE,
+                SemanticAcquireTaskRecord.Source.HUNT)) {
+            if (!allowed.contains(source)) {
+                Map<String, Object> patch = Map.of(
+                        "allowed_sources", appendSource(r.allowedSources, source));
+                options.add(Map.of(
+                        "id", "allow_" + source.name().toLowerCase(),
+                        "summary", "Retry the same inventory outcome while permitting "
+                                + source.name().toLowerCase() + " as a semantic source family.",
+                        "risk", source == SemanticAcquireTaskRecord.Source.HUNT
+                                ? "high" : source == SemanticAcquireTaskRecord.Source.MINE
+                                ? "medium" : "low",
+                        "parameters_patch", patch));
+            }
+        }
+        if (SemanticSourceKnowledge.merge(
+                SemanticSourceKnowledge.infer(r.itemIds), r.sourceHint).isEmpty()) {
+            options.add(Map.of(
+                    "id", "provide_source_hint",
+                    "summary", "Provide only a semantic source family (block/tag, entity type or "
+                            + "trade profession), never coordinates or runtime entity IDs.",
+                    "risk", "none"));
+        }
+        if (allowed.contains(SemanticAcquireTaskRecord.Source.HUNT) && !r.allowHarm) {
+            options.add(Map.of(
+                    "id", "narrate_and_allow_harm",
+                    "summary", "After telling the audience what would be harmed and why, retry "
+                            + "with allow_harm=true. Protection ambiguity still stops execution.",
+                    "risk", "high",
+                    "parameters_patch", Map.of("allow_harm", true)));
+        }
+        if (allowed.contains(SemanticAcquireTaskRecord.Source.HUNT)
+                && (hasIssue("hunt_entity_search_exhausted")
+                        || hasIssue("hunt_entity_search_incomplete"))) {
+            options.add(Map.of(
+                    "id", "continue_from_another_semantic_area",
+                    "summary", "Continue from another unprotected semantic area, then retry the "
+                            + "same inventory outcome; MaiCraft will run another bounded first-person search.",
+                    "risk", "none_until_a_new_target_is_verified_and_harm_is_rechecked"));
+        }
+        if (allowed.contains(SemanticAcquireTaskRecord.Source.HUNT)
+                && hasIssue("protected_hunt_target_requires_decision")) {
+            options.add(Map.of(
+                    "id", "choose_unprotected_hunt_context",
+                    "summary", "Choose or travel to a clearly unprotected matching population; "
+                            + "the current named, tamed, player, managed or protected candidates "
+                            + "will not be attacked.",
+                    "risk", "high_after_a_new_target_is_verified"));
+        }
+        options.add(Map.of(
+                "id", "semantic_prerequisite",
+                "summary", "Run a semantic prerequisite such as preparing a crafting surface or "
+                        + "a suitable harvesting tool, then retry the unchanged item fact.",
+                "risk", "depends_on_prerequisite"));
+        Map<String, Object> stop = Map.of(
+                "id", "stop",
+                "summary", "Leave the inventory fact incomplete and perform no further effects.",
+                "risk", "none");
+        List<Map<String, Object>> bounded = new ArrayList<>(
+                options.stream().limit(7).toList());
+        bounded.add(stop);
+        return List.copyOf(bounded);
+    }
+
+    private boolean hasIssue(String code) {
+        return issues.stream().anyMatch(issue -> code.equals(issue.get("code")));
+    }
+
+    private static List<String> appendSource(
+            List<SemanticAcquireTaskRecord.Source> sources,
+            SemanticAcquireTaskRecord.Source extra) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        for (var source : sources) result.add(source.name().toLowerCase());
+        result.add(extra.name().toLowerCase());
+        return List.copyOf(result);
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        if ("requires_dimension".equals(failureCode) && failureDimension != null) {
+            return dimensionFailureData();
+        }
+        Map<ResourceLocation, Integer> current = counts(r.itemIds);
+        Map<String, Object> before = new LinkedHashMap<>();
+        Map<String, Object> after = new LinkedHashMap<>();
+        for (ResourceLocation id : r.itemIds) {
+            before.put(id.toString(), initialCounts.getOrDefault(id, 0));
+            after.put(id.toString(), current.getOrDefault(id, 0));
+        }
+        int observed = count(r.itemIds);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("goal", "final_main_inventory_count");
+        data.put("item_ids", itemStrings(r.itemIds));
+        data.put("required_final_count", r.count);
+        data.put("observed_final_count", observed);
+        data.put("missing", Math.max(0, r.count - observed));
+        data.put("goal_satisfied", observed >= r.count);
+        data.put("inventory_before_by_item", before);
+        data.put("inventory_after_by_item", after);
+        data.put("allowed_sources", r.allowedSources.stream()
+                .map(source -> source.name().toLowerCase()).toList());
+        data.put("allow_harm", r.allowHarm);
+        data.put("work_budget", r.workBudget);
+        data.put("work_used", workUsed);
+        data.put("max_recipe_depth", r.maxRecipeDepth);
+        data.put("attempts", List.copyOf(attempts));
+        data.put("recipe_trace", List.copyOf(recipeTrace));
+        data.put("issues", List.copyOf(issues));
+        data.put("outcome_uncertain", outcomeUncertain);
+        if (failureCode != null) {
+            data.put("failure_code", failureCode);
+            data.put("requires_decision", true);
+            data.put("requires_narration", issues.stream().anyMatch(issue -> {
+                Object code = issue.get("code");
+                return "harm_permission_required".equals(code)
+                        || "protected_hunt_target_requires_decision".equals(code)
+                        || "other_player_near_hunt_target".equals(code)
+                        || "other_player_entered_hunt_area".equals(code)
+                        || "hunt_entity_search_exhausted".equals(code)
+                        || "hunt_entity_search_incomplete".equals(code)
+                        || "expected_hunt_drop_not_observed".equals(code)
+                        || "drop_ownership_ambiguous".equals(code);
+            }));
+            data.put("recovery_options", recoveryOptions());
+        }
+        return data;
+    }
+
+    private Map<String, Object> dimensionFailureData() {
+        List<String> allowed = stringIds(failureDimension.allowedDimensions());
+        Map<String, Object> travel = Map.of(
+                "id", "travel_dimension",
+                "summary", "Travel through an independently authorized dimension route, then "
+                        + "retry the unchanged semantic inventory goal.",
+                "allowed_dimensions", allowed,
+                "risk", "dimension_travel_requires_separate_authorization");
+        Map<String, Object> stop = Map.of(
+                "id", "stop",
+                "summary", "Leave the inventory goal incomplete and perform no further effects.",
+                "risk", "none");
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("failure_type", "requires_dimension");
+        data.put("target_item_family", itemStrings(failureDimension.itemIds()));
+        data.put("allowed_dimensions", allowed);
+        data.put("current_dimension", failureDimension.currentDimension().toString());
+        data.put("requires_decision", true);
+        data.put("requires_narration", true);
+        data.put("recovery_options", List.of(travel, stop));
+        return Map.copyOf(data);
+    }
+
+    @Override
+    protected String successMessage() {
+        return "final inventory fact satisfied: carrying " + count(r.itemIds)
+                + "/" + r.count + " across acceptable items " + itemStrings(r.itemIds);
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        if (failureCode == null) {
+            failureCode = "acquisition_timeout";
+            addIssue("planner", "acquisition_timeout",
+                    "the bounded deadline elapsed before the final inventory fact was true",
+                    Map.of("observed_final_count", count(r.itemIds),
+                            "required_final_count", r.count));
+        }
+        return "semantic acquisition timed out at " + count(r.itemIds) + "/" + r.count
+                + "; review attempts before retrying";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "semantic acquisition was interrupted at " + count(r.itemIds) + "/" + r.count;
+    }
+
+    @Override
+    protected void cleanup() {
+        if (activeChild != null) {
+            activeChild.stop(player, Task.StopReason.REPLACED);
+            TaskResult childResult = activeChild.result(TaskState.CANCELLED);
+            if (childResult != null && childResult.data() != null
+                    && bool(childResult.data().get("outcome_uncertain"))) {
+                outcomeUncertain = true;
+            }
+            recordAttempt(TaskState.CANCELLED, childResult, count(activeNeed.itemIds),
+                    Math.max(0, count(activeNeed.itemIds) - activeBeforeCount), false);
+            clearActive();
+        }
+        super.cleanup();
+    }
+
+    private static Map<String, Object> stringKeyMap(Map<?, ?> source) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        source.forEach((key, value) -> result.put(String.valueOf(key), value));
+        return result;
+    }
+
