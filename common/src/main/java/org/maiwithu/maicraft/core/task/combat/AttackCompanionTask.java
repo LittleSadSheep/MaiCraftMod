@@ -898,3 +898,117 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         loot.begin(BlockPos.containing(where != null ? where : player.position()));
         target = null;
         lastMove = null;   // 目标没了,承诺一并作废
+        phase = Phase.LOOT;
+    }
+
+    private TaskState tickLoot() {
+        loot.discover();
+        if (loot.settling()) {
+            InputDriver.halt(player);
+            return TaskState.RUNNING;
+        }
+        loot.prune();
+        if (loot.live().isEmpty()) {
+            stopNav();
+            loot.finish();
+            phase = Phase.COMBAT;
+            return TaskState.RUNNING;
+        }
+        if (nav == null) {
+            nav = PlayerNav.toGoal(player, loot::goal, 1.0, () -> loot.live().isEmpty());
+        }
+        switch (nav.tick()) {
+            case RUNNING -> { }
+            case ARRIVED, FAILED -> {
+                loot.noteApproachFailure();
+                stopNav();
+            }
+        }
+        return TaskState.RUNNING;
+    }
+
+    // ==================== 收尾与回执 ====================
+
+    private void abortShot() {
+        if (shot != null) {
+            shot.abort();
+            shot = null;
+        }
+    }
+
+    private void snapshotInventory(Map<Item, Integer> out) {
+        out.clear();
+        Inventory inventory = player.getInventory();
+        for (ItemStack stack : inventory.items) {
+            if (!stack.isEmpty()) out.merge(stack.getItem(), stack.getCount(), Integer::sum);
+        }
+    }
+
+    private Map<String, Integer> lootGained() {
+        Map<Item, Integer> now = new HashMap<>();
+        snapshotInventory(now);
+        Map<String, Integer> gained = new LinkedHashMap<>();
+        now.forEach((item, count) -> {
+            int delta = count - inventoryBaseline.getOrDefault(item, 0);
+            if (delta > 0) gained.put(BuiltInRegistries.ITEM.getKey(item).toString(), delta);
+        });
+        return gained;
+    }
+
+    @Override
+    protected void cleanup() {
+        abortShot();
+        if (meleeAction != null) meleeAction.stop();
+        if (shieldAction != null) shieldAction.stop();
+        meleeAction = null;
+        shieldAction = null;
+        meleeSelection.reset();
+        rangedSelection.reset();
+        InputDriver.halt(player);
+        org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).body().releaseAll();
+        super.cleanup();
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        // Runtime entity ids are an internal execution handle, not semantic output.  Aggregate
+        // receipts preserve everything the caller can act on without teaching the LLM ids.
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("mode", r.indiscriminate ? "nearby_hostiles" : "authorized_targets");
+        data.put("requested_targets", r.entityIds.size());
+        data.put("defeated_targets", r.defeated().size());
+        data.put("lost_targets", r.lost().size());
+        data.put("unreachable_targets", r.unreachable().size());
+        data.put("strikes", r.strikes());
+        data.put("loot_gained", lootGained());
+        data.put("unreachable_drop_count", loot.unreachableCount());
+        return data;
+    }
+
+    private String tally() {
+        return (r.indiscriminate
+                ? r.defeated().size() + " hostiles"
+                : r.defeated().size() + "/" + r.entityIds.size() + " requested entities")
+                + ", collected " + lootGained();
+    }
+
+    @Override
+    protected String successMessage() {
+        if (r.indiscriminate) {
+            return "fought off " + tally() + "; nothing is coming after you any more";
+        }
+        int incomplete = r.lost().size() + r.unreachable().size();
+        return "defeated " + tally()
+                + (incomplete == 0 ? "" : " (" + incomplete + " targets could not be completed)");
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "attack timed out after defeating " + tally();
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "attack interrupted after defeating " + tally();
+    }
+}
