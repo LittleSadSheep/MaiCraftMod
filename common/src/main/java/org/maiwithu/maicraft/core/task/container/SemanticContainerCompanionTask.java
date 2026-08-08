@@ -298,3 +298,303 @@ public final class SemanticContainerCompanionTask
     }
 
     private TaskState open() {
+        if (player.containerMenu != player.inventoryMenu) {
+            return failFinal("menu_changed_before_open", "A menu appeared before MaiCraft opened "
+                    + "the selected container.", FailureType.UNKNOWN);
+        }
+        if (!targetStillValid()) return failFinal("container_target_changed",
+                "The selected block changed before it could be opened.", FailureType.TARGET_LOST);
+        BlockEntity entity = player.level().getBlockEntity(target.position());
+        if (entity instanceof BaseContainerBlockEntity container && !container.canOpen(player)) {
+            return failFinal("container_locked", "The selected container reports that this player "
+                    + "cannot open it. No menu action was attempted.", FailureType.UNKNOWN);
+        }
+        if (otherPlayerNearTarget()) return failFinal("other_player_near_container",
+                "Another player is close enough to be using the selected container.",
+                FailureType.ENTITY_BLOCKED);
+        openRequested = true;
+        return start(new InteractAtTaskRecord(childId("open"), childDeadline(30L * 20L),
+                MouseButton.RIGHT, target.position(), 0, null), Purpose.OPEN);
+    }
+
+    private TaskState waitMenu() {
+        if (player.containerMenu != player.inventoryMenu) {
+            openedMenu = true;
+            AbstractContainerMenu menu = player.containerMenu;
+            if (!menu.getCarried().isEmpty()) {
+                outcomeUncertain = true;
+                return failFinal("menu_cursor_not_empty", "The newly opened menu already carries "
+                        + "an item stack; safe ownership cannot be proven.", FailureType.UNKNOWN);
+            }
+            if (!targetStillValid()) return failFinal("container_target_changed",
+                    "The selected block changed while its menu was opening.",
+                    FailureType.TARGET_LOST);
+            MenuView classified = classify(menu);
+            if (classified == null) return TaskState.RUNNING;
+            view = classified;
+            expectedContainerId = menu.containerId;
+            expectedMenuClass = menu.getClass();
+            stableFingerprint = fingerprint(menu);
+            initialPlayerCount = count(view.playerSlots());
+            initialContainerCount = count(view.containerSlots());
+            lastPlayerCount = initialPlayerCount;
+            lastContainerCount = initialContainerCount;
+            phase = Phase.PLAN;
+            return TaskState.RUNNING;
+        }
+        if (player.level().getGameTime() - waitMenuSince > MENU_WAIT_TICKS) {
+            return failFinal("container_open_unconfirmed", "The selected container did not produce "
+                    + "a synchronized menu. It may be locked, blocked or unavailable.",
+                    FailureType.TARGET_LOST);
+        }
+        return TaskState.RUNNING;
+    }
+
+    private MenuView classify(AbstractContainerMenu menu) {
+        if (specializedStorage(target.blockId())
+                || specializedStorage(menu.getClass().getName())) {
+            failFinal("specialized_storage_required", "This storage terminal has a dedicated "
+                    + "semantic supply path; generic clicks are unsafe for its virtual slots.",
+                    FailureType.UNSUPPORTED);
+            return null;
+        }
+        List<Integer> playerSlots = new ArrayList<>();
+        List<Integer> containerSlots = new ArrayList<>();
+        Set<Integer> inventoryIndices = new HashSet<>();
+        Container genericBacking = null;
+        boolean genericProof = true;
+        for (int i = 0; i < menu.slots.size(); i++) {
+            Slot slot = menu.slots.get(i);
+            if (slot.container == player.getInventory()) {
+                int inventorySlot = slot.getContainerSlot();
+                if (inventorySlot >= 0 && inventorySlot < 36) {
+                    if (!inventoryIndices.add(inventorySlot)) genericProof = false;
+                    playerSlots.add(i);
+                }
+                continue;
+            }
+            containerSlots.add(i);
+            if (genericBacking == null) genericBacking = slot.container;
+            else if (genericBacking != slot.container) genericProof = false;
+            if (slot.getClass() != Slot.class || slot.getContainerSlot() < 0
+                    || slot.getContainerSlot() >= slot.container.getContainerSize()) {
+                genericProof = false;
+            }
+        }
+        if (playerSlots.size() != 36 || inventoryIndices.size() != 36
+                || containerSlots.isEmpty()) {
+            failFinal("unsupported_menu_layout", "The opened menu does not expose one provable "
+                    + "main-inventory side and one container side.", FailureType.UNSUPPORTED);
+            return null;
+        }
+        boolean knownStorage = menu instanceof ChestMenu || menu instanceof ShulkerBoxMenu
+                || menu instanceof HopperMenu || menu instanceof DispenserMenu;
+        boolean knownMachine = menu instanceof AbstractFurnaceMenu;
+        if (!knownStorage && !knownMachine && !genericProof) {
+            failFinal("unsupported_modded_slots", "This modded menu uses slot classes or backing "
+                    + "inventories whose semantics cannot be proven safely. No transfer was "
+                    + "attempted.", FailureType.UNSUPPORTED);
+            return null;
+        }
+        return new MenuView(menu, List.copyOf(playerSlots), List.copyOf(containerSlots),
+                knownStorage, !knownStorage && !knownMachine);
+    }
+
+    private TaskState plan() {
+        if (!menuValid()) return menuLost("The synchronized container menu changed before planning.");
+        if (otherPlayerNearTarget()) return failFinal("other_player_near_container",
+                "Another player approached the open container; MaiCraft paused before moving items.",
+                FailureType.ENTITY_BLOCKED);
+        if (!player.containerMenu.getCarried().isEmpty()) {
+            outcomeUncertain = true;
+            return failFinal("menu_cursor_not_empty", "The menu cursor is not empty, so no "
+                    + "semantic transfer can start safely.", FailureType.UNKNOWN);
+        }
+        if (!fingerprint(player.containerMenu).equals(stableFingerprint)) {
+            return failFinal("menu_changed_externally", "The menu contents changed after inspection "
+                    + "and before the first click.", FailureType.TARGET_LOST);
+        }
+
+        int playerCount = count(view.playerSlots());
+        int containerCount = count(view.containerSlots());
+        direction = direction(playerCount);
+        plannedAmount = requestedAmount(playerCount, containerCount, direction);
+        if (plannedAmount < 0) return TaskState.RUNNING;
+        if (plannedAmount == 0) {
+            goalSatisfied = true;
+            phase = Phase.CLEANUP;
+            return TaskState.RUNNING;
+        }
+        if (plannedAmount > SemanticContainerTaskRecord.MAX_COUNT) {
+            return failFinal("transfer_too_large", "The semantic group exceeds the bounded transfer "
+                    + "limit; split the request by item group or explicit count.",
+                    FailureType.UNSUPPORTED);
+        }
+        Planning planning = buildPlan(direction, plannedAmount);
+        if (!planning.success()) {
+            return failFinal(planning.failureCode(), planning.failureMessage(), planning.failureType());
+        }
+        plan = planning.moves();
+        planIndex = 0;
+        phase = Phase.TRANSFER;
+        return TaskState.RUNNING;
+    }
+
+    private Direction direction(int playerCount) {
+        return switch (r.operation) {
+            case DEPOSIT -> Direction.DEPOSIT;
+            case WITHDRAW -> Direction.WITHDRAW;
+            case BALANCE -> playerCount > r.targetCount ? Direction.DEPOSIT : Direction.WITHDRAW;
+        };
+    }
+
+    private int requestedAmount(int playerCount, int containerCount, Direction selectedDirection) {
+        if (r.operation == SemanticContainerTaskRecord.Operation.BALANCE) {
+            return Math.abs(playerCount - r.targetCount);
+        }
+        if (r.targetCount != null) {
+            return r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT
+                    ? Math.max(0, r.targetCount - containerCount)
+                    : Math.max(0, r.targetCount - playerCount);
+        }
+        if (r.count != null) return r.count;
+        List<Integer> source = selectedDirection == Direction.DEPOSIT
+                ? view.playerSlots() : view.containerSlots();
+        int all = count(source);
+        if (all == 0) {
+            failFinal("insufficient_source", "The selected source side contains no matching items.",
+                    FailureType.NO_MATERIAL);
+            return -1;
+        }
+        return all;
+    }
+
+    /** Builds the complete bounded plan before the first click; failure leaves both sides untouched. */
+    private Planning buildPlan(Direction selectedDirection, int amount) {
+        List<Integer> sources = selectedDirection == Direction.DEPOSIT
+                ? view.playerSlots() : view.containerSlots();
+        List<Integer> destinations = selectedDirection == Direction.DEPOSIT
+                ? view.containerSlots() : view.playerSlots();
+        AbstractContainerMenu menu = view.menu();
+        List<ItemStack> simulated = new ArrayList<>(menu.slots.size());
+        for (Slot slot : menu.slots) simulated.add(slot.getItem().copy());
+
+        int rawSource = 0;
+        int transferableSource = 0;
+        for (int sourceIndex : sources) {
+            Slot slot = menu.getSlot(sourceIndex);
+            ItemStack stack = slot.getItem();
+            if (!matches(stack)) continue;
+            rawSource += stack.getCount();
+            if (slot.mayPickup(player)) transferableSource += stack.getCount();
+        }
+        if (rawSource < amount) return Planning.fail("insufficient_source",
+                "The source contains fewer matching items than the requested amount.",
+                FailureType.NO_MATERIAL);
+        if (transferableSource < amount) return Planning.fail("source_slots_locked",
+                "Matching items exist, but the menu does not prove they can be picked up safely.",
+                FailureType.UNKNOWN);
+
+        List<PlannedMove> moves = new ArrayList<>();
+        int remaining = amount;
+        for (int sourceIndex : sources) {
+            if (remaining <= 0) break;
+            Slot sourceSlot = menu.getSlot(sourceIndex);
+            ItemStack source = simulated.get(sourceIndex);
+            if (!matches(source) || !sourceSlot.mayPickup(player)) continue;
+            int take = Math.min(remaining, source.getCount());
+            List<Allocation> allocations = allocate(
+                    source, take, destinations, menu, simulated);
+            int allocated = allocations.stream().mapToInt(Allocation::count).sum();
+            if (allocated != take) return Planning.fail("destination_full_or_locked",
+                    "The destination cannot safely hold the complete requested amount. Nothing was "
+                            + "moved.", FailureType.NO_SPACE);
+
+            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(source.getItem());
+            if (view.quickMoveSafe() && take == source.getCount()) {
+                moves.add(new PlannedMove(
+                        new ContainerTransferTaskRecord.Move(sourceIndex, -1, 0), itemId, take));
+            } else {
+                for (Allocation allocation : allocations) {
+                    moves.add(new PlannedMove(new ContainerTransferTaskRecord.Move(
+                            sourceIndex, allocation.destination(), allocation.count()),
+                            itemId, allocation.count()));
+                }
+            }
+            simulated.set(sourceIndex, source.getCount() == take
+                    ? ItemStack.EMPTY : source.copyWithCount(source.getCount() - take));
+            remaining -= take;
+        }
+        if (remaining != 0) return Planning.fail("transfer_plan_incomplete",
+                "A complete safe slot-semantic plan could not be proven. Nothing was moved.",
+                FailureType.UNSUPPORTED);
+        return Planning.ok(moves);
+    }
+
+    private List<Allocation> allocate(ItemStack source, int amount, List<Integer> destinations,
+            AbstractContainerMenu menu, List<ItemStack> simulated) {
+        List<Allocation> result = new ArrayList<>();
+        int remaining = amount;
+        // Fill compatible stacks before consuming empty slots.
+        for (int pass = 0; pass < 2 && remaining > 0; pass++) {
+            for (int destinationIndex : destinations) {
+                if (remaining <= 0) break;
+                Slot destinationSlot = menu.getSlot(destinationIndex);
+                ItemStack destination = simulated.get(destinationIndex);
+                boolean empty = destination.isEmpty();
+                if ((pass == 0 && empty) || (pass == 1 && !empty)) continue;
+                if (!destinationSlot.mayPlace(source)) continue;
+                if (!empty && !ItemStack.isSameItemSameComponents(destination, source)) continue;
+                int limit = Math.min(source.getMaxStackSize(),
+                        destinationSlot.getMaxStackSize(source));
+                int capacity = Math.max(0, limit - (empty ? 0 : destination.getCount()));
+                if (capacity == 0) continue;
+                int placed = Math.min(remaining, capacity);
+                result.add(new Allocation(destinationIndex, placed));
+                simulated.set(destinationIndex, source.copyWithCount(
+                        (empty ? 0 : destination.getCount()) + placed));
+                remaining -= placed;
+            }
+        }
+        return remaining == 0 ? List.copyOf(result) : List.of();
+    }
+
+    private TaskState transfer() {
+        if (planIndex >= plan.size()) {
+            goalSatisfied = goalSatisfied();
+            if (!goalSatisfied) {
+                outcomeUncertain = true;
+                return failFinal("aggregate_goal_not_satisfied", "All planned receipts completed, "
+                        + "but the aggregate semantic inventory goal is not true.",
+                        FailureType.UNKNOWN);
+            }
+            phase = Phase.CLEANUP;
+            return TaskState.RUNNING;
+        }
+        if (!menuValid()) return menuLost(
+                "The synchronized container menu changed during the transfer.");
+        if (!targetStillValid()) return failFinal("container_target_changed",
+                "The selected container block changed during the transfer.",
+                FailureType.TARGET_LOST);
+        if (otherPlayerNearTarget()) return failFinal("other_player_near_container",
+                "Another player approached the container. Verified moves were kept and MaiCraft "
+                        + "paused before the next move.", FailureType.ENTITY_BLOCKED);
+        if (!player.containerMenu.getCarried().isEmpty()) {
+            outcomeUncertain = true;
+            return failFinal("menu_cursor_not_empty", "The menu cursor stopped being empty between "
+                    + "verified moves.", FailureType.UNKNOWN);
+        }
+        if (!fingerprint(player.containerMenu).equals(stableFingerprint)) {
+            return failFinal("menu_changed_externally", "The container or main inventory changed "
+                    + "between verified moves. MaiCraft paused instead of using a stale plan.",
+                    FailureType.TARGET_LOST);
+        }
+        pendingMove = plan.get(planIndex);
+        beforePlayerCount = count(view.playerSlots());
+        beforeContainerCount = count(view.containerSlots());
+        beforeItems = itemCounts(view.playerSlots());
+        return start(new ContainerTransferTaskRecord(childId("transfer"),
+                childDeadline(2L * 60L * 20L), expectedContainerId,
+                List.of(pendingMove.move())), Purpose.TRANSFER);
+    }
+
