@@ -598,3 +598,303 @@ public final class SemanticTradeCompanionTask
 
     private TaskState cleanupMenu() {
         if (player.containerMenu == player.inventoryMenu) {
+            openedMenu = false;
+            return afterClosed();
+        }
+        if (player.containerMenu instanceof MerchantMenu menu && menuClaimed) {
+            if (!menu.getSlot(0).getItem().isEmpty()) {
+                return start(new ContainerTransferTaskRecord(
+                        childId("return-a"), childDeadline(2L * 60L * 20L),
+                        menu.containerId,
+                        List.of(new ContainerTransferTaskRecord.Move(0, -1, 0))),
+                        Purpose.CLEAN_A);
+            }
+            if (!menu.getSlot(1).getItem().isEmpty()) {
+                return start(new ContainerTransferTaskRecord(
+                        childId("return-b"), childDeadline(2L * 60L * 20L),
+                        menu.containerId,
+                        List.of(new ContainerTransferTaskRecord.Move(1, -1, 0))),
+                        Purpose.CLEAN_B);
+            }
+        }
+        return start(new CloseMenuTaskRecord(
+                childId("close"), childDeadline(30L * 20L)), Purpose.CLOSE);
+    }
+
+    private TaskState afterClosed() {
+        menuClaimed = false;
+        offerPlan = null;
+        merchant = null;
+        if (failureMessage != null) {
+            phase = Phase.COMPLETE;
+            return TaskState.RUNNING;
+        }
+        if (finishRequested || outputCount() >= r.count) {
+            finishRequested = true;
+            phase = Phase.COMPLETE;
+            return TaskState.RUNNING;
+        }
+        if (nextAfterClose) {
+            nextAfterClose = false;
+            phase = Phase.OPEN;
+            return TaskState.RUNNING;
+        }
+        return failFinal(
+                "trade_cleanup_state_unknown",
+                "The merchant menu closed without a terminal or next-merchant state.",
+                FailureType.INTERNAL);
+    }
+
+    private TaskState tickChild() {
+        TaskState terminal = runChild(activeChild);
+        if (terminal == null) return TaskState.RUNNING;
+        TaskResult result = activeChild.result(terminal);
+        Purpose purpose = activePurpose;
+        activeChild = null;
+        activePurpose = null;
+        boolean success = terminal == TaskState.SUCCESS
+                && result != null && result.success();
+        if (!success) {
+            switch (purpose) {
+                case OPEN -> {
+                    note("merchant_interaction_failed");
+                    if (player.containerMenu != player.inventoryMenu) {
+                        openedMenu = true;
+                        nextAfterClose = true;
+                        phase = Phase.CLEANUP;
+                    } else {
+                        phase = Phase.OPEN;
+                    }
+                    return TaskState.RUNNING;
+                }
+                case TAKE -> {
+                    outcomeUncertain = true;
+                    return failFinal(
+                            "trade_take_unconfirmed",
+                            "The synchronized result transfer was not confirmed; blind retry "
+                                    + "could purchase twice.",
+                            lastFailure());
+                }
+                case PAY -> {
+                    outcomeUncertain = player.containerMenu != player.inventoryMenu;
+                    return failFinal(
+                            "trade_payment_unconfirmed",
+                            "The synchronized payment transfer was not confirmed.",
+                            lastFailure());
+                }
+                case CLEAN_A, CLEAN_B -> {
+                    outcomeUncertain = true;
+                    return failFinal(
+                            "trade_payment_return_unconfirmed",
+                            "Payment left in the merchant menu could not be confirmed back in "
+                                    + "the main inventory.",
+                            lastFailure());
+                }
+                case CLOSE -> {
+                    outcomeUncertain = true;
+                    if (failureMessage == null) {
+                        failureCode = "merchant_menu_close_unconfirmed";
+                        failureMessage = "The merchant menu close was not confirmed.";
+                        failureType = lastFailure();
+                    }
+                    phase = Phase.COMPLETE;
+                    return TaskState.RUNNING;
+                }
+            }
+        }
+
+        switch (purpose) {
+            case OPEN -> {
+                waitMenuSince = player.level().getGameTime();
+                phase = Phase.WAIT_MENU;
+            }
+            case PAY -> phase = Phase.TAKE;
+            case TAKE -> {
+                int observed = outputCount();
+                if (observed <= outputBeforeTake) {
+                    outcomeUncertain = true;
+                    return failFinal(
+                            "trade_inventory_delta_missing",
+                            "The confirmed trade result completed without the requested item count "
+                                    + "increasing in the real main inventory.",
+                            FailureType.UNKNOWN);
+                }
+                completedTrades++;
+                effectsStarted = false;
+                if (observed >= r.count) {
+                    finishRequested = true;
+                    phase = Phase.CLEANUP;
+                } else {
+                    offerPlan = null;
+                    phase = Phase.SELECT;
+                }
+            }
+            case CLEAN_A, CLEAN_B -> phase = Phase.CLEANUP;
+            case CLOSE -> {
+                openedMenu = false;
+                return afterClosed();
+            }
+        }
+        if (finishRequested && phase != Phase.CLEANUP) phase = Phase.CLEANUP;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState start(TaskRecord record, Purpose purpose) {
+        activeChild = TaskFactory.create(player, record);
+        activePurpose = purpose;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState menuLost(boolean afterPayment) {
+        outcomeUncertain |= afterPayment || effectsStarted || menuClaimed;
+        openedMenu = false;
+        return failFinal(
+                "merchant_menu_lost",
+                afterPayment
+                        ? "The synchronized merchant menu changed after payment was prepared."
+                        : "The synchronized merchant menu changed before the trade completed.",
+                FailureType.TARGET_LOST);
+    }
+
+    private TaskState exhausted() {
+        if (outputCount() >= r.count) {
+            finishRequested = true;
+            phase = Phase.CLEANUP;
+            return TaskState.RUNNING;
+        }
+        String code;
+        String message;
+        if (observations.containsKey("insufficient_payment")) {
+            code = "insufficient_payment";
+            message = "Loaded merchants offer the requested item, but the real main inventory "
+                    + "cannot fund enough complete trades.";
+        } else if (observations.containsKey("inventory_space_required")) {
+            code = "inventory_space_required";
+            message = "A matching affordable trade exists, but free main-inventory capacity "
+                    + "cannot be proven for the requested final count.";
+        } else if (observations.containsKey("offer_stock_insufficient")
+                || observations.containsKey("matching_offer_out_of_stock")) {
+            code = "trade_stock_insufficient";
+            message = "Matching loaded offers cannot supply the requested final count before "
+                    + "their synchronized stock is exhausted.";
+        } else if (observations.containsKey("payment_policy_rejected")) {
+            code = "payment_policy_rejected";
+            message = "Matching loaded offers require payment items outside the allowed policy.";
+        } else if (observations.containsKey("ambiguous_offer_selection")) {
+            code = "ambiguous_offer_selection";
+            message = "A matching offer shares its payment tuple with another offer; the current "
+                    + "receipt path cannot prove which result the server will choose.";
+        } else if (observations.containsKey("no_matching_offer")) {
+            code = "no_matching_loaded_offer";
+            message = "Inspected loaded merchants do not currently offer the requested item.";
+        } else {
+            code = "merchant_interaction_unavailable";
+            message = "No loaded unprotected merchant could be opened and verified for trading.";
+        }
+        return failFinal(code, message, FailureType.NO_MATERIAL);
+    }
+
+    private TaskState failFinal(String code, String message, FailureType type) {
+        if (failureMessage == null) {
+            failureCode = code;
+            failureMessage = message;
+            failureType = type == null ? FailureType.UNKNOWN : type;
+        }
+        if (player.containerMenu != player.inventoryMenu) {
+            openedMenu = true;
+            phase = Phase.CLEANUP;
+        } else {
+            openedMenu = false;
+            phase = Phase.COMPLETE;
+        }
+        return TaskState.RUNNING;
+    }
+
+    private void note(String code) {
+        observations.merge(code, 1, Integer::sum);
+    }
+
+    private MerchantMenu merchantMenu() {
+        return player.containerMenu instanceof MerchantMenu menu ? menu : null;
+    }
+
+    private int outputCount() {
+        return PlayerInv.buildableCount(
+                player.getInventory(), BuiltInRegistries.ITEM.get(r.itemId));
+    }
+
+    private String childId(String label) {
+        return r.getToolCallId() + "-trade-" + label + "-" + (++childSerial);
+    }
+
+    private long childDeadline(long ticks) {
+        return Math.min(r.getDeadlineGameTime(), player.level().getGameTime() + ticks);
+    }
+
+    private static int ceilDiv(int numerator, int denominator) {
+        if (numerator <= 0) return 0;
+        return (numerator + denominator - 1) / denominator;
+    }
+
+    @Override
+    protected void cleanup() {
+        if (activeChild != null) {
+            activeChild.stop(player, Task.StopReason.REPLACED);
+            activeChild = null;
+            activePurpose = null;
+        }
+        if (openedMenu && player.containerMenu != player.inventoryMenu) {
+            try {
+                var context = ClientRuntime.requireContext(player);
+                context.menus().close(context, 20);
+            } catch (RuntimeException ignored) {
+                outcomeUncertain = true;
+            }
+        }
+        super.cleanup();
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        int observed = outputCount();
+        data.put("goal", "final_main_inventory_count");
+        data.put("item_id", r.itemId.toString());
+        data.put("required_final_count", r.count);
+        data.put("initial_count", initialOutputCount);
+        data.put("observed_final_count", observed);
+        data.put("goal_satisfied", observed >= r.count);
+        data.put("merchant_kind_policy", r.merchantKind.name().toLowerCase());
+        data.put("loaded_safe_merchant_count", merchants.size());
+        data.put("protected_loaded_merchant_count", protectedMerchantCount);
+        data.put("inspected_merchant_menus", inspectedMenus);
+        data.put("completed_trades", completedTrades);
+        data.put("outcome_uncertain", outcomeUncertain);
+        if (selectedMerchantKind != null) data.put("selected_merchant_kind", selectedMerchantKind);
+        if (selectedOutputPerTrade > 0) {
+            data.put("selected_output_count_per_trade", selectedOutputPerTrade);
+        }
+        if (!selectedPaymentFacts.isEmpty()) {
+            data.put("selected_payment", selectedPaymentFacts);
+        }
+        if (!observations.isEmpty()) {
+            data.put("observed_offer_outcomes", Map.copyOf(observations));
+        }
+        if (!observedPaymentItemCandidates.isEmpty()) {
+            data.put("observed_payment_item_candidates", observedPaymentItemCandidates.stream()
+                    .map(ResourceLocation::toString).sorted().toList());
+        }
+        if (failureCode != null) {
+            data.put("decision", Map.of(
+                    "required", true,
+                    "reason_code", failureCode,
+                    "recovery_options", recoveryOptions(failureCode)));
+        }
+        return data;
+    }
+
+    private static List<String> recoveryOptions(String code) {
+        return switch (code) {
+            case "insufficient_payment", "payment_inventory_changed" -> List.of(
+                    "acquire one of the observed payment items, then retry",
+                    "allow another payment item or merchant family",
