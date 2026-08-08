@@ -598,3 +598,303 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
         }
         return status;
+    }
+
+    /**
+     * 她能够到当前目标的中心距离。目标没了就退回她自己那一格的量。
+     *
+     * <p>大史莱姆宽 2.04,半宽就一格出头 —— 按 3.0 硬比会把它判成"够不着",而原版玩家
+     * 打得到。判据的够到距离与站位的吸引半径必须是这同一个数。
+     */
+    /** 这一刻走的是弓那一套吗。环的内外沿、以及攻击层用什么,都看它。 */
+    private boolean bowFighting;
+
+    /** 走位环的外沿:剑是够到距离,弓是 {@link #BOW_MAX_DISTANCE}。 */
+    private double skirmishOuter() {
+        return bowFighting
+                ? strictCrystalTarget() ? STRICT_CRYSTAL_MAX_DISTANCE : BOW_MAX_DISTANCE
+                : reachToTarget();
+    }
+
+    /** 走位环的内沿:剑是"它够得着我",弓是"拉得开弓的距离"。 */
+    private double skirmishInner() {
+        return bowFighting
+                ? strictCrystalTarget()
+                        ? Menace.blastSpanOf(target) + STRICT_CRYSTAL_BLAST_MARGIN
+                        : BOW_MIN_DISTANCE
+                : target == null ? 0.0 : Menace.rawDangerRadius(target, player);
+    }
+
+    private boolean strictCrystalTarget() {
+        return r.strictAuthorized && target instanceof EndCrystal;
+    }
+
+    private double reachToTarget() {
+        double native0 = player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
+        return target == null || target.isRemoved()
+                ? Swing.reachOf(native0)
+                : Swing.reachTo(native0, target.getBbWidth());
+    }
+
+    /**
+     * 战斗站位:走到够得着目标的地方,<b>而且脚下这一格不在任何一只的危险半径里</b>。
+     *
+     * <h2>为什么到达要问危险半径</h2>
+     * 只问"够不够得着"的时候,她走进目标的球形邻域就判到达,而<b>一旦到达 A* 就不再搜索</b>,
+     * 势场那份估价一次也用不上 —— 僵尸慢慢挪过来,她那一格仍然合格,于是不重新规划、不躲。
+     * 躲得掉爆炸却防不了偷袭,根子在这。
+     *
+     * <p>光靠这一条还不够:目标是开路那一刻的<b>快照</b>。真正每刻重问的是判据那一侧
+     * 这里管的是"落脚点别选在人家嘴边"。
+     *
+     * <h2>目标自己也在势场里</h2>
+     * 它当然也会打她,所以不需要另画一条内沿:吸引项把她拉进够到距离,它自己的危险半径把她
+     * 顶在够不着的地方,中间那条缝就是拉扯的位置。缝宽是原版碰撞箱给的 —— 僵尸 3.30 对 2.73,
+     * 半格出头。
+     *
+     * <h2>被围住的时候</h2>
+     * 没有合格的格子也不会失败:引擎的七档 {@code bestSoFar} 会交出这次搜索里最好的一段。
+     */
+    private NavGoal standoffGoal() {
+        // 躲避场只收敌对生物:它们才有危险半径。目标本身归下面的环管——点名的猪牛鸡不是
+        // 敌对生物,不在这份名单里,但照样是要走过去打的目标。"有没有目标"与"附近有没有怪"
+        // 是两个问题,这里早退只看前者是否也为空:既无目标也无怪,才真的没处可站。
+        // 两份材料都引用本刻的判断:目标是判据选的那一只,怪是 surveyField 扫的那一份。
+        var field = hostiles;
+        boolean haveTarget = target != null && !target.isRemoved();
+        if (!haveTarget && field.isEmpty()) {
+            return null;
+        }
+        logStandoff(field);
+        if (!haveTarget) {
+            // <b>没有目标也照样走位</b>:环退化成"离每一只都出了它的危险半径"。
+            // 场上只剩一只点着的爬行者(她没弓打不了)时走的就是这一支 —— 退开等引信熄,
+            // 而不是跑三十二格。
+            return NavGoal.avoid(Menace.AVOID_PENALTY, Menace.field(player, field));
+        }
+        // 走位是<b>一个环</b>:外沿别跟丢,内沿是每一只都够不着她。太近自然往外走,太远
+        // 自然往回走 —— "拉开"不是另一个动作。
+        //
+        // 外沿<b>就是她的够到距离</b>。寻路不负责"打",但必须把她送进打得到的范围,否则
+        // 攻击层一辈子没机会 —— 外沿放宽到 4.73 那一版,她走到 4.7 就"到位"停下,而够到
+        // 距离只有 3.30,于是站在那儿挨打,实测有效血量 8 掉到 5。
+        //
+        // 内沿用<b>裸</b>攻击距离(2.02),不加格量化补偿。带宽因此是 1.28 格,比格量化误差
+        // 0.71 宽出一截 —— 当初算出"带只有 0.57 格、做不出来",是因为把补偿也叠进了内沿。
+        return NavGoal.approachAvoiding(
+                NavGoal.ring(target.blockPosition(), skirmishInner(), skirmishOuter()),
+                Menace.AVOID_PENALTY,
+                bowFighting
+                        ? Menace.field(player, field).stream()
+                                .map(x -> x.withClearance(
+                                        Math.max(x.clearance(), BOW_MIN_DISTANCE)))
+                                .toList()
+                        : Menace.field(player, field));
+        // 弓那一套的内沿对<b>每一只</b>都成立:她要跟所有怪保持五格,不只是当前目标。
+    }
+
+    /** 站位日志只在数字真的变了时打一行——每 tick 一行会把别的全冲掉。 */
+    private void logStandoff(List<Mob> field) {
+        int tooClose = 0;
+        for (var mob : field) {
+            if (Menace.tooClose(mob, player)) {
+                tooClose++;
+            }
+        }
+        String line = target == null || target.isRemoved()
+                ? String.format("无目标(只拉开) 太近=%d 场上=%d", tooClose, field.size())
+                : String.format("%s 目标=%d 距离=%.1f 带=[%.2f, %.2f] 太近=%d 场上=%d",
+                        bowFighting ? "弓" : "剑", target.getId(), player.distanceTo(target),
+                        skirmishInner(), skirmishOuter(), tooClose, field.size());
+        if (!line.equals(lastStandoffLog)) {
+            lastStandoffLog = line;
+            Constants.LOG.info("[maicraft-attack] 站位 {}", line);
+        }
+    }
+
+    // ==================== 远程 ====================
+
+    private TaskState shootAt(Loadout loadout) {
+        Loadout.Pick weapon = loadout.ranged();
+        if (weapon == null) {
+            return closeIn();   // 弓没了:回去走位,别放弃这只
+        }
+        // <b>攻击层不管距离。</b>射程之内就射,拉开是寻路的事(环的内沿 BOW_MIN_DISTANCE)。
+        //
+        // 这里曾经"近于内沿就 abortShot":僵尸一走进八格,拉到一半的弓当场取消;她退开、
+        // 重新起手、僵尸又跟进来 —— 一箭都放不出去。距离是走位的判据,混进攻击层就成了
+        // 一个把自己打断的开关。
+        double firingRange = strictCrystalTarget()
+                ? STRICT_CRYSTAL_MAX_DISTANCE : BOW_MAX_DISTANCE;
+        if (strictCrystalTarget() && player.distanceTo(target) < skirmishInner()) {
+            // Navigation is not an authorization boundary: it may still be walking away when
+            // the hand layer gets a clear ballistic solution. Never release inside the complete
+            // crystal blast span, even for a single tick.
+            abortShot();
+            return TaskState.RUNNING;
+        }
+        if (player.distanceTo(target) > firingRange) {
+            return TaskState.RUNNING;   // 射程外:不放,但<b>也不取消</b>,弓接着拉
+        }
+        boolean crossbow = RangedShot.isCrossbow(weapon);
+        double ballisticRange = strictCrystalTarget()
+                ? STRICT_CRYSTAL_MAX_DISTANCE : MAX_FIRING_RANGE;
+        Ballistics.Aim aim = Ballistics.findArrowShot(player.level(), player, target,
+                shotVelocity(crossbow), ARROW_GRAVITY, ARROW_DRAG, ARROW_HITBOX_RADIUS,
+                ballisticRange, !crossbow);
+        if (aim == null) {
+            // 这一刻算不出弹道。<b>弓接着拉</b> —— 脚一直在走位,下一刻位置变了自会有窗口,
+            // 取消了就白等一次拉满的时间。
+            return TaskState.RUNNING;
+        }
+
+        // <b>不停脚。</b>攻击层与寻路层正交:挥刀不停脚,拉弓也不该停 —— 原版拉弓时本来
+        // 就能走。这里曾经 stopNav() + halt(),而 bowFight 上一行刚 driveApproach() 建好
+        // 导航,于是每刻建一次拆一次,箭一直拉不满。
+        // <b>只在快松手那一刻转过去。</b>原版的箭朝哪飞只看松手那一刻的视线,拉弓的十几刻
+        // 里瞄不瞄没有区别 —— 而每刻转向会把脚带偏(移动按朝向投影),她就一路走进目标脸上。
+        // 挥刀早就是这么做的,弓这一支一直没跟上。
+        if (shot != null && shot.aboutToRelease()) {
+            InputDriver.lookAt(player, aim.lookPoint());
+        }
+
+        FirstPersonActionGate.Status selected = rangedSelection.select(player, weapon.slot());
+        if (selected != FirstPersonActionGate.Status.READY) {
+            if (selected == FirstPersonActionGate.Status.FAILED) {
+                rangedSelection.reset();
+                abortShot();
+            }
+            return TaskState.RUNNING;
+        }
+        if (!RangedShot.stillHolding(crossbow, player.getMainHandItem())) {
+            abortShot();
+            return TaskState.RUNNING;
+        }
+        if (player.isUsingItem() && shot == null) {
+            return TaskState.RUNNING;
+        }
+        if (shot == null) {
+            shot = new RangedShot(player, crossbow);
+        }
+        if (shot.tick(aim, target)) {
+            boolean fired = shot.fired();
+            shot = null;
+            if (fired) {
+                r.strike(target.getId());
+                misfires = 0;
+            } else if (++misfires >= MAX_MISFIRES) {
+                fail("the bow or crossbow did not launch an arrow", FailureType.WRONG_TOOL);
+                return TaskState.FAILED;
+            }
+        }
+        return TaskState.RUNNING;
+    }
+
+    private double shotVelocity(boolean crossbow) {
+        return shot != null ? shot.projectileVelocity(BOW_FULL_SPEED, CROSSBOW_SPEED)
+                : crossbow ? CROSSBOW_SPEED : BOW_FULL_SPEED * RangedShot.bowPowerForTicks(15);
+    }
+
+    // ==================== 躲避 ====================
+
+    /**
+     * 脱离接触:她扛不住了,先活下来。
+     *
+     * <p>终止条件就是那 {@link Menace#FLEE_DISTANCE} 格 —— 与逃跑目标的到达条件同一个数。
+     */
+    /**
+     * 逃跑这一刻做什么:跑向落点。
+     *
+     * <p><b>它不是一个"状态"。</b>顶层每刻重判"还打不打得过",打不过就再走一次这里,
+     * 血回来了下一刻自然回到战斗——曾经这里是一个闩锁({@code fleeing}),进去就把判据
+     * 整个短路,于是血回满了也一直跑,实测一次 DISENGAGE 配四十七行逃跑采样。
+     *
+     * <p>三十二格是<b>跑的目标</b>,不是状态的出口:跑到了就没什么可跑的,判据自会改口。
+     */
+    private TaskState tickFlee() {
+        var around = Menace.hostilesAround(player, Menace.FLEE_DISTANCE);
+        if (around.isEmpty()) {
+            clearHaven();
+            InputDriver.halt(player);
+            Constants.LOG.info("[maicraft-attack] 脱离成功 —— {} 格内没有敌对生物",
+                    (int) Menace.FLEE_DISTANCE);
+            fail(Menace.outmatched(player)
+                            ? "broke off — too hurt to keep fighting; nothing is near you now"
+                            : "broke off — nothing here can be fought with what you carry "
+                                    + "(explosive, or out of reach with no bow); you are clear now",
+                    FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        if (haven == null || player.blockPosition().closerThan(haven, HAVEN_ARRIVED)) {
+            haven = Haven.awayFrom(player, Menace.hostilesAround(player, FLEE_SCAN_RADIUS));
+            stopNav();
+            Constants.LOG.info("[maicraft-attack] 逃向 {} —— {} 格内 {} 只",
+                    haven, (int) Menace.FLEE_DISTANCE, around.size());
+        }
+        if (haven == null) {
+            Constants.LOG.info("[maicraft-attack] 没有可跑的方向");
+            return TaskState.RUNNING;
+        }
+        long now = player.level().getGameTime();
+        if (nav != null && now - havenPlannedAt >= FLEE_REPLAN_TICKS) {
+            stopNav();   // 到点重算:落点不变,只让这一刻的怪进边成本
+        }
+        if (nav == null) {
+            BlockPos landing = haven;
+            havenPlannedAt = now;
+            nav = PlayerNav.toGoal(player, () -> NavGoal.approachAvoiding(
+                            NavGoal.nearGround(landing, HAVEN_ARRIVED),
+                            Menace.AVOID_PENALTY, roadHazards()),
+                    CHASE_SPEED, () -> false);
+        }
+        PlayerNav.Status status = nav.tick();
+        if (status == PlayerNav.Status.FAILED) {
+            stopNav();
+            haven = null;   // 这个方向走不通,下一刻换一个
+            retreatFailures++;
+        } else {
+            if (status == PlayerNav.Status.ARRIVED) {
+                stopNav();
+                haven = null;
+            }
+            retreatFailures = 0;
+        }
+        return TaskState.RUNNING;
+    }
+
+    /** 丢掉落点与导航。跑到了、跑不动了、或者判据改口不跑了,都过这里。 */
+    private void clearHaven() {
+        haven = null;
+        stopNav();
+    }
+
+    /**
+     * 路上要绕开谁。<b>间距给零</b>:它们只让经过的格子变贵(边成本 ×4)与影响估价,
+     * 不参与"到没到"——落点旁边站着一只怪也算到了,不然她永远到不了、也就永远不换落点。
+     */
+    private java.util.List<org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities.Threat>
+            roadHazards() {
+        return Menace.field(player, Menace.hostilesAround(player, FLEE_SCAN_RADIUS)).stream()
+                .map(t -> t.withClearance(0.0))
+                .toList();
+    }
+
+    /**
+     * 脱离接触:她扛不住了,先活下来。
+     *
+     * <p>终止条件就是那 {@link Menace#FLEE_DISTANCE} 格 —— 与逃跑目标的到达条件同一个数。
+     *
+     * <p>势场收当前<b>所有</b>敌对生物:逃跑路上撞进第二只怪,是旧的单点逃离目标最典型的死法。
+     */
+
+
+
+    // ==================== 拾荒 ====================
+
+    private void beginLoot(Vec3 where) {
+        stopNav();
+        abortShot();
+        InputDriver.halt(player);
+        loot.begin(BlockPos.containing(where != null ? where : player.position()));
+        target = null;
+        lastMove = null;   // 目标没了,承诺一并作废
