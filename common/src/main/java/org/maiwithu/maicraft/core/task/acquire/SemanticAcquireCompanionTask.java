@@ -298,3 +298,303 @@ public final class SemanticAcquireCompanionTask
                 need.itemIds.getFirst(), need.itemIds, missing,
                 Ae2ResourceSupply.SelectionMode.AGGREGATE);
         boolean allowNetworkCrafting = r.allowedSources.contains(
+                SemanticAcquireTaskRecord.Source.CRAFT);
+        Ae2ResourceSupply.Request request = new Ae2ResourceSupply.Request(
+                List.of(group), allowNetworkCrafting);
+        long now = player.level().getGameTime();
+        TaskRecord record = Ae2ResourceSupply.taskRecord(
+                childId("storage"), now + STORAGE_TICKS, request);
+        return startChild(need, SemanticAcquireTaskRecord.Source.STORAGE,
+                record, "request exact missing aggregate count from storage"
+                        + (allowNetworkCrafting ? " with network crafting allowed" : ""));
+    }
+
+    private TaskState attemptCraft(Need need) {
+        if (need.craftRounds >= Math.max(4, r.maxRecipeDepth * 3)) {
+            addIssue("craft", "recipe_work_exhausted",
+                    "crafting did not close this need within its bounded recipe rounds",
+                    Map.of("depth", need.depth, "rounds", need.craftRounds,
+                            "rejected_recipes", List.copyOf(need.rejectedRecipes)));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        if (need.depth > r.maxRecipeDepth) {
+            addIssue("craft", "recipe_depth_exhausted",
+                    "recursive crafting reached the configured depth limit",
+                    Map.of("depth", need.depth, "max_recipe_depth", r.maxRecipeDepth));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+
+        int deficit = missing(need);
+        List<CraftCandidate> candidates = new ArrayList<>();
+        for (ResourceLocation output : need.itemIds) {
+            if (!spendWork()) break;
+            int requestedOwnFinal = PlayerInv.buildableCount(
+                    player.getInventory(), BuiltInRegistries.ITEM.get(output)) + deficit;
+            ToolContext context = new ToolContext(
+                    childId("craft-plan"), player.level().getGameTime());
+            CraftOps.Plan plan = craftOps.plan(
+                    output.toString(), requestedOwnFinal, player, context);
+            if (plan.executable()) {
+                need.craftRounds++;
+                need.attempted(SemanticAcquireTaskRecord.Source.CRAFT);
+                return startChild(need, SemanticAcquireTaskRecord.Source.CRAFT,
+                        plan.task(), "craft " + output + " from live recipe facts");
+            }
+            collectCraftCandidates(output, plan.immediate(), candidates);
+        }
+
+        CraftCandidate chosen = candidates.stream()
+                .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
+                .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
+                .filter(CraftCandidate::surfaceSupported)
+                .filter(candidate -> candidate.missing() > 0)
+                .sorted(Comparator
+                        .comparingInt(CraftCandidate::missing)
+                        .thenComparing(Comparator.comparing(
+                                CraftCandidate::surfaceReady).reversed())
+                        .thenComparing(CraftCandidate::recipeId))
+                .findFirst().orElse(null);
+        if (chosen == null) {
+            boolean surfaceMissing = candidates.stream().anyMatch(candidate ->
+                    candidate.missing() == 0
+                            && candidate.surfaceSupported() && !candidate.surfaceReady());
+            addIssue("craft", surfaceMissing
+                            ? "crafting_surface_missing" : "no_bounded_recipe_path",
+                    surfaceMissing
+                            ? "materials exist, but no compatible loaded crafting surface is ready"
+                            : "no cycle-free client-known ordinary recipe path remained",
+                    Map.of("candidate_count", candidates.size(),
+                            "rejected_recipes", List.copyOf(need.rejectedRecipes),
+                            "lineage_recipes", List.copyOf(need.lineageRecipes)));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+
+        IngredientNeed ingredient = chooseIngredient(chosen, need);
+        if (ingredient == null) {
+            need.rejectedRecipes.add(chosen.recipeId());
+            addIssue("craft", "recipe_cycle_or_missing_evidence",
+                    "the closest recipe's missing ingredients were cyclical or did not expose "
+                            + "acceptable item IDs",
+                    Map.of("recipe_id", chosen.recipeId()));
+            return TaskState.RUNNING;
+        }
+        if (need.depth >= r.maxRecipeDepth) {
+            need.rejectedRecipes.add(chosen.recipeId());
+            addIssue("craft", "recipe_depth_exhausted",
+                    "the next missing ingredient would exceed the recursive recipe depth",
+                    Map.of("recipe_id", chosen.recipeId(),
+                            "max_recipe_depth", r.maxRecipeDepth,
+                            "ingredient", itemStrings(ingredient.itemIds())));
+            return TaskState.RUNNING;
+        }
+
+        Set<ResourceLocation> lineageItems = new LinkedHashSet<>(need.lineageItems);
+        lineageItems.addAll(ingredient.itemIds());
+        Set<String> lineageRecipes = new LinkedHashSet<>(need.lineageRecipes);
+        lineageRecipes.add(chosen.recipeId());
+        int ingredientFinal = count(ingredient.itemIds()) + ingredient.missing();
+        Need childNeed = new Need(
+                ingredient.itemIds(), ingredientFinal, need.depth + 1,
+                lineageItems, lineageRecipes, chosen.recipeId());
+        need.craftRounds++;
+        recipeTrace.add(Map.of(
+                "recipe_id", chosen.recipeId(),
+                "output_item_id", chosen.outputItem().toString(),
+                "depth", need.depth,
+                "missing_item_ids", itemStrings(ingredient.itemIds()),
+                "missing_count", ingredient.missing()));
+        needs.push(childNeed);
+        return TaskState.RUNNING;
+    }
+
+    private TaskState attemptMine(Need need) {
+        if (need.attempts(SemanticAcquireTaskRecord.Source.MINE) >= MAX_SOURCE_ATTEMPTS) {
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.MINE)) {
+            return TaskState.RUNNING;
+        }
+        List<String> refs = new ArrayList<>();
+        for (ResourceLocation itemId : need.itemIds) {
+            Item item = BuiltInRegistries.ITEM.get(itemId);
+            if (item instanceof BlockItem blockItem) {
+                refs.add(BuiltInRegistries.BLOCK.getKey(blockItem.getBlock()).toString());
+            }
+        }
+        refs.addAll(sourceHint(need).blockRefs());
+        Set<Block> blocks = ToolParse.parseBlocks(refs);
+        if (blocks.isEmpty()) {
+            addIssue("mine", "mine_source_evidence_missing",
+                    "no source block can be derived from a requested BlockItem and no explicit "
+                            + "semantic block source_hint was supplied",
+                    Map.of("requested_item_ids", itemStrings(need.itemIds)));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        SemanticSourceKnowledge.ToolRequirement tool =
+                SemanticSourceKnowledge.missingTool(player, blocks);
+        if (tool != null) {
+            if (need.miningToolPrerequisitePushed) {
+                addIssue("mine", "wrong_tool_prerequisite_unmet",
+                        "source blocks are known, but the recursively requested harvesting tool "
+                                + "is still absent",
+                        Map.of("tool_family", tool.toolFamily(),
+                                "minimum_tier", tool.minimumTier(),
+                                "acceptable_tool_count", tool.acceptableItemIds().size()));
+                advanceSource(need);
+                return TaskState.RUNNING;
+            }
+            if (need.depth >= r.maxRecipeDepth) {
+                addIssue("mine", "tool_recipe_depth_exhausted",
+                        "preparing a suitable harvesting tool would exceed the recursive depth",
+                        Map.of("tool_family", tool.toolFamily(),
+                                "minimum_tier", tool.minimumTier()));
+                advanceSource(need);
+                return TaskState.RUNNING;
+            }
+            Set<ResourceLocation> lineage = new LinkedHashSet<>(need.lineageItems);
+            lineage.addAll(tool.acceptableItemIds());
+            Need toolNeed = new Need(
+                    tool.acceptableItemIds(), count(tool.acceptableItemIds()) + 1,
+                    need.depth + 1, lineage, need.lineageRecipes, null);
+            need.miningToolPrerequisitePushed = true;
+            addIssue("mine", "preparing_harvesting_tool",
+                    "a suitable harvesting tool is a semantic prerequisite for the observed "
+                            + "source block family",
+                    Map.of("tool_family", tool.toolFamily(),
+                            "minimum_tier", tool.minimumTier(),
+                            "acceptable_tool_count", tool.acceptableItemIds().size()));
+            needs.push(toolNeed);
+            return TaskState.RUNNING;
+        }
+        List<String> protectionProblems = worldSourceProtectionProblems(MINE_TASK_SEARCH_REACH);
+        if (!protectionProblems.isEmpty()) {
+            addIssue("mine", "protected_area_scope_ambiguous",
+                    "the generic mining child can search a wider loaded field than the protected "
+                            + "areas it would need to exclude, so mining was not started",
+                    Map.of("protection_evidence", protectionProblems,
+                            "source_blocks", blockStrings(blocks)));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        if (!spendWork()) return exhaustNeed(need);
+        need.attempted(SemanticAcquireTaskRecord.Source.MINE);
+        int deficit = Math.min(256, missing(need));
+        long now = player.level().getGameTime();
+        long budget = Math.max(MINE_MIN_TICKS, deficit * MINE_PER_UNIT_TICKS);
+        MineBlockTaskRecord record = new MineBlockTaskRecord(
+                childId("mine"), now + budget, blocks, deficit, blockLabel(blocks));
+        return startChild(need, SemanticAcquireTaskRecord.Source.MINE,
+                record, "mine BlockItem-derived or semantic source blocks");
+    }
+
+    private TaskState attemptCook(Need need) {
+        if (need.attempts(SemanticAcquireTaskRecord.Source.COOK) >= MAX_SOURCE_ATTEMPTS) {
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        ResourceLocation output = need.itemIds.stream()
+                .filter(this::hasCookingRecipe)
+                .findFirst().orElse(null);
+        if (output == null) {
+            addIssue("cook", "no_cooking_source_path",
+                    "no client-known furnace-family recipe produces this recursive need",
+                    Map.of("requested_item_ids", itemStrings(need.itemIds)));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        if (!spendWork()) return exhaustNeed(need);
+        need.attempted(SemanticAcquireTaskRecord.Source.COOK);
+        int currentSelected = PlayerInv.buildableCount(
+                player.getInventory(), BuiltInRegistries.ITEM.get(output));
+        int selectedFinal = Math.min(
+                SemanticCookTaskRecord.MAX_FINAL_COUNT, currentSelected + missing(need));
+        List<SemanticAcquireTaskRecord.Source> childSources = r.allowedSources.stream()
+                .filter(source -> source != SemanticAcquireTaskRecord.Source.COOK)
+                .toList();
+        long now = player.level().getGameTime();
+        SemanticCookTaskRecord child = new SemanticCookTaskRecord(
+                childId("cook"),
+                Math.min(r.getDeadlineGameTime(), now + 12L * 60L * 20L),
+                output, selectedFinal, SemanticCookTaskRecord.Preference.AUTO,
+                List.of(), childSources, r.allowHarm, r.protectedLabels);
+        return startChild(need, SemanticAcquireTaskRecord.Source.COOK, child,
+                "cook a client-known output while recursively acquiring its prerequisites");
+    }
+
+    private boolean hasCookingRecipe(ResourceLocation outputId) {
+        Item output = BuiltInRegistries.ITEM.get(outputId);
+        for (var holder : ClientRuntime.requireContext(player)
+                .connection().getRecipeManager().getRecipes()) {
+            if (!(holder.value() instanceof AbstractCookingRecipe cooking)) continue;
+            ItemStack result = cooking.getResultItem(player.level().registryAccess());
+            if (!result.isEmpty() && result.is(output)) return true;
+        }
+        return false;
+    }
+
+    private TaskState reviewTrade(Need need) {
+        if (!spendWork()) return exhaustNeed(need);
+        need.attempted(SemanticAcquireTaskRecord.Source.TRADE);
+        int alternativeCount = Math.min(MAX_TRADE_ALTERNATIVES, need.itemIds.size());
+        int alternativeIndex = Math.floorMod(
+                need.attempts(SemanticAcquireTaskRecord.Source.TRADE) - 1,
+                Math.max(1, alternativeCount));
+        ResourceLocation output = need.itemIds.get(alternativeIndex);
+        int currentSelected = PlayerInv.buildableCount(
+                player.getInventory(), BuiltInRegistries.ITEM.get(output));
+        int selectedFinalCount = Math.min(
+                SemanticTradeTaskRecord.MAX_FINAL_COUNT,
+                currentSelected + missing(need));
+        long now = player.level().getGameTime();
+        SemanticTradeTaskRecord record = new SemanticTradeTaskRecord(
+                childId("trade"),
+                Math.min(r.getDeadlineGameTime(), now + 8L * 60L * 20L),
+                output,
+                selectedFinalCount,
+                SemanticTradeTaskRecord.MerchantKind.AUTO,
+                List.of(),
+                r.protectedLabels,
+                Math.min(r.searchRadius, SemanticTradeTaskRecord.MAX_RADIUS));
+        return startChild(need, SemanticAcquireTaskRecord.Source.TRADE, record,
+                "inspect loaded unprotected merchants and execute a synchronized affordable offer");
+    }
+
+    private TaskState reviewHunt(Need need) {
+        if (!r.allowHarm) {
+            addIssue("hunt", "harm_permission_required",
+                    "hunt was allowed as a source family, but allow_harm is false; no entity was attacked",
+                    Map.of("requires_narration", true));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        int attemptLimit = huntAttemptLimit(need);
+        if (need.attempts(SemanticAcquireTaskRecord.Source.HUNT) >= attemptLimit) {
+            addIssue("hunt", "hunt_attempt_limit_reached",
+                    "the bounded hunt target budget ended before the inventory fact became true",
+                    Map.of("attempted_targets", need.attempts(
+                                    SemanticAcquireTaskRecord.Source.HUNT),
+                            "target_budget", attemptLimit,
+                            "observed_final_count", count(need.itemIds),
+                            "required_final_count", need.requiredFinalCount));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
+        if (hint.entityTypeIds().isEmpty()) {
+            addIssue("hunt", "entity_source_evidence_missing",
+                    "no semantic entity type source_hint was supplied; no entity was selected",
+                    Map.of());
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        Set<ResourceLocation> expected = new LinkedHashSet<>(hint.expectedItemIds());
+        expected.retainAll(need.itemIds);
+        if (expected.isEmpty()) {
+            addIssue("hunt", "drop_relation_evidence_missing",
+                    "the semantic hint does not identify any requested item as an expected product; "
+                            + "no entity was attacked",
