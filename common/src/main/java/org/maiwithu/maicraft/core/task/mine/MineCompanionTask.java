@@ -898,3 +898,303 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  contribution is subtracted first, so walking past old/other loot cannot satisfy
      *  the mining request. Observed new drop types are always compatible by actual
      *  spawn evidence; an entity picked up before first observation is accepted only
+     *  when provenance remained unambiguous. */
+    private int attributableInventoryGain() {
+        Map<Item, Integer> after = inventoryCounts();
+        Map<Item, Integer> oldLooseConsumed = preexistingLooseItemsConsumed();
+        int total = 0;
+        for (Map.Entry<Item, Integer> entry : after.entrySet()) {
+            Item item = entry.getKey();
+            int positive = entry.getValue() - inventoryBeforeBreak.getOrDefault(item, 0);
+            positive -= oldLooseConsumed.getOrDefault(item, 0);
+            if (positive <= 0) continue;
+            if (observedDropItems.contains(item) || !provenanceAmbiguous) total += positive;
+        }
+        return total;
+    }
+
+    /** Conservative upper bound on old loose items that may have entered the body.
+     *  Missing/unloaded old entities are treated as consumed and subtracted too; that
+     *  can under-credit a real drop, but can never turn somebody else's item into our
+     *  success. */
+    private Map<Item, Integer> preexistingLooseItemsConsumed() {
+        Map<Item, Integer> consumed = new HashMap<>();
+        for (int id : relevantPreexistingDropIds) {
+            ItemStack before = preexistingDropStacks.get(id);
+            if (before == null) continue;
+            int liveCount = 0;
+            Entity live = player.clientLevel.getEntity(id);
+            if (live instanceof ItemEntity item && !item.isRemoved()
+                    && item.getItem().getItem() == before.getItem()) {
+                liveCount = item.getItem().getCount();
+            }
+            int missing = Math.max(0, before.getCount() - liveCount);
+            if (missing > 0) consumed.merge(before.getItem(), missing, Integer::sum);
+        }
+        return consumed;
+    }
+
+    private boolean preexistingLooseItemChanged() {
+        return preexistingLooseItemsConsumed().values().stream().anyMatch(count -> count > 0);
+    }
+
+    private Map<Item, Integer> inventoryCounts() {
+        Map<Item, Integer> counts = new HashMap<>();
+        Inventory inv = player.getInventory();
+        // Main inventory only; armor/offhand are not mining output.
+        for (ItemStack stack : inv.items) {
+            if (!stack.isEmpty()) counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
+        }
+        return counts;
+    }
+
+    private AABB dropEvidenceBox() {
+        return new AABB(evidencePos).inflate(DROP_EVIDENCE_RADIUS);
+    }
+
+    private boolean anotherPlayerCouldSupplyDrop() {
+        if (evidencePos == null) return false;
+        Vec3 origin = Vec3.atCenterOf(evidencePos);
+        for (Player other : player.level().players()) {
+            if (other != player && !other.isRemoved()
+                    && other.position().distanceToSqr(origin) <= OTHER_PLAYER_AMBIGUITY_SQR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void clearBreakEvidence() {
+        breakDrops.clear();
+        preexistingDropIds.clear();
+        preexistingDropStacks.clear();
+        relevantPreexistingDropIds.clear();
+        attributedDropIds.clear();
+        rejectedDropIds.clear();
+        observedDropItems.clear();
+        inventoryBeforeBreak = Map.of();
+        evidencePos = null;
+        evidenceState = null;
+        evidenceTool = ItemStack.EMPTY;
+        collectingDrops = false;
+        provenanceAmbiguous = false;
+        nativeBreakObserved = false;
+        confirmedAirTicks = 0;
+        dropPhaseTicks = 0;
+        dropCloseTicks = 0;
+        dropTarget = null;
+    }
+
+    // ---- ore list maintenance ----
+
+    /** 按需查询:名单快吃完 / 进入新 chunk / 慢心跳到点 / 上次覆盖不完整,才碰索引。 */
+    private void maybeQuery() {
+        --queryCooldown;
+        --heartbeatTimer;
+        if (queryCooldown > 0) {
+            return;
+        }
+        if (knownOres.size() < QUERY_LOW_WATER
+                || ChunkPos.asLong(player.blockPosition()) != lastQueryChunk
+                || heartbeatTimer <= 0
+                || !lastQueryComplete) {
+            runQuery();
+        }
+    }
+
+    /** 查一次共享索引,把最近的目标并进名单。 */
+    private void runQuery() {
+        var sl = player.clientLevel;
+        lastQueryChunk = ChunkPos.asLong(player.blockPosition());
+        heartbeatTimer = QUERY_HEARTBEAT_TICKS;
+        queryCooldown = QUERY_MIN_GAP_TICKS;
+        TargetIndex.Result res = TargetIndex.query(sl, player.blockPosition(), r.targets,
+                MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET);
+        lastQueryComplete = res.complete();
+        if (lastQueryComplete) {
+            coldMapFails = 0;   // 图齐了，之前那几次无路不再算数
+        }
+        org.maiwithu.maicraft.core.Constants.LOG.debug(
+                "[maicraft-task] mine query feet={} raw={} complete={} known(before merge)={}",
+                player.blockPosition().toShortString(), res.hits().size(), res.complete(),
+                knownOres.size());
+        mergeHits(res.hits());
+    }
+
+    /** Add fresh, still-workable hits to knownOres, then prune (which re-validates
+     *  every entry against the live world and keeps the nearest {@link #MAX_ORES}). */
+    private void mergeHits(List<BlockPos> hits) {
+        // One-off Set view for dedup: knownOres stays a distance-ordered list (prune sorts it),
+        // but membership checks against it must not be linear scans — a big batch times a
+        // linear contains is O(N^2) on the server thread.
+        Set<BlockPos> seen = new HashSet<>(knownOres);
+        for (BlockPos hit : hits) {
+            BlockPos p = hit.immutable();
+            if (unworkable.contains(p) || !seen.add(p)) continue;
+            knownOres.add(p);
+        }
+        prune();
+    }
+
+    private void prune() {
+        Level level = player.level();
+        BlockPos feet = player.blockPosition();
+        // 问的是"挖不挖得成",按可改地形算——这是挖矿任务,许可本来就是 TERRAFORM
+        CalculationContext ctx = ContextFactory.forExecution(player,
+                org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.TERRAFORM);
+        knownOres.removeIf(p -> {
+            var state = level.getBlockState(p);
+            if (state.isAir() || !r.targets.contains(state.getBlock()) || unworkable.contains(p)
+                    || !plausibleToBreak(ctx, p, state)) {
+                return true;
+            }
+            // Harvestability gate. Tool-skipped cells are remembered so the terminal failure
+            // can say "you need a better tool" instead of the misleading "nothing found" (the
+            // tool situation can also CHANGE mid-task: the only good pick breaking makes this
+            // fire on re-prune).
+            if (!WorkProfile.of(player).instaBreak()
+                    && !BlockHelper.canHarvest(player.getInventory(), state)) {
+                unharvestable.add(p.immutable());
+                return true;
+            }
+            return false;
+        });
+        knownOres.sort(Comparator.comparingDouble(feet::distSqr));
+        if (knownOres.size() > MAX_ORES) {
+            knownOres.subList(MAX_ORES, knownOres.size()).clear();
+        }
+    }
+
+    /** Nearest known ore to the feet, or null — for the "near ore exists but heading far" diagnostics. */
+    private BlockPos nearestOre() {
+        BlockPos feet = player.blockPosition();
+        return knownOres.stream().min(Comparator.comparingDouble(feet::distSqr)).orElse(null);
+    }
+
+    /** Log-friendly nearest-ore descriptor (ASCII so it survives any log encoding):
+     *  "316,64,391 minecraft:oak_log dy=+0 dist=1.0" or "none". dy = ore.y - feet.y (spot "it's 4 up,
+     *  needs pillaring" vs "same level"); the block id spots a mis-handled type (vine/leaves/etc.). */
+    private String nearestOreInfo() {
+        BlockPos n = nearestOre();
+        if (n == null) {
+            return "none";
+        }
+        BlockPos feet = player.blockPosition();
+        String block = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                .getKey(player.level().getBlockState(n).getBlock()).toString();
+        int dy = n.getY() - feet.getY();
+        return n.toShortString() + " " + block + " dy=" + (dy >= 0 ? "+" + dy : dy)
+                + " dist=" + String.format("%.1f", Math.sqrt(feet.distSqr(n)));
+    }
+
+
+
+    /** 挖掉了一格,或者明显挪了窝 —— 两者都算进展,卡死计时重新起算。 */
+    private void noteProgress() {
+        lastProgressTick = player.level().getGameTime();
+        lastProgressPos = player.blockPosition();
+    }
+
+    /**
+     * 真卡住了吗。<b>既没挖掉一格、也没挪出 {@link #STALL_MOVE} 格</b>,持续
+     * {@link #STALL_TICKS} 刻才算 —— 走远路去挖矿一刻都不算,她在动。
+     *
+     * @return 该收工就给终态,否则 null
+     */
+    private TaskState stalledOut() {
+        long now = player.level().getGameTime();
+        if (lastProgressPos == null
+                || player.blockPosition().distSqr(lastProgressPos) > STALL_MOVE * STALL_MOVE) {
+            noteProgress();
+            return null;
+        }
+        // 规划器在飞的刻不算卡住:搜索按真实时间给预算,而这把尺子数的是游戏刻。tick 远快于
+        // 真实时间时(/tick rate 200、不限速的测试服),往下挖 170 格的搜索还没回来,400 刻已经
+        // 烧完——她被判"够不着",其实只是在等路。与任务 deadline 的同一条保护(AbstractCompanionTask)。
+        if (nav != null && nav.planningInFlight()) {
+            lastProgressTick++;
+            return null;
+        }
+        if (now - lastProgressTick < STALL_TICKS) {
+            return null;
+        }
+        org.maiwithu.maicraft.core.Constants.LOG.info(
+                "[maicraft-task] mine 卡住 {} 刻:没挖掉任何一格、也没挪窝 | feet={} 名单 {} 个",
+                now - lastProgressTick, player.blockPosition().toShortString(), knownOres.size());
+        if (r.getMined() > 0) {
+            progressNote = "gathered " + r.getMined() + "/" + r.count
+                    + ", then could not reach the remaining " + knownOres.size() + " " + r.label;
+            fail(progressNote, FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        fail("found " + knownOres.size() + " " + r.label + " but could not reach any of them from "
+                + "the current area — no path out, and nothing minable in place; gathered 0."
+                + " Move me somewhere else, or clear a way first.", FailureType.NO_PATH);
+        return TaskState.FAILED;
+    }
+
+    /** Terminal "nothing gathered, no ore left to go for" failure, distinguishing a
+     *  genuinely empty field ({@code MINED_OUT} — widening the search or stopping is the
+     *  LLM's call) from a field that WAS found but every target turned out unworkable
+     *  ({@code NO_PATH} — 没有任何站位能对它拉出射线), with the counts.
+     *  「走不到」那一档不在这里 —— 它由 {@link #stalledOut} 收工。 */
+    private TaskState noOreFailure() {
+        if (!unharvestable.isEmpty()) {
+            // Targets exist but the carried tools can't make them drop — the actionable
+            // problem is the tool, not the deposit. Names the escape hatches explicitly.
+            fail("found " + unharvestable.size() + " " + r.label + " but none can be harvested with"
+                    + " the current tools (mining would destroy them without any drop); gathered "
+                    + r.getMined() + ". Equip a better tool (equip_item) and retry; to just destroy"
+                    + " blocks regardless of drops, use break_block.",
+                    FailureType.WRONG_TOOL);
+            return TaskState.FAILED;
+        }
+        if (!unworkable.isEmpty()) {
+            fail("found " + unworkable.size() + " " + r.label + " nearby but no clear shot at any"
+                    + " of them from any stance I could take; gathered 0",
+                    FailureType.NO_PATH);
+        } else {
+            fail("no reachable " + r.label + " found in the loaded area around me",
+                    FailureType.MINED_OUT);
+        }
+        return TaskState.FAILED;
+    }
+
+    /** Stop the nav AND clear the branch-mode flag (extends the base's nav release). */
+    @Override
+    protected void stopNav() {
+        super.stopNav();
+        navIsBranch = false;
+    }
+
+    @Override
+    protected void cleanup() {
+        // super.cleanup() = stopNav() (nav.stop clears the overlay when a nav exists) + an explicit
+        // so a task that finished while shaft-mining (nav == null) still
+        // clears its lingering goal boxes. Then release the dig + the index registration.
+        super.cleanup();
+        digger.cancel();
+        clearBreakEvidence();
+        TargetIndex.unregister(player.clientLevel, r.targets);
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("target", r.label);
+        data.put("requested", r.count);
+        data.put("gathered", r.getMined());
+        data.put("confirmed_target_breaks", brokenTargets);
+        return data;
+    }
+
+    @Override
+    protected String successMessage() {
+        return "gathered " + r.getMined() + "/" + r.count + " " + r.label + " (" + progressNote + ")";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "timed out after gathering " + r.getMined() + "/" + r.count + " " + r.label;
+    }
+
