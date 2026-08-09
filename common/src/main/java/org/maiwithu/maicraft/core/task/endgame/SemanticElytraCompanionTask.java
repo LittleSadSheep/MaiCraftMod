@@ -898,3 +898,303 @@ public final class SemanticElytraCompanionTask
         frames.sort(Comparator.comparingDouble(player::distanceToSqr));
         return List.copyOf(frames);
     }
+
+    private boolean liveShipFrame(ItemFrame frame) {
+        return frame != null && !frame.isRemoved()
+                && player.level().isLoaded(frame.blockPosition())
+                && frame.getItem().is(Items.ELYTRA);
+    }
+
+    private ShipEvidence shipEvidence(ItemFrame frame) {
+        if (!liveShipFrame(frame)) return ShipEvidence.INVALID;
+        ItemStack displayed = frame.getItem();
+        if (protectedAt(frame.blockPosition())
+                || frame.hasCustomName()
+                || frame.getType() != EntityType.ITEM_FRAME
+                || frame.isInvisible()
+                || frame.isInvulnerable()
+                || !frame.getTags().isEmpty()
+                || displayed.has(DataComponents.CUSTOM_NAME)
+                || displayed.has(DataComponents.CUSTOM_DATA)
+                || displayed.isDamaged()
+                || frame.getRotation() != 0) {
+            return ShipEvidence.MANAGED;
+        }
+        Direction facing = frame.getDirection();
+        if (facing == Direction.UP || facing == Direction.DOWN) {
+            return ShipEvidence.INVALID;
+        }
+        BlockPos framePos = frame.blockPosition();
+        if (!shipSignatureRegionLoaded(framePos)) return ShipEvidence.INCOMPLETE;
+        Block support = player.level().getBlockState(
+                framePos.relative(facing.getOpposite())).getBlock();
+        if (!purpurHullBlock(support)) return ShipEvidence.INVALID;
+
+        int purpur = 0;
+        int chests = 0;
+        int brewingStands = 0;
+        int endRods = 0;
+        for (int dx = -SHIP_SIGNATURE_RADIUS; dx <= SHIP_SIGNATURE_RADIUS; dx++) {
+            for (int dz = -SHIP_SIGNATURE_RADIUS; dz <= SHIP_SIGNATURE_RADIUS; dz++) {
+                for (int dy = -12; dy <= 12; dy++) {
+                    Block block = player.level().getBlockState(
+                            framePos.offset(dx, dy, dz)).getBlock();
+                    if (Math.abs(dx) <= 12 && Math.abs(dz) <= 12
+                            && Math.abs(dy) <= 8 && purpurHullBlock(block)) purpur++;
+                    if (Math.abs(dx) <= 8 && Math.abs(dz) <= 8
+                            && Math.abs(dy) <= 6 && block == Blocks.CHEST) chests++;
+                    if (block == Blocks.BREWING_STAND) brewingStands++;
+                    if (block == Blocks.END_ROD) endRods++;
+                }
+            }
+        }
+        return purpur >= SHIP_MIN_PURPUR
+                        && chests >= SHIP_MIN_CHESTS
+                        && brewingStands >= SHIP_MIN_BREWING_STANDS
+                        && endRods > 0
+                ? ShipEvidence.VERIFIED : ShipEvidence.INVALID;
+    }
+
+    private boolean shipSignatureRegionLoaded(BlockPos center) {
+        int minChunkX = Math.floorDiv(center.getX() - SHIP_SIGNATURE_RADIUS, 16);
+        int maxChunkX = Math.floorDiv(center.getX() + SHIP_SIGNATURE_RADIUS, 16);
+        int minChunkZ = Math.floorDiv(center.getZ() - SHIP_SIGNATURE_RADIUS, 16);
+        int maxChunkZ = Math.floorDiv(center.getZ() + SHIP_SIGNATURE_RADIUS, 16);
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if (player.clientLevel.getChunkSource().getChunkNow(chunkX, chunkZ) == null) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean purpurHullBlock(Block block) {
+        return block == Blocks.PURPUR_BLOCK || block == Blocks.PURPUR_PILLAR
+                || block == Blocks.PURPUR_STAIRS || block == Blocks.PURPUR_SLAB;
+    }
+
+    private boolean loadedElytraDrop() {
+        AABB scan = new AABB(player.blockPosition()).inflate(32.0D);
+        return !player.clientLevel.getEntitiesOfClass(
+                ItemEntity.class, scan,
+                entity -> !entity.isRemoved() && entity.isAlive()
+                        && entity.getItem().is(Items.ELYTRA)).isEmpty();
+    }
+
+    private HostileSurvey blockingHostiles(BlockPos target) {
+        AABB scan = new AABB(target).inflate(HOSTILE_RADIUS);
+        List<Mob> active = new ArrayList<>(player.clientLevel.getEntitiesOfClass(
+                Mob.class, scan,
+                mob -> !mob.isRemoved() && mob.isAlive()
+                        && mob instanceof Enemy && mob.getTarget() == player));
+        active.sort(Comparator.comparingDouble(player::distanceToSqr));
+        boolean protectedPresent = active.stream()
+                .anyMatch(mob -> mob.hasCustomName() || protectedAt(mob.blockPosition()));
+        List<Mob> attackable = active.stream()
+                .filter(mob -> !mob.hasCustomName() && !protectedAt(mob.blockPosition()))
+                .toList();
+        return new HostileSurvey(attackable, protectedPresent);
+    }
+
+    private boolean protectedAt(BlockPos pos) {
+        if (pos == null || r.protectedLabels.isEmpty()) return false;
+        String currentDimension = dimension();
+        for (String label : r.protectedLabels) {
+            IntentRuntime.Landmark landmark = IntentRuntime.get().landmark(label);
+            if (landmark == null) return true;
+            Goal.WorldPosition known = landmark.position();
+            if (known.dimension() != null && !known.dimension().isBlank()
+                    && !currentDimension.equals(known.dimension())) {
+                continue;
+            }
+            long dx = (long) pos.getX() - known.x();
+            long dz = (long) pos.getZ() - known.z();
+            if (dx * dx + dz * dz
+                    <= (long) LANDMARK_PROTECTION_RADIUS * LANDMARK_PROTECTION_RADIUS) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private TaskState safetyGate() {
+        String code = null;
+        String message = null;
+        if (player.getHealth() < SAFETY_HEALTH_FLOOR) {
+            code = "safety_low_health";
+            message = "Health fell below the elytra traversal safety floor; active work was preempted.";
+        } else if (player.hasEffect(MobEffects.LEVITATION)) {
+            code = "safety_levitation";
+            message = "Levitation was observed; active traversal was preempted before it could steer into the void.";
+        } else if (imminentVoidRisk()) {
+            code = "safety_void_risk";
+            message = "A falling body with no loaded solid ground below was observed; active work was preempted.";
+        } else {
+            LivingEntity attacker = player.getLastHurtByMob();
+            boolean fresh = player.hurtTime > 0 && attacker != null
+                    && !attacker.isRemoved() && attacker.isAlive();
+            if (fresh && !authorizedCombatIds.contains(attacker.getId())) {
+                code = "safety_fresh_attacker";
+                message = "A fresh attacker outside the strict authorized combat set interrupted the task.";
+            }
+        }
+        if (code == null) return null;
+        clearActiveChild(TaskState.CANCELLED);
+        authorizedCombatIds.clear();
+        return failFinal(code, message, FailureType.HAZARD);
+    }
+
+    private boolean imminentVoidRisk() {
+        if (player.getY() <= player.level().getMinBuildHeight() + 8) return true;
+        return !player.onGround() && !player.isInWater()
+                && player.fallDistance > 3.0F && !loadedSolidGroundBelow(VOID_GROUND_PROBE);
+    }
+
+    private boolean loadedSolidGroundBelow(int depth) {
+        BlockPos feet = player.blockPosition();
+        for (int drop = 1; drop <= depth; drop++) {
+            BlockPos probe = feet.below(drop);
+            if (!player.level().isLoaded(probe)) return false;
+            BlockState state = player.level().getBlockState(probe);
+            if (!state.getCollisionShape(player.level(), probe).isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private BlockPos nextGatewayFrontier() {
+        int maximum = Math.min(r.maxSearchDistance, GATEWAY_SCAN_RADIUS);
+        while (gatewayFrontiersAttempted < MAX_GATEWAY_FRONTIERS) {
+            int index = gatewayFrontiersAttempted++;
+            int ring = index / 8 + 1;
+            int direction = index % 8;
+            int[][] directions = {
+                    {1, 0}, {1, 1}, {0, 1}, {-1, 1},
+                    {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
+            };
+            int distance = ring * GATEWAY_FRONTIER_STEP;
+            if (distance > maximum) return null;
+            BlockPos candidate = origin.offset(
+                    directions[direction][0] * distance, 0,
+                    directions[direction][1] * distance);
+            if (!outsideMainIsland(candidate) && !protectedAt(candidate)) {
+                return candidate.immutable();
+            }
+        }
+        return null;
+    }
+
+    private BlockPos nextShipFrontier() {
+        if (cityAnchor == null || shipFrontiersThisCity >= MAX_SHIP_FRONTIERS) {
+            return null;
+        }
+        int index = shipFrontiersThisCity;
+        int ring = index / 8 + 1;
+        int direction = index % 8;
+        int[][] directions = {
+                {1, 0}, {1, 1}, {0, 1}, {-1, 1},
+                {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
+        };
+        int distance = ring * SHIP_FRONTIER_STEP;
+        if (distance > Math.min(r.maxSearchDistance, SHIP_ENTITY_SCAN_RADIUS)) {
+            return null;
+        }
+        return cityAnchor.offset(
+                directions[direction][0] * distance,
+                0,
+                directions[direction][1] * distance).immutable();
+    }
+
+    private TaskState excludeCityAndContinue() {
+        if (cityAnchor == null) {
+            return failFinal("end_city_anchor_lost",
+                    "The internal verified city evidence anchor was lost; another search cannot be safely excluded.",
+                    FailureType.INTERNAL);
+        }
+        boolean alreadyVisited = visitedCityAnchors.stream().anyMatch(anchor ->
+                horizontalDistanceSquared(anchor, cityAnchor)
+                        <= (long) CITY_EXCLUSION_RADIUS * CITY_EXCLUSION_RADIUS);
+        if (!alreadyVisited) visitedCityAnchors.add(cityAnchor.immutable());
+        cityAnchor = null;
+        shipFrame = null;
+        shipFramePosition = null;
+        shipFrontiersThisCity = 0;
+        incompleteFrameApproached = false;
+        phase = Phase.SEARCH_END_CITY;
+        return TaskState.RUNNING;
+    }
+
+    private int remainingOuterSearchDistance() {
+        if (outerSearchOrigin == null) return r.maxSearchDistance;
+        double travelled = Math.sqrt(horizontalDistanceSquared(
+                outerSearchOrigin, player.blockPosition()));
+        return Math.max(0, (int) Math.floor(r.maxSearchDistance - travelled));
+    }
+
+    /**
+     * With protected labels, no shared navigation API can prove that a terrain-changing route
+     * would avoid every protected radius, so all delegated routes are forced read-only.
+     */
+    private boolean effectiveMayAlterTerrain() {
+        return r.mayAlterTerrain && r.protectedLabels.isEmpty();
+    }
+
+    private int elytraCount() {
+        return PlayerInv.carriedCount(player.getInventory(), Items.ELYTRA);
+    }
+
+    private int pearlCount() {
+        return PlayerInv.carriedCount(player.getInventory(), Items.ENDER_PEARL);
+    }
+
+    private String dimension() {
+        return player.level().dimension().location().toString();
+    }
+
+    private static boolean outsideMainIsland(BlockPos pos) {
+        long x = pos.getX();
+        long z = pos.getZ();
+        return x * x + z * z > (long) MAIN_ISLAND_RADIUS * MAIN_ISLAND_RADIUS;
+    }
+
+    private static long distanceSquared(BlockPos first, BlockPos second) {
+        if (first == null || second == null) return Long.MAX_VALUE;
+        long dx = (long) first.getX() - second.getX();
+        long dy = (long) first.getY() - second.getY();
+        long dz = (long) first.getZ() - second.getZ();
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    private static long horizontalDistanceSquared(BlockPos first, BlockPos second) {
+        if (first == null || second == null) return Long.MAX_VALUE;
+        long dx = (long) first.getX() - second.getX();
+        long dz = (long) first.getZ() - second.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    private String childId(String purpose) {
+        return r.getToolCallId() + "-elytra-" + purpose + "-" + (++childSerial);
+    }
+
+    private long childDeadline(long ticks) {
+        return Math.min(r.getDeadlineGameTime(),
+                player.level().getGameTime() + ticks);
+    }
+
+    private void clearActiveChild(TaskState terminal) {
+        if (activeChild == null) return;
+        Task child = activeChild;
+        child.stop(player, Task.StopReason.REPLACED);
+        try {
+            child.result(terminal);
+        } catch (RuntimeException ignored) {
+            // The parent still releases every first-person control in cleanup.
+        }
+        activeChild = null;
+        activeRecord = null;
+        activePurpose = null;
+        authorizedCombatIds.clear();
+    }
+
+    @Override
