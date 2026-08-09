@@ -598,3 +598,303 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     }
 
     /** Is {@code point} within reach of {@code eyes}, and does an eye→point ray hit {@code target} first
+     *  (nothing solid in the way)? */
+    private boolean reachableAt(Vec3 eyes, BlockPos target, Vec3 point) {
+        if (eyes.distanceToSqr(point) > REACH_SQR) {
+            return false;
+        }
+        // OUTLINE (the selection shape), matching how a real click picks a block and what BlockDigger's
+        // own reach ray uses — so this gate and the actual dig never disagree about whether a block is
+        // hittable (a COLLIDER gate could green-light an ore the digger then can't draw a shot at).
+        BlockHitResult hit = player.level().clip(new ClipContext(
+                eyes, point, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target);
+    }
+
+    // ---- mining (progressive, tick-by-tick like a real player) ----
+
+    /** Advance the shared dig one tick (it switches to the best tool itself); on the tick the TARGET
+     *  breaks, drop it from the ore list. A {@link BlockDigger.DigResult#BROKE_OCCLUDER} (a leaf cleared
+     *  to open the line of sight) is NOT the target, so the ore stays. Survival progress is committed
+     *  later by the isolated drop collector after a real main-inventory gain — one block can yield
+     *  several items, and the drops take a moment to be picked up.
+     *
+     *  <p>Recovery: 连续的 {@code NO_SHOT}(够到测试过了,可挖掘始终成不了射线)记数,满
+     *  {@link #MAX_NO_SHOT_TICKS} 就把<b>那一格</b>记进 {@link #unworkable} 继续往下走,
+     *  而不是永远等一个不会来的射线。<b>记的是这一格,不是猜一格</b> —— 这是唯一一处
+     *  按格记账的地方,因为它是唯一一件关于那一格的可复现事实。 */
+    private void mineProgress(BlockPos pos) {
+        prepareBreakEvidence(pos);
+        // The target may have changed between selection and this client tick. Never
+        // let the generic digger consume the replacement without a matching target
+        // state/evidence round.
+        if (evidencePos == null || !evidencePos.equals(pos) || evidenceState == null) {
+            digger.cancel();
+            return;
+        }
+        if (provenanceAmbiguous && !nativeBreakObserved) {
+            // This is knowable before any destructive action. Pause rather than break
+            // a source whose loose result cannot be distinguished from a nearby
+            // player's newly thrown item on the client.
+            digger.cancel();
+            fail("another player is too close to isolate this block's future loose drop; "
+                            + "move apart briefly and retry",
+                    FailureType.UNKNOWN);
+            return;
+        }
+        // Same block with a live property update (for example redstone ore lighting
+        // on attack) remains the same loot source; a different replacement does not.
+        if (player.level().getBlockState(pos).getBlock() != evidenceState.getBlock()) {
+            digger.cancel();
+            clearBreakEvidence();
+            return;
+        }
+        // ToolSelect inside BlockDigger may finish a tick after the evidence snapshot.
+        // Refresh while the target still exists so the retained tool is the one that
+        // actually drove the native break (including Silk Touch/Fortune components).
+        if (evidencePos != null && evidencePos.equals(pos)
+                && evidenceState != null
+                && player.level().getBlockState(pos).getBlock() == evidenceState.getBlock()) {
+            evidenceTool = player.getMainHandItem().copy();
+        }
+        BlockState beforeStep = player.level().getBlockState(pos);
+        BlockDigger.DigResult result = digger.digStep(pos);
+        var gameMode = net.minecraft.client.Minecraft.getInstance().gameMode;
+        if ((gameMode != null && gameMode.isDestroying())
+                || (!beforeStep.isAir() && player.level().getBlockState(pos).isAir())) {
+            nativeBreakObserved = true;
+        }
+        switch (result) {
+            case BROKE_TARGET -> finishConfirmedTargetBreak(pos);
+            case NO_SHOT -> {
+                if (pos.equals(noShotPos)) {
+                    if (++noShotTicks >= MAX_NO_SHOT_TICKS) {
+                        unworkable.add(pos.immutable());
+                        knownOres.remove(pos);
+                        digger.cancel();   // release the in-progress-dig latch on this ore
+                        clearNoShot();
+                    }
+                } else {
+                    noShotPos = pos.immutable();
+                    noShotTicks = 1;
+                }
+            }
+            // PROGRESSING / BROKE_OCCLUDER — real progress; reset the stall counter.
+            default -> clearNoShot();
+        }
+    }
+
+    private void finishConfirmedTargetBreak(BlockPos pos) {
+        // DefaultNativeActionPort confirms BREAK_BLOCK only after this exact cell
+        // has been authoritative air for two client revisions. Keep the explicit
+        // frozen-state binding so a stale/mismatched round cannot become loot progress.
+        if (evidencePos == null || !evidencePos.equals(pos)
+                || evidenceState == null
+                || !r.targets.contains(evidenceState.getBlock())
+                || !player.level().getBlockState(pos).isAir()) {
+            fail("a target break was reported, but its frozen pre-break state and "
+                            + "authoritative world change could not be bound to one drop round",
+                    FailureType.UNKNOWN);
+            clearBreakEvidence();
+            return;
+        }
+        knownOres.remove(pos);
+        brokenTargets++;
+        if (!WorkProfile.of(player).dropsLoot()) r.setMined(brokenTargets);
+        noteProgress();
+        // 地形变了 —— 挡住射线的那个檐口可能正好就是这一格。旧的"挖不动"结论全部作废。
+        unworkable.clear();
+        if (WorkProfile.of(player).dropsLoot()) beginDropCollection();
+        else clearBreakEvidence();
+        clearNoShot();
+    }
+
+    /** Freeze exactly one target's pre-break facts before BlockDigger submits its
+     *  native receipt. Existing item entities are snapshotted both through the shared
+     *  DropTracker and locally, because an old stack growing by merge must NOT make us
+     *  walk over and collect the old portion. */
+    private void prepareBreakEvidence(BlockPos pos) {
+        if (evidencePos != null && evidencePos.equals(pos)) return;
+        clearBreakEvidence();
+        BlockState state = player.level().getBlockState(pos);
+        if (!r.targets.contains(state.getBlock())) return;
+
+        evidencePos = pos.immutable();
+        evidenceState = state;
+        evidenceTool = player.getMainHandItem().copy();
+        inventoryBeforeBreak = inventoryCounts();
+        AABB localBox = dropEvidenceBox();
+        AABB guardBox = new AABB(evidencePos).inflate(PREEXISTING_DROP_GUARD_RADIUS);
+        breakDrops.rememberExisting(player.level(), guardBox);
+        for (ItemEntity item : player.level().getEntitiesOfClass(ItemEntity.class, guardBox)) {
+            preexistingDropIds.add(item.getId());
+            preexistingDropStacks.put(item.getId(), item.getItem().copy());
+            if (localBox.contains(item.position())) relevantPreexistingDropIds.add(item.getId());
+        }
+        provenanceAmbiguous = anotherPlayerCouldSupplyDrop();
+    }
+
+    /** Enter the bounded settle/collect phase only after the target break receipt and
+     *  air transition have both been confirmed. */
+    private void beginDropCollection() {
+        collectingDrops = true;
+        dropPhaseTicks = 0;
+        dropCloseTicks = 0;
+        dropTarget = null;
+        stopNav();
+        discoverAttributedDrops();
+    }
+
+    private void clearNoShot() {
+        noShotPos = null;
+        noShotTicks = 0;
+    }
+
+    // ---- confirmed drop discovery / pickup / inventory settlement ----
+
+    /** Finish one break before mining another. New ItemEntity ids are accepted only
+     *  inside the short spawn window around the receipt-bound target, then followed
+     *  by identity wherever they move. Completion requires the entities to disappear
+     *  through native pickup and the main inventory to show the corresponding gain. */
+    private TaskState collectConfirmedBreakDrops() {
+        dropPhaseTicks++;
+        if (dropPhaseTicks <= DROP_DISCOVERY_TICKS) discoverAttributedDrops();
+
+        if (dropPhaseTicks >= DROP_COLLECTION_TIMEOUT_TICKS) {
+            fail("the target was confirmed broken, but its attributable drop could not be "
+                            + "retrieved before the bounded pickup window expired",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+
+        if (dropTarget != null) {
+            if (dropTarget.isRemoved() || !attributedDropIds.contains(dropTarget.getId())) {
+                dropTarget = null;
+                dropCloseTicks = 0;
+                stopNav();
+            } else if (player.distanceToSqr(dropTarget) <= DROP_PICKUP_REACH_SQR) {
+                stopNav();
+                if (++dropCloseTicks >= DROP_CLOSE_WAIT_TICKS) {
+                    fail("reached the confirmed block drop, but native pickup did not move it "
+                                    + "into the main inventory (the inventory may be full)",
+                            FailureType.NO_SPACE);
+                    return TaskState.FAILED;
+                }
+                return TaskState.RUNNING;
+            } else {
+                dropCloseTicks = 0;
+                if (nav == null) {
+                    nav = new PlayerNav(player, dropTarget::blockPosition, MINE_SPEED,
+                            () -> dropTarget == null || dropTarget.isRemoved()
+                                    || player.distanceToSqr(dropTarget) <= DROP_PICKUP_REACH_SQR);
+                }
+                switch (nav.tick()) {
+                    case RUNNING, ARRIVED -> { return TaskState.RUNNING; }
+                    case FAILED -> {
+                        fail("the target was confirmed broken, but its attributable drop was "
+                                        + "not reachable for native pickup",
+                                FailureType.NO_PATH);
+                        return TaskState.FAILED;
+                    }
+                }
+            }
+        }
+
+        breakDrops.prune(player.clientLevel);
+        dropTarget = liveAttributedDrops().stream()
+                .min(Comparator.comparingDouble(player::distanceToSqr))
+                .orElse(null);
+        if (dropTarget != null) {
+            stopNav();
+            return TaskState.RUNNING;
+        }
+
+        // An entity can be absorbed on its spawn tick, so wait out the complete
+        // discovery window before treating "no live entity" as settled.
+        if (dropPhaseTicks < DROP_DISCOVERY_TICKS) return TaskState.RUNNING;
+
+        // Ambiguity wins over an inventory increase: otherwise somebody dropping
+        // the same item during this window could satisfy the request by coincidence.
+        // Likewise, an old entity disappearing makes the delta contaminated even if
+        // subtracting its count would leave a positive remainder.
+        if (provenanceAmbiguous || preexistingLooseItemChanged()) {
+            fail("the target was confirmed broken, but another nearby source made the new "
+                            + "loose-item provenance ambiguous; I did not credit the inventory change",
+                    FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
+
+        int credited = attributableInventoryGain();
+        if (credited > 0) {
+            gatheredItems += credited;
+            r.setMined(gatheredItems);
+            progressNote = "confirmed break drops entered inventory";
+            clearBreakEvidence();
+            stopNav();
+            return TaskState.RUNNING;
+        }
+        if (!observedDropItems.isEmpty()) {
+            fail("the target was confirmed broken and its new drop was observed, but no "
+                            + "matching gain reached the main inventory",
+                    FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
+
+        // Some valid breaks yield nothing (chance-based leaves/gravel paths, or a
+        // modded no-drop state). That is a real zero-result round, not success and not
+        // a guessed block-item fallback; continue to another target if one exists.
+        clearBreakEvidence();
+        stopNav();
+        return TaskState.RUNNING;
+    }
+
+    /** Feed the shared差集 tracker, then bind only genuinely new, just-spawned,
+     *  unowned entities to this receipt-bound target. Old ids (including an old
+     *  stack that grew by merge) are never walked over. */
+    private void discoverAttributedDrops() {
+        if (evidencePos == null) return;
+        provenanceAmbiguous |= anotherPlayerCouldSupplyDrop();
+        AABB localBox = dropEvidenceBox();
+        for (ItemEntity item : player.level().getEntitiesOfClass(ItemEntity.class, localBox)) {
+            if (preexistingDropIds.contains(item.getId())) {
+                relevantPreexistingDropIds.add(item.getId());
+            }
+        }
+        breakDrops.discover(player.level(), localBox);
+        Vec3 origin = Vec3.atCenterOf(evidencePos);
+        for (ItemEntity item : breakDrops.live(player.clientLevel, rejectedDropIds)) {
+            int id = item.getId();
+            if (attributedDropIds.contains(id)) continue;
+            if (preexistingDropIds.contains(id)
+                    || item.position().distanceToSqr(origin)
+                            > DROP_EVIDENCE_RADIUS * DROP_EVIDENCE_RADIUS) {
+                rejectedDropIds.add(id);
+                continue;
+            }
+            Entity owner = item.getOwner();
+            // Block.popResource has no thrower. A non-null owner proves this is a
+            // thrown item, not this block's loot; a null owner is accepted only when
+            // no other player is close enough to have supplied an unprovable throw.
+            if (owner != null || provenanceAmbiguous) {
+                rejectedDropIds.add(id);
+                provenanceAmbiguous = true;
+                continue;
+            }
+            attributedDropIds.add(id);
+            observedDropItems.add(item.getItem().getItem());
+        }
+    }
+
+    private List<ItemEntity> liveAttributedDrops() {
+        List<ItemEntity> out = new ArrayList<>();
+        for (ItemEntity item : breakDrops.live(player.clientLevel, rejectedDropIds)) {
+            if (attributedDropIds.contains(item.getId())) out.add(item);
+        }
+        return out;
+    }
+
+    /** Count only positive main-inventory deltas from this isolated break round.
+     *  If a preexisting entity disappeared or shrank during the round, its possible
+     *  contribution is subtracted first, so walking past old/other loot cannot satisfy
+     *  the mining request. Observed new drop types are always compatible by actual
+     *  spawn evidence; an entity picked up before first observation is accepted only
