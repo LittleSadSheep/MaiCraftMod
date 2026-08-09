@@ -898,3 +898,142 @@ public final class PhysicalStructureSearchCompanionTask
     protected void cleanup() {
         if (cleaned) return;
         cleaned = true;
+        stopActiveChild(TaskState.CANCELLED);
+        InputDriver.halt(player);
+        eyeSelection.reset();
+        eyeReceipt = null;
+        clearEyeTracking();
+        clearDirectionTravel();
+        if (indexedLevel != null && !indexedBlocks.isEmpty()) {
+            TargetIndex.unregister(indexedLevel, indexedBlocks);
+        }
+        indexedLevel = null;
+        indexedBlocks = Set.of();
+        super.cleanup();
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("structure_id", r.structureId);
+        data.put(
+                "canonical_profile",
+                profile == null ? r.structureId : profile.profile().canonicalId());
+        data.put("verified", verifiedEvidence != null);
+        data.put("reached", verifiedEvidence != null && r.reachStructure);
+        data.put("scope", "loaded_client_facts_and_first_person_travel_only");
+        data.put("max_distance", r.maxDistance);
+        data.put("frontier_legs_attempted", frontierAttempts);
+        data.put("frontier_legs_reached", frontierReached);
+        data.put("frontier_legs_failed", frontierFailed);
+        data.put("evidence_approaches", evidenceApproaches);
+        if (!routeFailureKinds.isEmpty()) {
+            data.put("route_failure_kinds", List.copyOf(routeFailureKinds));
+        }
+        if (stronghold) {
+            data.put("consumed", Map.of(
+                    "item_id", "minecraft:ender_eye",
+                    "count", eyesConsumed));
+            data.put("eye_direction_legs", directionLegs);
+            data.put("eye_direction_segments", directionSegments);
+            data.put("eye_direction_reversals", directionReversals);
+        }
+        if (verifiedEvidence != null) {
+            data.put("evidence", Map.of(
+                    "description", profile.profile().evidenceDescription(),
+                    "total_profile_blocks", verifiedEvidence.totalBlocks(),
+                    "group_counts", verifiedEvidence.groupCounts(),
+                    "block_counts", verifiedEvidence.blockCounts(),
+                    "authority", "observed_loaded_world"));
+        }
+        if (issueCode != null) {
+            data.put("issue_code", issueCode);
+            data.put("requires_decision", true);
+            data.put("recovery_options", recoveryOptions());
+        } else if (verifiedEvidence == null) {
+            data.put("recovery_options", recoveryOptions());
+        }
+        return data;
+    }
+
+    private List<Map<String, Object>> recoveryOptions() {
+        List<Map<String, Object>> options = new ArrayList<>();
+        if ("rare_consumable_permission_required".equals(issueCode)) {
+            options.add(Map.of(
+                    "choice", "retry",
+                    "description", "Retry with details.parameters.allow_rare_consumables=true."));
+            options.add(Map.of(
+                    "choice", "skip",
+                    "description", "Skip the stronghold search without throwing an ender eye."));
+            options.add(Map.of(
+                    "choice", "cancel",
+                    "description", "Cancel the task with zero rare-consumable use."));
+            return List.copyOf(options);
+        }
+        if ("evidence_profile_missing".equals(issueCode)) {
+            options.add(Map.of(
+                    "choice", "register_evidence_profile",
+                    "description",
+                    "Register visible block evidence for this vanilla or Mod structure, then retry."));
+            options.add(Map.of(
+                    "choice", "stop",
+                    "description", "Stop rather than guess a location."));
+            return List.copyOf(options);
+        }
+        if ("wrong_dimension".equals(issueCode) || "dimension_changed".equals(issueCode)) {
+            options.add(Map.of(
+                    "choice", "travel_dimension",
+                    "description",
+                    "Reach a dimension supported by this structure's physical evidence."));
+            options.add(Map.of(
+                    "choice", "stop",
+                    "description", "Keep the current dimension and stop this search."));
+            return List.copyOf(options);
+        }
+        if ((issueCode != null && issueCode.startsWith("ender_eye"))
+                || "eye_throw_budget_exhausted".equals(issueCode)) {
+            options.add(Map.of(
+                    "choice", "acquire",
+                    "item", "minecraft:ender_eye",
+                    "description",
+                    "Acquire ender eyes through a separately approved semantic task."));
+            options.add(Map.of(
+                    "choice", "stop",
+                    "description",
+                    "Stop; do not choose mobs, villagers or protected resources automatically."));
+            return List.copyOf(options);
+        }
+        options.add(Map.of(
+                "choice", "increase_search_bound",
+                "description",
+                "Retry with a larger max_distance if more first-person travel is acceptable."));
+        if (!r.mayAlterTerrain) {
+            options.add(Map.of(
+                    "choice", "allow_route_changes",
+                    "description",
+                    "Retry with may_alter_terrain only after deciding that digging/bridging is acceptable."));
+        }
+        options.add(Map.of(
+                "choice", "stop",
+                "description", "Stop without inventing coordinates or widening the goal."));
+        return List.copyOf(options);
+    }
+
+    @Override
+    protected String successMessage() {
+        return r.reachStructure
+                ? "physically reached and re-verified " + r.structureId
+                : "verified loaded physical evidence for " + r.structureId;
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "physical structure search timed out before " + r.structureId
+                + " was verified; no hidden locate result was substituted";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "physical structure search was interrupted";
+    }
+}
