@@ -298,3 +298,303 @@ public final class PhysicalStructureSearchCompanionTask
         if (eyeCount() <= 0) {
             failIssue(
                     "ender_eyes_exhausted",
+                    "No ender eye remains immediately before the native use request.",
+                    FailureType.NO_MATERIAL);
+            return TaskState.FAILED;
+        }
+        if (!safeEyeThrowStance()) {
+            failIssue(
+                    "unsafe_ender_eye_throw_stance",
+                    "Loaded safe footing changed before the native use request, so no ender eye was thrown.",
+                    FailureType.HAZARD);
+            return TaskState.FAILED;
+        }
+
+        throwOrigin = player.getEyePosition();
+        eyeCountBeforeThrow = eyeCount();
+        eyesBefore = loadedEyeUuids(player.clientLevel);
+        Set<UUID> frozenBefore = Set.copyOf(eyesBefore);
+        Vec3 frozenOrigin = throwOrigin;
+        AABB confirmationBox = new AABB(frozenOrigin, frozenOrigin).inflate(EYE_SPAWN_RADIUS);
+        var context = ClientRuntime.requireContext(player);
+        eyeReceipt = context.actions().useItem(
+                context,
+                InteractionHand.MAIN_HAND,
+                c -> c.level().getEntitiesOfClass(EyeOfEnder.class, confirmationBox).stream()
+                        .anyMatch(eye -> !frozenBefore.contains(eye.getUUID()))
+                        ? NativeConfirmation.Verdict.APPLIED
+                        : NativeConfirmation.Verdict.PENDING,
+                EYE_RECEIPT_TICKS);
+        stage = Stage.WAIT_EYE_RECEIPT;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickEyeReceipt() {
+        InputDriver.halt(player);
+        var context = ClientRuntime.requireContext(player);
+        eyeReceipt = context.actions().poll(context, eyeReceipt);
+        if (!eyeReceipt.terminal()) return TaskState.RUNNING;
+        if (eyeReceipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            String detail = eyeReceipt.detail();
+            eyeReceipt = null;
+            eyeSelection.reset();
+            failIssue(
+                    "eye_throw_unconfirmed",
+                    "A native ender-eye use was attempted, but a new EyeOfEnder entity was not "
+                            + "confirmed. The task stopped rather than risk consuming another eye: "
+                            + detail,
+                    FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
+        trackedEye = findNewEye();
+        eyeReceipt = null;
+        eyeSelection.reset();
+        if (trackedEye == null) {
+            failIssue(
+                    "eye_entity_lost",
+                    "The actor receipt confirmed a new EyeOfEnder, but it left the bounded loaded "
+                            + "observation before its trajectory could be attached.",
+                    FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        if (eyeCountBeforeThrow <= 0 || eyeCount() >= eyeCountBeforeThrow) {
+            clearEyeTracking();
+            failIssue(
+                    "eye_consumption_unconfirmed",
+                    "The task's native use receipt and EyeOfEnder evidence were confirmed, but no "
+                            + "corresponding main-inventory decrease was observed. It will not count "
+                            + "or repeat the use blindly.",
+                    FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
+        eyesConsumed++;
+        trackStart = trackedEye.position();
+        trackLast = trackStart;
+        trackTicks = 0;
+        stage = Stage.TRACK_EYE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickEyeTracking() {
+        InputDriver.halt(player);
+        trackTicks++;
+        if (trackedEye != null && !trackedEye.isRemoved()) {
+            trackLast = trackedEye.position();
+        }
+        double displacement = horizontalDistance(trackStart, trackLast);
+        boolean enough = trackTicks >= MIN_EYE_TRACK_TICKS
+                && displacement >= SETTLED_EYE_DISPLACEMENT;
+        boolean ended = trackedEye == null || trackedEye.isRemoved()
+                || trackTicks >= MAX_EYE_TRACK_TICKS;
+        if (!enough && !ended) return TaskState.RUNNING;
+        if (displacement < MIN_EYE_DISPLACEMENT) {
+            clearEyeTracking();
+            failIssue(
+                    "eye_trajectory_unobserved",
+                    "The eye throw was real, but its loaded horizontal trajectory was too short to "
+                            + "choose a reliable first-person travel direction.",
+                    FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        Vec3 direction = horizontalUnit(trackLast.subtract(trackStart));
+        if (direction == null) {
+            clearEyeTracking();
+            failIssue(
+                    "eye_trajectory_unobserved",
+                    "The eye trajectory had no usable horizontal direction.",
+                    FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        if (previousDirection != null) {
+            double dot = previousDirection.x * direction.x + previousDirection.z * direction.z;
+            if (dot < REVERSE_DOT) {
+                directionStep = Math.max(MIN_DIRECTION_STEP, directionStep * 0.5);
+                directionReversals++;
+            } else if (dot < 0.5) {
+                directionStep = Math.max(MIN_DIRECTION_STEP, directionStep * 0.75);
+            }
+        }
+        previousDirection = direction;
+        clearEyeTracking();
+        return beginDirectionTravel(direction);
+    }
+
+    private TaskState beginDirectionTravel(Vec3 direction) {
+        double travelled = horizontalDistance(origin, player.blockPosition());
+        double remaining = r.maxDistance - travelled;
+        if (remaining < MIN_FRONTIER_LEG) {
+            failIssue(
+                    "max_distance_reached",
+                    "The eye still pointed onward at the edge of the requested search radius.",
+                    FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        pendingDirection = direction;
+        pendingDirectionDistance = Math.min(directionStep, remaining);
+        directionLoadWaitTicks = 0;
+        directionLegs++;
+        return continueDirectionTravel();
+    }
+
+    private TaskState continueDirectionTravel() {
+        if (pendingDirection == null
+                || pendingDirectionDistance < MIN_FRONTIER_LEG) {
+            clearDirectionTravel();
+            stage = Stage.OBSERVE;
+            return TaskState.RUNNING;
+        }
+        BlockPos desired = new BlockPos(
+                (int) Math.round(player.getX()
+                        + pendingDirection.x * pendingDirectionDistance),
+                player.blockPosition().getY(),
+                (int) Math.round(player.getZ()
+                        + pendingDirection.z * pendingDirectionDistance));
+        BlockPos frontier = loadedFrontierToward(desired);
+        if (frontier == null) {
+            stage = Stage.OBSERVE;
+            if (++directionLoadWaitTicks <= 40) return TaskState.RUNNING;
+            clearDirectionTravel();
+            failIssue(
+                    "eye_direction_not_traversable",
+                    "The eye supplied a real direction, but no loaded first-person frontier in that "
+                            + "direction became available for a bounded route.",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        directionLoadWaitTicks = 0;
+        directionSegmentDistance = horizontalDistance(
+                player.blockPosition(), frontier);
+        startMove(frontier, false);
+        directionSegments++;
+        stage = Stage.MOVE_DIRECTION;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState beginFrontierTravel() {
+        if (frontierAttempts >= MAX_FRONTIER_LEGS) {
+            failIssue(
+                    "frontier_budget_exhausted",
+                    "Bounded first-person frontier exploration finished without a matching loaded "
+                            + "evidence cluster for " + r.structureId + ".",
+                    FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        BlockPos frontier = nextFrontier();
+        if (frontier == null) {
+            failIssue(
+                    "no_loaded_frontier",
+                    "No new loaded first-person frontier remained inside the requested search radius.",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        frontierAttempts++;
+        startMove(frontier, false);
+        stage = Stage.MOVE_FRONTIER;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState beginEvidence(EvidenceMatch match) {
+        activeEvidence = match;
+        if (!r.reachStructure) {
+            verifiedEvidence = match;
+            return TaskState.SUCCESS;
+        }
+        if (evidenceApproaches >= MAX_EVIDENCE_APPROACHES) {
+            failIssue(
+                    "evidence_unreachable",
+                    "Visible evidence was repeatedly observed, but no approach could be completed "
+                            + "under the allowed terrain policy.",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        evidenceApproaches++;
+        startMove(match.position(), true);
+        stage = Stage.MOVE_EVIDENCE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickMove(boolean evidenceMove, boolean directionMove) {
+        if (moveChild == null) {
+            failIssue(
+                    "internal_route_lost",
+                    "The active first-person route disappeared.",
+                    FailureType.INTERNAL);
+            return TaskState.FAILED;
+        }
+        TaskState terminal;
+        if (player.level().getGameTime() >= legDeadline) {
+            moveChild.stop(player, Task.StopReason.REPLACED);
+            terminal = TaskState.TIMEOUT;
+        } else {
+            terminal = runChild(moveChild);
+            if (terminal == null) return TaskState.RUNNING;
+        }
+        TaskResult result = moveChild.result(terminal);
+        moveChild = null;
+
+        if (terminal == TaskState.SUCCESS && result != null && result.success()) {
+            if (evidenceMove) {
+                stage = Stage.VERIFY_EVIDENCE;
+            } else if (directionMove) {
+                pendingDirectionDistance = Math.max(
+                        0.0, pendingDirectionDistance - directionSegmentDistance);
+                directionSegmentDistance = 0.0;
+                if (pendingDirectionDistance < MIN_FRONTIER_LEG) {
+                    clearDirectionTravel();
+                }
+                stage = Stage.OBSERVE;
+            } else {
+                frontierReached++;
+                stage = Stage.OBSERVE;
+            }
+            return TaskState.RUNNING;
+        }
+        recordRouteFailure(terminal);
+        if (evidenceMove) {
+            if (activeEvidence != null) rejectedEvidence.add(activeEvidence.position().asLong());
+            activeEvidence = null;
+            if (stronghold) {
+                failIssue(
+                        "evidence_unreachable",
+                        "An end portal frame was verified in loaded world facts, but the first-person "
+                                + "route to it failed under the allowed terrain policy. No more eyes "
+                                + "will be thrown for a structure that is already located.",
+                        FailureType.NO_PATH);
+                return TaskState.FAILED;
+            }
+            if (evidenceApproaches >= MAX_EVIDENCE_APPROACHES) {
+                failIssue(
+                        "evidence_unreachable",
+                        "Loaded evidence was found, but first-person approach failed under the "
+                                + "allowed terrain policy.",
+                        FailureType.NO_PATH);
+                return TaskState.FAILED;
+            }
+            stage = Stage.OBSERVE;
+            return TaskState.RUNNING;
+        }
+        if (directionMove) {
+            clearDirectionTravel();
+            failIssue(
+                    "eye_direction_route_failed",
+                    "A real eye trajectory supplied the direction, but the first-person route in "
+                            + "that direction failed under the allowed terrain policy.",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        frontierFailed++;
+        stage = Stage.OBSERVE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickEvidenceVerification(EvidenceScan scan) {
+        if (!scan.complete()) return TaskState.RUNNING;
+        EvidenceMatch match = scan.match();
+        if (match != null && activeEvidence != null
+                && horizontalDistance(match.position(), activeEvidence.position())
+                        <= profile.profile().clusterRadius() * 2.0) {
+            verifiedEvidence = match;
+            return TaskState.SUCCESS;
+        }
+        if (activeEvidence != null) rejectedEvidence.add(activeEvidence.position().asLong());
+        activeEvidence = null;
