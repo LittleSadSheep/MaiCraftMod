@@ -1498,3 +1498,303 @@ public final class DragonFightCompanionTask
                     int x = center.getX() + dx;
                     int z = center.getZ() + dz;
                     if (!insideRadius(x, z, fightOrigin, SAFE_HAVEN_RADIUS)) continue;
+                    int cx = SectionPos.blockToSectionCoord(x);
+                    int cz = SectionPos.blockToSectionCoord(z);
+                    if (level.getChunkSource().getChunkNow(cx, cz) == null) continue;
+                    int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                    BlockPos candidate = new BlockPos(x, y, z);
+                    Vec3 feet = Vec3.atCenterOf(candidate);
+                    double distanceSquared = feet.distanceToSqr(target.position());
+                    if (distanceSquared < square(minimum)
+                            || distanceSquared > square(CRYSTAL_SHOT_MAX_RANGE)
+                            || player.distanceToSqr(feet) < 16.0D
+                            || !standable(candidate)
+                            || protectedNear(candidate, PROTECTED_RADIUS)
+                            || nearBreath(candidate, 7.0D)
+                            || nearCrystal(candidate, CRYSTAL_BLAST_CLEARANCE)) continue;
+                    if (requireClearLine) {
+                        Vec3 eye = new Vec3(candidate.getX() + 0.5D,
+                                candidate.getY() + player.getEyeHeight(),
+                                candidate.getZ() + 0.5D);
+                        BlockHitResult hit = level.clip(new ClipContext(
+                                eye, target.getBoundingBox().getCenter(),
+                                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+                        if (hit.getType() != HitResult.Type.MISS) continue;
+                    }
+                    double score = player.distanceToSqr(feet) + distanceSquared * 0.04D;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = candidate.immutable();
+                    }
+                }
+            }
+            if (best != null && radius >= 28) break;
+        }
+        return best;
+    }
+
+    private AABB encounterBounds(ClientLevel level) {
+        return new AABB(
+                fightOrigin.getX() - ENCOUNTER_SCAN_RADIUS, level.getMinBuildHeight(),
+                fightOrigin.getZ() - ENCOUNTER_SCAN_RADIUS,
+                fightOrigin.getX() + ENCOUNTER_SCAN_RADIUS, level.getMaxBuildHeight(),
+                fightOrigin.getZ() + ENCOUNTER_SCAN_RADIUS);
+    }
+
+    private CageObservation observeVerifiedCage(EndCrystal crystal) {
+        List<BlockPos> bars = new ArrayList<>();
+        BlockPos center = crystal.blockPosition();
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                for (int dy = -2; dy <= 4; dy++) {
+                    BlockPos pos = center.offset(dx, dy, dz);
+                    if (player.level().isLoaded(pos)
+                            && player.level().getBlockState(pos).is(Blocks.IRON_BARS)) {
+                        bars.add(pos.immutable());
+                    }
+                }
+            }
+        }
+        if (bars.size() < 8) return null;
+
+        BlockHitResult hit = player.clientLevel.clip(new ClipContext(
+                player.getEyePosition(), crystal.getBoundingBox().getCenter(),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+        if (hit.getType() != HitResult.Type.BLOCK) return null;
+        BlockPos aperture = hit.getBlockPos().immutable();
+        Set<BlockPos> barSet = new HashSet<>(bars);
+        if (!barSet.contains(aperture)
+                || !player.level().getBlockState(aperture).is(Blocks.IRON_BARS)) return null;
+
+        // The ray-hit bar must belong to one connected enclosure, not merely share a scan cube
+        // with a handful of unrelated decorative bars.
+        Set<BlockPos> connected = new HashSet<>();
+        List<BlockPos> frontier = new ArrayList<>();
+        connected.add(aperture);
+        frontier.add(aperture);
+        for (int at = 0; at < frontier.size(); at++) {
+            BlockPos from = frontier.get(at);
+            for (Direction direction : Direction.values()) {
+                BlockPos neighbor = from.relative(direction).immutable();
+                if (barSet.contains(neighbor) && connected.add(neighbor)) {
+                    frontier.add(neighbor);
+                }
+            }
+        }
+        if (connected.size() < 8) return null;
+
+        int north = 0;
+        int south = 0;
+        int west = 0;
+        int east = 0;
+        int roof = 0;
+        for (BlockPos pos : connected) {
+            int dx = pos.getX() - center.getX();
+            int dy = pos.getY() - center.getY();
+            int dz = pos.getZ() - center.getZ();
+            if (dy >= -1 && dy <= 3 && Math.abs(dx) <= 2) {
+                if (dz <= -1) north++;
+                if (dz >= 1) south++;
+            }
+            if (dy >= -1 && dy <= 3 && Math.abs(dz) <= 2) {
+                if (dx <= -1) west++;
+                if (dx >= 1) east++;
+            }
+            if (dy >= 2 && Math.abs(dx) <= 2 && Math.abs(dz) <= 2) roof++;
+        }
+        if (north < 2 || south < 2 || west < 2 || east < 2 || roof < 2) return null;
+        return new CageObservation(List.copyOf(connected), List.of(aperture));
+    }
+
+    private TaskState startCageOpening(EndCrystal crystal, CageObservation cage) {
+        if (!r.mayAlterTerrain) {
+            return failDecision("cage_opening_requires_permission",
+                    "A verified iron-bar cage blocks the only safe firing line, but changing "
+                            + "terrain was not authorized. Nothing was altered.",
+                    FailureType.TERRAIN_BLOCKED,
+                    List.of("retry with may_alter_terrain=true",
+                            "open one firing aperture manually",
+                            "reposition until a clear shot exists"));
+        }
+        if (selectedCrystalUuid == null || !selectedCrystalUuid.equals(crystal.getUUID())
+                || cage.opening().size() != 1) {
+            return failDecision("cage_observation_changed",
+                    "The verified cage observation changed before an exact opening could be "
+                            + "authorized. Nothing was altered.",
+                    FailureType.TARGET_LOST,
+                    List.of("inspect the enclosure", "retry after it is stable"));
+        }
+        BlockPos opening = cage.opening().getFirst();
+        if (protectedNear(opening, PROTECTED_RADIUS)) {
+            return failDecision("cage_near_protected_label",
+                    "The only verified cage aperture overlaps a protected remembered area; it "
+                            + "was left untouched.",
+                    FailureType.HAZARD,
+                    List.of("revise protected_labels explicitly",
+                            "handle the cage manually"));
+        }
+        int attempts = cageOpenings.getOrDefault(selectedCrystalUuid, 0);
+        if (attempts >= MAX_CAGE_OPENINGS_PER_CRYSTAL) {
+            return failDecision("cage_opening_exhausted",
+                    "The same verified cage aperture resisted every bounded first-person opening "
+                            + "attempt.",
+                    FailureType.OUT_OF_REACH,
+                    List.of("inspect the cage manually", "change tools and retry"));
+        }
+        cageOpenings.put(selectedCrystalUuid, attempts + 1);
+        cagePlan = List.copyOf(cage.opening());
+
+        Set<BlockPos> protectedCells = new HashSet<>();
+        BlockPos center = crystal.blockPosition();
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                for (int dy = -2; dy <= 4; dy++) {
+                    BlockPos pos = center.offset(dx, dy, dz).immutable();
+                    if (!cagePlan.contains(pos)) protectedCells.add(pos);
+                }
+            }
+        }
+        for (BlockPos bar : cage.bars()) {
+            if (!cagePlan.contains(bar)) protectedCells.add(bar);
+        }
+        cageProtectedCells = List.copyOf(protectedCells);
+
+        if (!cageOpeningInReach()) {
+            BlockPos stance = findCageBreakStance(opening);
+            if (stance == null) {
+                cagePlan = List.of();
+                cageProtectedCells = List.of();
+                return failDecision("no_natural_cage_stance",
+                        "No loaded standable stance could reach the exact verified iron bar "
+                                + "without changing any other terrain. Nothing was altered.",
+                        FailureType.TERRAIN_BLOCKED,
+                        List.of("create a safe natural approach manually",
+                                "open one firing aperture manually",
+                                "retry from stable tower ground"));
+            }
+            MoveToTaskRecord move = new MoveToTaskRecord(
+                    childId("cage-stance"), childDeadline(2L * 60L * 20L),
+                    (double) stance.getX(), (double) stance.getY(), (double) stance.getZ(),
+                    null, false);
+            return startChild(move, Purpose.POSITION_CAGE);
+        }
+        return startVerifiedCageBuild();
+    }
+
+    private BlockPos findCageBreakStance(BlockPos opening) {
+        ClientLevel level = player.clientLevel;
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dz = -5; dz <= 5; dz++) {
+                for (int dy = -5; dy <= 3; dy++) {
+                    BlockPos candidate = opening.offset(dx, dy, dz);
+                    if (!standable(candidate)
+                            || !insideRadius(candidate.getX(), candidate.getZ(),
+                                    fightOrigin, SAFE_HAVEN_RADIUS)
+                            || protectedNear(candidate, PROTECTED_RADIUS)
+                            || nearBreath(candidate, 7.0D)) continue;
+                    Vec3 eye = new Vec3(candidate.getX() + 0.5D,
+                            candidate.getY() + player.getEyeHeight(),
+                            candidate.getZ() + 0.5D);
+                    if (eye.distanceToSqr(Vec3.atCenterOf(opening)) > 20.25D) continue;
+                    BlockHitResult hit = level.clip(new ClipContext(
+                            eye, Vec3.atCenterOf(opening),
+                            ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+                    if (hit.getType() != HitResult.Type.BLOCK
+                            || !hit.getBlockPos().equals(opening)) continue;
+                    double score = player.distanceToSqr(Vec3.atCenterOf(candidate));
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = candidate.immutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean cageOpeningInReach() {
+        return cagePlan.size() == 1
+                && player.level().isLoaded(cagePlan.getFirst())
+                && player.getEyePosition().distanceToSqr(
+                        Vec3.atCenterOf(cagePlan.getFirst())) <= 20.25D;
+    }
+
+    private TaskState startVerifiedCageBuild() {
+        if (cagePlan.size() != 1
+                || !player.level().isLoaded(cagePlan.getFirst())
+                || !player.level().getBlockState(cagePlan.getFirst()).is(Blocks.IRON_BARS)
+                || !cageOpeningInReach()) {
+            cagePlan = List.of();
+            cageProtectedCells = List.of();
+            return failDecision("cage_build_precondition_changed",
+                    "The exact verified aperture was no longer a reachable iron bar before the "
+                            + "terrain-changing child started. Nothing was altered.",
+                    FailureType.TARGET_LOST,
+                    List.of("inspect the enclosure", "retry after it is stable"));
+        }
+        List<BuildTaskRecord.Target> targets = cagePlan.stream()
+                .map(pos -> new BuildTaskRecord.Target(
+                        Blocks.AIR.defaultBlockState(), Items.AIR, pos,
+                        "verified cage aperture", null, null, null))
+                .toList();
+        BuildTaskRecord build = new BuildTaskRecord(
+                childId("cage"), childDeadline(2L * 60L * 20L),
+                targets, true, false, false);
+        return startChild(build, Purpose.OPEN_CAGE);
+    }
+
+    private boolean resolveProtectedLabels() {
+        String dimension = player.level().dimension().location().toString();
+        for (String label : r.protectedLabels) {
+            IntentRuntime.Landmark landmark = IntentRuntime.get().landmark(label);
+            if (landmark == null) {
+                failDecision("unknown_protected_label",
+                        "A protected label is not remembered; encounter safety cannot be proven.",
+                        FailureType.TARGET_LOST,
+                        List.of("remember or resolve the protected place first",
+                                "retry with unambiguous protected_labels"));
+                return false;
+            }
+            Goal.WorldPosition position = landmark.position();
+            if (position.dimension() != null && !position.dimension().isBlank()
+                    && !position.dimension().equals(dimension)) {
+                failDecision("protected_label_other_dimension",
+                        "A protected label belongs to another dimension.",
+                        FailureType.TARGET_LOST,
+                        List.of("use same-dimension protected labels", "revise the request"));
+                return false;
+            }
+            protectedAnchors.add(new BlockPos(position.x(), position.y(), position.z()));
+        }
+        return true;
+    }
+
+    private boolean protectedNear(BlockPos pos, int radius) {
+        long limit = (long) radius * radius;
+        for (BlockPos anchor : protectedAnchors) {
+            long dx = (long) pos.getX() - anchor.getX();
+            long dy = (long) pos.getY() - anchor.getY();
+            long dz = (long) pos.getZ() - anchor.getZ();
+            if (dx * dx + dy * dy + dz * dz <= limit) return true;
+        }
+        return false;
+    }
+
+    private boolean protectedNear(Entity entity, int radius) {
+        AABB box = entity.getBoundingBox();
+        double limit = square(radius);
+        for (BlockPos anchor : protectedAnchors) {
+            double closestX = Math.max(box.minX, Math.min(anchor.getX() + 0.5D, box.maxX));
+            double closestY = Math.max(box.minY, Math.min(anchor.getY() + 0.5D, box.maxY));
+            double closestZ = Math.max(box.minZ, Math.min(anchor.getZ() + 0.5D, box.maxZ));
+            if (square(closestX - (anchor.getX() + 0.5D))
+                    + square(closestY - (anchor.getY() + 0.5D))
+                    + square(closestZ - (anchor.getZ() + 0.5D)) <= limit) return true;
+        }
+        return false;
+    }
+
+    private boolean nearBreath(BlockPos pos, double margin) {
+        AABB scan = new AABB(pos).inflate(32.0D);
