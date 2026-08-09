@@ -298,3 +298,140 @@ public final class DimensionTravelCompanionTask
         boolean complete = true;
         try {
             revokeHandoff();
+        } catch (RuntimeException ignored) {
+            complete = false;
+        }
+        if (moveChild != null) {
+            boolean childComplete = true;
+            try {
+                moveChild.stop(player, Task.StopReason.REPLACED);
+            } catch (RuntimeException ignored) {
+                childComplete = false;
+                complete = false;
+            }
+            try {
+                moveChild.result(TaskState.CANCELLED);
+            } catch (RuntimeException ignored) {
+                childComplete = false;
+                complete = false;
+            }
+            if (childComplete) moveChild = null;
+        }
+        if (indexedLevel != null && !targetBlocks.isEmpty()) {
+            try {
+                TargetIndex.unregister(indexedLevel, targetBlocks);
+                indexedLevel = null;
+                targetBlocks = Set.of();
+            } catch (RuntimeException ignored) {
+                complete = false;
+            }
+        } else {
+            indexedLevel = null;
+            targetBlocks = Set.of();
+        }
+        try {
+            InputDriver.halt(player);
+        } catch (RuntimeException ignored) {
+            complete = false;
+        }
+        try {
+            super.cleanup();
+        } catch (RuntimeException ignored) {
+            complete = false;
+        }
+        portalCells = Set.of();
+        if (complete) cleaned = true;
+    }
+
+    private Set<Long> connectedPortalCells(BlockPos origin) {
+        ClientLevel level = (ClientLevel) player.level();
+        Block block = level.getBlockState(origin).getBlock();
+        Set<Long> cells = new HashSet<>();
+        ArrayDeque<BlockPos> open = new ArrayDeque<>();
+        open.add(origin.immutable());
+        while (!open.isEmpty() && cells.size() < MAX_CONNECTED_PORTAL_CELLS) {
+            BlockPos cell = open.removeFirst();
+            if (!level.isLoaded(cell)
+                    || !level.getBlockState(cell).is(block)
+                    || !cells.add(cell.asLong())) {
+                continue;
+            }
+            open.add(cell.above());
+            open.add(cell.below());
+            open.add(cell.north());
+            open.add(cell.south());
+            open.add(cell.east());
+            open.add(cell.west());
+        }
+        return Set.copyOf(cells);
+    }
+
+    private boolean intersectsConnectedPortal() {
+        if (portalCells.isEmpty()) return false;
+        ClientLevel level = (ClientLevel) player.level();
+        AABB body = player.getBoundingBox().inflate(0.05D);
+        BlockPos feet = player.blockPosition();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    BlockPos cell = feet.offset(dx, dy, dz);
+                    if (portalCells.contains(cell.asLong())
+                            && level.isLoaded(cell)
+                            && targetBlocks.contains(level.getBlockState(cell).getBlock())
+                            && body.intersects(new AABB(cell))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("destination_dimension", r.destinationDimension);
+        data.put("final_dimension", dimension());
+        if (portalBlockId != null) data.put("portal_block", portalBlockId);
+        data.put("observed_candidates_tried", attempted.size() + (portal == null ? 0 : 1));
+        data.put("verified", arrived && r.destinationDimension.equals(dimension()));
+        if (issueCode != null) {
+            data.put("issue_code", issueCode);
+            data.put("requires_decision", true);
+            data.put("recovery_options", recoveryOptions());
+        }
+        return data;
+    }
+
+    private List<Map<String, Object>> recoveryOptions() {
+        List<Map<String, Object>> options = new ArrayList<>();
+        options.add(Map.of(
+                "choice", "explore",
+                "description", "Explore physically until an appropriate portal is loaded and observed."));
+        if (NETHER.equals(r.destinationDimension)) {
+            options.add(Map.of(
+                    "choice", "prepare_portal",
+                    "description", "Acquire portal materials, construct a valid bounded frame, ignite it, then retry."));
+        } else if (END.equals(r.destinationDimension)) {
+            options.add(Map.of(
+                    "choice", "activate_portal",
+                    "description", "Discover a stronghold from physical evidence and activate its portal before retrying."));
+        }
+        return List.copyOf(options);
+    }
+
+    @Override
+    protected String successMessage() {
+        return "arrived in " + r.destinationDimension + " through an observed physical portal";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "dimension travel timed out before the requested world was observed";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "dimension travel was interrupted";
+    }
+}
