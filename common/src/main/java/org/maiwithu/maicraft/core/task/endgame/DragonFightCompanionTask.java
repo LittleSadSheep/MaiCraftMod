@@ -598,3 +598,303 @@ public final class DragonFightCompanionTask
             return failDecision("crystal_attack_inconsistent",
                     "The attack child reported success while the same crystal remained alive; "
                             + "the semantic goal was not accepted.",
+                    FailureType.UNKNOWN,
+                    List.of("inspect the firing receipt", "retry after the world state settles"));
+        }
+        FailureType type = lastFailure();
+        if (transientExecutionFailure(type)
+                && crystalPositionAttempts < MAX_CRYSTAL_POSITION_ATTEMPTS) {
+            phase = Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        return childFailureDecision("crystal_attack_failed",
+                "The first-person crystal attack stopped without a verified destruction.", type,
+                List.of("change or repair the ranged loadout",
+                        "reposition for a verified firing line",
+                        "inspect the crystal before retrying"));
+    }
+
+    private TaskState finishCageOpening(TaskState terminal, TaskResult receipt) {
+        boolean clear = !cagePlan.isEmpty() && cagePlan.stream().allMatch(
+                pos -> player.level().isLoaded(pos)
+                        && player.level().getBlockState(pos).isAir());
+        cagePlan = List.of();
+        cageProtectedCells = List.of();
+        if (terminal == TaskState.SUCCESS && receipt != null && receipt.success() && clear) {
+            cageOpeningsConfirmed++;
+            phase = Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        return failDecision("cage_change_unconfirmed",
+                "The first-person build receipt did not leave the freshly verified cage opening "
+                        + "clear. Blindly repeating terrain changes is unsafe.",
+                lastFailure(),
+                List.of("inspect the enclosure state", "clear a safe opening manually",
+                        "retry after the world state is stable"));
+    }
+
+    private TaskState tickDragon() {
+        if (!loadedCrystals.isEmpty()) {
+            phase = Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        if (zeroCrystalsSince < 0L
+                || player.level().getGameTime() - zeroCrystalsSince
+                        < ZERO_CRYSTAL_STABLE_TICKS) {
+            phase = Phase.OBSERVE;
+            return TaskState.RUNNING;
+        }
+        if (hasConfirmedDeathState()) {
+            phase = Phase.CONFIRM;
+            return TaskState.RUNNING;
+        }
+        if (dragon == null || dragon.isRemoved() || !dragon.isAlive()) {
+            phase = Phase.CONFIRM;
+            return TaskState.RUNNING;
+        }
+        if (protectedNear(dragon, PROTECTED_RADIUS)) {
+            return failDecision("dragon_near_protected_label",
+                    "The live dragon is inside a protected remembered area; combat there is not "
+                            + "authorized.",
+                    FailureType.HAZARD,
+                    List.of("wait for the dragon to leave the protected area",
+                            "revise protected_labels explicitly"));
+        }
+        long now = player.level().getGameTime();
+        boolean ranged = Loadout.forTarget(player, dragon).hasRanged();
+        boolean sitting = dragon.getPhaseManager().getCurrentPhase().isSitting();
+        boolean safeTarget = safeDragonTarget(dragon, ranged);
+        if ((!ranged && !sitting) || !safeTarget) {
+            if (safeDragonWaitSince < 0L) safeDragonWaitSince = now;
+            if (now - safeDragonWaitSince > WAIT_FOR_SAFE_DRAGON_TICKS) {
+                return failDecision(
+                        !ranged ? "no_safe_dragon_attack_window"
+                                : "dragon_outside_safe_envelope",
+                        !ranged
+                                ? "No usable ranged weapon was available and the dragon never "
+                                        + "entered a verified perched melee window."
+                                : "The dragon did not return to a loaded main-island attack window.",
+                        !ranged ? FailureType.WRONG_TOOL : FailureType.HAZARD,
+                        !ranged
+                                ? List.of("obtain a ranged weapon with ammunition",
+                                        "wait for a perch and retry")
+                                : List.of("return to the main island", "wait and retry"));
+            }
+            return TaskState.RUNNING;
+        }
+        safeDragonWaitSince = -1L;
+        if (now < nextDragonAttemptAt) return TaskState.RUNNING;
+        if (dragonAttackRounds >= MAX_DRAGON_ATTACK_ROUNDS) {
+            return failDecision("dragon_attack_exhausted",
+                    "The dragon remained alive after every bounded first-person attack round.",
+                    FailureType.OUT_OF_REACH,
+                    List.of("repair or improve the combat loadout", "wait for a safer perch",
+                            "inspect the encounter before retrying"));
+        }
+        dragonAttackRounds++;
+        AttackTaskRecord attack = new AttackTaskRecord(
+                childId("dragon"), childDeadline(12L * 60L * 20L),
+                List.of(dragon.getId()), false, true);
+        return startChild(attack, Purpose.ATTACK_DRAGON);
+    }
+
+    private TaskState finishDragonAttack(TaskState terminal, TaskResult receipt) {
+        activeAttackRecord = null;
+        if (hasConfirmedDeathState()) {
+            phase = Phase.CONFIRM;
+            return TaskState.RUNNING;
+        }
+        if (!loadedCrystals.isEmpty()) {
+            zeroCrystalsSince = -1L;
+            phase = Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        boolean successfulReceipt = terminal == TaskState.SUCCESS
+                && receipt != null && receipt.success();
+        if (successfulReceipt && dragon != null && !dragon.isRemoved() && dragon.isAlive()) {
+            return failDecision("dragon_attack_inconsistent",
+                    "The attack child reported success while the same Ender Dragon remained "
+                            + "alive; victory was not accepted.",
+                    FailureType.UNKNOWN,
+                    List.of("inspect the encounter state", "retry after synchronization settles"));
+        }
+        if (successfulReceipt || dragon == null || dragon.isRemoved() || !dragon.isAlive()) {
+            phase = Phase.CONFIRM;
+            return TaskState.RUNNING;
+        }
+        FailureType type = lastFailure();
+        if (!transientExecutionFailure(type)) {
+            return childFailureDecision("dragon_attack_failed",
+                    "The first-person dragon attack stopped on a non-transient prerequisite or "
+                            + "safety failure.", type,
+                    List.of("repair or change the combat loadout",
+                            "recover at a safe main-island position",
+                            "resume only after the blocking fact changes"));
+        }
+        if (++transientDragonFailures > MAX_TRANSIENT_DRAGON_FAILURES) {
+            return failDecision("dragon_transient_retries_exhausted",
+                    "Repeated bounded execution changes did not produce a verified dragon attack "
+                            + "window.",
+                    type,
+                    List.of("wait for a safer perch", "change the ranged loadout",
+                            "inspect the main-island firing lanes"));
+        }
+        nextDragonAttemptAt = player.level().getGameTime()
+                + 40L;
+        phase = Phase.DRAGON;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickRecover() {
+        if (recoveryActions >= MAX_RECOVERY_ACTIONS) {
+            return failDecision("recovery_exhausted",
+                    "Combat had to be interrupted too many times to maintain the requested health "
+                            + "and hazard safety envelope.",
+                    FailureType.HAZARD,
+                    List.of("improve armor and food supplies", "lower minimum_health explicitly",
+                            "resume from a safer main-island position"));
+        }
+        if (dangerousBreath() != null || !safePlayerPosition()) {
+            BlockPos safe = findSafeHaven();
+            if (safe == null) {
+                return failDecision("no_loaded_safe_haven",
+                        "No loaded, standable main-island cell clear of dragon breath, crystals "
+                                + "and the void could be verified.",
+                        FailureType.HAZARD,
+                        List.of("load more of the main island",
+                                "create a safe platform manually", "retry from stable ground"));
+            }
+            recoveryActions++;
+            MoveToTaskRecord move = new MoveToTaskRecord(
+                    childId("evade"), childDeadline(2L * 60L * 20L),
+                    (double) safe.getX(), (double) safe.getY(), (double) safe.getZ(),
+                    null, false);
+            return startChild(move, Purpose.EVADE_HAZARD);
+        }
+        boolean lowHealth = player.getHealth() < r.minimumHealth;
+        boolean hungry = hasHunger()
+                && player.getFoodData().getFoodLevel() <= CRITICAL_HUNGER;
+        if (!lowHealth && !hungry) {
+            recoveryWaitSince = -1L;
+            phase = loadedCrystals.isEmpty() ? Phase.OBSERVE : Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        Item food = chooseSafeFood();
+        if (food != null) {
+            recoveryActions++;
+            activeFood = food;
+            EatItemTaskRecord eat = new EatItemTaskRecord(
+                    childId("eat"), childDeadline(60L * 20L), food,
+                    BuiltInRegistries.ITEM.getKey(food).toString());
+            return startChild(eat, Purpose.EAT);
+        }
+        if (lowHealth && hasHunger() && player.getFoodData().getFoodLevel() >= 18) {
+            long now = player.level().getGameTime();
+            if (recoveryWaitSince < 0L) recoveryWaitSince = now;
+            if (now - recoveryWaitSince <= NATURAL_RECOVERY_TIMEOUT_TICKS) {
+                return TaskState.RUNNING;
+            }
+            return failDecision("health_recovery_stalled",
+                    "Health stayed below minimum_health despite sufficient hunger and a bounded "
+                            + "natural-regeneration wait.",
+                    FailureType.HAZARD,
+                    List.of("use a safe healing item", "lower minimum_health explicitly",
+                            "improve armor before retrying"));
+        }
+        return failDecision("missing_safe_recovery_food",
+                "Health or hunger crossed the safety floor, but no safe edible item could be used.",
+                FailureType.NO_MATERIAL,
+                List.of("obtain ordinary food or a safe healing food",
+                        "recover manually before retrying",
+                        "lower minimum_health explicitly if appropriate"));
+    }
+
+    private TaskState tickChild() {
+        Task finished = activeChild;
+        Purpose purpose = activePurpose;
+        TaskState terminal = runChild(finished);
+        if (terminal == null) return TaskState.RUNNING;
+        TaskResult receipt = finished.result(terminal);
+        activeChild = null;
+        activeRecord = null;
+        activePurpose = null;
+        return switch (purpose) {
+            case SURVEY_MOVE -> finishSurveyMove(terminal, receipt);
+            case POSITION_CRYSTAL -> finishCrystalPosition(terminal, receipt);
+            case ATTACK_CRYSTAL -> finishCrystalAttack(terminal, receipt);
+            case POSITION_CAGE -> finishCageApproach(terminal, receipt);
+            case OPEN_CAGE -> finishCageOpening(terminal, receipt);
+            case ATTACK_DRAGON -> finishDragonAttack(terminal, receipt);
+            case EVADE_HAZARD -> finishEvasion(terminal, receipt);
+            case EAT -> finishEating(terminal, receipt);
+        };
+    }
+
+    private TaskState finishSurveyMove(TaskState terminal, TaskResult receipt) {
+        if (terminal != TaskState.SUCCESS || receipt == null || !receipt.success()) {
+            return childFailureDecision("tower_survey_move_failed",
+                    "The bounded first-person tower survey could not reach its next observation "
+                            + "sector without altering terrain.", lastFailure(),
+                    List.of("clear a safe main-island route", "increase render distance",
+                            "continue the observation loop manually"));
+        }
+        observeTowerCoverage();
+        if (observedTowerChunks.size() <= coverageCountBeforeMove) {
+            surveyMovesWithoutProgress++;
+        } else {
+            surveyMovesWithoutProgress = 0;
+        }
+        phase = loadedCrystals.isEmpty() ? Phase.SURVEY : Phase.CRYSTALS;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState finishCrystalPosition(TaskState terminal, TaskResult receipt) {
+        EndCrystal target = selectedCrystalUuid == null ? null : findCrystal(selectedCrystalUuid);
+        if (terminal == TaskState.SUCCESS && receipt != null && receipt.success()
+                && target != null && safeCrystalFiringPosition(target)) {
+            selectCrystal(target);
+            phase = Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        if (target == null) invalidateCoverage(selectedCrystalLastPosition);
+        return childFailureDecision("crystal_position_failed",
+                "The first-person move did not establish a loaded stance outside the crystal "
+                        + "blast span.",
+                target == null ? FailureType.TARGET_LOST : lastFailure(),
+                List.of("clear a safe firing stance", "return to stable main-island ground",
+                        "retry after the route changes"));
+    }
+
+    private TaskState finishCageApproach(TaskState terminal, TaskResult receipt) {
+        EndCrystal target = selectedCrystalUuid == null ? null : findCrystal(selectedCrystalUuid);
+        CageObservation refreshed = target == null ? null : observeVerifiedCage(target);
+        if (terminal == TaskState.SUCCESS && receipt != null && receipt.success()
+                && target != null && cagePlan.size() == 1
+                && cageOpeningInReach()
+                && refreshed != null && refreshed.opening().equals(cagePlan)) {
+            selectCrystal(target);
+            return startVerifiedCageBuild();
+        }
+        if (target == null) invalidateCoverage(selectedCrystalLastPosition);
+        cagePlan = List.of();
+        cageProtectedCells = List.of();
+        return childFailureDecision("cage_approach_failed",
+                "A terrain-preserving first-person move did not establish the exact verified "
+                        + "cage-opening stance. Nothing was altered.",
+                target == null ? FailureType.TARGET_LOST : lastFailure(),
+                List.of("clear a natural path to the cage",
+                        "open one firing aperture manually",
+                        "retry from stable tower ground"));
+    }
+
+    private TaskState finishEvasion(TaskState terminal, TaskResult receipt) {
+        if (terminal == TaskState.SUCCESS && receipt != null && receipt.success()
+                && dangerousBreath() == null && safePlayerPosition()) {
+            breathAvoidances++;
+            phase = Phase.RECOVER;
+            return TaskState.RUNNING;
+        }
+        return failDecision("hazard_evasion_unconfirmed",
+                "The first-person movement receipt did not leave the body on a verified safe "
+                        + "main-island cell outside dragon breath.",
+                lastFailure(),
