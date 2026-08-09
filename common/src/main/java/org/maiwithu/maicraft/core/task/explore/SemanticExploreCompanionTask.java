@@ -298,3 +298,303 @@ public final class SemanticExploreCompanionTask
         observationColumn++;
         biomeYIndex = 0;
     }
+
+    private TaskState startTargetTravel(TargetCandidate found) {
+        if (targetAttempts >= MAX_TARGET_ATTEMPTS) {
+            fail("observed semantic matches, but none of " + targetAttempts
+                    + " bounded approach attempts reached a verifiable stance",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        candidate = found;
+        targetAttempts++;
+        startMove(found.approach(), true);
+        stage = Stage.TRAVEL_TARGET;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState startNextWaypoint(ClientLevel level) {
+        if (waypointAttempts >= r.maxWaypoints) {
+            return exhausted();
+        }
+        BlockPos waypoint = nextWaypoint(level);
+        if (waypoint == null) {
+            return exhausted();
+        }
+        activeWaypoint = waypoint;
+        waypointAttempts++;
+        startMove(waypoint, false);
+        stage = Stage.TRAVEL_WAYPOINT;
+        return TaskState.RUNNING;
+    }
+
+    private void startMove(BlockPos target, boolean exact) {
+        long now = player.level().getGameTime();
+        String parentCall = r.getToolCallId() == null ? "explore" : r.getToolCallId();
+        MoveToTaskRecord moveRecord = new MoveToTaskRecord(
+                parentCall + "-internal-leg-" + (++legSerial),
+                now + LEG_TIMEOUT_TICKS,
+                (double) target.getX(),
+                exact ? (double) target.getY() : null,
+                (double) target.getZ(),
+                null,
+                r.mayAlterTerrain);
+        moveChild = new MoveToCompanionTask(player, moveRecord);
+        legDeadline = now + LEG_TIMEOUT_TICKS;
+    }
+
+    private TaskState tickTravel(boolean targetTravel) {
+        TaskState terminal;
+        if (player.level().getGameTime() >= legDeadline) {
+            moveChild.stop(player, Task.StopReason.REPLACED);
+            terminal = TaskState.TIMEOUT;
+        } else {
+            terminal = runChild(moveChild);
+            if (terminal == null) {
+                return TaskState.RUNNING;
+            }
+        }
+        TaskResult result = moveChild.result(terminal);
+        moveChild = null;
+
+        if (targetTravel) {
+            if (terminal == TaskState.SUCCESS) {
+                stage = Stage.VERIFY_TARGET;
+                return TaskState.RUNNING;
+            }
+            rejectedTargets.add(candidate.approach().asLong());
+            recordLegFailure("target_approach", candidate.approach(), result);
+            candidate = null;
+            beginObservation();
+            return TaskState.RUNNING;
+        }
+
+        if (terminal == TaskState.SUCCESS) {
+            waypointReached++;
+        } else {
+            waypointFailed++;
+            recordLegFailure("exploration_waypoint", activeWaypoint, result);
+        }
+        activeWaypoint = null;
+        beginObservation();
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickVerification() {
+        ClientLevel level = ClientRuntime.requireContext(player).level();
+        TargetCandidate verified = null;
+        if (targetKind == TargetKind.BIOME) {
+            BlockPos feet = player.blockPosition();
+            if (level.isLoaded(feet) && biomeMatch.test(level.getBiome(feet))) {
+                verified = new TargetCandidate(feet, feet,
+                        "body position is inside " + biomeId(level, feet));
+            }
+        } else {
+            surfaceCache.clear();
+            TargetCandidate coast = findCoastNear(
+                    level, player.getBlockX(), player.getBlockZ(), 7);
+            if (coast != null
+                    && horizontalDistance(player.blockPosition(), coast.approach()) <= 5.0) {
+                verified = coast;
+            }
+        }
+        if (verified != null) {
+            verifiedPosition = player.blockPosition().immutable();
+            verifiedDescription = verified.description();
+            return TaskState.SUCCESS;
+        }
+
+        rejectedTargets.add(candidate.approach().asLong());
+        recordLegFailure("target_verification", candidate.approach(),
+                TaskResult.fail("arrival did not re-confirm the semantic target in loaded facts"));
+        candidate = null;
+        beginObservation();
+        return TaskState.RUNNING;
+    }
+
+    private TargetCandidate findCoastNear(
+            ClientLevel level, int centerX, int centerZ, int radius) {
+        for (int ring = 0; ring <= radius; ring++) {
+            for (int dx = -ring; dx <= ring; dx++) {
+                for (int dz = -ring; dz <= ring; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                    int landX = centerX + dx;
+                    int landZ = centerZ + dz;
+                    if (!insideScope(landX, landZ)) continue;
+                    SurfaceInfo land = surfaceInfo(level, landX, landZ);
+                    if (land.kind() != SurfaceKind.LAND || land.approach() == null) continue;
+                    for (Direction direction : Direction.Plane.HORIZONTAL) {
+                        int waterX = landX + direction.getStepX();
+                        int waterZ = landZ + direction.getStepZ();
+                        if (!insideScope(waterX, waterZ)) continue;
+                        SurfaceInfo water = surfaceInfo(level, waterX, waterZ);
+                        if (water.kind() == SurfaceKind.WATER
+                                && water.waterDepth() >= 2
+                                && substantialWater(level, waterX, waterZ, direction)) {
+                            return new TargetCandidate(
+                                    land.approach(), water.evidence(),
+                                    "verified land-water boundary: land at "
+                                            + shortPos(land.approach()) + ", water at "
+                                            + shortPos(water.evidence()));
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean substantialWater(
+            ClientLevel level, int waterX, int waterZ, Direction awayFromLand) {
+        Direction side = awayFromLand.getClockWise();
+        int[][] probes = {
+                {waterX, waterZ},
+                {waterX + awayFromLand.getStepX() * 2,
+                        waterZ + awayFromLand.getStepZ() * 2},
+                {waterX + awayFromLand.getStepX() * 4,
+                        waterZ + awayFromLand.getStepZ() * 4},
+                {waterX + side.getStepX() * 2, waterZ + side.getStepZ() * 2},
+                {waterX - side.getStepX() * 2, waterZ - side.getStepZ() * 2}
+        };
+        int waterColumns = 0;
+        for (int[] probe : probes) {
+            if (!insideScope(probe[0], probe[1])) continue;
+            if (surfaceInfo(level, probe[0], probe[1]).kind() == SurfaceKind.WATER) {
+                waterColumns++;
+            }
+        }
+        return waterColumns >= 3;
+    }
+
+    private SurfaceInfo surfaceInfo(ClientLevel level, int x, int z) {
+        long key = BlockPos.asLong(x, 0, z);
+        SurfaceInfo cached = surfaceCache.get(key);
+        if (cached != null) return cached;
+        SurfaceInfo result;
+        if (!columnLoaded(level, x, z)) {
+            result = new SurfaceInfo(SurfaceKind.UNKNOWN, null, null, 0);
+        } else {
+            int height = Math.clamp(
+                    level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z),
+                    level.getMinBuildHeight() + 1,
+                    level.getMaxBuildHeight() - 1);
+            BlockPos top = new BlockPos(x, height - 1, z);
+            BlockState topState = level.getBlockState(top);
+            if (topState.getFluidState().is(FluidTags.WATER)) {
+                int depth = 0;
+                for (int y = top.getY(); y >= level.getMinBuildHeight() && depth < 8; y--) {
+                    BlockPos water = new BlockPos(x, y, z);
+                    if (!level.getBlockState(water).getFluidState().is(FluidTags.WATER)) break;
+                    depth++;
+                }
+                result = new SurfaceInfo(SurfaceKind.WATER, null, top, depth);
+            } else {
+                BlockPos approach = travelCellNear(level, x, height, z, 3, null);
+                result = approach == null
+                        ? new SurfaceInfo(SurfaceKind.UNKNOWN, null, top, 0)
+                        : new SurfaceInfo(SurfaceKind.LAND, approach, top, 0);
+            }
+        }
+        surfaceCache.put(key, result);
+        return result;
+    }
+
+    private BlockPos surfaceTravelCell(ClientLevel level, int x, int z) {
+        SurfaceInfo surface = surfaceInfo(level, x, z);
+        if (surface.kind() == SurfaceKind.LAND) return surface.approach();
+        if (surface.kind() == SurfaceKind.WATER && isTravelCell(level, surface.evidence())) {
+            return surface.evidence();
+        }
+        return null;
+    }
+
+    private BlockPos travelCellNear(
+            ClientLevel level, int x, int y, int z, int verticalRadius,
+            Predicate<Holder<Biome>> requiredBiome) {
+        for (int distance = 0; distance <= verticalRadius; distance++) {
+            int[] ys = distance == 0 ? new int[]{y} : new int[]{y + distance, y - distance};
+            for (int candidateY : ys) {
+                if (candidateY <= level.getMinBuildHeight()
+                        || candidateY >= level.getMaxBuildHeight() - 1) continue;
+                BlockPos candidate = new BlockPos(x, candidateY, z);
+                if (isTravelCell(level, candidate)
+                        && (requiredBiome == null
+                                || requiredBiome.test(level.getBiome(candidate)))) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isTravelCell(ClientLevel level, BlockPos feet) {
+        if (!level.isLoaded(feet) || !level.isLoaded(feet.above())) return false;
+        BlockState feetState = level.getBlockState(feet);
+        BlockState headState = level.getBlockState(feet.above());
+        if (feetState.getFluidState().is(FluidTags.LAVA)
+                || headState.getFluidState().is(FluidTags.LAVA)) return false;
+        boolean headClear = headState.getCollisionShape(level, feet.above()).isEmpty();
+        if (feetState.getFluidState().is(FluidTags.WATER)) return headClear;
+        if (!feetState.getCollisionShape(level, feet).isEmpty() || !headClear) return false;
+        BlockPos below = feet.below();
+        return level.isLoaded(below)
+                && !level.getBlockState(below).getCollisionShape(level, below).isEmpty()
+                && !level.getBlockState(below).getFluidState().is(FluidTags.LAVA);
+    }
+
+    private BlockPos nextWaypoint(ClientLevel level) {
+        for (int probe = 0; probe < MAX_SPIRAL_PROBES; probe++) {
+            BlockPos desired = nextSpiralPoint();
+            if (!insideScope(desired.getX(), desired.getZ())) continue;
+            BlockPos frontier = loadedFrontierToward(level, desired);
+            if (frontier != null && attemptedWaypoints.add(
+                    BlockPos.asLong(frontier.getX(), 0, frontier.getZ()))) return frontier;
+        }
+        return null;
+    }
+
+    private BlockPos nextSpiralPoint() {
+        switch (spiralDirection) {
+            case 0 -> spiralX++;
+            case 1 -> spiralZ++;
+            case 2 -> spiralX--;
+            default -> spiralZ--;
+        }
+        spiralSegmentProgress++;
+        if (spiralSegmentProgress >= spiralSegmentLength) {
+            spiralSegmentProgress = 0;
+            spiralDirection = (spiralDirection + 1) & 3;
+            if (++spiralSegmentsAtLength >= 2) {
+                spiralSegmentsAtLength = 0;
+                spiralSegmentLength++;
+            }
+        }
+        return new BlockPos(
+                origin.getX() + spiralX * WAYPOINT_GRID,
+                player.blockPosition().getY(),
+                origin.getZ() + spiralZ * WAYPOINT_GRID);
+    }
+
+    private BlockPos loadedFrontierToward(ClientLevel level, BlockPos desired) {
+        BlockPos current = player.blockPosition();
+        double dx = desired.getX() - current.getX();
+        double dz = desired.getZ() - current.getZ();
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        if (distance < 1.0) return null;
+        double farthest = Math.min(MAX_LEG_DISTANCE, distance);
+        for (double leg = farthest; leg >= Math.min(16.0, farthest); leg -= 16.0) {
+            int x = (int) Math.round(current.getX() + dx / distance * leg);
+            int z = (int) Math.round(current.getZ() + dz / distance * leg);
+            if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
+            return new BlockPos(x, current.getY(), z);
+        }
+        return null;
+    }
+
+    private TaskState exhausted() {
+        fail("bounded exploration finished without verifying " + canonicalTarget
+                        + "; searched only the initial client view and terrain loaded by real "
+                        + "travel within "
+                        + r.maxDistance + " blocks",
+                FailureType.TARGET_LOST);
+        return TaskState.FAILED;
