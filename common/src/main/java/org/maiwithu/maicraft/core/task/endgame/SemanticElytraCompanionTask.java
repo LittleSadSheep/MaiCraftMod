@@ -598,3 +598,303 @@ public final class SemanticElytraCompanionTask
         return switch (purpose) {
             case ACQUIRE_PEARL -> {
                 if (pearlCount() > 0) {
+                    phase = Phase.FIND_GATEWAY;
+                    yield TaskState.RUNNING;
+                }
+                yield failFinal("pearl_acquisition_failed",
+                        "The bounded acquisition ended without a real ender pearl in the main inventory.",
+                        lastFailure());
+            }
+            case GATEWAY_FRONTIER -> {
+                if (!confirmed) gatewayFrontiersFailed++;
+                phase = Phase.FIND_GATEWAY;
+                yield TaskState.RUNNING;
+            }
+            case MOVE_GATEWAY -> {
+                if (!confirmed) {
+                    yield failFinal("gateway_approach_failed",
+                            "The bounded first-person move did not reach the verified gateway stance.",
+                            lastFailure());
+                }
+                phase = Phase.MOVE_GATEWAY;
+                yield TaskState.RUNNING;
+            }
+            case COMBAT_GATEWAY -> {
+                if (!confirmed) {
+                    yield failFinal("gateway_blocker_combat_failed",
+                            "The bounded fight against an actively attacking gateway blocker was not confirmed.",
+                            lastFailure());
+                }
+                phase = Phase.MOVE_GATEWAY;
+                yield TaskState.RUNNING;
+            }
+            case THROW_PEARL -> {
+                gatewayUseConfirmed = confirmed;
+                if (!gatewayUseConfirmed) {
+                    clearTeleportTracking();
+                    yield failFinal("pearl_throw_unconfirmed",
+                            "The task's first-person child did not produce a confirmed native USE_ITEM receipt. "
+                                    + "An unrelated pearl decrease cannot authorize or confirm this use.",
+                            lastFailure());
+                }
+                observePearlConsumption();
+                if (teleportVerified()) {
+                    acceptGatewayTeleport();
+                    yield TaskState.RUNNING;
+                }
+                phase = Phase.WAIT_TELEPORT;
+                yield TaskState.RUNNING;
+            }
+            case SEARCH_END_CITY -> {
+                if (!confirmed || verifiedAnchor == null) {
+                    yield failFinal("end_city_search_failed",
+                            "The bounded physical structure search ended without a typed verified End City evidence anchor.",
+                            lastFailure());
+                }
+                if (horizontalDistanceSquared(outerSearchOrigin, verifiedAnchor)
+                        > (long) r.maxSearchDistance * r.maxSearchDistance) {
+                    yield failFinal("end_city_outside_total_scope",
+                            "The verified city evidence lies outside the total semantic search distance and was not accepted.",
+                            FailureType.TARGET_LOST);
+                }
+                endCityEvidence = true;
+                cityAnchor = verifiedAnchor;
+                shipFrontiersThisCity = 0;
+                incompleteFrameApproached = false;
+                shipFrame = null;
+                shipFramePosition = null;
+                phase = Phase.FIND_SHIP_FRAME;
+                yield TaskState.RUNNING;
+            }
+            case SHIP_FRONTIER -> {
+                if (!confirmed) shipFrontiersFailed++;
+                phase = Phase.FIND_SHIP_FRAME;
+                yield TaskState.RUNNING;
+            }
+            case COMBAT_SHIP -> {
+                if (!confirmed) {
+                    yield failFinal("ship_blocker_combat_failed",
+                            "The bounded fight against an actively attacking ship blocker was not confirmed.",
+                            lastFailure());
+                }
+                phase = Phase.FIND_SHIP_FRAME;
+                yield TaskState.RUNNING;
+            }
+            case ATTACK_FRAME -> {
+                if (elytraCount() > 0) {
+                    phase = Phase.COMPLETE;
+                    yield TaskState.SUCCESS;
+                }
+                if (shipFramePosition == null
+                        || !player.level().isLoaded(shipFramePosition)) {
+                    yield failFinal("ship_frame_unloaded_after_attack",
+                            "The ship-frame area unloaded before the real attack outcome could be inspected.",
+                            FailureType.TARGET_LOST);
+                }
+                if (liveShipFrame(shipFrame)) {
+                    yield failFinal("frame_attack_unconfirmed",
+                            "The real loaded frame still holds the elytra after one first-person attack; it will not be struck again blindly.",
+                            lastFailure());
+                }
+                shipFrame = null;
+                dropSettleUntil = player.level().getGameTime() + DROP_SETTLE_TICKS;
+                phase = Phase.COLLECT_ELYTRA;
+                yield TaskState.RUNNING;
+            }
+            case COLLECT_ELYTRA -> {
+                if (elytraCount() > 0) {
+                    phase = Phase.COMPLETE;
+                    yield TaskState.SUCCESS;
+                }
+                yield failFinal(loadedElytraDrop()
+                                ? "elytra_drop_uncollected" : "elytra_drop_missing",
+                        loadedElytraDrop()
+                                ? "The loaded elytra drop remains outside the main inventory after one bounded collection attempt."
+                                : "The collection attempt ended without an elytra in the main inventory or a loaded drop.",
+                        lastFailure());
+            }
+        };
+    }
+
+    private TaskState startCombat(List<Mob> blockers, Purpose purpose) {
+        if (!r.allowCombat) {
+            return failFinal("combat_permission_required",
+                    "An explicitly hostile loaded mob is blocking progress, but allow_combat is false.",
+                    FailureType.ENTITY_BLOCKED);
+        }
+        if (combatEncounters >= MAX_COMBAT_ENCOUNTERS) {
+            return failFinal("combat_budget_exhausted",
+                    "The bounded combat budget is exhausted; further fighting needs a new decision.",
+                    FailureType.HAZARD);
+        }
+        List<Integer> targets = blockers.stream().limit(16).map(Mob::getId).toList();
+        if (targets.isEmpty()) {
+            return failFinal("hostile_blocker_unresolved",
+                    "A blocking threat changed before a safe first-person combat target could be compiled.",
+                    FailureType.TARGET_LOST);
+        }
+        combatEncounters++;
+        authorizedCombatIds.clear();
+        authorizedCombatIds.addAll(targets);
+        return startChild(new AttackTaskRecord(
+                childId("blocker"), childDeadline(5L * 60L * 20L),
+                targets, false, true), purpose);
+    }
+
+    private TaskState startChild(TaskRecord record, Purpose purpose) {
+        activeRecord = record;
+        activeChild = TaskFactory.create(player, record);
+        activePurpose = purpose;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState failFinal(String code, String message, FailureType type) {
+        failIssue(code, message, type);
+        return TaskState.FAILED;
+    }
+
+    private void failIssue(String code, String message, FailureType type) {
+        issueCode = code;
+        fail(message, type == null ? FailureType.UNKNOWN : type);
+    }
+
+    private boolean liveGateway(BlockPos pos) {
+        return pos != null && player.level().isLoaded(pos)
+                && player.level().getBlockState(pos).is(Blocks.END_GATEWAY);
+    }
+
+    private BlockPos safeGatewayStand(BlockPos target) {
+        if (!liveGateway(target)) return null;
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int radius = 2; radius <= 4; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    for (int dy = -3; dy <= 3; dy++) {
+                        BlockPos feet = target.offset(dx, dy, dz);
+                        if (safeGatewayStandCell(feet) && gatewayVisibleFrom(feet, target)) {
+                            candidates.add(feet.immutable());
+                        }
+                    }
+                }
+            }
+            if (!candidates.isEmpty()) break;
+        }
+        candidates.sort(Comparator.comparingDouble(
+                pos -> player.distanceToSqr(Vec3.atBottomCenterOf(pos))));
+        return candidates.isEmpty() ? null : candidates.getFirst();
+    }
+
+    private boolean safeGatewayStandCell(BlockPos feet) {
+        if (feet == null || protectedAt(feet)) return false;
+        ClientLevel level = player.clientLevel;
+        BlockPos head = feet.above();
+        BlockPos floor = feet.below();
+        if (!level.isLoaded(feet) || !level.isLoaded(head) || !level.isLoaded(floor)
+                || feet.getY() <= level.getMinBuildHeight() + 8) return false;
+        if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
+                || !level.getBlockState(head).getCollisionShape(level, head).isEmpty()
+                || !level.getFluidState(feet).isEmpty()
+                || !level.getFluidState(head).isEmpty()) return false;
+        return level.getBlockState(floor).isFaceSturdy(level, floor, Direction.UP);
+    }
+
+    private boolean gatewayVisibleFrom(BlockPos feet, BlockPos target) {
+        if (feet == null || target == null) return false;
+        Vec3 eye = Vec3.atBottomCenterOf(feet).add(0.0D, player.getEyeHeight(), 0.0D);
+        return gatewayRayHits(eye, target);
+    }
+
+    private boolean gatewayRayHits(Vec3 eye, BlockPos target) {
+        if (!liveGateway(target)) return false;
+        BlockHitResult hit = player.level().clip(new ClipContext(
+                eye, Vec3.atCenterOf(target), ClipContext.Block.OUTLINE,
+                ClipContext.Fluid.NONE, player));
+        return hit.getBlockPos().equals(target);
+    }
+
+    private boolean verifiedGatewayLaunchStance() {
+        if (!liveGateway(gateway) || protectedAt(gateway)
+                || !safeGatewayStandCell(player.blockPosition())
+                || gatewayStand == null
+                || horizontalDistanceSquared(player.blockPosition(), gatewayStand) > 4L) {
+            return false;
+        }
+        return player.getEyePosition().distanceToSqr(Vec3.atCenterOf(gateway))
+                        <= GATEWAY_REACH_DISTANCE * GATEWAY_REACH_DISTANCE
+                && gatewayRayHits(player.getEyePosition(), gateway);
+    }
+
+    private void observeTeleportSample() {
+        if (throwOrigin == null || teleportSample == null
+                || !END.equals(dimension())) return;
+        Vec3 current = player.position();
+        long now = player.level().getGameTime();
+        if (now >= launchTick && now <= teleportDeadline
+                && current.distanceToSqr(teleportSample)
+                        >= TELEPORT_MIN_DISTANCE * TELEPORT_MIN_DISTANCE) {
+            abruptTeleportObserved = true;
+        }
+        teleportSample = current;
+    }
+
+    private boolean teleportVerified() {
+        return throwOrigin != null
+                && END.equals(dimension())
+                && gatewayLaunchVerified
+                && gatewayUseConfirmed
+                && abruptTeleportObserved
+                && player.level().getGameTime() <= teleportDeadline
+                && outsideMainIsland(player.blockPosition());
+    }
+
+    private boolean observePearlConsumption() {
+        if (!pearlConsumptionConfirmed
+                && gatewayUseConfirmed
+                && pearlCountBeforeThrow > 0
+                && pearlCount() < pearlCountBeforeThrow) {
+            pearlConsumptionConfirmed = true;
+            pearlsConsumed++;
+        }
+        return pearlConsumptionConfirmed;
+    }
+
+    private void acceptGatewayTeleport() {
+        gatewayVerified = true;
+        gateway = null;
+        gatewayStand = null;
+        outerSearchOrigin = player.blockPosition().immutable();
+        clearTeleportTracking();
+        phase = Phase.SEARCH_END_CITY;
+    }
+
+    private void clearTeleportTracking() {
+        throwOrigin = null;
+        teleportSample = null;
+        gatewayLaunchVerified = false;
+        gatewayUseConfirmed = false;
+        pearlConsumptionConfirmed = false;
+        abruptTeleportObserved = false;
+        pearlCountBeforeThrow = 0;
+        launchTick = 0L;
+        teleportDeadline = 0L;
+    }
+
+    private List<ItemFrame> loadedElytraFrames() {
+        if (cityAnchor == null) return List.of();
+        ClientLevel level = player.clientLevel;
+        BlockPos center = player.blockPosition();
+        AABB scan = new AABB(
+                center.getX() - SHIP_ENTITY_SCAN_RADIUS, level.getMinBuildHeight(),
+                center.getZ() - SHIP_ENTITY_SCAN_RADIUS,
+                center.getX() + SHIP_ENTITY_SCAN_RADIUS, level.getMaxBuildHeight(),
+                center.getZ() + SHIP_ENTITY_SCAN_RADIUS);
+        long distanceLimit = (long) SHIP_ENTITY_SCAN_RADIUS * SHIP_ENTITY_SCAN_RADIUS;
+        List<ItemFrame> frames = new ArrayList<>(level.getEntitiesOfClass(
+                ItemFrame.class, scan,
+                frame -> liveShipFrame(frame)
+                        && horizontalDistanceSquared(cityAnchor, frame.blockPosition())
+                                <= distanceLimit));
+        frames.sort(Comparator.comparingDouble(player::distanceToSqr));
+        return List.copyOf(frames);
+    }
