@@ -598,3 +598,303 @@ public final class PhysicalStructureSearchCompanionTask
         }
         if (activeEvidence != null) rejectedEvidence.add(activeEvidence.position().asLong());
         activeEvidence = null;
+        stage = Stage.OBSERVE;
+        return TaskState.RUNNING;
+    }
+
+    private EvidenceScan scanEvidence() {
+        int chunkRadius = Math.max(
+                1, (Math.min(EVIDENCE_SCAN_RADIUS, r.maxDistance) + 15) / 16);
+        Map<Long, BlockPos> merged = new LinkedHashMap<>();
+        boolean complete = true;
+        for (StructureEvidenceProfiles.ResolvedGroup group : profile.groups()) {
+            TargetIndex.Result result = TargetIndex.query(
+                    player.clientLevel,
+                    player.blockPosition(),
+                    group.blocks(),
+                    MAX_GROUP_HITS,
+                    chunkRadius,
+                    INDEX_BUILD_BUDGET_PER_GROUP);
+            complete &= result.complete();
+            for (BlockPos hit : result.hits()) {
+                if (!insideScope(hit) || !liveTargetBlock(hit)) continue;
+                merged.putIfAbsent(hit.asLong(), hit.immutable());
+            }
+        }
+        List<BlockPos> hits = new ArrayList<>(merged.values());
+        hits.sort(Comparator.comparingDouble(
+                position -> position.distSqr(player.blockPosition())));
+        return new EvidenceScan(matchEvidence(hits), complete, hits.size());
+    }
+
+    private EvidenceMatch matchEvidence(List<BlockPos> hits) {
+        if (hits.isEmpty()) return null;
+        double radiusSqr = (double) profile.profile().clusterRadius()
+                * profile.profile().clusterRadius();
+        for (BlockPos anchor : hits) {
+            if (evidenceRejected(anchor)) continue;
+            Map<String, Integer> groups = new LinkedHashMap<>();
+            Map<String, Integer> blocks = new LinkedHashMap<>();
+            int total = 0;
+            for (BlockPos hit : hits) {
+                if (hit.distSqr(anchor) > radiusSqr) continue;
+                total++;
+                Block live = player.clientLevel.getBlockState(hit).getBlock();
+                String id = BuiltInRegistries.BLOCK.getKey(live).toString();
+                blocks.merge(id, 1, Integer::sum);
+            }
+            boolean allGroups = true;
+            for (StructureEvidenceProfiles.ResolvedGroup group : profile.groups()) {
+                int count = 0;
+                for (BlockPos hit : hits) {
+                    if (hit.distSqr(anchor) <= radiusSqr
+                            && group.blocks().contains(
+                                    player.clientLevel.getBlockState(hit).getBlock())) {
+                        count++;
+                    }
+                }
+                groups.put(group.label(), count);
+                if (count < group.minimum()) allGroups = false;
+            }
+            if (allGroups && total >= profile.profile().minimumTotal()) {
+                return new EvidenceMatch(
+                        anchor.immutable(),
+                        Map.copyOf(groups),
+                        Map.copyOf(blocks),
+                        total);
+            }
+        }
+        return null;
+    }
+
+    private boolean liveTargetBlock(BlockPos position) {
+        return player.clientLevel.isLoaded(position)
+                && indexedBlocks.contains(player.clientLevel.getBlockState(position).getBlock());
+    }
+
+    private boolean evidenceRejected(BlockPos position) {
+        if (r.evidenceExclusionRadius > 0) {
+            long exclusionRadiusSqr = (long) r.evidenceExclusionRadius
+                    * r.evidenceExclusionRadius;
+            for (BlockPos excluded : r.excludedEvidenceAnchors) {
+                if (horizontalDistanceSquared(position, excluded) <= exclusionRadiusSqr) {
+                    return true;
+                }
+            }
+        }
+        double radiusSqr = (double) profile.profile().clusterRadius()
+                * profile.profile().clusterRadius();
+        for (long packed : rejectedEvidence) {
+            if (position.distSqr(BlockPos.of(packed)) <= radiusSqr) return true;
+        }
+        return false;
+    }
+
+    private static long horizontalDistanceSquared(BlockPos first, BlockPos second) {
+        long dx = (long) first.getX() - second.getX();
+        long dz = (long) first.getZ() - second.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    private void startMove(BlockPos target, boolean exact) {
+        long now = player.level().getGameTime();
+        String parentCall = r.getToolCallId() == null ? "structure-search" : r.getToolCallId();
+        MoveToTaskRecord moveRecord = new MoveToTaskRecord(
+                parentCall + "-internal-structure-leg-" + (++legSerial),
+                now + LEG_TIMEOUT_TICKS,
+                (double) target.getX(),
+                exact ? (double) target.getY() : null,
+                (double) target.getZ(),
+                null,
+                r.mayAlterTerrain);
+        moveChild = new MoveToCompanionTask(player, moveRecord);
+        legDeadline = now + LEG_TIMEOUT_TICKS;
+    }
+
+    private BlockPos nextFrontier() {
+        for (int probe = 0; probe < MAX_FRONTIER_PROBES; probe++) {
+            BlockPos desired = nextSpiralPoint();
+            if (!insideScope(desired)) continue;
+            BlockPos frontier = loadedFrontierToward(desired);
+            if (frontier == null) continue;
+            long key = BlockPos.asLong(frontier.getX(), 0, frontier.getZ());
+            if (attemptedFrontiers.add(key)) return frontier;
+        }
+        return null;
+    }
+
+    private BlockPos nextSpiralPoint() {
+        switch (spiralDirection) {
+            case 0 -> spiralX++;
+            case 1 -> spiralZ++;
+            case 2 -> spiralX--;
+            default -> spiralZ--;
+        }
+        spiralSegmentProgress++;
+        if (spiralSegmentProgress >= spiralSegmentLength) {
+            spiralSegmentProgress = 0;
+            spiralDirection = (spiralDirection + 1) & 3;
+            if (++spiralSegmentsAtLength >= 2) {
+                spiralSegmentsAtLength = 0;
+                spiralSegmentLength++;
+            }
+        }
+        return new BlockPos(
+                origin.getX() + spiralX * FRONTIER_GRID,
+                player.blockPosition().getY(),
+                origin.getZ() + spiralZ * FRONTIER_GRID);
+    }
+
+    private BlockPos loadedFrontierToward(BlockPos desired) {
+        BlockPos current = player.blockPosition();
+        double dx = desired.getX() - current.getX();
+        double dz = desired.getZ() - current.getZ();
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        if (distance < MIN_FRONTIER_LEG) return null;
+        double farthest = Math.min(MAX_FRONTIER_LEG, distance);
+        for (double leg = farthest;
+                leg >= Math.min(MIN_FRONTIER_LEG, farthest);
+                leg -= 8.0) {
+            int x = (int) Math.round(current.getX() + dx / distance * leg);
+            int z = (int) Math.round(current.getZ() + dz / distance * leg);
+            BlockPos candidate = new BlockPos(x, current.getY(), z);
+            if (insideScope(candidate) && columnLoaded(x, z)) return candidate;
+        }
+        return null;
+    }
+
+    private boolean columnLoaded(int x, int z) {
+        int y = Math.clamp(
+                player.blockPosition().getY(),
+                player.clientLevel.getMinBuildHeight(),
+                player.clientLevel.getMaxBuildHeight() - 1);
+        return player.clientLevel.isLoaded(new BlockPos(x, y, z));
+    }
+
+    private int findEyeSlot() {
+        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && stack.is(Items.ENDER_EYE)) return slot;
+        }
+        return -1;
+    }
+
+    private int eyeCount() {
+        int count = 0;
+        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && stack.is(Items.ENDER_EYE)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private boolean safeEyeThrowStance() {
+        ClientLevel level = player.clientLevel;
+        BlockPos feet = player.blockPosition();
+        BlockPos head = feet.above();
+        BlockPos floor = feet.below();
+        if (!player.onGround() || player.fallDistance > 0.5F
+                || feet.getY() <= level.getMinBuildHeight() + 2) return false;
+        if (!level.isLoaded(feet) || !level.isLoaded(head) || !level.isLoaded(floor)) return false;
+        if (!level.getFluidState(feet).isEmpty()
+                || !level.getFluidState(head).isEmpty()
+                || !level.getFluidState(floor).isEmpty()) return false;
+        if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
+                || !level.getBlockState(head).getCollisionShape(level, head).isEmpty()) return false;
+        return level.getBlockState(floor).isFaceSturdy(level, floor, Direction.UP);
+    }
+
+    private Set<UUID> loadedEyeUuids(ClientLevel level) {
+        AABB box = new AABB(
+                player.position(), player.position()).inflate(EYE_REACQUIRE_RADIUS);
+        Set<UUID> ids = new HashSet<>();
+        for (EyeOfEnder eye : level.getEntitiesOfClass(EyeOfEnder.class, box)) {
+            ids.add(eye.getUUID());
+        }
+        return Set.copyOf(ids);
+    }
+
+    private EyeOfEnder findNewEye() {
+        AABB box = new AABB(throwOrigin, throwOrigin).inflate(EYE_REACQUIRE_RADIUS);
+        return player.clientLevel.getEntitiesOfClass(EyeOfEnder.class, box).stream()
+                .filter(eye -> !eyesBefore.contains(eye.getUUID()))
+                .min(Comparator.comparingDouble(
+                        eye -> eye.position().distanceToSqr(throwOrigin)))
+                .orElse(null);
+    }
+
+    private void clearEyeTracking() {
+        trackedEye = null;
+        trackStart = null;
+        trackLast = null;
+        trackTicks = 0;
+        eyesBefore = Set.of();
+        throwOrigin = null;
+        eyeCountBeforeThrow = -1;
+    }
+
+    private void clearDirectionTravel() {
+        pendingDirection = null;
+        pendingDirectionDistance = 0.0;
+        directionSegmentDistance = 0.0;
+        directionLoadWaitTicks = 0;
+    }
+
+    private void recordRouteFailure(TaskState terminal) {
+        if (routeFailureKinds.size() >= 16) return;
+        routeFailureKinds.add(switch (terminal) {
+            case TIMEOUT -> "timeout";
+            case CANCELLED -> "cancelled";
+            case FAILED -> "route_failed";
+            default -> "not_confirmed";
+        });
+    }
+
+    private boolean insideScope(BlockPos position) {
+        double dx = position.getX() - origin.getX();
+        double dz = position.getZ() - origin.getZ();
+        double limit = r.maxDistance + SCOPE_TOLERANCE;
+        return dx * dx + dz * dz <= limit * limit;
+    }
+
+    private String dimension() {
+        return player.level().dimension().location().toString();
+    }
+
+    private void failIssue(String code, String message, FailureType type) {
+        issueCode = code;
+        fail(message, type);
+    }
+
+    private static Vec3 horizontalUnit(Vec3 vector) {
+        double length = Math.sqrt(vector.x * vector.x + vector.z * vector.z);
+        if (length < 1.0e-6) return null;
+        return new Vec3(vector.x / length, 0.0, vector.z / length);
+    }
+
+    private static double horizontalDistance(Vec3 first, Vec3 second) {
+        double dx = first.x - second.x;
+        double dz = first.z - second.z;
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private static double horizontalDistance(BlockPos first, BlockPos second) {
+        double dx = first.getX() - second.getX();
+        double dz = first.getZ() - second.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private void stopActiveChild(TaskState terminal) {
+        if (moveChild == null) return;
+        try {
+            moveChild.stop(player, Task.StopReason.REPLACED);
+            moveChild.result(terminal);
+        } finally {
+            moveChild = null;
+        }
+    }
+
+    @Override
+    protected void cleanup() {
+        if (cleaned) return;
+        cleaned = true;
