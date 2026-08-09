@@ -298,3 +298,169 @@ public final class ReachMilestoneCompanionTask
             if (destination == null) {
                 return block("progression_supply_requires_dimension", FailureType.NO_MATERIAL,
                         "A progression prerequisite requires another dimension, but no safe supported destination can be selected from the typed evidence.",
+                        List.of("travel through an already-active portal, then resume"));
+            }
+            if (ProgressionFacts.END.equals(facts.dimension())) {
+                return block("progression_supply_requires_dimension", FailureType.NO_MATERIAL,
+                        "A progression prerequisite is unavailable in the current End body; this task will not invent or activate an exit route.",
+                        List.of("leave through an already-active exit portal, then resume"));
+            }
+            if (ProgressionFacts.END.equals(destination) && !facts.activeEndPortalNearby()) {
+                return block("end_portal_activation_unavailable", FailureType.UNSUPPORTED,
+                        "A prerequisite points to the End, but no already-active End portal is observed. This task cannot activate one.",
+                        List.of("activate a real End portal outside this task", "resume afterward"));
+            }
+            return start(children.travel(destination), Purpose.SUPPLY_DIMENSION_TRAVEL,
+                    requirement, facts, Phase.TRAVEL_DIMENSION);
+        }
+        if ((purpose == Purpose.DIMENSION_TRAVEL
+                || purpose == Purpose.SUPPLY_DIMENSION_TRAVEL)
+                && "portal_not_observed".equals(childIssue)) {
+            String destination = record instanceof org.maiwithu.maicraft.core.task.dimension.DimensionTravelTaskRecord travel
+                    ? travel.destinationDimension : "";
+            if (ProgressionFacts.END.equals(destination)
+                    || ProgressionFacts.END.equals(facts.dimension())) {
+                return block("end_portal_activation_unavailable", FailureType.UNSUPPORTED,
+                        "No already-active End portal is observed; this task cannot build, repair or activate one.",
+                        List.of("activate a real End portal outside this task", "resume afterward"));
+            }
+            return block("portal_lifecycle_unavailable", FailureType.UNSUPPORTED,
+                    "No already-active portal for the required dimension transition is observed. Portal construction, repair and activation are outside this task.",
+                    List.of("prepare an active portal outside this task", "resume afterward"));
+        }
+        if ("rare_consumable_permission_required".equals(childIssue)) {
+            return block(childIssue, FailureType.NO_MATERIAL,
+                    "The current phase needs explicit permission to consume a rare progression resource.",
+                    List.of("retry with allow_rare_consumables=true", "stop before consumption"));
+        }
+        String aggregate = switch (purpose) {
+            case ACQUIRE, EQUIP -> "progression_prerequisite_unavailable";
+            case STRUCTURE_SEARCH, STRONGHOLD_APPROACH -> "stronghold_progress_unavailable";
+            case DIMENSION_TRAVEL, SUPPLY_DIMENSION_TRAVEL -> "dimension_transition_unavailable";
+            case DRAGON_FIGHT -> "dragon_encounter_unresolved";
+            case ELYTRA_SEARCH -> "elytra_search_unresolved";
+        };
+        return block(aggregate, lastFailure(),
+                "The current progression phase stopped on typed issue '" + childIssue
+                        + "'; no broader permission or blind retry was inferred.",
+                List.of("review the reported phase and world state before retrying"));
+    }
+
+    private TaskState start(
+            TaskRecord record,
+            Purpose purpose,
+            ProgressionRequirementProfile.Requirement requirement,
+            ProgressionFacts facts,
+            Phase nextPhase) {
+        activeRecord = record;
+        activeChild = TaskFactory.create(player, record);
+        activePurpose = purpose;
+        activeRequirement = requirement;
+        activeStartFingerprint = facts.fingerprint();
+        phase = nextPhase;
+        return TaskState.RUNNING;
+    }
+
+    private void clearActive() {
+        activeRecord = null;
+        activeChild = null;
+        activePurpose = null;
+        activeRequirement = null;
+    }
+
+    private TaskState complete(ProgressionFacts facts) {
+        phase = Phase.COMPLETE;
+        completionFact = facts.completionFact(r.milestone);
+        return TaskState.SUCCESS;
+    }
+
+    private TaskState block(
+            String code, FailureType type, String message, List<String> recoveries) {
+        phase = Phase.BLOCKED;
+        issueCode = code;
+        recoveryOptions = List.copyOf(recoveries);
+        fail(message, type == null ? FailureType.UNKNOWN : type);
+        return TaskState.FAILED;
+    }
+
+    @Override
+    protected void cleanup() {
+        if (activeChild != null) {
+            activeChild.stop(player, Task.StopReason.REPLACED);
+            try {
+                activeChild.result(TaskState.CANCELLED);
+            } catch (RuntimeException ignored) {
+                // The parent still releases its index and first-person controls below.
+            }
+        }
+        clearActive();
+        if (indexedLevel != null) TargetIndex.unregister(indexedLevel, INDEXED_BLOCKS);
+        indexedLevel = null;
+        super.cleanup();
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("milestone", r.milestone.id());
+        data.put("aggregate_stage", phase.id);
+        data.put("completed", phase == Phase.COMPLETE);
+        if (completionFact != null) data.put("completion_fact", completionFact);
+        if (issueCode != null) {
+            data.put("issue_code", issueCode);
+            data.put("requires_decision", true);
+            data.put("recovery_options", recoveryOptions);
+        }
+        return data;
+    }
+
+    @Override
+    protected String successMessage() {
+        return "Verified progression milestone " + r.milestone.id() + ".";
+    }
+
+    private static boolean bool(Map<String, Object> data, String key) {
+        return data != null && Boolean.TRUE.equals(data.get(key));
+    }
+
+    private static String issue(TaskResult result) {
+        if (result == null || result.data() == null) return "child_result_missing";
+        Object issue = result.data().get("issue_code");
+        if (issue != null) return issue.toString();
+        Object failure = result.data().get("failure_type");
+        if (failure != null && "requires_dimension".equals(failure.toString())) {
+            return "requires_dimension";
+        }
+        for (String nestedKey : List.of("decision", "recovery_options")) {
+            Object nested = result.data().get(nestedKey);
+            if (nested instanceof Map<?, ?> map && map.get("reason_code") != null) {
+                return map.get("reason_code").toString();
+            }
+        }
+        return failure == null ? "unclassified_child_failure" : failure.toString();
+    }
+
+    private static String chooseRequiredDimension(TaskResult result, String current) {
+        if (result == null || result.data() == null) return null;
+        Object raw = result.data().get("allowed_dimensions");
+        if (!(raw instanceof Collection<?> values)) return null;
+        for (Object value : values) {
+            if (value == null) continue;
+            String dimension = value.toString().strip().toLowerCase(Locale.ROOT);
+            if (!dimension.equals(current) && List.of(
+                    ProgressionFacts.OVERWORLD,
+                    ProgressionFacts.NETHER,
+                    ProgressionFacts.END).contains(dimension)) {
+                // DimensionTravel intentionally has no direct Nether<->End route.
+                if ((ProgressionFacts.NETHER.equals(current)
+                        && ProgressionFacts.END.equals(dimension))
+                        || (ProgressionFacts.END.equals(current)
+                        && ProgressionFacts.NETHER.equals(dimension))) {
+                    return ProgressionFacts.OVERWORLD;
+                }
+                return dimension;
+            }
+        }
+        return null;
+    }
+}
