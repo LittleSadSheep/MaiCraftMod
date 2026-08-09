@@ -298,3 +298,303 @@ public final class DragonFightCompanionTask
                         ? coverageComplete() ? Phase.OBSERVE : Phase.SURVEY
                         : Phase.CRYSTALS;
             }
+            noteDragonState(observed);
+        } else if (dragon != null) {
+            noteDragonState(dragon);
+            if (dragon.isRemoved() && (deathPhaseObserved || dragon.getHealth() <= 0.0F)) {
+                dragonRemovalObserved = true;
+            }
+        }
+        return null;
+    }
+
+    private void noteDragonState(EnderDragon observed) {
+        boolean dying = observed.dragonDeathTime > 0 || observed.isDeadOrDying()
+                || observed.getPhaseManager().getCurrentPhase().getPhase() == EnderDragonPhase.DYING;
+        if (dying) deathPhaseObserved = true;
+        if (observed.isRemoved() && dying) dragonRemovalObserved = true;
+        float current = observed.getHealth();
+        if (!dying && lastDragonHealth >= 0.0F && current > lastDragonHealth + 0.25F) {
+            dragonHealingObservations++;
+            healingObservedThisTick = true;
+            zeroCrystalsSince = -1L;
+            if (loadedCrystals.isEmpty() && healingWithoutVisibleCrystalSince < 0L) {
+                healingWithoutVisibleCrystalSince = player.level().getGameTime();
+                observedTowerChunks.clear();
+                surveyMoves = 0;
+                surveyMovesWithoutProgress = 0;
+                healingSurveyAttempts++;
+            }
+        }
+        if (!loadedCrystals.isEmpty()) healingWithoutVisibleCrystalSince = -1L;
+        lastDragonHealth = current;
+    }
+
+    private TaskState tickObserve() {
+        if (!loadedCrystals.isEmpty()) {
+            phase = Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        long now = player.level().getGameTime();
+        if (healingWithoutVisibleCrystalSince >= 0L
+                && !coverageComplete()) {
+            phase = Phase.SURVEY;
+            return TaskState.RUNNING;
+        }
+        if (healingWithoutVisibleCrystalSince >= 0L
+                && now - healingWithoutVisibleCrystalSince > 100L) {
+            return failDecision("unobserved_healing_source",
+                    "The dragon regained health, and a fresh bounded tower survey still found no "
+                            + "loaded crystal. The unseen source cannot be treated as gone.",
+                    FailureType.TARGET_LOST,
+                    List.of("move until the remaining crystal is loaded",
+                            "increase render distance and retry",
+                            "inspect the main island before continuing"));
+        }
+        if (!coverageComplete()) {
+            phase = Phase.SURVEY;
+            return TaskState.RUNNING;
+        }
+        if (zeroCrystalsSince < 0L) zeroCrystalsSince = now;
+        if (now - zeroCrystalsSince < ZERO_CRYSTAL_STABLE_TICKS) return TaskState.RUNNING;
+        phase = Phase.DRAGON;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickSurvey() {
+        if (!loadedCrystals.isEmpty()) {
+            phase = Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        if (coverageComplete()) {
+            if (healingWithoutVisibleCrystalSince >= 0L) {
+                return failDecision("unobserved_healing_source",
+                        "The dragon regained health, but a fresh complete main-island tower "
+                                + "survey still found no visible crystal. That contradictory "
+                                + "world state requires a decision instead of another loop.",
+                        FailureType.TARGET_LOST,
+                        List.of("inspect the remaining healing beam manually",
+                                "increase entity tracking distance and retry",
+                                "resume only when the healing source is visible"));
+            }
+            zeroCrystalsSince = player.level().getGameTime();
+            phase = Phase.OBSERVE;
+            return TaskState.RUNNING;
+        }
+        if (surveyMoves >= MAX_SURVEY_MOVES || surveyMovesWithoutProgress >= 4) {
+            return failDecision("tower_coverage_incomplete",
+                    "The bounded first-person survey could not load every main-island tower "
+                            + "observation sector, so an empty client entity list is not proof that "
+                            + "all crystals are gone.",
+                    FailureType.TARGET_LOST,
+                    List.of("increase render distance", "clear a safe route around the main island",
+                            "continue the survey manually and retry"));
+        }
+        BlockPos vantage = findCoverageVantage();
+        if (vantage == null) {
+            return failDecision("no_safe_survey_vantage",
+                    "No loaded standable, non-void vantage toward the missing tower coverage could "
+                            + "be verified.",
+                    FailureType.HAZARD,
+                    List.of("load more safe main-island ground",
+                            "create a safe observation path manually",
+                            "retry from the central island"));
+        }
+        coverageCountBeforeMove = observedTowerChunks.size();
+        surveyMoves++;
+        MoveToTaskRecord move = new MoveToTaskRecord(
+                childId("survey"), childDeadline(3L * 60L * 20L),
+                (double) vantage.getX(), null, (double) vantage.getZ(),
+                null, false);
+        return startChild(move, Purpose.SURVEY_MOVE);
+    }
+
+    private TaskState tickCrystals() {
+        if (loadedCrystals.isEmpty()) {
+            if (selectedCrystalUuid != null) {
+                boolean targetCellLoaded = selectedCrystalLastPosition != null
+                        && player.level().isLoaded(selectedCrystalLastPosition);
+                invalidateCoverage(selectedCrystalLastPosition);
+                return failDecision(
+                        targetCellLoaded
+                                ? "crystal_changed_without_attack_receipt"
+                                : "crystal_observation_unloaded",
+                        targetCellLoaded
+                                ? "The selected crystal disappeared without a matching "
+                                        + "first-person attack receipt. Its destruction was not "
+                                        + "claimed."
+                                : "The selected crystal's last observation sector unloaded; an "
+                                        + "empty entity list is not a destruction fact.",
+                        FailureType.TARGET_LOST,
+                        List.of("reload and inspect the same tower sector",
+                                "repeat the bounded crystal survey",
+                                "retry only after the crystal state is visible"));
+            }
+            clearSelectedCrystal();
+            phase = Phase.OBSERVE;
+            return TaskState.RUNNING;
+        }
+        EndCrystal target = selectedCrystalUuid == null ? null : findCrystal(selectedCrystalUuid);
+        if (selectedCrystalUuid != null && target == null) {
+            boolean targetCellLoaded = selectedCrystalLastPosition != null
+                    && player.level().isLoaded(selectedCrystalLastPosition);
+            invalidateCoverage(selectedCrystalLastPosition);
+            return failDecision(
+                    targetCellLoaded
+                            ? "crystal_changed_without_attack_receipt"
+                            : "crystal_observation_unloaded",
+                    targetCellLoaded
+                            ? "The selected crystal disappeared without a matching first-person "
+                                    + "attack receipt; switching to another crystal would hide "
+                                    + "that uncertainty."
+                            : "The selected crystal's last observation sector unloaded; switching "
+                                    + "targets would treat unloading as destruction.",
+                    FailureType.TARGET_LOST,
+                    List.of("reload and inspect the same tower sector",
+                            "repeat the bounded crystal survey",
+                            "retry only after the crystal state is visible"));
+        }
+        if (target == null) {
+            target = loadedCrystals.stream()
+                    .min(Comparator.comparingDouble(player::distanceToSqr)).orElse(null);
+        }
+        if (target == null) {
+            phase = Phase.OBSERVE;
+            return TaskState.RUNNING;
+        }
+        selectCrystal(target);
+        if (!safeEncounterTarget(target.blockPosition())) {
+            return failDecision("unsafe_crystal_target",
+                    "A loaded End Crystal is outside the verified main-island safety envelope.",
+                    FailureType.HAZARD,
+                    List.of("load and inspect the main island",
+                            "handle the outlying crystal manually",
+                            "retry from a safe main-island position"));
+        }
+        if (protectedNear(target, PROTECTED_RADIUS)) {
+            return failDecision("crystal_near_protected_label",
+                    "A remaining crystal is close enough to a protected place that its explosion "
+                            + "is not authorized.",
+                    FailureType.HAZARD,
+                    List.of("revise protected_labels explicitly",
+                            "protect the remembered structure before retrying"));
+        }
+        if (unsafeCrystalBlastCollateral(target)) {
+            return failDecision("crystal_blast_bystander",
+                    "Another living entity or End Crystal is inside the selected crystal's full "
+                            + "blast span. Firing now could harm or chain-destroy an unselected "
+                            + "target.",
+                    FailureType.HAZARD,
+                    List.of("wait for bystanders to leave the blast span",
+                            "inspect clustered crystals before continuing",
+                            "retry when one crystal can be handled in isolation"));
+        }
+        if (!Loadout.forTarget(player, target).hasRanged()) {
+            return failDecision("missing_safe_ranged_loadout",
+                    "A remaining End Crystal is loaded, but no usable bow/crossbow with ammunition "
+                            + "is available. The task will not climb into its blast.",
+                    FailureType.WRONG_TOOL,
+                    List.of("obtain a bow or crossbow and ammunition",
+                            "equip a charged crossbow",
+                            "handle the remaining crystal manually"));
+        }
+
+        if (!safeCrystalFiringPosition(target)) {
+            if (crystalPositionAttempts >= MAX_CRYSTAL_POSITION_ATTEMPTS) {
+                return failDecision("safe_crystal_stance_exhausted",
+                        "No bounded first-person move established a loaded firing stance outside "
+                                + "the crystal blast span.",
+                        FailureType.HAZARD,
+                        List.of("clear a safe ranged stance", "return to stable main-island ground",
+                                "retry after the firing lane changes"));
+            }
+            BlockPos vantage = findCrystalVantage(target, false);
+            if (vantage == null) {
+                return failDecision("no_safe_crystal_stance",
+                        "No loaded standable firing stance outside the crystal blast span could "
+                                + "be verified.",
+                        FailureType.HAZARD,
+                        List.of("load more stable main-island ground",
+                                "create a safe ranged platform manually",
+                                "retry from farther away"));
+            }
+            crystalPositionAttempts++;
+            MoveToTaskRecord move = new MoveToTaskRecord(
+                    childId("crystal-stance"), childDeadline(2L * 60L * 20L),
+                    (double) vantage.getX(), (double) vantage.getY(),
+                    (double) vantage.getZ(), null, false);
+            return startChild(move, Purpose.POSITION_CRYSTAL);
+        }
+
+        if (!hasSafeCrystalShot(target)) {
+            CageObservation cage = observeVerifiedCage(target);
+            if (cage != null) return startCageOpening(target, cage);
+            if (crystalPositionAttempts < MAX_CRYSTAL_POSITION_ATTEMPTS) {
+                BlockPos vantage = findCrystalVantage(target, true);
+                if (vantage != null) {
+                    crystalPositionAttempts++;
+                    MoveToTaskRecord move = new MoveToTaskRecord(
+                            childId("crystal-line"), childDeadline(2L * 60L * 20L),
+                            (double) vantage.getX(), (double) vantage.getY(),
+                            (double) vantage.getZ(), null, false);
+                    return startChild(move, Purpose.POSITION_CRYSTAL);
+                }
+            }
+            return failDecision("crystal_occlusion_unverified",
+                    "No safe arrow trajectory reached the crystal, and the blocking geometry "
+                            + "was not a fully verified iron-bar cage. Nothing was altered.",
+                    FailureType.OCCLUDED,
+                    List.of("reposition for a clear ranged line",
+                            "inspect the obstruction before authorizing changes",
+                            "retry after the firing lane changes"));
+        }
+
+        int attempts = crystalAttacks.getOrDefault(selectedCrystalUuid, 0);
+        if (attempts >= MAX_CRYSTAL_ATTACKS) {
+            return failDecision("crystal_attack_exhausted",
+                    "One observed crystal survived every bounded first-person attack attempt.",
+                    FailureType.OUT_OF_REACH,
+                    List.of("change the ranged loadout", "reposition for line of sight",
+                            "inspect the enclosure manually"));
+        }
+        crystalAttacks.put(selectedCrystalUuid, attempts + 1);
+        AttackTaskRecord attack = new AttackTaskRecord(
+                childId("crystal"), childDeadline(3L * 60L * 20L),
+                List.of(target.getId()), false, true);
+        return startChild(attack, Purpose.ATTACK_CRYSTAL);
+    }
+
+    private TaskState finishCrystalAttack(TaskState terminal, TaskResult receipt) {
+        AttackTaskRecord attack = activeAttackRecord;
+        activeAttackRecord = null;
+        EndCrystal target = selectedCrystalUuid == null ? null : findCrystal(selectedCrystalUuid);
+        boolean targetCellLoaded = selectedCrystalLastPosition != null
+                && player.level().isLoaded(selectedCrystalLastPosition);
+        boolean successfulReceipt = terminal == TaskState.SUCCESS
+                && receipt != null && receipt.success();
+        boolean targetAttackReceipt = attack != null && selectedCrystalRuntimeId >= 0
+                && attack.strikes(selectedCrystalRuntimeId) > 0
+                && attack.defeated().contains(selectedCrystalRuntimeId);
+        if (target == null && targetCellLoaded && successfulReceipt && targetAttackReceipt) {
+            crystalsConfirmedDestroyed++;
+            unresolvedCrystals.remove(selectedCrystalUuid);
+            clearSelectedCrystal();
+            cagePlan = List.of();
+            cageProtectedCells = List.of();
+            phase = Phase.CRYSTALS;
+            return TaskState.RUNNING;
+        }
+        if (target == null) {
+            invalidateCoverage(selectedCrystalLastPosition);
+            return failDecision("crystal_observation_lost",
+                    "The selected crystal disappeared while its observation area was not a "
+                            + "loaded, receipt-confirmed destruction fact.",
+                    FailureType.TARGET_LOST,
+                    List.of("reload the same tower sector", "repeat the bounded crystal survey",
+                            "retry only after the crystal state is visible"));
+        }
+        selectCrystal(target);
+        if (successfulReceipt) {
+            return failDecision("crystal_attack_inconsistent",
+                    "The attack child reported success while the same crystal remained alive; "
+                            + "the semantic goal was not accepted.",
