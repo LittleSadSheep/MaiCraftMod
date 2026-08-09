@@ -298,3 +298,303 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         if (hooked != null) {
             reelIn();
             return failedCast("the hook caught an entity instead of landing cleanly", true);
+        }
+
+        int nibble = ((FishingHookAccessor) (Object) hook).maicraft$getNibble();
+        if (isBiteWindow(nibble)) {
+            beginLootCollection();
+            return TaskState.RUNNING;
+        }
+
+        boolean inWater = hook.level().getFluidState(hook.blockPosition()).is(FluidTags.WATER);
+        if (!inWater && phaseTicks >= CAST_SETTLE_TIMEOUT) {
+            Constants.LOG.debug("[maicraft-fish] miss hook={} on_ground={} age={}",
+                    hook.blockPosition().toShortString(), hook.onGround(), phaseTicks);
+            return failedCast("the fishing hook did not settle in water", true);
+        }
+        if (phaseTicks >= CAST_LIFETIME) {
+            return failedCast("no bite arrived before the cast timed out", false);
+        }
+        return TaskState.RUNNING;
+    }
+
+    /**
+     * Finish the semantic catch, not merely the rod interaction: walk to every
+     * ItemEntity created by this reel until vanilla pickup absorbs it. Fishing
+     * loot is launched toward the owner, but a bank, slab or ledge can intercept
+     * it several blocks away (the exact failure seen in ordinary play-testing).
+     */
+    private TaskState collectCaughtLoot() {
+        if (rodReceipt != null) {
+            var context = ClientRuntime.requireContext(player);
+            rodReceipt = context.actions().poll(context, rodReceipt);
+            if (!rodReceipt.terminal()) return TaskState.RUNNING;
+            if (rodReceipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+                fail("fishing reel was not confirmed: " + rodReceipt.detail(), FailureType.UNKNOWN);
+                return TaskState.FAILED;
+            }
+            rodReceipt = null;
+        }
+        if (!catchCounted) {
+            catchCounted = true;
+            r.caughtOne();
+            Constants.LOG.debug("[maicraft-fish] caught={}/{} casts={}",
+                    r.caught(), r.requested, r.casts());
+        }
+        phaseTicks++;
+        if (phaseTicks <= LOOT_DISCOVERY_TICKS) caught.discover(player.level(), lootBox());
+
+        if (phaseTicks >= LOOT_COLLECTION_TIMEOUT) {
+            int remaining = liveCaught().size();
+            fail("reeled in fishing loot but timed out while retrieving " + remaining
+                    + " dropped loot item(s)", FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+
+        // A vanilla reel launches its loot toward the owner. Planning against that
+        // still-moving entity makes the body step off the bank to "meet" a catch
+        // that would have arrived by itself. Hold the known-safe stance briefly;
+        // genuine stranded loot is still path-found after this grace period.
+        boolean returningLoot = !liveCaught().isEmpty();
+        if (returningLoot && phaseTicks <= LOOT_RETURN_GRACE_TICKS) {
+            return TaskState.RUNNING;
+        }
+
+        if (lootTarget != null) {
+            if (lootTarget.isRemoved()) {
+                lootTarget = null;
+                lootCloseTicks = 0;
+                stopNav();
+            } else if (player.distanceToSqr(lootTarget) <= PICKUP_REACH_SQR) {
+                // Give vanilla collision pickup a full second. This also produces
+                // a useful failure for a full inventory instead of looping forever.
+                stopNav();
+                if (++lootCloseTicks >= LOOT_CLOSE_WAIT_TICKS) abandonLootTarget();
+                return TaskState.RUNNING;
+            } else {
+                lootCloseTicks = 0;
+                if (nav == null) {
+                    nav = new PlayerNav(player, lootTarget::blockPosition, NAV_SPEED,
+                            () -> lootTarget == null || lootTarget.isRemoved()
+                                    || player.distanceToSqr(lootTarget) <= PICKUP_REACH_SQR);
+                }
+                switch (nav.tick()) {
+                    case RUNNING -> { return TaskState.RUNNING; }
+                    case ARRIVED -> { return TaskState.RUNNING; }
+                    case FAILED -> {
+                        abandonLootTarget();
+                        return TaskState.RUNNING;
+                    }
+                }
+            }
+        }
+
+        var level = player.clientLevel;
+        caught.prune(level);
+        lootTarget = caught.nearest(level, player, abandonedLoot).orElse(null);
+        if (lootTarget != null) {
+            stopNav();
+            return TaskState.RUNNING;
+        }
+
+        // A freshly spawned catch can be absorbed on the same tick or become
+        // query-visible one tick later. Keep the short discovery window before
+        // deciding that there is nothing left to retrieve.
+        if (phaseTicks < LOOT_DISCOVERY_TICKS) return TaskState.RUNNING;
+        if (unreachableLoot > 0) {
+            fail("reeled in fishing loot but could not reach " + unreachableLoot
+                    + " dropped loot item(s)", FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        clearLootTracking();
+        beginCooldown();
+        return TaskState.RUNNING;
+    }
+
+    private void beginLootCollection() {
+        caught.clear();
+        abandonedLoot.clear();
+        lootTarget = null;
+        lootCloseTicks = 0;
+        unreachableLoot = 0;
+        catchCounted = false;
+        caught.rememberExisting(player.level(), lootBox());
+
+        reelIn();
+        phase = Phase.COLLECT;
+        phaseTicks = 0;
+        stopNav();
+        caught.discover(player.level(), lootBox());
+    }
+
+    /** 收线战果的搜索范围:落点可能被岸坡/台阶截在几格外。 */
+    private AABB lootBox() {
+        return player.getBoundingBox().inflate(LOOT_SEARCH_RADIUS);
+    }
+
+    /** 仍在世且未被放弃的本竿战果。 */
+    private List<ItemEntity> liveCaught() {
+        return caught.live(player.clientLevel, abandonedLoot);
+    }
+
+    private void abandonLootTarget() {
+        if (lootTarget != null) abandonedLoot.add(lootTarget.getId());
+        unreachableLoot++;
+        lootTarget = null;
+        lootCloseTicks = 0;
+        stopNav();
+    }
+
+    private void clearLootTracking() {
+        caught.clear();
+        abandonedLoot.clear();
+        lootTarget = null;
+        lootCloseTicks = 0;
+        unreachableLoot = 0;
+        stopNav();
+    }
+
+    private TaskState coolDown() {
+        if (++phaseTicks < COOLDOWN_TICKS) return TaskState.RUNNING;
+        // requested == 0 = 主人没说钓几条 —— 这一行永远不成立,任务就是常驻的:
+        // 一直钓下去,直到主人换掉她手上的活。同一段逻辑,两种用法。
+        if (r.requested > 0 && r.caught() >= r.requested) return TaskState.SUCCESS;
+        phase = Phase.PREPARE;
+        phaseTicks = 0;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState failedCast(String reason, boolean rejectTarget) {
+        BlockPos failedTarget = target;
+        discardHook();
+        if (rejectTarget && failedTarget != null) rejectedTargets.add(failedTarget);
+        if (++failedCasts >= MAX_FAILED_CASTS) {
+            fail(reason + " after " + failedCasts
+                    + " attempts; move to a clearer shoreline and try fish again", FailureType.OUT_OF_REACH);
+            return TaskState.FAILED;
+        }
+        phase = Phase.PREPARE;
+        phaseTicks = 0;
+        if (rejectTarget) target = null;
+        return TaskState.RUNNING;
+    }
+
+    private void beginCooldown() {
+        phase = Phase.COOLDOWN;
+        phaseTicks = 0;
+        failedCasts = 0;
+        rejectedTargets.clear();
+    }
+
+    private void resetPositioning() {
+        discardHook();
+        stopNav();
+        clearLootTracking();
+        phase = Phase.POSITION;
+        phaseTicks = 0;
+        stance = null;
+        target = null;
+        rejectedTargets.clear();
+    }
+
+    private void reelIn() {
+        if (player.fishing == null || !player.getMainHandItem().is(Items.FISHING_ROD)
+                || rodReceipt != null) return;
+        var context = ClientRuntime.requireContext(player);
+        rodReceipt = context.actions().useItem(context, InteractionHand.MAIN_HAND,
+                c -> c.player().fishing == null
+                        ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING,
+                30);
+    }
+
+    private int findRodSlot() {
+        var inventory = player.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.is(Items.FISHING_ROD)) return i;
+        }
+        return -1;
+    }
+
+    private BlockPos findCastTarget(BlockPos fromStance, Vec3 eye) {
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int dy = -CAST_SEARCH_Y; dy <= CAST_SEARCH_Y; dy++) {
+            for (int dx = -CAST_SEARCH_RADIUS; dx <= CAST_SEARCH_RADIUS; dx++) {
+                for (int dz = -CAST_SEARCH_RADIUS; dz <= CAST_SEARCH_RADIUS; dz++) {
+                    double horizontal = Math.sqrt(dx * dx + dz * dz);
+                    if (horizontal < MIN_CAST_DISTANCE || horizontal > CAST_SEARCH_RADIUS) continue;
+                    BlockPos candidate = fromStance.offset(dx, dy, dz);
+                    if (!rejectedTargets.contains(candidate) && isCastableSurface(candidate)) {
+                        candidates.add(candidate.immutable());
+                    }
+                }
+            }
+        }
+        candidates.sort(Comparator.comparingDouble(candidate -> castScore(fromStance, candidate)));
+        for (BlockPos candidate : candidates) {
+            if (trajectoryClear(eye, candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private double castScore(BlockPos fromStance, BlockPos candidate) {
+        double dx = candidate.getX() - fromStance.getX();
+        double dz = candidate.getZ() - fromStance.getZ();
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        return Math.abs(horizontal - IDEAL_CAST_DISTANCE)
+                + Math.abs(candidate.getY() - fromStance.getY()) * 0.35
+                - waterNeighbourCount(candidate) * 0.04;
+    }
+
+    private int waterNeighbourCount(BlockPos pos) {
+        int count = 0;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (isCastableSurface(pos.offset(dx, 0, dz))) count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean isCastableSurface(BlockPos pos) {
+        var fluid = player.level().getFluidState(pos);
+        if (!fluid.is(FluidTags.WATER) || !fluid.isSource()) return false;
+        if (player.level().getFluidState(pos.above()).is(FluidTags.WATER)) return false;
+        return player.level().getBlockState(pos.above())
+                .getCollisionShape(player.level(), pos.above()).isEmpty();
+    }
+
+    private boolean isDryStance(BlockPos pos) {
+        return player.level().getFluidState(pos).isEmpty()
+                && player.level().getFluidState(pos.above()).isEmpty()
+                && BlockHelper.canWalkThrough(player.level(), pos)
+                && BlockHelper.canWalkThrough(player.level(), pos.above())
+                && BlockHelper.canWalkOn(player.level(), pos.below());
+    }
+
+    private boolean atStance() {
+        return stance != null && feet().equals(stance) && isDryStance(stance);
+    }
+
+    private BlockPos feet() {
+        return BlockHelper.playerFeet(player.level(), player.getX(), player.getY(), player.getZ());
+    }
+
+    private void aimAtTarget() {
+        InputDriver.lookAt(player, castAimPoint(player.getEyePosition(), target));
+    }
+
+    private static Vec3 castAimPoint(Vec3 eye, BlockPos target) {
+        double tx = target.getX() + 0.5;
+        double tz = target.getZ() + 0.5;
+        double dx = tx - eye.x;
+        double dz = tz - eye.z;
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        if (horizontal < 1.0e-6) return new Vec3(tx, waterSurfaceY(target), tz);
+        double pitch = Math.toRadians(castPitchDegrees(eye, target));
+        double scale = 16.0 / horizontal;
+        return new Vec3(eye.x + dx * scale,
+                eye.y - Math.tan(pitch) * 16.0,
+                eye.z + dz * scale);
+    }
+
