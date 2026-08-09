@@ -298,3 +298,35 @@ public final class GenericEntitySearchCompanionTask
             data.put("requires_narration", true);
             data.put("requires_decision",
                     "only_protected_or_ambiguous_entity_evidence".equals(code));
+            List<String> suggestions = new ArrayList<>();
+            suggestions.add("increase max_distance or continue from a different semantic area");
+            if (!r.mayAlterTerrain && frontierFailed > 0) {
+                suggestions.add("allow terrain alteration only if opening those routes is acceptable");
+            }
+            if (protectedOrAmbiguousSeen > 0) {
+                suggestions.add("choose a clearly unowned/unprotected population; do not weaken protection by runtime id");
+            }
+            suggestions.add("stop without treating the partial observed count as success");
+            data.put("suggestions", List.copyOf(suggestions));
+        }
+        return data;
+    }
+
+    @Override
+    protected String successMessage() {
+        return "verified " + observedSafe.size() + "/" + r.count + " acceptable "
+                + r.relation.name().toLowerCase(Locale.ROOT)
+                + " entity observations through loaded client evidence";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "entity search timed out with " + observedSafe.size() + "/" + r.count
+                + " acceptable observations; partial evidence was not reported as success";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "entity search was interrupted; partial observations were not reported as success";
+    }
+}
