@@ -1798,3 +1798,209 @@ public final class DragonFightCompanionTask
 
     private boolean nearBreath(BlockPos pos, double margin) {
         AABB scan = new AABB(pos).inflate(32.0D);
+        for (AreaEffectCloud cloud : player.clientLevel.getEntitiesOfClass(
+                AreaEffectCloud.class, scan,
+                candidate -> !candidate.isRemoved()
+                        && (candidate.getOwner() instanceof EnderDragon
+                                || candidate.getParticle().getType()
+                                        == ParticleTypes.DRAGON_BREATH))) {
+            if (Vec3.atCenterOf(pos).distanceToSqr(cloud.position())
+                    <= square(cloud.getRadius() + margin)) return true;
+        }
+        return false;
+    }
+
+    private boolean nearCrystal(BlockPos pos, double margin) {
+        Vec3 center = Vec3.atCenterOf(pos);
+        for (EndCrystal crystal : loadedCrystals) {
+            if (!crystal.isRemoved()
+                    && center.distanceToSqr(crystal.position()) <= square(margin)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasConfirmedDeathState() {
+        return dragon != null && (dragonRemovalObserved
+                || (deathPhaseObserved && (dragon.isRemoved() || dragon.isDeadOrDying()
+                        || dragon.getHealth() <= 0.0F)));
+    }
+
+    private PortalObservation scanExitPortal() {
+        if (!portalIndexRegistered || !player.clientLevel.isLoaded(fightOrigin)) {
+            return new PortalObservation(false, false);
+        }
+        TargetIndex.Result result = TargetIndex.query(
+                player.clientLevel, fightOrigin, List.of(Blocks.END_PORTAL), 1, 1, 16);
+        boolean present = !result.hits().isEmpty();
+        return new PortalObservation(present || result.complete(), present);
+    }
+
+    private void observePortalBaseline() {
+        if (portalBaselineKnown || deathPhaseObserved || dragonRemovalObserved
+                || phase == Phase.CONFIRM) return;
+        long now = player.level().getGameTime();
+        if (lastPortalScanAt != Long.MIN_VALUE && now - lastPortalScanAt < 20L) return;
+        lastPortalScanAt = now;
+        PortalObservation observation = scanExitPortal();
+        if (observation.known()) {
+            portalBaselineKnown = true;
+            portalPresentAtStart = observation.present();
+        }
+    }
+
+    private void observeExitPortal() {
+        if (!portalBaselineKnown || portalPresentAtStart) return;
+        PortalObservation observation = scanExitPortal();
+        if (observation.known() && observation.present()) exitPortalObserved = true;
+    }
+
+    private TaskState startChild(TaskRecord record, Purpose purpose) {
+        activeRecord = record;
+        activeChild = TaskFactory.create(player, record);
+        activeAttackRecord = record instanceof AttackTaskRecord attack ? attack : null;
+        if (purpose == Purpose.OPEN_CAGE
+                && activeChild instanceof BuildCompanionTask build) {
+            build.protectNavigationCells(cageProtectedCells);
+        }
+        activePurpose = purpose;
+        return TaskState.RUNNING;
+    }
+
+    private void cancelActiveChild(boolean countInterruption) {
+        if (activeChild == null) return;
+        Task child = activeChild;
+        child.stop(player, Task.StopReason.REPLACED);
+        try {
+            child.result(TaskState.CANCELLED);
+        } catch (RuntimeException ignored) {
+            // Parent cleanup still releases all first-person controls.
+        }
+        if (countInterruption && activePurpose != null && !activePurpose.recovery()) {
+            interruptedCombatChildren++;
+        }
+        activeChild = null;
+        activeRecord = null;
+        activeAttackRecord = null;
+        activePurpose = null;
+        activeFood = null;
+    }
+
+    private static boolean transientExecutionFailure(FailureType type) {
+        return type == FailureType.OCCLUDED
+                || type == FailureType.BOXED_IN
+                || type == FailureType.NO_PATH
+                || type == FailureType.OUT_OF_REACH
+                || type == FailureType.STANCE_DUD;
+    }
+
+    private TaskState childFailureDecision(
+            String code, String message, FailureType type, List<String> options) {
+        return failDecision(code, message,
+                type == null ? FailureType.UNKNOWN : type, options);
+    }
+
+    private String childId(String purpose) {
+        return r.getToolCallId() + "-dragon-" + purpose + "-" + (++childSerial);
+    }
+
+    private long childDeadline(long ticks) {
+        return Math.min(r.getDeadlineGameTime(), player.level().getGameTime() + ticks);
+    }
+
+    private TaskState failDecision(
+            String code, String message, FailureType type, List<String> options) {
+        failureCode = code;
+        recoveryOptions = List.copyOf(options);
+        fail(message, type == null ? FailureType.UNKNOWN : type);
+        return TaskState.FAILED;
+    }
+
+    private static boolean insideRadius(int x, int z, BlockPos center, int radius) {
+        long dx = (long) x - center.getX();
+        long dz = (long) z - center.getZ();
+        return dx * dx + dz * dz <= (long) radius * radius;
+    }
+
+    private static long chunkKey(int x, int z) {
+        return (x & 0xffffffffL) | ((long) z << 32);
+    }
+
+    private static int chunkX(long key) { return (int) key; }
+
+    private static int chunkZ(long key) { return (int) (key >> 32); }
+
+    private static double square(double value) { return value * value; }
+
+    @Override protected void cleanup() {
+        cancelActiveChild(false);
+        if (portalIndexRegistered) {
+            TargetIndex.unregister(player.clientLevel, List.of(Blocks.END_PORTAL));
+            portalIndexRegistered = false;
+        }
+        super.cleanup();
+    }
+
+    @Override protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("phase", phase.name().toLowerCase());
+        data.put("loaded_crystals_observed", loadedCrystals.size());
+        data.put("initial_loaded_crystals", initialLoadedCrystals);
+        data.put("maximum_loaded_crystals_observed", maximumLoadedCrystals);
+        data.put("crystals_confirmed_destroyed", crystalsConfirmedDestroyed);
+        data.put("crystals_still_unresolved", unresolvedCrystals.size());
+        data.put("cage_openings_confirmed", cageOpeningsConfirmed);
+        data.put("dragon_state", dragonState());
+        if (dragon != null && !dragon.isRemoved()) {
+            data.put("dragon_health_observed", Math.max(0.0F, dragon.getHealth()));
+        }
+        data.put("dragon_attack_rounds", dragonAttackRounds);
+        data.put("dragon_healing_observations", dragonHealingObservations);
+        data.put("healing_triggered_surveys", healingSurveyAttempts);
+        data.put("tower_coverage_required", requiredTowerChunks.size());
+        data.put("tower_coverage_observed", observedTowerChunks.size());
+        data.put("tower_coverage_complete", coverageComplete());
+        data.put("tower_survey_moves", surveyMoves);
+        data.put("recovery_actions", recoveryActions);
+        data.put("food_consumptions_confirmed", foodsConsumed);
+        data.put("rare_consumables_used", rareConsumablesConsumed);
+        data.put("breath_avoidances_confirmed", breathAvoidances);
+        data.put("combat_children_interrupted_for_safety", interruptedCombatChildren);
+        data.put("death_phase_observed", deathPhaseObserved);
+        data.put("dragon_removal_observed", dragonRemovalObserved);
+        data.put("exit_portal_transition_observed", exitPortalObserved);
+        if (failureCode != null) {
+            data.put("decision", Map.of(
+                    "required", true, "reason_code", failureCode,
+                    "recovery_options", recoveryOptions));
+        }
+        return data;
+    }
+
+    private String dragonState() {
+        if (dragonRemovalObserved || (dragon != null && dragon.isRemoved())) {
+            return deathPhaseObserved || exitPortalObserved
+                    ? "removed_after_death_evidence" : "removed_unconfirmed";
+        }
+        if (dragon == null) return "not_loaded_unconfirmed";
+        if (deathPhaseObserved) return "death_phase_observed";
+        if (!dragon.isAlive() || dragon.isDeadOrDying()) return "dead_state_observed";
+        return dragon.getPhaseManager().getCurrentPhase().isSitting()
+                ? "alive_perched" : "alive_airborne";
+    }
+
+    @Override protected String successMessage() {
+        return "completed the observed Ender Dragon encounter: crystals were handled one at a "
+                + "time, and real dragon death/removal was corroborated by death-phase or "
+                + "exit-portal evidence";
+    }
+
+    @Override protected String timeoutMessage() {
+        return "the Ender Dragon encounter timed out in phase " + phase.name().toLowerCase()
+                + "; no unverified victory was reported";
+    }
+
+    @Override protected String cancelledMessage() {
+        return "the Ender Dragon encounter was interrupted in phase "
+                + phase.name().toLowerCase() + "; all first-person controls were released";
+    }
+}
