@@ -1198,3 +1198,132 @@ public final class SemanticElytraCompanionTask
     }
 
     @Override
+    protected void cleanup() {
+        if (cleaned) return;
+        cleaned = true;
+        clearActiveChild(TaskState.CANCELLED);
+        clearTeleportTracking();
+        authorizedCombatIds.clear();
+        if (indexedLevel != null) {
+            TargetIndex.unregister(indexedLevel, gatewayBlocks);
+            indexedLevel = null;
+        }
+        super.cleanup();
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> budget = new LinkedHashMap<>();
+        budget.put("max_search_distance", r.maxSearchDistance);
+        budget.put("gateway_scans", gatewayScans);
+        budget.put("gateway_incomplete_scans", gatewayIncompleteScans);
+        budget.put("gateway_frontiers_attempted", gatewayFrontiersAttempted);
+        budget.put("gateway_frontiers_failed", gatewayFrontiersFailed);
+        budget.put("gateway_moves", gatewayMoveAttempts);
+        budget.put("pearl_acquisitions", pearlAcquireAttempts);
+        budget.put("end_city_searches", endCitySearches);
+        budget.put("end_cities_excluded", visitedCityAnchors.size());
+        budget.put("ship_frontiers_attempted", shipFrontiersAttempted);
+        budget.put("ship_frontiers_failed", shipFrontiersFailed);
+        budget.put("combat_encounters", combatEncounters);
+        budget.put("frame_attacks", frameAttacks);
+        budget.put("collection_attempts", collectionAttempts);
+        budget.put("terrain_alteration_suppressed_by_protection",
+                r.mayAlterTerrain && !r.protectedLabels.isEmpty());
+
+        Map<String, Object> recovery = new LinkedHashMap<>();
+        recovery.put("required", issueCode != null);
+        recovery.put("reason_code", issueCode == null ? "none" : issueCode);
+        recovery.put("options", recoveryOptions());
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("gateway_verified", gatewayVerified);
+        data.put("end_city_evidence", endCityEvidence);
+        data.put("ship_frame_verified", shipFrameVerified);
+        data.put("elytra_count", elytraCount());
+        data.put("consumed", Map.of(
+                "item_id", "minecraft:ender_pearl",
+                "count", pearlsConsumed));
+        data.put("search_budget", budget);
+        data.put("recovery_options", recovery);
+        return data;
+    }
+
+    private List<Map<String, Object>> recoveryOptions() {
+        if ("rare_consumable_permission_required".equals(issueCode)) {
+            return List.of(
+                    Map.of(
+                            "choice", "retry",
+                            "description", "Retry with details.parameters.allow_rare_consumables=true."),
+                    Map.of(
+                            "choice", "skip",
+                            "description", "Skip End Gateway traversal without using an ender pearl."),
+                    Map.of(
+                            "choice", "cancel",
+                            "description", "Cancel the task with zero rare-consumable use."));
+        }
+        List<String> actions;
+        if (issueCode == null) {
+            actions = List.of();
+        } else if (issueCode.startsWith("safety_")) {
+            actions = List.of("stabilize health, effects, footing, and nearby threats",
+                    "resume only from loaded solid ground",
+                    "revise combat permission explicitly if a threat remains");
+        } else if (issueCode.contains("dimension")) {
+            actions = List.of("finish the dragon encounter and enter the End",
+                    "resume from a stable loaded End position");
+        } else if (issueCode.contains("protected")) {
+            actions = List.of("resolve or revise protected labels",
+                    "move the protected obstruction without harming it",
+                    "choose a different verified target");
+        } else if (issueCode.contains("pearl")) {
+            actions = List.of("supply one ender pearl",
+                    "allow combat only if hunting a real Enderman is acceptable",
+                    "retry from the loaded main island");
+        } else if (issueCode.contains("gateway")) {
+            actions = List.of("load more of the main island",
+                    "inspect the observed gateway state",
+                    "retry with a larger bounded search distance");
+        } else if (issueCode.contains("end_city")) {
+            actions = List.of("increase max_search_distance",
+                    "allow terrain alteration if traversal is blocked",
+                    "resume from stable outer-island terrain");
+        } else if (issueCode.contains("combat")
+                || issueCode.contains("hostile")
+                || issueCode.contains("blocker")) {
+            actions = List.of("move or distract the hostile obstruction",
+                    "grant allow_combat if that consequence is acceptable",
+                    "restore health and equipment before retrying");
+        } else if (issueCode.contains("frame") || issueCode.contains("ship")) {
+            actions = List.of("load and inspect more End City branches",
+                    "move to a stable view of the End Ship",
+                    "retry without changing protected labels silently");
+        } else if (issueCode.contains("drop") || issueCode.contains("collection")) {
+            actions = List.of("inspect the loaded ship floor and main inventory",
+                    "free inventory space if needed",
+                    "resume only while the real drop is still observable");
+        } else {
+            actions = List.of("inspect the latest loaded facts",
+                    "resume from a stable position",
+                    "revise the bounded policy before retrying");
+        }
+        List<Map<String, Object>> options = new ArrayList<>();
+        for (String action : actions) options.add(Map.of("action", action));
+        return List.copyOf(options);
+    }
+
+    @Override
+    protected String successMessage() {
+        return "A real elytra is now present in the main inventory.";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "The bounded first-person elytra search timed out and stopped without assuming success.";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "The first-person elytra search was interrupted; no native child action will resume automatically.";
+    }
+}
