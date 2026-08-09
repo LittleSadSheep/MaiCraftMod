@@ -1198,3 +1198,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return "timed out after gathering " + r.getMined() + "/" + r.count + " " + r.label;
     }
 
+    @Override
+    protected String cancelledMessage() {
+        return "interrupted after gathering " + r.getMined() + "/" + r.count + " " + r.label;
+    }
+}
