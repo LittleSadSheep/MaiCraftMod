@@ -298,3 +298,303 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         BlockPos digging = digger.current();
         if (digging != null) {
             if (level.getBlockState(digging).isAir()) {
+                // Once air, BlockDigger's ordinary BlockPos entry cannot raycast the
+                // vanished block to poll its now-terminal receipt. ClientActorBoundary
+                // advances that receipt before this task tick; wait the same two stable
+                // revisions, then deliver it here only if native destruction was truly
+                // observed (not while a tool-selection receipt was still pending).
+                if (nativeBreakObserved && evidencePos != null && evidencePos.equals(digging)
+                        && ++confirmedAirTicks >= 2) {
+                    digger.cancel();
+                    finishConfirmedTargetBreak(digging);
+                } else if (!nativeBreakObserved) {
+                    digger.cancel();
+                    clearBreakEvidence();
+                }
+                return TaskState.RUNNING;
+            }
+            if (!reachable(digging)) {
+                digger.cancel();
+                clearBreakEvidence();
+            } else {
+                if (nav != null) {
+                    nav.pause();   // stand still for the dig; goal/path/in-flight search stay warm
+                }
+                mineProgress(digging);
+                return TaskState.RUNNING;
+            }
+        }
+
+        // 1) Mine any target we can already reach + see from here (no pathing) —
+        //    a tree gets mined from beside, never by digging under it.
+        BlockPos reachable = reachableTarget();
+        if (reachable != null) {
+            // Mine in place with the nav merely PAUSED (inputs cleared each tick), never torn down:
+            // the goal, current path segment, and any in-flight search stay warm, so when this dig
+            // ends navigation resumes where it left off instead of cold-starting a fresh A* — that
+            // cold start used to surface as a visible stall after every in-place dig. The goal-box
+            // overlay also survives for free (nothing clears it anymore).
+            if (nav != null) {
+                nav.pause();
+            }
+            mineProgress(reachable);
+            return TaskState.RUNNING;
+        }
+
+        // 2) Head for the ore field, arriving when a shaft opens up. The target set is
+        //    sacred to navigation: only this task's BlockDigger may break a requested
+        //    target, otherwise there is no receipt/evidence boundary for its loot.
+        if (!knownOres.isEmpty()) {
+            branchTicks = 0;
+            TaskState stalled = stalledOut();
+            if (stalled != null) {
+                return stalled;
+            }
+            if (nav == null || navIsBranch) {
+                stopNav();
+                // Compiled front door: one composite over every known target, with those target
+                // cells sacred. Navigation can terraform its approach, but requested targets are
+                // broken only by mineProgress so every drop has a receipt-bound evidence round.
+                // Revalidating: the ore field changes every few ticks (mined cells pruned,
+                // rescans merging, unworkable cells trimming), so hand the freshly compiled goal to
+                // the engine EVERY tick — the current segment is kept unless its destination
+                // is no longer accepted by the new goal (then it soft-cancels and re-plans),
+                // and standing in a stance whose ore just got mined out resumes navigation
+                // instead of reporting a stale arrival.
+                nav = PlayerNav.toRevalidating(player, this::oreFieldCompiled, MINE_SPEED,
+                        () -> reachableTarget() != null, PlayerNav.ContextProvider.TERRAFORM);
+                navIsBranch = false;
+            }
+            switch (nav.tick()) {
+                case RUNNING -> { return TaskState.RUNNING; }
+                case ARRIVED -> {
+                    // Arrival normally means an in-place target just became reachable — next tick step 1
+                    // pauses the nav and digs. Only clear inputs here (pause), never tear the nav down:
+                    // teardown would throw away the goal + any in-flight search and force a cold restart.
+                    nav.pause();
+                    // [ANCHOR arrived-dud] 到了站位,却什么都够不到。<b>这不构成关于任何一颗矿的
+                    // 证据</b>:最常见的成因根本不是故障 —— 这一刻人在空中(reachableTarget 第一行
+                    // 就要求 onGround),或者站位只满足“靠近”还没形成射线。剩下的
+                    // "被别的矿包住、射线打不到"也只是<b>还没轮到它</b>,
+                    // 外层挖掉自己就露出来了。
+                    //
+                    // 所以这里只重新规划。真卡住了由 STALL_TICKS 那把尺子收工,不记账到某一格。
+                    if (reachableTarget() == null && !knownOres.isEmpty()) {
+                        org.maiwithu.maicraft.core.Constants.LOG.debug(
+                                "[maicraft-task] mine ARRIVED 但够不到 feet={} nearestOre={} —— 重规划",
+                                player.blockPosition().toShortString(), nearestOreInfo());
+                        stopNav();
+                    }
+                    return TaskState.RUNNING;   // a reachable shaft is handled next tick
+                }
+                case FAILED -> {
+                    // [ANCHOR nav-cold-map] 地图自己都说了还没查完，这个“没路”不算证据。
+                    //
+                    // 世界刚加载时共用索引是冷的，第一次查询烧完预算也扫不完请求半径
+                    // ({@code complete=false})，名单里可能只有几十格外的一簇，而脚边那片还没进图。
+                    // 拿这种半张图上的无路去永久拉黑一个好方块，是把“我还不知道”当成了“不可能”。
+                    //
+                    // 跟上面 ARRIVED-dud 是同一条纪律：拉黑只该给真正失败的路。
+                    if (NoPathVerdict.of(lastQueryComplete, coldMapFails)
+                            == NoPathVerdict.Verdict.REQUERY) {
+                        if (++coldMapFails == 1) {
+                            org.maiwithu.maicraft.core.Constants.LOG.info(
+                                    "[maicraft-task] mine nav failed ({}) 但目标图还没查完 —— 不拉黑，重查 | nearestOre={}",
+                                    nav.failType(), nearestOreInfo());
+                        }
+                        stopNav();
+                        queryCooldown = 0;   // 下一刻就接着建图，别干等冷却
+                        return TaskState.RUNNING;
+                    }
+                    // [ANCHOR nav-failed] 完整图上真的没路。
+                    //
+                    // <b>这句话的主语是"这一批",不是"最近那颗"。</b>复合目标撒在全部目标上,
+                    // 搜不出路的意思是一个都到不了 —— 拿"离脚最近的"顶罪只是猜,而猜错了不会
+                    // 报错(日志只会写"记下 X",而 X 看着完全合理)。所以这里什么都不记,
+                    // 重新规划;真的一直出不去,由 STALL_TICKS 收工。
+                    org.maiwithu.maicraft.core.Constants.LOG.info(
+                            "[maicraft-task] mine nav failed ({}): {} | 复合目标 {} 个,nearestOre={}",
+                            nav.failType(), nav.failReason(), knownOres.size(), nearestOreInfo());
+                    coldMapFails = 0;
+                    stopNav();
+                    return TaskState.RUNNING;
+                }
+            }
+        }
+
+        // 3) No ore known and nothing dropped nearby. An incomplete index (cold area
+        //    still building under the per-query budget) means "don't know yet", not
+        //    "nothing there" — wait for full coverage before any verdict. 等扫描的刻
+        //    不烧任务预算:索引按真实时间分摊构建,而期限数游戏刻——tick 远快于真实
+        //    时间时(/tick rate、不限速的测试服),期限会在首查返回前烧光,任务无声
+        //    TIMEOUT。与 nav 规划在飞的冻结(AbstractCompanionTask)同一条保护。
+        if (!lastQueryComplete) {
+            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+            return TaskState.RUNNING;
+        }
+        //    Default: stop here — only the
+        //    opt-in explore mode branch-mines outward for more. So
+        //    finish with whatever we gathered (the tool's contract: "fewer than count
+        //    in range still succeeds"), rather than running off across the world.
+        if (!EXPLORE_FOR_BLOCKS) {
+            if (r.getMined() > 0) {
+                progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
+                fail(progressNote, FailureType.MINED_OUT);
+                return TaskState.FAILED;
+            }
+            return noOreFailure();
+        }
+
+        // 3b) Opt-in explore — branch-mine outward (bounded) to dig fresh tunnel and expose more.
+        if (branchPoint == null) {
+            branchPoint = player.blockPosition();
+            branchY = branchPoint.getY();
+        }
+        if (++branchTicks > MAX_BRANCH_TICKS) {
+            if (r.getMined() > 0) {
+                progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
+                fail(progressNote, FailureType.MINED_OUT);
+                return TaskState.FAILED;
+            }
+            return noOreFailure();
+        }
+        if (nav == null || !navIsBranch) {
+            stopNav();
+            nav = PlayerNav.toGoal(player, () -> NavGoal.runAway(branchPoint, branchY),
+                    MINE_SPEED, () -> false, PlayerNav.ContextProvider.TERRAFORM);
+            navIsBranch = true;
+        }
+        switch (nav.tick()) {
+            case RUNNING, ARRIVED -> { return TaskState.RUNNING; }
+            case FAILED -> { stopNav(); return TaskState.RUNNING; } // boxed in — rescan/retry
+        }
+        return TaskState.RUNNING;
+    }
+
+    // ---- goals ----
+
+    /** The whole mining objective, compiled as a sacred get-to-block composite.
+     *  Navigation may terraform unrelated terrain, but it may not consume a listed
+     *  target behind this task's back: target breaks need the BlockDigger receipt and
+     *  per-break drop snapshot below. */
+    private GoalCompiler.Compiled oreFieldCompiled() {
+        if (knownOres.isEmpty()) {
+            // Degenerate frame (targets vanished between ticks): stand where we are.
+            return GoalCompiler.standOn(player.blockPosition());
+        }
+        return GoalCompiler.anyOf(new ArrayList<>(knownOres));
+    }
+
+
+    /** 脚位到目标的最大垂直距离:站在目标正下方仰头,眼高 1.62 + 触及 4.5 ≈ 6.1,
+     *  即目标底面在脚上 6 格内仍可命中——波段最多下探到此,再深就算站得住也打不到了。 */
+    private static final int MAX_STANCE_DEPTH = 6;
+
+
+    /**
+     * Is {@code pos} also part of what we're mining — a known target, a filter
+     * match, or already-broken air continuing the shaft? Used by {@link #coalesce}
+     * to read the vertical run a block sits in.
+     */
+    private boolean internalMiningGoal(CalculationContext ctx, BlockPos pos) {
+        if (knownOres.contains(pos)) return true;
+        net.minecraft.world.level.block.state.BlockState state = player.level().getBlockState(pos);
+        if (state.isAir()) return true;                         // broken-out air still continues the run
+        return r.targets.contains(state.getBlock()) && plausibleToBreak(ctx, pos, state);
+    }
+
+    /** 该目标格是否真挖得成:挖穿成本无穷(挖不动/被硬禁)、禁挖判定命中
+     *  (冰/虫蚀/贴液体/悬空落沙邻格/世界边界)、或上下都被基岩封死的都不算。
+     *  包内共享:goto 的 FIND 候选入册走同一道剪枝。 */
+    public static boolean plausibleToBreak(CalculationContext ctx, BlockPos pos, BlockState state) {
+        if (MovementHelper.getMiningDurationTicks(ctx, pos.getX(), pos.getY(), pos.getZ(),
+                state, true) >= ActionCosts.COST_INF) {
+            return false;
+        }
+        if (MovementHelper.avoidBreaking(ctx, pos.getX(), pos.getY(), pos.getZ(), state)) {
+            return false;
+        }
+        return !(ctx.get(pos.getX(), pos.getY() + 1, pos.getZ()).getBlock()
+                        == net.minecraft.world.level.block.Blocks.BEDROCK
+                && ctx.get(pos.getX(), pos.getY() - 1, pos.getZ()).getBlock()
+                        == net.minecraft.world.level.block.Blocks.BEDROCK);
+    }
+
+    /**
+     * Pre-filter for the in-place pick, squared: candidates farther than this from the feet can't be
+     * within block reach of the eyes (4.5 eye reach + 1.62 eye height + aim-point slack), so they are
+     * skipped without spending rays. {@link #knownOres} is kept sorted nearest-first by {@link #prune},
+     * so iteration simply stops at the first candidate beyond the filter.
+     */
+    private static final double IN_PLACE_FILTER_SQR = 7.0 * 7.0;
+
+    /**
+     * The in-place mining pick: the nearest known target the eyes can ACTUALLY hit from where the body
+     * stands right now ({@link #reachable}: centre + exposed face points, within block reach, nothing
+     * solid in the way) — mined on the spot, no pathing. Column and height don't matter; hittability
+     * does. The one hard exception is the support cell directly under the feet — never dig out our own
+     * floor. Anything the eyes can't hit from here is left to the navigator (walk to a stance, pillar
+     * up, etc.).
+     */
+    private BlockPos reachableTarget() {
+        if (!player.onGround()) return null;
+        Level level = player.level();
+        BlockPos feet = player.blockPosition();
+        BlockPos support = feet.below();
+        BlockPos best = null;
+        double bestD = Double.MAX_VALUE;
+        for (BlockPos ore : knownOres) {
+            if (ore.distSqr(feet) > IN_PLACE_FILTER_SQR) {
+                break;   // sorted nearest-first — everything after this is farther still
+            }
+            if (ore.equals(support) || level.getBlockState(ore).isAir()) {
+                continue;
+            }
+            double d = ore.distSqr(feet.above());
+            if (d >= bestD || !reachable(ore)) {
+                continue;
+            }
+            bestD = d;
+            best = ore;
+        }
+        return best;
+    }
+
+    /** Face points of a block (each face centre, from its collision shape), tried when the block's own
+     *  centre is occluded — so a block whose centre is blocked but whose face is exposed still counts,
+     *  the way a real click can catch it at an angle. */
+    private static final Vec3[] BLOCK_FACE_POINTS = {
+            new Vec3(0.5, 0, 0.5), new Vec3(0.5, 1, 0.5),
+            new Vec3(0.5, 0.5, 0), new Vec3(0.5, 0.5, 1),
+            new Vec3(0, 0.5, 0.5), new Vec3(1, 0.5, 0.5),
+    };
+
+    /**
+     * Can the body reach {@code target} to break it from where it stands right now — an eye-line to the
+     * block (its centre first, then each exposed face point) within block-interaction range
+     * ({@link #REACH_SQR}) that nothing solid obstructs but the target itself. Reach is measured from the
+     * EYE, so an upward target is reachable as high as a standing body's eyes allow — not merely what its
+     * feet are next to — and a face-occluded block is still reachable via an exposed side.
+     */
+    private boolean reachable(BlockPos target) {
+        Vec3 eyes = player.getEyePosition();
+        if (reachableAt(eyes, target, Vec3.atCenterOf(target))) {
+            return true;
+        }
+        VoxelShape shape = player.level().getBlockState(target).getShape(player.level(), target);
+        if (shape.isEmpty()) {
+            shape = Shapes.block();
+        }
+        for (Vec3 m : BLOCK_FACE_POINTS) {
+            double xDiff = shape.min(Direction.Axis.X) * m.x + shape.max(Direction.Axis.X) * (1 - m.x);
+            double yDiff = shape.min(Direction.Axis.Y) * m.y + shape.max(Direction.Axis.Y) * (1 - m.y);
+            double zDiff = shape.min(Direction.Axis.Z) * m.z + shape.max(Direction.Axis.Z) * (1 - m.z);
+            if (reachableAt(eyes, target,
+                    new Vec3(target.getX() + xDiff, target.getY() + yDiff, target.getZ() + zDiff))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Is {@code point} within reach of {@code eyes}, and does an eye→point ray hit {@code target} first
