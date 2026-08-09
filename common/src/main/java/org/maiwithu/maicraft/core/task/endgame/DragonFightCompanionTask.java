@@ -1198,3 +1198,303 @@ public final class DragonFightCompanionTask
         BlockPos feet = player.blockPosition();
         if (!player.level().isLoaded(feet)
                 || !insideRadius(feet.getX(), feet.getZ(), fightOrigin, SAFE_PLAYER_RADIUS)
+                || feet.getY() <= player.level().getMinBuildHeight() + 3) return false;
+        if (player.onGround() || player.isInWater()) return groundWithin(feet, 3);
+        // Normal jumps and knockback above solid island terrain are left to the fall reflex.
+        return groundWithin(feet, 32);
+    }
+
+    private boolean standable(BlockPos feet) {
+        ClientLevel level = player.clientLevel;
+        BlockPos head = feet.above();
+        BlockPos floor = feet.below();
+        if (!level.isLoaded(feet) || !level.isLoaded(head) || !level.isLoaded(floor)) return false;
+        if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
+                || !level.getBlockState(head).getCollisionShape(level, head).isEmpty()
+                || !level.getFluidState(feet).isEmpty()
+                || !level.getFluidState(head).isEmpty()) return false;
+        return level.getBlockState(floor).isFaceSturdy(level, floor, Direction.UP)
+                && !level.getBlockState(floor).is(Blocks.END_PORTAL);
+    }
+
+    private boolean groundWithin(BlockPos start, int drop) {
+        ClientLevel level = player.clientLevel;
+        for (int d = 0; d <= drop; d++) {
+            BlockPos floor = start.below(d + 1);
+            if (!level.isLoaded(floor)) return false;
+            if (level.getBlockState(floor).isFaceSturdy(level, floor, Direction.UP)
+                    && level.getFluidState(floor).isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private boolean safeEncounterTarget(BlockPos pos) {
+        return player.level().isLoaded(pos)
+                && insideRadius(pos.getX(), pos.getZ(), fightOrigin, MAIN_ISLAND_TARGET_RADIUS)
+                && pos.getY() > player.level().getMinBuildHeight() + 2
+                && pos.getY() < player.level().getMaxBuildHeight();
+    }
+
+    private boolean safeDragonTarget(EnderDragon target, boolean ranged) {
+        BlockPos pos = target.blockPosition();
+        if (!safeEncounterTarget(pos)) return false;
+        if (ranged) return true;
+        BlockPos probe = new BlockPos(pos.getX(),
+                Math.min(pos.getY(), fightOrigin.getY() + 16), pos.getZ());
+        return target.getPhaseManager().getCurrentPhase().isSitting()
+                && insideRadius(pos.getX(), pos.getZ(), fightOrigin, 48)
+                && groundWithin(probe, 48);
+    }
+
+    private List<EndCrystal> scanCrystals() {
+        ClientLevel level = player.clientLevel;
+        List<EndCrystal> result = new ArrayList<>(level.getEntitiesOfClass(
+                EndCrystal.class, encounterBounds(level),
+                crystal -> !crystal.isRemoved() && crystal.isAlive()));
+        result.sort(Comparator.comparingDouble(player::distanceToSqr));
+        return List.copyOf(result);
+    }
+
+    private void recordObservedCrystals() {
+        for (EndCrystal crystal : loadedCrystals) {
+            unresolvedCrystals.put(crystal.getUUID(), crystal.blockPosition().immutable());
+        }
+    }
+
+    /**
+     * Every crystal ever observed remains semantically unresolved until this parent accepts its
+     * own strict attack receipt.  This closes the gap where an unselected crystal could unload
+     * between observation and selection and then disappear from the aggregate entity list.
+     */
+    private TaskState unresolvedCrystalObservationFailure() {
+        for (Map.Entry<UUID, BlockPos> entry : unresolvedCrystals.entrySet()) {
+            if (findCrystal(entry.getKey()) != null) continue;
+            if (activePurpose == Purpose.ATTACK_CRYSTAL
+                    && entry.getKey().equals(selectedCrystalUuid)) {
+                // The attack child gets one chance to produce the matching strike/despawn
+                // receipt. validateActiveWork separately rejects an unloaded target sector.
+                continue;
+            }
+            BlockPos last = entry.getValue();
+            boolean loaded = player.level().isLoaded(last);
+            invalidateCoverage(last);
+            return failDecision(
+                    loaded
+                            ? "observed_crystal_changed_without_receipt"
+                            : "observed_crystal_sector_unloaded",
+                    loaded
+                            ? "A previously observed End Crystal disappeared without this "
+                                    + "task's matching first-person attack receipt. It remains "
+                                    + "unresolved."
+                            : "A previously observed End Crystal's sector unloaded. An empty "
+                                    + "client entity list is not proof of destruction.",
+                    FailureType.TARGET_LOST,
+                    List.of("reload and inspect the same tower sector",
+                            "repeat the bounded tower survey",
+                            "retry only after every crystal state is visible"));
+        }
+        return null;
+    }
+
+    private List<EnderDragon> liveDragons() {
+        ClientLevel level = player.clientLevel;
+        return List.copyOf(level.getEntitiesOfClass(
+                EnderDragon.class, encounterBounds(level),
+                candidate -> !candidate.isRemoved() && candidate.isAlive()
+                        && !candidate.isDeadOrDying()));
+    }
+
+    /**
+     * Cover every client chunk whose horizontal footprint intersects the tower disk.  A loaded
+     * entity list is only negative evidence after each of these sectors has actually entered the
+     * local client's world at least once during this encounter.
+     */
+    private void initializeTowerCoverage() {
+        requiredTowerChunks.clear();
+        observedTowerChunks.clear();
+        int minCx = SectionPos.blockToSectionCoord(fightOrigin.getX() - TOWER_COVERAGE_RADIUS);
+        int maxCx = SectionPos.blockToSectionCoord(fightOrigin.getX() + TOWER_COVERAGE_RADIUS);
+        int minCz = SectionPos.blockToSectionCoord(fightOrigin.getZ() - TOWER_COVERAGE_RADIUS);
+        int maxCz = SectionPos.blockToSectionCoord(fightOrigin.getZ() + TOWER_COVERAGE_RADIUS);
+        long radiusSquared = (long) TOWER_COVERAGE_RADIUS * TOWER_COVERAGE_RADIUS;
+        for (int cx = minCx; cx <= maxCx; cx++) {
+            int minX = cx << 4;
+            int maxX = minX + 15;
+            long dx = fightOrigin.getX() < minX ? (long) minX - fightOrigin.getX()
+                    : fightOrigin.getX() > maxX ? (long) fightOrigin.getX() - maxX : 0L;
+            for (int cz = minCz; cz <= maxCz; cz++) {
+                int minZ = cz << 4;
+                int maxZ = minZ + 15;
+                long dz = fightOrigin.getZ() < minZ ? (long) minZ - fightOrigin.getZ()
+                        : fightOrigin.getZ() > maxZ ? (long) fightOrigin.getZ() - maxZ : 0L;
+                if (dx * dx + dz * dz <= radiusSquared) {
+                    requiredTowerChunks.add(chunkKey(cx, cz));
+                }
+            }
+        }
+    }
+
+    private void observeTowerCoverage() {
+        for (long key : requiredTowerChunks) {
+            int cx = chunkX(key);
+            int cz = chunkZ(key);
+            if (player.clientLevel.getChunkSource().getChunkNow(cx, cz) != null) {
+                observedTowerChunks.add(key);
+            }
+        }
+    }
+
+    private boolean coverageComplete() {
+        return !requiredTowerChunks.isEmpty()
+                && observedTowerChunks.containsAll(requiredTowerChunks);
+    }
+
+    /** Pick a loaded, standable point that advances the view toward one missing tower sector. */
+    private BlockPos findCoverageVantage() {
+        long missing = 0L;
+        boolean foundMissing = false;
+        double missingDistance = Double.POSITIVE_INFINITY;
+        for (long key : requiredTowerChunks) {
+            if (observedTowerChunks.contains(key)) continue;
+            int tx = (chunkX(key) << 4) + 8;
+            int tz = (chunkZ(key) << 4) + 8;
+            double distance = square((double) tx - player.getX())
+                    + square((double) tz - player.getZ());
+            if (distance < missingDistance) {
+                missingDistance = distance;
+                missing = key;
+                foundMissing = true;
+            }
+        }
+        if (!foundMissing) return null;
+
+        int targetX = (chunkX(missing) << 4) + 8;
+        int targetZ = (chunkZ(missing) << 4) + 8;
+        double directionX = targetX - fightOrigin.getX();
+        double directionZ = targetZ - fightOrigin.getZ();
+        double length = Math.hypot(directionX, directionZ);
+        if (length < 1.0D) return null;
+        directionX /= length;
+        directionZ /= length;
+
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        ClientLevel level = player.clientLevel;
+        for (int radial = Math.min(TOWER_COVERAGE_RADIUS - 6, (int) Math.ceil(length));
+                radial >= 12; radial -= 4) {
+            for (int lateral = -12; lateral <= 12; lateral += 4) {
+                int x = (int) Math.round(fightOrigin.getX() + directionX * radial
+                        - directionZ * lateral);
+                int z = (int) Math.round(fightOrigin.getZ() + directionZ * radial
+                        + directionX * lateral);
+                int cx = SectionPos.blockToSectionCoord(x);
+                int cz = SectionPos.blockToSectionCoord(z);
+                if (level.getChunkSource().getChunkNow(cx, cz) == null) continue;
+                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                BlockPos candidate = new BlockPos(x, y, z);
+                if (!standable(candidate)
+                        || protectedNear(candidate, PROTECTED_RADIUS)
+                        || nearBreath(candidate, 7.0D)
+                        || nearCrystal(candidate, CRYSTAL_BLAST_CLEARANCE)
+                        || player.distanceToSqr(Vec3.atCenterOf(candidate)) < 16.0D) continue;
+                double score = square((double) x - targetX) + square((double) z - targetZ)
+                        + player.distanceToSqr(Vec3.atCenterOf(candidate)) * 0.05D;
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = candidate.immutable();
+                }
+            }
+        }
+        return best;
+    }
+
+    private void invalidateCoverage(BlockPos position) {
+        zeroCrystalsSince = -1L;
+        if (position == null) {
+            observedTowerChunks.clear();
+            return;
+        }
+        observedTowerChunks.remove(chunkKey(
+                SectionPos.blockToSectionCoord(position.getX()),
+                SectionPos.blockToSectionCoord(position.getZ())));
+    }
+
+    private void selectCrystal(EndCrystal crystal) {
+        UUID uuid = crystal.getUUID();
+        if (!uuid.equals(selectedCrystalUuid)) crystalPositionAttempts = 0;
+        selectedCrystal = crystal;
+        selectedCrystalUuid = uuid;
+        selectedCrystalLastPosition = crystal.blockPosition().immutable();
+        selectedCrystalRuntimeId = crystal.getId();
+    }
+
+    private void clearSelectedCrystal() {
+        selectedCrystal = null;
+        selectedCrystalUuid = null;
+        selectedCrystalLastPosition = null;
+        selectedCrystalRuntimeId = -1;
+        crystalPositionAttempts = 0;
+    }
+
+    private EndCrystal findCrystal(UUID uuid) {
+        if (uuid == null) return null;
+        for (EndCrystal crystal : loadedCrystals) {
+            if (!crystal.isRemoved() && crystal.isAlive() && uuid.equals(crystal.getUUID())) {
+                return crystal;
+            }
+        }
+        return null;
+    }
+
+    private boolean safeCrystalFiringPosition(EndCrystal target) {
+        if (target == null || target.isRemoved() || !target.isAlive()
+                || !safePlayerPosition() || dangerousBreath() != null) return false;
+        double minimum = Menace.blastSpanOf(target) + CRYSTAL_BLAST_MARGIN;
+        double distanceSquared = player.distanceToSqr(target);
+        return distanceSquared >= square(minimum)
+                && distanceSquared <= square(CRYSTAL_SHOT_MAX_RANGE);
+    }
+
+    private boolean unsafeCrystalBlastCollateral(EndCrystal target) {
+        double span = Menace.blastSpanOf(target);
+        for (Entity candidate : player.clientLevel.getEntities(
+                target, target.getBoundingBox().inflate(span),
+                candidate -> candidate != player && candidate != dragon
+                        && candidate.isAlive()
+                        && (candidate instanceof LivingEntity
+                                || candidate instanceof EndCrystal))) {
+            if (candidate.position().distanceToSqr(target.position()) <= square(span)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasSafeCrystalShot(EndCrystal target) {
+        if (!safeCrystalFiringPosition(target)) return false;
+        Loadout loadout = Loadout.forTarget(player, target);
+        if (!loadout.hasRanged()) return false;
+        boolean crossbow = loadout.ranged().stack().getItem() instanceof CrossbowItem;
+        return Ballistics.findArrowShot(player.level(), player, target,
+                crossbow ? 3.15D : 3.0D, 0.05D, 0.99D, 0.5D,
+                CRYSTAL_SHOT_MAX_RANGE, !crossbow) != null;
+    }
+
+    /**
+     * Find a first-person stance; it may only use already loaded, standable island ground.  The
+     * clear-line variant is a conservative prefilter—the real projectile simulation is repeated
+     * after arrival before any shot is authorized.
+     */
+    private BlockPos findCrystalVantage(EndCrystal target, boolean requireClearLine) {
+        ClientLevel level = player.clientLevel;
+        BlockPos center = target.blockPosition();
+        double minimum = Menace.blastSpanOf(target) + CRYSTAL_BLAST_MARGIN;
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (int radius = 14; radius <= 64; radius += 2) {
+            for (int dx = -radius; dx <= radius; dx += 2) {
+                for (int dz = -radius; dz <= radius; dz += 2) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    int x = center.getX() + dx;
+                    int z = center.getZ() + dz;
+                    if (!insideRadius(x, z, fightOrigin, SAFE_HAVEN_RADIUS)) continue;
