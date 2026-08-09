@@ -598,3 +598,153 @@ public final class SemanticExploreCompanionTask
                         + r.maxDistance + " blocks",
                 FailureType.TARGET_LOST);
         return TaskState.FAILED;
+    }
+
+    private void noteUnloaded(int x, int z) {
+        unloadedSampleCount++;
+        if (unloadedFrontiers.size() >= MAX_REPORTED_FRONTIERS) return;
+        BlockPos sample = new BlockPos(x, 0, z);
+        for (BlockPos existing : unloadedFrontiers) {
+            if (existing.distManhattan(sample) < 32) return;
+        }
+        unloadedFrontiers.add(sample);
+    }
+
+    private void recordLegFailure(String kind, BlockPos target, TaskResult result) {
+        if (legFailures.size() >= MAX_REPORTED_FAILURES) return;
+        Map<String, Object> failure = new LinkedHashMap<>();
+        failure.put("kind", kind);
+        failure.put("x", target.getX());
+        failure.put("y", target.getY());
+        failure.put("z", target.getZ());
+        failure.put("message", result == null ? "no child result" : result.message());
+        legFailures.add(failure);
+    }
+
+    private void stopActiveChild(TaskState terminal) {
+        if (moveChild == null) return;
+        moveChild.stop(player, Task.StopReason.REPLACED);
+        moveChild.result(terminal);
+        moveChild = null;
+    }
+
+    private boolean insideScope(int x, int z) {
+        double dx = x - origin.getX();
+        double dz = z - origin.getZ();
+        return dx * dx + dz * dz <= (double) r.maxDistance * r.maxDistance;
+    }
+
+    private boolean columnLoaded(ClientLevel level, int x, int z) {
+        int y = Math.clamp(player.blockPosition().getY(),
+                level.getMinBuildHeight(), level.getMaxBuildHeight() - 1);
+        return level.isLoaded(new BlockPos(x, y, z));
+    }
+
+    private static double horizontalDistance(BlockPos first, BlockPos second) {
+        double dx = first.getX() - second.getX();
+        double dz = first.getZ() - second.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private static String biomeId(ClientLevel level, BlockPos pos) {
+        return level.getBiome(pos).unwrapKey()
+                .map(key -> key.location().toString())
+                .orElse("unregistered biome");
+    }
+
+    private static String shortPos(BlockPos pos) {
+        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    }
+
+    private static List<ColumnOffset> buildOffsets(int step) {
+        List<ColumnOffset> offsets = new ArrayList<>();
+        for (int dx = -OBSERVATION_RADIUS; dx <= OBSERVATION_RADIUS; dx += step) {
+            for (int dz = -OBSERVATION_RADIUS; dz <= OBSERVATION_RADIUS; dz += step) {
+                int distanceSquared = dx * dx + dz * dz;
+                if (distanceSquared <= OBSERVATION_RADIUS * OBSERVATION_RADIUS) {
+                    offsets.add(new ColumnOffset(dx, dz, distanceSquared));
+                }
+            }
+        }
+        offsets.sort(Comparator.comparingInt(ColumnOffset::distanceSquared));
+        return List.copyOf(offsets);
+    }
+
+    @Override protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("target", canonicalTarget == null ? r.target : canonicalTarget);
+        data.put("verified", verifiedPosition != null);
+        data.put("scope", "initial_client_view_and_first_person_loaded_terrain");
+        data.put("max_distance", r.maxDistance);
+        data.put("origin", Map.of("x", origin.getX(), "y", origin.getY(), "z", origin.getZ()));
+        data.put("final_position", Map.of(
+                "x", player.getX(), "y", player.getY(), "z", player.getZ()));
+        data.put("farthest_body_distance", farthestBodyDistance);
+        data.put("observation_cycles", observationCycles);
+        data.put("loaded_columns_observed", observedLoadedColumns.size());
+        data.put("loaded_column_samples", loadedSampleCount);
+        data.put("farthest_loaded_observation", farthestObservedDistance);
+        if (!observedLoadedColumns.isEmpty()) {
+            data.put("observed_loaded_bounds", Map.of(
+                    "min_x", observedMinX, "max_x", observedMaxX,
+                    "min_z", observedMinZ, "max_z", observedMaxZ));
+        }
+        data.put("unloaded_column_samples", unloadedSampleCount);
+        data.put("unapproachable_loaded_matches", unapproachableMatchCount);
+        data.put("waypoints_attempted", waypointAttempts);
+        data.put("waypoints_reached", waypointReached);
+        data.put("waypoints_failed", waypointFailed);
+        data.put("target_approaches_attempted", targetAttempts);
+        data.put("failed_legs", List.copyOf(legFailures));
+
+        List<Map<String, Object>> centers = exploredCenters.stream()
+                .map(pos -> Map.<String, Object>of(
+                        "x", pos.getX(), "y", pos.getY(), "z", pos.getZ(),
+                        "distance_from_origin", horizontalDistance(origin, pos)))
+                .toList();
+        data.put("explored_centers", centers);
+
+        List<Map<String, Object>> frontiers = unloadedFrontiers.stream()
+                .map(pos -> Map.<String, Object>of(
+                        "x", pos.getX(), "z", pos.getZ(),
+                        "direction", CompassUtil.compass(
+                                pos.getX() - origin.getX(), pos.getZ() - origin.getZ())))
+                .toList();
+        data.put("observed_unloaded_frontier_samples", frontiers);
+        if (verifiedPosition != null) {
+            data.put("verified_position", Map.of(
+                    "x", verifiedPosition.getX(),
+                    "y", verifiedPosition.getY(),
+                    "z", verifiedPosition.getZ()));
+            data.put("verification", verifiedDescription);
+        } else {
+            List<String> suggestions = new ArrayList<>();
+            suggestions.add("increase max_distance or choose another semantic landmark");
+            suggestions.add("continue from the final position to search a different loaded frontier");
+            if (!r.mayAlterTerrain && waypointFailed > 0) {
+                suggestions.add("review failed_legs; enable may_alter_terrain only if those route changes are acceptable");
+            }
+            data.put("suggestions", suggestions);
+        }
+        return data;
+    }
+
+    @Override protected String successMessage() {
+        return "verified " + canonicalTarget + " at " + shortPos(verifiedPosition)
+                + " after real first-person exploration";
+    }
+
+    @Override protected String timeoutMessage() {
+        return "semantic exploration timed out before " + canonicalTarget
+                + " was verified; the explored range and unloaded frontier are in data";
+    }
+
+    @Override protected String cancelledMessage() {
+        return "semantic exploration was interrupted before verification";
+    }
+
+    @Override protected void cleanup() {
+        stopActiveChild(TaskState.CANCELLED);
+        super.cleanup();
+    }
+}
