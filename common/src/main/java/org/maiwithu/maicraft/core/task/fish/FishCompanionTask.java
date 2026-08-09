@@ -598,3 +598,142 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                 eye.z + dz * scale);
     }
 
+    private boolean trajectoryClear(Vec3 eye, BlockPos target) {
+        double tx = target.getX() + 0.5;
+        double tz = target.getZ() + 0.5;
+        double dx = tx - eye.x;
+        double dz = tz - eye.z;
+        double directDistance = Math.sqrt(dx * dx + dz * dz);
+        if (directDistance < 1.0e-6) return false;
+        double ux = dx / directDistance;
+        double uz = dz / directDistance;
+        // Vanilla spawns the bobber 0.3 blocks in front of the player's eyes.
+        Vec3 pos = eye.add(ux * 0.3, 0.0, uz * 0.3);
+        double distance = Math.sqrt((tx - pos.x) * (tx - pos.x) + (tz - pos.z) * (tz - pos.z));
+        double pitch = Math.toRadians(solvePitchDegrees(distance, waterSurfaceY(target) - eye.y));
+        double horizontalVelocity = 0.6 * Math.cos(pitch) + 0.5;
+        double verticalVelocity = -Math.tan(pitch) * horizontalVelocity;
+        double travelled = 0.0;
+
+        for (int tick = 0; tick < MAX_FLIGHT_TICKS; tick++) {
+            verticalVelocity -= FISHING_GRAVITY;
+            double fraction = Math.min(1.0, (distance - travelled) / horizontalVelocity);
+            Vec3 next = pos.add(ux * horizontalVelocity * fraction,
+                    verticalVelocity * fraction, uz * horizontalVelocity * fraction);
+            HitResult hit = player.level().clip(new ClipContext(pos, next,
+                    ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+            if (hit.getType() != HitResult.Type.MISS) return false;
+            travelled += horizontalVelocity * fraction;
+            if (travelled >= distance - 1.0e-6) return true;
+            pos = next;
+            horizontalVelocity *= FISHING_DRAG;
+            verticalVelocity *= FISHING_DRAG;
+        }
+        return false;
+    }
+
+    private static double castPitchDegrees(Vec3 eye, BlockPos target) {
+        double dx = target.getX() + 0.5 - eye.x;
+        double dz = target.getZ() + 0.5 - eye.z;
+        double distance = Math.max(0.1, Math.sqrt(dx * dx + dz * dz) - 0.3);
+        return solvePitchDegrees(distance, waterSurfaceY(target) - eye.y);
+    }
+
+    static double solvePitchDegrees(double horizontalDistance, double targetHeight) {
+        double low = -45.0;
+        double high = 55.0;
+        for (int i = 0; i < 32; i++) {
+            double mid = (low + high) * 0.5;
+            double height = trajectoryHeightAtDistance(horizontalDistance, mid);
+            if (height > targetHeight) {
+                low = mid;  // trajectory is high: aim farther down
+            } else {
+                high = mid;
+            }
+        }
+        return (low + high) * 0.5;
+    }
+
+    static double trajectoryHeightAtDistance(double horizontalDistance, double pitchDegrees) {
+        double pitch = Math.toRadians(pitchDegrees);
+        double horizontalVelocity = 0.6 * Math.cos(pitch) + 0.5;
+        double verticalVelocity = -Math.tan(pitch) * horizontalVelocity;
+        double travelled = 0.0;
+        double height = 0.0;
+        for (int tick = 0; tick < MAX_FLIGHT_TICKS; tick++) {
+            verticalVelocity -= FISHING_GRAVITY;
+            double nextDistance = travelled + horizontalVelocity;
+            double nextHeight = height + verticalVelocity;
+            if (nextDistance >= horizontalDistance) {
+                double fraction = (horizontalDistance - travelled) / horizontalVelocity;
+                return height + verticalVelocity * fraction;
+            }
+            travelled = nextDistance;
+            height = nextHeight;
+            horizontalVelocity *= FISHING_DRAG;
+            verticalVelocity *= FISHING_DRAG;
+        }
+        return Double.NEGATIVE_INFINITY;
+    }
+
+    private static double waterSurfaceY(BlockPos target) {
+        return target.getY() + WATER_SURFACE_OFFSET;
+    }
+
+    static boolean isBiteWindow(int nibbleTicks) {
+        return nibbleTicks > 0;
+    }
+
+    private void discardHook() {
+        reelIn();
+    }
+
+    @Override
+    public void stop(LocalPlayer companion, StopReason why) {
+        boolean wasPositioning = phase == Phase.POSITION;
+        boolean wasCollecting = phase == Phase.COLLECT;
+        super.stop(companion, why);
+        discardHook();
+        if (wasCollecting) {
+            // Survival preemption may stop the navigator, but the already-caught
+            // drops remain the same bounded sub-goal when the LLM task resumes.
+            stopNav();
+        } else if (!wasPositioning) {
+            resetPositioning();
+        }
+    }
+
+    @Override
+    protected void cleanup() {
+        InputDriver.halt(player);
+        discardHook();
+        rodSelection.reset();
+        rodReceipt = null;
+        clearLootTracking();
+        super.cleanup();
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("requested", r.requested);
+        data.put("caught", r.caught());
+        data.put("casts", r.casts());
+        return data;
+    }
+
+    @Override
+    protected String successMessage() {
+        return "completed " + r.caught() + " successful fishing catch(es)";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "fishing timed out after " + r.caught() + "/" + r.requested + " successful catches";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "fishing interrupted after " + r.caught() + "/" + r.requested + " successful catches";
+    }
+}
