@@ -298,3 +298,26 @@ public final class StructureEvidenceProfiles {
             String canonicalId,
             Set<String> dimensions,
             int clusterRadius,
+            int minimumTotal,
+            String evidence,
+            Group... groups) {
+        return new Profile(
+                canonicalId, dimensions, clusterRadius, minimumTotal, evidence, List.of(groups));
+    }
+
+    private static Group group(String label, int minimum, String... blockIds) {
+        return new Group(label, minimum, List.of(blockIds));
+    }
+
+    private static Set<String> dims(String... ids) {
+        return Set.of(ids);
+    }
+
+    private static void register(Map<String, Profile> out, Profile profile, String... aliases) {
+        if (aliases.length == 0) {
+            out.put(profile.canonicalId(), profile);
+            return;
+        }
+        for (String alias : aliases) out.put(alias, profile);
+    }
+}
