@@ -898,3 +898,303 @@ public final class DragonFightCompanionTask
                 "The first-person movement receipt did not leave the body on a verified safe "
                         + "main-island cell outside dragon breath.",
                 lastFailure(),
+                List.of("clear a safe path", "move to stable main-island ground",
+                        "retry afterward"));
+    }
+
+    private TaskState finishEating(TaskState terminal, TaskResult receipt) {
+        Item attempted = activeFood;
+        activeFood = null;
+        if (terminal == TaskState.SUCCESS && receipt != null && receipt.success()) {
+            foodsConsumed++;
+            if (attempted == Items.GOLDEN_APPLE
+                    || attempted == Items.ENCHANTED_GOLDEN_APPLE) {
+                rareConsumablesConsumed++;
+            }
+            recoveryWaitSince = -1L;
+            phase = Phase.RECOVER;
+            return TaskState.RUNNING;
+        }
+        if (attempted != null) failedFoods.add(attempted);
+        FailureType type = lastFailure();
+        if (!transientExecutionFailure(type)) {
+            return childFailureDecision("recovery_food_failed",
+                    "The first-person eat child stopped on a non-transient prerequisite or "
+                            + "inventory failure; choosing another item silently would hide the "
+                            + "decision.",
+                    type,
+                    List.of("inspect the inventory and food state",
+                            "obtain ordinary safe food",
+                            "recover manually before retrying"));
+        }
+        if (failedFoods.size() >= MAX_FAILED_FOODS) {
+            return failDecision("recovery_food_attempts_exhausted",
+                    "Several first-person eat attempts failed their real consumption receipts; "
+                            + "repeating is no longer safe.",
+                    type,
+                    List.of("inspect the inventory and food effects",
+                            "recover manually before retrying"));
+        }
+        phase = Phase.RECOVER;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickConfirm() {
+        long now = player.level().getGameTime();
+        if (confirmStartedAt < 0L) confirmStartedAt = now;
+        observeExitPortal();
+        boolean deadOrRemoved = dragonRemovalObserved
+                || (dragon != null && (dragon.isRemoved()
+                        || (dragon.isDeadOrDying() && dragon.getHealth() <= 0.0F)));
+        boolean corroborated = deathPhaseObserved || exitPortalObserved;
+        if (deadOrRemoved && corroborated) {
+            if (confirmSince < 0L) confirmSince = now;
+            if (now - confirmSince >= CONFIRM_STABLE_TICKS) return TaskState.SUCCESS;
+        } else {
+            confirmSince = -1L;
+        }
+        if (now - confirmStartedAt > CONFIRM_TIMEOUT_TICKS) {
+            return failDecision("dragon_death_unconfirmed",
+                    "The dragon disappeared or stopped fighting, but stable death/removal plus "
+                            + "death-phase or exit-portal evidence could not be confirmed.",
+                    FailureType.TARGET_LOST,
+                    List.of("return to the loaded exit portal",
+                            "inspect whether the dragon merely unloaded",
+                            "retry only if a live dragon is observed"));
+        }
+        return TaskState.RUNNING;
+    }
+
+    /** Recheck volatile facts immediately before handing this tick to a child. */
+    private TaskState validateActiveWork() {
+        if (activePurpose == Purpose.ATTACK_CRYSTAL) {
+            EndCrystal observed = selectedCrystalUuid == null
+                    ? null : findCrystal(selectedCrystalUuid);
+            if (observed == null) {
+                if (selectedCrystalLastPosition == null
+                        || !player.level().isLoaded(selectedCrystalLastPosition)) {
+                    cancelActiveChild(true);
+                    invalidateCoverage(selectedCrystalLastPosition);
+                    return failDecision("crystal_chunk_unloaded",
+                            "The selected crystal's observation area unloaded during the attack; "
+                                    + "unloading is not a destruction receipt.",
+                            FailureType.TARGET_LOST,
+                            List.of("reload the same tower sector",
+                                    "repeat the bounded crystal survey"));
+                }
+                // Keep the child alive for its native strike/despawn receipt. finishCrystalAttack
+                // is the only place allowed to convert this absence into a confirmed destruction.
+                return null;
+            }
+            if (observed.getId() != selectedCrystalRuntimeId) {
+                cancelActiveChild(true);
+                selectCrystal(observed);
+                phase = Phase.CRYSTALS;
+                return TaskState.RUNNING;
+            }
+            selectCrystal(observed);
+            if (!safeEncounterTarget(observed.blockPosition())) {
+                cancelActiveChild(true);
+                return failDecision("crystal_left_safe_envelope",
+                        "The selected crystal was no longer a loaded main-island target before "
+                                + "the next first-person attack tick.",
+                        FailureType.TARGET_LOST,
+                        List.of("reload and inspect the crystal", "retry from the main island"));
+            }
+        } else if (activePurpose == Purpose.POSITION_CRYSTAL) {
+            EndCrystal observed = selectedCrystalUuid == null
+                    ? null : findCrystal(selectedCrystalUuid);
+            if (observed == null && (selectedCrystalLastPosition == null
+                    || !player.level().isLoaded(selectedCrystalLastPosition))) {
+                cancelActiveChild(true);
+                invalidateCoverage(selectedCrystalLastPosition);
+                return failDecision("crystal_chunk_unloaded",
+                        "The selected crystal's observation area unloaded while establishing a "
+                                + "safe firing stance.",
+                        FailureType.TARGET_LOST,
+                        List.of("reload the same tower sector", "repeat the crystal survey"));
+            }
+        } else if (activePurpose == Purpose.POSITION_CAGE) {
+            EndCrystal observed = selectedCrystalUuid == null
+                    ? null : findCrystal(selectedCrystalUuid);
+            if (observed == null) {
+                cancelActiveChild(true);
+                invalidateCoverage(selectedCrystalLastPosition);
+                cagePlan = List.of();
+                cageProtectedCells = List.of();
+                return failDecision("crystal_changed_during_cage_approach",
+                        "The selected crystal disappeared while moving toward a verified cage "
+                                + "stance. Nothing was altered.",
+                        FailureType.TARGET_LOST,
+                        List.of("reload and inspect the same tower sector",
+                                "repeat the bounded crystal survey"));
+            }
+            selectCrystal(observed);
+            if (cagePlan.size() != 1
+                    || !player.level().isLoaded(cagePlan.getFirst())
+                    || !player.level().getBlockState(cagePlan.getFirst()).is(Blocks.IRON_BARS)) {
+                cancelActiveChild(true);
+                cagePlan = List.of();
+                cageProtectedCells = List.of();
+                return failDecision("cage_changed_during_approach",
+                        "The exact verified iron-bar aperture changed during approach, so the "
+                                + "planned terrain change was discarded.",
+                        FailureType.TARGET_LOST,
+                        List.of("inspect the enclosure", "retry after it is stable"));
+            }
+        } else if (activePurpose == Purpose.ATTACK_DRAGON) {
+            if (dragon == null || dragon.isRemoved() || !dragon.isAlive()) {
+                cancelActiveChild(false);
+                phase = Phase.CONFIRM;
+                return TaskState.RUNNING;
+            }
+            boolean ranged = Loadout.forTarget(player, dragon).hasRanged();
+            if (!safeDragonTarget(dragon, ranged)) {
+                cancelActiveChild(true);
+                nextDragonAttemptAt = player.level().getGameTime() + 20L;
+                phase = Phase.DRAGON;
+                return TaskState.RUNNING;
+            }
+        } else if (activePurpose == Purpose.OPEN_CAGE) {
+            EndCrystal observed = selectedCrystalUuid == null
+                    ? null : findCrystal(selectedCrystalUuid);
+            if (observed == null) {
+                cancelActiveChild(true);
+                invalidateCoverage(selectedCrystalLastPosition);
+                return failDecision("crystal_changed_during_cage_opening",
+                        "The crystal disappeared while only cage blocks were being changed; no "
+                                + "combat receipt can authorize calling it destroyed.",
+                        FailureType.TARGET_LOST,
+                        List.of("reload and inspect the same tower sector",
+                                "repeat the bounded crystal survey"));
+            }
+            selectCrystal(observed);
+            for (BlockPos pos : cagePlan) {
+                if (!player.level().isLoaded(pos)) {
+                    cancelActiveChild(true);
+                    return failDecision("cage_chunk_unloaded",
+                            "The verified cage cell unloaded before the next build tick.",
+                            FailureType.TARGET_LOST,
+                            List.of("reload the crystal tower and retry"));
+                }
+                if (!player.level().getBlockState(pos).isAir()
+                        && !player.level().getBlockState(pos).is(Blocks.IRON_BARS)) {
+                    cancelActiveChild(true);
+                    return failDecision("cage_state_changed",
+                            "A verified iron-bar cage cell changed to another block before the "
+                                    + "next build tick; it was left untouched.",
+                            FailureType.UNKNOWN,
+                            List.of("inspect the changed enclosure", "retry after it is stable"));
+                }
+            }
+            if (!cageOpeningInReach()
+                    && cagePlan.stream().noneMatch(
+                            pos -> player.level().getBlockState(pos).isAir())) {
+                cancelActiveChild(true);
+                cagePlan = List.of();
+                cageProtectedCells = List.of();
+                return failDecision("cage_stance_lost",
+                        "The body left interaction range before the verified aperture was "
+                                + "cleared. The terrain-changing child was stopped immediately.",
+                        FailureType.OUT_OF_REACH,
+                        List.of("return to the verified stance", "retry from stable tower ground"));
+            }
+        }
+        return null;
+    }
+
+    private boolean needsImmediateRecovery() {
+        return dangerousBreath() != null || !safePlayerPosition()
+                || player.getHealth() < r.minimumHealth
+                || (hasHunger()
+                        && player.getFoodData().getFoodLevel() <= CRITICAL_HUNGER);
+    }
+
+    private boolean hasHunger() {
+        return WorkProfile.of(player).hasHunger();
+    }
+
+    private Item chooseSafeFood() {
+        Item best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty() || failedFoods.contains(stack.getItem())) continue;
+            FoodProperties food = stack.get(net.minecraft.core.component.DataComponents.FOOD);
+            if (food == null || !player.canEat(food.canAlwaysEat())) continue;
+            Item item = stack.getItem();
+            if (item == Items.CHORUS_FRUIT || item == Items.PUFFERFISH
+                    || item == Items.POISONOUS_POTATO || item == Items.ROTTEN_FLESH
+                    || item == Items.SPIDER_EYE || item == Items.SUSPICIOUS_STEW) continue;
+            boolean trustedEffectFood = item == Items.GOLDEN_APPLE
+                    || item == Items.ENCHANTED_GOLDEN_APPLE;
+            if (!food.effects().isEmpty() && !trustedEffectFood) continue;
+            if (trustedEffectFood && !r.allowRareConsumables) continue;
+            double score = food.nutrition() * 4.0D + food.saturation() * 2.0D
+                    + (food.canAlwaysEat() ? 8.0D : 0.0D)
+                    + (trustedEffectFood && player.getHealth() < r.minimumHealth ? 20.0D : 0.0D);
+            if (score > bestScore) {
+                bestScore = score;
+                best = item;
+            }
+        }
+        return best;
+    }
+
+    private AreaEffectCloud dangerousBreath() {
+        AABB scan = player.getBoundingBox().inflate(24.0D);
+        return player.clientLevel.getEntitiesOfClass(
+                        AreaEffectCloud.class, scan,
+                        cloud -> !cloud.isRemoved()
+                                && (cloud.getOwner() instanceof EnderDragon
+                                        || cloud.getParticle().getType()
+                                                == ParticleTypes.DRAGON_BREATH))
+                .stream()
+                .filter(cloud -> player.distanceToSqr(cloud)
+                        <= square(cloud.getRadius() + 5.0D))
+                .min(Comparator.comparingDouble(player::distanceToSqr))
+                .orElse(null);
+    }
+
+    private BlockPos findSafeHaven() {
+        ClientLevel level = player.clientLevel;
+        BlockPos body = player.blockPosition();
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (int radius = 3; radius <= 18; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    int x = body.getX() + dx;
+                    int z = body.getZ() + dz;
+                    if (!insideRadius(x, z, fightOrigin, SAFE_HAVEN_RADIUS)) continue;
+                    BlockPos probe = new BlockPos(x, body.getY(), z);
+                    if (!level.isLoaded(probe)) continue;
+                    int surfaceY = level.getHeight(
+                            Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                    for (int y = Math.min(surfaceY, body.getY() + 6);
+                            y >= Math.max(level.getMinBuildHeight() + 2, body.getY() - 14);
+                            y--) {
+                        BlockPos candidate = new BlockPos(x, y, z);
+                        if (!standable(candidate)
+                                || protectedNear(candidate, PROTECTED_RADIUS)
+                                || nearBreath(candidate, 7.0D)
+                                || nearCrystal(candidate, CRYSTAL_BLAST_CLEARANCE)) continue;
+                        double score = body.distSqr(candidate)
+                                + fightOrigin.distSqr(candidate) * 0.01D;
+                        if (score < bestScore) {
+                            bestScore = score;
+                            best = candidate;
+                        }
+                    }
+                }
+            }
+            if (best != null && radius >= 8) break;
+        }
+        return best;
+    }
+
+    private boolean safePlayerPosition() {
+        BlockPos feet = player.blockPosition();
+        if (!player.level().isLoaded(feet)
+                || !insideRadius(feet.getX(), feet.getZ(), fightOrigin, SAFE_PLAYER_RADIUS)
