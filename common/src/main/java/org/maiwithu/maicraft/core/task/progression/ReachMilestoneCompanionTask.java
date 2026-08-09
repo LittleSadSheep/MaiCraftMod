@@ -1,0 +1,300 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.core.task.progression;
+
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.scan.TargetIndex;
+import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.structure.PhysicalStructureSearchCompanionTask;
+import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.task.TaskState;
+
+/**
+ * Reconciliatory progression state machine.  It owns exactly one typed child at a time and
+ * reconstructs every phase from live client facts, so a LocalPlayer handoff can discard this
+ * instance without losing logical progress.
+ */
+public final class ReachMilestoneCompanionTask
+        extends AbstractCompanionTask<ReachMilestoneTaskRecord> {
+    private static final List<Block> INDEXED_BLOCKS =
+            List.of(Blocks.END_PORTAL_FRAME, Blocks.END_PORTAL);
+
+    private enum Phase {
+        RECONCILE("reconcile"),
+        PREPARE_NAVIGATION("prepare_navigation"),
+        TRAVEL_DIMENSION("travel_dimension"),
+        LOCATE_STRONGHOLD("locate_stronghold"),
+        PREPARE_COMBAT("prepare_combat"),
+        FIGHT_DRAGON("fight_dragon"),
+        SEARCH_ELYTRA("search_elytra"),
+        BLOCKED("blocked"),
+        COMPLETE("complete");
+
+        private final String id;
+        Phase(String id) { this.id = id; }
+    }
+
+    private enum Purpose {
+        ACQUIRE, EQUIP, STRUCTURE_SEARCH, STRONGHOLD_APPROACH,
+        DIMENSION_TRAVEL, SUPPLY_DIMENSION_TRAVEL, DRAGON_FIGHT, ELYTRA_SEARCH
+    }
+
+    private final ProgressionChildFactory children;
+    private ClientLevel indexedLevel;
+    private TaskRecord activeRecord;
+    private Task activeChild;
+    private Purpose activePurpose;
+    private ProgressionRequirementProfile.Requirement activeRequirement;
+    private long activeStartFingerprint;
+    private BlockPos strongholdAnchor;
+    private Phase phase = Phase.RECONCILE;
+    private String issueCode;
+    private List<String> recoveryOptions = List.of();
+    private String completionFact;
+
+    public ReachMilestoneCompanionTask(LocalPlayer player, ReachMilestoneTaskRecord record) {
+        super(player, record);
+        this.children = new ProgressionChildFactory(player, record);
+    }
+
+    @Override
+    protected void onStart() {
+        indexedLevel = player.clientLevel;
+        TargetIndex.register(indexedLevel, INDEXED_BLOCKS);
+    }
+
+    @Override
+    protected TaskState onTick() {
+        ProgressionFacts facts = ProgressionFacts.observe(player, strongholdAnchor);
+        if (facts.milestoneDone(r.milestone)) return complete(facts);
+        if (activeChild != null) return tickChild(facts);
+        phase = Phase.RECONCILE;
+        return switch (r.milestone) {
+            case NETHER -> planNether(facts);
+            case STRONGHOLD -> planStronghold(facts);
+            case DEFEAT_DRAGON -> planDragon(facts, false);
+            case ELYTRA -> planElytra(facts);
+        };
+    }
+
+    private TaskState tickChild(ProgressionFacts before) {
+        Task child = activeChild;
+        TaskRecord record = activeRecord;
+        Purpose purpose = activePurpose;
+        ProgressionRequirementProfile.Requirement requirement = activeRequirement;
+        TaskState terminal = runChild(child);
+        if (terminal == null) return TaskState.RUNNING;
+
+        BlockPos discoveredAnchor = null;
+        if (purpose == Purpose.STRUCTURE_SEARCH
+                && child instanceof PhysicalStructureSearchCompanionTask search) {
+            discoveredAnchor = search.verifiedEvidenceAnchor();
+        }
+        TaskResult childResult = child.result(terminal);
+        clearActive();
+        if (discoveredAnchor != null) strongholdAnchor = discoveredAnchor.immutable();
+
+        boolean childSucceeded = terminal == TaskState.SUCCESS
+                && childResult != null && childResult.success();
+        if (!childSucceeded) {
+            return handleChildFailure(purpose, requirement, record, childResult, before);
+        }
+
+        if (purpose == Purpose.DRAGON_FIGHT
+                && bool(childResult.data(), "exit_portal_transition_observed")) {
+            ProgressionFacts.markDragonTransition(player);
+        }
+
+        ProgressionFacts after = ProgressionFacts.observe(player, strongholdAnchor);
+        if (after.milestoneDone(r.milestone)) return complete(after);
+
+        if (purpose == Purpose.STRUCTURE_SEARCH) {
+            if (strongholdAnchor == null) {
+                return block("stronghold_evidence_not_retained", FailureType.TARGET_LOST,
+                        "The physical search ended without live portal-frame evidence to approach.",
+                        List.of("repeat the bounded physical search"));
+            }
+            TaskRecord approach = children.approachStronghold(strongholdAnchor);
+            if (approach == null) {
+                return block("stronghold_approach_unavailable", FailureType.NO_PATH,
+                        "Portal-frame evidence is loaded, but no real standable approach cell is visible.",
+                        List.of("load more of the stronghold interior",
+                                "allow terrain alteration only if changing this area is acceptable"));
+            }
+            return start(approach, Purpose.STRONGHOLD_APPROACH, null, after,
+                    Phase.LOCATE_STRONGHOLD);
+        }
+
+        // A successful child that neither changed an observable fact nor completed a milestone
+        // must not be reissued forever. Dimension handoff success normally destroys this object.
+        if (after.fingerprint() == activeStartFingerprint
+                && purpose != Purpose.DIMENSION_TRAVEL
+                && purpose != Purpose.SUPPLY_DIMENSION_TRAVEL) {
+            return block("no_state_change", FailureType.UNKNOWN,
+                    "The internal phase reported success, but no live inventory, equipment, body or world fact changed.",
+                    List.of("inspect the current world state before retrying"));
+        }
+        return TaskState.RUNNING;
+    }
+
+    private TaskState planNether(ProgressionFacts facts) {
+        phase = Phase.TRAVEL_DIMENSION;
+        String destination = ProgressionFacts.END.equals(facts.dimension())
+                ? ProgressionFacts.OVERWORLD : ProgressionFacts.NETHER;
+        return start(children.travel(destination), Purpose.DIMENSION_TRAVEL,
+                null, facts, phase);
+    }
+
+    private TaskState planStronghold(ProgressionFacts facts) {
+        if (!ProgressionFacts.OVERWORLD.equals(facts.dimension())) {
+            if (ProgressionFacts.NETHER.equals(facts.dimension())) {
+                // A prior acquire child can legitimately move the semantic root here for blaze
+                // evidence. Rebuild from live inventory and finish that dimension-local need
+                // before returning, otherwise handoff reconstruction would bounce forever.
+                TaskState localSupply = ensureRequirements(
+                        facts, ProgressionRequirementProfile.strongholdNavigation(),
+                        Phase.PREPARE_NAVIGATION);
+                if (localSupply != null) return localSupply;
+            }
+            phase = Phase.TRAVEL_DIMENSION;
+            return start(children.travel(ProgressionFacts.OVERWORLD),
+                    Purpose.DIMENSION_TRAVEL, null, facts, phase);
+        }
+        if (facts.strongholdFrameLoaded() && facts.strongholdAnchorInternal() != null) {
+            strongholdAnchor = facts.strongholdAnchorInternal();
+            TaskRecord approach = children.approachStronghold(strongholdAnchor);
+            if (approach == null) {
+                return block("stronghold_approach_unavailable", FailureType.NO_PATH,
+                        "Loaded portal-frame evidence has no verified standable approach.",
+                        List.of("load the nearby stronghold interior"));
+            }
+            return start(approach, Purpose.STRONGHOLD_APPROACH, null, facts,
+                    Phase.LOCATE_STRONGHOLD);
+        }
+        TaskState prerequisite = ensureRequirements(
+                facts, ProgressionRequirementProfile.strongholdNavigation(),
+                Phase.PREPARE_NAVIGATION);
+        if (prerequisite != null) return prerequisite;
+        if (!r.allowRareConsumables) {
+            return block("rare_consumable_permission_required", FailureType.NO_MATERIAL,
+                    "Physical stronghold guidance may consume Eyes of Ender and needs explicit rare-consumable permission.",
+                    List.of("retry with allow_rare_consumables=true",
+                            "stop before consuming navigation resources"));
+        }
+        return start(children.stronghold(), Purpose.STRUCTURE_SEARCH, null, facts,
+                Phase.LOCATE_STRONGHOLD);
+    }
+
+    private TaskState planDragon(ProgressionFacts facts, boolean forElytra) {
+        if (!r.allowCombat) {
+            return block("combat_permission_required", FailureType.UNSUPPORTED,
+                    "This milestone can destroy crystals and kill the Ender Dragon; combat permission is required.",
+                    List.of("retry with allow_combat=true", "stop before the encounter"));
+        }
+        TaskState loadout = ensureRequirements(
+                facts, ProgressionRequirementProfile.dragonLoadout(), Phase.PREPARE_COMBAT);
+        if (loadout != null) return loadout;
+
+        if (ProgressionFacts.NETHER.equals(facts.dimension())) {
+            TaskState localNavigationSupply = ensureRequirements(
+                    facts, ProgressionRequirementProfile.strongholdNavigation(),
+                    Phase.PREPARE_NAVIGATION);
+            if (localNavigationSupply != null) return localNavigationSupply;
+        }
+
+        if (ProgressionFacts.END.equals(facts.dimension())) {
+            if (facts.dragonState() == ProgressionFacts.DragonState.UNKNOWN) {
+                return block("dragon_state_unknown", FailureType.TARGET_LOST,
+                        "No live dragon is visible, but there is no verified exit-portal or fight transition evidence.",
+                        List.of("load and inspect the central End arena",
+                                "do not treat an empty entity list as victory"));
+            }
+            if (facts.dragonState() == ProgressionFacts.DragonState.ALIVE) {
+                return start(children.dragonFight(), Purpose.DRAGON_FIGHT, null, facts,
+                        Phase.FIGHT_DRAGON);
+            }
+            return forElytra ? TaskState.RUNNING : complete(facts);
+        }
+
+        if (!ProgressionFacts.OVERWORLD.equals(facts.dimension())) {
+            return start(children.travel(ProgressionFacts.OVERWORLD),
+                    Purpose.DIMENSION_TRAVEL, null, facts, Phase.TRAVEL_DIMENSION);
+        }
+        if (!facts.strongholdApproachVerified()) {
+            return planStronghold(facts);
+        }
+        if (!facts.activeEndPortalNearby()) {
+            return block("end_portal_activation_unavailable", FailureType.UNSUPPORTED,
+                    "The stronghold is reached, but no already-active End portal is observed. Portal activation is not implemented or authorized.",
+                    List.of("activate the End portal outside this task",
+                            "resume after an active portal is visibly loaded"));
+        }
+        return start(children.travel(ProgressionFacts.END), Purpose.DIMENSION_TRAVEL,
+                null, facts, Phase.TRAVEL_DIMENSION);
+    }
+
+    private TaskState planElytra(ProgressionFacts facts) {
+        if (!ProgressionFacts.END.equals(facts.dimension())
+                || facts.dragonState() != ProgressionFacts.DragonState.DEFEATED_CORROBORATED) {
+            return planDragon(facts, true);
+        }
+        TaskState traversal = ensureRequirements(
+                facts, ProgressionRequirementProfile.elytraTraversal(), Phase.SEARCH_ELYTRA);
+        if (traversal != null) return traversal;
+        if (!r.allowRareConsumables) {
+            return block("rare_consumable_permission_required", FailureType.NO_MATERIAL,
+                    "End Gateway traversal may consume an ender pearl and needs explicit rare-consumable permission.",
+                    List.of("retry with allow_rare_consumables=true",
+                            "stop before consuming a gateway item"));
+        }
+        return start(children.elytra(), Purpose.ELYTRA_SEARCH, null, facts,
+                Phase.SEARCH_ELYTRA);
+    }
+
+    /** @return null when all requirements are live-satisfied; otherwise a running/terminal state. */
+    private TaskState ensureRequirements(
+            ProgressionFacts facts,
+            List<ProgressionRequirementProfile.Requirement> requirements,
+            Phase aggregatePhase) {
+        for (ProgressionRequirementProfile.Requirement requirement : requirements) {
+            if (facts.requirementSatisfied(player, requirement)) continue;
+            if (requirement.equipSlot() != null
+                    && facts.mainInventoryCount(player, requirement.alternatives()) > 0) {
+                TaskRecord equip = children.equip(facts, requirement);
+                if (equip == null) {
+                    return block("equipment_fact_unresolved", FailureType.NO_MATERIAL,
+                            "Protective equipment is expected in the main inventory but no concrete carried alternative was verified.",
+                            List.of("recheck the main inventory"));
+                }
+                return start(equip, Purpose.EQUIP, requirement, facts, aggregatePhase);
+            }
+            return start(children.acquire(requirement), Purpose.ACQUIRE,
+                    requirement, facts, aggregatePhase);
+        }
+        return null;
+    }
+
+    private TaskState handleChildFailure(
+            Purpose purpose,
+            ProgressionRequirementProfile.Requirement requirement,
+            TaskRecord record,
+            TaskResult result,
+            ProgressionFacts facts) {
+        String childIssue = issue(result);
+        if (purpose == Purpose.ACQUIRE && "requires_dimension".equals(childIssue)) {
+            String destination = chooseRequiredDimension(result, facts.dimension());
+            if (destination == null) {
+                return block("progression_supply_requires_dimension", FailureType.NO_MATERIAL,
+                        "A progression prerequisite requires another dimension, but no safe supported destination can be selected from the typed evidence.",
