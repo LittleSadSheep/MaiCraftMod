@@ -298,3 +298,122 @@ final class BuildPlacementGeometry {
                         out.add(new BlockPos(target.getX() + dx, y, target.getZ() + dz));
                     }
                 }
+            }
+        }
+        out.sort(Comparator.comparingDouble(p -> p.distSqr(target)));
+        return out;
+    }
+
+    private static boolean bodyCellAvailable(LocalPlayer player, BlockPos feet,
+                                             Map<Long, BuildTaskRecord.Target> targets,
+                                             BlockPos activeTarget) {
+        if (feet.equals(activeTarget) || feet.above().equals(activeTarget)) return false;
+        BlockState feetState = finalState(player, feet, targets);
+        BlockState headState = finalState(player, feet.above(), targets);
+        if (!feetState.getCollisionShape(player.level(), feet).isEmpty()
+                || !headState.getCollisionShape(player.level(), feet.above()).isEmpty()) {
+            return false;
+        }
+        // A missing floor is allowed: the terraform path can erect a real, accounted scaffold.
+        // Fluids and known hazardous occupied cells are not accepted as hypothetical stances.
+        BlockState floor = finalState(player, feet.below(), targets);
+        return floor.getFluidState().isEmpty();
+    }
+
+    private static BlockState finalState(LocalPlayer player, BlockPos pos,
+                                         Map<Long, BuildTaskRecord.Target> targets) {
+        BuildTaskRecord.Target target = targets.get(pos.asLong());
+        if (target != null) return target.desiredState();
+        return player.level().isLoaded(pos)
+                ? player.level().getBlockState(pos)
+                : net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+    }
+
+    /** Conservative cell-sampling ray check against the final planned structure. */
+    private static boolean plannedRayClear(LocalPlayer player, Vec3 from, Vec3 to,
+                                           BlockPos clicked, BlockPos placeAt,
+                                           Map<Long, BuildTaskRecord.Target> targets) {
+        Vec3 delta = to.subtract(from);
+        int samples = Math.max(2, (int) Math.ceil(delta.length() * 12.0));
+        BlockPos previous = null;
+        for (int i = 1; i < samples; i++) {
+            Vec3 at = from.add(delta.scale(i / (double) samples));
+            BlockPos cell = BlockPos.containing(at);
+            if (cell.equals(clicked) || cell.equals(placeAt) || cell.equals(previous)) continue;
+            previous = cell;
+            BlockState state = finalState(player, cell, targets);
+            if (!state.getShape(player.level(), cell).isEmpty()) return false;
+        }
+        return true;
+    }
+
+    private static Vec3 facePoint(BlockPos clicked, Direction face, double a, double b) {
+        double x = clicked.getX() + 0.5;
+        double y = clicked.getY() + 0.5;
+        double z = clicked.getZ() + 0.5;
+        switch (face.getAxis()) {
+            case X -> {
+                x = clicked.getX() + (face == Direction.EAST ? 1.0 : 0.0);
+                y = clicked.getY() + a;
+                z = clicked.getZ() + b;
+            }
+            case Y -> {
+                x = clicked.getX() + a;
+                y = clicked.getY() + (face == Direction.UP ? 1.0 : 0.0);
+                z = clicked.getZ() + b;
+            }
+            case Z -> {
+                x = clicked.getX() + a;
+                y = clicked.getY() + b;
+                z = clicked.getZ() + (face == Direction.SOUTH ? 1.0 : 0.0);
+            }
+        }
+        // Pull a hair inside the clicked block so floating-point rounding keeps the ray on the
+        // intended face while the BlockHitResult still reports that exact outward direction.
+        return new Vec3(x - face.getStepX() * 1.0e-4,
+                y - face.getStepY() * 1.0e-4,
+                z - face.getStepZ() * 1.0e-4);
+    }
+
+    private static BlockState predictedState(LocalPlayer player, ItemStack stack, BlockHitResult hit,
+                                             float yaw, float pitch) {
+        if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
+        Vec3 look = direction(yaw, pitch);
+        Direction[] nearest = Direction.values();
+        Arrays.sort(nearest, Comparator.comparingDouble(direction ->
+                -(direction.getStepX() * look.x
+                        + direction.getStepY() * look.y
+                        + direction.getStepZ() * look.z)));
+        try {
+            BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(
+                    player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
+                @Override public Direction getHorizontalDirection() {
+                    return Direction.fromYRot(yaw);
+                }
+                @Override public float getRotation() { return yaw; }
+                @Override public Direction getNearestLookingDirection() {
+                    return Direction.getNearest(look.x, look.y, look.z);
+                }
+                @Override public Direction getNearestLookingVerticalDirection() {
+                    return look.y >= 0.0 ? Direction.UP : Direction.DOWN;
+                }
+                @Override public Direction[] getNearestLookingDirections() {
+                    return nearest.clone();
+                }
+            };
+            return blockItem.getBlock().getStateForPlacement(context);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static Vec3 direction(float yaw, float pitch) {
+        float pitchRad = pitch * ((float) Math.PI / 180.0F);
+        float yawRad = -yaw * ((float) Math.PI / 180.0F);
+        float cosYaw = net.minecraft.util.Mth.cos(yawRad);
+        float sinYaw = net.minecraft.util.Mth.sin(yawRad);
+        float cosPitch = net.minecraft.util.Mth.cos(pitchRad);
+        float sinPitch = net.minecraft.util.Mth.sin(pitchRad);
+        return new Vec3(sinYaw * cosPitch, -sinPitch, cosYaw * cosPitch);
+    }
+}
