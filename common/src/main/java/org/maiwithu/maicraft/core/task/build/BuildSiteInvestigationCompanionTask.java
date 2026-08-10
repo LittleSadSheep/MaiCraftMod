@@ -298,3 +298,233 @@ public final class BuildSiteInvestigationCompanionTask
             BlockPos feet = safeSurfaceFeet(level, x, z);
             if (feet != null) return feet;
         }
+        return null;
+    }
+
+    private BlockPos safeSurfaceFeet(ClientLevel level, int x, int z) {
+        int aroundY = Math.clamp(player.getBlockY(),
+                level.getMinBuildHeight() + 2, level.getMaxBuildHeight() - 3);
+        BlockPos column = new BlockPos(x, aroundY, z);
+        if (!level.hasChunkAt(column)) return null;
+        int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        for (int y = Math.min(top + 2, level.getMaxBuildHeight() - 2);
+             y >= Math.max(level.getMinBuildHeight() + 1, top - 8); y--) {
+            BlockPos feet = new BlockPos(x, y, z);
+            if (!level.isLoaded(feet.below()) || !level.isLoaded(feet.above())) continue;
+            if (!BlockHelper.isStandable(level, feet)
+                    || BlockHelper.isHazard(level, feet)
+                    || BlockHelper.isHazard(level, feet.below())) continue;
+            if (sensitiveForTravel(level, feet) || sensitiveForTravel(level, feet.below())) continue;
+            return feet;
+        }
+        return null;
+    }
+
+    private static boolean sensitiveForTravel(ClientLevel level, BlockPos pos) {
+        var state = level.getBlockState(pos);
+        var block = state.getBlock();
+        return level.getBlockEntity(pos) != null || state.is(Blocks.FARMLAND)
+                || block instanceof CropBlock || block instanceof StemBlock
+                || block instanceof AttachedStemBlock || block instanceof CocoaBlock
+                || state.is(Blocks.NETHER_WART) || state.is(Blocks.SWEET_BERRY_BUSH);
+    }
+
+    private boolean shorelineEvidence(ClientLevel level, BlockPos landFeet) {
+        int water = 0;
+        int land = 0;
+        for (int dx = -WATER_SAMPLE_RADIUS; dx <= WATER_SAMPLE_RADIUS; dx += 5) {
+            for (int dz = -WATER_SAMPLE_RADIUS; dz <= WATER_SAMPLE_RADIUS; dz += 5) {
+                if (dx * dx + dz * dz > WATER_SAMPLE_RADIUS * WATER_SAMPLE_RADIUS) continue;
+                int x = landFeet.getX() + dx;
+                int z = landFeet.getZ() + dz;
+                BlockPos column = new BlockPos(x, landFeet.getY(), z);
+                if (!level.hasChunkAt(column)) continue;
+                if (sourceWaterSurface(level, x, z, landFeet.getY())) water++;
+                else if (safeSurfaceFeet(level, x, z) != null) land++;
+            }
+        }
+        return water >= 3 && land >= 3;
+    }
+
+    private static boolean sourceWaterSurface(
+            ClientLevel level, int x, int z, int aroundY) {
+        for (int y = aroundY + 4; y >= aroundY - 10; y--) {
+            BlockPos pos = new BlockPos(x, y, z);
+            if (!level.isLoaded(pos) || !level.isLoaded(pos.above())) return false;
+            var fluid = level.getFluidState(pos);
+            if (fluid.is(FluidTags.WATER) && fluid.isSource()
+                    && level.getFluidState(pos.above()).isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static int boundaryScore(ClientLevel level, BlockPos pos) {
+        int score = 0;
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            for (int distance : new int[]{16, 32}) {
+                BlockPos probe = pos.relative(direction, distance);
+                if (!level.hasChunkAt(probe)) score++;
+            }
+        }
+        return score;
+    }
+
+    private TaskState exhausted(String code) {
+        return stopInvestigation(code,
+                waterfront
+                        ? "bounded first-person investigation found no safe loaded site with verified shoreline"
+                        : "bounded first-person investigation found no safe loaded site",
+                frontierAttempts > 0 && frontierFailed == frontierAttempts
+                        ? FailureType.NO_PATH : FailureType.TARGET_LOST);
+    }
+
+    private TaskState stopInvestigation(String code, String message, FailureType type) {
+        failureCode = code;
+        fail(message, type);
+        return TaskState.FAILED;
+    }
+
+    private boolean insideScope(double x, double z) {
+        double dx = x - origin.getX();
+        double dz = z - origin.getZ();
+        return dx * dx + dz * dz <= (double) r.maxDistance * r.maxDistance;
+    }
+
+    private boolean insideSemanticSurveyScope(BlockPos pos) {
+        if (focus == null) return true;
+        double dx = pos.getX() - focus.x();
+        double dz = pos.getZ() - focus.z();
+        double radius = Math.max(32, r.maxDistance - SEMANTIC_SCOPE_MARGIN);
+        return dx * dx + dz * dz <= radius * radius;
+    }
+
+    private static long columnKey(BlockPos pos) {
+        return BlockPos.asLong(pos.getX(), 0, pos.getZ());
+    }
+
+    private static double horizontalDistance(BlockPos first, BlockPos second) {
+        double dx = first.getX() - second.getX();
+        double dz = first.getZ() - second.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private String childString(String key, String fallback) {
+        if (buildResult == null || buildResult.data() == null) return fallback;
+        Object value = buildResult.data().get(key);
+        return value == null ? fallback : value.toString();
+    }
+
+    private void retainVerifiedPosition() {
+        if (buildResult == null || buildResult.data() == null) return;
+        Object raw = buildResult.data().get("verified_position");
+        if (!(raw instanceof Map<?, ?> position)) return;
+        Object x = position.get("x"), y = position.get("y"), z = position.get("z");
+        if (!(x instanceof Number nx) || !(y instanceof Number ny) || !(z instanceof Number nz)) {
+            return;
+        }
+        Object dimension = position.get("dimension");
+        String dimensionId = dimension == null
+                ? player.level().dimension().location().toString() : dimension.toString();
+        r.retainVerifiedPosition(new InternalPositionReceipt.Position(
+                nx.intValue(), ny.intValue(), nz.intValue(), dimensionId));
+    }
+
+    private static String safeMessage(RuntimeException exception) {
+        return exception.getMessage() == null
+                ? exception.getClass().getSimpleName() : exception.getMessage();
+    }
+
+    private void stopMove(TaskState terminal) {
+        if (moveChild == null) return;
+        moveChild.stop(player, Task.StopReason.REPLACED);
+        moveChild.result(terminal);
+        moveChild = null;
+        moveRecord = null;
+        legDeadline = 0L;
+    }
+
+    @Override
+    protected void cleanup() {
+        stopMove(TaskState.CANCELLED);
+        if (buildChild != null) {
+            buildChild.stop(player, Task.StopReason.REPLACED);
+            buildChild.result(TaskState.CANCELLED);
+            buildChild = null;
+            buildRecord = null;
+        }
+        super.cleanup();
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("scope", "loaded_client_observation_and_first_person_frontiers");
+        data.put("waterfront_required", waterfront);
+        data.put("site_verified", siteVerified);
+        data.put("max_distance", r.maxDistance);
+        data.put("max_frontier_legs", r.maxFrontierLegs);
+        data.put("max_investigation_seconds", r.maxInvestigationTicks / 20L);
+        data.put("scan_cycles", scanCycles);
+        data.put("frontier_legs_attempted", frontierAttempts);
+        data.put("frontier_legs_reached", frontierReached);
+        data.put("frontier_legs_failed", frontierFailed);
+        data.put("shoreline_weighted_candidates_used", shorelineWeightedCandidates);
+        data.put("farthest_body_distance", farthestBodyDistance);
+        if (lastProbeMessage != null) data.put("last_probe", lastProbeMessage);
+        if (buildResult != null) {
+            Map<String, Object> construction = new LinkedHashMap<>();
+            construction.put("success", buildResult.success());
+            construction.put("message", buildResult.message());
+            if (buildResult.data() != null) {
+                copyAggregate(buildResult.data(), construction,
+                        "requested", "completed", "placed", "cleared",
+                        "required_materials", "missing_materials", "failure_code",
+                        "world_change_uncertain", "safe_to_retry_without_observation",
+                        "material_policy", "complete_supply_prepared_before_construction",
+                        "total_material_ledger", "initial_remaining_material_ledger",
+                        "remaining_material_ledger", "remaining_cells", "goal_satisfied",
+                        "issues", "requires_decision", "recovery_options");
+            }
+            data.put("construction", construction);
+        }
+        if (failureCode != null || !siteVerified) {
+            data.put("failure_code", failureCode == null
+                    ? "site_investigation_interrupted" : failureCode);
+            data.put("recoverable", true);
+            data.put("requires_narration", true);
+            data.put("requires_decision", true);
+            data.put("recovery_options", List.of(
+                    "continue the same semantic build from a different suitable area",
+                    "reduce or change the footprint, terrain fit, or waterfront features",
+                    "authorize replace_existing only after reviewing terrain removal",
+                    "stop and leave the world unchanged"));
+        }
+        return data;
+    }
+
+    private static void copyAggregate(
+            Map<String, Object> source, Map<String, Object> target, String... keys) {
+        for (String key : keys) {
+            if (source.containsKey(key)) target.put(key, source.get(key));
+        }
+    }
+
+    @Override
+    protected String successMessage() {
+        return "verified a safe site through bounded first-person investigation and completed the frozen build plan";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return siteVerified
+                ? "construction at the verified site timed out"
+                : "bounded first-person site investigation reached its time limit without a verified site";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return siteVerified
+                ? "construction at the verified site was interrupted"
+                : "site investigation was interrupted before any build plan was frozen";
+    }
+}
