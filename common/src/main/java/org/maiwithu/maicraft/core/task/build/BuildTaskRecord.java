@@ -298,3 +298,249 @@ public final class BuildTaskRecord extends TaskRecord {
                               CompoundTag nbt) {
 
         /**
+         * 这只摆设要花哪件材料。
+         *
+         * <p>摆设不能免费:一张带五十个盔甲架的图纸凭空给五十个盔甲架,和"框里的剑
+         * 不给"是自相矛盾的——框白送而框里的东西要玩家自己放,说不通。白名单只有
+         * 四种,所以这里是个封闭的对照表,不必去猜。
+         *
+         * @return 对应物品;不在白名单里返回空气(不该出现)
+         */
+        public Item item() {
+            return switch (nbt.getString("id")) {
+                case "minecraft:item_frame" -> net.minecraft.world.item.Items.ITEM_FRAME;
+                case "minecraft:glow_item_frame" -> net.minecraft.world.item.Items.GLOW_ITEM_FRAME;
+                case "minecraft:armor_stand" -> net.minecraft.world.item.Items.ARMOR_STAND;
+                case "minecraft:painting" -> net.minecraft.world.item.Items.PAINTING;
+                default -> net.minecraft.world.item.Items.AIR;
+            };
+        }
+
+        /**
+         * 这只摆设身上带的东西要收哪几叠——每一叠按<b>组件全等</b>收。
+         *
+         * <p>躯壳一件料,身上的东西另算:框白送而框里的剑也白送,那就是凭空造物品;
+         * 框收料而框里的剑不给,玩家又会觉得图纸没还原。收什么放什么,账才是平的。
+         */
+        public java.util.List<net.minecraft.world.item.ItemStack> payload(
+                net.minecraft.core.HolderLookup.Provider registries) {
+            return org.maiwithu.maicraft.core.build.BlueprintSafety.payloadStacks(nbt, registries);
+        }
+    }
+
+    /**
+     * @param itemPlace 原生车道:这一格由<b>物品自己</b>像真右键那样落位,而不是照图直写。
+     *                  只给没提任何摆放要求的单格 set——那是"放一个工作台"这类玩家动作,
+     *                  朝向随她的视线,模组钩在物品放置上的转换照常发生。
+     */
+    public record Target(BlockState desiredState, Item item, BlockPos pos, String label,
+                         Direction facing, Direction.Axis axis, Boolean topHalf,
+                         boolean itemPlace) {
+        public Target(BlockState desiredState, Item item, BlockPos pos, String label,
+                      Direction facing, Direction.Axis axis, Boolean topHalf) {
+            this(desiredState, item, pos, label, facing, axis, topHalf, false);
+        }
+
+        public Target(Block block, Item item, BlockPos pos, String label,
+                      Direction facing, Direction.Axis axis, Boolean topHalf) {
+            this(applyHints(block.defaultBlockState(), facing, axis, topHalf),
+                    item, pos, label, facing, axis, topHalf);
+        }
+
+        /**
+         * 进原生车道。放不出来的东西——清空格、液体、没有物品形态的方块——进不了,
+         * 原样返回:车道的前提是"手里有一件能放的东西"。
+         */
+        public Target asItemPlace() {
+            if (desiredState.isAir()
+                    || desiredState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock
+                    || !(item instanceof net.minecraft.world.item.BlockItem)) {
+                return this;
+            }
+            return new Target(desiredState, item, pos, label, facing, axis, topHalf, true);
+        }
+
+        public Target {
+            desiredState = Objects.requireNonNull(desiredState, "desiredState");
+            // 归一在这一处做完:每一个目标格无论从工具还是从图纸来,都必须过这道口,
+            // 所以运行态(作物生长阶段、含水、活塞伸出、堆肥进度、锅里装的东西)
+            // 在这里一次清干净,而不是让每条入口各清各的。
+            desiredState = org.maiwithu.maicraft.core.build.BuildStates.normalize(desiredState);
+            item = Objects.requireNonNull(item, "item");
+            pos = Objects.requireNonNull(pos, "pos").immutable();
+            if (facing != null && facingOf(desiredState) == null) {
+                throw new IllegalArgumentException(desiredState.getBlock().getName().getString()
+                        + " does not support facing");
+            }
+            if (axis != null && axisOf(desiredState) == null) {
+                throw new IllegalArgumentException(desiredState.getBlock().getName().getString()
+                        + " does not support axis");
+            }
+            if (topHalf != null && topHalfOf(desiredState) == null) {
+                throw new IllegalArgumentException(desiredState.getBlock().getName().getString()
+                        + " does not support top/bottom half");
+            }
+            label = label == null || label.isBlank()
+                    ? desiredState.getBlock().getName().getString()
+                    : label;
+        }
+
+        public Block block() {
+            return desiredState.getBlock();
+        }
+
+        /**
+         * 这一格要花<b>几件</b>材料——盘点、报价与实扣的唯一真源。
+         *
+         * <p>清空格与液体格不费料。双格方块(门、床、高草、向日葵)在图纸里是上下
+         * 两格、各带一个同样的物品,逐格计费就会一扇门吃掉两扇门的料,所以只让
+         * "下半"计费,上半随之而生。
+         *
+         * <p>反过来也有一格要<b>多件</b>的:双层砖是两块半砖摞出来的,雪层、海龟蛋、
+         * 海泡菜按层数/个数算。此前这里是个布尔量"要不要花一件",一格恒定一件——
+         * 而屋面把双层砖当立面用,约三成屋面格子因此少报一件。清单与实扣不同源的
+         * 后果和门那件事一模一样,只是方向相反:玩家按清单备齐了,照样建到一半停下。
+         */
+        public int materialCount() {
+            if (desiredState == null || desiredState.isAir()) {
+                return 0;
+            }
+            if (desiredState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock) {
+                return 0;
+            }
+            if (desiredState.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
+                    && desiredState.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)
+                    == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER) {
+                return 0;
+            }
+            if (desiredState.hasProperty(BlockStateProperties.BED_PART)
+                    && desiredState.getValue(BlockStateProperties.BED_PART)
+                    == net.minecraft.world.level.block.state.properties.BedPart.HEAD) {
+                return 0;
+            }
+            if (desiredState.hasProperty(BlockStateProperties.SLAB_TYPE)
+                    && desiredState.getValue(BlockStateProperties.SLAB_TYPE)
+                    == net.minecraft.world.level.block.state.properties.SlabType.DOUBLE) {
+                return 2;
+            }
+            if (desiredState.getBlock() instanceof net.minecraft.world.level.block.SnowLayerBlock) {
+                return desiredState.getValue(BlockStateProperties.LAYERS);
+            }
+            if (desiredState.getBlock() instanceof net.minecraft.world.level.block.TurtleEggBlock) {
+                return desiredState.getValue(BlockStateProperties.EGGS);
+            }
+            if (desiredState.getBlock() instanceof net.minecraft.world.level.block.SeaPickleBlock) {
+                return desiredState.getValue(BlockStateProperties.PICKLES);
+            }
+            // 一格四根蜡烛就是四根:少收三根等于白送三根
+            if (desiredState.hasProperty(BlockStateProperties.CANDLES)) {
+                return desiredState.getValue(BlockStateProperties.CANDLES);
+            }
+            // 藤蔓与发光地衣按贴了几个面算:一格贴三面是三份料
+            if (desiredState.is(net.minecraft.world.level.block.Blocks.VINE)
+                    || desiredState.is(net.minecraft.world.level.block.Blocks.GLOW_LICHEN)) {
+                int faces = 0;
+                for (var side : new net.minecraft.world.level.block.state.properties.BooleanProperty[]{
+                        BlockStateProperties.NORTH, BlockStateProperties.EAST,
+                        BlockStateProperties.SOUTH, BlockStateProperties.WEST,
+                        BlockStateProperties.UP, BlockStateProperties.DOWN}) {
+                    if (desiredState.hasProperty(side) && desiredState.getValue(side)) {
+                        faces++;
+                    }
+                }
+                return Math.max(1, faces);
+            }
+            // 高草与大蕨类一格一件:tall_grass / large_fern 自己就是物品,方块自述
+            // 给的正是它。按"两株矮的"算两件会让玩家照清单备双份,多出来的那一半
+            // 永远用不掉。
+            return 1;
+        }
+
+        /** 要不要花料——{@link #materialCount()} 的派生问法,不另立判据。 */
+        public boolean costsMaterial() {
+            return materialCount() > 0;
+        }
+
+        public boolean matches(BlockState state) {
+            if (itemPlace) {
+                // 原生格的对账不看状态位:没提朝向的格子,朝向就不是工程量——游戏按
+                // 玩家规则给什么就是什么。方块种类按"自述名"对,不只按注册名:有模组
+                // 在放置时把原版设施原地换成自家实现(注册名变了,名字没变),按注册名
+                // 对账会判不符,拆了重放,和模组拉锯到天荒地老。
+                return !state.isAir() && (state.getBlock() == desiredState.getBlock()
+                        || state.getBlock().getDescriptionId()
+                                .equals(desiredState.getBlock().getDescriptionId()));
+            }
+            return BuildValidity.valid(state, desiredState, false);
+        }
+
+        public boolean acceptsPlacedState(BlockState state) {
+            return BuildValidity.valid(state, desiredState, true);
+        }
+
+        public String shortPos() {
+            return pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        }
+    }
+
+    private static BlockState applyHints(BlockState state, Direction facing,
+                                         Direction.Axis axis, Boolean topHalf) {
+        if (facing != null) {
+            if (state.hasProperty(BlockStateProperties.FACING)) {
+                state = state.setValue(BlockStateProperties.FACING, facing);
+            } else if (facing.getAxis().isHorizontal()
+                    && state.hasProperty(BlockStateProperties.HORIZONTAL_FACING)) {
+                state = state.setValue(BlockStateProperties.HORIZONTAL_FACING, facing);
+            }
+        }
+        if (axis != null) {
+            if (state.hasProperty(BlockStateProperties.AXIS)) {
+                state = state.setValue(BlockStateProperties.AXIS, axis);
+            } else if (axis.isHorizontal() && state.hasProperty(BlockStateProperties.HORIZONTAL_AXIS)) {
+                state = state.setValue(BlockStateProperties.HORIZONTAL_AXIS, axis);
+            }
+        }
+        if (topHalf != null) {
+            if (state.hasProperty(BlockStateProperties.SLAB_TYPE)) {
+                state = state.setValue(BlockStateProperties.SLAB_TYPE,
+                        topHalf ? SlabType.TOP : SlabType.BOTTOM);
+            }
+            if (state.hasProperty(BlockStateProperties.HALF)) {
+                state = state.setValue(BlockStateProperties.HALF,
+                        topHalf ? Half.TOP : Half.BOTTOM);
+            }
+        }
+        return state;
+    }
+
+    private static Direction facingOf(BlockState s) {
+        if (s.hasProperty(BlockStateProperties.FACING)) {
+            return s.getValue(BlockStateProperties.FACING);
+        }
+        if (s.hasProperty(BlockStateProperties.HORIZONTAL_FACING)) {
+            return s.getValue(BlockStateProperties.HORIZONTAL_FACING);
+        }
+        return null;
+    }
+
+    private static Direction.Axis axisOf(BlockState s) {
+        if (s.hasProperty(BlockStateProperties.AXIS)) {
+            return s.getValue(BlockStateProperties.AXIS);
+        }
+        if (s.hasProperty(BlockStateProperties.HORIZONTAL_AXIS)) {
+            return s.getValue(BlockStateProperties.HORIZONTAL_AXIS);
+        }
+        return null;
+    }
+
+    private static Boolean topHalfOf(BlockState s) {
+        if (s.hasProperty(BlockStateProperties.SLAB_TYPE)) {
+            SlabType t = s.getValue(BlockStateProperties.SLAB_TYPE);
+            return t == SlabType.DOUBLE ? null : t == SlabType.TOP;
+        }
+        if (s.hasProperty(BlockStateProperties.HALF)) {
+            return s.getValue(BlockStateProperties.HALF) == Half.TOP;
+        }
+        return null;
+    }
+}
