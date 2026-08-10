@@ -298,3 +298,303 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState selectTick() {
         resetCell();
         while (queueAt < queue.size()) {
+            cell = queue.get(queueAt);
+            if (matches(cell.target(), cell.generated())) { markComplete(cell); queueAt++; continue; }
+            clearQueue = clearCells(cell); clearAt = 0;
+            if (!clearQueue.isEmpty()) { clearing = clearQueue.get(0); phase = Phase.CLEAR_NAV; }
+            else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
+            else {
+                liveGestures = cell.gestures().isEmpty()
+                        ? BuildPlacementGeometry.plan(player, cell.target(), targets) : cell.gestures();
+                phase = Phase.PLACE_NAV;
+            }
+            return TaskState.RUNNING;
+        }
+        beginVerify(); return TaskState.RUNNING;
+    }
+
+    private List<BlockPos> clearCells(CellPlan plan) {
+        LinkedHashSet<BlockPos> out = new LinkedHashSet<>();
+        if (player.level().isLoaded(plan.target().pos())) {
+            BlockState live = player.level().getBlockState(plan.target().pos());
+            if (!live.isAir() && !plan.target().matches(live)) out.add(plan.target().pos());
+        }
+        for (BuildPlacementGeometry.GeneratedCell generated : plan.generated()) {
+            if (!player.level().isLoaded(generated.pos())) continue;
+            BlockState live = player.level().getBlockState(generated.pos());
+            if (!live.isAir() && !BuildValidity.valid(live, generated.expected(), false)) out.add(generated.pos());
+        }
+        return List.copyOf(out);
+    }
+
+    private TaskState clearNavTick() {
+        if (!player.level().isLoaded(clearing)) {
+            failAt(clearing, "cell unloaded after preflight", FailureType.TARGET_LOST,
+                    "cell_unloaded", false); return TaskState.FAILED;
+        }
+        BlockState live = player.level().getBlockState(clearing);
+        if (live.isAir()) return nextClear();
+        if (live.hasBlockEntity() && !r.replaceBlockEntities) {
+            failAt(clearing, "protected block entity appeared after preflight",
+                    FailureType.TARGET_LOST, "site_changed_after_preflight", false);
+            return TaskState.FAILED;
+        }
+        if (nav == null) {
+            BlockPos at = clearing.immutable();
+            nav = PlayerNav.toGoal(player, () -> NavGoal.mineStance(at), 1.0, () -> inReach(at), this);
+        }
+        return switch (nav.tick()) {
+            case RUNNING -> TaskState.RUNNING;
+            case ARRIVED -> { stopNav(); phase = Phase.CLEAR; yield TaskState.RUNNING; }
+            case FAILED -> {
+                FailureType type = nav.failType(); String reason = nav.failReason(); stopNav();
+                failAt(clearing, "no breaking stance: " + reason, type, "clear_stance_failed", false);
+                yield TaskState.FAILED;
+            }
+        };
+    }
+
+    private TaskState clearTick() {
+        if (!player.level().isLoaded(clearing)) {
+            failAt(clearing, "break target unloaded", FailureType.TARGET_LOST,
+                    "clear_target_lost", false); return TaskState.FAILED;
+        }
+        if (player.level().getBlockState(clearing).isAir()) return nextClear();
+        return switch (digger.digTargetStep(clearing)) {
+            case PROGRESSING -> TaskState.RUNNING;
+            case BROKE_TARGET -> { r.brokeOne(); yield nextClear(); }
+            case BROKE_OCCLUDER -> {
+                failAt(clearing, "target-only breaker changed another block", FailureType.INTERNAL,
+                        "unexpected_break_target", true); yield TaskState.FAILED;
+            }
+            case NO_SHOT -> {
+                failAt(clearing, "no verified crosshair ray reaches obstruction", FailureType.OCCLUDED,
+                        "clear_occluded", false); yield TaskState.FAILED;
+            }
+        };
+    }
+
+    private TaskState nextClear() {
+        clearAt++; stopNav();
+        if (clearAt < clearQueue.size()) { clearing = clearQueue.get(clearAt); phase = Phase.CLEAR_NAV; }
+        else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
+        else {
+            liveGestures = cell.gestures().isEmpty()
+                    ? BuildPlacementGeometry.plan(player, cell.target(), targets) : cell.gestures();
+            phase = Phase.PLACE_NAV;
+        }
+        return TaskState.RUNNING;
+    }
+
+    private TaskState placeNavTick() {
+        if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
+        if (gestureAt >= liveGestures.size() || gestureTries >= MAX_GESTURES) return deferOrFail();
+        gesture = liveGestures.get(gestureAt);
+        if (!supportExists(gesture)) { gestureAt++; gestureTries++; return TaskState.RUNNING; }
+        if (nav == null) {
+            BlockPos stance = gesture.stance();
+            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), 1.0,
+                    () -> PathExecutor.playerFeet(player).equals(stance), this);
+        }
+        return switch (nav.tick()) {
+            case RUNNING -> TaskState.RUNNING;
+            case ARRIVED -> { stopNav(); phase = Phase.SELECT_ITEM; yield TaskState.RUNNING; }
+            case FAILED -> { stopNav(); gestureAt++; gestureTries++; yield TaskState.RUNNING; }
+        };
+    }
+
+    private boolean supportExists(BuildPlacementGeometry.Gesture g) {
+        if (!player.level().isLoaded(g.clicked())) return false;
+        BlockState live = player.level().getBlockState(g.clicked());
+        if (g.clicked().equals(cell.target().pos())) return !live.isAir();
+        return !live.isAir() && !live.canBeReplaced();
+    }
+
+    private TaskState selectItemTick() {
+        if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
+        if (creativeReceipt != null) {
+            LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+            creativeReceipt = ctx.actions().poll(ctx, creativeReceipt);
+            if (!creativeReceipt.terminal()) return TaskState.RUNNING;
+            if (creativeReceipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+                failAt(cell.target().pos(), "creative staging not confirmed: " + creativeReceipt.detail(),
+                        FailureType.UNKNOWN, "creative_stage_failed",
+                        creativeReceipt.status() == NativeActionReceipt.Status.UNCERTAIN);
+                return TaskState.FAILED;
+            }
+            creativeReceipt = null;
+        }
+        int slot = inventory.findSlot(cell.target().item(), true);
+        if (slot < 0 && player.getAbilities().instabuild) {
+            if (creativeSlot < 0) creativeSlot = emptyHotbar();
+            if (creativeSlot < 0) {
+                failAt(cell.target().pos(), "creative placement needs an empty hotbar slot",
+                        FailureType.NO_SPACE, "no_creative_staging_slot", false); return TaskState.FAILED;
+            }
+            if (creativeStack.isEmpty()) {
+                creativeStack = new ItemStack(cell.target().item(), 1);
+                LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+                creativeReceipt = ctx.actions().creativeSetSlot(
+                        ctx, creativeSlot, creativeStack, CREATIVE_TIMEOUT);
+                return TaskState.RUNNING;
+            }
+            slot = creativeSlot;
+        }
+        if (slot < 0) {
+            missing.clear();
+            missing.putAll(currentShortfall());
+            failAt(cell.target().pos(), "required block item is not in synchronized inventory",
+                    FailureType.NO_MATERIAL, "material_exhausted", false); return TaskState.FAILED;
+        }
+        FirstPersonActionGate.Status status = selection.select(player, slot);
+        if (status == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;
+        if (status == FirstPersonActionGate.Status.FAILED) {
+            failAt(cell.target().pos(), "item selection failed: " + selection.failure(),
+                    FailureType.UNKNOWN, "item_selection_failed", false); return TaskState.FAILED;
+        }
+        phase = Phase.AIM; aimTicks = 0; return TaskState.RUNNING;
+    }
+
+    private TaskState aimTick() {
+        if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
+        InputDriver.halt(player); InputDriver.sneak(player, true); InputDriver.lookAt(player, gesture.point());
+        HitResult crosshair = Interaction.nativeRaytrace(player, 4.5);
+        if (!(crosshair instanceof BlockHitResult hit) || !placesAt(hit, cell.target().pos())) {
+            if (++aimTicks < AIM_TICKS) return TaskState.RUNNING;
+            return rejectGesture();
+        }
+        BlockState before = player.level().getBlockState(cell.target().pos());
+        BlockState predicted = BuildPlacementGeometry.predict(
+                player, cell.target(), hit, player.getYRot(), player.getXRot());
+        if (!cell.target().itemPlace() && (predicted == null
+                || (!cell.target().acceptsPlacedState(predicted)
+                && !BuildPlacementGeometry.isProgress(cell.target(), before, predicted)))) return rejectGesture();
+        Map<Long, BlockState> frozen = freeze(cell);
+        LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+        useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
+                confirmation(cell, frozen), USE_TIMEOUT);
+        useCount++; phase = Phase.WAIT_USE; return TaskState.RUNNING;
+    }
+
+    private TaskState rejectGesture() {
+        InputDriver.halt(player); stopNav(); selection.reset();
+        gesture = null; gestureAt++; gestureTries++; aimTicks = 0; phase = Phase.PLACE_NAV;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState waitUseTick() {
+        InputDriver.halt(player);
+        LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+        useReceipt = ctx.actions().poll(ctx, useReceipt);
+        if (!useReceipt.terminal()) return TaskState.RUNNING;
+        NativeActionReceipt.Status status = useReceipt.status();
+        String detail = useReceipt.detail(); useReceipt = null;
+        if (status != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            failAt(cell.target().pos(), "native placement not safely confirmed: " + detail,
+                    status == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED
+                            ? FailureType.NO_SUPPORT : FailureType.UNKNOWN,
+                    "placement_" + status.name().toLowerCase(),
+                    status == NativeActionReceipt.Status.UNCERTAIN
+                            || status == NativeActionReceipt.Status.DIVERGED);
+            return TaskState.FAILED;
+        }
+        if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
+        BlockState live = player.level().getBlockState(cell.target().pos());
+        if (useCount < BuildPlacementGeometry.maximumUses(cell.target())
+                && BuildPlacementGeometry.isProgress(cell.target(), Blocks.AIR.defaultBlockState(), live)) {
+            liveGestures = BuildPlacementGeometry.plan(player, cell.target(), targets);
+            gestureAt = 0; gestureTries = 0; gesture = null; selection.reset(); phase = Phase.PLACE_NAV;
+            return TaskState.RUNNING;
+        }
+        failAt(cell.target().pos(), "click changed world but not to the requested verified state",
+                FailureType.UNSUPPORTED, "placement_state_mismatch", true); return TaskState.FAILED;
+    }
+
+    private void finishPlaced() {
+        r.placedOne(); markComplete(cell);
+        if (creativeSlot >= 0 && !creativeStack.isEmpty()) {
+            LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+            creativeReceipt = ctx.actions().creativeSetSlot(
+                    ctx, creativeSlot, ItemStack.EMPTY, CREATIVE_TIMEOUT);
+            phase = Phase.CLEAR_CREATIVE;
+        } else finishCell();
+    }
+
+    private TaskState clearCreativeTick() {
+        LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+        creativeReceipt = ctx.actions().poll(ctx, creativeReceipt);
+        if (!creativeReceipt.terminal()) return TaskState.RUNNING;
+        if (creativeReceipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            failAt(cell.target().pos(), "temporary creative item was not cleared: "
+                            + creativeReceipt.detail(), FailureType.UNKNOWN, "creative_cleanup_failed",
+                    creativeReceipt.status() == NativeActionReceipt.Status.UNCERTAIN);
+            return TaskState.FAILED;
+        }
+        creativeReceipt = null; creativeSlot = -1; creativeStack = ItemStack.EMPTY;
+        finishCell(); return TaskState.RUNNING;
+    }
+
+    private TaskState deferOrFail() {
+        int n = defers.merge(cell.target().pos().asLong(), 1, Integer::sum);
+        if (n <= MAX_DEFERS && queue.size() > 1) {
+            CellPlan delayed = queue.remove(queueAt); queue.add(delayed);
+            note = "support-dependent cells were deferred until supports existed";
+            phase = Phase.SELECT; return TaskState.RUNNING;
+        }
+        failAt(cell.target().pos(), "all bounded first-person stances were exhausted",
+                FailureType.NO_PATH, "placement_stances_exhausted", false); return TaskState.FAILED;
+    }
+
+    private void finishCell() { markComplete(cell); queueAt++; resetCell(); phase = Phase.SELECT; }
+    private void resetCell() {
+        stopNav(); clearing = null; clearQueue = List.of(); clearAt = 0;
+        liveGestures = List.of(); gestureAt = 0; gestureTries = 0; gesture = null;
+        aimTicks = 0; useCount = 0; useReceipt = null; selection.reset();
+    }
+
+    private void beginVerify() { stopNav(); verifyAt = 0; verifyFailed.clear(); phase = Phase.VERIFY; }
+
+    private TaskState verifyTick() {
+        int budget = PREFLIGHT_BUDGET;
+        while (verifyAt < r.targets.size() && budget-- > 0) {
+            BuildTaskRecord.Target target = r.targets.get(verifyAt);
+            if (!player.level().isLoaded(target.pos())) return travelToLoad(target.pos(), false);
+            if (target.matches(player.level().getBlockState(target.pos()))) completed.add(target.pos().asLong());
+            else {
+                completed.remove(target.pos().asLong());
+                verifyFailed.add(BuildPlacementGeometry.primaryOf(target).asLong());
+            }
+            verifyAt++;
+        }
+        r.completed(completed.size());
+        if (verifyAt < r.targets.size()) return TaskState.RUNNING;
+        if (!verifyFailed.isEmpty()) {
+            if (repairPass++ >= MAX_REPAIRS) {
+                failAt(BlockPos.of(verifyFailed.iterator().next()), "final verification found mismatched cells",
+                        FailureType.TARGET_LOST, "final_verification_failed", false);
+                return TaskState.FAILED;
+            }
+            List<CellPlan> repairs = new ArrayList<>();
+            for (long key : verifyFailed) {
+                CellPlan plan = plansByPrimary.get(key);
+                if (plan != null && !repairs.contains(plan)) repairs.add(plan);
+            }
+            if (repairs.size() != verifyFailed.size()) {
+                failAt(BlockPos.of(verifyFailed.iterator().next()),
+                        "a pre-existing cell changed and has no retained safe gesture",
+                        FailureType.TARGET_LOST, "externally_changed_preexisting_cell", false);
+                return TaskState.FAILED;
+            }
+            queue = repairs; queueAt = 0; phase = Phase.SELECT;
+            note = "final verification repaired bounded outside changes";
+            return TaskState.RUNNING;
+        }
+        drainScaffolds(); unregisterProvider();
+        scaffoldQueue = scaffolds.stream().filter(p -> !targets.containsKey(p.asLong()))
+                .sorted(Comparator.comparingInt((BlockPos position) -> position.getY()).reversed()
+                        .thenComparingDouble(p -> p.distSqr(player.blockPosition()))).toList();
+        scaffoldAt = 0; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
+    }
+
+    private TaskState scaffoldSelectTick() {
+        while (scaffoldAt < scaffoldQueue.size()) {
