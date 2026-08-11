@@ -598,3 +598,303 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState scaffoldSelectTick() {
         while (scaffoldAt < scaffoldQueue.size()) {
+            scaffold = scaffoldQueue.get(scaffoldAt);
+            if (!player.level().isLoaded(scaffold)) {
+                failAt(scaffold, "path scaffold unloaded before cleanup", FailureType.TARGET_LOST,
+                        "scaffold_unloaded", false); return TaskState.FAILED;
+            }
+            if (player.level().getBlockState(scaffold).isAir()) { scaffoldAt++; continue; }
+            phase = Phase.SCAFFOLD_NAV; return TaskState.RUNNING;
+        }
+        r.completed(countMatching());
+        if (r.completed() != r.targets.size()) { beginVerify(); return TaskState.RUNNING; }
+        if (r.traversabilityContract() != null) {
+            traversabilityResult = BuildTraversabilityVerifier.verify(
+                    player.clientLevel, r.traversabilityContract());
+            if (!traversabilityResult.valid()) {
+                failAt(traversabilityResult.position(), traversabilityResult.message(),
+                        FailureType.NO_PATH, traversabilityResult.code(), false);
+                return TaskState.FAILED;
+            }
+        }
+        return TaskState.SUCCESS;
+    }
+
+    private TaskState scaffoldNavTick() {
+        if (nav == null) {
+            BlockPos at = scaffold.immutable();
+            nav = PlayerNav.toGoal(player, () -> NavGoal.mineStance(at), 1.0,
+                    () -> inReach(at), PlayerNav.ContextProvider.DEFAULT);
+        }
+        return switch (nav.tick()) {
+            case RUNNING -> TaskState.RUNNING;
+            case ARRIVED -> { stopNav(); phase = Phase.SCAFFOLD_BREAK; yield TaskState.RUNNING; }
+            case FAILED -> {
+                FailureType type = nav.failType(); String reason = nav.failReason(); stopNav();
+                failAt(scaffold, "could not reach temporary scaffold: " + reason,
+                        type, "scaffold_cleanup_path_failed", false); yield TaskState.FAILED;
+            }
+        };
+    }
+
+    private TaskState scaffoldBreakTick() {
+        if (player.level().getBlockState(scaffold).isAir()) {
+            scaffoldAt++; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
+        }
+        return switch (digger.digTargetStep(scaffold)) {
+            case PROGRESSING -> TaskState.RUNNING;
+            case BROKE_TARGET -> {
+                r.brokeOne(); scaffoldAt++; phase = Phase.SCAFFOLD_SELECT; yield TaskState.RUNNING;
+            }
+            case BROKE_OCCLUDER -> {
+                failAt(scaffold, "scaffold cleanup changed another block", FailureType.INTERNAL,
+                        "scaffold_cleanup_wrong_block", true); yield TaskState.FAILED;
+            }
+            case NO_SHOT -> {
+                failAt(scaffold, "scaffold remains but has no safe first-person ray",
+                        FailureType.OCCLUDED, "scaffold_cleanup_occluded", false); yield TaskState.FAILED;
+            }
+        };
+    }
+
+    private NativeConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before) {
+        return ctx -> {
+            if (!ctx.level().isLoaded(plan.target().pos())) return NativeConfirmation.Verdict.PENDING;
+            if (matches(ctx, plan)) return NativeConfirmation.Verdict.APPLIED;
+            BlockState old = before.get(plan.target().pos().asLong());
+            BlockState live = ctx.level().getBlockState(plan.target().pos());
+            if (BuildPlacementGeometry.isProgress(plan.target(), old, live))
+                return NativeConfirmation.Verdict.APPLIED;
+            boolean unchanged = live.equals(old);
+            for (BuildPlacementGeometry.GeneratedCell effect : plan.generated()) {
+                if (!ctx.level().isLoaded(effect.pos())) return NativeConfirmation.Verdict.PENDING;
+                BlockState was = before.get(effect.pos().asLong());
+                BlockState now = ctx.level().getBlockState(effect.pos());
+                unchanged &= now.equals(was);
+                if (!now.equals(was) && !BuildValidity.valid(now, effect.expected(), false))
+                    return NativeConfirmation.Verdict.DIVERGED;
+            }
+            return unchanged ? NativeConfirmation.Verdict.PENDING : NativeConfirmation.Verdict.DIVERGED;
+        };
+    }
+
+    private Map<Long, BlockState> freeze(CellPlan plan) {
+        Map<Long, BlockState> out = new LinkedHashMap<>();
+        out.put(plan.target().pos().asLong(), player.level().getBlockState(plan.target().pos()));
+        for (BuildPlacementGeometry.GeneratedCell effect : plan.generated())
+            out.put(effect.pos().asLong(), player.level().getBlockState(effect.pos()));
+        return Map.copyOf(out);
+    }
+
+    private boolean matches(BuildTaskRecord.Target target,
+                            List<BuildPlacementGeometry.GeneratedCell> generated) {
+        if (!player.level().isLoaded(target.pos())
+                || !target.matches(player.level().getBlockState(target.pos()))) return false;
+        for (BuildPlacementGeometry.GeneratedCell effect : generated)
+            if (!player.level().isLoaded(effect.pos())
+                    || !BuildValidity.valid(player.level().getBlockState(effect.pos()),
+                    effect.expected(), false)) return false;
+        return true;
+    }
+
+    private static boolean matches(LocalPlayerContext ctx, CellPlan plan) {
+        if (!ctx.level().isLoaded(plan.target().pos())
+                || !plan.target().matches(ctx.level().getBlockState(plan.target().pos()))) return false;
+        for (BuildPlacementGeometry.GeneratedCell effect : plan.generated())
+            if (!ctx.level().isLoaded(effect.pos())
+                    || !BuildValidity.valid(ctx.level().getBlockState(effect.pos()),
+                    effect.expected(), false)) return false;
+        return true;
+    }
+
+    private void markComplete(CellPlan plan) {
+        if (player.level().isLoaded(plan.target().pos())
+                && plan.target().matches(player.level().getBlockState(plan.target().pos())))
+            completed.add(plan.target().pos().asLong());
+        for (BuildPlacementGeometry.GeneratedCell effect : plan.generated()) {
+            BuildTaskRecord.Target declared = targets.get(effect.pos().asLong());
+            if (declared != null && player.level().isLoaded(effect.pos())
+                    && declared.matches(player.level().getBlockState(effect.pos())))
+                completed.add(effect.pos().asLong());
+        }
+        r.completed(completed.size());
+    }
+
+    private int countMatching() {
+        int n = 0;
+        for (BuildTaskRecord.Target target : r.targets)
+            if (player.level().isLoaded(target.pos())
+                    && target.matches(player.level().getBlockState(target.pos()))) n++;
+        return n;
+    }
+
+    private boolean placesAt(BlockHitResult hit, BlockPos target) {
+        return hit.getBlockPos().equals(target)
+                || hit.getBlockPos().relative(hit.getDirection()).equals(target);
+    }
+    private boolean inReach(BlockPos pos) {
+        return player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)) <= 20.25;
+    }
+    private int emptyHotbar() {
+        for (int i = 0; i < Math.min(9, player.getInventory().getContainerSize()); i++)
+            if (player.getInventory().getItem(i).isEmpty()) return i;
+        return -1;
+    }
+
+    private void bounds() {
+        for (BuildTaskRecord.Target target : r.targets) {
+            BlockPos p = target.pos();
+            siteMin = siteMin == null ? p : new BlockPos(Math.min(siteMin.getX(), p.getX()),
+                    Math.min(siteMin.getY(), p.getY()), Math.min(siteMin.getZ(), p.getZ()));
+            siteMax = siteMax == null ? p : new BlockPos(Math.max(siteMax.getX(), p.getX()),
+                    Math.max(siteMax.getY(), p.getY()), Math.max(siteMax.getZ(), p.getZ()));
+        }
+    }
+    private void addUnsupported(String code, BlockPos pos, String detail, List<String> decisions) {
+        if (unsupported.size() >= 64) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("code", code); if (pos != null) data.put("pos", pos.toShortString());
+        data.put("detail", detail); data.put("decision_options", decisions); unsupported.add(data);
+    }
+    private void addBlocked(String code, BlockPos pos, String detail) {
+        if (blocked.size() < 64) blocked.add(Map.of(
+                "code", code, "pos", pos.toShortString(), "detail", detail));
+    }
+    private void failPreflight(String message, FailureType type, String code) {
+        failureCode = code; fail(message + "; no mutation was submitted", type);
+    }
+    private void failAt(BlockPos pos, String message, FailureType type, String code, boolean unknown) {
+        failurePos = pos == null ? null : pos.immutable(); failureCode = code; uncertain = unknown; fail(message, type);
+    }
+
+    private void drainScaffolds() {
+        for (BlockPos pos : BuildPlacementRegistry.drainScaffold(player))
+            if (!targets.containsKey(pos.asLong())) scaffolds.add(pos.immutable());
+    }
+    private void registerProvider() {
+        if (!providerRegistered) { BuildPlacementRegistry.register(player, this); providerRegistered = true; }
+    }
+    private void unregisterProvider() {
+        if (providerRegistered) {
+            drainScaffolds(); BuildPlacementRegistry.unregister(player, this); providerRegistered = false;
+        }
+    }
+
+    @Override public BlockState desiredState(BlockPos pos) {
+        BuildTaskRecord.Target target = targets.get(pos.asLong());
+        if (target == null || BuildCellRules.isAirTarget(target) || !player.level().isLoaded(pos)
+                || target.matches(player.level().getBlockState(pos))) return null;
+        return target.desiredState();
+    }
+    @Override public boolean acceptsPlacement(BlockPos pos, BlockState state) {
+        BuildTaskRecord.Target target = targets.get(pos.asLong());
+        return target != null && target.acceptsPlacedState(state);
+    }
+    @Override public CalculationContext forSearch(LocalPlayer p, LongSet sacred, LongSet denied) {
+        return ContextFactory.forSearch(p, union(sacred), union(denied), permit(),
+                (body, view, loaded, safe, s, d, terrain) -> new BuildCalculationContext(
+                        body, view, loaded, safe, s, d, terrain, targets,
+                        inventory.availableStates(true), r.replaceExisting));
+    }
+    @Override public CalculationContext forExecution(LocalPlayer p, LongSet sacred, LongSet denied) {
+        return ContextFactory.forExecution(p, union(sacred), union(denied), permit(),
+                (body, view, loaded, safe, s, d, terrain) -> new BuildCalculationContext(
+                        body, view, loaded, safe, s, d, terrain, targets,
+                        inventory.availableStates(true), r.replaceExisting));
+    }
+    @Override public TerrainPermit permit() { return TerrainPermit.TERRAFORM; }
+    private LongSet union(LongSet other) {
+        if (other == null || other.isEmpty()) return protectedCells;
+        LongOpenHashSet out = new LongOpenHashSet(protectedCells); out.addAll(other); return out;
+    }
+
+    @Override public void stop(LocalPlayer companion, StopReason why) {
+        if (digger.current() != null) digger.cancel();
+        drainScaffolds(); unregisterProvider(); super.stop(companion, why); InputDriver.halt(player);
+    }
+    @Override protected void cleanup() {
+        if (digger.current() != null) digger.cancel();
+        drainScaffolds(); unregisterProvider(); InputDriver.halt(player); selection.reset();
+        bestEffortCreativeCleanup(); super.cleanup();
+    }
+    private void bestEffortCreativeCleanup() {
+        if (creativeSlot < 0 || creativeStack.isEmpty() || !player.getAbilities().instabuild) return;
+        ItemStack live = player.getInventory().getItem(creativeSlot);
+        if (!ItemStack.isSameItemSameComponents(live, creativeStack)) return;
+        try {
+            LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+            if (creativeReceipt == null || creativeReceipt.terminal())
+                ctx.actions().creativeSetSlot(ctx, creativeSlot, ItemStack.EMPTY, CREATIVE_TIMEOUT);
+        } catch (RuntimeException ignored) { }
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("requested", r.targets.size());
+        data.put("completed", r.completed());
+        data.put("placed", r.placed());
+        data.put("cleared", r.broken());
+        data.put("site_min", siteMin == null ? "-" : siteMin.toShortString());
+        data.put("site_max", siteMax == null ? "-" : siteMax.toShortString());
+
+        if (!required.isEmpty()) data.put("required_materials", itemCounts(required));
+        Map<Item, Integer> outstanding = preflightDone ? currentShortfall() : missing;
+        if (!outstanding.isEmpty()) data.put("missing_materials", itemCounts(outstanding));
+        if (!unsupported.isEmpty()) data.put("unsupported_cells", List.copyOf(unsupported));
+        if (!blocked.isEmpty()) data.put("blocked_cells", List.copyOf(blocked));
+        if (failureCode != null) data.put("failure_code", failureCode);
+        if (failurePos != null) data.put("failure_position", position(failurePos));
+        if (uncertain) {
+            data.put("world_change_uncertain", true);
+            data.put("safe_to_retry_without_observation", false);
+        }
+
+        List<Map<String, Object>> remainingScaffolds = scaffolds.stream()
+                .filter(pos -> player.level().isLoaded(pos)
+                        && !player.level().getBlockState(pos).isAir())
+                .map(this::position).toList();
+        if (!remainingScaffolds.isEmpty()) data.put("remaining_scaffolds", remainingScaffolds);
+
+        if (creativeSlot >= 0 && !creativeStack.isEmpty()
+                && ItemStack.isSameItemSameComponents(
+                player.getInventory().getItem(creativeSlot), creativeStack)) {
+            data.put("temporary_creative_slot_pending_cleanup", creativeSlot);
+            data.put("temporary_creative_item",
+                    BuiltInRegistries.ITEM.getKey(creativeStack.getItem()).toString());
+        }
+
+        if (traversabilityResult != null) {
+            data.put("traversability_verification", traversabilityResult.evidence());
+        }
+
+        if (!r.targets.isEmpty() && countMatching() == r.targets.size()
+                && siteMin != null && siteMax != null) {
+            BlockPos center = new BlockPos(
+                    Math.floorDiv(siteMin.getX() + siteMax.getX(), 2),
+                    siteMin.getY(),
+                    Math.floorDiv(siteMin.getZ() + siteMax.getZ(), 2));
+            Map<String, Object> verified = position(center);
+            verified.put("kind", "verified_site_center");
+            data.put("verified_position", verified);
+            if (!r.semanticFacts().isEmpty()
+                    && (r.traversabilityContract() == null
+                            || traversabilityResult != null && traversabilityResult.valid())) {
+                data.put("aggregate_verification", Map.of(
+                        "status", "verified",
+                        "basis", r.traversabilityContract() == null
+                                ? "every contract-bearing target cell was re-read after construction"
+                                : "every target cell plus all planner-required traversal endpoints were re-read",
+                        "facts", r.semanticFacts()));
+            }
+        }
+        return data;
+    }
+
+    private Map<String, Integer> itemCounts(Map<Item, Integer> counts) {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        counts.forEach((item, count) -> out.put(
+                BuiltInRegistries.ITEM.getKey(item).toString(), count));
+        return out;
+    }
+
