@@ -298,3 +298,182 @@ final class Ae2SupplyPlanner {
             Allocator allocationView = allocator;
             boundOrder.sort(Comparator
                     .<Integer>comparingLong(index -> Math.min(
+                            allocationView.boundCapacity(candidates.get(index).sample()), limits[index]))
+                    .reversed()
+                    .thenComparing(Comparator.<Integer>comparingLong(
+                            index -> candidates.get(index).storedAmount()).reversed())
+                    .thenComparing(Comparator.<Integer>comparingInt(
+                            index -> candidates.get(index).sample().getMaxStackSize()).reversed())
+                    .thenComparing(index -> candidates.get(index).itemId().toString())
+                    .thenComparingLong(index -> candidates.get(index).stableSerial()));
+            for (int index : boundOrder) {
+                if (remaining <= 0) break;
+                int requested = (int) Math.min(
+                        Math.min((long) remaining, limits[index]),
+                        allocator.boundCapacity(candidates.get(index).sample()));
+                int moved = allocator.allocateBound(candidates.get(index).sample(), requested);
+                allocationCounts[index] += moved;
+                limits[index] -= moved;
+                remaining -= moved;
+            }
+
+            List<SlotOption> options = new ArrayList<>();
+            int emptySlots = allocator.unboundEmptySlots();
+            for (int index = 0; index < candidates.size(); index++) {
+                long supply = Math.min(limits[index], remaining);
+                int stackSize = Math.max(1, candidates.get(index).sample().getMaxStackSize());
+                int optionsForCandidate = 0;
+                while (supply > 0 && optionsForCandidate < emptySlots) {
+                    int capacity = (int) Math.min(stackSize, supply);
+                    options.add(new SlotOption(index, capacity));
+                    supply -= capacity;
+                    optionsForCandidate++;
+                }
+            }
+            options.sort(Comparator.comparingInt(SlotOption::capacity).reversed()
+                    .thenComparing(Comparator.<SlotOption>comparingLong(
+                            option -> candidates.get(option.candidateIndex()).storedAmount()).reversed())
+                    .thenComparingInt(option -> candidates.get(option.candidateIndex()).craftable() ? 1 : 0)
+                    .thenComparing(option -> candidates.get(option.candidateIndex()).itemId().toString())
+                    .thenComparingLong(option -> candidates.get(option.candidateIndex()).stableSerial()));
+            for (SlotOption option : options) {
+                if (remaining <= 0 || allocator.unboundEmptySlots() <= 0) break;
+                int index = option.candidateIndex();
+                int requested = Math.min(remaining, option.capacity());
+                int moved = allocator.allocate(candidates.get(index).sample(), requested);
+                allocationCounts[index] += moved;
+                limits[index] -= moved;
+                remaining -= moved;
+            }
+            if (remaining > 0) return capacityFailure(group);
+            List<Allocation> allocations = new ArrayList<>();
+            for (int index = 0; index < candidates.size(); index++) {
+                if (allocationCounts[index] <= 0) continue;
+                Candidate candidate = candidates.get(index);
+                allocations.add(new Allocation(
+                        candidate.itemId(), candidate.sample(), allocationCounts[index],
+                        request.allowCrafting() && candidate.craftable()));
+            }
+            groups.add(new PlannedGroup(group, allocations));
+        }
+        return Result.success(new Plan(groups));
+    }
+
+    static List<Ae2ReflectionBridge.Entry> matchingEntries(
+            List<Ae2ReflectionBridge.Entry> entries, Allocation allocation) {
+        return entries.stream().filter(entry -> entry.itemId().equals(allocation.itemId())
+                        && same(entry.sample(), allocation.sample())).toList();
+    }
+
+    static String issue(
+            Plan plan,
+            LocalPlayer player,
+            List<Ae2ReflectionBridge.Entry> entries,
+            Set<Integer> reservedSlots,
+            java.util.function.ToIntFunction<Ae2ResourceSupply.Group> groupProgress) {
+        Allocator allocator = Allocator.capture(player, reservedSlots);
+        for (PlannedGroup group : plan.groups()) {
+            if (groupProgress.applyAsInt(group.group()) != group.confirmedCount()) {
+                return "inventory_delta_changed";
+            }
+            for (Allocation allocation : group.allocations()) {
+                int remaining = allocation.remaining();
+                if (remaining <= 0) continue;
+                List<Ae2ReflectionBridge.Entry> matching = matchingEntries(entries, allocation);
+                long stored = matching.stream().mapToLong(Ae2ReflectionBridge.Entry::storedAmount)
+                        .reduce(0L, Ae2SupplyPlanner::saturatingAdd);
+                boolean craftable = allocation.craftingAllowed()
+                        && matching.stream().anyMatch(Ae2ReflectionBridge.Entry::craftable);
+                if (stored < remaining && !craftable) return "network_supply_changed";
+                if (allocator.allocate(allocation.sample(), remaining) != remaining) {
+                    return "inventory_capacity_changed";
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean better(
+            Candidate candidate, int craftMissing, int emptyUsed,
+            Candidate best, int bestCraftMissing, int bestEmptyUsed) {
+        if (best == null) return true;
+        if (craftMissing != bestCraftMissing) return craftMissing < bestCraftMissing;
+        if (emptyUsed != bestEmptyUsed) return emptyUsed < bestEmptyUsed;
+        if (candidate.storedAmount() != best.storedAmount()) {
+            return candidate.storedAmount() > best.storedAmount();
+        }
+        int byId = candidate.itemId().toString().compareTo(best.itemId().toString());
+        return byId < 0 || (byId == 0 && candidate.stableSerial() < best.stableSerial());
+    }
+
+    private static List<Candidate> candidates(
+            Ae2ResourceSupply.Group group, List<Ae2ReflectionBridge.Entry> entries) {
+        List<Candidate> result = new ArrayList<>();
+        for (Ae2ReflectionBridge.Entry entry : entries) {
+            if (!group.acceptableItemIds().contains(entry.itemId())
+                    || !entry.sample().getComponentsPatch().isEmpty()
+                    || entry.sample().getMaxStackSize() < 1
+                    || entry.sample().getMaxStackSize() > 64) {
+                continue;
+            }
+            int existingIndex = -1;
+            for (int i = 0; i < result.size(); i++) {
+                Candidate existing = result.get(i);
+                if (existing.itemId().equals(entry.itemId()) && same(existing.sample(), entry.sample())) {
+                    existingIndex = i;
+                    break;
+                }
+            }
+            if (existingIndex < 0) {
+                result.add(new Candidate(entry.itemId(), entry.sample(), entry.storedAmount(),
+                        entry.craftable(), entry.serial()));
+            } else {
+                Candidate existing = result.get(existingIndex);
+                result.set(existingIndex, new Candidate(
+                        existing.itemId(), existing.sample(),
+                        saturatingAdd(existing.storedAmount(), entry.storedAmount()),
+                        existing.craftable() || entry.craftable(),
+                        Math.min(existing.stableSerial(), entry.serial())));
+            }
+        }
+        result.sort(Comparator.comparing((Candidate value) -> value.itemId().toString())
+                .thenComparingLong(Candidate::stableSerial));
+        return List.copyOf(result);
+    }
+
+    private static long supplyLimit(Candidate candidate, int requested, boolean allowCrafting) {
+        return allowCrafting && candidate.craftable()
+                ? requested : Math.min(requested, candidate.storedAmount());
+    }
+
+    private static Result unavailableFailure(
+            Ae2ResourceSupply.Group group, Ae2ResourceSupply.Request request) {
+        String code = request.allowCrafting()
+                ? "crafting_pattern_missing" : "network_stock_insufficient";
+        return Result.failure(new Failure(
+                code,
+                "the AE2 network cannot fully supply one bound plan for " + group.itemId(),
+                group));
+    }
+
+    private static Result capacityFailure(Ae2ResourceSupply.Group group) {
+        return Result.failure(new Failure(
+                "inventory_full",
+                "the player inventory cannot hold the concrete AE2 plan for " + group.itemId(),
+                group));
+    }
+
+    private static boolean same(ItemStack left, ItemStack right) {
+        return left.getCount() == right.getCount()
+                && ItemStack.isSameItemSameComponents(left, right);
+    }
+
+    private static long saturatingAdd(long left, long right) {
+        return right > 0 && left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
+    }
+
+    private static int saturatingIntAdd(int left, int right) {
+        long result = (long) left + right;
+        return (int) Math.min(Integer.MAX_VALUE, result);
+    }
+}
