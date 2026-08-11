@@ -298,3 +298,303 @@ public final class SemanticLightAreaCompanionTask
     private TaskState tickSupply() {
         SemanticMaterialSupplyCoordinator.Tick tick = supply.tick(player, this::runChild);
         if (tick.status() == SemanticMaterialSupplyCoordinator.Status.RUNNING) {
+            return TaskState.RUNNING;
+        }
+        supplyReceipts.add(tick.receipt());
+        if (tick.status() == SemanticMaterialSupplyCoordinator.Status.FAILED) {
+            supplyFailure = tick.receipt();
+            failureCode = stringValue(tick.receipt().get("failure_code"),
+                    "material_supply_failed");
+            requiresDecision = true;
+            recoveryOptions = recoveryIds(tick.receipt().get("recovery_options"));
+            if (recoveryOptions.isEmpty()) recoveryOptions = List.of(
+                    "change material source policy", "provide a different light preference",
+                    "stop without placing the unsupplied layout");
+            pendingSupplySource = null;
+            fail("lighting material supply stopped before construction: " + tick.message(),
+                    tick.failureType());
+            return TaskState.FAILED;
+        }
+        pinnedSuppliedSource = pendingSupplySource;
+        pendingSupplySource = null;
+        resetObservationForReplan();
+        return TaskState.RUNNING;
+    }
+
+    private void startBuild(List<BuildTaskRecord.Target> targets, boolean consume) {
+        for (BuildTaskRecord.Target target : targets) {
+            attemptedPositions.add(target.pos().asLong());
+        }
+        String parent = r.getToolCallId() == null ? "light_area" : r.getToolCallId();
+        long now = player.level().getGameTime();
+        BuildTaskRecord build = new BuildTaskRecord(
+                parent + "-lighting-pass-" + (passes + 1),
+                now + BuildTool.timeoutTicksFor(targets.size(), consume),
+                targets, false, consume, false);
+        buildChild = new BuildCompanionTask(player, build);
+        buildChild.protectNavigationCells(protectedNavigationCells);
+        requestedPlacements += targets.size();
+        passes++;
+        stage = Stage.BUILD;
+    }
+
+    private TaskState tickBuild() {
+        TaskState terminal = runChild(buildChild);
+        if (terminal == null) return TaskState.RUNNING;
+        lastBuildResult = buildChild.result(terminal);
+        Map<String, Object> receipt = new LinkedHashMap<>();
+        receipt.put("pass", passes);
+        receipt.put("success", lastBuildResult.success());
+        receipt.put("message", lastBuildResult.message());
+        if (lastBuildResult.data() != null) {
+            copyReceiptField(lastBuildResult.data(), receipt, "failure_type", "failure_code",
+                    "placed", "remaining", "outcome_uncertain");
+        }
+        childReceipts.add(receipt);
+        buildChild = null;
+        settledAt = SETTLE_TICKS;
+        stage = Stage.SETTLE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickSettle() {
+        if (settledAt-- > 0) return TaskState.RUNNING;
+        verifyIndex = 0;
+        verifyLit = 0;
+        verifyDark.clear();
+        stage = Stage.VERIFY;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickVerify() {
+        ClientLevel level = ClientRuntime.requireContext(player).level();
+        int budget = VERIFY_PER_TICK;
+        while (budget-- > 0 && verifyIndex < targetCells.size()) {
+            Sample original = targetCells.get(verifyIndex++);
+            if (!level.isLoaded(original.pos())) {
+                giveUp("verification_area_unloaded",
+                        "part of the observed area unloaded before actual block-light verification",
+                        FailureType.TARGET_LOST,
+                        List.of("return to the area and retry", "use a smaller radius"));
+                return TaskState.FAILED;
+            }
+            int light = level.getBrightness(LightLayer.BLOCK, original.pos());
+            if (light >= r.minimumLight) verifyLit++;
+            else verifyDark.add(new Sample(original.pos(), light));
+        }
+        if (verifyIndex < targetCells.size()) return TaskState.RUNNING;
+        litCells = verifyLit;
+        darkCells = List.copyOf(verifyDark);
+        achievedCoverage = targetCells.isEmpty() ? 0.0D
+                : (double) litCells / (double) targetCells.size();
+        if (meetsRequirement()) return TaskState.SUCCESS;
+        stage = Stage.PLAN;
+        return TaskState.RUNNING;
+    }
+
+    private void evaluateCurrentLight(ClientLevel level) {
+        List<Sample> dark = new ArrayList<>();
+        int lit = 0;
+        for (Sample sample : targetCells) {
+            int light = level.getBrightness(LightLayer.BLOCK, sample.pos());
+            if (light >= r.minimumLight) lit++;
+            else dark.add(new Sample(sample.pos(), light));
+        }
+        litCells = lit;
+        darkCells = List.copyOf(dark);
+        achievedCoverage = (double) lit / (double) targetCells.size();
+    }
+
+    private boolean meetsRequirement() {
+        return achievedCoverage + 1.0E-9D >= r.coverage.requiredRatio();
+    }
+
+    private LightSource chooseSource() {
+        boolean free = WorkProfile.of(player).freeMaterials();
+        Map<Item, Integer> carried = new HashMap<>();
+        for (int slot = 0; slot < Math.min(
+                PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty()) carried.merge(stack.getItem(), stack.getCount(), Integer::sum);
+        }
+        List<Item> ordered = new ArrayList<>();
+        addItem(pinnedSuppliedSource, ordered);
+        for (String raw : r.lightPreferences) {
+            addItem(raw, ordered);
+        }
+        carried.keySet().stream()
+                .sorted(Comparator.comparing(item -> BuiltInRegistries.ITEM.getKey(item).toString()))
+                .forEach(ordered::add);
+        for (String fallback : DEFAULT_LIGHT_IDS) addItem(fallback, ordered);
+        if (free) {
+            for (Item item : BuiltInRegistries.ITEM) if (item instanceof BlockItem) ordered.add(item);
+        }
+        LightSource best = null;
+        Set<Item> seen = new HashSet<>();
+        for (Item item : ordered) {
+            if (!seen.add(item) || !(item instanceof BlockItem blockItem)) continue;
+            int available = free ? Integer.MAX_VALUE : carried.getOrDefault(item, 0);
+            Block block = blockItem.getBlock();
+            int emission = block.getStateDefinition().getPossibleStates().stream()
+                    .mapToInt(BlockState::getLightEmission).max().orElse(0);
+            if (emission < r.minimumLight) continue;
+            String id = BuiltInRegistries.ITEM.getKey(item).toString();
+            int priority = sourcePriority(id, available > 0);
+            LightSource candidate = new LightSource(
+                    item, block, id, emission, available, priority);
+            if (best == null || priority < best.priority()
+                    || (priority == best.priority()
+                            && emission > best.emission())) best = candidate;
+        }
+        return best;
+    }
+
+    private int sourcePriority(String id, boolean carried) {
+        if (id.equals(pinnedSuppliedSource)) return -1;
+        for (int i = 0; i < r.lightPreferences.size(); i++) {
+            if (id.equals(r.lightPreferences.get(i))) return i;
+        }
+        if (carried) return r.lightPreferences.size();
+        int fallback = DEFAULT_LIGHT_IDS.indexOf(id);
+        if (fallback >= 0) return r.lightPreferences.size() + 1 + fallback;
+        return r.lightPreferences.size() + DEFAULT_LIGHT_IDS.size() + 2;
+    }
+
+    private static void addItem(String raw, List<Item> output) {
+        if (raw == null || raw.isBlank()) return;
+        ResourceLocation id = ResourceLocation.tryParse(raw);
+        if (id == null) return;
+        BuiltInRegistries.ITEM.getOptional(id).ifPresent(item -> {
+            if (item instanceof BlockItem) output.add(item);
+        });
+        BuiltInRegistries.BLOCK.getOptional(id).ifPresent(block -> {
+            Item item = block.asItem();
+            if (item instanceof BlockItem) output.add(item);
+        });
+    }
+
+    private void resetObservationForReplan() {
+        columnIndex = 0;
+        unloadedColumns = 0;
+        loadedColumns = 0;
+        samples.clear();
+        protectedFacts.clear();
+        protectedNavigationCells.clear();
+        targetCells = List.of();
+        darkCells = List.of();
+        achievedCoverage = 0.0D;
+        litCells = 0;
+        verifyIndex = 0;
+        verifyLit = 0;
+        verifyDark.clear();
+        source = null;
+        stage = Stage.OBSERVE;
+    }
+
+    private List<Candidate> candidates(ClientLevel level, LightSource light) {
+        Map<Long, Candidate> byPos = new LinkedHashMap<>();
+        int[] distances = {1, 2, 4, 6};
+        int[][] directions = {{1, 0}, {-1, 0}, {0, 1}, {0, -1},
+                {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+        for (Sample dark : darkCells) {
+            if (r.coverage == SemanticLightAreaTaskRecord.Coverage.CROP_GROWTH) {
+                Candidate exact = groundCandidate(level, light, dark.pos());
+                if (exact != null) byPos.putIfAbsent(exact.pos().asLong(), exact);
+            }
+            for (int distance : distances) {
+                for (int[] direction : directions) {
+                    int x = dark.pos().getX() + direction[0] * distance;
+                    int z = dark.pos().getZ() + direction[1] * distance;
+                    for (int dy = -2; dy <= 2; dy++) {
+                        BlockPos pos = new BlockPos(x, dark.pos().getY() + dy, z);
+                        Candidate candidate = groundCandidate(level, light, pos);
+                        if (candidate != null) byPos.putIfAbsent(pos.asLong(), candidate);
+                        if (byPos.size() >= MAX_CANDIDATES) break;
+                    }
+                    if (byPos.size() >= MAX_CANDIDATES) break;
+                }
+                if (byPos.size() >= MAX_CANDIDATES) break;
+            }
+            if (byPos.size() >= MAX_CANDIDATES) break;
+        }
+        List<Candidate> result = new ArrayList<>();
+        for (Candidate candidate : byPos.values()) {
+            Set<Long> covers = new HashSet<>();
+            for (Sample dark : darkCells) {
+                if (candidate.state().getLightEmission()
+                        - candidate.pos().distManhattan(dark.pos()) >= r.minimumLight) {
+                    covers.add(dark.pos().asLong());
+                }
+            }
+            if (!covers.isEmpty()) result.add(new Candidate(candidate.pos(), candidate.state(),
+                    candidate.preferenceScore(), Set.copyOf(covers)));
+        }
+        return result;
+    }
+
+    private Candidate groundCandidate(ClientLevel level, LightSource light, BlockPos pos) {
+        if (!inside(pos) || attemptedPositions.contains(pos.asLong())
+                || !level.isLoaded(pos) || !level.isLoaded(pos.below())) return null;
+        BlockState current = level.getBlockState(pos);
+        BlockState support = level.getBlockState(pos.below());
+        if (!current.canBeReplaced() || !current.getFluidState().isEmpty()) return null;
+        String currentSensitive = sensitiveReason(level, pos, current);
+        String supportSensitive = sensitiveReason(level, pos.below(), support);
+        boolean unplantedFarmland = r.coverage == SemanticLightAreaTaskRecord.Coverage.CROP_GROWTH
+                && (r.style == SemanticLightAreaTaskRecord.Style.AUTO
+                        || r.style == SemanticLightAreaTaskRecord.Style.GROUND)
+                && current.isAir() && support.getBlock() instanceof FarmBlock;
+        if (currentSensitive != null
+                || (supportSensitive != null
+                        && !(unplantedFarmland && "cultivated_land".equals(supportSensitive)))
+                || protectedByLabel(pos)
+                || (!unplantedFarmland && narrowRoute(level, pos))) return null;
+        if (!unplantedFarmland && !support.isFaceSturdy(level, pos.below(), Direction.UP)) return null;
+        BlockState chosen = null;
+        int emission = -1;
+        for (BlockState state : light.block().getStateDefinition().getPossibleStates()) {
+            if (state.hasProperty(BlockStateProperties.HANGING)
+                    && state.getValue(BlockStateProperties.HANGING)) continue;
+            if (state.getLightEmission() < r.minimumLight || !state.canSurvive(level, pos)) continue;
+            if (state.getLightEmission() > emission) {
+                chosen = state;
+                emission = state.getLightEmission();
+            }
+        }
+        int preferenceScore = placementPreferenceScore(pos, unplantedFarmland);
+        return chosen == null ? null : new Candidate(
+                pos.immutable(), chosen, preferenceScore, Set.of());
+    }
+
+    private int placementPreferenceScore(BlockPos pos, boolean unplantedFarmland) {
+        int distanceFromCenter = horizontalDistanceSquared(pos, r.center);
+        return switch (r.placementPreference) {
+            case CENTRAL_UNPLANTED ->
+                    (unplantedFarmland ? 1_000_000 : 0) - distanceFromCenter;
+            case UNOBTRUSIVE -> distanceFromCenter;
+            case COVERAGE_OPTIMAL ->
+                    r.style == SemanticLightAreaTaskRecord.Style.UNOBTRUSIVE
+                            ? distanceFromCenter : 0;
+        };
+    }
+
+    private List<Candidate> greedy(List<Candidate> candidates, int needed, int cap) {
+        List<Candidate> selected = new ArrayList<>();
+        Set<Long> covered = new HashSet<>();
+        while (selected.size() < cap && covered.size() < needed) {
+            Candidate best = null;
+            int bestGain = 0;
+            for (Candidate candidate : candidates) {
+                if (selected.contains(candidate)) continue;
+                int gain = 0;
+                for (long cell : candidate.covers()) if (!covered.contains(cell)) gain++;
+                // Measured coverage gain is always primary. Placement preference only
+                // chooses between candidates with the same positive gain.
+                if (gain > bestGain || gain == bestGain && gain > 0
+                        && (best == null
+                                || candidate.preferenceScore() > best.preferenceScore())) {
+                    best = candidate;
+                    bestGain = gain;
+                }
+            }
+            if (best == null) break;
