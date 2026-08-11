@@ -298,3 +298,65 @@ final class Ae2ReflectionBridge {
             Class<?> cableBus = Class.forName("appeng.blockentity.networking.CableBusBlockEntity");
             Class<?> terminalPart = Class.forName("appeng.parts.reporting.AbstractTerminalPart");
             Class<?> syncableSubmitResult =
+                    Class.forName("appeng.menu.me.crafting.CraftConfirmMenu$SyncableSubmitResult");
+            Class<?> craftingSubmitResult =
+                    Class.forName("appeng.api.networking.crafting.ICraftingSubmitResult");
+            Map<String, Object> actions = Arrays.stream(inventoryAction.getEnumConstants())
+                    .collect(Collectors.toMap(value -> ((Enum<?>) value).name(), Function.identity()));
+            Ae2ReflectionBridge bridge = new Ae2ReflectionBridge(
+                    storageMenu,
+                    craftAmount,
+                    craftConfirm,
+                    itemKey,
+                    cableBus,
+                    terminalPart,
+                    storageMenu.getMethod("getClientRepo"),
+                    storageMenu.getMethod("getLinkStatus"),
+                    linkStatus.getMethod("connected"),
+                    clientRepo.getMethod("getAllEntries"),
+                    entry.getMethod("getSerial"),
+                    entry.getMethod("getWhat"),
+                    entry.getMethod("getStoredAmount"),
+                    entry.getMethod("isCraftable"),
+                    itemKey.getMethod("getId"),
+                    itemKey.getMethod("toStack", Integer.TYPE),
+                    storageMenu.getMethod("handleInteraction", Long.TYPE, inventoryAction),
+                    requireAction(actions, "PICKUP_SINGLE"),
+                    requireAction(actions, "PICKUP_OR_SET_DOWN"),
+                    requireAction(actions, "AUTO_CRAFT"),
+                    craftAmount.getMethod(
+                            "confirm", Integer.TYPE, Boolean.TYPE, Boolean.TYPE),
+                    craftConfirm.getMethod("hasNoCPU"),
+                    craftConfirm.getMethod("getPlan"),
+                    craftConfirm.getMethod("startJob"),
+                    craftConfirm.getField("submitError"),
+                    syncableSubmitResult.getMethod("result"),
+                    craftingSubmitResult.getMethod("successful"),
+                    craftingSubmitResult.getMethod("errorCode"),
+                    cableBus.getMethod("getPart", Direction.class));
+            return new Availability(Optional.of(bridge), "available");
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException failure) {
+            String detail = failure.getClass().getSimpleName();
+            if (failure.getMessage() != null && !failure.getMessage().isBlank()) {
+                detail += ": " + failure.getMessage();
+            }
+            return new Availability(Optional.empty(), detail);
+        }
+    }
+
+    private static Object requireAction(Map<String, Object> actions, String name) {
+        Object value = actions.get(name);
+        if (value == null) throw new IllegalStateException("AE2 InventoryAction is missing " + name);
+        return value;
+    }
+}
+
+final class Ae2ProtocolException extends RuntimeException {
+    Ae2ProtocolException(String message) {
+        super(message);
+    }
+
+    Ae2ProtocolException(String message, Throwable cause) {
+        super(message, cause);
+    }
+}
