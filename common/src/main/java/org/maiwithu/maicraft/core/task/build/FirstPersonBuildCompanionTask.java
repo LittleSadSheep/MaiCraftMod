@@ -898,3 +898,46 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return out;
     }
 
+    private Map<Item, Integer> currentShortfall() {
+        Map<Item, Integer> need = new LinkedHashMap<>();
+        for (CellPlan plan : plans) {
+            BuildTaskRecord.Target target = plan.target();
+            if (BuildCellRules.isAirTarget(target) || matches(target, plan.generated())) continue;
+            if (target.costsMaterial())
+                need.merge(target.item(), Math.max(1, target.materialCount()), Integer::sum);
+        }
+        Map<Item, Integer> out = new LinkedHashMap<>();
+        need.forEach((item, count) -> {
+            int have = inventory.mainInventoryCount(item);
+            if (have < count) out.put(item, count - have);
+        });
+        return out;
+    }
+
+    private Map<String, Object> position(BlockPos pos) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("x", pos.getX()); out.put("y", pos.getY()); out.put("z", pos.getZ());
+        out.put("dimension", player.level().dimension().location().toString());
+        return out;
+    }
+
+    @Override
+    protected String successMessage() {
+        return "built and re-verified " + r.completed() + "/" + r.targets.size()
+                + " block(s) through first-person actions; placed " + r.placed()
+                + ", cleared " + r.broken() + " (" + note
+                + (r.traversabilityContract() == null ? "" : "; required routes re-verified") + ")";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "timed out while building through first-person actions; verified "
+                + r.completed() + "/" + r.targets.size() + " (" + note + ")";
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return "build interrupted after " + r.completed() + "/" + r.targets.size()
+                + " block(s) had been verified";
+    }
+}
