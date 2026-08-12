@@ -598,3 +598,106 @@ final class CreateMechanicalPlanner {
         for (int layer : candidateLayers(level, start, receiver)) {
             for (boolean xFirst : new boolean[]{true, false}) {
                 for (int pivot : new int[]{1, -1}) {
+                    candidates.add(fiveRunRoute(start, receiver, layer, xFirst, pivot));
+                }
+            }
+        }
+        List<TentativeRoute> approved = new ArrayList<>();
+        Set<String> identities = new HashSet<>();
+        for (List<BlockPos> route : candidates) {
+            if (route.isEmpty() || route.size() > 16_384 || hasDuplicate(route)
+                    || countRuns(route) > MAX_ROUTE_RUNS) continue;
+            boolean bounded = true;
+            for (BlockPos position : route) {
+                if (level.isOutsideBuildHeight(position)
+                        || !level.getWorldBorder().isWithinBounds(position)) {
+                    bounded = false;
+                    break;
+                }
+            }
+            if (bounded) {
+                List<BlockPos> frozen = List.copyOf(route);
+                String geometry = CreateMechanicalPlan.geometry(frozen);
+                String hash = CreateMechanicalPlan.hashRoute(frozen, geometry);
+                if (identities.add(hash)) {
+                    approved.add(new TentativeRoute(source, destination, receiver, frozen,
+                            geometry, hash, null, null));
+                }
+            }
+        }
+        approved.sort(Comparator.comparingInt((TentativeRoute candidate) -> candidate.positions().size())
+                .thenComparing(TentativeRoute::routeHash));
+        return approved.size() <= MAX_ENDPOINT_PAIR_ATTEMPTS
+                ? List.copyOf(approved)
+                : List.copyOf(approved.subList(0, MAX_ENDPOINT_PAIR_ATTEMPTS));
+    }
+
+    /**
+     * Prefer the endpoint layer and its small deterministic offsets, then add a handful of
+     * already-loaded terrain surfaces. This lets a high machine reach an existing ground-level
+     * service corridor without scanning dozens of speculative Y layers or changing terrain.
+     */
+    private static List<Integer> candidateLayers(
+            ClientLevel level, BlockPos start, BlockPos receiver) {
+        int base = Math.max(start.getY(), receiver.getY());
+        LinkedHashSet<Integer> layers = new LinkedHashSet<>();
+        addLayer(level, layers, base);
+        for (int offset = 1; offset <= MAX_LAYER_OFFSET; offset++) {
+            addLayer(level, layers, base + offset);
+            addLayer(level, layers, base - offset);
+        }
+
+        List<BlockPos> probes = List.of(
+                start,
+                receiver,
+                new BlockPos(Math.floorDiv(start.getX() + receiver.getX(), 2),
+                        base, Math.floorDiv(start.getZ() + receiver.getZ(), 2)),
+                new BlockPos(receiver.getX(), base, start.getZ()),
+                new BlockPos(start.getX(), base, receiver.getZ()));
+        for (BlockPos probe : probes) {
+            if (!level.hasChunkAt(probe)) continue;
+            int surface = level.getHeight(
+                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, probe.getX(), probe.getZ());
+            addLayer(level, layers, surface);
+            addLayer(level, layers, surface + 1);
+        }
+        return List.copyOf(layers);
+    }
+
+    private static void addLayer(ClientLevel level, Set<Integer> layers, int y) {
+        if (y > level.getMinBuildHeight() && y < level.getMaxBuildHeight() - 1) layers.add(y);
+    }
+
+    static CreateMechanicalPlan.RouteCell surveyCell(
+            ClientLevel level, TentativeRoute route, int index) {
+        if (index < 0 || index >= route.positions().size()) return null;
+        BlockPos position = route.positions().get(index);
+        BlockPos support = index == 0 ? route.source().position() : route.positions().get(index - 1);
+        Direction face = CreateMechanicalPlan.between(support, position);
+        if (face == null || !level.isLoaded(position) || !level.isLoaded(support)
+                || !isEmptyRouteCell(level, position)) return null;
+        BlockPos stand = findStand(level, position, new HashSet<>(route.positions()));
+        return stand == null ? null : new CreateMechanicalPlan.RouteCell(position, support, face, stand);
+    }
+
+    static BlockPos findTravelStand(
+            ClientLevel level, BlockPos around, int horizontalRadius, int verticalRadius) {
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int radius = 0; radius <= horizontalRadius; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    for (int dy = -verticalRadius; dy <= verticalRadius; dy++) {
+                        candidates.add(around.offset(dx, dy, dz));
+                    }
+                }
+            }
+        }
+        candidates.sort(Comparator.comparingDouble((BlockPos position) -> position.distSqr(around))
+                .thenComparingLong(BlockPos::asLong));
+        for (BlockPos candidate : candidates) {
+            if (standable(level, candidate)) return candidate.immutable();
+        }
+        return null;
+    }
+}
