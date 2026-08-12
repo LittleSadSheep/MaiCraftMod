@@ -298,3 +298,303 @@ final class CreateMechanicalPlanner {
             }
             if (missing > 0) {
                 unloaded++;
+            } else if (unsafe) {
+                blocked++;
+            } else {
+                RouteCandidate directCandidate = new RouteCandidate(source, destination, receiver,
+                        List.copyOf(direct), 0, direct.size() * 32);
+                if (materializeCells(level, directCandidate) == null) blocked++;
+                else best = directCandidate;
+            }
+        }
+        int base = Math.max(start.getY(), receiver.getY());
+        layerSearch:
+        for (int layer : candidateLayers(level, start, receiver)) {
+            for (boolean xFirst : new boolean[]{true, false}) {
+                for (int pivot : new int[]{1, -1}) {
+                    List<BlockPos> route = fiveRunRoute(start, receiver, layer, xFirst, pivot);
+                    if (route.isEmpty() || countRuns(route) > MAX_ROUTE_RUNS
+                            || hasDuplicate(route)) {
+                        blocked++;
+                        continue;
+                    }
+                    int missing = 0;
+                    boolean unsafe = false;
+                    for (BlockPos position : route) {
+                        if (!level.isLoaded(position)) {
+                            missing++;
+                        } else if (!isEmptyRouteCell(level, position)) {
+                            unsafe = true;
+                            break;
+                        }
+                    }
+                    if (missing > 0) {
+                        unloaded++;
+                        continue;
+                    }
+                    if (unsafe) {
+                        blocked++;
+                        continue;
+                    }
+                    int score = route.size() * 32 + Math.abs(layer - base) * 4
+                            + (xFirst ? 0 : 1) + (pivot > 0 ? 0 : 2);
+                    RouteCandidate candidate = new RouteCandidate(source, destination, receiver,
+                            List.copyOf(route), 0, score);
+                    if (materializeCells(level, candidate) == null) {
+                        blocked++;
+                    } else if (best == null || candidate.score < best.score) {
+                        best = candidate;
+                    }
+                }
+            }
+            // Layers are ordered by construction cost. Once this layer has a preserving route,
+            // later layers can only add vertical material and are not a better semantic choice.
+            if (best != null) break layerSearch;
+        }
+        return new RouteSearchOne(best, blocked, unloaded);
+    }
+
+    /** Direct route for endpoints sharing an X or Z axis; no artificial pivot/backtrack. */
+    private static List<BlockPos> alignedRoute(BlockPos start, BlockPos target) {
+        List<BlockPos> route = new ArrayList<>();
+        appendLine(route, start);
+        appendLine(route, new BlockPos(start.getX(), target.getY(), start.getZ()));
+        appendLine(route, target);
+        return route;
+    }
+
+    private static List<BlockPos> fiveRunRoute(
+            BlockPos start, BlockPos target, int layer, boolean xFirst, int pivot) {
+        List<BlockPos> route = new ArrayList<>();
+        appendLine(route, start);
+        BlockPos atLayer = new BlockPos(start.getX(), layer, start.getZ());
+        appendLine(route, atLayer);
+        if (xFirst) {
+            BlockPos firstAxis = new BlockPos(target.getX(), layer, start.getZ());
+            appendLine(route, firstAxis);
+            int pivotY = layer + pivot;
+            BlockPos pivotPoint = new BlockPos(target.getX(), pivotY, start.getZ());
+            appendLine(route, pivotPoint);
+            BlockPos secondAxis = new BlockPos(target.getX(), pivotY, target.getZ());
+            appendLine(route, secondAxis);
+            appendLine(route, target);
+        } else {
+            BlockPos firstAxis = new BlockPos(start.getX(), layer, target.getZ());
+            appendLine(route, firstAxis);
+            int pivotY = layer + pivot;
+            BlockPos pivotPoint = new BlockPos(start.getX(), pivotY, target.getZ());
+            appendLine(route, pivotPoint);
+            BlockPos secondAxis = new BlockPos(target.getX(), pivotY, target.getZ());
+            appendLine(route, secondAxis);
+            appendLine(route, target);
+        }
+        return route;
+    }
+
+    /** Append a Manhattan line from the current tail to target, excluding a duplicate tail. */
+    private static void appendLine(List<BlockPos> route, BlockPos target) {
+        if (route.isEmpty()) {
+            route.add(target.immutable());
+            return;
+        }
+        BlockPos cursor = route.get(route.size() - 1);
+        while (!cursor.equals(target)) {
+            int dx = Integer.compare(target.getX(), cursor.getX());
+            int dy = dx == 0 ? Integer.compare(target.getY(), cursor.getY()) : 0;
+            int dz = dx == 0 && dy == 0 ? Integer.compare(target.getZ(), cursor.getZ()) : 0;
+            cursor = cursor.offset(dx, dy, dz);
+            route.add(cursor.immutable());
+        }
+    }
+
+    private static List<CreateMechanicalPlan.RouteCell> materializeCells(
+            ClientLevel level, RouteCandidate candidate) {
+        Set<BlockPos> routeSet = new HashSet<>(candidate.positions);
+        List<CreateMechanicalPlan.RouteCell> result = new ArrayList<>(candidate.positions.size());
+        BlockPos prior = candidate.source.position();
+        for (BlockPos position : candidate.positions) {
+            Direction face = CreateMechanicalPlan.between(prior, position);
+            if (face == null) return null;
+            BlockPos stand = findStand(level, position, routeSet);
+            if (stand == null) return null;
+            result.add(new CreateMechanicalPlan.RouteCell(position, prior, face, stand));
+            prior = position;
+        }
+        return List.copyOf(result);
+    }
+
+    private static BlockPos findStand(ClientLevel level, BlockPos target, Set<BlockPos> route) {
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -4; dx <= 4; dx++) {
+                for (int dz = -4; dz <= 4; dz++) {
+                    BlockPos feet = target.offset(dx, dy, dz);
+                    if (route.contains(feet) || route.contains(feet.above())) continue;
+                    candidates.add(feet);
+                }
+            }
+        }
+        candidates.sort(Comparator.comparingDouble((BlockPos position) -> position.distSqr(target))
+                .thenComparingLong(BlockPos::asLong));
+        for (BlockPos feet : candidates) {
+            if (standable(level, feet) && withinPlacementReach(feet, target)) return feet.immutable();
+        }
+        return null;
+    }
+
+    private static boolean standable(ClientLevel level, BlockPos feet) {
+        BlockPos head = feet.above();
+        BlockPos floor = feet.below();
+        if (!level.isLoaded(feet) || !level.isLoaded(head) || !level.isLoaded(floor)) return false;
+        BlockState feetState = level.getBlockState(feet);
+        BlockState headState = level.getBlockState(head);
+        if (!feetState.getFluidState().isEmpty() || !headState.getFluidState().isEmpty()) return false;
+        // Use the exact same passability contract as PlayerNav: carpets, hand-openable doors,
+        // paths, stairs and slabs are real existing corridors, not "occupied" failures. Create
+        // remains stricter about fluids, crops/farmland and entities because this is a stationary
+        // precision-placement stance rather than an ordinary transit node.
+        if (!BlockHelper.isStandable(level, feet)
+                || BlockHelper.isHazard(level, feet)
+                || BlockHelper.isHazard(level, head)
+                || BlockHelper.isHazard(level, floor)
+                || protectedTerrain(level, feet)
+                || protectedTerrain(level, floor)) return false;
+        AABB body = new AABB(feet.getX() + 0.2, feet.getY(), feet.getZ() + 0.2,
+                feet.getX() + 0.8, feet.getY() + 1.8, feet.getZ() + 0.8);
+        return level.getEntities(null, body).isEmpty();
+    }
+
+    private static boolean withinPlacementReach(BlockPos feet, BlockPos target) {
+        double eyeX = feet.getX() + 0.5;
+        double eyeY = feet.getY() + 1.62;
+        double eyeZ = feet.getZ() + 0.5;
+        double dx = target.getX() + 0.5 - eyeX;
+        double dy = target.getY() + 0.5 - eyeY;
+        double dz = target.getZ() + 0.5 - eyeZ;
+        return dx * dx + dy * dy + dz * dz <= 4.35 * 4.35;
+    }
+
+    private static List<BlockPos> freeReceivers(
+            ClientLevel level, CreateMechanicalPower.Endpoint destination) {
+        List<BlockPos> result = new ArrayList<>();
+        BlockPos center = destination.center();
+        int radius = Math.min(8, destination.searchRadius());
+        for (int dy = -Math.min(radius, 4); dy <= Math.min(radius, 4); dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    BlockPos position = center.offset(dx, dy, dz);
+                    if (!level.isLoaded(position) || !isEmptyRouteCell(level, position)) continue;
+                    if (level.getBlockEntity(position.below()) != null) continue;
+                    if (protectedTerrain(level, position.below())) continue;
+                    result.add(position.immutable());
+                }
+            }
+        }
+        result.sort(Comparator.comparingDouble((BlockPos position) -> position.distSqr(center))
+                .thenComparingLong(BlockPos::asLong));
+        return result.size() <= 12 ? List.copyOf(result) : List.copyOf(result.subList(0, 12));
+    }
+
+    static boolean isEmptyRouteCell(ClientLevel level, BlockPos position) {
+        if (!level.isLoaded(position) || level.isOutsideBuildHeight(position)
+                || !level.getWorldBorder().isWithinBounds(position)) return false;
+        BlockState state = level.getBlockState(position);
+        if (!state.isAir() || !state.getFluidState().isEmpty()
+                || level.getBlockEntity(position) != null) return false;
+        return !protectedTerrain(level, position.below());
+    }
+
+    private static boolean protectedTerrain(ClientLevel level, BlockPos position) {
+        if (!level.isLoaded(position)) return true;
+        BlockState state = level.getBlockState(position);
+        Block block = state.getBlock();
+        return state.is(Blocks.FARMLAND) || block instanceof CropBlock || block instanceof StemBlock
+                || block instanceof AttachedStemBlock || block instanceof CocoaBlock
+                || state.is(Blocks.NETHER_WART) || state.is(Blocks.SWEET_BERRY_BUSH);
+    }
+
+    private static boolean hasDuplicate(List<BlockPos> route) {
+        return new HashSet<>(route).size() != route.size();
+    }
+
+    private static int countRuns(List<BlockPos> route) {
+        int runs = 0;
+        Direction prior = null;
+        for (int i = 1; i < route.size(); i++) {
+            Direction now = CreateMechanicalPlan.between(route.get(i - 1), route.get(i));
+            if (now == null) return Integer.MAX_VALUE;
+            if (now != prior) runs++;
+            prior = now;
+        }
+        return Math.max(1, runs);
+    }
+
+    // ---------------------------------------------------------------------
+    // Progressive loaded-world survey seam
+    // ---------------------------------------------------------------------
+
+    record EndpointSurvey(
+            List<CreateMechanicalPlan.KineticEndpoint> endpoints,
+            int loadedCells,
+            int unloadedCells,
+            int poweredEndpoints,
+            BlockPos nextObservation) {}
+
+    static EndpointSurvey surveyEndpoint(
+            ClientLevel level, CreateMechanicalPower.Endpoint region, boolean poweredOnly) {
+        Scan scan = scanKinetics(level, region, poweredOnly);
+        List<CreateMechanicalPlan.KineticEndpoint> endpoints = scan.candidates().stream()
+                .map(Candidate::endpoint).toList();
+        int powered = (int) endpoints.stream().filter(endpoint -> endpoint.network()
+                && Math.abs(endpoint.speed()) > 0.0001f).count();
+        return new EndpointSurvey(endpoints, scan.loadedCells(), scan.unloadedCells(), powered,
+                scan.nextObservation());
+    }
+
+    static List<BlockPos> surveyFreeReceivers(
+            ClientLevel level, CreateMechanicalPower.Endpoint destination) {
+        return freeReceivers(level, destination);
+    }
+
+    record TentativeRoute(
+            CreateMechanicalPlan.KineticEndpoint source,
+            CreateMechanicalPlan.KineticEndpoint destination,
+            BlockPos receiver,
+            List<BlockPos> positions,
+            String geometry,
+            String routeHash,
+            String failureCode,
+            String detail) {
+        boolean ready() { return failureCode == null; }
+    }
+
+    /**
+     * Geometry only. Cells may be unloaded and are not approved here; the progressive survey must
+     * walk the entire candidate, verify every cell/stance, and return to the source before use.
+     */
+    static TentativeRoute tentativeRoute(
+            ClientLevel level,
+            CreateMechanicalPlan.KineticEndpoint source,
+            CreateMechanicalPlan.KineticEndpoint destination,
+            BlockPos receiver) {
+        List<TentativeRoute> routes = tentativeRoutes(level, source, destination, receiver);
+        return routes.isEmpty()
+                ? new TentativeRoute(source, destination, receiver, List.of(), null, null,
+                        "progressive_route_unbounded",
+                        "no bounded at-most-five-run geometry connects the surveyed endpoints")
+                : routes.get(0);
+    }
+
+    static List<TentativeRoute> tentativeRoutes(
+            ClientLevel level,
+            CreateMechanicalPlan.KineticEndpoint source,
+            CreateMechanicalPlan.KineticEndpoint destination,
+            BlockPos receiver) {
+        BlockPos start = source.position().relative(source.shaftFace());
+        List<List<BlockPos>> candidates = new ArrayList<>();
+        if (start.getX() == receiver.getX() || start.getZ() == receiver.getZ()) {
+            candidates.add(alignedRoute(start, receiver));
+        }
+        for (int layer : candidateLayers(level, start, receiver)) {
+            for (boolean xFirst : new boolean[]{true, false}) {
+                for (int pivot : new int[]{1, -1}) {
