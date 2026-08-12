@@ -1498,3 +1498,62 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         craftingItemId = null;
         craftingSample = ItemStack.EMPTY;
         craftingPlanGroupIndex = -1;
+        craftingPlanAllocationIndex = -1;
+    }
+
+    private int firstEmpty(int from, int to) {
+        int upper = Math.min(to, player.getInventory().getContainerSize() - 1);
+        for (int slot = Math.max(0, from); slot <= upper; slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+        return -1;
+    }
+
+    private void stopNavigation() {
+        if (navigation != null) {
+            navigation.stop();
+            navigation = null;
+        }
+    }
+
+    private void setPhase(Phase next) {
+        phase = next;
+        phaseTicks = 0;
+    }
+
+    private void validateContext(LocalPlayerContext context) {
+        context.requireCurrent();
+        if (context.player() != player) {
+            throw new IllegalStateException("AE2 session belongs to another local-player body");
+        }
+    }
+
+    private static boolean exactCarriedMatches(ItemStack carried, ItemStack sample, int count) {
+        return count == 0 ? carried.isEmpty()
+                : !carried.isEmpty() && carried.getCount() == count && sameKind(carried, sample);
+    }
+
+    private static boolean same(ItemStack left, ItemStack right) {
+        return left.getCount() == right.getCount() && sameKind(left, right);
+    }
+
+    private static boolean sameKind(ItemStack left, ItemStack right) {
+        return ItemStack.isSameItemSameComponents(left, right);
+    }
+
+    /** Wireless charge components may change while its item identity remains the staged object. */
+    private static boolean stagedItemMatches(ItemStack actual, ItemStack stagedBefore) {
+        if (stagedBefore.isEmpty()) return actual.isEmpty();
+        return !actual.isEmpty()
+                && BuiltInRegistries.ITEM.getKey(actual.getItem())
+                .equals(BuiltInRegistries.ITEM.getKey(stagedBefore.getItem()));
+    }
+
+    private static final int INVENTORY_CONFIRM_TICKS = 60;
+    private static final int PROTOCOL_CONFIRM_TICKS = 200;
+    private static final int TERMINAL_OPEN_TICKS = 100;
+    private static final int REPOSITORY_READY_TICKS = 100;
+    private static final int CRAFT_JOB_CONFIRM_TICKS = 2_400;
+    private static final int CRAFT_STOCK_TICKS = 2_400;
+    private static final float LOOK_EPSILON = 1.5f;
+}
