@@ -598,3 +598,303 @@ final class CreateMechanicalPowerTask
             return TaskState.RUNNING;
         }
         cursor++;
+        readyTicks = 0;
+        context.body().clearLook();
+        data.put("confirmed_route_cells", cursor);
+        phase = cursor >= plan.cells().size() ? Phase.VERIFY : Phase.PREPARE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState verifyNetwork(LocalPlayerContext context) {
+        InputDriver.halt(player);
+        Validation route = validateWholeRoute(context.level());
+        if (route != null) {
+            beginFailure(route.code, route.detail, route.type, route.recovery, false);
+            return TaskState.RUNNING;
+        }
+        CreateKineticsBridge.Facts source = CreateKineticsBridge.inspect(
+                context.level(), plan.source().position());
+        CreateKineticsBridge.Facts destination = CreateKineticsBridge.inspect(
+                context.level(), plan.destinationPosition());
+        int expectedInventory = initialInventoryCount - (cursor - startCursor);
+        if (inventoryCount(player, chainItem) != expectedInventory) {
+            beginFailure("postcondition_failed",
+                    "the completed route did not consume exactly one item per confirmed placement",
+                    FailureType.UNKNOWN, List.of("inspect_inventory", "inspect_route", "cancel"), true);
+            return TaskState.RUNNING;
+        }
+        boolean sourceAccepted = source != null && source.powered()
+                || plan.progressive() && !context.level().isLoaded(plan.source().position());
+        if (sourceAccepted && destination != null && destination.powered()) {
+            float acceptedSourceSpeed = source == null ? plan.sourceSpeedAtSurvey() : source.speed();
+            data.put("source_speed", canonicalSpeed(acceptedSourceSpeed));
+            data.put("destination_speed", canonicalSpeed(destination.speed()));
+            if (source != null && source.overstressed() != null) {
+                data.put("source_overstressed", source.overstressed());
+            }
+            if (destination.overstressed() != null) data.put("destination_overstressed", destination.overstressed());
+            data.put("speed_unit", "create_rpm");
+            data.put("network_live", true);
+            data.put("source_verification", source == null
+                    ? "frozen_after_return_to_source_before_first_mutation"
+                    : "live_at_acceptance");
+            data.put("acceptance_basis",
+                    "the formerly unpowered destination became a live non-zero-speed endpoint after the exact contiguous route was confirmed");
+            data.put("placed_this_attempt", cursor - startCursor);
+            data.put("confirmed_route_cells", cursor);
+            failureCode = null;
+            failureDetail = null;
+            recoveryOptions = List.of();
+            desiredSuccess = true;
+            phase = Phase.RESTORE;
+            return TaskState.RUNNING;
+        }
+        if (++networkWaitTicks < NETWORK_CONFIRM_TICKS) return TaskState.RUNNING;
+        beginFailure("network_not_propagated",
+                "every route cell was confirmed, but the destination did not report a live non-zero-speed kinetic network",
+                FailureType.UNKNOWN,
+                List.of("inspect_overstress_or_direction", "inspect_endpoint", "cancel"), false);
+        return TaskState.RUNNING;
+    }
+
+    private TaskState restoreAndFinish(LocalPlayerContext context) {
+        InputDriver.halt(player);
+        CreateMechanicalStager.Status restored = stager == null
+                ? CreateMechanicalStager.Status.RESTORED : stager.restore(context);
+        if (restored == CreateMechanicalStager.Status.RUNNING) return TaskState.RUNNING;
+        if (restored == CreateMechanicalStager.Status.FAILED
+                || restored == CreateMechanicalStager.Status.UNCERTAIN) {
+            nativeOutcomeUncertain |= restored == CreateMechanicalStager.Status.UNCERTAIN;
+            failureCode = restored == CreateMechanicalStager.Status.UNCERTAIN
+                    ? "inventory_restoration_uncertain" : "inventory_restoration_failed";
+            failureDetail = stager.detail();
+            failureType = restored == CreateMechanicalStager.Status.FAILED
+                    ? FailureType.NO_SPACE : FailureType.UNKNOWN;
+            recoveryOptions = List.of("inspect_inventory", "do_not_repeat_blindly", "cancel");
+            desiredSuccess = false;
+        }
+        data.put("inventory_restoration", stager == null ? "not_needed" : stager.detail());
+        if (desiredSuccess) {
+            succeed();
+            return TaskState.SUCCESS;
+        }
+        fail(failureDetail == null ? "mechanical connection failed" : failureDetail, failureType);
+        return TaskState.FAILED;
+    }
+
+    private NativeConfirmation placementConfirmation(
+            CreateMechanicalPlan.RouteCell cell,
+            BlockState targetBefore,
+            BlockState supportBefore,
+            BlockState expected,
+            ItemStack stackBefore,
+            int totalBefore) {
+        return context -> {
+            ClientLevel level = context.level();
+            if (!level.isLoaded(cell.position()) || !level.isLoaded(cell.support())) {
+                return NativeConfirmation.Verdict.PENDING;
+            }
+            BlockState target = level.getBlockState(cell.position());
+            BlockState support = level.getBlockState(cell.support());
+            ItemStack held = context.player().getMainHandItem();
+            if (!support.equals(supportBefore)) return NativeConfirmation.Verdict.DIVERGED;
+            boolean blockAfter = target.equals(expected) && "y".equals(axisName(target));
+            boolean itemAfter = exactlyOneConsumed(stackBefore, held)
+                    && inventoryCount(context.player(), chainItem) == totalBefore - 1;
+            boolean blockBefore = target.equals(targetBefore);
+            boolean itemBefore = sameStack(held, stackBefore)
+                    && inventoryCount(context.player(), chainItem) == totalBefore;
+            if (blockAfter && itemAfter) return NativeConfirmation.Verdict.APPLIED;
+            if (blockBefore && itemBefore) return NativeConfirmation.Verdict.PENDING;
+            if ((blockBefore || blockAfter) && (itemBefore || itemAfter)) {
+                return NativeConfirmation.Verdict.PENDING;
+            }
+            return NativeConfirmation.Verdict.DIVERGED;
+        };
+    }
+
+    private Validation validateWholeRoute(ClientLevel level) {
+        Validation endpoint = validateSourceAndDestination(level, cursor == startCursor);
+        if (endpoint != null) return endpoint;
+        int from = plan.progressive() ? Math.max(0, cursor - 8) : 0;
+        int to = plan.progressive() ? Math.min(plan.cells().size(), cursor + 64) : plan.cells().size();
+        for (int i = from; i < to; i++) {
+            BlockPos position = plan.cells().get(i).position();
+            if (!level.isLoaded(position)) {
+                if (plan.progressive()) continue;
+                return new Validation("route_needs_exploration",
+                        "a planned route cell is no longer loaded", FailureType.TARGET_LOST,
+                        List.of("travel_to_load_corridor", "resume", "cancel"));
+            }
+            BlockState state = level.getBlockState(position);
+            if (i < cursor) {
+                if (state.getBlock() != chainBlock || !"y".equals(axisName(state))) {
+                    return new Validation("confirmed_prefix_changed",
+                            "a previously confirmed route cell changed",
+                            FailureType.TARGET_LOST,
+                            List.of("inspect_partial_route", "repair_manually", "cancel"));
+                }
+            } else if (!CreateMechanicalPlanner.isEmptyRouteCell(level, position)) {
+                return new Validation("route_changed",
+                        "a remaining route cell is no longer empty and safe",
+                        FailureType.TARGET_LOST,
+                        List.of("inspect_obstruction", "choose_other_route", "cancel"));
+            }
+        }
+        return null;
+    }
+
+    private Validation validateSourceAndDestination(ClientLevel level, boolean beforeFirstMutation) {
+        CreateMechanicalPlan.KineticEndpoint source = plan.source();
+        boolean sourceLoaded = level.isLoaded(source.position());
+        if (!sourceLoaded && plan.progressive() && cursor > 0) {
+            // The exact source was revalidated after returning from survey and immediately before
+            // the first mutation. Once a long route advances beyond its loaded window, only the
+            // frozen source fact is available; every newly loaded route cell is still rechecked.
+        } else if (!sourceLoaded || !level.getBlockState(source.position()).equals(source.state())) {
+            return new Validation("source_changed", "the selected source block changed or unloaded",
+                    FailureType.TARGET_LOST, List.of("inspect_source", "cancel"));
+        }
+        CreateKineticsBridge.Facts sourceFacts = sourceLoaded
+                ? CreateKineticsBridge.inspect(level, source.position()) : null;
+        if (sourceLoaded && (sourceFacts == null || !sourceFacts.powered())) {
+            return new Validation("source_changed", "the selected source is no longer a live powered endpoint",
+                    FailureType.TARGET_LOST, List.of("restore_source_power", "choose_other_source", "cancel"));
+        }
+        CreateMechanicalPlan.KineticEndpoint destination = plan.destinationMachine();
+        boolean destinationLoaded = destination == null
+                || level.isLoaded(destination.position());
+        if (destination != null && !destinationLoaded && plan.progressive()) {
+            // Frozen during destination survey; revalidated when its corridor window loads again.
+        } else if (destination != null && (!destinationLoaded
+                || !level.getBlockState(destination.position()).equals(destination.state()))) {
+            return new Validation("destination_changed", "the selected destination block changed or unloaded",
+                    FailureType.TARGET_LOST, List.of("inspect_destination", "cancel"));
+        }
+        boolean receiverPending = plan.progressive()
+                && cursor == plan.cells().size() - 1;
+        if (beforeFirstMutation || receiverPending) {
+            CreateKineticsBridge.Facts destinationFacts = level.isLoaded(plan.destinationPosition())
+                    ? CreateKineticsBridge.inspect(level, plan.destinationPosition()) : null;
+            if (destinationFacts != null && destinationFacts.powered()) {
+                return new Validation("destination_already_powered",
+                        receiverPending
+                                ? "the destination became powered before the surveyed receiver was connected; source membership is not provable"
+                                : "the destination became powered before the first approved placement; source membership is not provable",
+                        FailureType.TARGET_LOST,
+                        List.of("inspect_existing_network", "choose_unpowered_destination", "cancel"));
+            }
+        }
+        return null;
+    }
+
+    private record Validation(
+            String code, String detail, FailureType type, List<String> recovery) {}
+
+    private void beginFailure(
+            String code, String detail, FailureType type, List<String> recovery, boolean uncertain) {
+        if (phase == Phase.RESTORE) return;
+        failureCode = code;
+        failureDetail = detail;
+        failureType = type;
+        recoveryOptions = List.copyOf(recovery);
+        nativeOutcomeUncertain |= uncertain;
+        desiredSuccess = false;
+        if (progressiveSurvey != null) progressiveSurvey.stop();
+        constructionTravel.stop();
+        stopNavSafely();
+        phase = Phase.RESTORE;
+    }
+
+    private void failNow(String code, String detail, FailureType type, List<String> recovery) {
+        failureCode = code;
+        failureDetail = detail;
+        failureType = type;
+        recoveryOptions = List.copyOf(recovery);
+        fail(detail, type);
+    }
+
+    @Override
+    public void stop(LocalPlayer companion, Task.StopReason why) {
+        if (why != Task.StopReason.PREEMPTED) forcedStop = why;
+        if (why != Task.StopReason.PREEMPTED && failureCode == null) {
+            failureCode = why == Task.StopReason.BODY_GONE ? "body_gone" : "cancelled";
+            failureDetail = why == Task.StopReason.BODY_GONE
+                    ? "the local player body disappeared during the mechanical connection"
+                    : "the mechanical connection was cancelled or replaced";
+            recoveryOptions = why == Task.StopReason.BODY_GONE
+                    ? List.of("rejoin_world", "inspect_partial_route", "cancel")
+                    : List.of("resume_if_token_present", "inspect_partial_route", "cancel");
+        }
+        if (why != Task.StopReason.PREEMPTED
+                && (placementReceipt != null || stager != null && stager.hasPendingReceipt())) {
+            nativeOutcomeUncertain = true;
+            recoveryOptions = List.of("inspect_world_and_inventory", "do_not_retry_blindly", "cancel");
+        }
+        if (progressiveSurvey != null) {
+            if (why == Task.StopReason.PREEMPTED) progressiveSurvey.pause();
+            else progressiveSurvey.stop();
+        }
+        if (why == Task.StopReason.PREEMPTED) constructionTravel.pause();
+        else constructionTravel.stop();
+        if (why == Task.StopReason.BODY_GONE) return;
+        super.stop(companion, why);
+    }
+
+    @Override
+    protected void cleanup() {
+        if (supply.active()) supply.cancel(player);
+        if (progressiveSurvey != null) progressiveSurvey.stop();
+        constructionTravel.stop();
+        stopNavSafely();
+        issueContinuationIfSafe();
+    }
+
+    private void stopNavSafely() {
+        try {
+            stopNav();
+        } catch (RuntimeException ignored) {
+            nav = null;
+        }
+    }
+
+    private void issueContinuationIfSafe() {
+        if (continuationIssued || plan == null || cursor <= 0 || cursor >= plan.cells().size()
+                || nativeOutcomeUncertain || placementReceipt != null
+                || stager != null && stager.hasPendingReceipt()
+                || forcedStop == Task.StopReason.BODY_GONE) return;
+        CreateMechanicalStager.Snapshot staging = stager == null ? null : stager.snapshot();
+        if (stager != null && staging == null) return;
+        CreateMechanicalContinuations.Entry receipt = CreateMechanicalContinuations.issue(
+                r.request, plan, cursor, bodyEpoch, dimension, staging);
+        if (receipt == null) return;
+        continuationIssued = true;
+        data.put("continuation_token", receipt.token().toString());
+        data.put("continuation_confirmed_prefix", cursor);
+        data.put("continuation_prefix_hash", receipt.prefixHash());
+        data.put("continuation_policy", "resume_only_after_revalidating_exact_prefix_and_remaining_empty_route");
+    }
+
+    @Override
+    protected Map<String, Object> resultData() {
+        Map<String, Object> safe = new LinkedHashMap<>();
+        copyResultField(data, safe,
+                "progressive_survey", "progressive_travel_segments",
+                "progressive_rejected_route_candidates", "source_loaded_cells",
+                "source_unloaded_cells", "destination_loaded_cells",
+                "destination_unloaded_cells", "numeric_stress_margin_supported",
+                "stress_evidence", "delivery_kind", "required_chain_drives_this_attempt",
+                "available_chain_drives", "source_speed", "destination_speed",
+                "source_overstressed", "destination_overstressed", "speed_unit",
+                "network_live", "source_verification", "acceptance_basis",
+                "placed_this_attempt",
+                "inventory_restoration", "reinvestigated_after_supply",
+                "continuation_token", "continuation_confirmed_prefix",
+                "continuation_policy");
+        if (failureCode != null) safe.put("failure_code", failureCode);
+        if (!recoveryOptions.isEmpty()) safe.put("recovery_options", recoveryOptions);
+        safe.put("confirmed_placements", cursor);
+        safe.put("planned_placements", plan == null ? 0 : plan.cells().size());
+        safe.put("native_outcome_uncertain", nativeOutcomeUncertain);
+        safe.put("material_policy", r.materialPolicy.id());
+        safe.put("supply_rounds", supplyRounds);
