@@ -598,3 +598,303 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             beginFinish(Ae2ResourceSupply.Status.FAILED,
                     acquired > group.count() || confirmed > group.count()
                             ? "approved_transfer_exceeded" : "inventory_changed",
+                    "the live inventory no longer matches the bound AE2 transfer plan");
+            return;
+        }
+        if (confirmed == group.count()) {
+            clearCraftingTarget();
+            groupIndex++;
+            return;
+        }
+        int allocationIndex = -1;
+        for (int i = 0; i < plannedGroup.allocations().size(); i++) {
+            if (plannedGroup.allocations().get(i).remaining() > 0) {
+                allocationIndex = i;
+                break;
+            }
+        }
+        if (allocationIndex < 0) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                    "the executable AE2 allocation is missing before the group is complete");
+            return;
+        }
+        Ae2SupplyPlanner.Allocation allocation = plannedGroup.allocations().get(allocationIndex);
+        int remaining = allocation.remaining();
+        List<Ae2ReflectionBridge.Entry> matching =
+                Ae2SupplyPlanner.matchingEntries(entries, allocation);
+        Ae2ReflectionBridge.Entry stocked = matching.stream()
+                .filter(entry -> entry.storedAmount() > 0)
+                .sorted(Comparator.comparingLong(Ae2ReflectionBridge.Entry::storedAmount).reversed()
+                        .thenComparingLong(Ae2ReflectionBridge.Entry::serial))
+                .findFirst().orElse(null);
+        if (stocked != null) {
+            if (!player.containerMenu.getCarried().isEmpty()) {
+                beginFinish(Ae2ResourceSupply.Status.FAILED, "inventory_cursor_changed",
+                        "the inventory cursor changed before exact AE2 extraction");
+                return;
+            }
+            ExtractionDestination destination = exactDestination(player.containerMenu, stocked.sample());
+            if (destination == null) {
+                beginFinish(Ae2ResourceSupply.Status.FAILED, "inventory_full",
+                        "no compatible inventory slot can receive the exact AE2 extraction");
+                return;
+            }
+            int batch = Math.min(
+                    Math.min(remaining, (int) Math.min(Integer.MAX_VALUE, stocked.storedAmount())),
+                    Math.min(destination.capacity(), stocked.sample().getMaxStackSize()));
+            if (batch <= 0) {
+                beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "network_stock_changed",
+                        "the selected AE2 entry no longer has an extractable exact batch");
+                return;
+            }
+            exactExtraction = new ExactExtraction(
+                    stocked.itemId(), stocked.serial(), stocked.sample(), groupIndex, allocationIndex,
+                    destination.inventorySlot(), destination.menuSlot(), destination.before(),
+                    batch, inventoryCount(stocked.itemId()));
+            setPhase(Phase.COLLECT_EXACT);
+            return;
+        }
+        Ae2ReflectionBridge.Entry craftable = matching.stream()
+                .filter(Ae2ReflectionBridge.Entry::craftable)
+                .min(Comparator.comparingLong(Ae2ReflectionBridge.Entry::serial)).orElse(null);
+        if (allocation.craftingAllowed() && craftable != null
+                && capacityFor(allocation.sample()) >= remaining) {
+            craftingMissing = remaining;
+            craftingItemId = craftable.itemId();
+            craftingSample = allocation.sample().copyWithCount(1);
+            craftingPlanGroupIndex = groupIndex;
+            craftingPlanAllocationIndex = allocationIndex;
+            boolean submitted = submitProtocol(
+                    context,
+                    "ae2_open_craft_amount",
+                    () -> bridge.startAutoCraft(menu, craftable.serial()),
+                    fresh -> {
+                        Object active = fresh.player().containerMenu;
+                        if (bridge.isCraftAmountMenu(active)) {
+                            return NativeConfirmation.Verdict.APPLIED;
+                        }
+                        return active == menu
+                                ? NativeConfirmation.Verdict.PENDING
+                                : NativeConfirmation.Verdict.DIVERGED;
+                    });
+            if (submitted) {
+                effectsStarted = true;
+                setPhase(Phase.WAIT_CRAFT_AMOUNT);
+            }
+            return;
+        }
+        beginFinish(Ae2ResourceSupply.Status.FAILED, "resource_plan_changed",
+                "the bound AE2 candidate can no longer complete its planned allocation");
+    }
+
+    /** Prepare complete network stock, including confirmed auto-crafting, without extraction. */
+    private void processPreparedItem(
+            LocalPlayerContext context, List<Ae2ReflectionBridge.Entry> entries) {
+        Ae2SupplyPlanner.PlannedGroup plannedGroup = plan.groups().get(groupIndex);
+        if (plannedGroup.confirmedCount() == plannedGroup.group().count()) {
+            clearCraftingTarget();
+            groupIndex++;
+            return;
+        }
+        int allocationIndex = -1;
+        for (int index = 0; index < plannedGroup.allocations().size(); index++) {
+            if (plannedGroup.allocations().get(index).remaining() > 0) {
+                allocationIndex = index;
+                break;
+            }
+        }
+        if (allocationIndex < 0) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                    "the prepared AE2 allocation is missing before the group is complete");
+            return;
+        }
+        Ae2SupplyPlanner.Allocation allocation = plannedGroup.allocations().get(allocationIndex);
+        List<Ae2ReflectionBridge.Entry> matching =
+                Ae2SupplyPlanner.matchingEntries(entries, allocation);
+        long stocked = matching.stream().mapToLong(Ae2ReflectionBridge.Entry::storedAmount).sum();
+        int remaining = allocation.remaining();
+        if (stocked >= remaining) {
+            allocation.confirm(remaining);
+            return;
+        }
+        Ae2ReflectionBridge.Entry craftable = matching.stream()
+                .filter(Ae2ReflectionBridge.Entry::craftable)
+                .min(Comparator.comparingLong(Ae2ReflectionBridge.Entry::serial)).orElse(null);
+        if (!allocation.craftingAllowed() || craftable == null) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "network_stock_changed",
+                    "the AE2 network can no longer prepare the complete material ledger");
+            return;
+        }
+        craftingMissing = (int) Math.min(Integer.MAX_VALUE, remaining - stocked);
+        craftingItemId = craftable.itemId();
+        craftingSample = allocation.sample().copyWithCount(1);
+        craftingPlanGroupIndex = groupIndex;
+        craftingPlanAllocationIndex = allocationIndex;
+        Object menu = storageMenuOrFail();
+        if (menu == null) return;
+        boolean submitted = submitProtocol(
+                context,
+                "ae2_open_craft_amount",
+                () -> bridge.startAutoCraft(menu, craftable.serial()),
+                fresh -> {
+                    Object active = fresh.player().containerMenu;
+                    if (bridge.isCraftAmountMenu(active)) return NativeConfirmation.Verdict.APPLIED;
+                    return active == menu
+                            ? NativeConfirmation.Verdict.PENDING
+                            : NativeConfirmation.Verdict.DIVERGED;
+                });
+        if (submitted) {
+            effectsStarted = true;
+            setPhase(Phase.WAIT_CRAFT_AMOUNT);
+        }
+    }
+
+    private void collectExact(LocalPlayerContext context) {
+        ExactExtraction extraction = requireExtraction();
+        if (extraction == null) return;
+        Object menu = storageMenuOrFail();
+        if (menu == null) return;
+        if (!extraction.planValidated) {
+            List<Ae2ReflectionBridge.Entry> entries = bridge.entries(menu);
+            if (entries == null) {
+                exactExtraction = null;
+                setPhase(Phase.WAIT_REPOSITORY);
+                return;
+            }
+            String issue = Ae2SupplyPlanner.issue(
+                    plan, player, entries, reservedInventorySlots(), this::groupProgress);
+            if (issue != null) {
+                if (!effectsStarted && installPlan(entries)) setPhase(Phase.PROCESS_ITEM);
+                else beginFinish(Ae2ResourceSupply.Status.FAILED, "resource_plan_changed",
+                        "the bound extraction changed before submission: " + issue);
+                return;
+            }
+            boolean entryBound = entries.stream().anyMatch(entry ->
+                    entry.serial() == extraction.serial
+                            && entry.itemId().equals(extraction.itemId)
+                            && entry.storedAmount() > 0
+                            && same(entry.sample(), extraction.sample));
+            if (!entryBound) {
+                exactExtraction = null;
+                setPhase(Phase.PROCESS_ITEM);
+                return;
+            }
+            extraction.planValidated = true;
+        }
+        ItemStack carried = player.containerMenu.getCarried();
+        if (!exactCarriedMatches(carried, extraction.sample, extraction.collected)) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "inventory_cursor_changed",
+                    "the cursor no longer matches the exact AE2 extraction batch");
+            return;
+        }
+        if (extraction.collected >= extraction.batch) {
+            setPhase(Phase.PLACE_EXACT);
+            return;
+        }
+        int beforeCount = extraction.collected;
+        boolean submitted = submitProtocol(
+                context,
+                "ae2_extract_single",
+                () -> bridge.pickupSingle(menu, extraction.serial),
+                fresh -> {
+                    Object active = fresh.player().containerMenu;
+                    if (!bridge.isStorageMenu(active)) {
+                        return NativeConfirmation.Verdict.DIVERGED;
+                    }
+                    ItemStack freshCarried = fresh.player().containerMenu.getCarried();
+                    if (exactCarriedMatches(freshCarried, extraction.sample, beforeCount + 1)) {
+                        return NativeConfirmation.Verdict.APPLIED;
+                    }
+                    return exactCarriedMatches(freshCarried, extraction.sample, beforeCount)
+                            ? NativeConfirmation.Verdict.PENDING
+                            : NativeConfirmation.Verdict.DIVERGED;
+                });
+        if (submitted) {
+            effectsStarted = true;
+            setPhase(Phase.WAIT_EXACT_UNIT);
+        }
+    }
+
+    private void waitExactUnit(LocalPlayerContext context) {
+        ExactExtraction extraction = requireExtraction();
+        if (extraction == null) return;
+        if (!settleNativeReceipt(context, "ae2_extract_unconfirmed")) return;
+        ItemStack carried = player.containerMenu.getCarried();
+        int expected = extraction.collected + 1;
+        if (exactCarriedMatches(carried, extraction.sample, expected)) {
+            extraction.collected = expected;
+            setPhase(expected == extraction.batch ? Phase.PLACE_EXACT : Phase.COLLECT_EXACT);
+            return;
+        }
+        finishUncertain("ae2_extract_diverged",
+                "AE2 confirmed extraction without the expected exact cursor amount");
+    }
+
+    private void placeExact(LocalPlayerContext context) {
+        ExactExtraction extraction = requireExtraction();
+        if (extraction == null) return;
+        AbstractContainerMenu menu = player.containerMenu;
+        if (!bridge.isStorageMenu(menu)
+                || !exactCarriedMatches(menu.getCarried(), extraction.sample, extraction.batch)) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "inventory_cursor_changed",
+                    "the exact AE2 cursor batch changed before inventory placement");
+            return;
+        }
+        if (!same(player.getInventory().getItem(extraction.inventorySlot), extraction.destinationBefore)
+                || menuSlotForInventory(menu, extraction.inventorySlot) != extraction.menuSlot) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "inventory_changed",
+                    "the reserved inventory destination changed during exact extraction");
+            return;
+        }
+        menuReceipt = context.menus().click(
+                context, extraction.menuSlot, 0, ClickType.PICKUP,
+                (fresh, ignored) -> {
+                    int delta = inventoryCount(extraction.itemId) - extraction.inventoryCountBefore;
+                    ItemStack cursor = fresh.player().containerMenu.getCarried();
+                    if (cursor.isEmpty() && delta == extraction.batch) {
+                        return MenuConfirmation.Verdict.APPLIED;
+                    }
+                    if (delta > extraction.batch || delta < 0
+                            || !exactCarriedMatches(cursor, extraction.sample, extraction.batch)) {
+                        return MenuConfirmation.Verdict.DIVERGED;
+                    }
+                    return MenuConfirmation.Verdict.PENDING;
+                }, INVENTORY_CONFIRM_TICKS);
+        setPhase(Phase.WAIT_EXACT_PLACE);
+    }
+
+    private void waitExactPlace(LocalPlayerContext context) {
+        ExactExtraction extraction = requireExtraction();
+        if (extraction == null) return;
+        if (!settleMenuReceipt(context, "inventory_delta_unconfirmed")) return;
+        int delta = inventoryCount(extraction.itemId) - extraction.inventoryCountBefore;
+        if (!player.containerMenu.getCarried().isEmpty() || delta != extraction.batch) {
+            finishUncertain("inventory_delta_unconfirmed",
+                    "the exact AE2 placement did not become the approved inventory delta");
+            return;
+        }
+        Ae2SupplyPlanner.Allocation allocation = plan.groups().get(extraction.planGroupIndex)
+                .allocations().get(extraction.planAllocationIndex);
+        if (extraction.planGroupIndex != groupIndex
+                || !allocation.itemId().equals(extraction.itemId)
+                || !same(allocation.sample(), extraction.sample)) {
+            finishUncertain("resource_plan_changed",
+                    "the confirmed AE2 extraction no longer matches its bound allocation");
+            return;
+        }
+        allocation.confirm(extraction.batch);
+        Ae2ResourceSupply.Group group = plan.groups().get(extraction.planGroupIndex).group();
+        if (group.selectionMode() == Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT
+                && !extraction.itemId.equals(lockedVariantByGroup.get(group.itemId()))) {
+            finishUncertain("single_variant_conflict",
+                    "the confirmed AE2 extraction violated its locked concrete variant");
+            return;
+        }
+        if (allocation.remaining() == 0
+                && craftingPlanGroupIndex == extraction.planGroupIndex
+                && craftingPlanAllocationIndex == extraction.planAllocationIndex) {
+            clearCraftingTarget();
+        }
+        exactExtraction = null;
+        setPhase(Phase.PROCESS_ITEM);
+    }
