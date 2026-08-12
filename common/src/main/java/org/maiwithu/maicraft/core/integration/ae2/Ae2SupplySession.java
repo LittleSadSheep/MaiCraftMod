@@ -298,3 +298,303 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 beginStage(context, wireless.inventorySlot(), hotbar, Phase.OPEN_WIRELESS);
             }
             return;
+        }
+
+        remembered = Ae2TerminalAccess.remembered(player);
+        if (remembered != null && Ae2TerminalAccess.stillPresent(
+                player, bridge, remembered.position(), remembered.side())) {
+            fixedCandidates = Ae2TerminalAccess.targetsFor(
+                    player, remembered.position(), remembered.side());
+        } else {
+            if (remembered != null) Ae2TerminalAccess.discard(remembered);
+            remembered = null;
+            Ae2TerminalAccess.Discovery discovery = Ae2TerminalAccess.discover(player, bridge);
+            fixedCandidates = discovery.targets();
+            if (fixedCandidates.isEmpty()) {
+                String code = discovery.terminalsObserved() > 0
+                        ? "fixed_terminal_unreachable" : "fixed_terminal_not_found";
+                finishNow(Ae2ResourceSupply.Status.FAILED, code,
+                        discovery.terminalsObserved() > 0
+                                ? "loaded fixed AE2 terminals have no bounded interaction approach"
+                                : "no wireless or loaded fixed AE2 terminal is available", false);
+                return;
+            }
+        }
+        if (fixedCandidates.isEmpty()) {
+            finishNow(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_unreachable",
+                    "the remembered AE2 terminal has no bounded interaction approach", false);
+            return;
+        }
+        terminalAccess = "fixed_terminal";
+        int emptyHotbar = firstEmpty(0, 8);
+        if (emptyHotbar >= 0) {
+            selectedTerminalSlot = emptyHotbar;
+            requestSelect(context, emptyHotbar, Phase.NAVIGATE_FIXED);
+            return;
+        }
+        int emptyStorage = firstEmpty(9, 35);
+        if (emptyStorage < 0) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "safe_hand_unavailable",
+                    "opening a fixed AE2 terminal requires an empty hand and no slot can stage one");
+            return;
+        }
+        beginStage(context, emptyStorage, originalSelected, Phase.NAVIGATE_FIXED);
+    }
+
+    private void beginStage(
+            LocalPlayerContext context, int sourceSlot, int hotbarSlot, Phase next) {
+        inventorySwap = new InventorySwap(
+                sourceSlot, hotbarSlot,
+                player.getInventory().getItem(sourceSlot),
+                player.getInventory().getItem(hotbarSlot));
+        selectedTerminalSlot = hotbarSlot;
+        afterSelect = next;
+        menuReceipt = context.menus().swapInventoryToHotbar(
+                context, sourceSlot, hotbarSlot, INVENTORY_CONFIRM_TICKS);
+        setPhase(Phase.WAIT_STAGE);
+    }
+
+    private void waitStage(LocalPlayerContext context) {
+        if (!settleMenuReceipt(context, "inventory_stage_unconfirmed")) return;
+        requestSelect(context, selectedTerminalSlot, afterSelect);
+    }
+
+    private void requestSelect(LocalPlayerContext context, int slot, Phase next) {
+        afterSelect = next;
+        if (player.getInventory().selected == slot) {
+            setPhase(next);
+            return;
+        }
+        nativeReceipt = context.actions().selectHotbar(context, slot, 20);
+        setPhase(Phase.WAIT_SELECT);
+    }
+
+    private void waitSelect(LocalPlayerContext context) {
+        if (!settleNativeReceipt(context, "hotbar_selection_unconfirmed")) return;
+        setPhase(afterSelect);
+    }
+
+    private void navigateFixed() {
+        if (fixedCandidates.isEmpty()) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_unreachable",
+                    "no fixed-terminal approach remains");
+            return;
+        }
+        if (navigation == null) {
+            List<NavGoal> goals = fixedCandidates.stream()
+                    .map(target -> NavGoal.exact(target.approach())).toList();
+            navigation = PlayerNav.toGoal(
+                    player,
+                    () -> NavGoal.composite(goals),
+                    1.0,
+                    () -> fixedCandidates.stream()
+                            .anyMatch(target -> target.approach().equals(player.blockPosition())));
+        }
+        PlayerNav.Status status = navigation.tick();
+        if (status == PlayerNav.Status.RUNNING) return;
+        if (status == PlayerNav.Status.FAILED) {
+            String reason = navigation.failReason();
+            stopNavigation();
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    remembered != null ? "last_known_terminal_path_blocked" : "fixed_terminal_unreachable",
+                    "the player could not reach a fixed AE2 terminal: " + reason);
+            return;
+        }
+        fixedTarget = fixedCandidates.stream()
+                .filter(target -> target.approach().equals(player.blockPosition()))
+                .findFirst().orElse(null);
+        stopNavigation();
+        if (fixedTarget == null || !Ae2TerminalAccess.stillPresent(
+                player, bridge, fixedTarget.position(), fixedTarget.side())) {
+            if (remembered != null) Ae2TerminalAccess.discard(remembered);
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    "fixed_terminal_changed", "the selected fixed AE2 terminal changed before use");
+            return;
+        }
+        movedForFixedTerminal = !callerOrigin.equals(player.blockPosition());
+        setPhase(Phase.FACE_FIXED);
+    }
+
+    private void faceFixed(LocalPlayerContext context) {
+        Ae2TerminalAccess.FixedTarget target = fixedTarget;
+        if (target == null || !Ae2TerminalAccess.stillPresent(
+                player, bridge, target.position(), target.side())) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    "fixed_terminal_changed", "the selected fixed AE2 terminal changed before interaction");
+            return;
+        }
+        double reach = player.blockInteractionRange();
+        if (player.getEyePosition().distanceToSqr(target.hit()) > reach * reach) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    "fixed_terminal_unreachable", "the fixed AE2 terminal is outside native reach");
+            return;
+        }
+        Vec3 delta = target.hit().subtract(player.getEyePosition());
+        double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        float yaw = Mth.wrapDegrees((float) Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90.0f);
+        float pitch = Mth.clamp((float) -Math.toDegrees(Math.atan2(delta.y, horizontal)), -90.0f, 90.0f);
+        context.body().applyMovement(BodyControlPort.Movement.STOPPED, context.tickRevision());
+        context.body().requestLook(yaw, pitch, context.tickRevision());
+        if (Math.abs(Mth.wrapDegrees(yaw - player.getYRot())) <= LOOK_EPSILON
+                && Math.abs(pitch - player.getXRot()) <= LOOK_EPSILON) {
+            setPhase(Phase.OPEN_FIXED);
+        }
+    }
+
+    private void openFixed(LocalPlayerContext context) {
+        Ae2TerminalAccess.FixedTarget target = fixedTarget;
+        if (target == null || !Ae2TerminalAccess.stillPresent(
+                player, bridge, target.position(), target.side())) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    "fixed_terminal_changed", "the fixed AE2 terminal changed before opening");
+            return;
+        }
+        if (!player.getMainHandItem().isEmpty()) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "safe_hand_unavailable",
+                    "the selected hand is no longer empty for fixed-terminal interaction");
+            return;
+        }
+        int beforeContainer = player.containerMenu.containerId;
+        nativeReceipt = context.actions().useBlock(
+                context,
+                InteractionHand.MAIN_HAND,
+                new BlockHitResult(target.hit(), target.side(), target.position(), false),
+                NativeConfirmation.menuChanged(beforeContainer),
+                TERMINAL_OPEN_TICKS);
+        setPhase(Phase.WAIT_OPEN);
+    }
+
+    private void openWireless(LocalPlayerContext context) {
+        if (selectedTerminalSlot < 0 || wireless == null) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "wireless_terminal_missing",
+                    "the selected wireless AE2 terminal is unavailable");
+            return;
+        }
+        ItemStack stack = player.getInventory().getItem(selectedTerminalSlot);
+        if (stack.isEmpty()
+                || !BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(wireless.itemId())
+                || player.getInventory().selected != selectedTerminalSlot) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    "wireless_terminal_changed", "the staged wireless AE2 terminal changed before use");
+            return;
+        }
+        int beforeContainer = player.containerMenu.containerId;
+        nativeReceipt = context.actions().useItem(
+                context,
+                InteractionHand.MAIN_HAND,
+                NativeConfirmation.menuChanged(beforeContainer),
+                TERMINAL_OPEN_TICKS);
+        setPhase(Phase.WAIT_OPEN);
+    }
+
+    private void waitOpen(LocalPlayerContext context) {
+        if (!settleNativeReceipt(context, "terminal_open_unconfirmed")) return;
+        setPhase(Phase.WAIT_REPOSITORY);
+    }
+
+    private void waitRepository() {
+        Object menu = storageMenuOrFail();
+        if (menu == null) return;
+        if (!bridge.connected(menu)) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    "ae2_network_disconnected", "the AE2 terminal is not connected to a storage network");
+            return;
+        }
+        List<Ae2ReflectionBridge.Entry> entries = bridge.entries(menu);
+        if (entries == null) {
+            if (phaseTicks > REPOSITORY_READY_TICKS) {
+                beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                        "ae2_repository_pending", "the AE2 client repository did not become ready");
+            }
+            return;
+        }
+        if (!installPlan(entries)) return;
+        if (fixedTarget != null) Ae2TerminalAccess.remember(player, fixedTarget);
+        setPhase(Phase.PROCESS_ITEM);
+    }
+
+    private boolean installPlan(List<Ae2ReflectionBridge.Entry> entries) {
+        if (effectsStarted) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "resource_plan_changed",
+                    "AE2 refused to replace a resource plan after an effect began");
+            return false;
+        }
+        baseline = inventoryCounts();
+        Ae2SupplyPlanner.Result built = request.operation() == Ae2ResourceSupply.Operation.PREPARE
+                ? Ae2SupplyPlanner.prepare(request, entries)
+                : Ae2SupplyPlanner.build(player, request, entries, reservedInventorySlots());
+        if (built.failure() != null) {
+            Ae2SupplyPlanner.Failure failure = built.failure();
+            beginFinish(Ae2ResourceSupply.Status.FAILED, failure.code(), failure.message());
+            return false;
+        }
+        plan = built.plan();
+        lockedVariantByGroup.clear();
+        for (Ae2SupplyPlanner.PlannedGroup group : plan.groups()) {
+            if (group.group().selectionMode() != Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT) {
+                continue;
+            }
+            List<ResourceLocation> selected = group.allocations().stream()
+                    .map(Ae2SupplyPlanner.Allocation::itemId).distinct().toList();
+            if (selected.size() != 1) {
+                beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                        "a single-variant AE2 plan selected more than one concrete item ID");
+                return false;
+            }
+            lockedVariantByGroup.put(group.group().itemId(), selected.getFirst());
+        }
+        groupIndex = 0;
+        exactExtraction = null;
+        clearCraftingTarget();
+        return true;
+    }
+
+    private void processItem(LocalPlayerContext context) {
+        if (groupIndex >= request.groups().size()) {
+            beginFinish(Ae2ResourceSupply.Status.SUCCEEDED,
+                    request.operation() == Ae2ResourceSupply.Operation.PREPARE
+                            ? "resources_prepared" : "resources_supplied",
+                    request.operation() == Ae2ResourceSupply.Operation.PREPARE
+                            ? "AE2 prepared the complete approved network stock"
+                            : "AE2 supplied the approved resource delta");
+            return;
+        }
+        Object menu = storageMenuOrFail();
+        if (menu == null) return;
+        if (!bridge.connected(menu)) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    "ae2_network_disconnected", "the AE2 network disconnected during supply");
+            return;
+        }
+        List<Ae2ReflectionBridge.Entry> entries = bridge.entries(menu);
+        if (entries == null) {
+            setPhase(Phase.WAIT_REPOSITORY);
+            return;
+        }
+        if (plan == null) {
+            if (installPlan(entries)) setPhase(Phase.PROCESS_ITEM);
+            return;
+        }
+        if (request.operation() == Ae2ResourceSupply.Operation.PREPARE) {
+            processPreparedItem(context, entries);
+            return;
+        }
+        String issue = Ae2SupplyPlanner.issue(
+                plan, player, entries, reservedInventorySlots(), this::groupProgress);
+        if (issue != null) {
+            if (!effectsStarted) {
+                if (installPlan(entries)) setPhase(Phase.PROCESS_ITEM);
+            } else {
+                beginFinish(Ae2ResourceSupply.Status.FAILED, "resource_plan_changed",
+                        "the bound AE2 resource plan changed after an effect began: " + issue);
+            }
+            return;
+        }
+        Ae2SupplyPlanner.PlannedGroup plannedGroup = plan.groups().get(groupIndex);
+        Ae2ResourceSupply.Group group = request.groups().get(groupIndex);
+        int confirmed = plannedGroup.confirmedCount();
+        int acquired = groupProgress(group);
+        if (acquired != confirmed || confirmed > group.count()) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED,
+                    acquired > group.count() || confirmed > group.count()
+                            ? "approved_transfer_exceeded" : "inventory_changed",
