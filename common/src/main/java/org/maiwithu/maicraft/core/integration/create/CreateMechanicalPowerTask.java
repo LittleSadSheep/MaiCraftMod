@@ -298,3 +298,303 @@ final class CreateMechanicalPowerTask
                 progressiveSurvey.rejectedRouteCandidates());
         data.put("source_loaded_cells", progressiveSurvey.sourceLoadedCells());
         data.put("source_unloaded_cells", progressiveSurvey.sourceUnloadedCells());
+        data.put("destination_loaded_cells", progressiveSurvey.destinationLoadedCells());
+        data.put("destination_unloaded_cells", progressiveSurvey.destinationUnloadedCells());
+        data.put("corridor_survey_digest", progressiveSurvey.surveyDigest());
+        data.put("route_hash", plan.routeHash());
+        data.put("route_cells", plan.cells().size());
+        data.put("numeric_stress_margin_supported", false);
+        data.put("stress_evidence",
+                "non-zero speed plus optional boolean overstress; numeric capacity/impact margin unavailable");
+        data.put("delivery_kind", plan.destinationMachine() == null
+                ? "verified_free_receiver" : "kinetic_machine");
+        stager = new CreateMechanicalStager(player);
+        cursor = 0;
+        if (!initializeApprovedPlan(true)) return TaskState.RUNNING;
+        phase = Phase.PREPARE;
+        return TaskState.RUNNING;
+    }
+
+    private boolean initializeApprovedPlan(boolean duringTick) {
+        startCursor = cursor;
+        initialInventoryCount = inventoryCount(player, chainItem);
+        int required = plan.cells().size() - cursor;
+        data.put("required_chain_drives_this_attempt", required);
+        data.put("available_chain_drives", initialInventoryCount);
+        data.put("route_hash", plan.routeHash());
+        if (required > SemanticAcquireTaskRecord.MAX_FINAL_COUNT) {
+            String detail = "the investigated route needs " + required
+                    + " material items, beyond the bounded main-inventory supply ceiling of "
+                    + SemanticAcquireTaskRecord.MAX_FINAL_COUNT;
+            List<String> recovery = List.of(
+                    "shorten_route", "choose_closer_endpoint", "cancel");
+            if (duringTick) {
+                beginFailure("material_ledger_exceeds_inventory", detail,
+                        FailureType.NO_SPACE, recovery, false);
+            } else {
+                failNow("material_ledger_exceeds_inventory", detail,
+                        FailureType.NO_SPACE, recovery);
+            }
+            return false;
+        }
+        if (initialInventoryCount < required) {
+            if (r.continuationToken == null && cursor == 0) {
+                startMaterialSupply(required);
+                return false;
+            }
+            String detail = "need " + required + " default-component encased chain drives but only "
+                    + initialInventoryCount + " are available";
+            List<String> recovery = List.of(
+                    "acquire_items", "shorten_route", "choose_closer_endpoint", "cancel");
+            if (duringTick) {
+                beginFailure("missing_material", detail, FailureType.NO_MATERIAL, recovery, false);
+            } else {
+                failNow("missing_material", detail, FailureType.NO_MATERIAL, recovery);
+            }
+            return false;
+        }
+        if (!plan.progressive()) {
+            long scaledBudget = player.level().getGameTime()
+                    + Math.max(600L, required * 160L + 400L);
+            r.extendDeadlineTo(scaledBudget);
+        }
+        return true;
+    }
+
+    private void startMaterialSupply(int requiredFinalCount) {
+        ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(chainItem);
+        supply.begin(player, r.getToolCallId(), r.getDeadlineGameTime(),
+                new SemanticMaterialSupplyCoordinator.Demand(
+                        List.of(itemId), requiredFinalCount,
+                        "investigated mechanical connection material ledger"),
+                r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels);
+        r.extendDeadlineTo(supply.childDeadline());
+        supplyRounds++;
+        phase = Phase.SUPPLY;
+    }
+
+    private TaskState tickSupply(LocalPlayerContext context) {
+        SemanticMaterialSupplyCoordinator.Tick tick = supply.tick(player, this::runChild);
+        if (tick.status() == SemanticMaterialSupplyCoordinator.Status.RUNNING) {
+            return TaskState.RUNNING;
+        }
+        supplyReceipts.add(tick.receipt());
+        if (tick.status() == SemanticMaterialSupplyCoordinator.Status.FAILED) {
+            supplyFailure = tick.receipt();
+            beginFailure(stringValue(tick.receipt().get("failure_code"),
+                            "material_supply_failed"),
+                    "mechanical material supply stopped before construction: " + tick.message(),
+                    tick.failureType(), recoveryIds(tick.receipt().get("recovery_options")), false);
+            return TaskState.RUNNING;
+        }
+        return replanAfterSupply(context);
+    }
+
+    /** Supply invalidates every pre-supply route fact; investigate again before any placement. */
+    private TaskState replanAfterSupply(LocalPlayerContext context) {
+        if (progressiveSurvey != null) progressiveSurvey.stop();
+        progressiveSurvey = null;
+        constructionTravel.stop();
+        stopNavSafely();
+        plan = null;
+        stager = null;
+        cursor = 0;
+        startCursor = 0;
+        initialInventoryCount = 0;
+        data.put("reinvestigated_after_supply", supplyRounds);
+
+        CreateMechanicalPlan.Result planned = CreateMechanicalPlanner.plan(player, r.request);
+        data.putAll(planned.facts());
+        if (planned.plan() == null) {
+            if (progressiveEligible(planned.failureCode())) {
+                progressiveSurvey = new CreateProgressiveSurvey(r.request);
+                progressiveStartedGameTime = context.level().getGameTime();
+                progressiveActiveTicks = 0L;
+                r.extendDeadlineTo(progressiveStartedGameTime + 36_000L);
+                data.put("progressive_survey", true);
+                phase = Phase.PROGRESSIVE;
+                return TaskState.RUNNING;
+            }
+            beginFailure(planned.failureCode(), stringFact(planned.facts(), "detail",
+                            "fresh post-supply investigation did not produce a route"),
+                    mapFailure(planned.failureCode()), recovery(planned.facts()), false);
+            return TaskState.RUNNING;
+        }
+        plan = planned.plan();
+        stager = new CreateMechanicalStager(player);
+        if (initializeApprovedPlan(true)) phase = Phase.PREPARE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState prepare(LocalPlayerContext context) {
+        if (cursor >= plan.cells().size()) {
+            phase = Phase.VERIFY;
+            return TaskState.RUNNING;
+        }
+        if (plan.progressive()) {
+            CreateMechanicalPlan.RouteCell active = plan.cells().get(cursor);
+            if (!context.level().isLoaded(active.position())
+                    || !context.level().isLoaded(active.support())
+                    || !context.level().isLoaded(active.stand())) {
+                BlockPos loadTarget = !context.level().isLoaded(active.position())
+                        ? active.position()
+                        : !context.level().isLoaded(active.support())
+                                ? active.support() : active.stand();
+                CreateProgressiveSurvey.Travel.Status travel = constructionTravel.tick(
+                        player, loadTarget, 2);
+                if (travel == CreateProgressiveSurvey.Travel.Status.RUNNING) {
+                    return TaskState.RUNNING;
+                }
+                if (travel == CreateProgressiveSurvey.Travel.Status.FAILED) {
+                    beginFailure("construction_corridor_unreachable",
+                            "could not reload the next surveyed corridor segment: "
+                                    + constructionTravel.failure(),
+                            FailureType.NO_PATH,
+                            List.of("make_path_accessible", "resume", "cancel"), false);
+                    return TaskState.RUNNING;
+                }
+            }
+        }
+        Validation validation = validateWholeRoute(context.level());
+        if (validation != null) {
+            beginFailure(validation.code, validation.detail, validation.type, validation.recovery, false);
+            return TaskState.RUNNING;
+        }
+        int expectedInventory = initialInventoryCount - (cursor - startCursor);
+        int actualInventory = inventoryCount(player, chainItem);
+        if (actualInventory != expectedInventory) {
+            beginFailure("material_changed",
+                    "the exact chain-drive inventory budget changed between confirmed placements",
+                    FailureType.NO_MATERIAL, List.of("inspect_inventory", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        CreateMechanicalStager.Status staged = stager.ensureChainSelected(context, chainItem);
+        if (staged == CreateMechanicalStager.Status.RUNNING) return TaskState.RUNNING;
+        if (staged == CreateMechanicalStager.Status.FAILED
+                || staged == CreateMechanicalStager.Status.UNCERTAIN) {
+            beginFailure(staged == CreateMechanicalStager.Status.UNCERTAIN
+                            ? "inventory_staging_uncertain" : "inventory_staging_failed",
+                    stager.detail(), staged == CreateMechanicalStager.Status.FAILED
+                            ? FailureType.NO_SPACE : FailureType.UNKNOWN,
+                    List.of("inspect_inventory", "clear_hotbar_slot", "cancel"),
+                    staged == CreateMechanicalStager.Status.UNCERTAIN);
+            return TaskState.RUNNING;
+        }
+        CreateMechanicalPlan.RouteCell cell = plan.cells().get(cursor);
+        activeStand = cell.stand();
+        final BlockPos stand = activeStand;
+        nav = new PlayerNav(player, stand, 0.85,
+                () -> player.blockPosition().distSqr(stand) <= 1.0);
+        phase = Phase.NAVIGATE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState navigate(LocalPlayerContext context) {
+        Validation endpoint = validateSourceAndDestination(context.level(), cursor == startCursor);
+        if (endpoint != null) {
+            beginFailure(endpoint.code, endpoint.detail, endpoint.type, endpoint.recovery, false);
+            return TaskState.RUNNING;
+        }
+        PlayerNav.Status status = nav.tick();
+        if (status == PlayerNav.Status.RUNNING) return TaskState.RUNNING;
+        if (status == PlayerNav.Status.FAILED) {
+            String reason = nav.failReason();
+            FailureType type = nav.failType();
+            stopNav();
+            beginFailure("placement_stance_unreachable", reason, type,
+                    List.of("make_corridor_accessible", "choose_other_endpoint", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        stopNav();
+        phase = Phase.ALIGN;
+        readyTicks = 0;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState alignAndPlace(LocalPlayerContext context) {
+        CreateMechanicalPlan.RouteCell cell = plan.cells().get(cursor);
+        if (!context.level().isLoaded(cell.position()) || !context.level().isLoaded(cell.support())) {
+            beginFailure("route_needs_exploration", "the active placement cell became unloaded",
+                    FailureType.TARGET_LOST, List.of("travel_to_load_corridor", "resume", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        if (!CreateMechanicalPlanner.isEmptyRouteCell(context.level(), cell.position())) {
+            beginFailure("route_changed", "the active route cell is no longer empty and safe",
+                    FailureType.TARGET_LOST, List.of("inspect_obstruction", "choose_other_route", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        Vec3 point = faceCenter(cell.support(), cell.supportFace());
+        InputDriver.halt(player);
+        InputDriver.lookAt(player, point);
+        float[] look = lookAngles(player.getEyePosition(), point);
+        if (Math.abs(look[1]) < MIN_VERTICAL_PITCH) {
+            beginFailure("endpoint_orientation_unsupported",
+                    "the verified stance cannot aim steeply enough to place a vertical-axis chain drive",
+                    FailureType.STANCE_DUD, List.of("choose_other_endpoint", "make_alternate_stance", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        if (!lookReady(player, look[0], look[1])) {
+            readyTicks = 0;
+            return TaskState.RUNNING;
+        }
+        BlockHitResult hit = nativeRaycast(player);
+        if (hit == null || !hit.getBlockPos().equals(cell.support())
+                || hit.getDirection() != cell.supportFace()) {
+            readyTicks = 0;
+            if (++networkWaitTicks > 20) {
+                networkWaitTicks = 0;
+                beginFailure("placement_occluded",
+                        "the first-person ray no longer reaches the planned support face",
+                        FailureType.OCCLUDED, List.of("make_corridor_accessible", "choose_other_route", "cancel"), false);
+            }
+            return TaskState.RUNNING;
+        }
+        networkWaitTicks = 0;
+        readyTicks++;
+        if (cursor == 0) {
+            context.body().applyMovement(new BodyControlPort.Movement(0, 0, false, true, false),
+                    context.tickRevision());
+        }
+        if (readyTicks < READY_TICKS) return TaskState.RUNNING;
+        ItemStack beforeStack = player.getMainHandItem().copy();
+        if (CreateMechanicalStager.usable(beforeStack, chainItem) <= 0) {
+            beginFailure("material_changed", "the selected chain-drive stack changed before placement",
+                    FailureType.NO_MATERIAL, List.of("inspect_inventory", "resume", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        BlockState expected = predictedState(player, beforeStack, hit);
+        if (expected == null || expected.getBlock() != chainBlock || !"y".equals(axisName(expected))) {
+            beginFailure("endpoint_orientation_unsupported",
+                    "native placement would not produce a vertical-axis encased chain drive",
+                    FailureType.STANCE_DUD, List.of("choose_other_endpoint", "make_alternate_stance", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        BlockState targetBefore = context.level().getBlockState(cell.position());
+        BlockState supportBefore = context.level().getBlockState(cell.support());
+        int totalBefore = inventoryCount(player, chainItem);
+        NativeConfirmation confirmation = placementConfirmation(
+                cell, targetBefore, supportBefore, expected, beforeStack, totalBefore);
+        placementReceipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND,
+                hit, confirmation, PLACEMENT_CONFIRM_TICKS);
+        phase = Phase.WAIT_PLACEMENT;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState settlePlacement(LocalPlayerContext context) {
+        InputDriver.halt(player);
+        placementReceipt = context.actions().poll(context, placementReceipt);
+        if (!placementReceipt.terminal()) return TaskState.RUNNING;
+        NativeActionReceipt.Status status = placementReceipt.status();
+        String detail = placementReceipt.detail();
+        placementReceipt = null;
+        if (status != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            boolean uncertain = status == NativeActionReceipt.Status.UNCERTAIN
+                    || status == NativeActionReceipt.Status.DIVERGED;
+            beginFailure(uncertain ? "placement_outcome_uncertain" : "placement_not_applied",
+                    "native chain-drive placement was not definitely applied: " + detail,
+                    FailureType.UNKNOWN,
+                    List.of("inspect_route_cell", uncertain ? "do_not_retry" : "resume", "cancel"),
+                    uncertain);
+            return TaskState.RUNNING;
+        }
+        cursor++;
