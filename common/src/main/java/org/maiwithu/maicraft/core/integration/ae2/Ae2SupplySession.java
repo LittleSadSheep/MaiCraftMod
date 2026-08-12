@@ -898,3 +898,303 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         exactExtraction = null;
         setPhase(Phase.PROCESS_ITEM);
     }
+
+    private void waitCraftAmount(LocalPlayerContext context) {
+        if (!settleNativeReceipt(context, "craft_amount_menu_unconfirmed")) return;
+        if (!bridge.isCraftAmountMenu(player.containerMenu)) {
+            finishUncertain("craft_amount_menu_diverged",
+                    "AE2 confirmed craft-amount opening without the expected menu");
+            return;
+        }
+        setPhase(Phase.SUBMIT_CRAFT_AMOUNT);
+    }
+
+    private void submitCraftAmount(LocalPlayerContext context) {
+        Object amountMenu = player.containerMenu;
+        if (!bridge.isCraftAmountMenu(amountMenu)) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "craft_menu_changed",
+                    "the AE2 craft-amount menu changed before confirmation");
+            return;
+        }
+        boolean submitted = submitProtocol(
+                context,
+                "ae2_confirm_craft_amount",
+                () -> bridge.confirmCraftAmount(amountMenu, craftingMissing),
+                fresh -> {
+                    Object active = fresh.player().containerMenu;
+                    if (bridge.isCraftConfirmMenu(active)) {
+                        return NativeConfirmation.Verdict.APPLIED;
+                    }
+                    return active == amountMenu
+                            ? NativeConfirmation.Verdict.PENDING
+                            : NativeConfirmation.Verdict.DIVERGED;
+                });
+        if (submitted) {
+            craftingRequests++;
+            setPhase(Phase.WAIT_CRAFT_CONFIRM);
+        }
+    }
+
+    private void waitCraftConfirm(LocalPlayerContext context) {
+        if (!settleNativeReceipt(context, "craft_confirm_menu_unconfirmed")) return;
+        if (!bridge.isCraftConfirmMenu(player.containerMenu)) {
+            finishUncertain("craft_confirm_menu_diverged",
+                    "AE2 confirmed the craft amount without the expected confirmation menu");
+            return;
+        }
+        setPhase(Phase.WAIT_CRAFT_PLAN);
+    }
+
+    private void waitCraftPlan(LocalPlayerContext context) {
+        Object menu = player.containerMenu;
+        if (!bridge.isCraftConfirmMenu(menu)) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "craft_menu_changed",
+                    "the AE2 crafting confirmation menu changed before job submission");
+            return;
+        }
+        String submitFailure = bridge.craftConfirmSubmitFailure(menu);
+        if (submitFailure != null) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "crafting_submit_failed",
+                    "AE2 rejected the crafting plan: " + submitFailure);
+            return;
+        }
+        if (!bridge.craftConfirmPlanReady(menu)) {
+            if (phaseTicks > CRAFT_JOB_CONFIRM_TICKS) {
+                beginFinish(Ae2ResourceSupply.Status.FAILED, "crafting_job_unconfirmed",
+                        "AE2 did not synchronize a craftable plan before the deadline");
+            }
+            return;
+        }
+        if (bridge.craftConfirmHasNoCpu(menu)) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "crafting_cpu_unavailable",
+                    "AE2 could not assign a crafting CPU to the requested job");
+            return;
+        }
+        craftingSubmitFailure = null;
+        boolean submitted = submitProtocol(
+                context,
+                "ae2_submit_crafting_job",
+                () -> bridge.startCraftingJob(menu),
+                fresh -> {
+                    Object active = fresh.player().containerMenu;
+                    if (bridge.isStorageMenu(active)) {
+                        return NativeConfirmation.Verdict.APPLIED;
+                    }
+                    if (bridge.isCraftConfirmMenu(active)) {
+                        String failure = bridge.craftConfirmSubmitFailure(active);
+                        if (failure != null) {
+                            craftingSubmitFailure = failure;
+                            return NativeConfirmation.Verdict.NOT_APPLIED;
+                        }
+                        return NativeConfirmation.Verdict.PENDING;
+                    }
+                    return NativeConfirmation.Verdict.DIVERGED;
+                });
+        if (submitted) {
+            effectsStarted = true;
+            craftingJobsSubmitted++;
+            craftingJobEffectPending = true;
+            setPhase(Phase.WAIT_CRAFT_RETURN);
+        }
+    }
+
+    private void waitCraftReturn(LocalPlayerContext context) {
+        NativeActionReceipt receipt = nativeReceipt;
+        if (receipt == null) {
+            finishUncertain("transaction_state_missing",
+                    "the AE2 crafting-job actor receipt is missing");
+            return;
+        }
+        if (!receipt.terminal()) {
+            receipt = context.actions().poll(context, receipt);
+            nativeReceipt = receipt;
+        }
+        if (!receipt.terminal()) return;
+        nativeReceipt = null;
+        if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            if (!bridge.isStorageMenu(player.containerMenu)) {
+                finishUncertain("crafting_submit_diverged",
+                        "AE2 confirmed job submission without returning to storage");
+                return;
+            }
+            setPhase(Phase.WAIT_CRAFT_STOCK);
+            return;
+        }
+        if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED) {
+            craftingJobEffectPending = false;
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "crafting_submit_failed",
+                    "AE2 rejected the submitted crafting job: "
+                            + (craftingSubmitFailure == null
+                            ? receipt.detail() : craftingSubmitFailure));
+            return;
+        }
+        finishUncertain("crafting_submit_unconfirmed", receipt.detail());
+    }
+
+    private void waitCraftStock() {
+        if (craftingItemId == null || craftingSample.isEmpty()) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                    "the concrete AE2 crafting target is missing");
+            return;
+        }
+        if (plan == null
+                || craftingPlanGroupIndex < 0
+                || craftingPlanGroupIndex >= plan.groups().size()
+                || craftingPlanAllocationIndex < 0
+                || craftingPlanAllocationIndex
+                >= plan.groups().get(craftingPlanGroupIndex).allocations().size()) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "resource_plan_changed",
+                    "the submitted AE2 crafting allocation is no longer bound to the request");
+            return;
+        }
+        Ae2SupplyPlanner.Allocation allocation = plan.groups().get(craftingPlanGroupIndex)
+                .allocations().get(craftingPlanAllocationIndex);
+        if (groupIndex != craftingPlanGroupIndex
+                || !allocation.itemId().equals(craftingItemId)
+                || !same(allocation.sample(), craftingSample)) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "resource_plan_changed",
+                    "the submitted AE2 crafting target no longer matches its bound allocation");
+            return;
+        }
+        Object menu = storageMenuOrFail();
+        if (menu == null) return;
+        if (!bridge.connected(menu)) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    "ae2_network_disconnected", "the AE2 network disconnected while crafting");
+            return;
+        }
+        List<Ae2ReflectionBridge.Entry> entries = bridge.entries(menu);
+        long observed = entries == null ? 0L : entries.stream()
+                .filter(entry -> entry.itemId().equals(craftingItemId)
+                        && same(entry.sample(), craftingSample))
+                .mapToLong(Ae2ReflectionBridge.Entry::storedAmount).sum();
+        boolean ready = request.operation() == Ae2ResourceSupply.Operation.PREPARE
+                ? observed >= allocation.remaining() : observed > 0;
+        if (ready) {
+            craftingJobEffectPending = false;
+            setPhase(Phase.PROCESS_ITEM);
+            return;
+        }
+        if (phaseTicks > CRAFT_STOCK_TICKS) {
+            finishUncertain("ae2_submit_crafting_job_outcome_uncertain",
+                    "the submitted AE2 crafting job produced no observable output; do not resubmit blindly");
+        }
+    }
+
+    private void beginFinish(
+            Ae2ResourceSupply.Status status, String code, String message) {
+        if (terminal != null || pendingTerminal != null) return;
+        if (nativeReceipt != null && !nativeReceipt.terminal() || craftingJobEffectPending) {
+            finishUncertain(code + "_outcome_uncertain",
+                    message + "; an AE2 server transaction is still unconfirmed");
+            return;
+        }
+        pendingTerminal = new PendingTerminal(status, code, message);
+        stopNavigation();
+        if (!player.containerMenu.getCarried().isEmpty()
+                && bridge.isStorageMenu(player.containerMenu)) {
+            setPhase(Phase.CLEAN_RETURN_CURSOR);
+        } else {
+            setPhase(Phase.CLEAN_CLOSE);
+        }
+    }
+
+    private void cleanReturnCursor(LocalPlayerContext context) {
+        if (!bridge.isStorageMenu(player.containerMenu)) {
+            finishCleanupFailure("cursor_return_menu_missing");
+            return;
+        }
+        cleanupCursorBefore = player.containerMenu.getCarried().copy();
+        if (cleanupCursorBefore.isEmpty()) {
+            setPhase(Phase.CLEAN_CLOSE);
+            return;
+        }
+        Object storageMenu = player.containerMenu;
+        boolean submitted = submitProtocol(
+                context,
+                "ae2_return_cursor",
+                () -> bridge.returnCarriedToNetwork(storageMenu),
+                fresh -> {
+                    Object active = fresh.player().containerMenu;
+                    if (active != storageMenu || !bridge.isStorageMenu(active)) {
+                        return NativeConfirmation.Verdict.DIVERGED;
+                    }
+                    ItemStack carried = fresh.player().containerMenu.getCarried();
+                    if (carried.isEmpty()) return NativeConfirmation.Verdict.APPLIED;
+                    return same(carried, cleanupCursorBefore)
+                            ? NativeConfirmation.Verdict.PENDING
+                            : NativeConfirmation.Verdict.DIVERGED;
+                });
+        if (submitted) setPhase(Phase.CLEAN_WAIT_CURSOR_RETURN);
+    }
+
+    private void cleanWaitCursorReturn(LocalPlayerContext context) {
+        if (!settleNativeReceipt(context, "cursor_return_unconfirmed")) return;
+        ItemStack carried = player.containerMenu.getCarried();
+        if (carried.isEmpty()) {
+            exactExtraction = null;
+            setPhase(Phase.CLEAN_CLOSE);
+            return;
+        }
+        finishUncertain("cursor_return_diverged",
+                "AE2 confirmed cursor return while a carried stack remains");
+    }
+
+    private void cleanClose(LocalPlayerContext context) {
+        if (player.containerMenu == player.inventoryMenu && context.minecraft().screen == null) {
+            setPhase(Phase.CLEAN_RESTORE);
+            return;
+        }
+        menuReceipt = context.menus().close(context, INVENTORY_CONFIRM_TICKS);
+        setPhase(Phase.CLEAN_WAIT_CLOSE);
+    }
+
+    private void cleanWaitClose(LocalPlayerContext context) {
+        if (!settleMenuReceipt(context, "terminal_close_unconfirmed")) return;
+        setPhase(Phase.CLEAN_RESTORE);
+    }
+
+    private void cleanRestore(LocalPlayerContext context) {
+        InventorySwap swap = inventorySwap;
+        if (swap == null) {
+            setPhase(Phase.CLEAN_SELECT);
+            return;
+        }
+        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu
+                || !player.inventoryMenu.getCarried().isEmpty()) {
+            finishCleanupFailure("inventory_not_ready_for_restore");
+            return;
+        }
+        ItemStack source = player.getInventory().getItem(swap.sourceSlot());
+        ItemStack hotbar = player.getInventory().getItem(swap.hotbarSlot());
+        if (!same(source, swap.hotbarBefore()) || !stagedItemMatches(hotbar, swap.sourceBefore())) {
+            finishCleanupFailure("inventory_changed_before_restore");
+            return;
+        }
+        menuReceipt = context.menus().swapInventoryToHotbar(
+                context, swap.sourceSlot(), swap.hotbarSlot(), INVENTORY_CONFIRM_TICKS);
+        setPhase(Phase.CLEAN_WAIT_RESTORE);
+    }
+
+    private void cleanWaitRestore(LocalPlayerContext context) {
+        if (!settleMenuReceipt(context, "inventory_restore_unconfirmed")) return;
+        InventorySwap swap = inventorySwap;
+        if (swap == null
+                || !stagedItemMatches(player.getInventory().getItem(swap.sourceSlot()), swap.sourceBefore())
+                || !same(player.getInventory().getItem(swap.hotbarSlot()), swap.hotbarBefore())) {
+            finishUncertain("inventory_restore_diverged",
+                    "temporary terminal staging did not restore to the exact authoritative state");
+            return;
+        }
+        inventorySwap = null;
+        setPhase(Phase.CLEAN_SELECT);
+    }
+
+    private void cleanSelect(LocalPlayerContext context) {
+        if (player.getInventory().selected != originalSelected) {
+            requestSelect(context, originalSelected, Phase.CLEAN_SELECT);
+            return;
+        }
+        if (movedForFixedTerminal && !callerOrigin.equals(player.blockPosition())
+                && pendingTerminal != null
+                && pendingTerminal.status() != Ae2ResourceSupply.Status.CANCELLED) {
