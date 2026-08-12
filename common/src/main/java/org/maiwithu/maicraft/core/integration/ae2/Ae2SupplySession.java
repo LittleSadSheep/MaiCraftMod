@@ -1198,3 +1198,303 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (movedForFixedTerminal && !callerOrigin.equals(player.blockPosition())
                 && pendingTerminal != null
                 && pendingTerminal.status() != Ae2ResourceSupply.Status.CANCELLED) {
+            setPhase(Phase.RETURN_ORIGIN);
+        } else {
+            finishPending();
+        }
+    }
+
+    private void returnOrigin() {
+        if (!player.level().dimension().location().equals(callerDimension)) {
+            finishCleanupFailure("return_world_changed");
+            return;
+        }
+        if (navigation == null) {
+            navigation = new PlayerNav(
+                    player, callerOrigin, 1.0,
+                    () -> callerOrigin.equals(player.blockPosition()));
+        }
+        PlayerNav.Status status = navigation.tick();
+        if (status == PlayerNav.Status.RUNNING) return;
+        if (status == PlayerNav.Status.FAILED) {
+            String detail = navigation.failReason();
+            stopNavigation();
+            finishCleanupFailure("return_path_blocked: " + detail);
+            return;
+        }
+        stopNavigation();
+        finishPending();
+    }
+
+    private void finishPending() {
+        PendingTerminal pending = pendingTerminal;
+        if (pending == null) {
+            finishNow(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                    "AE2 cleanup reached no terminal result", effectsStarted);
+            return;
+        }
+        if (pending.status() == Ae2ResourceSupply.Status.SUCCEEDED && !finalAuditPasses()) {
+            finishNow(Ae2ResourceSupply.Status.UNCERTAIN, "final_exact_audit_failed",
+                    "the final inventory audit did not exactly match the approved AE2 request", true);
+            return;
+        }
+        finishNow(pending.status(), pending.code(), pending.message(), false);
+    }
+
+    private void finishCleanupFailure(String detail) {
+        PendingTerminal pending = pendingTerminal;
+        Ae2ResourceSupply.Status status = effectsStarted
+                ? Ae2ResourceSupply.Status.UNCERTAIN : Ae2ResourceSupply.Status.FAILED;
+        String message = "AE2 cleanup could not be confirmed: " + detail;
+        if (pending != null && !pending.message().isBlank()) message = pending.message() + "; " + message;
+        finishNow(status, "cleanup_unconfirmed", message, effectsStarted);
+    }
+
+    private void finishUncertain(String code, String message) {
+        stopNavigation();
+        try {
+            org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player)
+                    .body().releaseAll();
+        } catch (RuntimeException ignored) {
+            // Body/control epoch may already have ended; no compensating packet is submitted.
+        }
+        finishNow(Ae2ResourceSupply.Status.UNCERTAIN, code, message, true);
+    }
+
+    private void finishNow(
+            Ae2ResourceSupply.Status status, String code, String message, boolean uncertain) {
+        if (terminal != null) return;
+        terminal = new Ae2ResourceSupply.Outcome(
+                status, code, message, groupDeltas(), request.operation(), request.allowCrafting(),
+                craftingRequests, craftingJobsSubmitted, effectsStarted,
+                uncertain, terminalAccess);
+        phase = Phase.FINISHED;
+    }
+
+    private boolean settleNativeReceipt(LocalPlayerContext context, String code) {
+        NativeActionReceipt receipt = nativeReceipt;
+        if (receipt == null) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                    "the pending native AE2 action receipt is missing");
+            return false;
+        }
+        if (!receipt.terminal()) {
+            receipt = context.actions().poll(context, receipt);
+            nativeReceipt = receipt;
+        }
+        if (!receipt.terminal()) return false;
+        nativeReceipt = null;
+        if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) return true;
+        if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED
+                || receipt.status() == NativeActionReceipt.Status.CANCELLED) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, code, receipt.detail());
+        } else {
+            finishUncertain(code, receipt.detail());
+        }
+        return false;
+    }
+
+    private boolean settleMenuReceipt(LocalPlayerContext context, String code) {
+        MenuReceipt receipt = menuReceipt;
+        if (receipt == null) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                    "the pending AE2 menu receipt is missing");
+            return false;
+        }
+        if (!receipt.terminal()) {
+            receipt = context.menus().poll(context, receipt);
+            menuReceipt = receipt;
+        }
+        if (!receipt.terminal()) return false;
+        menuReceipt = null;
+        if (receipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED) return true;
+        if (receipt.status() == MenuReceipt.Status.CONFIRMED_NOT_APPLIED) {
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, code, receipt.detail());
+        } else {
+            finishUncertain(code, receipt.detail());
+        }
+        return false;
+    }
+
+    private boolean submitProtocol(
+            LocalPlayerContext context,
+            String operation,
+            Runnable submission,
+            NativeConfirmation confirmation) {
+        if (nativeReceipt != null) {
+            if (pendingTerminal != null) {
+                finishCleanupFailure("overlapping_actor_protocol_receipt");
+            } else {
+                beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                        "AE2 protocol actions cannot overlap one actor receipt");
+            }
+            return false;
+        }
+        try {
+            nativeReceipt = context.actions().submitProtocol(
+                    context, operation, submission, confirmation, PROTOCOL_CONFIRM_TICKS);
+            return true;
+        } catch (RuntimeException rejectedBeforeSubmission) {
+            String detail = "actor rejected AE2 protocol submission before a receipt was created: "
+                    + rejectedBeforeSubmission.getMessage();
+            if (pendingTerminal != null) {
+                finishCleanupFailure(detail);
+            } else {
+                beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                        "actor_protocol_unavailable", detail);
+            }
+            return false;
+        }
+    }
+
+    private Object storageMenuOrFail() {
+        Object menu = player.containerMenu;
+        if (bridge.isStorageMenu(menu)) return menu;
+        beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                "ae2_menu_changed", "the active menu is no longer the AE2 storage menu");
+        return null;
+    }
+
+    private ExactExtraction requireExtraction() {
+        if (exactExtraction != null) return exactExtraction;
+        beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
+                "the exact AE2 extraction state is missing");
+        return null;
+    }
+
+    private Set<Integer> reservedInventorySlots() {
+        return inventorySwap == null
+                ? Set.of() : Set.of(inventorySwap.sourceSlot(), inventorySwap.hotbarSlot());
+    }
+
+    private ExtractionDestination exactDestination(AbstractContainerMenu menu, ItemStack sample) {
+        Set<Integer> reserved = reservedInventorySlots();
+        List<Integer> ordered = new ArrayList<>();
+        for (int slot = 0; slot <= 35; slot++) if (!reserved.contains(slot)) ordered.add(slot);
+        ordered.sort(Comparator.comparingInt(slot -> {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && sameKind(stack, sample)) return 0;
+            return stack.isEmpty() ? 1 : 2;
+        }));
+        for (int inventorySlot : ordered) {
+            ItemStack before = player.getInventory().getItem(inventorySlot);
+            int capacity = before.isEmpty() ? sample.getMaxStackSize()
+                    : sameKind(before, sample)
+                    ? Math.max(0, before.getMaxStackSize() - before.getCount()) : 0;
+            if (capacity <= 0) continue;
+            int menuSlot = menuSlotForInventory(menu, inventorySlot);
+            if (menuSlot >= 0) {
+                return new ExtractionDestination(inventorySlot, menuSlot, before, capacity);
+            }
+        }
+        return null;
+    }
+
+    private int menuSlotForInventory(AbstractContainerMenu menu, int inventorySlot) {
+        for (int menuSlot = 0; menuSlot < menu.slots.size(); menuSlot++) {
+            var slot = menu.getSlot(menuSlot);
+            if (slot.container == player.getInventory() && slot.getContainerSlot() == inventorySlot) {
+                return menuSlot;
+            }
+        }
+        return -1;
+    }
+
+    private int capacityFor(ItemStack sample) {
+        int capacity = 0;
+        Set<Integer> reserved = reservedInventorySlots();
+        for (int slot = 0; slot <= 35; slot++) {
+            if (reserved.contains(slot)) continue;
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty()) capacity += sample.getMaxStackSize();
+            else if (sameKind(stack, sample)) {
+                capacity += Math.max(0, stack.getMaxStackSize() - stack.getCount());
+            }
+        }
+        return capacity;
+    }
+
+    private Map<ResourceLocation, Integer> inventoryCounts() {
+        Map<ResourceLocation, Integer> counts = new LinkedHashMap<>();
+        Set<ResourceLocation> accepted = request.acceptedItemIds();
+        for (int slot = 0; slot <= 35; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty()) continue;
+            ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            if (accepted.contains(id)) counts.merge(id, stack.getCount(), Integer::sum);
+        }
+        return Map.copyOf(counts);
+    }
+
+    private int inventoryCount(ResourceLocation itemId) {
+        int count = 0;
+        for (int slot = 0; slot <= 35; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(itemId)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    private int groupProgress(Ae2ResourceSupply.Group group) {
+        if (group.selectionMode() == Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT) {
+            ResourceLocation selected = lockedVariantByGroup.get(group.itemId());
+            return selected == null ? 0
+                    : Math.max(0, inventoryCount(selected) - baseline.getOrDefault(selected, 0));
+        }
+        int before = group.acceptableItemIds().stream()
+                .mapToInt(id -> baseline.getOrDefault(id, 0)).sum();
+        int after = group.acceptableItemIds().stream().mapToInt(this::inventoryCount).sum();
+        return Math.max(0, after - before);
+    }
+
+    private List<Ae2ResourceSupply.GroupDelta> groupDeltas() {
+        List<Ae2ResourceSupply.GroupDelta> result = new ArrayList<>();
+        for (Ae2ResourceSupply.Group group : request.groups()) {
+            int before = group.acceptableItemIds().stream()
+                    .mapToInt(id -> baseline.getOrDefault(id, 0)).sum();
+            int after = group.acceptableItemIds().stream().mapToInt(this::inventoryCount).sum();
+            int acquired = groupProgress(group);
+            ResourceLocation selected = lockedVariantByGroup.get(group.itemId());
+            List<Ae2ResourceSupply.ItemDelta> itemEvidence = group.acceptableItemIds().stream()
+                    .map(itemId -> {
+                        int itemBefore = baseline.getOrDefault(itemId, 0);
+                        int itemAfter = inventoryCount(itemId);
+                        return new Ae2ResourceSupply.ItemDelta(
+                                itemId,
+                                itemBefore,
+                                itemAfter,
+                                Math.max(0, itemAfter - itemBefore),
+                                itemId.equals(selected));
+                    })
+                    .toList();
+            result.add(new Ae2ResourceSupply.GroupDelta(
+                    group.itemId(), group.acceptableItemIds(), group.selectionMode(),
+                    selected, group.count(), before, after,
+                    acquired, Math.max(0, group.count() - acquired), itemEvidence));
+        }
+        return List.copyOf(result);
+    }
+
+    private boolean finalAuditPasses() {
+        if (request.operation() == Ae2ResourceSupply.Operation.PREPARE) {
+            return player.containerMenu.getCarried().isEmpty() && plan != null
+                    && plan.groups().size() == request.groups().size()
+                    && plan.groups().stream().allMatch(group ->
+                            group.confirmedCount() == group.group().count());
+        }
+        if (!player.containerMenu.getCarried().isEmpty() || plan == null
+                || plan.groups().size() != request.groups().size()) return false;
+        for (Ae2SupplyPlanner.PlannedGroup group : plan.groups()) {
+            if (group.confirmedCount() != group.group().count()
+                    || groupProgress(group.group()) != group.group().count()) return false;
+        }
+        return true;
+    }
+
+    private void clearCraftingTarget() {
+        craftingMissing = 0;
+        craftingItemId = null;
+        craftingSample = ItemStack.EMPTY;
+        craftingPlanGroupIndex = -1;
