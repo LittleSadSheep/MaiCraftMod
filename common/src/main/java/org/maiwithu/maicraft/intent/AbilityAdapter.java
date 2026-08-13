@@ -598,3 +598,194 @@ final class AbilityAdapter {
         args.addProperty("source_name", sourceLabel == null ? "source" : sourceLabel);
         args.addProperty("source_x", source.x());
         args.addProperty("source_y", source.y());
+        args.addProperty("source_z", source.z());
+        args.addProperty("destination_name", destinationLabel == null ? "destination" : destinationLabel);
+        args.addProperty("destination_x", destination.x());
+        args.addProperty("destination_y", destination.y());
+        args.addProperty("destination_z", destination.z());
+        args.addProperty("transmission", transmission);
+        args.addProperty("allow_free_receiver", bool(parameters, "allow_new_receiver", false));
+        if (continuationToken != null) {
+            args.addProperty("continuation_token", continuationToken.toString());
+        }
+        for (String key : List.of(
+                "material_policy", "allowed_sources", "allow_harm", "protected_labels")) {
+            if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
+        }
+        return new IntentAction.Tool("connect_mechanical_power", args.toString());
+    }
+
+    private static IntentAction acquire(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        boolean hasItem = parameters.has("item_id")
+                && parameters.get("item_id").isJsonPrimitive()
+                && !parameters.get("item_id").getAsString().isBlank();
+        boolean hasAlternatives = parameters.has("item_ids")
+                && parameters.get("item_ids").isJsonArray()
+                && !parameters.getAsJsonArray("item_ids").isEmpty();
+        boolean hasTag = parameters.has("item_tag")
+                && parameters.get("item_tag").isJsonPrimitive()
+                && !parameters.get("item_tag").getAsString().isBlank();
+        boolean hasTags = parameters.has("item_tags")
+                && parameters.get("item_tags").isJsonArray()
+                && !parameters.getAsJsonArray("item_tags").isEmpty();
+        if (!hasItem && !hasAlternatives && !hasTag && !hasTags) {
+            return decision(goal, "Acquire items needs an item or semantic item tag selector.",
+                    List.of(option("retry", "Retry with item_id/item_ids or item_tag/item_tags."),
+                            option("cancel", "Cancel the task.")));
+        }
+        JsonObject args = new JsonObject();
+        for (String key : List.of(
+                "item_id", "item_ids", "item_tag", "item_tags", "count",
+                "allowed_sources", "allow_harm",
+                "protected_labels", "radius", "max_recipe_depth", "work_budget",
+                "source_hint")) {
+            if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
+        }
+        return new IntentAction.Tool("acquire_items", args.toString());
+    }
+
+    private static IntentAction waitFor(Goal goal, LocalPlayer player) {
+        JsonObject parameters = goal.parameters();
+        int seconds = integer(parameters, "after_s", 1, 0, 3600);
+        String condition = string(parameters, "condition");
+        if (condition == null) condition = "elapsed";
+        if (!List.of("elapsed", "day", "night", "health_full", "not_hungry").contains(condition)) {
+            return decision(goal, "Unsupported wait condition: " + condition,
+                    List.of(option("skip", "Skip this wait."),
+                            option("cancel", "Cancel the task.")));
+        }
+        return new IntentAction.Wait(condition, player.level().getGameTime() + seconds * 20L);
+    }
+
+    private static IntentAction.Decision decision(Goal goal, String question,
+                                                   List<IntentTaskRecord.DecisionOption> options) {
+        JsonObject context = new JsonObject();
+        context.addProperty("ability", goal.ability());
+        context.addProperty("outcome", goal.outcome());
+        return new IntentAction.Decision(new IntentTaskRecord.DecisionSnapshot(
+                UUID.randomUUID(), question, options, context.toString()));
+    }
+
+    private static IntentTaskRecord.DecisionOption option(String choice, String description) {
+        return new IntentTaskRecord.DecisionOption(choice, description);
+    }
+
+    private static Goal.WorldPosition position(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        Goal.SemanticTarget target = goal.target();
+        if (target == null) return null;
+        if ("current_place".equals(target.kind())) return currentPosition(player);
+        if ("coordinates".equals(target.kind())) return sameDimension(target.position(), player)
+                ? target.position() : null;
+        if ("landmark".equals(target.kind()) || "area".equals(target.kind())) {
+            IntentRuntime.Landmark landmark = runtime.landmark(target.label());
+            return landmark == null || !sameDimension(landmark.position(), player)
+                    ? null : landmark.position();
+        }
+        return null;
+    }
+
+    private static Goal.WorldPosition namedPosition(
+            String label, LocalPlayer player, IntentRuntime runtime) {
+        if (label == null || label.isBlank()) return null;
+        if ("current_place".equals(label)) return currentPosition(player);
+        IntentRuntime.Landmark landmark = runtime.landmark(label);
+        return landmark == null || !sameDimension(landmark.position(), player)
+                ? null : landmark.position();
+    }
+
+    private static Goal.WorldPosition rememberPosition(
+        Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        Goal.SemanticTarget target = goal.target();
+        if (target == null) return null;
+        if ("current_place".equals(target.kind())) return currentPosition(player);
+        if ("coordinates".equals(target.kind())) return target.position();
+        if ("landmark".equals(target.kind()) || "area".equals(target.kind())) {
+            IntentRuntime.Landmark landmark = runtime.landmark(target.label());
+            return landmark == null ? null : landmark.position();
+        }
+        return null;
+    }
+
+    private static boolean sameDimension(Goal.WorldPosition position, LocalPlayer player) {
+        return position != null && (position.dimension() == null
+                || position.dimension().equals(player.level().dimension().location().toString()));
+    }
+
+    private static Goal.WorldPosition currentPosition(LocalPlayer player) {
+        BlockPos pos = player.blockPosition();
+        return new Goal.WorldPosition(pos.getX(), pos.getY(), pos.getZ(),
+                player.level().dimension().location().toString());
+    }
+
+    private static String itemId(Goal goal, JsonObject parameters) {
+        String item = string(parameters, "item_id");
+        if (item == null && goal.target() != null) item = goal.target().label();
+        return item;
+    }
+
+    private static JsonArray ids(Goal goal, JsonObject parameters) {
+        for (String key : List.of("block_ids", "item_ids")) {
+            if (parameters.has(key) && parameters.get(key).isJsonArray()) {
+                return parameters.getAsJsonArray(key).deepCopy();
+            }
+        }
+        JsonArray result = new JsonArray();
+        String item = itemId(goal, parameters);
+        if (item != null) result.add(item);
+        return result;
+    }
+
+    private static String string(JsonObject object, String key) {
+        if (!object.has(key) || object.get(key).isJsonNull()
+                || !object.get(key).isJsonPrimitive()) return null;
+        return object.get(key).getAsString();
+    }
+
+    private static boolean bool(JsonObject object, String key, boolean fallback) {
+        return object.has(key) && object.get(key).isJsonPrimitive()
+                ? object.get(key).getAsBoolean()
+                : fallback;
+    }
+
+    private static int integer(JsonObject object, String key, int fallback, int min, int max) {
+        int value = object.has(key) && object.get(key).isJsonPrimitive()
+                ? object.get(key).getAsInt()
+                : fallback;
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static boolean numberInRange(JsonObject object, String key, int min, int max) {
+        if (!object.has(key) || !object.get(key).isJsonPrimitive()
+                || !object.getAsJsonPrimitive(key).isNumber()) return false;
+        try {
+            int value = object.get(key).getAsInt();
+            return value >= min && value <= max;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static void merge(JsonObject target, JsonObject source) {
+        for (var entry : source.entrySet()) {
+            target.add(entry.getKey(), entry.getValue().deepCopy());
+        }
+    }
+}
+
+sealed interface IntentAction {
+    record Chain(List<Tool> actions) implements IntentAction {
+        public Chain {
+            actions = List.copyOf(actions);
+            if (actions.isEmpty()) throw new IllegalArgumentException("intent action chain cannot be empty");
+        }
+    }
+    record Tool(String toolName, String argumentsJson) implements IntentAction {
+        JsonObject arguments() {
+            return JsonParser.parseString(argumentsJson).getAsJsonObject();
+        }
+    }
+    record Remember(String label, Goal.WorldPosition position) implements IntentAction {}
+    record Wait(String condition, long notBeforeGameTime) implements IntentAction {}
+    record Decision(IntentTaskRecord.DecisionSnapshot snapshot) implements IntentAction {}
+}
