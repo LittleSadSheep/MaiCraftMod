@@ -898,3 +898,160 @@ final class CreateMechanicalPowerTask
         safe.put("native_outcome_uncertain", nativeOutcomeUncertain);
         safe.put("material_policy", r.materialPolicy.id());
         safe.put("supply_rounds", supplyRounds);
+        safe.put("supply_receipts", List.copyOf(supplyReceipts));
+        if (!supplyFailure.isEmpty()) safe.put("supply_failure", supplyFailure);
+        if (failureDetail != null) safe.put("detail", failureDetail);
+        return safe;
+    }
+
+    @Override
+    protected String successMessage() {
+        return "mechanical power connected through " + cursor
+                + " confirmed first-person chain-drive placements";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        if (failureCode == null) {
+            failureCode = "timeout";
+            failureDetail = "the bounded mechanical connection deadline elapsed";
+            recoveryOptions = placementReceipt == null && (stager == null || !stager.hasPendingReceipt())
+                    ? List.of("resume_if_token_present", "inspect_partial_route", "cancel")
+                    : List.of("inspect_world_and_inventory", "do_not_retry_blindly", "cancel");
+            nativeOutcomeUncertain |= placementReceipt != null
+                    || stager != null && stager.hasPendingReceipt();
+        }
+        return failureDetail;
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return failureDetail == null ? "mechanical connection interrupted" : failureDetail;
+    }
+
+    private static int inventoryCount(LocalPlayer player, Item item) {
+        int total = 0;
+        for (int slot = 0; slot < Math.min(36, player.getInventory().getContainerSize()); slot++) {
+            total += CreateMechanicalStager.usable(player.getInventory().getItem(slot), item);
+        }
+        return total;
+    }
+
+    private static BlockHitResult nativeRaycast(LocalPlayer player) {
+        Vec3 eye = player.getEyePosition();
+        Vec3 end = eye.add(player.getViewVector(1.0f).scale(player.blockInteractionRange()));
+        BlockHitResult hit = player.level().clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        return hit.getType() == HitResult.Type.BLOCK ? hit : null;
+    }
+
+    private static Vec3 faceCenter(BlockPos support, Direction face) {
+        return Vec3.atCenterOf(support).add(
+                face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+    }
+
+    private static float[] lookAngles(Vec3 eye, Vec3 target) {
+        Vec3 delta = target.subtract(eye);
+        double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        float yaw = (float) (Mth.atan2(delta.z, delta.x) * Mth.RAD_TO_DEG) - 90.0f;
+        float pitch = (float) -(Mth.atan2(delta.y, horizontal) * Mth.RAD_TO_DEG);
+        return new float[]{yaw, pitch};
+    }
+
+    private static boolean lookReady(LocalPlayer player, float yaw, float pitch) {
+        return Math.abs(Mth.wrapDegrees(player.getYRot() - yaw)) <= LOOK_EPSILON
+                && Math.abs(player.getXRot() - pitch) <= LOOK_EPSILON;
+    }
+
+    private static BlockState predictedState(
+            LocalPlayer player, ItemStack stack, BlockHitResult hit) {
+        if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
+        try {
+            BlockPlaceContext placement = new BlockPlaceContext(new UseOnContext(
+                    player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {});
+            BlockState predicted = blockItem.getBlock().getStateForPlacement(placement);
+            return predicted != null && placement.canPlace() ? predicted : null;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean exactlyOneConsumed(ItemStack before, ItemStack after) {
+        if (before.getCount() == 1) return after.isEmpty();
+        return after.getCount() == before.getCount() - 1
+                && before.getItem() == after.getItem()
+                && ItemStack.isSameItemSameComponents(before, after);
+    }
+
+    private static boolean sameStack(ItemStack left, ItemStack right) {
+        return left.getCount() == right.getCount()
+                && ItemStack.isSameItemSameComponents(left, right);
+    }
+
+    private static String axisName(BlockState state) {
+        for (Property<?> property : state.getProperties()) {
+            if (property.getName().equals("axis")) return propertyName(state, property);
+        }
+        return null;
+    }
+
+    private static <T extends Comparable<T>> String propertyName(
+            BlockState state, Property<T> property) {
+        return property.getName(state.getValue(property));
+    }
+
+    private static String canonicalSpeed(float speed) {
+        return new java.math.BigDecimal(Float.toString(speed)).stripTrailingZeros().toPlainString();
+    }
+
+    private static FailureType mapFailure(String code) {
+        if (code == null) return FailureType.UNKNOWN;
+        if (code.contains("material")) return FailureType.NO_MATERIAL;
+        if (code.contains("route") || code.contains("stance")) return FailureType.NO_PATH;
+        if (code.contains("exploration") || code.contains("not_found")) return FailureType.TARGET_LOST;
+        if (code.contains("unavailable")) return FailureType.UNSUPPORTED;
+        return FailureType.UNKNOWN;
+    }
+
+    private static boolean progressiveEligible(String code) {
+        return "source_needs_exploration".equals(code)
+                || "destination_needs_exploration".equals(code)
+                || "route_needs_exploration".equals(code);
+    }
+
+    private static String stringFact(Map<String, Object> facts, String key, String fallback) {
+        Object value = facts.get(key);
+        return value == null ? fallback : value.toString();
+    }
+
+    private static List<String> recovery(Map<String, Object> facts) {
+        Object value = facts.get("recovery_options");
+        if (!(value instanceof List<?> list)) return List.of("inspect_facts", "cancel");
+        List<String> result = new ArrayList<>();
+        for (Object entry : list) if (entry != null) result.add(entry.toString());
+        return result.isEmpty() ? List.of("inspect_facts", "cancel") : List.copyOf(result);
+    }
+
+    private static void copyResultField(
+            Map<String, Object> from, Map<String, Object> to, String... keys) {
+        for (String key : keys) if (from.containsKey(key)) to.put(key, from.get(key));
+    }
+
+    private static String stringValue(Object value, String fallback) {
+        return value == null || value.toString().isBlank() ? fallback : value.toString();
+    }
+
+    private static List<String> recoveryIds(Object value) {
+        if (!(value instanceof List<?> list)) return List.of(
+                "change_material_source_policy", "change_route_or_endpoints", "cancel");
+        List<String> result = new ArrayList<>();
+        for (Object entry : list) {
+            if (entry instanceof Map<?, ?> map && map.get("id") != null) {
+                result.add(map.get("id").toString());
+            } else if (entry != null) result.add(entry.toString());
+        }
+        return result.isEmpty()
+                ? List.of("change_material_source_policy", "change_route_or_endpoints", "cancel")
+                : List.copyOf(result);
+    }
+}
