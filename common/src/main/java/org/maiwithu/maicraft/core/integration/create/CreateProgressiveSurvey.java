@@ -298,3 +298,133 @@ final class CreateProgressiveSurvey {
         if (status == Travel.Status.RUNNING) return Status.RUNNING;
         if (status == Travel.Status.ARRIVED) {
             travelSegments++;
+            return Status.RUNNING;
+        }
+        return fail(code, detail + ": " + travel.failure(), FailureType.NO_PATH,
+                List.of("make_path_accessible", "choose_other_endpoint", "cancel"));
+    }
+
+    private Status fail(String code, String detail, FailureType type, List<String> recovery) {
+        travel.stop();
+        failure = new Failure(code, detail, type, List.copyOf(recovery));
+        phase = Phase.FAILED;
+        return Status.FAILED;
+    }
+
+    private static String surveyDigest(
+            CreateMechanicalPlanner.TentativeRoute route,
+            List<CreateMechanicalPlan.RouteCell> cells) {
+        StringBuilder value = new StringBuilder(route.routeHash());
+        for (CreateMechanicalPlan.RouteCell cell : cells) {
+            value.append('|').append(cell.position().asLong())
+                    .append(':').append(cell.stand().asLong()).append(":air");
+        }
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
+    }
+
+    /** Incremental loaded-frontier navigation used by survey and progressive construction. */
+    static final class Travel {
+        enum Status { RUNNING, ARRIVED, FAILED }
+
+        private PlayerNav nav;
+        private BlockPos semanticTarget;
+        private BlockPos waypoint;
+        private int failures;
+        private final Set<Long> deniedWaypoints = new HashSet<>();
+        private String failure = "no loaded waypoint was found";
+
+        Status tick(LocalPlayer player, BlockPos target, int radius) {
+            if (semanticTarget == null || !semanticTarget.equals(target)) {
+                stop();
+                semanticTarget = target.immutable();
+                failures = 0;
+            }
+            if (horizontalDistanceSq(player.blockPosition(), target) <= radius * radius
+                    && player.level().isLoaded(target)) {
+                stop();
+                return Status.ARRIVED;
+            }
+            if (nav == null) {
+                waypoint = chooseWaypoint(player, target);
+                if (waypoint == null) {
+                    failure = "the loaded frontier has no standable position toward the current semantic target";
+                    return Status.FAILED;
+                }
+                BlockPos frozen = waypoint;
+                nav = new PlayerNav(player, frozen, 0.9,
+                        () -> player.blockPosition().distSqr(frozen) <= 1.0);
+            }
+            PlayerNav.Status status = nav.tick();
+            if (status == PlayerNav.Status.RUNNING) return Status.RUNNING;
+            if (status == PlayerNav.Status.ARRIVED) {
+                nav.stop();
+                nav = null;
+                return Status.RUNNING;
+            }
+            failure = nav.failReason();
+            if (waypoint != null) deniedWaypoints.add(waypoint.asLong());
+            nav.stop();
+            nav = null;
+            if (++failures >= MAX_TRAVEL_FAILURES) return Status.FAILED;
+            return Status.RUNNING;
+        }
+
+        String failure() { return failure; }
+
+        void pause() {
+            if (nav != null) nav.pause();
+        }
+
+        void stop() {
+            if (nav != null) {
+                try { nav.stop(); } catch (RuntimeException ignored) { }
+            }
+            nav = null;
+            waypoint = null;
+            semanticTarget = null;
+            deniedWaypoints.clear();
+        }
+
+        private BlockPos chooseWaypoint(LocalPlayer player, BlockPos target) {
+            ClientLevel level = player.clientLevel;
+            BlockPos from = player.blockPosition();
+            double dx = target.getX() - from.getX();
+            double dz = target.getZ() - from.getZ();
+            double length = Math.sqrt(dx * dx + dz * dz);
+            if (length < 1.0) {
+                return CreateMechanicalPlanner.findTravelStand(level, target, 6, 16);
+            }
+            double nx = dx / length;
+            double nz = dz / length;
+            double px = -nz;
+            double pz = nx;
+            for (int distance : new int[]{28, 22, 16, 10, 6}) {
+                for (int lateral : new int[]{0, 6, -6, 12, -12}) {
+                    int x = MthFloor(from.getX() + nx * Math.min(distance, length) + px * lateral);
+                    int z = MthFloor(from.getZ() + nz * Math.min(distance, length) + pz * lateral);
+                    BlockPos probe = new BlockPos(x, from.getY(), z);
+                    if (!level.isLoaded(probe)) continue;
+                    BlockPos stand = CreateMechanicalPlanner.findTravelStand(level, probe, 4, 16);
+                    if (stand != null && stand.distSqr(from) > 4.0
+                            && !deniedWaypoints.contains(stand.asLong())) return stand;
+                }
+            }
+            return null;
+        }
+
+        private static int MthFloor(double value) {
+            return net.minecraft.util.Mth.floor(value);
+        }
+
+        private static double horizontalDistanceSq(BlockPos a, BlockPos b) {
+            double dx = a.getX() - b.getX();
+            double dz = a.getZ() - b.getZ();
+            return dx * dx + dz * dz;
+        }
+    }
+}
