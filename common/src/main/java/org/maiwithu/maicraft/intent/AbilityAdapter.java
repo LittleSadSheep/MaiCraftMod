@@ -298,3 +298,303 @@ final class AbilityAdapter {
         if (bool(parameters, "may_alter_terrain", false)
                 || bool(goal.preferences(), "may_alter_terrain", false)) {
             args.addProperty("may_alter_terrain", true);
+        }
+        return new IntentAction.Tool("dimension_travel", args.toString());
+    }
+
+    private static IntentAction findStructure(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        String structure = string(parameters, "structure_id");
+        Goal.SemanticTarget target = goal.target();
+        if (structure == null && target != null && target.label() != null
+                && ResourceLocation.tryParse(target.label()) != null) {
+            structure = target.label();
+        }
+        if (structure == null || ResourceLocation.tryParse(structure) == null) {
+            return decision(goal,
+                    "Physical structure discovery needs a namespaced structure_id; MaiCraft chooses every search segment and observation.",
+                    List.of(
+                            option("retry", "Retry with details.parameters.structure_id."),
+                            option("skip", "Do not search for a structure."),
+                            option("cancel", "Cancel the task.")));
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("structure_id", structure);
+        args.addProperty("max_distance",
+                integer(parameters, "max_distance", 4_096, 64, 4_096));
+        args.addProperty("reach_structure",
+                !parameters.has("reach_structure")
+                        || bool(parameters, "reach_structure", true));
+        if (bool(parameters, "may_alter_terrain", false)
+                || bool(goal.preferences(), "may_alter_terrain", false)) {
+            args.addProperty("may_alter_terrain", true);
+        }
+        if (bool(parameters, "allow_rare_consumables", false)) {
+            args.addProperty("allow_rare_consumables", true);
+        }
+        return new IntentAction.Tool("structure_search", args.toString());
+    }
+
+    private static IntentAction defeatEnderDragon(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        if (!bool(parameters, "allow_combat", false)) {
+            return decision(goal,
+                    "Defeating the Ender Dragon destroys crystals and kills a living boss. Confirm that combat is intended before MaiCraft acts.",
+                    List.of(
+                            option("retry", "Retry with details.parameters.allow_combat=true if this fight is intended."),
+                            option("skip", "Leave the dragon encounter untouched."),
+                            option("cancel", "Cancel the task.")));
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("allow_combat", true);
+        if (bool(parameters, "may_alter_terrain", false)
+                || bool(goal.preferences(), "may_alter_terrain", false)) {
+            args.addProperty("may_alter_terrain", true);
+        }
+        for (String key : List.of("minimum_health", "protected_labels")) {
+            if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
+        }
+        return new IntentAction.Tool("dragon_fight", args.toString());
+    }
+
+    private static IntentAction reachMilestone(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        String milestone = string(parameters, "milestone");
+        Goal.SemanticTarget target = goal.target();
+        if (milestone == null && target != null) milestone = target.label();
+        if (!List.of("nether", "stronghold", "defeat_dragon", "elytra")
+                .contains(milestone)) {
+            return decision(goal,
+                    "reach_milestone needs milestone=nether, stronghold, defeat_dragon or elytra. MaiCraft derives the private prerequisite chain.",
+                    List.of(
+                            option("retry", "Retry with details.parameters.milestone."),
+                            option("cancel", "Cancel progression.")));
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("milestone", milestone);
+        args.addProperty("max_search_distance",
+                integer(parameters, "max_search_distance", 4_096, 128, 4_096));
+        args.addProperty("max_portal_search_radius",
+                integer(parameters, "max_portal_search_radius", 128, 16, 512));
+        if (bool(parameters, "may_alter_terrain", false)
+                || bool(goal.preferences(), "may_alter_terrain", false)) {
+            args.addProperty("may_alter_terrain", true);
+        }
+        for (String key : List.of(
+                "minimum_health", "allow_combat", "allow_rare_consumables",
+                "allowed_sources", "material_policy", "protected_labels")) {
+            if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
+        }
+        return new IntentAction.Tool("reach_milestone", args.toString());
+    }
+
+    private static IntentAction obtainElytra(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        JsonObject args = new JsonObject();
+        args.addProperty("max_search_distance",
+                integer(parameters, "max_search_distance", 2_048, 128, 4_096));
+        if (bool(parameters, "may_alter_terrain", false)
+                || bool(goal.preferences(), "may_alter_terrain", false)) {
+            args.addProperty("may_alter_terrain", true);
+        }
+        if (bool(parameters, "allow_combat", false)) {
+            args.addProperty("allow_combat", true);
+        }
+        if (bool(parameters, "allow_rare_consumables", false)) {
+            args.addProperty("allow_rare_consumables", true);
+        }
+        if (parameters.has("protected_labels")) {
+            args.add("protected_labels", parameters.get("protected_labels").deepCopy());
+        }
+        return new IntentAction.Tool("obtain_elytra", args.toString());
+    }
+
+    private static String exploreTarget(Goal goal, IntentRuntime runtime) {
+        String target = string(goal.parameters(), "semantic_target");
+        if (target == null) target = string(goal.parameters(), "biome_id");
+        if (target == null) {
+            String tag = string(goal.parameters(), "biome_tag");
+            if (tag != null) target = tag.startsWith("#") ? tag : "#" + tag;
+        }
+        Goal.SemanticTarget semantic = goal.target();
+        if (target == null && semantic != null
+                && ("nearest".equals(semantic.kind())
+                    || ("area".equals(semantic.kind()) && runtime.landmark(semantic.label()) == null))) {
+            target = semantic.label();
+        }
+        if (target == null && semantic != null && "nearest".equals(semantic.kind())) {
+            target = semantic.relation();
+        }
+        return target == null || target.isBlank() ? null : target.strip();
+    }
+
+    private static IntentAction craft(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        String item = itemId(goal, parameters);
+        if (item == null) {
+            return decision(goal, "Craft needs a namespaced item_id.",
+                    List.of(option("retry", "Retry with details.parameters.item_id and count."),
+                            option("cancel", "Cancel the task.")));
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("item_id", item);
+        args.addProperty("count", integer(parameters, "count", 1, 1, 256));
+        return new IntentAction.Tool("craft", args.toString());
+    }
+
+    private static IntentAction cook(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        String item = itemId(goal, parameters);
+        if (item == null) {
+            return decision(goal, "Cook needs a namespaced item_id.",
+                    List.of(option("retry",
+                                    "Retry with details.parameters.item_id and count."),
+                            option("cancel", "Cancel the task.")));
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("item_id", item);
+        args.addProperty("count", integer(parameters, "count", 1, 1, 256));
+        for (String key : List.of(
+                "recipe_preference", "allowed_fuels", "allowed_sources",
+                "allow_harm", "protected_labels")) {
+            if (parameters.has(key)) {
+                args.add(key, parameters.get(key).deepCopy());
+            }
+        }
+        return new IntentAction.Tool("cook", args.toString());
+    }
+
+    private static IntentAction trade(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        String item = itemId(goal, parameters);
+        if (item == null) {
+            return decision(goal, "Trade needs a namespaced item_id for the desired output.",
+                    List.of(
+                            option("retry", "Retry with details.parameters.item_id and count."),
+                            option("cancel", "Cancel the trade.")));
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("item_id", item);
+        args.addProperty("count", integer(parameters, "count", 1, 1, 256));
+        for (String key : List.of(
+                "merchant_kind", "allowed_payment_items", "protected_labels", "radius")) {
+            if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
+        }
+        return new IntentAction.Tool("trade_items", args.toString());
+    }
+
+    private static IntentAction build(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        return SemanticBuildPlanner.plan(goal, player, runtime);
+    }
+
+    private static IntentAction lightArea(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        JsonObject parameters = goal.parameters();
+        Goal.WorldPosition center = position(goal, player, runtime);
+        Goal.SemanticTarget target = goal.target();
+        boolean semanticPlace = target != null
+                && ("area".equals(target.kind()) || "landmark".equals(target.kind()));
+        if (center == null && semanticPlace) {
+            String label = target.label() == null || target.label().isBlank()
+                    ? "the requested semantic area" : "'" + target.label() + "'";
+            return decision(goal,
+                    "Lighting target " + label + " is not a remembered same-dimension place. "
+                            + "MaiCraft refused to substitute the player's current position.",
+                    List.of(
+                            option("recover", "Provide details.goal to remember, discover, or travel to the intended area first."),
+                            option("replace_goal", "Use current_place, loaded coordinates, a resolved landmark, or an earlier verified result."),
+                            option("cancel", "Cancel without changing any area.")));
+        }
+        if (center == null) {
+            return decision(goal,
+                    "Lighting needs current_place, same-dimension coordinates, a resolved landmark, or an earlier verified result.",
+                    List.of(option("replace_goal", "Provide one unambiguous semantic target."),
+                            option("cancel", "Cancel the task.")));
+        }
+        boolean resolveLoadedComponent = target != null && "area".equals(target.kind());
+        String coverage = string(parameters, "coverage");
+        if (coverage == null) coverage = "most";
+        if (!List.of("all", "most", "crop_growth", "player_visibility").contains(coverage)) {
+            return decision(goal,
+                    "Unsupported lighting coverage: " + coverage,
+                    List.of(option("replace_goal", "Choose all, most, crop_growth or player_visibility."),
+                            option("cancel", "Cancel the task.")));
+        }
+        if (parameters.has("placement_preference")
+                && (!parameters.get("placement_preference").isJsonPrimitive()
+                        || !parameters.getAsJsonPrimitive("placement_preference").isString())) {
+            return decision(goal,
+                    "Lighting placement_preference must be a string enum value.",
+                    List.of(option("replace_goal", "Choose coverage_optimal, central_unplanted or unobtrusive."),
+                            option("cancel", "Cancel the task.")));
+        }
+        String placementPreference = string(parameters, "placement_preference");
+        if (placementPreference == null) placementPreference = "coverage_optimal";
+        if (!List.of("coverage_optimal", "central_unplanted", "unobtrusive")
+                .contains(placementPreference)) {
+            return decision(goal,
+                    "Unsupported lighting placement_preference: " + placementPreference,
+                    List.of(option("replace_goal", "Choose coverage_optimal, central_unplanted or unobtrusive."),
+                            option("cancel", "Cancel the task.")));
+        }
+        if ("central_unplanted".equals(placementPreference)
+                && !"crop_growth".equals(coverage)) {
+            return decision(goal,
+                    "central_unplanted placement_preference is only valid for crop_growth coverage.",
+                    List.of(option("replace_goal", "Use crop_growth coverage or choose another placement preference."),
+                            option("cancel", "Cancel the task.")));
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("center_x", center.x());
+        args.addProperty("center_y", center.y());
+        args.addProperty("center_z", center.z());
+        args.addProperty("radius", integer(parameters, "radius", 16, 1, 48));
+        args.addProperty("coverage", coverage);
+        args.addProperty("placement_preference", placementPreference);
+        args.addProperty("minimum_light", integer(parameters, "minimum_light",
+                "crop_growth".equals(coverage) ? 9 : 8, 1, 15));
+        args.addProperty("resolve_loaded_component", resolveLoadedComponent);
+        if (target != null && target.label() != null && !target.label().isBlank()) {
+            args.addProperty("semantic_target", target.label());
+        }
+        for (String key : List.of("style", "block_id", "light_preferences",
+                "material_policy", "allowed_sources", "allow_harm",
+                "protected_labels", "max_passes", "max_placements")) {
+            if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
+        }
+        if (!args.has("protected_labels") && parameters.has("preserve")
+                && parameters.get("preserve").isJsonArray()) {
+            args.add("protected_labels", parameters.get("preserve").deepCopy());
+        }
+        return new IntentAction.Tool("light_area", args.toString());
+    }
+
+    private static IntentAction connectPower(
+            Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
+        JsonObject parameters = goal.parameters();
+        String sourceLabel = string(parameters, "source_label");
+        String destinationLabel = string(parameters, "target_label");
+        Goal.WorldPosition source = namedPosition(sourceLabel, player, runtime);
+        Goal.WorldPosition destination = position(goal, player, runtime);
+        if (destination == null) destination = namedPosition(destinationLabel, player, runtime);
+        if (source == null || destination == null) {
+            return decision(goal,
+                    "Both mechanical endpoint regions must resolve to remembered or prior-result places before routing.",
+                    List.of(option("recover", "Provide details.goal to remember or travel to the unresolved semantic endpoint."),
+                            option("skip", "Leave the networks unchanged."),
+                            option("cancel", "Cancel the whole task.")));
+        }
+        String requested = string(parameters, "transmission");
+        String transmission;
+        if (requested == null || "auto".equals(requested)) transmission = "auto";
+        else if ("chain_drive".equals(requested) || "encased_chain_drive".equals(requested)) {
+            transmission = "encased_chain_drive";
+        } else {
+            return decision(goal, "Unsupported mechanical transmission: " + requested,
+                    List.of(option("replace_goal", "Choose automatic or chain_drive transmission."),
+                            option("cancel", "Cancel the whole task.")));
+        }
+
+        JsonObject args = new JsonObject();
+        args.addProperty("source_name", sourceLabel == null ? "source" : sourceLabel);
+        args.addProperty("source_x", source.x());
+        args.addProperty("source_y", source.y());
