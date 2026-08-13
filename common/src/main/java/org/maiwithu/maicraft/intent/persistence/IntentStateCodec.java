@@ -298,3 +298,235 @@ public final class IntentStateCodec {
         IntentTaskRecord.DecisionSnapshot decision = value.has("decision")
                 ? decodeDecision(value.getAsJsonObject("decision")) : null;
         IntentTaskRecord.DecisionAnswer answer = value.has("pending_answer")
+                ? decodeAnswer(value.getAsJsonObject("pending_answer")) : null;
+        IntentTaskRecord.TerminalSnapshot terminal = value.has("terminal")
+                ? decodeTerminal(value.getAsJsonObject("terminal")) : null;
+        return new TaskSnapshot(
+                id, planId, goal, List.copyOf(steps), stepIndex,
+                List.copyOf(completed), List.copyOf(attempts),
+                decision, answer, terminal);
+    }
+
+    private static IntentTaskRecord.DecisionSnapshot decodeDecision(JsonObject value) {
+        List<IntentTaskRecord.DecisionOption> options = new ArrayList<>();
+        for (JsonElement element : array(value, "options", MAX_OPTIONS)) {
+            JsonObject item = element.getAsJsonObject();
+            options.add(new IntentTaskRecord.DecisionOption(
+                    bounded(text(item, "choice")),
+                    bounded(text(item, "description"))));
+        }
+        if (options.isEmpty()) throw new IllegalArgumentException(
+                "persisted semantic decision has no options");
+        return new IntentTaskRecord.DecisionSnapshot(
+                UUID.fromString(text(value, "id")),
+                safeMessage(text(value, "question")),
+                options,
+                safeElement(value.get("context")).toString());
+    }
+
+    private static IntentTaskRecord.DecisionAnswer decodeAnswer(JsonObject value) {
+        return new IntentTaskRecord.DecisionAnswer(
+                UUID.fromString(text(value, "decision_id")),
+                bounded(text(value, "choice")),
+                safeElement(value.get("details")).toString());
+    }
+
+    private static IntentTaskRecord.TerminalSnapshot decodeTerminal(JsonObject value) {
+        TaskState state = TaskState.valueOf(text(value, "state").toUpperCase());
+        if (!state.isTerminal()) throw new IllegalArgumentException(
+                "persisted terminal state is not terminal");
+        return new IntentTaskRecord.TerminalSnapshot(
+                state,
+                safeElement(value.get("result")).toString(),
+                longValue(value, "game_time", 0L));
+    }
+
+    private static JsonArray array(JsonObject root, String key, int maximum) {
+        if (!root.has(key)) return new JsonArray();
+        if (!root.get(key).isJsonArray()) {
+            throw new IllegalArgumentException(key + " must be an array");
+        }
+        JsonArray array = root.getAsJsonArray(key);
+        if (array.size() > maximum) {
+            throw new IllegalArgumentException(key + " exceeds its persisted bound");
+        }
+        return array;
+    }
+
+    private static JsonObject worldPosition(Goal.WorldPosition position) {
+        JsonObject value = new JsonObject();
+        value.addProperty("x", position.x());
+        value.addProperty("y", position.y());
+        value.addProperty("z", position.z());
+        if (position.dimension() != null) {
+            value.addProperty("dimension", bounded(position.dimension()));
+        }
+        return value;
+    }
+
+    private static Goal.WorldPosition decodePosition(JsonObject value) {
+        return new Goal.WorldPosition(
+                integer(value, "x", 0),
+                integer(value, "y", 0),
+                integer(value, "z", 0),
+                value.has("dimension") && value.get("dimension").isJsonPrimitive()
+                        ? bounded(value.get("dimension").getAsString()) : null);
+    }
+
+    private static JsonObject safeGoal(Goal goal) {
+        JsonObject original = goal.toJson();
+        JsonElement safe = safeGoalElement(original, 0);
+        if (!safe.isJsonObject()) {
+            throw new IllegalArgumentException("semantic goal must encode as an object");
+        }
+        if (!safe.equals(original)) {
+            throw new IllegalArgumentException(
+                    "semantic goal contains native execution details or exceeds persistence bounds");
+        }
+        return safe.getAsJsonObject();
+    }
+
+    private static Goal decodeGoal(JsonObject value) {
+        JsonElement safe = safeGoalElement(value, 0);
+        if (!safe.equals(value)) {
+            throw new IllegalArgumentException(
+                    "persisted semantic goal contains native execution details or exceeds bounds");
+        }
+        return Goal.fromJson(value);
+    }
+
+    private static JsonObject safeObject(String json) {
+        try {
+            JsonElement element = JsonParser.parseString(
+                    json == null || json.isBlank() ? "{}" : json);
+            JsonElement safe = safeElement(element);
+            return safe.isJsonObject() ? safe.getAsJsonObject() : new JsonObject();
+        } catch (RuntimeException invalid) {
+            return new JsonObject();
+        }
+    }
+
+    private static JsonElement safeElement(JsonElement value) {
+        return safeElement(value, 0);
+    }
+
+    private static JsonElement safeElement(JsonElement value, int depth) {
+        if (value == null || value.isJsonNull() || depth > MAX_RESULT_DEPTH) {
+            return JsonNull.INSTANCE;
+        }
+        if (value.isJsonPrimitive()) {
+            JsonPrimitive primitive = value.getAsJsonPrimitive();
+            if (primitive.isString()) return new JsonPrimitive(safeMessage(primitive.getAsString()));
+            return primitive.deepCopy();
+        }
+        if (value.isJsonArray()) {
+            JsonArray result = new JsonArray();
+            int count = 0;
+            for (JsonElement element : value.getAsJsonArray()) {
+                if (count++ >= 256) break;
+                result.add(safeElement(element, depth + 1));
+            }
+            return result;
+        }
+        JsonObject result = new JsonObject();
+        int count = 0;
+        for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
+            if (count++ >= 256) break;
+            String key = entry.getKey();
+            if (isInternalKey(key)) continue;
+            result.add(bounded(key), safeElement(entry.getValue(), depth + 1));
+        }
+        return result;
+    }
+
+    private static boolean isInternalKey(String key) {
+        String lower = key.toLowerCase(Locale.ROOT);
+        if (INTERNAL_KEYS.contains(lower)) return true;
+        return lower.endsWith("_entity_id") || lower.endsWith("_entity_ids")
+                || lower.endsWith("_entity_uuid") || lower.endsWith("_entity_uuids")
+                || lower.endsWith("_runtime_id") || lower.endsWith("_runtime_ids")
+                || lower.endsWith("_slot") || lower.endsWith("_slots")
+                || lower.endsWith("_click") || lower.endsWith("_clicks")
+                || lower.endsWith("_route") || lower.endsWith("_waypoints")
+                || lower.endsWith("_path_nodes") || lower.endsWith("_receipt")
+                || lower.endsWith("_receipts");
+    }
+
+    /** Goal metadata may contain semantic equipment slots; only native menu slots are forbidden. */
+    private static JsonElement safeGoalElement(JsonElement value, int depth) {
+        if (value == null || value.isJsonNull() || depth > MAX_RESULT_DEPTH) {
+            return JsonNull.INSTANCE;
+        }
+        if (value.isJsonPrimitive()) {
+            JsonPrimitive primitive = value.getAsJsonPrimitive();
+            if (primitive.isString()) return new JsonPrimitive(bounded(primitive.getAsString()));
+            return primitive.deepCopy();
+        }
+        if (value.isJsonArray()) {
+            JsonArray result = new JsonArray();
+            int count = 0;
+            for (JsonElement element : value.getAsJsonArray()) {
+                if (count++ >= 256) break;
+                result.add(safeGoalElement(element, depth + 1));
+            }
+            return result;
+        }
+        JsonObject result = new JsonObject();
+        int count = 0;
+        for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
+            if (count++ >= 256) break;
+            String key = entry.getKey();
+            if (isGoalInternalKey(key)) continue;
+            result.add(bounded(key), safeGoalElement(entry.getValue(), depth + 1));
+        }
+        return result;
+    }
+
+    private static boolean isGoalInternalKey(String key) {
+        String lower = key.toLowerCase(Locale.ROOT);
+        if (GOAL_INTERNAL_KEYS.contains(lower)) return true;
+        return lower.endsWith("_entity_id") || lower.endsWith("_entity_ids")
+                || lower.endsWith("_entity_uuid") || lower.endsWith("_entity_uuids")
+                || lower.endsWith("_runtime_id") || lower.endsWith("_runtime_ids")
+                || lower.endsWith("_click") || lower.endsWith("_clicks")
+                || lower.endsWith("_route") || lower.endsWith("_waypoints")
+                || lower.endsWith("_path_nodes") || lower.endsWith("_receipt")
+                || lower.endsWith("_receipts");
+    }
+
+    private static String safeMessage(String value) {
+        String message = bounded(value);
+        String lower = message.toLowerCase();
+        if (lower.contains("exception") || lower.contains("stack trace")
+                || lower.contains("internal error") || lower.contains("task start failed")
+                || lower.contains("task tick failed") || lower.contains("task result failed")
+                || lower.contains("internal tool") || lower.contains("java.")
+                || lower.contains("net.minecraft.") || lower.contains("org.maiwithu.")) {
+            return "A previous semantic action stopped safely; re-observe current facts before retrying.";
+        }
+        return message;
+    }
+
+    private static String bounded(String value) {
+        if (value == null) return "";
+        String result = value.strip();
+        return result.length() <= MAX_TEXT ? result : result.substring(0, MAX_TEXT);
+    }
+
+    private static String text(JsonObject value, String key) {
+        if (!value.has(key) || !value.get(key).isJsonPrimitive()) {
+            throw new IllegalArgumentException(key + " is required");
+        }
+        return bounded(value.get(key).getAsString());
+    }
+
+    private static int integer(JsonObject value, String key, int fallback) {
+        if (!value.has(key)) return fallback;
+        return value.get(key).getAsInt();
+    }
+
+    private static long longValue(JsonObject value, String key, long fallback) {
+        if (!value.has(key)) return fallback;
+        return value.get(key).getAsLong();
+    }
+}
