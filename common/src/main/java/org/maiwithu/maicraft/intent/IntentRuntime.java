@@ -598,3 +598,164 @@ public final class IntentRuntime {
                 if (internalAttentionKey(entry.getKey())) continue;
                 JsonElement nested = sanitizeAttentionValue(entry.getValue());
                 if (nested != null) clean.add(entry.getKey(), nested);
+            }
+            return clean;
+        }
+        if (value.getAsJsonPrimitive().isString()) {
+            return new JsonPrimitive(value.getAsString()
+                    .replaceAll("(?i)entity\\s*#?\\s*\\d+", "selected entity")
+                    .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target"));
+        }
+        return value.deepCopy();
+    }
+
+    private static boolean internalAttentionKey(String raw) {
+        String key = raw.toLowerCase(Locale.ROOT);
+        return ATTENTION_INTERNAL_KEYS.contains(key)
+                || key.endsWith("_cells") || key.endsWith("_ops")
+                || key.endsWith("_placements") || key.endsWith("_receipts")
+                || key.endsWith("_routes") || key.endsWith("_waypoints")
+                || key.endsWith("_path_nodes") || key.endsWith("_entity_id")
+                || key.endsWith("_entity_ids") || key.endsWith("_runtime_id")
+                || key.endsWith("_runtime_ids");
+    }
+
+    private static String normalizeLabel(String label) {
+        return label.strip().toLowerCase(Locale.ROOT);
+    }
+
+    private static void rejectMicroInstructions(Goal goal) {
+        String forbidden = findMicroInstruction(goal.toJson());
+        if (forbidden != null) {
+            throw new IllegalArgumentException(
+                    "semantic goals cannot contain " + forbidden + "; describe the outcome instead");
+        }
+        JsonObject parameters = goal.parameters();
+        if ("maicraft:build".equals(goal.ability()) && parameters.has("ops")) {
+            throw new IllegalArgumentException(
+                    "semantic build goals cannot contain per-block ops; use shape/material/size or a blueprint");
+        }
+    }
+
+    private static String findMicroInstruction(JsonElement value) {
+        if (value == null || value.isJsonNull() || value.isJsonPrimitive()) return null;
+        if (value.isJsonArray()) {
+            for (JsonElement element : value.getAsJsonArray()) {
+                String nested = findMicroInstruction(element);
+                if (nested != null) return nested;
+            }
+            return null;
+        }
+        for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
+            String key = entry.getKey().toLowerCase(Locale.ROOT);
+            if (isMicroInstructionKey(key)) return entry.getKey();
+            String nested = findMicroInstruction(entry.getValue());
+            if (nested != null) return nested;
+        }
+        return null;
+    }
+
+    private static boolean isMicroInstructionKey(String key) {
+        if (Set.of(
+                "route", "waypoints", "path_nodes", "click", "clicks", "slot_clicks",
+                "click_sequence", "inventory_slots", "block_ops", "placements", "cells",
+                "entity_id", "entity_ids", "entity_uuid", "entity_uuids", "runtime_id",
+                "runtime_ids", "target_runtime_id", "target_runtime_ids", "receipt",
+                "receipts").contains(key)) return true;
+        return key.endsWith("_entity_id") || key.endsWith("_entity_ids")
+                || key.endsWith("_entity_uuid") || key.endsWith("_entity_uuids")
+                || key.endsWith("_runtime_id") || key.endsWith("_runtime_ids")
+                || key.endsWith("_click") || key.endsWith("_clicks")
+                || key.endsWith("_route") || key.endsWith("_waypoints")
+                || key.endsWith("_path_nodes") || key.endsWith("_receipt")
+                || key.endsWith("_receipts");
+    }
+
+    private void trimTasks() {
+        if (tasks.size() <= MAX_TASKS) return;
+        List<UUID> removable = tasks.entrySet().stream()
+                .filter(entry -> entry.getValue().getState().isTerminal())
+                .map(Map.Entry::getKey)
+                .toList();
+        for (UUID id : removable) {
+            if (tasks.size() <= MAX_TASKS) break;
+            tasks.remove(id);
+            requestKeys.values().removeIf(id::equals);
+        }
+    }
+
+    private static <K, V> void trimOldest(LinkedHashMap<K, V> map, int max) {
+        while (map.size() > max) {
+            K first = map.keySet().iterator().next();
+            map.remove(first);
+        }
+    }
+
+    public record Landmark(String label, Goal.WorldPosition position) {}
+
+    private static final class AttentionFeed {
+        private final List<AttentionEvent> events = new ArrayList<>();
+        private final CopyOnWriteArrayList<Consumer<JsonElement>> listeners = new CopyOnWriteArrayList<>();
+        private long cursor;
+
+        void publish(String type, UUID taskId, String message, JsonObject data) {
+            AttentionEvent event = new AttentionEvent(
+                    ++cursor, type, taskId, message, data == null ? "{}" : data.toString());
+            events.add(event);
+            while (events.size() > MAX_ATTENTION) events.removeFirst();
+            JsonObject snapshot = read(Math.max(0, cursor - 1), 1);
+            for (Consumer<JsonElement> listener : listeners) {
+                try {
+                    listener.accept(snapshot.deepCopy());
+                } catch (RuntimeException ignored) {
+                    // One failed MCP subscriber must never break task settlement.
+                }
+            }
+        }
+
+        JsonObject read(long afterCursor, int limit) {
+            JsonArray array = new JsonArray();
+            int start = afterCursor == 0 ? Math.max(0, events.size() - limit) : 0;
+            for (int index = start; index < events.size(); index++) {
+                AttentionEvent event = events.get(index);
+                if (event.cursor() <= afterCursor) continue;
+                array.add(event.toJson());
+                if (array.size() >= limit) break;
+            }
+            JsonObject result = new JsonObject();
+            result.addProperty("cursor", cursor);
+            result.add("events", array);
+            return result;
+        }
+
+        AutoCloseable subscribe(Consumer<JsonElement> listener) {
+            listeners.add(listener);
+            return new AutoCloseable() {
+                private boolean closed;
+                @Override
+                public synchronized void close() {
+                    if (closed) return;
+                    closed = true;
+                    listeners.remove(listener);
+                }
+            };
+        }
+
+        void clear() {
+            events.clear();
+        }
+    }
+
+    private record AttentionEvent(long cursor, String type, UUID taskId,
+                                  String message, String dataJson) {
+        JsonObject toJson() {
+            JsonObject result = new JsonObject();
+            result.addProperty("cursor", cursor);
+            result.addProperty("type", type);
+            if (taskId != null) result.addProperty("task_id", taskId.toString());
+            result.addProperty("message", message == null ? "" : message);
+            result.add("data", JsonParser.parseString(dataJson));
+            return result;
+        }
+    }
+}
