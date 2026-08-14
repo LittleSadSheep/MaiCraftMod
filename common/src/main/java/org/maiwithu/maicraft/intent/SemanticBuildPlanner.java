@@ -598,3 +598,303 @@ public final class SemanticBuildPlanner {
         }
 
         if (size.storeys > 1) {
+            verticalLink(ops, ladder, s.front, floorY, size, palette.ladder);
+        }
+        if (features.contains("cellar") && replace) {
+            ops.add(set("minecraft:air", cellarLadder.getX(), floorY,
+                    cellarLadder.getZ()));
+            for (int y = floorY - 3; y <= floorY; y++) {
+                ops.add(setFacing(palette.ladder, cellarLadder.getX(), y,
+                        cellarLadder.getZ(), s.front));
+            }
+        }
+
+        List<BlockPos> openings = new ArrayList<>();
+        BlockPos mainDoor = edge(s, s.front, floorY + 1, 0);
+        BlockPos interiorEntry = edge(s, s.front, floorY + 1, -1);
+        // A centred facade door can meet a centred partition wall. The entrance is a semantic
+        // invariant, so cut its two-block landing after all room walls and furniture are planned.
+        ops.add(set("minecraft:air", interiorEntry.getX(), interiorEntry.getY(), interiorEntry.getZ()));
+        ops.add(set("minecraft:air", interiorEntry.getX(), interiorEntry.getY() + 1,
+                interiorEntry.getZ()));
+        openings.add(mainDoor);
+        openings.add(ladder);
+        BlockPos serviceDoor = null;
+        if (features.contains("workshop")) {
+            Direction side = s.front.getOpposite();
+            serviceDoor = edge(s, side, floorY + 1, 0);
+            openings.add(serviceDoor);
+        }
+        for (int storey = 0; storey < size.storeys; storey++) {
+            int windowY = floorY + storey * size.floorHeight + 2;
+            windows(ops, s, windowY, openings, palette.window, style.windowStride);
+        }
+        ops.add(door(palette.door, mainDoor, s.front));
+        if (serviceDoor != null) {
+            ops.add(door(palette.door, serviceDoor, s.front.getOpposite()));
+        }
+
+        ops.add(roof(palette, s, wallTop + 1, style, purpose));
+        if (features.contains("dock") && s.shore != null) {
+            dock(ops, s, palette);
+        } else {
+            entryTerrace(ops, s, palette, features.contains("porch"));
+        }
+        return ops;
+    }
+
+    private static void supports(JsonArray ops, Site s, String block) {
+        int stepX = Math.max(2, (s.maxX - s.minX) / 3);
+        int stepZ = Math.max(2, (s.maxZ - s.minZ) / 3);
+        for (int x : samples(s.minX, s.maxX, stepX)) {
+            for (int z : samples(s.minZ, s.maxZ, stepZ)) {
+                int groundY = s.heights[x - s.minX][z - s.minZ];
+                if (groundY < s.baseY) {
+                    ops.add(line(block, x, groundY, z, x, s.baseY - 1, z));
+                }
+            }
+        }
+    }
+
+    private static void frameShell(JsonArray ops, Site s, int floorY, int wallTop,
+                                   Size size, String frame) {
+        int stride = Math.max(3, Math.min(5, Math.min(size.width, size.depth) / 3));
+        for (int x : samples(s.minX, s.maxX, stride)) {
+            ops.add(line(frame, x, floorY + 1, s.minZ, x, wallTop, s.minZ));
+            ops.add(line(frame, x, floorY + 1, s.maxZ, x, wallTop, s.maxZ));
+        }
+        for (int z : samples(s.minZ, s.maxZ, stride)) {
+            ops.add(line(frame, s.minX, floorY + 1, z, s.minX, wallTop, z));
+            ops.add(line(frame, s.maxX, floorY + 1, z, s.maxX, wallTop, z));
+        }
+        for (int storey = 1; storey <= size.storeys; storey++) {
+            int y = floorY + storey * size.floorHeight;
+            ops.add(line(frame, s.minX, y, s.minZ, s.maxX, y, s.minZ));
+            ops.add(line(frame, s.minX, y, s.maxZ, s.maxX, y, s.maxZ));
+            ops.add(line(frame, s.minX, y, s.minZ, s.minX, y, s.maxZ));
+            ops.add(line(frame, s.maxX, y, s.minZ, s.maxX, y, s.maxZ));
+        }
+    }
+
+    private static List<Room> partitionRooms(
+            JsonArray ops, Site s, Size size, int floorY, String wall,
+            List<RoomUse> functions, int serial) {
+        int minX = s.minX + 1, maxX = s.maxX - 1;
+        int minZ = s.minZ + 1, maxZ = s.maxZ - 1;
+        boolean splitX = size.width >= 11;
+        boolean splitZ = size.depth >= 13;
+        int midX = Math.floorDiv(minX + maxX, 2);
+        int midZ = Math.floorDiv(minZ + maxZ, 2);
+        int wallTop = floorY + size.floorHeight - 1;
+
+        List<int[]> xRanges = splitX
+                ? List.of(new int[]{minX, midX - 1}, new int[]{midX + 1, maxX})
+                : List.of(new int[]{minX, maxX});
+        List<int[]> zRanges = splitZ
+                ? List.of(new int[]{minZ, midZ - 1}, new int[]{midZ + 1, maxZ})
+                : List.of(new int[]{minZ, maxZ});
+
+        if (splitX) {
+            ops.add(line(wall, midX, floorY + 1, minZ, midX, wallTop, maxZ));
+            for (int[] range : zRanges) {
+                int doorZ = Math.floorDiv(range[0] + range[1], 2);
+                ops.add(set("minecraft:air", midX, floorY + 1, doorZ));
+                ops.add(set("minecraft:air", midX, floorY + 2, doorZ));
+            }
+        }
+        if (splitZ) {
+            ops.add(line(wall, minX, floorY + 1, midZ, maxX, wallTop, midZ));
+            for (int[] range : xRanges) {
+                int doorX = Math.floorDiv(range[0] + range[1], 2);
+                ops.add(set("minecraft:air", doorX, floorY + 1, midZ));
+                ops.add(set("minecraft:air", doorX, floorY + 2, midZ));
+            }
+        }
+
+        List<Room> rooms = new ArrayList<>();
+        int index = serial;
+        for (int[] xr : xRanges) for (int[] zr : zRanges) {
+            rooms.add(new Room(xr[0], xr[1], zr[0], zr[1],
+                    functions.get(Math.floorMod(index++, functions.size()))));
+        }
+        return List.copyOf(rooms);
+    }
+
+    private static void ceilingAndLight(JsonArray ops, Room room, int ceilingY,
+                                        String frame, String light, Set<Long> reserved) {
+        int x = room.centerX(), z = room.centerZ();
+        ops.add(line(frame, room.minX, ceilingY, z, room.maxX, ceilingY, z));
+        BlockPos lamp = new BlockPos(x, ceilingY - 1, z);
+        if (!nearReserved(lamp, reserved, 1)) {
+            ops.add(setProperties(light, x, ceilingY - 1, z,
+                    Map.of("hanging", "true")));
+        }
+    }
+
+    private static void furnish(JsonArray ops, Room room, int floorY,
+                                Palette palette, Set<Long> reserved) {
+        List<BlockPos> spots = List.of(
+                new BlockPos(room.minX, floorY + 1, room.minZ),
+                new BlockPos(room.maxX, floorY + 1, room.minZ),
+                new BlockPos(room.minX, floorY + 1, room.maxZ),
+                new BlockPos(room.maxX, floorY + 1, room.maxZ));
+        List<String> blocks = switch (room.use) {
+            case COMMON -> List.of(palette.study, palette.storage, palette.work, palette.seat);
+            case REST -> List.of(palette.storage, palette.study, palette.work, palette.seat);
+            case KITCHEN -> List.of(palette.work, "minecraft:furnace",
+                    palette.storage, palette.storage);
+            case WORK -> List.of(palette.work, "minecraft:stonecutter",
+                    palette.storage, palette.study);
+            case STORAGE -> List.of(palette.storage, palette.storage,
+                    palette.storage, palette.study);
+            case STUDY -> List.of(palette.study, palette.study,
+                    "minecraft:lectern", palette.storage);
+        };
+        for (int i = 0; i < spots.size(); i++) {
+            BlockPos spot = spots.get(i);
+            if (!nearReserved(spot, reserved, 1)) {
+                ops.add(set(blocks.get(i), spot.getX(), spot.getY(), spot.getZ()));
+            }
+        }
+        int carpetX = room.centerX();
+        int carpetZ = Math.max(room.minZ, room.centerZ() - 1);
+        BlockPos carpet = new BlockPos(carpetX, floorY + 1, carpetZ);
+        if (!nearReserved(carpet, reserved, 1)) {
+            ops.add(set(palette.textile, carpet.getX(), carpet.getY(), carpet.getZ()));
+        }
+    }
+
+    private static void verticalLink(JsonArray ops, BlockPos ladder, Direction facing,
+                                     int floorY, Size size, String block) {
+        int highestLanding = floorY + (size.storeys - 1) * size.floorHeight;
+        for (int storey = 1; storey < size.storeys; storey++) {
+            int landingY = floorY + storey * size.floorHeight;
+            ops.add(set("minecraft:air", ladder.getX(), landingY, ladder.getZ()));
+        }
+        for (int y = floorY + 1; y <= highestLanding + 1; y++) {
+            ops.add(setFacing(block, ladder.getX(), y, ladder.getZ(), facing));
+        }
+    }
+
+    private static BlockPos ladderPosition(Site s, int y) {
+        Direction back = s.front.getOpposite();
+        return switch (back) {
+            case NORTH -> new BlockPos(s.minX + 2, y, s.minZ + 1);
+            case SOUTH -> new BlockPos(s.minX + 2, y, s.maxZ - 1);
+            case WEST -> new BlockPos(s.minX + 1, y, s.minZ + 2);
+            case EAST -> new BlockPos(s.maxX - 1, y, s.minZ + 2);
+            default -> new BlockPos(s.minX + 2, y, s.minZ + 1);
+        };
+    }
+
+    private static void reserveColumn(Set<Long> reserved, BlockPos pos, int minY, int maxY) {
+        for (int y = minY; y <= maxY; y++) {
+            reserved.add(BlockPos.asLong(pos.getX(), y, pos.getZ()));
+        }
+    }
+
+    private static boolean nearReserved(BlockPos pos, Set<Long> reserved, int horizontalRadius) {
+        for (int dx = -horizontalRadius; dx <= horizontalRadius; dx++) {
+            for (int dz = -horizontalRadius; dz <= horizontalRadius; dz++) {
+                if (reserved.contains(BlockPos.asLong(
+                        pos.getX() + dx, pos.getY(), pos.getZ() + dz))) return true;
+            }
+        }
+        return false;
+    }
+
+    private static void windows(JsonArray ops, Site s, int y, List<BlockPos> avoid,
+                                String block, int stride) {
+        for (int x : samples(s.minX + 2, s.maxX - 2, stride)) {
+            window(ops, block, x, y, s.minZ, avoid);
+            window(ops, block, x, y, s.maxZ, avoid);
+        }
+        for (int z : samples(s.minZ + 2, s.maxZ - 2, stride)) {
+            window(ops, block, s.minX, y, z, avoid);
+            window(ops, block, s.maxX, y, z, avoid);
+        }
+    }
+
+    private static void window(JsonArray ops, String block, int x, int y, int z,
+                               List<BlockPos> avoid) {
+        boolean blocked = avoid.stream().anyMatch(cell ->
+                Math.abs(x - cell.getX()) + Math.abs(z - cell.getZ()) <= 1);
+        if (!blocked) ops.add(set(block, x, y, z));
+    }
+
+    private static List<Integer> samples(int min, int max, int stride) {
+        LinkedHashSet<Integer> values = new LinkedHashSet<>();
+        for (int value = min; value <= max; value += Math.max(1, stride)) values.add(value);
+        values.add(max);
+        return List.copyOf(values);
+    }
+
+    private static JsonObject roof(Palette palette, Site s, int y,
+                                   StyleProfile style, String purpose) {
+        JsonObject op = base("roof", palette.roof);
+        bounds(op, s.minX, y, s.minZ, s.maxX, y, s.maxZ);
+        int variant = Math.floorMod(
+                Objects.hash(purpose.toLowerCase(Locale.ROOT), s.minX, s.minZ),
+                style.roofShapes.size());
+        String shape = style.roofShapes.get(variant);
+        op.addProperty("roof_shape", shape);
+        op.addProperty("roof_curve", shape.equals("shed") ? "straight" : style.roofCurve);
+        op.addProperty("overhang", style.overhang);
+        op.addProperty("corner_lift", style.cornerLift);
+        op.addProperty("gable_block", palette.wall);
+        op.addProperty("ridge_block", palette.accent);
+        op.addProperty("eave_block", palette.frame);
+        if (style.soffit) op.addProperty("soffit_block", palette.floor);
+        op.addProperty("hollow", true);
+        return op;
+    }
+
+    private static void entryTerrace(JsonArray ops, Site s, Palette palette, boolean porch) {
+        int depth = porch ? 3 : 2;
+        int halfWidth = porch ? 2 : 1;
+        BlockPos a = edge(s, s.front, s.baseY, 1);
+        BlockPos b = edge(s, s.front, s.baseY, depth);
+        if (s.front.getAxis() == Direction.Axis.Z) {
+            ops.add(box(palette.floor, a.getX() - halfWidth, s.baseY,
+                    Math.min(a.getZ(), b.getZ()), a.getX() + halfWidth,
+                    s.baseY, Math.max(a.getZ(), b.getZ()), false));
+        } else {
+            ops.add(box(palette.floor, Math.min(a.getX(), b.getX()), s.baseY,
+                    a.getZ() - halfWidth, Math.max(a.getX(), b.getX()),
+                    s.baseY, a.getZ() + halfWidth, false));
+        }
+        for (int lateral : new int[]{-halfWidth, halfWidth}) {
+            BlockPos post = lateral(edge(s, s.front, s.baseY + 1, depth), s.front, lateral);
+            ops.add(set(palette.railing, post.getX(), post.getY(), post.getZ()));
+            ops.add(set(palette.light, post.getX(), post.getY() + 1, post.getZ()));
+        }
+    }
+
+    private static void dock(JsonArray ops, Site s, Palette palette) {
+        Shore shore = s.shore;
+        int deckY = shore.waterY + 1;
+        BlockPos a = edge(s, shore.direction, deckY, 1);
+        BlockPos b = edge(s, shore.direction, deckY, shore.length);
+        if (shore.direction.getAxis() == Direction.Axis.Z) {
+            ops.add(box(palette.floor, a.getX() - 1, deckY,
+                    Math.min(a.getZ(), b.getZ()), a.getX() + 1,
+                    deckY, Math.max(a.getZ(), b.getZ()), false));
+        } else {
+            ops.add(box(palette.floor, Math.min(a.getX(), b.getX()), deckY,
+                    a.getZ() - 1, Math.max(a.getX(), b.getX()),
+                    deckY, a.getZ() + 1, false));
+        }
+
+        Set<Integer> supportRows = new LinkedHashSet<>();
+        for (int d = 1; d <= shore.length; d += 3) supportRows.add(d);
+        supportRows.add(shore.length);
+        for (int d : supportRows) for (int side : new int[]{-1, 1}) {
+            BlockPos column = lateral(edge(s, shore.direction, deckY, d),
+                    shore.direction, side);
+            int bottom = shore.supportFloor(d, side) + 1;
+            if (bottom <= shore.waterY) {
+                ops.add(line(palette.frame, column.getX(), bottom, column.getZ(),
+                        column.getX(), shore.waterY, column.getZ()));
+            }
+        }
+        for (int d = 2; d <= shore.length; d++) for (int side : new int[]{-1, 1}) {
