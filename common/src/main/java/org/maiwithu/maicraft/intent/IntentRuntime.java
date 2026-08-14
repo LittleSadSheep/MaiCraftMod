@@ -298,3 +298,303 @@ public final class IntentRuntime {
     }
 
     /** Loader shutdown hook: a synchronous best-effort forced save, never a background write. */
+    public void shutdownPersistence() {
+        saveNow(true);
+        bodyAttached = false;
+    }
+
+    public void requireCurrentBinding(IntentTaskRecord record) {
+        if (record == null || stateIdentity == null || !bodyAttached
+                || record.bindingKey() == null
+                || !stateIdentity.key().equals(record.bindingKey())) {
+            throw new IllegalStateException(
+                    "semantic task belongs to another connection or world");
+        }
+    }
+
+    public void restoredTaskAttached(IntentTaskRecord record) {
+        requireCurrentBinding(record);
+        record.markAttached();
+        markDirty();
+    }
+
+    private void restoreBound(long gameTime) {
+        IntentStateStore.LoadResult loaded = stateStore.load(stateIdentity);
+        int restoredTasks = 0;
+        int restoredLandmarks = 0;
+        int restoredTerminal = 0;
+        String status = loaded.status().name().toLowerCase(Locale.ROOT);
+        if (loaded.status() == IntentStateStore.Status.LOADED) {
+            try {
+                IntentStateCodec.Decoded decoded = IntentStateCodec.decode(loaded.root());
+                for (Plan plan : decoded.plans()) {
+                    validateGoal(plan.goal());
+                    if (plans.putIfAbsent(plan.id(), plan) != null) {
+                        throw new IllegalArgumentException("duplicate persisted plan id");
+                    }
+                }
+                for (IntentStateCodec.TaskSnapshot snapshot : decoded.tasks()) {
+                    validateGoal(snapshot.goal());
+                    for (Goal step : snapshot.steps()) validateGoal(step);
+                    for (IntentTaskRecord.AttemptSnapshot attempt : snapshot.attempts()) {
+                        validateGoal(attempt.goal());
+                    }
+                    IntentTaskRecord record = IntentTaskRecord.restored(
+                            snapshot.id(), snapshot.planId(), snapshot.goal(),
+                            stateIdentity.key(), snapshot.steps(), snapshot.stepIndex(),
+                            snapshot.completed(), snapshot.attempts(), snapshot.decision(),
+                            snapshot.pendingAnswer(), snapshot.terminal(), gameTime);
+                    record.bindDirty(this::markDirty);
+                    if (tasks.putIfAbsent(record.externalId(), record) != null) {
+                        throw new IllegalArgumentException("duplicate persisted task id");
+                    }
+                    restoredTasks++;
+                    if (record.getState().isTerminal()) restoredTerminal++;
+                }
+                for (Map.Entry<String, UUID> entry : decoded.requestKeys().entrySet()) {
+                    if (tasks.containsKey(entry.getValue())) {
+                        requestKeys.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                for (Landmark landmark : decoded.landmarks()) {
+                    if (landmark.label() == null || landmark.label().isBlank()
+                            || landmark.position() == null) {
+                        throw new IllegalArgumentException("invalid persisted landmark");
+                    }
+                    landmarks.put(normalizeLabel(landmark.label()), landmark);
+                    restoredLandmarks++;
+                }
+            } catch (RuntimeException invalidModel) {
+                stateStore.quarantine(stateIdentity);
+                clearSemanticState();
+                restoredTasks = 0;
+                restoredLandmarks = 0;
+                restoredTerminal = 0;
+                status = "corrupt";
+                Constants.LOG.warn(
+                        "MaiCraft semantic state model was invalid and quarantined ({})",
+                        invalidModel.getClass().getSimpleName());
+            }
+        }
+        dirty = false;
+        nextSaveNanos = System.nanoTime() + SAVE_INTERVAL_NANOS;
+        JsonObject data = new JsonObject();
+        data.addProperty("status", status);
+        data.addProperty("restored_tasks", restoredTasks);
+        data.addProperty("restored_terminal_tasks", restoredTerminal);
+        data.addProperty("restored_landmarks", restoredLandmarks);
+        attention.publish(
+                "state_restored",
+                null,
+                "Restored " + restoredTasks + " semantic task(s) and "
+                        + restoredLandmarks + " landmark(s); non-terminal work is paused.",
+                data);
+    }
+
+    private boolean saveNow(boolean force) {
+        if (stateIdentity == null || (!force && !dirty)) return stateIdentity != null;
+        try {
+            JsonObject root = IntentStateCodec.encode(
+                    stateIdentity.key(), plans.values(), tasks.values(),
+                    requestKeys, landmarks.values());
+            stateStore.save(stateIdentity, root);
+            dirty = false;
+            return true;
+        } catch (IOException | RuntimeException failure) {
+            dirty = true;
+            Constants.LOG.warn(
+                    "Could not save MaiCraft semantic state ({})",
+                    failure.getClass().getSimpleName());
+            return false;
+        } finally {
+            nextSaveNanos = System.nanoTime() + SAVE_INTERVAL_NANOS;
+        }
+    }
+
+    private void clearSemanticState() {
+        plans.clear();
+        tasks.clear();
+        requestKeys.clear();
+        landmarks.clear();
+        attention.clear();
+        dirty = false;
+    }
+
+    private void markDirty() {
+        dirty = true;
+    }
+
+    void decision(IntentTaskRecord record, IntentTaskRecord.DecisionSnapshot decision) {
+        markDirty();
+        JsonObject data = new JsonObject();
+        data.addProperty("decision_id", decision.id().toString());
+        JsonArray options = new JsonArray();
+        for (IntentTaskRecord.DecisionOption option : decision.options()) {
+            JsonObject item = new JsonObject();
+            item.addProperty("choice", option.choice());
+            item.addProperty("description", option.description());
+            options.add(item);
+        }
+        data.add("options", options);
+        data.add("context", sanitizeAttentionContext(decision.context()));
+        publish("decision", record, decision.question(), data);
+    }
+
+    public void paused(IntentTaskRecord record, String reason) {
+        markDirty();
+        publish("paused", record, reason, new JsonObject());
+    }
+
+    public void resumed(IntentTaskRecord record) {
+        markDirty();
+        publish("resumed", record, "Task resumed", new JsonObject());
+    }
+
+    /** Pause only an otherwise-running semantic parent while first-person control is unavailable. */
+    public void controlUnavailable(LocalPlayer player, String reason) {
+        if (player == null) return;
+        if (!(CompanionTickDispatcher.current() instanceof IntentTaskRecord record)
+                || record.getState().isTerminal() || record.pauseSnapshot() != null) {
+            return;
+        }
+        if (!record.pause(player.level().getGameTime(), "control_unavailable")) return;
+        markDirty();
+        JsonObject data = new JsonObject();
+        data.addProperty("reason", reason == null || reason.isBlank()
+                ? "first-person automation control is unavailable" : reason);
+        publish("paused", record,
+                "Task paused because first-person automation control is unavailable.", data);
+    }
+
+    /** Resume only the pause installed by {@link #controlUnavailable}; preserve every other pause. */
+    public void controlAvailable() {
+        if (!(CompanionTickDispatcher.current() instanceof IntentTaskRecord record)
+                || record.getState().isTerminal() || record.decisionSnapshot() != null
+                || record.pauseSnapshot() == null
+                || !"control_unavailable".equals(record.pauseSnapshot().reason())) {
+            return;
+        }
+        if (record.resume()) resumed(record);
+    }
+
+    void validateGoal(Goal goal) {
+        IntentStateCodec.requirePersistableGoal(goal);
+        rejectMicroInstructions(goal);
+        SemanticGoalContract.validate(goal, KNOWN_ABILITIES);
+    }
+
+    /** Validate public decision details before the answer can unpause or mutate a task record. */
+    public void validateDecisionAnswer(
+            IntentTaskRecord record, String choice, JsonObject details) {
+        JsonObject supplied = details == null ? new JsonObject() : details;
+        boolean semanticReplacement = "recover".equals(choice) || "replace_goal".equals(choice);
+        if (semanticReplacement) {
+            if (!supplied.has("goal") || !supplied.get("goal").isJsonObject()) {
+                throw new SemanticContractException(
+                        "decision_goal_required", "answer.details.goal",
+                        record.stepIndex() < record.steps().size()
+                                ? record.steps().get(record.stepIndex()).ability() : null,
+                        choice + " requires exactly one semantic Goal in details.goal.");
+            }
+            if (supplied.size() != 1) {
+                throw new SemanticContractException(
+                        "unknown_decision_detail", "answer.details",
+                        record.stepIndex() < record.steps().size()
+                                ? record.steps().get(record.stepIndex()).ability() : null,
+                        choice + " accepts details.goal only; extra fields were refused.");
+            }
+            validateGoal(Goal.fromJson(supplied.getAsJsonObject("goal")));
+            return;
+        }
+        if (supplied.has("goal")) {
+            throw new SemanticContractException(
+                    "decision_goal_not_allowed", "answer.details.goal",
+                    record.stepIndex() < record.steps().size()
+                            ? record.steps().get(record.stepIndex()).ability() : null,
+                    choice + " cannot carry a replacement Goal; use recover or replace_goal.");
+        }
+        if (record.stepIndex() >= record.steps().size()) {
+            return;
+        }
+        JsonObject updates = supplied.has("parameters")
+                && supplied.get("parameters").isJsonObject()
+                ? supplied.getAsJsonObject("parameters") : supplied;
+        Goal current = record.steps().get(record.stepIndex());
+        JsonObject merged = current.parameters();
+        updates.entrySet().forEach(entry ->
+                merged.add(entry.getKey(), entry.getValue().deepCopy()));
+        validateGoal(current.withParameters(merged));
+    }
+
+    void semanticPlanChanged(IntentTaskRecord record, Goal semanticGoal, boolean replaced) {
+        markDirty();
+        JsonObject data = new JsonObject();
+        data.addProperty("mode", replaced ? "replace" : "prerequisite");
+        data.add("goal", semanticGoal.toJson());
+        publish(
+                "plan_changed",
+                record,
+                replaced
+                        ? "Replaced the current semantic step."
+                        : "Inserted a semantic prerequisite; the failed step will be retried afterwards.",
+                data);
+    }
+
+    void terminal(IntentTaskRecord record, TaskState state, TaskResult result) {
+        markDirty();
+        String type = switch (state) {
+            case SUCCESS -> "completed";
+            case CANCELLED -> "cancelled";
+            default -> "failed";
+        };
+        JsonObject data = result == null ? new JsonObject() : resultJson(result);
+        String message = result == null ? state.name().toLowerCase() : result.message();
+        publish(type, record, message, data);
+    }
+
+    public JsonObject attention(long afterCursor, int limit) {
+        return attention.read(afterCursor, limit);
+    }
+
+    public AutoCloseable subscribeAttention(Consumer<JsonElement> listener) {
+        return attention.subscribe(listener);
+    }
+
+    /** Publish a concise game-side fact that may require the LLM's attention. */
+    public void gameEvent(String type, String message, JsonObject data) {
+        if (type == null || type.isBlank()) {
+            throw new IllegalArgumentException("game event type is required");
+        }
+        attention.publish(type, null, message, data == null ? new JsonObject() : data);
+    }
+
+    private void publish(String type, IntentTaskRecord record, String message, JsonObject data) {
+        attention.publish(type, record.externalId(), message, data);
+    }
+
+    private static JsonObject resultJson(TaskResult result) {
+        return JsonParser.parseString(result.toJson()).getAsJsonObject();
+    }
+
+    private static JsonObject sanitizeAttentionContext(JsonObject source) {
+        JsonElement sanitized = sanitizeAttentionValue(source);
+        return sanitized != null && sanitized.isJsonObject()
+                ? sanitized.getAsJsonObject() : new JsonObject();
+    }
+
+    private static JsonElement sanitizeAttentionValue(JsonElement value) {
+        if (value == null || value.isJsonNull()) return null;
+        if (value.isJsonArray()) {
+            JsonArray clean = new JsonArray();
+            for (JsonElement element : value.getAsJsonArray()) {
+                JsonElement nested = sanitizeAttentionValue(element);
+                if (nested != null) clean.add(nested);
+            }
+            return clean;
+        }
+        if (value.isJsonObject()) {
+            JsonObject clean = new JsonObject();
+            for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
+                if (internalAttentionKey(entry.getKey())) continue;
+                JsonElement nested = sanitizeAttentionValue(entry.getValue());
+                if (nested != null) clean.add(entry.getKey(), nested);
