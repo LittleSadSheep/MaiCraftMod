@@ -598,3 +598,159 @@ final class IntentTask implements Task {
             if (value.has("data") && value.get("data").isJsonObject()) {
                 data.put("tool_data", value.getAsJsonObject("data").toString());
             }
+            return success ? TaskResult.ok(message, data) : TaskResult.fail(message, data);
+        } catch (RuntimeException exception) {
+            return TaskResult.fail("internal tool returned invalid JSON: " + safeMessage(exception));
+        }
+    }
+
+    private static TaskResult defaultResult(TaskState state) {
+        return switch (state) {
+            case SUCCESS -> TaskResult.ok("child completed");
+            case TIMEOUT -> TaskResult.timeout("child timed out");
+            case CANCELLED -> TaskResult.cancelled("child cancelled");
+            default -> TaskResult.fail("child failed");
+        };
+    }
+
+    private void clearChild() {
+        child = null;
+        childRecord = null;
+    }
+
+    private void abandonChildAfterUnexpectedFailure() {
+        Task failed = child;
+        clearChild();
+        if (failed == null) return;
+        try {
+            failed.stop(player, StopReason.REPLACED);
+        } catch (RuntimeException ignoredFailure) {
+            // Recovery must remain available even when child cleanup itself is broken.
+        }
+    }
+
+    private static String safeMessage(Throwable throwable) {
+        String message = throwable.getMessage();
+        return message == null || message.isBlank()
+                ? throwable.getClass().getSimpleName()
+                : message;
+    }
+
+    /**
+     * Internal tasks may use runtime entity ids, menu slots and concrete routes to keep native
+     * work stable across ticks. Those implementation details stop here: the public semantic task
+     * reports outcomes and evidence, never handles that the model could replay as micro-actions.
+     */
+    private static TaskResult semanticResult(TaskResult raw) {
+        if (raw == null) return TaskResult.fail("internal action failed");
+        return new TaskResult(
+                raw.success(),
+                sanitizeMessage(raw.message()),
+                raw.timedOut(),
+                raw.interrupted(),
+                sanitizeMap(raw.data()));
+    }
+
+    private static Map<String, Object> sanitizeMap(Map<String, Object> source) {
+        if (source == null || source.isEmpty()) return Map.of();
+        Map<String, Object> clean = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            String key = entry.getKey();
+            if (key == null || internalResultKey(key)) continue;
+            Object value = sanitizeValue(entry.getValue());
+            if (value != null) clean.put(key, value);
+        }
+        return Map.copyOf(clean);
+    }
+
+    private static Object sanitizeValue(Object value) {
+        if (value instanceof com.google.gson.JsonElement json) {
+            return sanitizeJson(json);
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> clean = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                if (internalResultKey(key)) continue;
+                Object nested = sanitizeValue(entry.getValue());
+                if (nested != null) clean.put(key, nested);
+            }
+            return Map.copyOf(clean);
+        }
+        if (value instanceof Collection<?> collection) {
+            List<Object> clean = new ArrayList<>();
+            for (Object element : collection) {
+                Object nested = sanitizeValue(element);
+                if (nested != null) clean.add(nested);
+            }
+            return List.copyOf(clean);
+        }
+        if (value instanceof String text) {
+            String stripped = text.strip();
+            if ((stripped.startsWith("{") && stripped.endsWith("}"))
+                    || (stripped.startsWith("[") && stripped.endsWith("]"))) {
+                try {
+                    return sanitizeJson(JsonParser.parseString(stripped));
+                } catch (RuntimeException ignored) {
+                    // Ordinary text that merely resembles JSON remains ordinary text.
+                }
+            }
+            return sanitizeMessage(text);
+        }
+        return value;
+    }
+
+    private static Object sanitizeJson(com.google.gson.JsonElement value) {
+        if (value == null || value.isJsonNull()) return null;
+        if (value.isJsonObject()) {
+            Map<String, Object> clean = new LinkedHashMap<>();
+            for (Map.Entry<String, com.google.gson.JsonElement> entry
+                    : value.getAsJsonObject().entrySet()) {
+                if (internalResultKey(entry.getKey())) continue;
+                Object nested = sanitizeJson(entry.getValue());
+                if (nested != null) clean.put(entry.getKey(), nested);
+            }
+            return Map.copyOf(clean);
+        }
+        if (value.isJsonArray()) {
+            List<Object> clean = new ArrayList<>();
+            for (com.google.gson.JsonElement element : value.getAsJsonArray()) {
+                Object nested = sanitizeJson(element);
+                if (nested != null) clean.add(nested);
+            }
+            return List.copyOf(clean);
+        }
+        var primitive = value.getAsJsonPrimitive();
+        if (primitive.isBoolean()) return primitive.getAsBoolean();
+        if (primitive.isNumber()) return primitive.getAsNumber();
+        return sanitizeMessage(primitive.getAsString());
+    }
+
+    private static boolean internalResultKey(String raw) {
+        String key = raw.toLowerCase(Locale.ROOT);
+        return INTERNAL_RESULT_KEYS.contains(key)
+                || key.endsWith("_cells")
+                || key.endsWith("_ops")
+                || key.endsWith("_placements")
+                || key.endsWith("_receipts")
+                || key.endsWith("_routes")
+                || key.endsWith("_waypoints")
+                || key.endsWith("_path_nodes")
+                || key.endsWith("_entity_id")
+                || key.endsWith("_entity_ids")
+                || key.endsWith("_runtime_id")
+                || key.endsWith("_runtime_ids");
+    }
+
+    private static String sanitizeMessage(String raw) {
+        if (raw == null) return "";
+        return raw
+                .replaceAll("(?i)entity\\s*#?\\s*\\d+", "selected entity")
+                .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target");
+    }
+
+    @Override
+    public String name() {
+        return "intent";
+    }
+}
