@@ -898,3 +898,179 @@ public final class GeneralAbilityAdapter {
     }
 
     private static List<FoodChoice> foodChoices(LocalPlayer player) {
+        Map<String, FoodChoice> result = new LinkedHashMap<>();
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = player.getInventory().getItem(i);
+            if (stack.isEmpty()) continue;
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food == null) continue;
+            String id = itemId(stack);
+            FoodChoice previous = result.get(id);
+            result.put(id, new FoodChoice(id, food,
+                    stack.getCount() + (previous == null ? 0 : previous.count())));
+        }
+        return List.copyOf(result.values());
+    }
+
+    private static JsonArray foodFacts(List<FoodChoice> choices) {
+        JsonArray facts = new JsonArray();
+        for (FoodChoice choice : choices) {
+            JsonObject fact = new JsonObject();
+            fact.addProperty("item_id", choice.itemId());
+            fact.addProperty("count", choice.count());
+            fact.addProperty("nutrition", choice.food().nutrition());
+            fact.addProperty("has_effects", !choice.food().effects().isEmpty());
+            facts.add(fact);
+        }
+        return facts;
+    }
+
+    private static IntentAction eatTool(String itemId) {
+        JsonObject args = new JsonObject();
+        args.addProperty("item_id", itemId);
+        return new IntentAction.Tool("eat", args.toString());
+    }
+
+    private static String itemId(ItemStack stack) {
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+    }
+
+    private static EquipmentSlot equipmentSlot(String slot) {
+        return switch (slot) {
+            case "offhand" -> EquipmentSlot.OFFHAND;
+            case "head" -> EquipmentSlot.HEAD;
+            case "chest" -> EquipmentSlot.CHEST;
+            case "legs" -> EquipmentSlot.LEGS;
+            case "feet" -> EquipmentSlot.FEET;
+            default -> EquipmentSlot.MAINHAND;
+        };
+    }
+
+    private static IntentAction invalidSelector(Goal goal, String error) {
+        return decision(goal, error,
+                List.of(option("retry", "Retry with a valid namespaced entity type or semantic name."),
+                        option("cancel", "Cancel this action.")), null);
+    }
+
+    private static IntentAction.Decision decision(
+            Goal goal, String question, List<IntentTaskRecord.DecisionOption> options, JsonObject facts) {
+        JsonObject context = new JsonObject();
+        context.addProperty("ability", goal.ability());
+        context.addProperty("outcome", goal.outcome());
+        if (facts != null) context.add("facts", facts);
+        return new IntentAction.Decision(new IntentTaskRecord.DecisionSnapshot(
+                UUID.randomUUID(), question, options, context.toString()));
+    }
+
+    private static IntentTaskRecord.DecisionOption option(String choice, String description) {
+        return new IntentTaskRecord.DecisionOption(choice, description);
+    }
+
+    private static boolean sameDimension(Goal.WorldPosition position, LocalPlayer player) {
+        return position != null && (position.dimension() == null
+                || position.dimension().equals(player.level().dimension().location().toString()));
+    }
+
+    private static boolean nearest(Goal goal, JsonObject p) {
+        if ("nearest".equalsIgnoreCase(string(p, "selection"))) return true;
+        Goal.SemanticTarget target = goal.target();
+        return target != null && ("nearest".equalsIgnoreCase(target.kind())
+                || "nearest".equalsIgnoreCase(target.relation()));
+    }
+
+    private static String firstString(JsonObject p, String... keys) {
+        for (String key : keys) {
+            String value = string(p, key);
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    private static String string(JsonObject object, String key) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()
+                || !object.get(key).isJsonPrimitive()) return null;
+        try {
+            String value = object.get(key).getAsString();
+            return value == null || value.isBlank() ? null : value;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean bool(JsonObject object, String key, boolean fallback) {
+        if (object == null || !object.has(key) || !object.get(key).isJsonPrimitive()) return fallback;
+        try {
+            return object.get(key).getAsBoolean();
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private static int integer(JsonObject object, String key, int fallback, int min, int max) {
+        int value = fallback;
+        if (object != null && object.has(key) && object.get(key).isJsonPrimitive()) {
+            try {
+                value = object.get(key).getAsInt();
+            } catch (RuntimeException ignored) {
+                value = fallback;
+            }
+        }
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static Integer strictInteger(JsonObject object, String key, int min, int max) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) return null;
+        if (!object.get(key).isJsonPrimitive()) {
+            throw new IllegalArgumentException(key + " must be an integer");
+        }
+        final int value;
+        try {
+            value = object.get(key).getAsInt();
+        } catch (RuntimeException invalid) {
+            throw new IllegalArgumentException(key + " must be an integer");
+        }
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(
+                    key + " must be between " + min + " and " + max);
+        }
+        return value;
+    }
+
+    private static String lower(String value) {
+        return value == null ? null : value.toLowerCase(Locale.ROOT);
+    }
+
+    private static long squared(BlockPos a, BlockPos b) {
+        long dx = (long) a.getX() - b.getX();
+        long dy = (long) a.getY() - b.getY();
+        long dz = (long) a.getZ() - b.getZ();
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    private static long squaredHorizontal(BlockPos a, BlockPos b) {
+        long dx = (long) a.getX() - b.getX();
+        long dz = (long) a.getZ() - b.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    private static double roundedDistance(LocalPlayer player, BlockPos pos) {
+        return Math.round(Math.sqrt(player.distanceToSqr(
+                pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D)) * 10.0D) / 10.0D;
+    }
+
+    private static String sector(int dx, int dz) {
+        if (Math.abs(dx) < 2 && Math.abs(dz) < 2) return "here";
+        String ns = dz < 0 ? "north" : dz > 0 ? "south" : "";
+        String ew = dx > 0 ? "east" : dx < 0 ? "west" : "";
+        return ns + ew;
+    }
+
+    private record EntitySelector(
+            String rawType, ResourceLocation typeId, String playerName, String entityName, boolean hostileOnly) {
+        boolean empty() {
+            return rawType == null && playerName == null && entityName == null && !hostileOnly;
+        }
+    }
+
+    private record FoodChoice(String itemId, FoodProperties food, int count) {}
+}
