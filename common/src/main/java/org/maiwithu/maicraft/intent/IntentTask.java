@@ -298,3 +298,303 @@ final class IntentTask implements Task {
         return TaskState.RUNNING;
     }
 
+    private TaskState failStep(TaskState state, TaskResult result) {
+        TaskState failureState = state == null ? TaskState.FAILED : state;
+        // A failed/abandoned execution can never authorize a later prior_result binding.
+        internalStepPositions.remove(record.stepIndex());
+        captureMechanicalContinuation(currentGoal(), result);
+        TaskResult failure = semanticResult(
+                result == null ? TaskResult.fail("internal action failed") : result);
+        Goal failedGoal = currentGoal();
+        record.addAttempt(new IntentTaskRecord.AttemptSnapshot(
+                record.stepIndex(),
+                failedGoal,
+                failureState,
+                failure.message(),
+                failure.toJson(),
+                player.level().getGameTime()));
+        terminalResult = null;
+        chain = List.of();
+        chainIndex = 0;
+        return requestDecision(RecoveryAdvisor.afterFailure(
+                failedGoal, failureState, failure));
+    }
+
+    private void captureMechanicalContinuation(Goal goal, TaskResult raw) {
+        if (goal == null || !"maicraft:connect_mechanical_power".equals(goal.ability())) return;
+        String key = continuationKey(goal);
+        Object value = raw == null || raw.data() == null
+                ? null : raw.data().get("continuation_token");
+        if (value == null) {
+            mechanicalContinuations.remove(key);
+            return;
+        }
+        try {
+            mechanicalContinuations.put(key, UUID.fromString(String.valueOf(value)));
+        } catch (IllegalArgumentException invalid) {
+            mechanicalContinuations.remove(key);
+        }
+    }
+
+    private UUID continuationFor(Goal goal) {
+        return goal == null ? null : mechanicalContinuations.get(continuationKey(goal));
+    }
+
+    private void discardContinuation(Goal goal) {
+        if (goal != null) mechanicalContinuations.remove(continuationKey(goal));
+    }
+
+    private static String continuationKey(Goal goal) {
+        return goal.toJson().toString();
+    }
+
+    private TaskState requestDecision(IntentTaskRecord.DecisionSnapshot decision) {
+        record.requestDecision(decision, player.level().getGameTime());
+        runtime.decision(record, decision);
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickWait() {
+        if (player.level().getGameTime() < wait.notBeforeGameTime()) return TaskState.RUNNING;
+        boolean satisfied = switch (wait.condition()) {
+            case "elapsed" -> true;
+            case "day" -> player.level().isDay();
+            case "night" -> !player.level().isDay();
+            case "health_full" -> player.getHealth() >= player.getMaxHealth();
+            case "not_hungry" -> player.getFoodData().getFoodLevel() >= 18;
+            default -> false;
+        };
+        if (!satisfied) return TaskState.RUNNING;
+        String condition = wait.condition();
+        wait = null;
+        completeStep(TaskResult.ok("wait condition satisfied: " + condition));
+        return afterImmediate();
+    }
+
+    private TaskState afterImmediate() {
+        if (record.stepIndex() >= record.steps().size()) {
+            terminalResult = successResult();
+            return TaskState.SUCCESS;
+        }
+        return TaskState.RUNNING;
+    }
+
+    private void completeStep(TaskResult result) {
+        result = semanticResult(result);
+        int index = record.stepIndex();
+        Goal goal = record.steps().get(index);
+        record.addStepResult(new IntentTaskRecord.StepSnapshot(
+                index, goal.ability(), result.success(), result.message(), result.toJson()));
+        if (!result.success()) terminalResult = result;
+    }
+
+    private Goal currentGoal() {
+        return record.steps().get(record.stepIndex());
+    }
+
+    /**
+     * Resolve a semantic prior_result to an authoritative position reported by an earlier task.
+     * The LLM names the relationship; it never copies coordinates between steps.
+     */
+    private Goal resolvedCurrentGoal() {
+        Goal goal = currentGoal();
+        Goal.SemanticTarget target = goal.target();
+        if (target == null || !"prior_result".equals(target.kind())) return goal;
+        Goal.WorldPosition position = reportedPosition(target);
+        return position == null ? goal : goal.withTarget(new Goal.SemanticTarget(
+                "coordinates", target.label(), position, target.relation()));
+    }
+
+    private Goal.WorldPosition reportedPosition(Goal.SemanticTarget target) {
+        List<ReportedPosition> candidates = new ArrayList<>();
+        List<IntentTaskRecord.StepSnapshot> completed = record.stepResults();
+        for (int index = completed.size() - 1; index >= 0; index--) {
+            IntentTaskRecord.StepSnapshot step = completed.get(index);
+            if (!step.success()) continue;
+            Goal.WorldPosition internal = internalStepPositions.get(step.index());
+            if (internal != null) {
+                Goal sourceGoal = step.index() >= 0 && step.index() < record.steps().size()
+                        ? record.steps().get(step.index()) : null;
+                candidates.add(new ReportedPosition(step, sourceGoal, internal));
+                continue;
+            }
+            JsonObject root;
+            try {
+                root = step.result();
+            } catch (RuntimeException ignored) {
+                continue;
+            }
+            JsonObject data = root.has("data") && root.get("data").isJsonObject()
+                    ? root.getAsJsonObject("data") : root;
+            Goal.WorldPosition position = nestedPosition(data, "verified_position");
+            if (position == null) position = nestedPosition(data, "final_position");
+            if (position == null) position = nestedPosition(data, "position");
+            if (position == null && numbers(data, "final_x", "final_y", "final_z")) {
+                position = new Goal.WorldPosition(
+                        (int) Math.floor(data.get("final_x").getAsDouble()),
+                        (int) Math.floor(data.get("final_y").getAsDouble()),
+                        (int) Math.floor(data.get("final_z").getAsDouble()),
+                        player.level().dimension().location().toString());
+            }
+            if (position == null) continue;
+            Goal sourceGoal = step.index() >= 0 && step.index() < record.steps().size()
+                    ? record.steps().get(step.index()) : null;
+            candidates.add(new ReportedPosition(step, sourceGoal, position));
+        }
+        if (candidates.isEmpty()) return null;
+        if (candidates.size() == 1) return candidates.getFirst().position();
+
+        String query = ((target.label() == null ? "" : target.label()) + " "
+                + (target.relation() == null ? "" : target.relation())).strip();
+        int bestScore = 0;
+        ReportedPosition best = null;
+        boolean ambiguous = false;
+        for (ReportedPosition candidate : candidates) {
+            int score = semanticScore(query, candidate);
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+                ambiguous = false;
+            } else if (score > 0 && score == bestScore
+                    && best != null && !best.position().equals(candidate.position())) {
+                ambiguous = true;
+            }
+        }
+        // Never silently bind "there" to the most recent unrelated task. If more than one
+        // authoritative position exists, the semantic relation must distinguish one of them.
+        return bestScore > 0 && !ambiguous ? best.position() : null;
+    }
+
+    private static int semanticScore(String query, ReportedPosition candidate) {
+        if (query == null || query.isBlank()) return 0;
+        String needle = normalizeSemanticText(query);
+        IntentTaskRecord.StepSnapshot step = candidate.step();
+        Goal goal = candidate.goal();
+        String source = step.ability() + " " + step.message() + " " + step.resultJson();
+        if (goal != null) source += " " + goal.toJson();
+        String haystack = normalizeSemanticText(source);
+        int score = 0;
+        if (!needle.isBlank() && haystack.contains(needle)) score += 200;
+        if (goal != null) {
+            String outcome = normalizeSemanticText(goal.outcome());
+            if (!outcome.isBlank() && (needle.contains(outcome) || outcome.contains(needle))) {
+                score += 120;
+            }
+            String ability = goal.ability();
+            int colon = ability.indexOf(':');
+            String suffix = normalizeSemanticText(colon < 0 ? ability : ability.substring(colon + 1));
+            if (!suffix.isBlank() && needle.contains(suffix)) score += 80;
+        }
+        for (String unit : semanticUnits(needle)) {
+            if (haystack.contains(unit)) score += Math.min(24, 4 + unit.length() * 2);
+        }
+        return score;
+    }
+
+    private static List<String> semanticUnits(String normalized) {
+        List<String> result = new ArrayList<>();
+        for (String token : normalized.split(" +")) {
+            if (token.length() < 2 || List.of(
+                    "the", "that", "there", "prior", "previous", "result", "step",
+                    "earlier", "place", "position", "from", "into").contains(token)) continue;
+            result.add(token);
+            int[] points = token.codePoints().toArray();
+            if (points.length >= 2 && java.util.Arrays.stream(points).anyMatch(
+                    point -> Character.UnicodeScript.of(point) == Character.UnicodeScript.HAN)) {
+                for (int index = 0; index + 1 < points.length; index++) {
+                    result.add(new String(points, index, 2));
+                }
+            }
+        }
+        return result;
+    }
+
+    private static String normalizeSemanticText(String value) {
+        return value.toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{L}\\p{N}:_./-]+", " ").strip();
+    }
+
+    private record ReportedPosition(
+            IntentTaskRecord.StepSnapshot step, Goal goal, Goal.WorldPosition position) {}
+
+    private Goal.WorldPosition nestedPosition(JsonObject data, String key) {
+        if (!data.has(key) || !data.get(key).isJsonObject()) return null;
+        JsonObject value = data.getAsJsonObject(key);
+        if (!numbers(value, "x", "y", "z")) return null;
+        String dimension = value.has("dimension") && value.get("dimension").isJsonPrimitive()
+                ? value.get("dimension").getAsString()
+                : player.level().dimension().location().toString();
+        return new Goal.WorldPosition(
+                (int) Math.floor(value.get("x").getAsDouble()),
+                (int) Math.floor(value.get("y").getAsDouble()),
+                (int) Math.floor(value.get("z").getAsDouble()), dimension);
+    }
+
+    private static boolean numbers(JsonObject value, String x, String y, String z) {
+        return value.has(x) && value.get(x).isJsonPrimitive()
+                && value.has(y) && value.get(y).isJsonPrimitive()
+                && value.has(z) && value.get(z).isJsonPrimitive();
+    }
+
+    @Override
+    public void stop(LocalPlayer ignored, StopReason reason) {
+        if (child == null) return;
+        try {
+            child.stop(player, reason);
+        } catch (RuntimeException ignoredFailure) {
+        }
+        if (reason != StopReason.PREEMPTED) {
+            if (!childRecord.getState().isTerminal()) childRecord.setState(TaskState.CANCELLED);
+            try {
+                childRecord.setResult(child.result(childRecord.getState()));
+            } catch (RuntimeException ignoredFailure) {
+            }
+            clearChild();
+        }
+    }
+
+    @Override
+    public TaskResult result(TaskState terminal) {
+        if (child != null) {
+            stop(player, StopReason.REPLACED);
+        }
+        TaskResult result = terminalResult;
+        if (result == null) {
+            result = switch (terminal) {
+                case SUCCESS -> successResult();
+                case TIMEOUT -> TaskResult.timeout("semantic task timed out");
+                case CANCELLED -> TaskResult.cancelled("semantic task cancelled");
+                default -> TaskResult.fail("semantic task failed");
+            };
+        }
+        if (!terminalPublished) {
+            terminalPublished = true;
+            record.terminal(terminal, result, player.level().getGameTime());
+            runtime.terminal(record, terminal, result);
+        }
+        return result;
+    }
+
+    private TaskResult successResult() {
+        List<Map<String, Object>> steps = new ArrayList<>();
+        for (IntentTaskRecord.StepSnapshot step : record.stepResults()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("index", step.index());
+            item.put("ability", step.ability());
+            item.put("success", step.success());
+            item.put("message", step.message());
+            steps.add(item);
+        }
+        return TaskResult.ok(record.goal().outcome(),
+                Map.of("task_id", record.externalId().toString(), "steps", steps));
+    }
+
+    private static TaskResult parseImmediate(String json) {
+        try {
+            JsonObject value = JsonParser.parseString(json).getAsJsonObject();
+            boolean success = value.has("success") && value.get("success").getAsBoolean();
+            String message = value.has("message") ? value.get("message").getAsString() : "";
+            Map<String, Object> data = new LinkedHashMap<>();
+            if (value.has("data") && value.get("data").isJsonObject()) {
+                data.put("tool_data", value.getAsJsonObject("data").toString());
+            }
