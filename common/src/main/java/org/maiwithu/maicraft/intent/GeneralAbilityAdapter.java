@@ -598,3 +598,303 @@ public final class GeneralAbilityAdapter {
         }
 
         String itemId = itemId(p);
+        if (itemId == null && goal.target() != null && "item".equals(goal.target().kind())) {
+            itemId = goal.target().label();
+        }
+        if (itemId == null) {
+            if (slot == null) {
+                return decision(goal, "Which item should be equipped?",
+                        List.of(option("retry", "Provide item_id, or a slot with exactly one compatible inventory item."),
+                                option("cancel", "Cancel equipment change.")), null);
+            }
+            EquipmentSlot equipmentSlot = equipmentSlot(slot);
+            Map<String, ItemStack> matching = new LinkedHashMap<>();
+            for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+                ItemStack stack = player.getInventory().getItem(i);
+                if (!stack.isEmpty() && player.getEquipmentSlotForItem(stack) == equipmentSlot) {
+                    matching.putIfAbsent(itemId(stack), stack);
+                }
+            }
+            if (matching.isEmpty()) {
+                return decision(goal, "No compatible item for " + slot + " is in the inventory.",
+                        List.of(option("recover", "Acquire suitable equipment, then retry."),
+                                option("cancel", "Cancel equipment change.")), null);
+            }
+            if (matching.size() > 1) {
+                JsonObject facts = new JsonObject();
+                JsonArray ids = new JsonArray();
+                matching.keySet().forEach(ids::add);
+                facts.add("compatible_item_ids", ids);
+                return decision(goal, "Several inventory items fit the requested equipment slot.",
+                        List.of(option("retry", "Retry with the intended item_id."),
+                                option("cancel", "Cancel equipment change.")), facts);
+            }
+            itemId = matching.keySet().iterator().next();
+        }
+        ResourceLocation id = ResourceLocation.tryParse(itemId);
+        if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return invalidItem(goal, itemId);
+        if (firstStack(player, BuiltInRegistries.ITEM.get(id)) == null) return missingItem(goal, itemId);
+        JsonObject args = new JsonObject();
+        args.addProperty("action", "equip");
+        args.addProperty("item_id", itemId);
+        if (slot != null) args.addProperty("slot", slot);
+        return new IntentAction.Tool("equip_item", args.toString());
+    }
+
+    private static IntentAction fish(Goal goal, LocalPlayer player) {
+        ResourceLocation rodId = ResourceLocation.tryParse("minecraft:fishing_rod");
+        Item rod = BuiltInRegistries.ITEM.get(rodId);
+        if (firstStack(player, rod) == null) {
+            JsonObject facts = new JsonObject();
+            facts.addProperty("missing_item_id", "minecraft:fishing_rod");
+            return decision(goal, "Fishing needs a fishing rod, but none is in the inventory.",
+                    List.of(option("recover", "Acquire or craft a fishing rod, then retry."),
+                            option("skip", "Skip fishing."),
+                            option("cancel", "Cancel the task.")), facts);
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("count", integer(goal.parameters(), "count", 1, 1, 64));
+        return new IntentAction.Tool("fish", args.toString());
+    }
+
+    private static IntentAction drop(Goal goal, LocalPlayer player) {
+        JsonObject p = goal.parameters();
+        String itemId = itemId(p);
+        if (itemId == null && goal.target() != null && "item".equals(goal.target().kind())) {
+            itemId = goal.target().label();
+        }
+        if (itemId == null || !p.has("count")) {
+            return decision(goal, "Dropping is irreversible; both item_id and an explicit count are required.",
+                    List.of(option("retry", "Provide the namespaced item and exact count to drop."),
+                            option("cancel", "Cancel dropping.")), null);
+        }
+        ResourceLocation id = ResourceLocation.tryParse(itemId);
+        if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return invalidItem(goal, itemId);
+        int count = integer(p, "count", 0, 0, 999);
+        if (count < 1) {
+            return decision(goal, "Drop count must be between 1 and 999.",
+                    List.of(option("retry", "Provide a positive count."),
+                            option("cancel", "Cancel dropping.")), null);
+        }
+        int available = countItem(player, BuiltInRegistries.ITEM.get(id));
+        if (available == 0) return missingItem(goal, itemId);
+        if (count > available) {
+            JsonObject facts = new JsonObject();
+            facts.addProperty("item_id", itemId);
+            facts.addProperty("requested_count", count);
+            facts.addProperty("available_count", available);
+            return decision(goal, "The requested drop count exceeds the inventory count.",
+                    List.of(option("retry", "Retry with a count no greater than available_count."),
+                            option("cancel", "Cancel dropping.")), facts);
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("item_id", itemId);
+        args.addProperty("count", count);
+        return new IntentAction.Tool("drop_items", args.toString());
+    }
+
+    private static EntitySelector selector(Goal goal, JsonObject p) {
+        String type = firstString(p, "entity_type_id", "entity_type");
+        String playerName = string(p, "player_name");
+        String entityName = string(p, "entity_name");
+        boolean hostileOnly = false;
+        Goal.SemanticTarget target = goal.target();
+        if (target != null) {
+            String kind = lower(target.kind());
+            String label = target.label();
+            if (playerName == null && "player".equals(kind)) playerName = label;
+            if (type == null && List.of("entity_type", "mob_type").contains(kind)) type = label;
+            if (List.of("hostile", "nearest_hostile").contains(kind)) hostileOnly = true;
+            if (entityName == null && "entity".equals(kind) && label != null) {
+                ResourceLocation possibleType = ResourceLocation.tryParse(label);
+                if (possibleType != null && BuiltInRegistries.ENTITY_TYPE.containsKey(possibleType)) type = label;
+                else entityName = label;
+            }
+        }
+        ResourceLocation typeId = type == null ? null : ResourceLocation.tryParse(type);
+        return new EntitySelector(type, typeId, playerName, entityName, hostileOnly);
+    }
+
+    private static String validateSelector(EntitySelector selector) {
+        if (selector.rawType() != null && (selector.typeId() == null
+                || !BuiltInRegistries.ENTITY_TYPE.containsKey(selector.typeId()))) {
+            return "Unknown entity type id: " + selector.rawType();
+        }
+        return null;
+    }
+
+    private static List<Entity> findEntities(
+            LocalPlayer player, EntitySelector selector, int radius, boolean combat) {
+        AABB area = player.getBoundingBox().inflate(radius);
+        return player.clientLevel.getEntities(player, area, entity -> {
+                    if (entity == player || entity.isRemoved() || !entity.isAlive()) return false;
+                    if (combat && !entity.isAttackable()) return false;
+                    if (selector.typeId() != null && !BuiltInRegistries.ENTITY_TYPE
+                            .getKey(entity.getType()).equals(selector.typeId())) return false;
+                    if (selector.hostileOnly() && !(entity instanceof Enemy)) return false;
+                    if (selector.playerName() != null) {
+                        if (!(entity instanceof Player other)
+                                || !other.getGameProfile().getName().equalsIgnoreCase(selector.playerName())) {
+                            return false;
+                        }
+                    }
+                    return selector.entityName() == null
+                            || semanticName(entity).equalsIgnoreCase(selector.entityName());
+                }).stream()
+                .sorted(Comparator.comparingDouble(player::distanceToSqr))
+                .toList();
+    }
+
+    private static boolean riskyHarmTarget(Entity entity) {
+        return entity instanceof Player || !(entity instanceof Enemy)
+                || entity.hasCustomName()
+                || entity instanceof TamableAnimal tame && tame.isTame();
+    }
+
+    private static IntentAction ambiguousEntities(
+            Goal goal, LocalPlayer player, String question, List<Entity> entities) {
+        JsonObject facts = new JsonObject();
+        facts.add("candidates", entityFacts(player, entities.stream().limit(8).toList()));
+        return decision(goal, question,
+                List.of(option("retry", "Retry with a unique name, narrower type, or selection=nearest."),
+                        option("cancel", "Cancel this action.")), facts);
+    }
+
+    private static IntentAction missingEntity(Goal goal, EntitySelector selector, int radius) {
+        JsonObject facts = new JsonObject();
+        if (selector.typeId() != null) facts.addProperty("entity_type_id", selector.typeId().toString());
+        if (selector.playerName() != null) facts.addProperty("player_name", selector.playerName());
+        if (selector.entityName() != null) facts.addProperty("entity_name", selector.entityName());
+        facts.addProperty("searched_loaded_radius", radius);
+        return decision(goal, "No matching entity is currently loaded and visible to the client.",
+                List.of(option("recover", "Travel or explore to load the target area, then retry."),
+                        option("replace_goal", "Choose another visible semantic target."),
+                        option("cancel", "Cancel this action.")), facts);
+    }
+
+    private static JsonArray entityFacts(LocalPlayer player, List<Entity> entities) {
+        JsonArray result = new JsonArray();
+        for (Entity entity : entities) {
+            JsonObject fact = new JsonObject();
+            fact.addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
+            fact.addProperty("name", semanticName(entity));
+            fact.addProperty("distance", roundedDistance(player, entity.blockPosition()));
+            fact.addProperty("hostile", entity instanceof Enemy);
+            fact.addProperty("named", entity.hasCustomName());
+            fact.addProperty("tamed", entity instanceof TamableAnimal tame && tame.isTame());
+            result.add(fact);
+        }
+        return result;
+    }
+
+    private static JsonArray blockFacts(BlockPos center, List<BlockPos> positions) {
+        JsonArray result = new JsonArray();
+        positions.stream().limit(8).forEach(pos -> {
+            JsonObject fact = new JsonObject();
+            fact.addProperty("distance", Math.round(Math.sqrt(squared(pos, center)) * 10.0D) / 10.0D);
+            fact.addProperty("relative_sector", sector(pos.getX() - center.getX(), pos.getZ() - center.getZ()));
+            result.add(fact);
+        });
+        return result;
+    }
+
+    private static String semanticName(Entity entity) {
+        return entity instanceof Player other
+                ? other.getGameProfile().getName()
+                : entity.getName().getString();
+    }
+
+    private static BlockPos semanticCenter(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        Goal.SemanticTarget target = goal.target();
+        if (target == null) return player.blockPosition();
+        Goal.WorldPosition position = target.position();
+        if (sameDimension(position, player)) return new BlockPos(position.x(), position.y(), position.z());
+        String kind = lower(target.kind());
+        if (("landmark".equals(kind) || "area".equals(kind)) && target.label() != null) {
+            IntentRuntime.Landmark landmark = runtime.landmark(target.label());
+            if (landmark != null && sameDimension(landmark.position(), player)) {
+                Goal.WorldPosition at = landmark.position();
+                return new BlockPos(at.x(), at.y(), at.z());
+            }
+        }
+        return player.blockPosition();
+    }
+
+    private static BlockPos interactionStand(ClientLevel level, BlockPos target, BlockPos current) {
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int radius = 1; radius <= 3; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    for (int dy = -2; dy <= 1; dy++) {
+                        BlockPos feet = target.offset(dx, dy, dz);
+                        if (isStandable(level, feet)
+                                && Vec3.atCenterOf(feet).distanceToSqr(Vec3.atCenterOf(target)) <= 4.5D * 4.5D) {
+                            candidates.add(feet.immutable());
+                        }
+                    }
+                }
+            }
+        }
+        return candidates.stream().min(Comparator.comparingLong(pos -> squared(pos, current))).orElse(null);
+    }
+
+    private static boolean isStandable(ClientLevel level, BlockPos feet) {
+        if (!level.getFluidState(feet).isEmpty() || !level.getFluidState(feet.above()).isEmpty()) return false;
+        if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()) return false;
+        if (!level.getBlockState(feet.above()).getCollisionShape(level, feet.above()).isEmpty()) return false;
+        BlockPos support = feet.below();
+        return level.getBlockState(support).isFaceSturdy(level, support, Direction.UP);
+    }
+
+    private static String blockId(Goal goal, JsonObject p) {
+        String value = string(p, "block_id");
+        if (value != null || goal.target() == null) return value;
+        String kind = lower(goal.target().kind());
+        return List.of("block", "container", "block_type").contains(kind) ? goal.target().label() : null;
+    }
+
+    private static String itemId(JsonObject p) {
+        return string(p, "item_id");
+    }
+
+    private static IntentAction requireInventoryItem(Goal goal, LocalPlayer player, String itemId) {
+        if (itemId == null) return null;
+        ResourceLocation id = ResourceLocation.tryParse(itemId);
+        if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return invalidItem(goal, itemId);
+        return firstStack(player, BuiltInRegistries.ITEM.get(id)) == null ? missingItem(goal, itemId) : null;
+    }
+
+    private static IntentAction invalidItem(Goal goal, String itemId) {
+        return decision(goal, "Unknown item id: " + itemId,
+                List.of(option("retry", "Retry with a valid namespaced item id."),
+                        option("cancel", "Cancel this action.")), null);
+    }
+
+    private static IntentAction missingItem(Goal goal, String itemId) {
+        JsonObject facts = new JsonObject();
+        facts.addProperty("missing_item_id", itemId);
+        return decision(goal, itemId + " is not in the inventory.",
+                List.of(option("recover", "Acquire the item, then retry this action."),
+                        option("replace_goal", "Choose an item that is already available."),
+                        option("cancel", "Cancel this action.")), facts);
+    }
+
+    private static ItemStack firstStack(LocalPlayer player, Item item) {
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = player.getInventory().getItem(i);
+            if (!stack.isEmpty() && stack.is(item)) return stack;
+        }
+        return null;
+    }
+
+    private static int countItem(LocalPlayer player, Item item) {
+        int count = 0;
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = player.getInventory().getItem(i);
+            if (!stack.isEmpty() && stack.is(item)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private static List<FoodChoice> foodChoices(LocalPlayer player) {
