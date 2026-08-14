@@ -298,3 +298,303 @@ public final class GeneralAbilityAdapter {
     private static IntentAction combat(Goal goal, LocalPlayer player) {
         JsonObject p = goal.parameters();
         if (!bool(p, "allow_harm", false)) {
+            return decision(goal,
+                    "Combat can harm or kill entities. Confirm that harm is intended before the body acts.",
+                    List.of(option("retry", "Retry with allow_harm=true if this harm is intended."),
+                            option("skip", "Skip the combat step."),
+                            option("cancel", "Cancel the task.")), null);
+        }
+
+        String mode = lower(string(p, "mode"));
+        EntitySelector selector = selector(goal, p);
+        if (("defend".equals(mode) || "defence".equals(mode)) && selector.empty()) {
+            return new IntentAction.Tool("attack", "{}");
+        }
+        String selectorError = validateSelector(selector);
+        if (selectorError != null) return invalidSelector(goal, selectorError);
+        if (selector.empty()) {
+            return decision(goal, "Who or what should be fought?",
+                    List.of(option("retry", "Provide entity_type_id, entity_name, or player_name."),
+                            option("cancel", "Cancel combat.")), null);
+        }
+
+        int radius = integer(p, "radius", 32, 4, 128);
+        List<Entity> candidates = findEntities(player, selector, radius, true);
+        if (candidates.isEmpty()) return missingEntity(goal, selector, radius);
+
+        int requested = integer(p, "count", 1, 1, 20);
+        boolean nearest = nearest(goal, p);
+        if (requested == 1 && candidates.size() > 1 && !nearest) {
+            return ambiguousEntities(goal, player, "Several loaded entities match the combat target.", candidates);
+        }
+        List<Entity> selected = candidates.subList(0, Math.min(requested, candidates.size()));
+        List<Entity> risky = selected.stream().filter(GeneralAbilityAdapter::riskyHarmTarget).toList();
+        if (!risky.isEmpty() && !bool(p, "confirm_risky_target", false)) {
+            JsonObject facts = new JsonObject();
+            facts.add("protected_or_non_hostile_candidates", entityFacts(player, risky));
+            return decision(goal,
+                    "The resolved target includes a player, tame/named entity, or non-hostile creature. "
+                            + "This may be somebody's companion or farm animal.",
+                    List.of(option("retry", "Retry with confirm_risky_target=true only after confirming this exact semantic target."),
+                            option("replace_goal", "Choose a safer target or another way to reach the outcome."),
+                            option("cancel", "Cancel combat.")), facts);
+        }
+
+        JsonArray ids = new JsonArray();
+        selected.forEach(entity -> ids.add(entity.getId()));
+        JsonObject args = new JsonObject();
+        args.add("entity_ids", ids);
+        return new IntentAction.Tool("attack", args.toString());
+    }
+
+    private static IntentAction follow(Goal goal, LocalPlayer player) {
+        JsonObject p = goal.parameters();
+        EntitySelector selector = selector(goal, p);
+        String error = validateSelector(selector);
+        if (error != null) return invalidSelector(goal, error);
+        if (selector.empty()) {
+            return decision(goal, "Who should be followed?",
+                    List.of(option("retry", "Provide a player_name, entity_name, or entity_type_id."),
+                            option("cancel", "Cancel following.")), null);
+        }
+        int radius = integer(p, "radius", 64, 4, 128);
+        List<Entity> candidates = findEntities(player, selector, radius, false);
+        if (candidates.isEmpty()) return missingEntity(goal, selector, radius);
+        if (candidates.size() > 1 && !nearest(goal, p)) {
+            return ambiguousEntities(goal, player, "Several loaded entities match the follow target.", candidates);
+        }
+        Entity selected = candidates.getFirst();
+        JsonObject args = new JsonObject();
+        args.addProperty("entity_id", selected.getId());
+        args.addProperty("distance", integer(p, "distance", 3, 2, 16));
+        args.addProperty("may_alter_terrain", bool(p, "may_alter_terrain", false));
+        return new IntentAction.Tool("follow", args.toString());
+    }
+
+    private static IntentAction interact(
+            Goal goal, LocalPlayer player, IntentRuntime runtime, boolean containerOnly) {
+        JsonObject p = goal.parameters();
+        if (containerOnly && (p.has("transfer") || p.has("deposit") || p.has("withdraw"))) {
+            return decision(goal,
+                    "Container slot movement is not part of `use_container`; this ability safely opens or uses "
+                            + "a semantic container target only.",
+                    List.of(option("replace_goal", "Open the container first, then request a semantic deposit/withdraw ability when available."),
+                            option("cancel", "Cancel container use.")), null);
+        }
+        String purpose = lower(string(p, "purpose"));
+        if ("attack".equals(purpose) || "break".equals(purpose)) {
+            return decision(goal, "Destructive interaction must use the combat or mining ability.",
+                    List.of(option("replace_goal", "Replace this with combat or mining so its safety policy applies."),
+                            option("cancel", "Cancel interaction.")), null);
+        }
+
+        EntitySelector selector = selector(goal, p);
+        String blockId = blockId(goal, p);
+        if (!selector.empty() && blockId != null) {
+            return decision(goal, "The target names both an entity and a block. Which one should be used?",
+                    List.of(option("retry", "Retry with exactly one semantic target kind."),
+                            option("cancel", "Cancel interaction.")), null);
+        }
+        if (!selector.empty()) {
+            if (containerOnly) {
+                return decision(goal, "`use_container` currently opens loaded block containers, not entity inventories.",
+                        List.of(option("replace_goal", "Use a block container target."),
+                                option("cancel", "Cancel container use.")), null);
+            }
+            String error = validateSelector(selector);
+            if (error != null) return invalidSelector(goal, error);
+            List<Entity> candidates = findEntities(player, selector,
+                    integer(p, "radius", 48, 4, 128), false);
+            if (candidates.isEmpty()) return missingEntity(goal, selector, integer(p, "radius", 48, 4, 128));
+            if (candidates.size() > 1 && !nearest(goal, p)) {
+                return ambiguousEntities(goal, player,
+                        "Several loaded entities match the interaction target.", candidates);
+            }
+            String itemId = itemId(p);
+            IntentAction missingItem = requireInventoryItem(goal, player, itemId);
+            if (missingItem != null) return missingItem;
+            JsonObject args = new JsonObject();
+            args.addProperty("button", "right");
+            args.addProperty("entity_id", candidates.getFirst().getId());
+            if (itemId != null) args.addProperty("item_id", itemId);
+            return new IntentAction.Tool("interact_entity", args.toString());
+        }
+        if (blockId == null) {
+            return decision(goal, containerOnly ? "Which loaded container block should be opened?"
+                            : "Which block or entity should be used?",
+                    List.of(option("retry", containerOnly
+                                    ? "Provide block_id, such as a namespaced chest or modded storage block."
+                                    : "Provide block_id, entity_type_id, entity_name, or player_name."),
+                            option("cancel", "Cancel interaction.")), null);
+        }
+        return interactBlock(goal, player, runtime, blockId, itemId(p));
+    }
+
+    private static IntentAction interactBlock(
+            Goal goal, LocalPlayer player, IntentRuntime runtime, String rawBlockId, String itemId) {
+        ResourceLocation id = ResourceLocation.tryParse(rawBlockId);
+        if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
+            return decision(goal, "Unknown block id: " + rawBlockId,
+                    List.of(option("retry", "Retry with a valid namespaced block id."),
+                            option("cancel", "Cancel interaction.")), null);
+        }
+        IntentAction missingItem = requireInventoryItem(goal, player, itemId);
+        if (missingItem != null) return missingItem;
+
+        ClientLevel level = player.clientLevel;
+        Block block = BuiltInRegistries.BLOCK.get(id);
+        BlockPos center = semanticCenter(goal, player, runtime);
+        int radius = integer(goal.parameters(), "radius", 64, 4, 128);
+        int chunkRadius = Math.max(1, (radius + 15) / 16);
+        TargetIndex.Result query;
+        TargetIndex.register(level, List.of(block));
+        try {
+            query = TargetIndex.query(level, center, List.of(block), 8, chunkRadius, 384);
+        } finally {
+            TargetIndex.unregister(level, List.of(block));
+        }
+        List<BlockPos> hits = query.hits().stream()
+                .filter(pos -> squaredHorizontal(pos, center) <= (long) radius * radius)
+                .filter(pos -> level.getBlockState(pos).is(block))
+                .sorted(Comparator.comparingLong(pos -> squared(pos, center)))
+                .toList();
+        if (hits.isEmpty()) {
+            JsonObject facts = new JsonObject();
+            facts.addProperty("block_id", id.toString());
+            facts.addProperty("searched_loaded_radius", radius);
+            facts.addProperty("loaded_scan_complete", query.complete());
+            return decision(goal, "No matching block is visible in the currently loaded search area.",
+                    List.of(option("recover", "Travel or explore to load the likely area, then retry."),
+                            option("replace_goal", "Choose another visible block target."),
+                            option("cancel", "Cancel interaction.")), facts);
+        }
+        if (hits.size() > 1 && !nearest(goal, goal.parameters())) {
+            JsonObject facts = new JsonObject();
+            facts.addProperty("block_id", id.toString());
+            facts.add("candidates", blockFacts(center, hits));
+            return decision(goal, "Several loaded blocks match this semantic target.",
+                    List.of(option("retry", "Retry with selection=nearest or name a landmark/area relation."),
+                            option("cancel", "Cancel interaction.")), facts);
+        }
+
+        BlockPos target = hits.getFirst();
+        JsonObject use = new JsonObject();
+        use.addProperty("button", "right");
+        use.addProperty("x", target.getX());
+        use.addProperty("y", target.getY());
+        use.addProperty("z", target.getZ());
+        if (itemId != null) use.addProperty("item_id", itemId);
+        if (player.getEyePosition().distanceToSqr(Vec3.atCenterOf(target)) <= 4.5D * 4.5D) {
+            return new IntentAction.Tool("interact_at", use.toString());
+        }
+        BlockPos stand = interactionStand(level, target, player.blockPosition());
+        if (stand == null) {
+            JsonObject facts = new JsonObject();
+            facts.addProperty("block_id", id.toString());
+            facts.addProperty("distance", roundedDistance(player, target));
+            return decision(goal, "The loaded target has no verified standable interaction position nearby.",
+                    List.of(option("recover", "Clear or approach the obstruction, then retry."),
+                            option("replace_goal", "Choose another matching target."),
+                            option("cancel", "Cancel interaction.")), facts);
+        }
+        JsonObject travel = new JsonObject();
+        travel.addProperty("x", stand.getX() + 0.5D);
+        travel.addProperty("y", stand.getY());
+        travel.addProperty("z", stand.getZ() + 0.5D);
+        travel.addProperty("may_alter_terrain", bool(goal.parameters(), "may_alter_terrain", false));
+        return new IntentAction.Chain(List.of(
+                new IntentAction.Tool("goto", travel.toString()),
+                new IntentAction.Tool("interact_at", use.toString())));
+    }
+
+    private static IntentAction consume(Goal goal, LocalPlayer player) {
+        JsonObject p = goal.parameters();
+        if (player.getFoodData().getFoodLevel() >= 20) {
+            return decision(goal, "Hunger is already full, so eating would not meet the requested outcome.",
+                    List.of(option("skip", "Skip eating for now."),
+                            option("cancel", "Cancel consumption.")), null);
+        }
+        String requested = itemId(p);
+        if (requested == null && goal.target() != null && "item".equals(goal.target().kind())) {
+            requested = goal.target().label();
+        }
+        if (requested != null) {
+            ResourceLocation id = ResourceLocation.tryParse(requested);
+            if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) {
+                return invalidItem(goal, requested);
+            }
+            Item item = BuiltInRegistries.ITEM.get(id);
+            ItemStack stack = firstStack(player, item);
+            if (stack == null) return missingItem(goal, requested);
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (food == null) {
+                return decision(goal, requested + " is not food supported by the timed consume action.",
+                        List.of(option("replace_goal", "Choose an edible inventory item or a dedicated use-item action."),
+                                option("cancel", "Cancel consumption.")), null);
+            }
+            if (!food.effects().isEmpty() && !bool(p, "allow_effects", false)) {
+                JsonObject facts = new JsonObject();
+                facts.addProperty("item_id", requested);
+                facts.addProperty("effect_entries", food.effects().size());
+                return decision(goal, "The named food can apply effects; the safe-food policy will not consume it implicitly.",
+                        List.of(option("retry", "Retry with allow_effects=true only if these effects are intended."),
+                                option("replace_goal", "Choose effect-free food."),
+                                option("cancel", "Cancel consumption.")), facts);
+            }
+            return eatTool(requested);
+        }
+
+        int missingHunger = 20 - player.getFoodData().getFoodLevel();
+        List<FoodChoice> choices = foodChoices(player);
+        List<FoodChoice> safe = choices.stream().filter(choice -> choice.food().effects().isEmpty())
+                .sorted(Comparator.comparingInt((FoodChoice choice) ->
+                                Math.abs(choice.food().nutrition() - missingHunger))
+                        .thenComparing(Comparator.comparingDouble(
+                                (FoodChoice choice) -> choice.food().saturation()).reversed()))
+                .toList();
+        if (safe.isEmpty()) {
+            JsonObject facts = new JsonObject();
+            facts.add("available_food", foodFacts(choices));
+            return decision(goal, choices.isEmpty()
+                            ? "There is no food in the inventory."
+                            : "Only foods with effects are available; the safe-food policy will not choose one silently.",
+                    List.of(option("recover", "Acquire ordinary effect-free food, then retry."),
+                            option("retry", "Name a specific food and set allow_effects=true if its effects are intended."),
+                            option("cancel", "Cancel consumption.")), facts);
+        }
+        return eatTool(safe.getFirst().itemId());
+    }
+
+    private static IntentAction equip(Goal goal, LocalPlayer player) {
+        JsonObject p = goal.parameters();
+        String action = lower(string(p, "action"));
+        if (action == null) action = "equip";
+        String slot = lower(string(p, "slot"));
+        if (slot != null && !EQUIPMENT_SLOTS.contains(slot)) {
+            return decision(goal, "Unknown semantic equipment slot: " + slot,
+                    List.of(option("retry", "Use mainhand, offhand, head, chest, legs, feet, or armor."),
+                            option("cancel", "Cancel equipment change.")), null);
+        }
+        if ("unequip".equals(action)) {
+            if (slot == null) {
+                return decision(goal, "Which equipment slot should be cleared?",
+                        List.of(option("retry", "Provide a semantic slot; armor means all four armor pieces."),
+                                option("cancel", "Cancel equipment change.")), null);
+            }
+            JsonObject args = new JsonObject();
+            args.addProperty("action", "unequip");
+            args.addProperty("slot", slot);
+            return new IntentAction.Tool("equip_item", args.toString());
+        }
+        if (!"equip".equals(action)) {
+            return decision(goal, "Unsupported equipment action: " + action,
+                    List.of(option("retry", "Use action=equip or action=unequip."),
+                            option("cancel", "Cancel equipment change.")), null);
+        }
+        if ("armor".equals(slot)) {
+            return decision(goal, "slot=armor is only meaningful when unequipping all armor.",
+                    List.of(option("retry", "Choose one armor slot or omit slot for automatic routing."),
+                            option("cancel", "Cancel equipment change.")), null);
+        }
+
+        String itemId = itemId(p);
