@@ -1198,3 +1198,257 @@ public final class SemanticBuildPlanner {
     }
 
     private static boolean ladderBlock(String id) {
+        Block block = registered(id);
+        return block != null && path(id).endsWith("ladder")
+                && block.getStateDefinition().getProperty("facing") != null;
+    }
+
+    private static boolean hangingLight(String id) {
+        Block block = registered(id);
+        return block != null && block.getStateDefinition().getProperty("hanging") != null;
+    }
+
+    private static boolean storageBlock(String id) {
+        String path = path(id);
+        return path.equals("barrel") || path.endsWith("_chest") || path.equals("chest");
+    }
+
+    private static boolean workBlock(String id) {
+        String path = path(id);
+        return Set.of("crafting_table", "smithing_table", "cartography_table",
+                "fletching_table", "loom", "stonecutter").contains(path);
+    }
+
+    private static boolean studyBlock(String id) {
+        String path = path(id);
+        return path.equals("bookshelf") || path.equals("chiseled_bookshelf")
+                || path.equals("lectern");
+    }
+
+    private static String textured(
+            String base, Map<String, Integer> inventory, String policy) {
+        String candidate = switch (path(base)) {
+            case "cobblestone" -> "minecraft:mossy_cobblestone";
+            case "stone_bricks" -> "minecraft:mossy_stone_bricks";
+            case "deepslate_bricks" -> "minecraft:cracked_deepslate_bricks";
+            case "deepslate_tiles" -> "minecraft:cracked_deepslate_tiles";
+            default -> null;
+        };
+        if (candidate == null || !validMaterial(candidate)
+                || !(policy.equals("storage_available") || inventory.containsKey(candidate))) {
+            return base;
+        }
+        return base + "*8," + candidate + "*2";
+    }
+
+    private static String deriveWood(String source, String suffix, String fallback) {
+        ResourceLocation id = ResourceLocation.tryParse(source);
+        if (id == null || !id.getPath().endsWith("_planks")) return fallback;
+        String path = id.getPath();
+        String candidate = id.getNamespace() + ":"
+                + path.substring(0, path.length() - "_planks".length()) + suffix;
+        return validMaterial(candidate) ? candidate : fallback;
+    }
+
+    private static String path(String id) {
+        int separator = id.indexOf(':');
+        return separator < 0 ? id : id.substring(separator + 1);
+    }
+
+    private static boolean wood(String id) {
+        String path = path(id);
+        return path.contains("plank") || path.contains("wood") || path.contains("log")
+                || path.contains("stem") || path.contains("hyphae");
+    }
+
+    private static boolean stone(String id) {
+        String path = path(id);
+        return path.contains("stone") || path.contains("brick") || path.contains("cobble")
+                || path.contains("deepslate") || path.contains("andesite")
+                || path.contains("granite") || path.contains("diorite");
+    }
+
+    private static boolean rare(String id) {
+        String path = path(id);
+        return path.contains("diamond") || path.contains("emerald") || path.contains("netherite")
+                || path.contains("ancient_debris") || path.startsWith("gold_") || path.contains("raw_gold");
+    }
+
+    private static boolean sensitive(ClientLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        Block block = state.getBlock();
+        return level.getBlockEntity(pos) != null || state.is(Blocks.FARMLAND)
+                || block instanceof CropBlock || block instanceof StemBlock
+                || block instanceof AttachedStemBlock || block instanceof CocoaBlock
+                || state.is(Blocks.NETHER_WART) || state.is(Blocks.SWEET_BERRY_BUSH);
+    }
+
+    private static boolean loadedColumn(ClientLevel level, int x, int z, int aroundY) {
+        int y = Math.max(level.getMinBuildHeight(), Math.min(level.getMaxBuildHeight() - 1, aroundY));
+        return level.hasChunkAt(new BlockPos(x, y, z));
+    }
+
+    private static Goal.WorldPosition target(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        Goal.SemanticTarget target = goal.target();
+        if (target == null) return null;
+        if (target.kind().equals("current_place")) {
+            BlockPos pos = player.blockPosition();
+            return new Goal.WorldPosition(pos.getX(), pos.getY(), pos.getZ(),
+                    player.level().dimension().location().toString());
+        }
+        Goal.WorldPosition position = null;
+        if (target.kind().equals("coordinates")) position = target.position();
+        else if (target.kind().equals("landmark") || target.kind().equals("area")) {
+            IntentRuntime.Landmark landmark = runtime.landmark(target.label());
+            if (landmark != null) position = landmark.position();
+        }
+        if (position == null) return null;
+        String dimension = player.level().dimension().location().toString();
+        return position.dimension() == null || position.dimension().equals(dimension) ? position : null;
+    }
+
+    private static Size parseSize(JsonElement element) {
+        if (element == null || element.isJsonNull()) return null;
+        if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()) {
+            return switch (element.getAsString().trim().toLowerCase(Locale.ROOT)) {
+                case "small", "compact" -> new Size(9, 7, 1, 4);
+                case "medium", "normal" -> new Size(13, 11, 2, 4);
+                case "large", "spacious" -> new Size(19, 15, 3, 4);
+                default -> null;
+            };
+        }
+        if (!element.isJsonObject()) return null;
+        JsonObject o = element.getAsJsonObject();
+        if (!o.has("width") && !o.has("depth") && !o.has("height")) return null;
+        Integer w = bounded(o, "width", 9, 5, 31);
+        Integer d = bounded(o, "depth", 9, 5, 31);
+        Integer h = bounded(o, "height", 8, 4, 16);
+        if (w == null || d == null || h == null) return null;
+        int storeys = Math.max(1, Math.min(4, h / 4));
+        int floorHeight = Math.max(4, (int) Math.ceil(h / (double) storeys));
+        return new Size(odd(w), odd(d), storeys, floorHeight);
+    }
+
+    private static Integer bounded(JsonObject o, String key, int fallback, int min, int max) {
+        if (!o.has(key)) return fallback;
+        try { int n = o.get(key).getAsInt(); return n >= min && n <= max ? n : null; }
+        catch (RuntimeException ignored) { return null; }
+    }
+
+    private static int odd(int n) { return (n & 1) == 0 ? n + 1 : n; }
+
+    private static boolean waterfront(String purpose, Set<String> features) {
+        String p = purpose.toLowerCase(Locale.ROOT);
+        return features.contains("dock") || features.contains("pier") || p.contains("seaside")
+                || p.contains("coastal") || p.contains("waterfront") || p.contains("shore")
+                || p.contains("dock");
+    }
+
+    private static Set<String> stringSet(JsonElement element) {
+        if (element == null || !element.isJsonArray()) return Set.of();
+        Set<String> out = new LinkedHashSet<>();
+        for (JsonElement item : element.getAsJsonArray()) if (item.isJsonPrimitive()
+                && item.getAsJsonPrimitive().isString()) {
+            out.add(item.getAsString().trim().toLowerCase(Locale.ROOT));
+        }
+        return Set.copyOf(out);
+    }
+
+    private static Set<String> normalizedFeatures(JsonElement element) {
+        Set<String> raw = stringSet(element);
+        Set<String> out = new LinkedHashSet<>(raw);
+        if (out.remove("pier")) out.add("dock");
+        return Set.copyOf(out);
+    }
+
+    private static List<String> resources(JsonElement element) {
+        if (element == null || !element.isJsonArray()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (JsonElement item : element.getAsJsonArray()) {
+            if (!item.isJsonPrimitive() || !item.getAsJsonPrimitive().isString()) continue;
+            ResourceLocation id = ResourceLocation.tryParse(item.getAsString());
+            if (id != null) out.add(id.toString());
+        }
+        return List.copyOf(out);
+    }
+
+    private static String text(JsonObject object, String key) {
+        return object.has(key) && object.get(key).isJsonPrimitive()
+                && object.getAsJsonPrimitive(key).isString() ? object.get(key).getAsString() : null;
+    }
+
+    private static String normalized(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback
+                : value.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+    }
+
+    private static boolean bool(JsonObject object, String key, boolean fallback) {
+        return object.has(key) && object.get(key).isJsonPrimitive()
+                && object.getAsJsonPrimitive(key).isBoolean() ? object.get(key).getAsBoolean() : fallback;
+    }
+
+    private static IntentAction.Decision decision(Goal goal, String question,
+                                                  IntentTaskRecord.DecisionOption... options) {
+        JsonObject context = new JsonObject();
+        context.addProperty("ability", goal.ability());
+        context.addProperty("outcome", goal.outcome());
+        if (goal.target() != null) context.add("semantic_target", goal.target().toJson());
+        return new IntentAction.Decision(new IntentTaskRecord.DecisionSnapshot(
+                UUID.randomUUID(), question, List.of(options), context.toString()));
+    }
+
+    private static IntentTaskRecord.DecisionOption option(String choice, String description) {
+        return new IntentTaskRecord.DecisionOption(choice, description);
+    }
+
+    private static JsonObject base(String kind, String block) {
+        JsonObject op = new JsonObject(); op.addProperty("op", kind); op.addProperty("block_id", block);
+        return op;
+    }
+
+    private static JsonObject set(String block, int x, int y, int z) {
+        JsonObject op = base("set", block);
+        op.addProperty("x", x); op.addProperty("y", y); op.addProperty("z", z); return op;
+    }
+
+    private static JsonObject setFacing(
+            String block, int x, int y, int z, Direction facing) {
+        JsonObject op = set(block, x, y, z);
+        op.addProperty("facing", facing.getName());
+        return op;
+    }
+
+    private static JsonObject setProperties(
+            String block, int x, int y, int z, Map<String, String> properties) {
+        JsonObject op = set(block, x, y, z);
+        JsonObject values = new JsonObject();
+        properties.forEach(values::addProperty);
+        op.add("properties", values);
+        return op;
+    }
+
+    private static JsonObject door(String block, BlockPos pos, Direction facing) {
+        JsonObject op = base("set_door", block);
+        op.addProperty("x", pos.getX()); op.addProperty("y", pos.getY());
+        op.addProperty("z", pos.getZ()); op.addProperty("facing", facing.getName()); return op;
+    }
+
+    private static JsonObject box(String block, int x1, int y1, int z1,
+                                  int x2, int y2, int z2, boolean hollow) {
+        JsonObject op = base("box", block); bounds(op, x1, y1, z1, x2, y2, z2);
+        op.addProperty("hollow", hollow); return op;
+    }
+
+    private static JsonObject walls(String block, int x1, int y1, int z1, int x2, int y2, int z2) {
+        JsonObject op = base("walls", block); bounds(op, x1, y1, z1, x2, y2, z2); return op;
+    }
+
+    private static JsonObject line(String block, int x1, int y1, int z1, int x2, int y2, int z2) {
+        JsonObject op = base("line", block); bounds(op, x1, y1, z1, x2, y2, z2); return op;
+    }
+
+    private static void bounds(JsonObject op, int x1, int y1, int z1, int x2, int y2, int z2) {
+        op.addProperty("x1", x1); op.addProperty("y1", y1); op.addProperty("z1", z1);
+        op.addProperty("x2", x2); op.addProperty("y2", y2); op.addProperty("z2", z2);
+    }
+}
