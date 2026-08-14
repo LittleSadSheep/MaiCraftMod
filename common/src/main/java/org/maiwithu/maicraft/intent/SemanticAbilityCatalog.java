@@ -298,3 +298,38 @@ public final class SemanticAbilityCatalog {
         values.forEach(value -> result.add(value.getAsString()));
         return Set.copyOf(result);
     }
+
+    static Set<String> hardConstraintKinds(String ability) {
+        JsonArray values = describe(ability).getAsJsonArray("accepted_hard_constraints");
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        values.forEach(value -> result.add(value.getAsString()));
+        return Set.copyOf(result);
+    }
+
+    private static Set<String> names(JsonObject fields) {
+        return fields == null ? Set.of() : Set.copyOf(fields.keySet());
+    }
+
+    private static JsonArray targets(String... values) {
+        JsonArray result = new JsonArray();
+        for (String value : values) result.add(value);
+        return result;
+    }
+
+    private static JsonObject fields(JsonObject... fields) {
+        JsonObject result = new JsonObject();
+        for (JsonObject field : fields) {
+            String name = field.remove("name").getAsString();
+            result.add(name, field);
+        }
+        return result;
+    }
+
+    private static JsonObject field(String name, String type, String description) {
+        JsonObject result = new JsonObject();
+        result.addProperty("name", name);
+        result.addProperty("type", type);
+        result.addProperty("description", description);
+        return result;
+    }
+}
