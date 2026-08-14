@@ -898,3 +898,303 @@ public final class SemanticBuildPlanner {
             }
         }
         for (int d = 2; d <= shore.length; d++) for (int side : new int[]{-1, 1}) {
+            BlockPos rail = lateral(edge(s, shore.direction, deckY + 1, d),
+                    shore.direction, side);
+            ops.add(set(palette.railing, rail.getX(), rail.getY(), rail.getZ()));
+        }
+        for (int d : List.of(2, shore.length)) for (int side : new int[]{-1, 1}) {
+            BlockPos lamp = lateral(edge(s, shore.direction, deckY + 2, d),
+                    shore.direction, side);
+            ops.add(set(palette.light, lamp.getX(), lamp.getY(), lamp.getZ()));
+        }
+    }
+
+    private static BlockPos lateral(BlockPos center, Direction forward, int offset) {
+        return forward.getAxis() == Direction.Axis.Z
+                ? center.offset(offset, 0, 0)
+                : center.offset(0, 0, offset);
+    }
+
+    private static BlockPos edge(Site s, Direction direction, int y, int out) {
+        int x = (s.minX + s.maxX) / 2, z = (s.minZ + s.maxZ) / 2;
+        return switch (direction) {
+            case NORTH -> new BlockPos(x, y, s.minZ - out);
+            case SOUTH -> new BlockPos(x, y, s.maxZ + out);
+            case WEST -> new BlockPos(s.minX - out, y, z);
+            case EAST -> new BlockPos(s.maxX + out, y, z);
+            default -> new BlockPos(x, y, z);
+        };
+    }
+
+    private static StyleProfile styleProfile(String requestedStyle, String purpose) {
+        String language = ((requestedStyle == null ? "" : requestedStyle) + ' ' + purpose)
+                .toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        StyleProfile selected = DEFAULT_STYLE;
+        int bestScore = 0;
+        for (StyleRule rule : STYLE_RULES) {
+            int score = 0;
+            for (String token : rule.tokens) if (language.contains(token)) score++;
+            if (score > bestScore) {
+                bestScore = score;
+                selected = rule.profile;
+            }
+        }
+        return selected;
+    }
+
+    private static List<RoomUse> roomFunctions(String purpose, Set<String> features) {
+        LinkedHashSet<RoomUse> uses = new LinkedHashSet<>();
+        features.stream().sorted().map(ROOM_LANGUAGE::get)
+                .filter(Objects::nonNull).forEach(uses::add);
+        String language = purpose.toLowerCase(Locale.ROOT);
+        ROOM_LANGUAGE.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                .filter(entry -> language.contains(entry.getKey()))
+                .map(Map.Entry::getValue).forEach(uses::add);
+        uses.add(RoomUse.COMMON);
+        uses.add(RoomUse.REST);
+        uses.add(RoomUse.KITCHEN);
+        uses.add(RoomUse.STORAGE);
+        uses.add(RoomUse.WORK);
+        uses.add(RoomUse.STUDY);
+        return List.copyOf(uses);
+    }
+
+    private static JsonObject semanticContract(Size size, Set<String> features, Site site,
+                                               int resolvedCells, String purpose) {
+        int roomsPerStorey = (size.width >= 11 ? 2 : 1) * (size.depth >= 13 ? 2 : 1);
+        int roomCount = roomsPerStorey * size.storeys;
+        List<RoomUse> functions = roomFunctions(purpose, features);
+        LinkedHashSet<String> zones = new LinkedHashSet<>();
+        for (int i = 0; i < roomCount; i++) {
+            zones.add(functions.get(Math.floorMod(i, functions.size()))
+                    .name().toLowerCase(Locale.ROOT));
+        }
+
+        JsonObject contract = new JsonObject();
+        contract.addProperty("bounded_cell_count", resolvedCells);
+        contract.addProperty("storeys", size.storeys);
+        contract.addProperty("interior_rooms", roomCount);
+        contract.addProperty("interior_lights", roomCount);
+        contract.addProperty("floor_slabs", size.storeys);
+        contract.addProperty("exterior_doors", features.contains("workshop") ? 2 : 1);
+        contract.addProperty("terrain_entry_approach", true);
+        contract.addProperty("storeys_connected", true);
+        contract.addProperty("cellar_access", features.contains("cellar"));
+        contract.addProperty("traversability_requires_world_verification", true);
+        JsonArray zoneArray = new JsonArray();
+        zones.forEach(zoneArray::add);
+        contract.add("functional_zones", zoneArray);
+
+        JsonObject dock = new JsonObject();
+        boolean hasDock = features.contains("dock") && site.shore != null;
+        dock.addProperty("present", hasDock);
+        if (hasDock) {
+            int supportRows = (site.shore.length + 2) / 3;
+            if ((site.shore.length - 1) % 3 != 0) supportRows++;
+            dock.addProperty("length", site.shore.length);
+            dock.addProperty("width", 3);
+            dock.addProperty("support_columns", supportRows * 2);
+            dock.addProperty("railed_sides", 2);
+            dock.addProperty("exterior_lights", 4);
+            dock.addProperty("connected_to_entry", true);
+        }
+        contract.add("dock", dock);
+        return contract;
+    }
+
+    private static JsonObject traversabilityContract(Site site, Size size, Set<String> features) {
+        int floorY = site.baseY;
+        int highestFeetY = floorY + (size.storeys - 1) * size.floorHeight + 1;
+        int approachDistance = features.contains("dock") && site.shore != null
+                ? site.shore.length : features.contains("porch") ? 3 : 2;
+
+        JsonObject contract = new JsonObject();
+        contract.add("exteriorApproach",
+                cellJson(edge(site, site.front, floorY + 1, approachDistance)));
+        contract.add("entranceDoor", cellJson(edge(site, site.front, floorY + 1, 0)));
+        contract.add("interiorEntry", cellJson(edge(site, site.front, floorY + 1, -1)));
+
+        JsonObject bounds = new JsonObject();
+        bounds.addProperty("minX", site.minX + 1);
+        bounds.addProperty("minY", floorY + 1);
+        bounds.addProperty("minZ", site.minZ + 1);
+        bounds.addProperty("maxX", site.maxX - 1);
+        bounds.addProperty("maxY", highestFeetY);
+        bounds.addProperty("maxZ", site.maxZ - 1);
+        contract.add("interiorBounds", bounds);
+
+        JsonArray waypoints = new JsonArray();
+        List<int[]> xRanges = roomRanges(site.minX + 1, site.maxX - 1, size.width >= 11);
+        List<int[]> zRanges = roomRanges(site.minZ + 1, site.maxZ - 1, size.depth >= 13);
+        for (int storey = 0; storey < size.storeys; storey++) {
+            int feetY = floorY + storey * size.floorHeight + 1;
+            for (int[] xr : xRanges) for (int[] zr : zRanges) {
+                waypoints.add(cellJson(new BlockPos(
+                        Math.floorDiv(xr[0] + xr[1], 2), feetY,
+                        Math.floorDiv(zr[0] + zr[1], 2))));
+            }
+        }
+        contract.add("floorWaypoints", waypoints);
+
+        if (size.storeys > 1) {
+            BlockPos ladder = ladderPosition(site, floorY + 1);
+            JsonObject vertical = new JsonObject();
+            vertical.addProperty("x", ladder.getX());
+            vertical.addProperty("z", ladder.getZ());
+            vertical.addProperty("bottomY", floorY + 1);
+            vertical.addProperty("topY", highestFeetY);
+            contract.add("verticalLink", vertical);
+        }
+        if (features.contains("dock") && site.shore != null) {
+            JsonObject dock = new JsonObject();
+            dock.add("houseSide", cellJson(edge(site, site.shore.direction, floorY + 1, 1)));
+            dock.add("deckEnd", cellJson(
+                    edge(site, site.shore.direction, floorY + 1, site.shore.length)));
+            contract.add("dockPath", dock);
+        }
+        return contract;
+    }
+
+    private static List<int[]> roomRanges(int min, int max, boolean split) {
+        if (!split) return List.of(new int[]{min, max});
+        int middle = Math.floorDiv(min + max, 2);
+        return List.of(new int[]{min, middle - 1}, new int[]{middle + 1, max});
+    }
+
+    private static JsonObject cellJson(BlockPos pos) {
+        JsonObject cell = new JsonObject();
+        cell.addProperty("x", pos.getX());
+        cell.addProperty("y", pos.getY());
+        cell.addProperty("z", pos.getZ());
+        return cell;
+    }
+
+    private static Palette palette(LocalPlayer player, List<String> preferred, String policy) {
+        Map<String, Integer> inventory = inventoryBlocks(player);
+        Predicate<String> allowed = id -> !policy.equals("preserve_rare") || !rare(id);
+        List<String> choices = preferred.stream().filter(SemanticBuildPlanner::validMaterial)
+                .filter(allowed).toList();
+        String wallBase = role(choices, inventory, allowed, SemanticBuildPlanner::basic, policy);
+        if (wallBase == null) wallBase = "minecraft:oak_planks";
+        String foundationBase = role(
+                choices, inventory, allowed, id -> basic(id) && stone(id), policy);
+        if (foundationBase == null) {
+            foundationBase = stone(wallBase) ? wallBase : "minecraft:cobblestone";
+        }
+        String floor = role(choices, inventory, allowed, id -> basic(id) && wood(id), policy);
+        if (floor == null) floor = wood(wallBase) ? wallBase : "minecraft:oak_planks";
+        String frame = role(choices, inventory, allowed, SemanticBuildPlanner::frameBlock, policy);
+        if (frame == null) frame = deriveWood(floor, "_log", "minecraft:oak_log");
+        String roof = role(choices, inventory, allowed, SemanticBuildPlanner::slab, policy);
+        if (roof == null) roof = deriveWood(floor, "_slab", "minecraft:oak_slab");
+        String door = role(choices, inventory, allowed, SemanticBuildPlanner::doorBlock, policy);
+        if (door == null) door = deriveWood(floor, "_door", "minecraft:oak_door");
+        String window = role(choices, inventory, allowed, SemanticBuildPlanner::windowBlock, policy);
+        if (window == null) window = "minecraft:glass_pane";
+        String railing = role(
+                choices, inventory, allowed, SemanticBuildPlanner::railingBlock, policy);
+        if (railing == null) railing = deriveWood(floor, "_fence", "minecraft:oak_fence");
+        String ladder = role(
+                choices, inventory, allowed, SemanticBuildPlanner::ladderBlock, policy);
+        if (ladder == null) ladder = "minecraft:ladder";
+        String light = role(
+                choices, inventory, allowed, SemanticBuildPlanner::hangingLight, policy);
+        if (light == null) light = "minecraft:lantern";
+        String storage = role(
+                choices, inventory, allowed, SemanticBuildPlanner::storageBlock, policy);
+        if (storage == null) storage = "minecraft:barrel";
+        String work = role(
+                choices, inventory, allowed, SemanticBuildPlanner::workBlock, policy);
+        if (work == null) work = "minecraft:crafting_table";
+        String study = role(
+                choices, inventory, allowed, SemanticBuildPlanner::studyBlock, policy);
+        if (study == null) study = "minecraft:bookshelf";
+        String seat = role(
+                choices, inventory, allowed, id -> path(id).endsWith("_stairs"), policy);
+        if (seat == null) seat = deriveWood(floor, "_stairs", "minecraft:oak_stairs");
+        String textile = role(
+                choices, inventory, allowed, id -> path(id).endsWith("_carpet"), policy);
+        if (textile == null) textile = "minecraft:gray_carpet";
+
+        String foundation = textured(foundationBase, inventory, policy);
+        String wall = textured(wallBase, inventory, policy);
+        String accent = frame.equals(wallBase) ? foundationBase : frame;
+        return new Palette(foundation, floor, wall, frame, roof, accent, door, window,
+                railing, ladder, light, storage, work, study, seat, textile);
+    }
+
+    private static String role(List<String> preferred, Map<String, Integer> inventory,
+                               Predicate<String> allowed, Predicate<String> kind, String policy) {
+        String presentPreference = first(preferred, id -> inventory.containsKey(id) && kind.test(id));
+        if (presentPreference != null) return presentPreference;
+        if (policy.equals("specified")) return first(preferred, kind);
+        String carried = best(inventory, allowed.and(kind));
+        return carried != null ? carried : first(preferred, kind);
+    }
+
+    private static Map<String, Integer> inventoryBlocks(LocalPlayer player) {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        int limit = Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size());
+        for (int slot = 0; slot < limit; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem item)) continue;
+            out.merge(BuiltInRegistries.BLOCK.getKey(item.getBlock()).toString(), stack.getCount(), Integer::sum);
+        }
+        return out;
+    }
+
+    private static String best(Map<String, Integer> inventory, Predicate<String> predicate) {
+        return inventory.entrySet().stream().filter(e -> predicate.test(e.getKey()))
+                .max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse(null);
+    }
+
+    private static String first(List<String> ids, Predicate<String> predicate) {
+        return ids.stream().filter(predicate).findFirst().orElse(null);
+    }
+
+    private static Block registered(String id) {
+        ResourceLocation key = ResourceLocation.tryParse(id);
+        if (key == null) return null;
+        Block block = BuiltInRegistries.BLOCK.get(key);
+        return BuiltInRegistries.BLOCK.getKey(block).equals(key) ? block : null;
+    }
+
+    private static boolean validMaterial(String id) {
+        Block block = registered(id);
+        return block != null && block != Blocks.AIR;
+    }
+
+    private static boolean basic(String id) {
+        Block block = registered(id);
+        return block != null && block != Blocks.AIR && !(block instanceof SlabBlock)
+                && !(block instanceof DoorBlock) && !(block instanceof TransparentBlock)
+                && !(block instanceof IronBarsBlock) && !(block instanceof CropBlock)
+                && !(block instanceof StemBlock) && !(block instanceof AttachedStemBlock)
+                && !block.defaultBlockState().hasBlockEntity()
+                && !storageBlock(id) && !workBlock(id) && !studyBlock(id)
+                && block.defaultBlockState().isCollisionShapeFullBlock(
+                        net.minecraft.world.level.EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+    }
+
+    private static boolean slab(String id) { return registered(id) instanceof SlabBlock; }
+    private static boolean doorBlock(String id) { return registered(id) instanceof DoorBlock; }
+    private static boolean windowBlock(String id) {
+        Block block = registered(id);
+        ResourceLocation key = ResourceLocation.tryParse(id);
+        return block instanceof TransparentBlock || block instanceof IronBarsBlock
+                || key != null && key.getPath().contains("glass_pane");
+    }
+
+    private static boolean frameBlock(String id) {
+        String path = path(id);
+        return path.endsWith("_log") || path.endsWith("_wood")
+                || path.endsWith("_stem") || path.endsWith("_hyphae")
+                || path.startsWith("stripped_");
+    }
+
+    private static boolean railingBlock(String id) {
+        String path = path(id);
+        return path.endsWith("_fence") || path.endsWith("_wall");
+    }
+
+    private static boolean ladderBlock(String id) {
