@@ -87,6 +87,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     private static final double FLEE_SCAN_RADIUS = 40.0;
 
+    /** A health decrease or confirmed defeat renews combat without making missed swings progress. */
+    private static final long COMBAT_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
+
     /**
      * 弓战斗的环内沿:比这更近就拉不开弓 —— 弹道压得平,而且白白挨打。
      *
@@ -139,6 +142,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private final java.util.Set<Integer> noPath = new java.util.HashSet<>();
 
     private final Map<Item, Integer> inventoryBaseline = new HashMap<>();
+    private final Map<Integer, Float> observedHealth = new HashMap<>();
     private final LootSweep loot;
 
     /**
@@ -311,15 +315,27 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             if (e == null || e.isRemoved()) {
                 if (r.strikes(id) > 0) {
                     r.defeated(id);
+                    renewCombatProgress();
                     beginLoot(lastTargetPosition);
                 } else {
                     r.lost(id);
                 }
             } else if (e instanceof LivingEntity living && living.isDeadOrDying()) {
                 r.defeated(id);
+                renewCombatProgress();
                 beginLoot(lastTargetPosition);
+            } else if (e instanceof LivingEntity living) {
+                float current = living.getHealth();
+                Float previous = observedHealth.put(id, current);
+                if (previous != null && current + 0.01F < previous) {
+                    renewCombatProgress();
+                }
             }
         }
+    }
+
+    private void renewCombatProgress() {
+        r.extendDeadlineTo(player.level().getGameTime() + COMBAT_PROGRESS_LEASE_TICKS);
     }
 
     /**
@@ -1004,7 +1020,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     @Override
     protected String timeoutMessage() {
-        return "attack timed out after defeating " + tally();
+        return "attack stopped making verified movement or damage progress after defeating "
+                + tally();
     }
 
     @Override
