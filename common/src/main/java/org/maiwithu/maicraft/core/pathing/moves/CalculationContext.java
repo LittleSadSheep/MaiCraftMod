@@ -98,6 +98,8 @@ public class CalculationContext {
     public final LongSet sacred;
     /** 执行层证明无支撑放不上的格:放置成本直接 INF。 */
     public final LongSet deniedPlace;
+    /** Task-scoped cells the first-person body must never occupy. */
+    public final LongSet forbiddenBodyCells;
 
     /** 世界可建高度下界(含)与上界(不含)。 */
     public final int worldBottom;
@@ -111,12 +113,20 @@ public class CalculationContext {
     public CalculationContext(LocalPlayer player, BlockGetter view, ChunkLoadedTest loadedTest,
                               boolean safeForThreadedUse, TerrainPermit permit) {
         this(player, view, loadedTest, safeForThreadedUse,
-                LongSets.emptySet(), LongSets.emptySet(), permit);
+                LongSets.emptySet(), LongSets.emptySet(), LongSets.emptySet(), permit);
     }
 
     public CalculationContext(LocalPlayer player, BlockGetter view, ChunkLoadedTest loadedTest,
                               boolean safeForThreadedUse,
                               LongSet sacred, LongSet deniedPlace, TerrainPermit permit) {
+        this(player, view, loadedTest, safeForThreadedUse,
+                sacred, deniedPlace, LongSets.emptySet(), permit);
+    }
+
+    public CalculationContext(LocalPlayer player, BlockGetter view, ChunkLoadedTest loadedTest,
+                              boolean safeForThreadedUse,
+                              LongSet sacred, LongSet deniedPlace,
+                              LongSet forbiddenBodyCells, TerrainPermit permit) {
         NavSettings settings = NavSettings.get();
         this.safeForThreadedUse = safeForThreadedUse;
         this.player = safeForThreadedUse ? null : player;
@@ -125,6 +135,8 @@ public class CalculationContext {
         this.permit = permit;
         this.sacred = LongSets.unmodifiable(new LongOpenHashSet(sacred));
         this.deniedPlace = LongSets.unmodifiable(new LongOpenHashSet(deniedPlace));
+        this.forbiddenBodyCells = LongSets.unmodifiable(
+                new LongOpenHashSet(forbiddenBodyCells));
         this.toolSet = new ToolSet(player);
         // 规划与执行使用同一份真实库存事实；没有 actor 确认的材料不预支。
         // 许可与总开关同折:PRESERVE 下没有耗材这回事,放置成本处处 INF。
@@ -332,6 +344,10 @@ public class CalculationContext {
 
     public boolean isLoaded(int x, int z) {
         return loadedTest.isLoaded(x, z);
+    }
+
+    public boolean isForbiddenBodyCell(int x, int y, int z) {
+        return forbiddenBodyCells.contains(BlockPos.asLong(x, y, z));
     }
 
     // ==================== 成本函数 ====================

@@ -98,8 +98,12 @@ public abstract class Movement {
 
     public double getCost(CalculationContext context) {
         if (cost == null) {
-            MutableMoveResult result = new MutableMoveResult();
-            cost = calculateCost(context, result);
+            if (context.isForbiddenBodyCell(dest.getX(), dest.getY(), dest.getZ())) {
+                cost = ActionCosts.COST_INF;
+            } else {
+                MutableMoveResult result = new MutableMoveResult();
+                cost = calculateCost(context, result);
+            }
         }
         return cost;
     }
