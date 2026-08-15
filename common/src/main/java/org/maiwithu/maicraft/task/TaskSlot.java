@@ -1,6 +1,8 @@
 package org.maiwithu.maicraft.task;
 
 import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.entity.InputDriver;
 
 import java.util.function.Consumer;
 
@@ -54,7 +56,7 @@ final class TaskSlot {
             runCleanupAfterFailure();
             next.setResult(TaskResult.fail("task start failed: " + safeMessage(exception)));
         }
-        settleIfTerminal();
+        settleIfTerminal(player);
     }
 
     /** Advance this slot once. The brain calls this for the selected winner only. */
@@ -75,7 +77,7 @@ final class TaskSlot {
                 }
             }
         }
-        settleIfTerminal();
+        settleIfTerminal(player);
     }
 
     void loseBody(LocalPlayer player) {
@@ -106,9 +108,9 @@ final class TaskSlot {
         }
     }
 
-    void settleIfTerminal() {
+    void settleIfTerminal(LocalPlayer player) {
         if (record != null && record.getState().isTerminal()) {
-            settle();
+            settle(player);
         }
     }
 
@@ -135,7 +137,7 @@ final class TaskSlot {
         if (!record.getState().isTerminal()) {
             record.setState(TaskState.CANCELLED);
         }
-        settle();
+        settle(player);
     }
 
     private void runCleanupAfterFailure() {
@@ -146,22 +148,38 @@ final class TaskSlot {
         }
     }
 
-    private void settle() {
+    private void settle(LocalPlayer player) {
         TaskRecord finished = record;
-        if (finished.getResult() == null) {
-            try {
-                finished.setResult(task.result(finished.getState()));
-            } catch (RuntimeException exception) {
-                finished.setResult(TaskResult.fail("task result failed: " + safeMessage(exception)));
+        try {
+            if (finished.getResult() == null) {
+                try {
+                    finished.setResult(task.result(finished.getState()));
+                } catch (RuntimeException exception) {
+                    finished.setResult(TaskResult.fail("task result failed: " + safeMessage(exception)));
+                }
             }
+            if (finished.getResult() == null) {
+                finished.setResult(defaultResult(finished.getState()));
+            }
+        } finally {
+            releaseBody(player);
+            task = null;
+            record = null;
+            acceptedGameTime = Long.MIN_VALUE;
         }
-        if (finished.getResult() == null) {
-            finished.setResult(defaultResult(finished.getState()));
-        }
-        task = null;
-        record = null;
-        acceptedGameTime = Long.MIN_VALUE;
         outbox.accept(finished);
+    }
+
+    /** A terminal slot can never leave a movement lease behind, even if result cleanup throws. */
+    private static void releaseBody(LocalPlayer player) {
+        try {
+            InputDriver.halt(player);
+        } catch (RuntimeException ignoredFailure) {
+        }
+        try {
+            ClientRuntime.requireContext(player).body().releaseAll();
+        } catch (RuntimeException ignoredFailure) {
+        }
     }
 
     private static TaskResult defaultResult(TaskState state) {

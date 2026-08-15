@@ -58,8 +58,8 @@ final class CompanionBrain {
             winner.tick(player);
         }
 
-        sync.settleIfTerminal();
-        current.settleIfTerminal();
+        sync.settleIfTerminal(player);
+        current.settleIfTerminal(player);
         shipResults();
     }
 
