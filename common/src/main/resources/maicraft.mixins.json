@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.maiwithu.maicraft.core.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "FishingHookAccessor",
+    "MenuDataSlotsAccessor"
+  ],
+  "client": [],
+  "server": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
