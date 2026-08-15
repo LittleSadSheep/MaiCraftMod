@@ -298,3 +298,303 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             entities.add(item);
         }
         result.add("nearby_entities", entities);
+        result.add("local_decision_summary", localDecisionSummary(player, hostileCount));
+        return result;
+    }
+
+    /**
+     * Aggregate local geometry into decision references. This deliberately
+     * reports regions and risks, not a raw block dump.
+     */
+    private JsonObject localDecisionSummary(LocalPlayer player, int hostileCount) {
+        final int radius = 8;
+        final int stride = 2;
+        BlockPos origin = player.blockPosition();
+        Map<String, SectorStats> sectors = new LinkedHashMap<>();
+        Map<String, RegionStats> surfaces = new LinkedHashMap<>();
+        Map<String, Integer> hazards = new LinkedHashMap<>();
+        JsonArray interactionCandidates = new JsonArray();
+
+        for (int dx = -radius; dx <= radius; dx += stride) {
+            for (int dz = -radius; dz <= radius; dz += stride) {
+                int x = origin.getX() + dx;
+                int z = origin.getZ() + dz;
+                int y = player.level().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                BlockPos feet = new BlockPos(x, y, z);
+                BlockPos support = feet.below();
+                var supportState = player.level().getBlockState(support);
+                var feetState = player.level().getBlockState(feet);
+                var headState = player.level().getBlockState(feet.above());
+
+                boolean standable = feetState.getCollisionShape(player.level(), feet).isEmpty()
+                        && headState.getCollisionShape(player.level(), feet.above()).isEmpty()
+                        && Block.isShapeFullBlock(
+                                supportState.getCollisionShape(player.level(), support));
+                String sectorName = sector(dx, dz);
+                sectors.computeIfAbsent(sectorName, ignored -> new SectorStats())
+                        .sample(standable, y);
+
+                String surfaceId = BuiltInRegistries.BLOCK.getKey(supportState.getBlock()).toString();
+                surfaces.computeIfAbsent(surfaceId, ignored -> new RegionStats(surfaceId))
+                        .sample(x, y - 1, z);
+
+                if (supportState.getFluidState().is(FluidTags.LAVA)
+                        || feetState.getFluidState().is(FluidTags.LAVA)) {
+                    hazards.merge("lava", 1, Integer::sum);
+                }
+                if (isHotOrDamaging(supportState.getBlock()) || isHotOrDamaging(feetState.getBlock())) {
+                    hazards.merge("damaging_surface", 1, Integer::sum);
+                }
+                if (y < origin.getY() - 4) {
+                    hazards.merge("drop_edge", 1, Integer::sum);
+                }
+
+                if (interactionCandidates.size() < 6) {
+                    BlockPos candidate = supportState.hasBlockEntity() ? support
+                            : feetState.hasBlockEntity() ? feet : null;
+                    if (candidate != null) {
+                        JsonObject reference = new JsonObject();
+                        reference.addProperty("block_id", BuiltInRegistries.BLOCK.getKey(
+                                player.level().getBlockState(candidate).getBlock()).toString());
+                        reference.add("position", blockPosition(candidate));
+                        interactionCandidates.add(reference);
+                    }
+                }
+            }
+        }
+        if (hostileCount > 0) hazards.put("hostile_entities", hostileCount);
+
+        JsonArray standableRegions = new JsonArray();
+        for (Map.Entry<String, SectorStats> entry : sectors.entrySet()) {
+            standableRegions.add(entry.getValue().toJson(entry.getKey()));
+        }
+
+        JsonArray surfaceRegions = new JsonArray();
+        surfaces.values().stream()
+                .sorted((left, right) -> Integer.compare(right.samples, left.samples))
+                .limit(8)
+                .forEach(region -> surfaceRegions.add(region.toJson()));
+
+        JsonArray hazardSummary = new JsonArray();
+        hazards.forEach((kind, count) -> {
+            JsonObject hazard = new JsonObject();
+            hazard.addProperty("kind", kind);
+            hazard.addProperty("samples", count);
+            hazardSummary.add(hazard);
+        });
+
+        JsonObject summary = new JsonObject();
+        summary.add("standable_regions", standableRegions);
+        summary.add("surface_region_references", surfaceRegions);
+        summary.add("interaction_candidates", interactionCandidates);
+        summary.add("hazards", hazardSummary);
+        return summary;
+    }
+
+    private JsonObject abilities(String focus) {
+        JsonArray abilities = new JsonArray();
+        for (String ability : IntentRuntime.KNOWN_ABILITIES.stream().sorted().toList()) {
+            if (focus != null && !focus.equals(ability)) continue;
+            JsonObject item = new JsonObject();
+            item.addProperty("ability", ability);
+            item.addProperty("available", true);
+            item.addProperty("mode", abilityMode(ability));
+            item.add("contract", SemanticAbilityCatalog.describe(ability));
+            abilities.add(item);
+        }
+        JsonObject result = new JsonObject();
+        result.add("semantic_abilities", abilities);
+        result.addProperty(
+                "boundary",
+                "Express outcomes and only fields declared by each ability contract. The Mod owns routes, clicks, slots and block cells.");
+        return result;
+    }
+
+    private JsonObject landmarks() {
+        JsonArray entries = new JsonArray();
+        for (IntentRuntime.Landmark landmark : intents.landmarks()) {
+            JsonObject item = new JsonObject();
+            item.addProperty("label", landmark.label());
+            item.add("position", worldPosition(landmark.position()));
+            entries.add(item);
+        }
+        JsonObject result = new JsonObject();
+        result.add("landmarks", entries);
+        return result;
+    }
+
+    private JsonObject taskSnapshot(IntentTaskRecord record) {
+        JsonObject result = new JsonObject();
+        result.addProperty("task_id", record.externalId().toString());
+        if (record.planId() != null) result.addProperty("plan_id", record.planId().toString());
+        result.addProperty("state", publicState(record));
+        result.addProperty("internal_state", record.getState().name().toLowerCase());
+        result.addProperty("step_index", record.stepIndex());
+        result.addProperty("step_count", record.steps().size());
+        result.add("goal", record.goal().toJson());
+
+        JsonArray steps = new JsonArray();
+        for (IntentTaskRecord.StepSnapshot step : record.stepResults()) {
+            JsonObject item = new JsonObject();
+            item.addProperty("index", step.index());
+            item.addProperty("ability", step.ability());
+            item.addProperty("success", step.success());
+            item.addProperty("message", step.message());
+            item.add("result", step.result());
+            steps.add(item);
+        }
+        result.add("completed_steps", steps);
+
+        JsonArray attempts = new JsonArray();
+        for (IntentTaskRecord.AttemptSnapshot attempt : record.attempts()) {
+            JsonObject item = new JsonObject();
+            item.addProperty("step_index", attempt.stepIndex());
+            item.addProperty("ability", attempt.goal().ability());
+            item.addProperty("outcome", attempt.goal().outcome());
+            item.addProperty("state", attempt.state().name().toLowerCase());
+            item.addProperty("message", attempt.message());
+            item.addProperty("game_time", attempt.gameTime());
+            item.add("result", attempt.result());
+            attempts.add(item);
+        }
+        result.add("attempts", attempts);
+
+        if (record.pauseSnapshot() != null) {
+            JsonObject pause = new JsonObject();
+            pause.addProperty("reason", record.pauseSnapshot().reason());
+            pause.addProperty("game_time", record.pauseSnapshot().gameTime());
+            result.add("pause", pause);
+        }
+        if (record.decisionSnapshot() != null) {
+            result.add("decision", decision(record.decisionSnapshot()));
+        }
+        if (record.terminalSnapshot() != null) {
+            JsonObject terminal = new JsonObject();
+            terminal.addProperty("state", record.terminalSnapshot().state().name().toLowerCase());
+            terminal.addProperty("game_time", record.terminalSnapshot().gameTime());
+            terminal.add("result", record.terminalSnapshot().result());
+            result.add("terminal", terminal);
+        }
+        return result;
+    }
+
+    private static JsonObject taskSummary(IntentTaskRecord record) {
+        JsonObject result = new JsonObject();
+        result.addProperty("task_id", record.externalId().toString());
+        result.addProperty("state", publicState(record));
+        result.addProperty("outcome", record.goal().outcome());
+        result.addProperty("step", record.stepIndex());
+        result.addProperty("steps", record.steps().size());
+        return result;
+    }
+
+    private static JsonObject decision(IntentTaskRecord.DecisionSnapshot decision) {
+        JsonObject result = new JsonObject();
+        result.addProperty("decision_id", decision.id().toString());
+        result.addProperty("question", decision.question());
+        JsonArray options = new JsonArray();
+        for (IntentTaskRecord.DecisionOption option : decision.options()) {
+            JsonObject item = new JsonObject();
+            item.addProperty("choice", option.choice());
+            item.addProperty("description", option.description());
+            options.add(item);
+        }
+        result.add("options", options);
+        result.add("context", decision.context());
+        return result;
+    }
+
+    private static JsonArray inventorySummary(LocalPlayer player) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (ItemStack stack : player.getInventory().items) {
+            if (stack.isEmpty()) continue;
+            String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            counts.merge(id, stack.getCount(), Integer::sum);
+        }
+        JsonArray result = new JsonArray();
+        counts.entrySet().stream()
+                .sorted((left, right) -> Integer.compare(right.getValue(), left.getValue()))
+                .forEach(entry -> {
+                    JsonObject item = new JsonObject();
+                    item.addProperty("item_id", entry.getKey());
+                    item.addProperty("count", entry.getValue());
+                    result.add(item);
+                });
+        return result;
+    }
+
+    private static JsonObject equipmentSummary(LocalPlayer player) {
+        JsonObject result = new JsonObject();
+        addStack(result, "main_hand", player.getMainHandItem());
+        addStack(result, "off_hand", player.getOffhandItem());
+        String[] armorSlots = {"feet", "legs", "chest", "head"};
+        for (int index = 0;
+             index < Math.min(armorSlots.length, player.getInventory().armor.size());
+             index++) {
+            addStack(result, armorSlots[index], player.getInventory().armor.get(index));
+        }
+        return result;
+    }
+
+    private static void addStack(JsonObject target, String key, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return;
+        JsonObject value = new JsonObject();
+        value.addProperty("item_id",
+                BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+        value.addProperty("count", stack.getCount());
+        value.addProperty("damage", stack.getDamageValue());
+        value.addProperty("max_damage", stack.getMaxDamage());
+        target.add(key, value);
+    }
+
+    private static JsonObject position(LocalPlayer player) {
+        JsonObject result = new JsonObject();
+        result.addProperty("x", player.getX());
+        result.addProperty("y", player.getY());
+        result.addProperty("z", player.getZ());
+        return result;
+    }
+
+    private static JsonObject blockPosition(BlockPos position) {
+        JsonObject result = new JsonObject();
+        result.addProperty("x", position.getX());
+        result.addProperty("y", position.getY());
+        result.addProperty("z", position.getZ());
+        return result;
+    }
+
+    private static String sector(int dx, int dz) {
+        if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2) return "center";
+        if (Math.abs(dx) > Math.abs(dz)) return dx < 0 ? "west" : "east";
+        return dz < 0 ? "north" : "south";
+    }
+
+    private static boolean isHotOrDamaging(Block block) {
+        return block == Blocks.FIRE || block == Blocks.SOUL_FIRE
+                || block == Blocks.CAMPFIRE || block == Blocks.SOUL_CAMPFIRE
+                || block == Blocks.MAGMA_BLOCK || block == Blocks.CACTUS
+                || block == Blocks.POWDER_SNOW || block == Blocks.SWEET_BERRY_BUSH;
+    }
+
+    private static JsonObject worldPosition(Goal.WorldPosition position) {
+        JsonObject result = new JsonObject();
+        result.addProperty("x", position.x());
+        result.addProperty("y", position.y());
+        result.addProperty("z", position.z());
+        if (position.dimension() != null) result.addProperty("dimension", position.dimension());
+        return result;
+    }
+
+    private IntentTaskRecord currentIntent() {
+        return CompanionTickDispatcher.current() instanceof IntentTaskRecord record ? record : null;
+    }
+
+    private IntentTaskRecord requireTask(UUID id) {
+        IntentTaskRecord record = intents.task(id);
+        if (record == null) throw new IllegalArgumentException("unknown task_id: " + id);
+        return record;
+    }
+
+    private static String publicState(IntentTaskRecord record) {
+        if (record.decisionSnapshot() != null) return "waiting_for_decision";
+        if (record.pauseSnapshot() != null) return "paused";
