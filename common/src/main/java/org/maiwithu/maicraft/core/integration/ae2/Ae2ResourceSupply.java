@@ -240,6 +240,13 @@ public final class Ae2ResourceSupply {
 
         String phase();
 
+        /**
+         * True while a bounded native receipt, verified route, or already-submitted external
+         * crafting job is still legitimately in flight. Callers may renew a liveness lease;
+         * this is not evidence that a new side effect should be submitted.
+         */
+        boolean livenessActive();
+
         /** Release locomotion on preemption without selecting a new strategy or repeating a packet. */
         void pause(LocalPlayerContext context);
 
@@ -255,6 +262,19 @@ public final class Ae2ResourceSupply {
 
     public static String availabilityDetail() {
         return Ae2ReflectionBridge.availability().detail();
+    }
+
+    /** Token-free, side-effect-free observation of nearby fixed AE access for later prerequisites. */
+    public static void observeNearbyAccess(LocalPlayer player) {
+        if (player == null) return;
+        Ae2ReflectionBridge.availability().bridge().ifPresent(bridge -> {
+            try {
+                Ae2TerminalAccess.observeNearby(player, bridge, 16);
+            } catch (RuntimeException ignored) {
+                // This passive cache is optional. The foreground supply session reports protocol
+                // failures with exact evidence if AE access is actually requested.
+            }
+        });
     }
 
     public static Session begin(LocalPlayer player, Request request) {

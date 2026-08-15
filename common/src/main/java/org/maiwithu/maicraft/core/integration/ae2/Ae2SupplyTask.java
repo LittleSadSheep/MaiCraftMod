@@ -11,12 +11,14 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /** Thin scheduler wrapper; all transactional state remains in {@link Ae2ResourceSupply.Session}. */
 final class Ae2SupplyTask implements Task {
+    private static final long PROGRESS_LEASE_TICKS = 3L * 60L * 20L;
     private final LocalPlayer player;
     private final Ae2SupplyTaskRecord record;
     private Ae2ResourceSupply.Session session;
     private Ae2ResourceSupply.Outcome outcome;
     private TaskState terminal;
     private String earlyFailure;
+    private String observedPhase;
 
     Ae2SupplyTask(LocalPlayer player, Ae2SupplyTaskRecord record) {
         this.player = player;
@@ -46,6 +48,11 @@ final class Ae2SupplyTask implements Task {
         if (terminal != null) return terminal;
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         var settled = session.tick(context);
+        String phase = session.phase();
+        if (!phase.equals(observedPhase) || session.livenessActive()) {
+            record.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
+            observedPhase = phase;
+        }
         if (settled.isEmpty()) return TaskState.RUNNING;
         outcome = settled.orElseThrow();
         terminal = switch (outcome.status()) {

@@ -235,6 +235,17 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     @Override
+    public boolean livenessActive() {
+        if (craftingJobEffectPending
+                || nativeReceipt != null && !nativeReceipt.terminal()
+                || menuReceipt != null && !menuReceipt.terminal()) {
+            return true;
+        }
+        return navigation != null
+                && (navigation.hasRecentPhysicalProgress(100) || navigation.planningInFlight());
+    }
+
+    @Override
     public void pause(LocalPlayerContext context) {
         validateContext(context);
         context.body().releaseAll();
@@ -301,7 +312,12 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
 
         remembered = Ae2TerminalAccess.remembered(player);
-        if (remembered != null && Ae2TerminalAccess.stillPresent(
+        if (remembered != null && !Ae2TerminalAccess.isLoaded(player, remembered.position())) {
+            // Unloaded is not evidence of removal. Travel to the last verified access point; the
+            // terminal is authoritatively revalidated only after its chunk becomes loaded.
+            fixedCandidates = Ae2TerminalAccess.targetsFor(
+                    player, remembered.position(), remembered.side());
+        } else if (remembered != null && Ae2TerminalAccess.stillPresent(
                 player, bridge, remembered.position(), remembered.side())) {
             fixedCandidates = Ae2TerminalAccess.targetsFor(
                     player, remembered.position(), remembered.side());
@@ -391,6 +407,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                             .anyMatch(target -> target.approach().equals(player.blockPosition())));
         }
         PlayerNav.Status status = navigation.tick();
+        // Cleanup responsibility begins as soon as navigation has physically displaced the body,
+        // not only after a terminal is successfully revalidated. A stale remembered terminal or
+        // a path failure must still return the player to the semantic caller's worksite.
+        movedForFixedTerminal |= !callerOrigin.equals(player.blockPosition());
         if (status == PlayerNav.Status.RUNNING) return;
         if (status == PlayerNav.Status.FAILED) {
             String reason = navigation.failReason();
@@ -411,7 +431,6 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     "fixed_terminal_changed", "the selected fixed AE2 terminal changed before use");
             return;
         }
-        movedForFixedTerminal = !callerOrigin.equals(player.blockPosition());
         setPhase(Phase.FACE_FIXED);
     }
 
@@ -1075,10 +1094,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             setPhase(Phase.PROCESS_ITEM);
             return;
         }
-        if (phaseTicks > CRAFT_STOCK_TICKS) {
-            finishUncertain("ae2_submit_crafting_job_outcome_uncertain",
-                    "the submitted AE2 crafting job produced no observable output; do not resubmit blindly");
-        }
+        // A confirmed AE crafting job may legitimately run for an arbitrarily long time. Its
+        // submission is an acknowledged in-flight effect, so the scheduler renews a liveness
+        // lease while this phase keeps observing network stock. Cancellation remains explicit;
+        // never resubmit merely because no output has appeared yet.
     }
 
     private void beginFinish(
@@ -1210,9 +1229,14 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         if (navigation == null) {
-            navigation = new PlayerNav(
-                    player, callerOrigin, 1.0,
-                    () -> callerOrigin.equals(player.blockPosition()));
+            // Return to the caller's semantic worksite, not blindly to its exact old feet cell.
+            // That cell may have become task-scoped forbidden after an area investigation (for
+            // example an unplanted farmland cell). The path graph chooses a real safe stance;
+            // the outer material coordinator uses the same radius-two return contract.
+            navigation = PlayerNav.toGoal(
+                    player, () -> NavGoal.near(callerOrigin, RETURN_RADIUS), 1.0,
+                    () -> player.blockPosition().distSqr(callerOrigin)
+                            <= RETURN_RADIUS * RETURN_RADIUS);
         }
         PlayerNav.Status status = navigation.tick();
         if (status == PlayerNav.Status.RUNNING) return;
@@ -1554,6 +1578,6 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private static final int TERMINAL_OPEN_TICKS = 100;
     private static final int REPOSITORY_READY_TICKS = 100;
     private static final int CRAFT_JOB_CONFIRM_TICKS = 2_400;
-    private static final int CRAFT_STOCK_TICKS = 2_400;
     private static final float LOOK_EPSILON = 1.5f;
+    private static final double RETURN_RADIUS = 2.0D;
 }
