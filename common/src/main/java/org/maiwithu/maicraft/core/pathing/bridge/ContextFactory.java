@@ -34,7 +34,7 @@ public final class ContextFactory {
     public interface ContextBuilder {
         CalculationContext create(LocalPlayer player, BlockGetter view, ChunkLoadedTest loadedTest,
                                   boolean safeForThreadedUse, LongSet sacred, LongSet deniedPlace,
-                                  TerrainPermit permit);
+                                  LongSet forbiddenBodyCells, TerrainPermit permit);
     }
 
     /**
@@ -47,18 +47,26 @@ public final class ContextFactory {
      */
     public static CalculationContext forSearch(LocalPlayer player, LongSet sacred,
                                                LongSet deniedPlace, TerrainPermit permit) {
-        return forSearch(player, sacred, deniedPlace, permit, CalculationContext::new);
+        return forSearch(player, sacred, deniedPlace, LongSets.emptySet(), permit,
+                CalculationContext::new);
     }
 
     public static CalculationContext forSearch(LocalPlayer player, LongSet sacred,
                                                LongSet deniedPlace, TerrainPermit permit,
                                                ContextBuilder builder) {
+        return forSearch(player, sacred, deniedPlace, LongSets.emptySet(), permit, builder);
+    }
+
+    public static CalculationContext forSearch(LocalPlayer player, LongSet sacred,
+                                               LongSet deniedPlace, LongSet forbiddenBodyCells,
+                                               TerrainPermit permit, ContextBuilder builder) {
         if (!(player.level() instanceof ClientLevel level)) {
             throw new IllegalArgumentException("path search requires a LocalPlayer in ClientLevel");
         }
         LoadedChunks loaded = PathCaches.ensureSnapshot(level, player.blockPosition());
         CachedNavView view = new CachedNavView(loaded);
-        return builder.create(player, view, view::isLoaded, true, sacred, deniedPlace, permit);
+        return builder.create(player, view, view::isLoaded, true, sacred, deniedPlace,
+                forbiddenBodyCells, permit);
     }
 
     /** 无目标格/禁放格开关的搜索用冻结上下文。 */
@@ -74,16 +82,24 @@ public final class ContextFactory {
      */
     public static CalculationContext forExecution(LocalPlayer player, LongSet sacred,
                                                   LongSet deniedPlace, TerrainPermit permit) {
-        return forExecution(player, sacred, deniedPlace, permit, CalculationContext::new);
+        return forExecution(player, sacred, deniedPlace, LongSets.emptySet(), permit,
+                CalculationContext::new);
     }
 
     public static CalculationContext forExecution(LocalPlayer player, LongSet sacred,
                                                   LongSet deniedPlace, TerrainPermit permit,
                                                   ContextBuilder builder) {
+        return forExecution(player, sacred, deniedPlace, LongSets.emptySet(), permit, builder);
+    }
+
+    public static CalculationContext forExecution(LocalPlayer player, LongSet sacred,
+                                                  LongSet deniedPlace, LongSet forbiddenBodyCells,
+                                                  TerrainPermit permit, ContextBuilder builder) {
         var view = org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(player.level());
         ChunkLoadedTest loaded = view instanceof org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView v
                 ? v::isLoaded : ChunkLoadedTest.ALWAYS;
-        return builder.create(player, view, loaded, false, sacred, deniedPlace, permit);
+        return builder.create(player, view, loaded, false, sacred, deniedPlace,
+                forbiddenBodyCells, permit);
     }
 
     /** 无目标格/禁放格开关的执行期实时上下文。 */
