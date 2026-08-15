@@ -898,3 +898,130 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         private long lastActivityNanos() {
             return lastActivityNanos;
+        }
+
+        private boolean expired(long nowNanos) {
+            return closed.get() || nowNanos - lastActivityNanos > SESSION_TTL_NANOS;
+        }
+
+        private void attach(SseConnection next) {
+            touch();
+            if (closed.get()) {
+                next.close();
+                return;
+            }
+            SseConnection previous = connection.getAndSet(next);
+            if (previous != null) previous.close();
+
+            // close() can race between the first check and getAndSet().  The
+            // second check prevents resurrecting an exchange on an expired
+            // session without taking a monitor that stop() would have to wait for.
+            if (closed.get() && connection.compareAndSet(next, null)) next.close();
+        }
+
+        private void detach(SseConnection candidate) {
+            connection.compareAndSet(candidate, null);
+        }
+
+        private boolean enqueue(JsonObject message) {
+            SseConnection current = connection.get();
+            return current != null && current.enqueue(message);
+        }
+
+        private void close() {
+            if (!closed.compareAndSet(false, true)) return;
+            SseConnection current = connection.getAndSet(null);
+            if (current != null) current.close();
+        }
+    }
+
+    private static final class SseConnection implements AutoCloseable {
+        private final HttpExchange exchange;
+        private final OutputStream output;
+        private final Runnable activity;
+        private final ArrayBlockingQueue<Outbound> outbound = new ArrayBlockingQueue<>(1);
+        private final AtomicBoolean done = new AtomicBoolean();
+
+        private SseConnection(HttpExchange exchange, Runnable activity) throws IOException {
+            this.exchange = exchange;
+            this.output = exchange.getResponseBody();
+            this.activity = activity;
+        }
+
+        private boolean enqueue(JsonObject message) {
+            if (done.get()) return false;
+            Outbound update = new Outbound(message.deepCopy(), false);
+            if (outbound.offer(update)) return true;
+
+            // Resource-updated messages are level-triggered: one pending signal
+            // already tells the client to read the latest attention snapshot.
+            // Never wait for a slow reader and never perform socket work here.
+            return !done.get();
+        }
+
+        private void writeLoop() throws InterruptedException {
+            try {
+                writeComment("connected");
+                while (!done.get()) {
+                    Outbound next = outbound.poll(SSE_HEARTBEAT_SECONDS, TimeUnit.SECONDS);
+                    if (next == null) {
+                        writeComment("heartbeat");
+                    } else if (next.terminal()) {
+                        return;
+                    } else {
+                        writeMessage(next.message());
+                    }
+                }
+            } catch (IOException ignored) {
+                // A disconnected or non-reading client is isolated to this GET
+                // handler.  Its session is detached in handleGet's finally block.
+            }
+        }
+
+        private void writeMessage(JsonObject message) throws IOException {
+            if (done.get()) return;
+            byte[] bytes = ("event: message\ndata: " + GSON.toJson(message) + "\n\n")
+                    .getBytes(StandardCharsets.UTF_8);
+            output.write(bytes);
+            output.flush();
+            activity.run();
+        }
+
+        private void writeComment(String text) throws IOException {
+            if (done.get()) return;
+            output.write((": " + text + "\n\n").getBytes(StandardCharsets.UTF_8));
+            output.flush();
+            activity.run();
+        }
+
+        @Override
+        public void close() {
+            if (!done.compareAndSet(false, true)) return;
+            outbound.clear();
+            outbound.offer(Outbound.CLOSE);
+            // No monitor is acquired and no writer completion is awaited.  This
+            // makes session replacement, expiry, and stop() bounded even when a
+            // client has stopped reading its SSE stream.
+            exchange.close();
+        }
+
+        private record Outbound(JsonObject message, boolean terminal) {
+            private static final Outbound CLOSE = new Outbound(null, true);
+        }
+    }
+
+    private static final class RpcException extends RuntimeException {
+        private final int code;
+
+        private RpcException(int code, String message) {
+            super(message);
+            this.code = code;
+        }
+    }
+
+    private static final class PayloadTooLargeException extends IOException {
+        private PayloadTooLargeException(String message) {
+            super(message);
+        }
+    }
+}
