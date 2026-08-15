@@ -459,8 +459,10 @@ public final class SemanticAcquireCompanionTask
             Set<ResourceLocation> lineage = new LinkedHashSet<>(need.lineageItems);
             lineage.addAll(tool.acceptableItemIds());
             Need toolNeed = new Need(
-                    tool.acceptableItemIds(), count(tool.acceptableItemIds()) + 1,
-                    need.depth + 1, lineage, need.lineageRecipes, null);
+                    toolItems, count(toolItems) + 1,
+                    need.depth + 1, lineage, need.lineageRecipes, null,
+                    need.allowedSources);
+            toolNeed.lastObservedCount = count(toolNeed.itemIds);
             need.miningToolPrerequisitePushed = true;
             addIssue("mine", "preparing_harvesting_tool",
                     "a suitable harvesting tool is a semantic prerequisite for the observed "
@@ -469,6 +471,7 @@ public final class SemanticAcquireCompanionTask
                             "minimum_tier", tool.minimumTier(),
                             "acceptable_tool_count", tool.acceptableItemIds().size()));
             needs.push(toolNeed);
+            renewProgressLease();
             return TaskState.RUNNING;
         }
         List<String> protectionProblems = worldSourceProtectionProblems(MINE_TASK_SEARCH_REACH);
@@ -481,7 +484,7 @@ public final class SemanticAcquireCompanionTask
             advanceSource(need);
             return TaskState.RUNNING;
         }
-        if (!spendWork()) return exhaustNeed(need);
+        if (!takePlannerStep()) return TaskState.RUNNING;
         need.attempted(SemanticAcquireTaskRecord.Source.MINE);
         int deficit = Math.min(256, missing(need));
         long now = player.level().getGameTime();
@@ -493,10 +496,6 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptCook(Need need) {
-        if (need.attempts(SemanticAcquireTaskRecord.Source.COOK) >= MAX_SOURCE_ATTEMPTS) {
-            advanceSource(need);
-            return TaskState.RUNNING;
-        }
         ResourceLocation output = need.itemIds.stream()
                 .filter(this::hasCookingRecipe)
                 .findFirst().orElse(null);
@@ -507,7 +506,7 @@ public final class SemanticAcquireCompanionTask
             advanceSource(need);
             return TaskState.RUNNING;
         }
-        if (!spendWork()) return exhaustNeed(need);
+        if (!takePlannerStep()) return TaskState.RUNNING;
         need.attempted(SemanticAcquireTaskRecord.Source.COOK);
         int currentSelected = PlayerInv.buildableCount(
                 player.getInventory(), BuiltInRegistries.ITEM.get(output));
@@ -519,7 +518,7 @@ public final class SemanticAcquireCompanionTask
         long now = player.level().getGameTime();
         SemanticCookTaskRecord child = new SemanticCookTaskRecord(
                 childId("cook"),
-                Math.min(r.getDeadlineGameTime(), now + 12L * 60L * 20L),
+                now + 12L * 60L * 20L,
                 output, selectedFinal, SemanticCookTaskRecord.Preference.AUTO,
                 List.of(), childSources, r.allowHarm, r.protectedLabels);
         return startChild(need, SemanticAcquireTaskRecord.Source.COOK, child,
@@ -538,13 +537,24 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState reviewTrade(Need need) {
-        if (!spendWork()) return exhaustNeed(need);
+        if (!takePlannerStep()) return TaskState.RUNNING;
+        ResourceLocation output = need.preferredTradeOutput;
+        if (output == null || need.rejectedTradeOutputs.contains(output)) {
+            output = need.itemIds.stream()
+                    .filter(id -> !need.rejectedTradeOutputs.contains(id))
+                    .findFirst().orElse(null);
+            need.preferredTradeOutput = output;
+        }
+        if (output == null) {
+            addIssue("trade", "trade_alternatives_exhausted",
+                    "every acceptable output alternative has returned a structured failure or no inventory increment",
+                    Map.of("alternative_count", need.itemIds.size(),
+                            "rejected_outputs", itemStrings(
+                                    List.copyOf(need.rejectedTradeOutputs))));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
         need.attempted(SemanticAcquireTaskRecord.Source.TRADE);
-        int alternativeCount = Math.min(MAX_TRADE_ALTERNATIVES, need.itemIds.size());
-        int alternativeIndex = Math.floorMod(
-                need.attempts(SemanticAcquireTaskRecord.Source.TRADE) - 1,
-                Math.max(1, alternativeCount));
-        ResourceLocation output = need.itemIds.get(alternativeIndex);
         int currentSelected = PlayerInv.buildableCount(
                 player.getInventory(), BuiltInRegistries.ITEM.get(output));
         int selectedFinalCount = Math.min(
@@ -553,7 +563,7 @@ public final class SemanticAcquireCompanionTask
         long now = player.level().getGameTime();
         SemanticTradeTaskRecord record = new SemanticTradeTaskRecord(
                 childId("trade"),
-                Math.min(r.getDeadlineGameTime(), now + 8L * 60L * 20L),
+                now + 8L * 60L * 20L,
                 output,
                 selectedFinalCount,
                 SemanticTradeTaskRecord.MerchantKind.AUTO,
@@ -569,18 +579,6 @@ public final class SemanticAcquireCompanionTask
             addIssue("hunt", "harm_permission_required",
                     "hunt was allowed as a source family, but allow_harm is false; no entity was attacked",
                     Map.of("requires_narration", true));
-            advanceSource(need);
-            return TaskState.RUNNING;
-        }
-        int attemptLimit = huntAttemptLimit(need);
-        if (need.attempts(SemanticAcquireTaskRecord.Source.HUNT) >= attemptLimit) {
-            addIssue("hunt", "hunt_attempt_limit_reached",
-                    "the bounded hunt target budget ended before the inventory fact became true",
-                    Map.of("attempted_targets", need.attempts(
-                                    SemanticAcquireTaskRecord.Source.HUNT),
-                            "target_budget", attemptLimit,
-                            "observed_final_count", count(need.itemIds),
-                            "required_final_count", need.requiredFinalCount));
             advanceSource(need);
             return TaskState.RUNNING;
         }
@@ -646,9 +644,10 @@ public final class SemanticAcquireCompanionTask
                 advanceSource(need);
                 return TaskState.RUNNING;
             }
-            if (need.huntSearchAttempts >= MAX_HUNT_SEARCHES) {
-                addIssue("hunt", "hunt_entity_search_exhausted",
-                        "bounded first-person entity searches ended without loading an acceptable target",
+            String searchState = huntSearchState(need, hint, relation);
+            if (!need.exhaustedHuntSearchStates.add(searchState)) {
+                addIssue("hunt", "hunt_entity_search_state_repeated",
+                        "the same dimension, position and semantic entity search state produced no new evidence",
                         Map.of("search_attempts", need.huntSearchAttempts,
                                 "max_search_distance", HUNT_SEARCH_DISTANCE,
                                 "entity_type_ids", stringIds(hint.entityTypeIds()),
@@ -656,16 +655,16 @@ public final class SemanticAcquireCompanionTask
                 advanceSource(need);
                 return TaskState.RUNNING;
             }
-            if (!spendWork()) return exhaustNeed(need);
+            if (!takePlannerStep()) return TaskState.RUNNING;
             need.huntSearchAttempts++;
             need.huntSearchExpandedView = false;
             addIssue("hunt", "no_loaded_hunt_evidence_searching",
-                    "no acceptable target is currently loaded; starting bounded first-person frontier search",
+                    "no acceptable target is currently loaded; starting first-person frontier search",
                     facts);
             long now = player.level().getGameTime();
             GenericEntitySearchTaskRecord search = new GenericEntitySearchTaskRecord(
                     childId("hunt-search"),
-                    Math.min(r.getDeadlineGameTime(), now + 10L * 60L * 20L),
+                    now + 10L * 60L * 20L,
                     hint.entityTypeIds(), relation, 1, HUNT_SEARCH_DISTANCE,
                     false, r.protectedLabels, true);
             return startHuntChild(need, search, HuntChildStage.SEARCH, null,
@@ -682,12 +681,12 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
 
-        if (!spendWork()) return exhaustNeed(need);
+        if (!takePlannerStep()) return TaskState.RUNNING;
         need.attempted(SemanticAcquireTaskRecord.Source.HUNT);
         Entity target = safe.getFirst();
         long now = player.level().getGameTime();
         AttackTaskRecord attack = new AttackTaskRecord(
-                childId("hunt-attack"), Math.min(r.getDeadlineGameTime(), now + HUNT_TICKS),
+                childId("hunt-attack"), now + HUNT_TICKS,
                 List.of(target.getId()), false, true);
         return startHuntChild(need, attack, HuntChildStage.ATTACK, target.getUUID(),
                 "hunt one loaded unprotected "
@@ -695,9 +694,16 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState tickActiveChild() {
+        r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
+        int liveCount = count(activeNeed.itemIds);
+        if (liveCount > activeLastObservedCount) {
+            activeLastObservedCount = liveCount;
+            renewProgressLease();
+        }
+        activeNeed.lastObservedCount = liveCount;
         // The root fact is checked by onTick before this method. Check the active recursive need too:
         // an external pickup or the child's previous effect may have completed it already.
-        if (count(activeNeed.itemIds) >= activeNeed.requiredFinalCount) {
+        if (liveCount >= activeNeed.requiredFinalCount) {
             Need satisfiedNeed = activeNeed;
             cancelActiveBecauseSatisfied();
             if (!needs.isEmpty() && needs.peek() == satisfiedNeed) needs.pop();
@@ -732,15 +738,19 @@ public final class SemanticAcquireCompanionTask
             terminal = TaskState.TIMEOUT;
         } else {
             terminal = runChild(activeChild);
+            r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
             if (terminal == null) return TaskState.RUNNING;
         }
         TaskResult result = activeChild.result(terminal);
         int after = count(activeNeed.itemIds);
         int progress = Math.max(0, after - activeBeforeCount);
+        if (progress > 0) renewProgressLease();
+        activeNeed.lastObservedCount = after;
         recordAttempt(terminal, result, after, progress, false);
 
         Need completedNeed = activeNeed;
         SemanticAcquireTaskRecord.Source completedSource = activeSource;
+        TaskRecord completedRecord = activeRecord;
         HuntChildStage completedHuntStage = activeHuntStage;
         UUID completedHuntTarget = activeHuntTarget;
         clearActive();
@@ -748,6 +758,7 @@ public final class SemanticAcquireCompanionTask
         if (count(r.itemIds) >= r.count) return TaskState.SUCCESS;
         if (after >= completedNeed.requiredFinalCount) {
             if (!needs.isEmpty() && needs.peek() == completedNeed) needs.pop();
+            renewProgressLease();
             return TaskState.RUNNING;
         }
         if (completedSource == SemanticAcquireTaskRecord.Source.HUNT) {
@@ -785,29 +796,44 @@ public final class SemanticAcquireCompanionTask
                     result == null ? "child task ended without a result" : result.message(),
                     result == null || result.data() == null ? Map.of() : result.data());
         }
+        boolean structuredFailure = structuredFailure(terminal, result);
         switch (completedSource) {
-            case NEARBY -> advanceSource(completedNeed);
+            case NEARBY -> {
+                if (progress == 0 || structuredFailure) advanceSource(completedNeed);
+            }
             case CRAFT -> {
-                if (progress == 0 || terminal != TaskState.SUCCESS) advanceSource(completedNeed);
+                if (progress == 0 || structuredFailure) {
+                    if (completedRecord instanceof CraftTaskRecord craft) {
+                        // Retry the semantic craft source, but never the same proven-failed recipe.
+                        // This allows a 2x2 alternative after every concrete 3x3 station/site route
+                        // failed, without blindly repeating the failed physical effect.
+                        completedNeed.rejectedRecipes.add(craft.recipeId.toString());
+                    } else {
+                        advanceSource(completedNeed);
+                    }
+                }
             }
             case COOK -> {
-                if (progress == 0 || terminal != TaskState.SUCCESS
-                        || completedNeed.attempts(completedSource) >= MAX_SOURCE_ATTEMPTS) {
+                if (progress == 0 || structuredFailure) {
                     advanceSource(completedNeed);
                 }
             }
             case STORAGE, MINE -> {
-                if (progress == 0
-                        || completedNeed.attempts(completedSource) >= MAX_SOURCE_ATTEMPTS) {
+                if (progress == 0 || structuredFailure) {
                     advanceSource(completedNeed);
                 }
             }
             case TRADE -> {
-                int attempts = completedNeed.attempts(SemanticAcquireTaskRecord.Source.TRADE);
-                int alternatives = Math.min(
-                        MAX_TRADE_ALTERNATIVES, completedNeed.itemIds.size());
-                if (progress > 0 || attempts >= Math.max(1, alternatives)) {
-                    advanceSource(completedNeed);
+                if (progress == 0 || structuredFailure) {
+                    if (completedNeed.preferredTradeOutput != null) {
+                        completedNeed.rejectedTradeOutputs.add(
+                                completedNeed.preferredTradeOutput);
+                        completedNeed.preferredTradeOutput = null;
+                    }
+                    if (completedNeed.rejectedTradeOutputs.containsAll(
+                            completedNeed.itemIds)) {
+                        advanceSource(completedNeed);
+                    }
                 }
             }
             default -> advanceSource(completedNeed);
@@ -829,16 +855,17 @@ public final class SemanticAcquireCompanionTask
                 // The search receipt intentionally contains no runtime handle. Re-observe the live
                 // client world and authorize only a still-alive entity of the hinted type.
                 need.huntSearchExpandedView = true;
+                renewProgressLease();
                 return TaskState.RUNNING;
             }
             need.huntSearchExpandedView = false;
             addIssue("hunt", "hunt_entity_search_incomplete",
-                    "bounded first-person search ended without a complete acceptable entity observation",
+                    "first-person search ended without a complete acceptable entity observation",
                     Map.of("terminal_state", terminal.name().toLowerCase(),
                             "search_attempts", need.huntSearchAttempts,
                             "search_receipt", result == null || result.data() == null
                                     ? Map.of() : result.data()));
-            if (need.huntSearchAttempts >= MAX_HUNT_SEARCHES) advanceSource(need);
+            advanceSource(need);
             return TaskState.RUNNING;
         }
 
@@ -857,10 +884,9 @@ public final class SemanticAcquireCompanionTask
                                     "unreachable_drop_count", result == null || result.data() == null
                                             ? 0
                                             : result.data().getOrDefault("unreachable_drop_count", 0)));
-                }
-                if (need.attempts(SemanticAcquireTaskRecord.Source.HUNT)
-                        >= huntAttemptLimit(need)) {
                     advanceSource(need);
+                } else {
+                    renewProgressLease();
                 }
                 // AttackCompanionTask already snapshots pre-existing drops, tracks only new/merged
                 // loot from this kill, approaches it and reports the resulting inventory delta.
@@ -870,17 +896,14 @@ public final class SemanticAcquireCompanionTask
             if (targetUuid != null) rejectedHuntTargets.add(targetUuid);
             addIssue("hunt", "hunt_target_lost_or_unreachable",
                     "the selected loaded target disappeared or could not be reached; "
-                            + "the next bounded attempt will re-observe loaded entities",
+                            + "a later authorized attempt would re-observe loaded entities",
                     Map.of("terminal_state", terminal.name().toLowerCase(),
                             "child_message", result == null || result.message() == null
                                     ? "" : result.message(),
                             "inventory_progress", progress,
                             "attempted_targets", need.attempts(
                                     SemanticAcquireTaskRecord.Source.HUNT)));
-            if (need.attempts(SemanticAcquireTaskRecord.Source.HUNT)
-                    >= huntAttemptLimit(need)) {
-                advanceSource(need);
-            }
+            advanceSource(need);
             return TaskState.RUNNING;
         }
 
@@ -902,6 +925,8 @@ public final class SemanticAcquireCompanionTask
         activeChild = TaskFactory.create(player, record);
         activeDetail = detail;
         activeBeforeCount = count(need.itemIds);
+        activeLastObservedCount = activeBeforeCount;
+        r.extendDeadlineTo(record.getDeadlineGameTime());
         return TaskState.RUNNING;
     }
 
@@ -935,17 +960,39 @@ public final class SemanticAcquireCompanionTask
         activeSource = null;
         activeDetail = null;
         activeBeforeCount = 0;
+        activeLastObservedCount = 0;
         activeHuntStage = HuntChildStage.NONE;
         activeHuntTarget = null;
-    }
-
-    private int huntAttemptLimit(Need need) {
-        return Math.min(MAX_HUNT_TARGETS, Math.max(3, missing(need)));
     }
 
     private static boolean huntDefeated(TaskResult result) {
         return result != null && result.data() != null
                 && positiveNumber(result.data().get("defeated_targets"));
+    }
+
+    private boolean structuredFailure(TaskState terminal, TaskResult result) {
+        if (terminal == TaskState.SUCCESS && result != null && result.success()) return false;
+        if (result != null && result.data() != null) {
+            Map<String, Object> data = result.data();
+            if (data.containsKey("failure_type") || data.containsKey("failure_code")
+                    || bool(data.get("requires_decision"))
+                    || bool(data.get("outcome_uncertain"))) {
+                return true;
+            }
+        }
+        return terminal == TaskState.FAILED;
+    }
+
+    private String huntSearchState(
+            Need need,
+            SemanticAcquireTaskRecord.SourceHint hint,
+            GenericEntitySearchTaskRecord.Relation relation) {
+        BlockPos position = player.blockPosition();
+        return player.level().dimension().location()
+                + "|" + (position.getX() >> 4) + ',' + (position.getZ() >> 4)
+                + "|" + relation.name()
+                + "|" + String.join(",", stringIds(hint.entityTypeIds()))
+                + "|expanded=" + need.huntSearchExpandedView;
     }
 
     private static boolean positiveNumber(Object value) {
@@ -987,23 +1034,98 @@ public final class SemanticAcquireCompanionTask
     }
 
     private void collectCraftCandidates(
-            ResourceLocation output, TaskResult immediate, List<CraftCandidate> target) {
-        if (immediate == null || immediate.data() == null) return;
-        Object raw = immediate.data().get("candidate_recipes");
-        if (!(raw instanceof List<?> values)) return;
+            ResourceLocation output, CraftOps.Plan plan, List<CraftCandidate> target) {
+        List<?> values = plan.recoveryCandidates();
+        if (values.isEmpty()) {
+            TaskResult immediate = plan.immediate();
+            if (immediate == null || immediate.data() == null) return;
+            Object raw = immediate.data().get("candidate_recipes");
+            if (!(raw instanceof List<?> fallback)) return;
+            values = fallback;
+        }
         for (Object value : values) {
             if (!(value instanceof Map<?, ?> map)) continue;
             Map<String, Object> data = stringKeyMap(map);
             String recipeId = string(data.get("recipe_id"));
             if (recipeId == null) continue;
+            boolean surfaceSupported = bool(data.get("crafting_surface_supported"));
+            boolean surfaceReady = bool(data.get("crafting_surface_ready"));
+            CraftPlanCost.Surface surface = craftSurface(
+                    data.get("crafting_surface_state"), surfaceSupported, surfaceReady,
+                    bool(data.get("crafting_surface_preparable")));
+            CraftPlanCost cost = new CraftPlanCost(
+                    Math.max(0, integer(data.get("ingredients_missing"), Integer.MAX_VALUE)),
+                    surface,
+                    Math.max(0, integer(data.get("output_waste"), 0)),
+                    Math.max(0, integer(data.get("ingredient_uses"), Integer.MAX_VALUE)),
+                    output + "|" + recipeId);
+            List<ResourceLocation> surfacePrerequisites = new ArrayList<>();
+            Object rawPrerequisites = data.get("crafting_surface_prerequisite_item_ids");
+            if (rawPrerequisites instanceof List<?> ids) {
+                for (Object rawId : ids) {
+                    ResourceLocation id = ResourceLocation.tryParse(String.valueOf(rawId));
+                    if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
+                        surfacePrerequisites.add(id);
+                    }
+                }
+            }
+            if (surfacePrerequisites.isEmpty()) {
+                String fallback = string(data.get("crafting_surface_prerequisite_item_id"));
+                ResourceLocation id = fallback == null ? null : ResourceLocation.tryParse(fallback);
+                if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
+                    surfacePrerequisites.add(id);
+                }
+            }
             target.add(new CraftCandidate(
                     output,
                     recipeId,
                     data,
-                    integer(data.get("ingredients_missing"), Integer.MAX_VALUE),
-                    bool(data.get("crafting_surface_supported")),
-                    bool(data.get("crafting_surface_ready"))));
+                    cost,
+                    surfaceSupported,
+                    surfaceReady,
+                    List.copyOf(new LinkedHashSet<>(surfacePrerequisites))));
         }
+    }
+
+    /**
+     * Insert one finite-lineage, Mod-owned workstation item prerequisite ahead of an unchanged recipe.
+     * Only already-authorized non-destructive material sources are inherited: inventory, storage
+     * and ordinary crafting. It may turn carried/stored logs into planks and then a table, but
+     * cannot silently mine, take a world drop, trade or harm for this physical prerequisite.
+     */
+    private boolean pushCraftingSurfacePrerequisite(
+            Need parent, CraftCandidate blockedRecipe) {
+        List<ResourceLocation> itemIds = blockedRecipe.surfacePrerequisiteItems().stream()
+                .filter(id -> !parent.lineageItems.contains(id))
+                .toList();
+        if (itemIds.isEmpty()) return false;
+
+        Set<ResourceLocation> lineageItems = new LinkedHashSet<>(parent.lineageItems);
+        lineageItems.addAll(itemIds);
+        Set<String> lineageRecipes = new LinkedHashSet<>(parent.lineageRecipes);
+        lineageRecipes.add(blockedRecipe.recipeId());
+        List<SemanticAcquireTaskRecord.Source> prerequisiteSources = parent.allowedSources.stream()
+                .filter(source -> source == SemanticAcquireTaskRecord.Source.INVENTORY
+                        || source == SemanticAcquireTaskRecord.Source.STORAGE
+                        || source == SemanticAcquireTaskRecord.Source.CRAFT)
+                .toList();
+        Need prerequisite = new Need(
+                itemIds, count(itemIds) + 1, parent.depth + 1,
+                lineageItems, lineageRecipes, blockedRecipe.recipeId(),
+                prerequisiteSources);
+        prerequisite.lastObservedCount = count(prerequisite.itemIds);
+        recipeTrace.add(Map.of(
+                "recipe_id", blockedRecipe.recipeId(),
+                "output_item_id", blockedRecipe.outputItem().toString(),
+                "depth", parent.depth,
+                "internal_prerequisite", "crafting_surface",
+                "prerequisite_item_ids", itemStrings(itemIds),
+                "allowed_sources", prerequisiteSources.stream()
+                        .map(source -> source.name().toLowerCase(java.util.Locale.ROOT))
+                        .toList()));
+        needs.push(prerequisite);
+        renewProgressLease();
+        return true;
     }
 
     private IngredientNeed chooseIngredient(CraftCandidate candidate, Need parent) {
@@ -1203,10 +1325,14 @@ public final class SemanticAcquireCompanionTask
                 .orElse(null);
     }
 
-    private boolean spendWork() {
-        if (workUsed >= r.workBudget) return false;
-        workUsed++;
+    private boolean takePlannerStep() {
+        if (plannerStepsThisTick >= PLANNER_STEPS_PER_TICK) return false;
+        plannerStepsThisTick++;
         return true;
+    }
+
+    private void renewProgressLease() {
+        r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
     }
 
     private void advanceSource(Need need) {
@@ -1338,7 +1464,7 @@ public final class SemanticAcquireCompanionTask
             options.add(Map.of(
                     "id", "continue_from_another_semantic_area",
                     "summary", "Continue from another unprotected semantic area, then retry the "
-                            + "same inventory outcome; MaiCraft will run another bounded first-person search.",
+                            + "same inventory outcome; MaiCraft will run another progress-driven first-person search.",
                     "risk", "none_until_a_new_target_is_verified_and_harm_is_rechecked"));
         }
         if (allowed.contains(SemanticAcquireTaskRecord.Source.HUNT)
@@ -1359,10 +1485,10 @@ public final class SemanticAcquireCompanionTask
                 "id", "stop",
                 "summary", "Leave the inventory fact incomplete and perform no further effects.",
                 "risk", "none");
-        List<Map<String, Object>> bounded = new ArrayList<>(
+        List<Map<String, Object>> reported = new ArrayList<>(
                 options.stream().limit(7).toList());
-        bounded.add(stop);
-        return List.copyOf(bounded);
+        reported.add(stop);
+        return List.copyOf(reported);
     }
 
     private boolean hasIssue(String code) {
@@ -1403,9 +1529,6 @@ public final class SemanticAcquireCompanionTask
         data.put("allowed_sources", r.allowedSources.stream()
                 .map(source -> source.name().toLowerCase()).toList());
         data.put("allow_harm", r.allowHarm);
-        data.put("work_budget", r.workBudget);
-        data.put("work_used", workUsed);
-        data.put("max_recipe_depth", r.maxRecipeDepth);
         data.put("attempts", List.copyOf(attempts));
         data.put("recipe_trace", List.copyOf(recipeTrace));
         data.put("issues", List.copyOf(issues));
@@ -1463,7 +1586,7 @@ public final class SemanticAcquireCompanionTask
         if (failureCode == null) {
             failureCode = "acquisition_timeout";
             addIssue("planner", "acquisition_timeout",
-                    "the bounded deadline elapsed before the final inventory fact was true",
+                    "the no-progress lease elapsed before the final inventory fact was true",
                     Map.of("observed_final_count", count(r.itemIds),
                             "required_final_count", r.count));
         }
@@ -1504,6 +1627,23 @@ public final class SemanticAcquireCompanionTask
 
     private static boolean bool(Object value) {
         return value instanceof Boolean flag && flag;
+    }
+
+    private static CraftPlanCost.Surface craftSurface(
+            Object raw, boolean supported, boolean ready, boolean preparable) {
+        String value = string(raw);
+        if (value != null) {
+            try {
+                return CraftPlanCost.Surface.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                // Fall through to the backwards-compatible booleans below.
+            }
+        }
+        if (!supported) return CraftPlanCost.Surface.UNSUPPORTED;
+        if (ready) return CraftPlanCost.Surface.READY;
+        return preparable
+                ? CraftPlanCost.Surface.PREPARABLE
+                : CraftPlanCost.Surface.UNAVAILABLE;
     }
 
     private static String string(Object value) {
