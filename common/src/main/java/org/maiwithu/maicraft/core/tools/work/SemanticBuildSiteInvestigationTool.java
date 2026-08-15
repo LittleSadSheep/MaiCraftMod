@@ -50,7 +50,8 @@ public final class SemanticBuildSiteInvestigationTool implements MaiCraftTool {
         Goal goal = Goal.fromJson(args.getAsJsonObject("goal"));
         var record = new BuildSiteInvestigationTaskRecord(
                 toolCallId,
-                ctx(toolCallId, player).deadline(BuildSiteInvestigationTaskRecord.MAX_TOTAL_TICKS),
+                ctx(toolCallId, player).deadline(
+                        BuildSiteInvestigationTaskRecord.INITIAL_LIVENESS_LEASE_TICKS),
                 goal);
         setTask(player, record, args, reply);
     }

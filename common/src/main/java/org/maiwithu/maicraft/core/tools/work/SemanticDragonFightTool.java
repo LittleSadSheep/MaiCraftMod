@@ -17,6 +17,8 @@ import org.maiwithu.maicraft.core.task.endgame.DragonFightTaskRecord;
 
 /** Internal semantic Ender Dragon encounter capability. */
 public final class SemanticDragonFightTool implements MaiCraftTool {
+    private static final long INITIAL_LIVENESS_LEASE_TICKS = 90L * 60L * 20L;
+
     @Override
     public String name() {
         return DragonFightTaskRecord.TOOL_NAME;
@@ -83,7 +85,7 @@ public final class SemanticDragonFightTool implements MaiCraftTool {
         var context = ctx(toolCallId, player);
         var record = new DragonFightTaskRecord(
                 context.toolCallId(),
-                context.deadline(90L * 60L * 20L),
+                context.deadline(INITIAL_LIVENESS_LEASE_TICKS),
                 allowCombat,
                 mayAlterTerrain,
                 allowRareConsumables,

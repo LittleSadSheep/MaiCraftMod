@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 public final class ContainerOps {
 
     private static final long MIN_TIMEOUT_TICKS = 30L * 20L;
-    private static final long MAX_TIMEOUT_TICKS = 10L * 60L * 20L;
+    private static final long MAX_INITIAL_LEASE_TICKS = 10L * 60L * 20L;
 
     /** One semantic move. A null destination means menu-routed whole-stack transfer. */
     public record Move(int from, Integer to, Integer count) {}
@@ -70,7 +70,7 @@ public final class ContainerOps {
         }
 
         long timeout = Math.clamp(20L + estimatedClicks * 25L,
-                MIN_TIMEOUT_TICKS, MAX_TIMEOUT_TICKS);
+                MIN_TIMEOUT_TICKS, MAX_INITIAL_LEASE_TICKS);
         return new Plan(new ContainerTransferTaskRecord(
                 context.toolCallId(), context.deadline(timeout), menu.containerId, planned), null);
     }

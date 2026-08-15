@@ -26,7 +26,7 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                 + "Declare only item ids or live item tags, the final count, allowed source families and semantic "
                 + "safety constraints. The Mod observes inventory before every step, stops as soon "
                 + "as the fact is true, and owns source selection, recipe recursion, loaded-world "
-                + "evidence, bounded first-person source exploration, paths, menus and receipts. "
+                + "evidence, progress-driven first-person source exploration, paths, menus and receipts. "
                 + "Defaults cover ordinary survival: inventory, "
                 + "provably unowned nearby drops, crafting, cooking and protection-aware mining. "
                 + "Hunting may be identified as a possible source, but never starts without explicit "
@@ -61,10 +61,6 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                 "Remembered places or possessions that must not be touched.", null));
         properties.put("radius", boundedInteger(
                 "Loaded-world radius for nearby evidence (default 16).", 1, 48));
-        properties.put("max_recipe_depth", boundedInteger(
-                "Bounded recursive crafting depth (default 6).", 1, 10));
-        properties.put("work_budget", boundedInteger(
-                "Bound on source plans and child tasks (default 64).", 8, 192));
 
         Map<String, Object> hintProperties = new LinkedHashMap<>();
         hintProperties.put("block_ids", arrayProperty("string",

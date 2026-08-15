@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.task.dimension.DimensionTravelTaskRecord;
 /** Hidden executor for semantic dimension travel; portal cells remain a Mod concern. */
 public final class SemanticDimensionTravelTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
+    private static final long INITIAL_LIVENESS_LEASE_TICKS = 10L * 60L * 20L;
     private record Args(
             String destination_dimension,
             Integer max_search_radius,
@@ -59,7 +60,7 @@ public final class SemanticDimensionTravelTool implements MaiCraftTool {
         boolean alter = Boolean.TRUE.equals(parsed.may_alter_terrain());
         var record = new DimensionTravelTaskRecord(
                 toolCallId,
-                player.level().getGameTime() + 20L * 60L * 10L,
+                player.level().getGameTime() + INITIAL_LIVENESS_LEASE_TICKS,
                 parsed.destination_dimension(),
                 radius,
                 alter);

@@ -11,8 +11,8 @@ import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 
 /** Registration and typed-record seam for generic semantic entity search. */
 public final class SemanticEntitySearchApi {
-    private static final long MIN_TOTAL_TICKS = 3L * 60L * 20L;
-    private static final long MAX_TOTAL_TICKS = 20L * 60L * 20L;
+    private static final long MIN_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
+    private static final long MAX_INITIAL_LEASE_TICKS = 20L * 60L * 20L;
 
     private SemanticEntitySearchApi() {}
 
@@ -57,10 +57,10 @@ public final class SemanticEntitySearchApi {
                 maxDistance == null ? GenericEntitySearchTaskRecord.DEFAULT_DISTANCE : maxDistance,
                 GenericEntitySearchTaskRecord.MIN_DISTANCE,
                 GenericEntitySearchTaskRecord.MAX_DISTANCE);
-        long ticks = Math.clamp(60L * 20L + distance * 16L,
-                MIN_TOTAL_TICKS, MAX_TOTAL_TICKS);
+        long initialLease = Math.clamp(60L * 20L + distance * 16L,
+                MIN_INITIAL_LEASE_TICKS, MAX_INITIAL_LEASE_TICKS);
         return new GenericEntitySearchTaskRecord(
-                context.toolCallId(), context.deadline(ticks), types,
+                context.toolCallId(), context.deadline(initialLease), types,
                 GenericEntitySearchTaskRecord.Relation.parse(relation),
                 boundedCount, distance, Boolean.TRUE.equals(mayAlterTerrain),
                 protectedLabels, harmIntent);

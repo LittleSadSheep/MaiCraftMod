@@ -54,24 +54,22 @@ public final class SemanticLightAreaApi {
         var allowedSources = SemanticMaterialSupplyCoordinator.parseSources(
                 strings(args.get("allowed_sources"), "allowed_sources"));
         boolean allowHarm = bool(args, "allow_harm", false);
-        int maxPasses = integer(args, "max_passes",
-                SemanticLightAreaTaskRecord.DEFAULT_MAX_PASSES, 1, 8);
-        int maxPlacements = integer(args, "max_placements",
-                SemanticLightAreaTaskRecord.DEFAULT_MAX_PLACEMENTS, 1, 512);
+        int maxPlacements = args.has("max_placements")
+                        && !args.get("max_placements").isJsonNull()
+                ? integer(args, "max_placements", 0, 1,
+                        SemanticLightAreaTaskRecord.MAX_EXPLICIT_PLACEMENTS)
+                : 0;
         String semanticTarget = string(args, "semantic_target");
-        boolean resolveLoadedComponent = bool(args, "resolve_loaded_component", false);
+        boolean resolveLoadedComponent = bool(
+                args, "resolve_loaded_component", !explicitRadius);
 
-        long work = Math.clamp(60L * 20L
-                        + (long) radius * radius * 8L
-                        + (long) maxPlacements * 30L,
-                MIN_TOTAL_TICKS, MAX_TOTAL_TICKS);
         return new SemanticLightAreaTaskRecord(
-                context.toolCallId(), context.deadline(work),
+                context.toolCallId(), context.deadline(INITIAL_PROGRESS_LEASE_TICKS),
                 new BlockPos(x, y, z), semanticTarget, resolveLoadedComponent,
                 radius, minimumLight, coverage, style, placementPreference,
                 preferences, protectedLabels,
                 materialPolicy, allowedSources, allowHarm,
-                maxPasses, maxPlacements);
+                maxPlacements);
     }
 
     private static int requiredInteger(JsonObject args, String key) {

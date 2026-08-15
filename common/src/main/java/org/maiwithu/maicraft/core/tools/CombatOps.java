@@ -9,10 +9,10 @@ import java.util.List;
 /** 造 {@code attack} 的任务账本。 */
 public final class CombatOps {
 
-    /** 每个目标给多久;总时长封顶十分钟。 */
+    /** Initial estimate only; verified health/defeat and navigation progress renew the task. */
     private static final long PER_TARGET_TICKS = 75L * 20L;
     private static final long MIN_TICKS = 120L * 20L;
-    private static final long MAX_TICKS = 10L * 60L * 20L;
+    private static final long MAX_INITIAL_LEASE_TICKS = 10L * 60L * 20L;
 
     /**
      * 不给 id 就是<b>无差别</b>:打退附近所有敌对生物。会分裂的怪(史莱姆、岩浆怪)只能这么打
@@ -22,7 +22,8 @@ public final class CombatOps {
         boolean indiscriminate = entityIds == null || entityIds.isEmpty();
         List<Integer> ids = indiscriminate ? List.of() : normalizeEntityIds(entityIds);
         long count = indiscriminate ? 4 : ids.size();
-        long timeout = Math.min(MAX_TICKS, Math.max(MIN_TICKS, count * PER_TARGET_TICKS));
+        long timeout = Math.min(MAX_INITIAL_LEASE_TICKS,
+                Math.max(MIN_TICKS, count * PER_TARGET_TICKS));
         return new AttackTaskRecord(ctx.toolCallId(), ctx.deadline(timeout), ids, indiscriminate);
     }
 

@@ -20,8 +20,8 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 
 /** Registration and typed-record seam for semantic final-inventory acquisition. */
 public final class SemanticAcquireApi {
-    private static final long MIN_TOTAL_TICKS = 3L * 60L * 20L;
-    private static final long MAX_TOTAL_TICKS = 20L * 60L * 20L;
+    private static final long MIN_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
+    private static final long MAX_INITIAL_LEASE_TICKS = 20L * 60L * 20L;
 
     private SemanticAcquireApi() {}
 
@@ -92,16 +92,10 @@ public final class SemanticAcquireApi {
                 args.get("protected_labels"), "protected_labels");
         int radius = integer(args, "radius", SemanticAcquireTaskRecord.DEFAULT_RADIUS,
                 1, SemanticAcquireTaskRecord.MAX_RADIUS);
-        int depth = integer(args, "max_recipe_depth",
-                SemanticAcquireTaskRecord.DEFAULT_RECIPE_DEPTH,
-                1, SemanticAcquireTaskRecord.MAX_RECIPE_DEPTH);
-        int budget = integer(args, "work_budget",
-                SemanticAcquireTaskRecord.DEFAULT_WORK_BUDGET,
-                8, SemanticAcquireTaskRecord.MAX_WORK_BUDGET);
         boolean allowHarm = bool(args, "allow_harm", false);
 
         long ticks = Math.clamp(2L * 60L * 20L + (long) count * 80L,
-                MIN_TOTAL_TICKS, MAX_TOTAL_TICKS);
+                MIN_INITIAL_LEASE_TICKS, MAX_INITIAL_LEASE_TICKS);
         boolean huntAllowed = allowHarm && (sources.isEmpty()
                 || sources.contains(SemanticAcquireTaskRecord.Source.HUNT));
         if (huntAllowed) {
@@ -111,7 +105,7 @@ public final class SemanticAcquireApi {
         }
         return new SemanticAcquireTaskRecord(
                 context.toolCallId(), context.deadline(ticks), itemIds, count,
-                sources, allowHarm, hint, protectedLabels, radius, depth, budget);
+                sources, allowHarm, hint, protectedLabels, radius);
     }
 
     private static List<ResourceLocation> resolveItemTag(

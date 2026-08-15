@@ -7,8 +7,8 @@ import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 /** Registration and direct-record API for semantic exploration. */
 public final class SemanticExploreApi {
     public static final int DEFAULT_MAX_DISTANCE = 768;
-    private static final long MIN_TOTAL_TICKS = 3L * 60L * 20L;
-    private static final long MAX_TOTAL_TICKS = 20L * 60L * 20L;
+    private static final long MIN_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
+    private static final long MAX_INITIAL_LEASE_TICKS = 20L * 60L * 20L;
 
     private SemanticExploreApi() {}
 
@@ -28,10 +28,10 @@ public final class SemanticExploreApi {
                 maxDistance == null ? DEFAULT_MAX_DISTANCE : maxDistance,
                 SemanticExploreTaskRecord.MIN_DISTANCE,
                 SemanticExploreTaskRecord.MAX_DISTANCE);
-        long budget = Math.clamp(60L * 20L + distance * 12L,
-                MIN_TOTAL_TICKS, MAX_TOTAL_TICKS);
+        long initialLease = Math.clamp(60L * 20L + distance * 12L,
+                MIN_INITIAL_LEASE_TICKS, MAX_INITIAL_LEASE_TICKS);
         return new SemanticExploreTaskRecord(
-                context.toolCallId(), context.deadline(budget), target, distance,
+                context.toolCallId(), context.deadline(initialLease), target, distance,
                 Boolean.TRUE.equals(mayAlterTerrain));
     }
 }

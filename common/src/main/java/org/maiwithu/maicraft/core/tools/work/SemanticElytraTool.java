@@ -61,13 +61,13 @@ public final class SemanticElytraTool implements MaiCraftTool {
         boolean allowRareConsumables = bool(input, "allow_rare_consumables", false);
         List<String> protectedLabels = strings(
                 input.get("protected_labels"), "protected_labels");
-        long ticks = Math.clamp(
+        long initialLease = Math.clamp(
                 10L * 60L * 20L + (long) maxDistance * 18L,
                 20L * 60L * 20L,
                 90L * 60L * 20L);
         var context = ctx(toolCallId, player);
         var record = new SemanticElytraTaskRecord(
-                context.toolCallId(), context.deadline(ticks), maxDistance,
+                context.toolCallId(), context.deadline(initialLease), maxDistance,
                 mayAlterTerrain, allowCombat, allowRareConsumables, protectedLabels);
         setTask(player, record, input, reply);
     }
