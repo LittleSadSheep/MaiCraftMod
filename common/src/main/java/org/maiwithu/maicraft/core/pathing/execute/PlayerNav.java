@@ -44,10 +44,10 @@ import net.minecraft.core.BlockPos;
  *
  * <p>引擎自身无限重试;"何时放弃"是任务过程层的语义,住在这里:连续
  * {@link #MAX_STALLED_REPLANS} 次失败重规划目标启发值无 ≥{@link #REPLAN_PROGRESS_EPS_H}
- * 改善 → FAILED(BOXED_IN);{@link #MAX_REPLANS} 次硬保险丝兜底。
+ * 改善 → FAILED(BOXED_IN)。只要身体仍在真实接近目标,重规划次数本身不构成失败。
  *
  * <p>sacred(自身目标格,不可挖不可埋)/ deniedPlace(执行层证明放不上
- * 的格)两个语义开关穿透本导航建的每一个
+ * 的格)/ task-scoped forbidden body cells 等语义开关穿透本导航建的每一个
  * {@link CalculationContext}:搜索用冻结快照、执行期复核用活世界,同一
  * 套开关同一把尺。
  *
@@ -61,8 +61,6 @@ public final class PlayerNav {
 
     public enum Status { RUNNING, ARRIVED, FAILED }
 
-    /** 重规划次数硬保险丝(理智上限,不是真正的放弃条件)。 */
-    private static final int MAX_REPLANS = 200;
     /** 真正的放弃条件:连续这么多次失败重规划都没有真实接近目标。 */
     private static final int MAX_STALLED_REPLANS = 6;
     /**
@@ -126,7 +124,6 @@ public final class PlayerNav {
     /** 最近一次下发给状态机的目标中心(重根判定的基准)。 */
     private BlockPos plannedCenter;
 
-    private int replans;
     private int ticksSincePlan;
     private int stalledReplans;
     /** 脚下到过的最优(最低)目标启发值——停滞重规划的量尺。 */
@@ -271,14 +268,16 @@ public final class PlayerNav {
 
     /** 搜索用冻结上下文:快照世界 + 快照背包,穿透三个语义开关。 */
     private CalculationContext searchContext() {
-        CalculationContext ctx = contextProvider.forSearch(player, sacred, deniedPlace);
+        CalculationContext ctx = contextProvider.forSearch(
+                player, sacred, deniedPlace, NavigationSafetyContext.forbiddenBodyCells());
         lastSearchContext = ctx;
         return ctx;
     }
 
     /** 执行期复核用实时上下文:活世界 + 当下背包,同一套语义开关。 */
     private CalculationContext executionContext() {
-        return contextProvider.forExecution(player, sacred, deniedPlace);
+        return contextProvider.forExecution(
+                player, sacred, deniedPlace, NavigationSafetyContext.forbiddenBodyCells());
     }
 
     /**
@@ -294,13 +293,17 @@ public final class PlayerNav {
         static ContextProvider of(TerrainPermit permit) {
             return new ContextProvider() {
                 @Override
-                public CalculationContext forSearch(LocalPlayer player, LongSet sacred, LongSet deniedPlace) {
-                    return ContextFactory.forSearch(player, sacred, deniedPlace, permit);
+                public CalculationContext forSearch(LocalPlayer player, LongSet sacred,
+                                                    LongSet deniedPlace, LongSet forbiddenBodyCells) {
+                    return ContextFactory.forSearch(player, sacred, deniedPlace,
+                            forbiddenBodyCells, permit, CalculationContext::new);
                 }
 
                 @Override
-                public CalculationContext forExecution(LocalPlayer player, LongSet sacred, LongSet deniedPlace) {
-                    return ContextFactory.forExecution(player, sacred, deniedPlace, permit);
+                public CalculationContext forExecution(LocalPlayer player, LongSet sacred,
+                                                       LongSet deniedPlace, LongSet forbiddenBodyCells) {
+                    return ContextFactory.forExecution(player, sacred, deniedPlace,
+                            forbiddenBodyCells, permit, CalculationContext::new);
                 }
 
                 @Override
@@ -310,8 +313,10 @@ public final class PlayerNav {
             };
         }
 
-        CalculationContext forSearch(LocalPlayer player, LongSet sacred, LongSet deniedPlace);
-        CalculationContext forExecution(LocalPlayer player, LongSet sacred, LongSet deniedPlace);
+        CalculationContext forSearch(LocalPlayer player, LongSet sacred, LongSet deniedPlace,
+                                     LongSet forbiddenBodyCells);
+        CalculationContext forExecution(LocalPlayer player, LongSet sacred, LongSet deniedPlace,
+                                        LongSet forbiddenBodyCells);
         /** 本提供者建出的上下文所带的地形许可(执行器据此决定顺手的放置能不能做)。 */
         TerrainPermit permit();
     }
@@ -484,11 +489,6 @@ public final class PlayerNav {
                                     ? "; the recurring failure: " + lastExecFailure : ""));
             return reached.getAsBoolean() ? Status.ARRIVED : verdict;
         }
-        if (replans++ >= MAX_REPLANS) {
-            Status verdict = fail(FailureType.BOXED_IN,
-                    "gave up after " + MAX_REPLANS + " replans");
-            return reached.getAsBoolean() ? Status.ARRIVED : verdict;
-        }
         return null;
     }
 
@@ -512,8 +512,9 @@ public final class PlayerNav {
         if (start == null) {
             return false;
         }
-        CalculationContext probeContext = ContextFactory.forSearch(player, sacred, deniedPlace,
-                TerrainPermit.TERRAFORM);
+        CalculationContext probeContext = ContextFactory.forSearch(
+                player, sacred, deniedPlace, NavigationSafetyContext.forbiddenBodyCells(),
+                TerrainPermit.TERRAFORM, CalculationContext::new);
         NavSettings settings = NavSettings.get();
         terraformProbe = PoolSearchDispatcher.INSTANCE.submit(PathExecutor.playerFeet(player), start,
                 engineGoal, probeContext, Favoring.empty(),
@@ -628,6 +629,16 @@ public final class PlayerNav {
     public int stallTicks() {
         PathExecutor current = core.getCurrent();
         return current == null ? 0 : current.ticksSinceProgress();
+    }
+
+    /**
+     * True only while a concrete execution segment has made recent physical progress. Unlike
+     * {@link #stallTicks()}, an absent segment is not treated as progress; callers can therefore
+     * renew a task lease without accidentally keeping an idle navigator alive forever.
+     */
+    public boolean hasRecentPhysicalProgress(int graceTicks) {
+        PathExecutor current = core.getCurrent();
+        return current != null && current.ticksSinceProgress() <= Math.max(0, graceTicks);
     }
 
     /** 搜索结论分布摘要,转发自内核(排障日志用)。 */

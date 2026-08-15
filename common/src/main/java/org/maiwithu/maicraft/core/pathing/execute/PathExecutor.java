@@ -370,7 +370,7 @@ public final class PathExecutor {
             } else {
                 ticksSinceProgress++;
             }
-            if (ticksOnCurrent > timedOutAt(currentMovementOriginalCostEstimate,
+            if (ticksSinceProgress > timedOutAt(currentMovementOriginalCostEstimate,
                     NavSettings.get().movementTimeoutTicks)) {
                 // 卡死的动作必须留声:类型、起讫、四邻实况、身位一次性摊开。
                 // 动作卡住是寻路故障里最常见的一类,所以这条是 INFO 不是 debug——
@@ -384,8 +384,10 @@ public final class PathExecutor {
                         String.format("%.2f,%.2f,%.2f", player.getX(), player.getY(), player.getZ()),
                         blockName(movement.getSrc()), blockName(movement.getDest()),
                         blockName(movement.getDest().above()), blockName(movement.getDest().below()));
-                cancel(describe(movement) + " 卡住:耗时 " + ticksOnCurrent
-                        + " tick,远超估价 " + (int) (double) currentMovementOriginalCostEstimate);
+                cancel(describe(movement) + " 卡住:连续无进展 " + ticksSinceProgress
+                        + " tick,超过进展窗口 "
+                        + timedOutAt(currentMovementOriginalCostEstimate,
+                                NavSettings.get().movementTimeoutTicks));
                 return true;
             }
         }
