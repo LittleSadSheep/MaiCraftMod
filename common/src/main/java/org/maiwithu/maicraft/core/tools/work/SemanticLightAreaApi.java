@@ -11,10 +11,10 @@ import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.core.task.lighting.SemanticLightAreaTaskRecord;
 
-/** Registration and typed-record seam for verified, semantic loaded-area lighting. */
+/** Registration and typed-record seam for verified semantic-area lighting. */
 public final class SemanticLightAreaApi {
-    private static final long MIN_TOTAL_TICKS = 2L * 60L * 20L;
-    private static final long MAX_TOTAL_TICKS = 15L * 60L * 20L;
+    /** Initial liveness lease; verified child/coverage progress renews it across ticks. */
+    private static final long INITIAL_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
 
     private SemanticLightAreaApi() {}
 
@@ -29,9 +29,12 @@ public final class SemanticLightAreaApi {
         int x = requiredInteger(args, "center_x");
         int y = requiredInteger(args, "center_y");
         int z = requiredInteger(args, "center_z");
-        int radius = integer(args, "radius", 16,
-                SemanticLightAreaTaskRecord.MIN_RADIUS,
-                SemanticLightAreaTaskRecord.MAX_RADIUS);
+        boolean explicitRadius = args.has("radius") && !args.get("radius").isJsonNull();
+        int radius = explicitRadius
+                ? integer(args, "radius", 0,
+                        SemanticLightAreaTaskRecord.MIN_RADIUS,
+                        SemanticLightAreaTaskRecord.MAX_EXPLICIT_RADIUS)
+                : 0;
         SemanticLightAreaTaskRecord.Coverage coverage =
                 SemanticLightAreaTaskRecord.Coverage.parse(string(args, "coverage"));
         int defaultLight = coverage == SemanticLightAreaTaskRecord.Coverage.CROP_GROWTH

@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.core.task.structure.PhysicalStructureSearchTaskReco
  */
 public final class SemanticStructureSearchTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
-    private static final long MAX_TASK_TICKS = 20L * 60L * 20L;
+    private static final long INITIAL_LIVENESS_LEASE_TICKS = 20L * 60L * 20L;
 
     private record Args(
             String structure_id,
@@ -79,7 +79,7 @@ public final class SemanticStructureSearchTool implements MaiCraftTool {
                 || Boolean.TRUE.equals(parsed.reach_structure());
         var record = new PhysicalStructureSearchTaskRecord(
                 toolCallId,
-                player.level().getGameTime() + MAX_TASK_TICKS,
+                player.level().getGameTime() + INITIAL_LIVENESS_LEASE_TICKS,
                 parsed.structure_id(),
                 distance,
                 alter,

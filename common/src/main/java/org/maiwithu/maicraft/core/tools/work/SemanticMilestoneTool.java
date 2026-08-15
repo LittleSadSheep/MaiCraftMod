@@ -94,14 +94,14 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
                 ? 10.0F : parsed.minimum_health();
         var sources = SemanticMaterialSupplyCoordinator.parseSources(parsed.allowed_sources());
         var policy = SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(parsed.material_policy());
-        long ticks = switch (milestone) {
+        long initialLease = switch (milestone) {
             case NETHER -> 45L * 60L * 20L;
             case STRONGHOLD -> 2L * 60L * 60L * 20L;
             case DEFEAT_DRAGON, ELYTRA -> 4L * 60L * 60L * 20L;
         };
         var context = ctx(toolCallId, player);
         var record = new ReachMilestoneTaskRecord(
-                context.toolCallId(), context.deadline(ticks), milestone,
+                context.toolCallId(), context.deadline(initialLease), milestone,
                 maxDistance, portalRadius, minimumHealth,
                 Boolean.TRUE.equals(parsed.allow_combat()),
                 Boolean.TRUE.equals(parsed.allow_rare_consumables()),

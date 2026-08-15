@@ -19,26 +19,29 @@ public final class SemanticLightAreaTool implements MaiCraftTool {
     }
 
     @Override public String description() {
-        return "Make a bounded loaded area meet an actual block-light threshold. Supply only the "
-                + "semantic area anchor, radius, coverage policy, aesthetic preferences and protected "
-                + "labels. The Mod observes loaded cells, derives protected footprints, chooses a "
+        return "Make a semantic area meet an actual block-light threshold. Supply only the "
+                + "semantic area seed, coverage policy, aesthetic preferences and protected "
+                + "labels. The Mod progressively discovers the connected boundary from real loaded "
+                + "block evidence, travels to load unresolved frontiers, derives protected footprints, chooses a "
                 + "light source and placement set, delegates real first-person placement to Build, "
                 + "acquires the exact current batch before any placement, re-investigates after "
                 + "supply, "
-                + "then re-reads block light and performs bounded corrective passes. It never reports "
+                + "then re-reads block light and performs corrective passes until coverage is met or "
+                + "live evidence stops improving. It never reports "
                 + "success from a theoretical spacing calculation.";
     }
 
     @Override public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .integer("center_x", "Internal loaded-area observation anchor X.")
-                .integer("center_y", "Internal loaded-area observation anchor Y.")
-                .integer("center_z", "Internal loaded-area observation anchor Z.")
+                .integer("center_x", "Internal semantic-area landmark seed X.")
+                .integer("center_y", "Internal semantic-area landmark seed Y.")
+                .integer("center_z", "Internal semantic-area landmark seed Z.")
                 .optionalString("semantic_target", "Area label retained as semantic evidence; never coordinates.")
-                .optionalBool("resolve_loaded_component", "Resolve the nearest matching connected component in loaded facts.")
-                .optionalInteger("radius", "Bounded horizontal observation radius (default 16).",
+                .optionalBool("resolve_loaded_component", "Progressively close the matching connected component from live block facts; internal semantic compiler field.")
+                .optionalInteger("radius", "Optional player-authored geometric boundary. Omit it so "
+                                + "MaiCraft discovers the complete connected semantic component.",
                         SemanticLightAreaTaskRecord.MIN_RADIUS,
-                        SemanticLightAreaTaskRecord.MAX_RADIUS)
+                        SemanticLightAreaTaskRecord.MAX_EXPLICIT_RADIUS)
                 .optionalInteger("minimum_light", "Required observed block-light level (default depends on coverage).", 1, 15)
                 .optionalEnum("coverage", "Cells that define the verified denominator.",
                         "all", "most", "crop_growth", "player_visibility")
@@ -55,8 +58,10 @@ public final class SemanticLightAreaTool implements MaiCraftTool {
                 .optionalStringArray("allowed_sources", "Permitted semantic acquisition sources; storage is tried before crafting.")
                 .optionalBool("allow_harm", "Permit harmful acquisition only when explicitly true; never inferred.")
                 .optionalStringArray("protected_labels", "Remembered areas that placement must not touch.")
-                .optionalInteger("max_passes", "Bounded observe/build/verify passes (default 4).", 1, 8)
-                .optionalInteger("max_placements", "Whole-task placement work budget (default 192).", 1, 512)
+                .optionalInteger("max_placements",
+                        "Optional explicit whole-task placement budget. Omit it to let verified "
+                                + "coverage/convergence decide when work ends.",
+                        1, SemanticLightAreaTaskRecord.MAX_EXPLICIT_PLACEMENTS)
                 .build();
     }
 
