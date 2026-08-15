@@ -598,3 +598,247 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     private static String publicState(IntentTaskRecord record) {
         if (record.decisionSnapshot() != null) return "waiting_for_decision";
         if (record.pauseSnapshot() != null) return "paused";
+        return record.getState().name().toLowerCase();
+    }
+
+    private static String abilityMode(String ability) {
+        return switch (ability) {
+            case "maicraft:remember_place" -> "local_memory";
+            case "maicraft:wait_for_condition" -> "client_clock_or_predicate";
+            case "maicraft:sequence" -> "sequential_children";
+            default -> "compiled_to_internal_task";
+        };
+    }
+
+    private static String nullableString(JsonObject object, String key) {
+        return object.has(key) && !object.get(key).isJsonNull() ? object.get(key).getAsString() : null;
+    }
+
+    private static Minecraft requireWorld() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null || minecraft.level == null || minecraft.gameMode == null) {
+            throw new IllegalStateException("no active local player world");
+        }
+        return minecraft;
+    }
+
+    /**
+     * Wait for semantic attention without holding the client thread. The listener
+     * only snapshots the in-memory feed and completes a future; transport I/O is
+     * owned by the MCP handler. Resource notifications remain advisory and never
+     * initiate model sampling from inside the Mod.
+     */
+    private CompletionStage<JsonElement> waitForAttention(JsonObject arguments) {
+        long afterCursor = arguments.get("after_cursor").getAsLong();
+        int limit = arguments.get("limit").getAsInt();
+        int waitMs = arguments.get("wait_ms").getAsInt();
+        ClientCallFuture future = new ClientCallFuture();
+        AtomicReference<AutoCloseable> subscription = new AtomicReference<>();
+        future.whenComplete((ignored, failure) -> closeQuietly(subscription.getAndSet(null)));
+
+        Runnable setup = () -> {
+            if (!future.begin()) return;
+            try {
+                Minecraft minecraft = requireWorld();
+                intents.bindForRequest(minecraft, minecraft.player);
+                JsonObject initial = intents.attention(afterCursor, limit);
+                if (hasAttentionEvents(initial)) {
+                    future.completeCall(initial);
+                    return;
+                }
+
+                Consumer<JsonElement> listener = ignored -> {
+                    if (future.isDone()) return;
+                    JsonObject snapshot = intents.attention(afterCursor, limit);
+                    if (hasAttentionEvents(snapshot)) future.completeCall(snapshot);
+                };
+                AutoCloseable handle = intents.subscribeAttention(listener);
+                subscription.set(handle);
+                if (future.isDone()) {
+                    closeQuietly(subscription.getAndSet(null));
+                    return;
+                }
+
+                // Subscribe before the second read so an event can land on neither side
+                // of the check only if the listener itself already completed the future.
+                JsonObject raced = intents.attention(afterCursor, limit);
+                if (hasAttentionEvents(raced)) {
+                    future.completeCall(raced);
+                    return;
+                }
+                if (!future.markWaiting()) return;
+                JsonObject timeoutSnapshot = raced.deepCopy();
+                CompletableFuture.delayedExecutor(waitMs, TimeUnit.MILLISECONDS)
+                        .execute(() -> future.completeCall(timeoutSnapshot));
+            } catch (Throwable failure) {
+                future.failCall(failure);
+            }
+        };
+        scheduleClient(future, setup);
+        return future;
+    }
+
+    private static boolean hasAttentionEvents(JsonObject snapshot) {
+        return snapshot.has("events") && snapshot.get("events").isJsonArray()
+                && snapshot.getAsJsonArray("events").size() > 0;
+    }
+
+    private static CompletionStage<JsonElement> onClient(Supplier<? extends JsonElement> operation) {
+        ClientCallFuture future = new ClientCallFuture();
+        Runnable work = () -> {
+            if (!future.begin()) return;
+            try {
+                future.completeCall(operation.get());
+            } catch (Throwable throwable) {
+                future.failCall(throwable);
+            }
+        };
+        scheduleClient(future, work);
+        return future;
+    }
+
+    private static void scheduleClient(ClientCallFuture future, Runnable work) {
+        Minecraft minecraft = Minecraft.getInstance();
+        try {
+            if (minecraft.isSameThread()) work.run(); else minecraft.execute(work);
+        } catch (Throwable failure) {
+            future.rejectBeforeStart(failure);
+        }
+    }
+
+    private static void closeQuietly(AutoCloseable closeable) {
+        if (closeable == null) return;
+        try {
+            closeable.close();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static final class ClientCallFuture extends CompletableFuture<JsonElement>
+            implements RuntimeFacade.ManagedCall {
+        private static final int QUEUED = 0;
+        private static final int RUNNING = 1;
+        private static final int WAITING = 2;
+        private static final int SETTLED = 3;
+        private static final int CANCELLED = 4;
+
+        private final AtomicInteger state = new AtomicInteger(QUEUED);
+
+        private boolean begin() {
+            return state.compareAndSet(QUEUED, RUNNING);
+        }
+
+        private boolean markWaiting() {
+            return state.compareAndSet(RUNNING, WAITING);
+        }
+
+        private boolean completeCall(JsonElement value) {
+            if (!settle()) return false;
+            return super.complete(value);
+        }
+
+        private boolean failCall(Throwable failure) {
+            if (!settle()) return false;
+            return super.completeExceptionally(failure);
+        }
+
+        private void rejectBeforeStart(Throwable failure) {
+            if (state.compareAndSet(QUEUED, SETTLED)) {
+                super.completeExceptionally(failure);
+            }
+        }
+
+        private boolean settle() {
+            while (true) {
+                int current = state.get();
+                if (current != RUNNING && current != WAITING) return false;
+                if (state.compareAndSet(current, SETTLED)) return true;
+            }
+        }
+
+        @Override
+        public RuntimeFacade.CancellationDisposition cancelCall() {
+            while (true) {
+                int current = state.get();
+                if (current == QUEUED && state.compareAndSet(QUEUED, CANCELLED)) {
+                    super.cancel(false);
+                    return RuntimeFacade.CancellationDisposition.CANCELLED_BEFORE_START;
+                }
+                if (current == WAITING && state.compareAndSet(WAITING, CANCELLED)) {
+                    super.cancel(false);
+                    return RuntimeFacade.CancellationDisposition.CANCELLED_WHILE_WAITING;
+                }
+                if (current == RUNNING) {
+                    return RuntimeFacade.CancellationDisposition.ALREADY_STARTED;
+                }
+                if (current == SETTLED || current == CANCELLED) {
+                    return RuntimeFacade.CancellationDisposition.SETTLED;
+                }
+            }
+        }
+    }
+
+    private static final class SectorStats {
+        private int samples;
+        private int standable;
+        private int minY = Integer.MAX_VALUE;
+        private int maxY = Integer.MIN_VALUE;
+
+        void sample(boolean canStand, int y) {
+            samples++;
+            if (canStand) standable++;
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+
+        JsonObject toJson(String name) {
+            JsonObject result = new JsonObject();
+            result.addProperty("region", name);
+            result.addProperty("standable_fraction",
+                    samples == 0 ? 0.0 : Math.round(standable * 100.0 / samples) / 100.0);
+            result.addProperty("min_y", minY);
+            result.addProperty("max_y", maxY);
+            return result;
+        }
+    }
+
+    private static final class RegionStats {
+        private final String blockId;
+        private int samples;
+        private int minX = Integer.MAX_VALUE;
+        private int minY = Integer.MAX_VALUE;
+        private int minZ = Integer.MAX_VALUE;
+        private int maxX = Integer.MIN_VALUE;
+        private int maxY = Integer.MIN_VALUE;
+        private int maxZ = Integer.MIN_VALUE;
+
+        private RegionStats(String blockId) {
+            this.blockId = blockId;
+        }
+
+        void sample(int x, int y, int z) {
+            samples++;
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            minZ = Math.min(minZ, z);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            maxZ = Math.max(maxZ, z);
+        }
+
+        JsonObject toJson() {
+            JsonObject result = new JsonObject();
+            result.addProperty("surface_block", blockId);
+            result.addProperty("sample_count", samples);
+            JsonObject bounds = new JsonObject();
+            bounds.addProperty("min_x", minX);
+            bounds.addProperty("min_y", minY);
+            bounds.addProperty("min_z", minZ);
+            bounds.addProperty("max_x", maxX);
+            bounds.addProperty("max_y", maxY);
+            bounds.addProperty("max_z", maxZ);
+            result.add("sample_bounds", bounds);
+            return result;
+        }
+    }
+}
