@@ -29,11 +29,14 @@ public final class CraftTool implements MaiCraftTool {
     public String description() {
         return "Reach a requested main-inventory count through a client-known ordinary crafting recipe. "
                 + "If that inventory condition is already true, it stops immediately without exploring "
-                + "another recipe. Otherwise candidates are ranked by executable-now then smallest material "
-                + "gap; failures report structured accepted item ids and satisfied/missing counts. Execution uses "
+                + "another recipe. Otherwise candidates prefer material-complete routes whose physical "
+                + "workstation is ready or internally preparable, then the smallest material gap; failures "
+                + "report structured accepted item ids and satisfied/missing counts. Execution uses "
                 + "the real synchronized crafting menu across ticks. A 2x2 recipe returns to your inventory "
                 + "grid if another menu is open. A 3x3 recipe reuses any compatible open modded crafting "
-                + "surface, otherwise it needs a loaded crafting table within first-person reach. Only for "
+                + "surface, approaches a loaded crafting table, or places a carried table. When none is "
+                + "available it reports the workstation prerequisite; the semantic craft/acquire coordinator "
+                + "owns obtaining it before retrying this unchanged recipe. Only for "
                 + "[crafting] recipes; other recipe types use their own visible station workflow.";
     }
 
