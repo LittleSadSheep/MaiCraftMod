@@ -12,14 +12,11 @@ public final class BuildSiteInvestigationTaskRecord extends TaskRecord
         implements InternalPositionReceipt {
     public static final String TOOL_NAME = SemanticBuildPlanner.SITE_INVESTIGATION_TOOL;
     public static final int MAX_DISTANCE = 384;
-    public static final int MAX_FRONTIER_LEGS = 12;
-    public static final long MAX_INVESTIGATION_TICKS = 12L * 60L * 20L;
-    public static final long MAX_TOTAL_TICKS = 60L * 60L * 20L;
+    /** Initial lease only; live Move/Build child deadlines are propagated by the parent task. */
+    public static final long INITIAL_LIVENESS_LEASE_TICKS = 2L * 60L * 20L;
 
     public final Goal goal;
     public final int maxDistance;
-    public final int maxFrontierLegs;
-    public final long maxInvestigationTicks;
     private Position verifiedPosition;
 
     static {
@@ -38,8 +35,6 @@ public final class BuildSiteInvestigationTaskRecord extends TaskRecord
         }
         this.goal = goal;
         this.maxDistance = MAX_DISTANCE;
-        this.maxFrontierLegs = MAX_FRONTIER_LEGS;
-        this.maxInvestigationTicks = MAX_INVESTIGATION_TICKS;
     }
 
     /** Forces runner registration during Mod initialization. */

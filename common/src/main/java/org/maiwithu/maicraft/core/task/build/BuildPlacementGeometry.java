@@ -48,7 +48,6 @@ final class BuildPlacementGeometry {
 
     private static final double CROUCH_EYE_HEIGHT = 1.27;
     private static final double REACH = 4.45;
-    private static final int MAX_GESTURES = 24;
     private static final double[] FACE_SAMPLES = {0.25, 0.50, 0.75};
     private static final Direction[] SUPPORT_ORDER = {
             Direction.DOWN, Direction.NORTH, Direction.SOUTH,
@@ -115,6 +114,17 @@ final class BuildPlacementGeometry {
      */
     static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
                               Map<Long, BuildTaskRecord.Target> targets) {
+        return plan(player, target, targets, false);
+    }
+
+    /** Cheap preflight proof; a negative result still exhausts the complete finite search. */
+    static boolean hasAnyGesture(LocalPlayer player, BuildTaskRecord.Target target,
+                                 Map<Long, BuildTaskRecord.Target> targets) {
+        return !plan(player, target, targets, true).isEmpty();
+    }
+
+    private static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
+                                      Map<Long, BuildTaskRecord.Target> targets, boolean firstOnly) {
         if (!(target.item() instanceof BlockItem)) {
             return List.of();
         }
@@ -128,14 +138,17 @@ final class BuildPlacementGeometry {
         if (live != null && !live.isAir()
                 && (live.canBeReplaced()
                 || (live.is(target.block()) && maximumUses(target) > 1))) {
-            enumerateForClicked(player, target, targets, placeAt, Direction.UP, true, out);
+            enumerateForClicked(player, target, targets, placeAt, Direction.UP, true,
+                    firstOnly, out);
+            if (firstOnly && !out.isEmpty()) return List.copyOf(out);
         }
         for (Direction towardSupport : SUPPORT_ORDER) {
             BlockPos clicked = placeAt.relative(towardSupport);
             Direction face = towardSupport.getOpposite();
             if (!hasPlannedSupport(player, clicked, face, targets)) continue;
-            enumerateForClicked(player, target, targets, clicked, face, false, out);
-            if (out.size() >= MAX_GESTURES) break;
+            enumerateForClicked(player, target, targets, clicked, face, false,
+                    firstOnly, out);
+            if (firstOnly && !out.isEmpty()) break;
         }
         return List.copyOf(out);
     }
@@ -187,12 +200,12 @@ final class BuildPlacementGeometry {
     }
 
     private static void enumerateForClicked(LocalPlayer player, BuildTaskRecord.Target target,
-                                            Map<Long, BuildTaskRecord.Target> targets,
-                                            BlockPos clicked, Direction face, boolean direct,
-                                            List<Gesture> out) {
+                                             Map<Long, BuildTaskRecord.Target> targets,
+                                             BlockPos clicked, Direction face, boolean direct,
+                                             boolean firstOnly, List<Gesture> out) {
         BlockPos placeAt = target.pos();
         for (BlockPos stance : candidateStances(placeAt)) {
-            if (out.size() >= MAX_GESTURES) return;
+            if (firstOnly && !out.isEmpty()) return;
             if (!bodyCellAvailable(player, stance, targets, placeAt)) continue;
             Vec3 eye = new Vec3(stance.getX() + 0.5, stance.getY() + CROUCH_EYE_HEIGHT,
                     stance.getZ() + 0.5);
@@ -207,7 +220,7 @@ final class BuildPlacementGeometry {
                             direct ? "replaceable target face" : "adjacent support face");
                     if (provesGesture(player, target, gesture)) {
                         out.add(gesture);
-                        if (out.size() >= MAX_GESTURES) return;
+                        if (firstOnly) return;
                     }
                 }
             }

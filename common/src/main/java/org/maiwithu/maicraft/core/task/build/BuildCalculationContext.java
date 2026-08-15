@@ -27,10 +27,12 @@ final class BuildCalculationContext extends CalculationContext {
     private final boolean replaceExisting;
     BuildCalculationContext(LocalPlayer player, BlockGetter view, ChunkLoadedTest loadedTest,
                             boolean safeForThreadedUse, LongSet sacred, LongSet deniedPlace,
+                            LongSet forbiddenBodyCells,
                             TerrainPermit permit,
                             Map<Long, BuildTaskRecord.Target> activeTargets,
                             Set<BlockState> availableStates, boolean replaceExisting) {
-        super(player, view, loadedTest, safeForThreadedUse, sacred, deniedPlace, permit);
+        super(player, view, loadedTest, safeForThreadedUse, sacred, deniedPlace,
+                forbiddenBodyCells, permit);
         this.activeTargets = Map.copyOf(activeTargets);
         this.availableStates = Set.copyOf(availableStates);
         this.replaceExisting = replaceExisting;

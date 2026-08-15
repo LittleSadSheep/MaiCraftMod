@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.task.build;
 import org.maiwithu.maicraft.core.build.BuildValidity;
 
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.InternalPositionReceipt;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -18,7 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /** Typed descriptor for a bounded multi-block construction job. */
-public final class BuildTaskRecord extends TaskRecord {
+public final class BuildTaskRecord extends TaskRecord implements InternalPositionReceipt {
 
     public static final String TOOL_NAME = "build";
 
@@ -93,6 +94,8 @@ public final class BuildTaskRecord extends TaskRecord {
     private Map<String, Object> semanticFacts = Map.of();
     /** Planner endpoints whose connectivity must be proven against the finished client world. */
     private BuildTraversabilityContract traversabilityContract;
+    /** Verified semantic site retained inside the Mod for a later prior_result binding. */
+    private Position verifiedPosition;
 
     // 注:曾有 layerHeight(分层施工的层高门)。施工模型改为"低层优先的确定
     // 顺序 + 分遍补漏"之后,层高不再有任何裁决作用,留着就是个调了不起作用
@@ -152,6 +155,15 @@ public final class BuildTaskRecord extends TaskRecord {
         this.consumeMaterials = consumeMaterials;
         this.allowPartial = allowPartial;
         this.blockEntityData = Map.copyOf(blockEntityData);
+    }
+
+    void retainVerifiedPosition(Position position) {
+        this.verifiedPosition = position;
+    }
+
+    @Override
+    public Position internalVerifiedPosition() {
+        return verifiedPosition;
     }
 
     /**

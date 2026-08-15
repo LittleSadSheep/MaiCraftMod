@@ -20,9 +20,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CocoaBlock;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.StemBlock;
-import net.minecraft.world.level.levelgen.Heightmap;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
@@ -45,7 +45,8 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class BuildSiteInvestigationCompanionTask
         extends AbstractCompanionTask<BuildSiteInvestigationTaskRecord> {
     private static final int MAX_LEG_DISTANCE = 72;
-    private static final int LEG_TIMEOUT_TICKS = 90 * 20;
+    /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
+    private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 12;
     /** Reserve room for planner footprint/boundary scans beyond the body survey stance. */
     private static final int SEMANTIC_SCOPE_MARGIN = 48;
@@ -62,12 +63,10 @@ public final class BuildSiteInvestigationCompanionTask
     private BlockPos origin;
     private Goal.WorldPosition focus;
     private boolean waterfront;
-    private long investigationDeadline;
     private Stage stage;
 
     private MoveToCompanionTask moveChild;
     private MoveToTaskRecord moveRecord;
-    private long legDeadline;
     private Task buildChild;
     private TaskRecord buildRecord;
     private TaskResult buildResult;
@@ -94,8 +93,6 @@ public final class BuildSiteInvestigationCompanionTask
         origin = player.blockPosition().immutable();
         focus = SemanticBuildPlanner.investigationAnchor(r.goal, player, IntentRuntime.get());
         waterfront = SemanticBuildPlanner.requiresWaterfront(r.goal);
-        investigationDeadline = Math.min(r.getDeadlineGameTime(),
-                player.level().getGameTime() + r.maxInvestigationTicks);
         stage = Stage.OBSERVE;
     }
 
@@ -117,10 +114,6 @@ public final class BuildSiteInvestigationCompanionTask
     }
 
     private TaskState observeThenContinue() {
-        if (player.level().getGameTime() >= investigationDeadline) {
-            failureCode = "site_investigation_time_limit";
-            return TaskState.TIMEOUT;
-        }
         scanCycles++;
         if (!insideSemanticSurveyScope(player.blockPosition())) {
             lastProbeMessage = "first-person survey has not yet reached the bounded semantic target area";
@@ -140,9 +133,6 @@ public final class BuildSiteInvestigationCompanionTask
     }
 
     private TaskState continueToFrontier() {
-        if (frontierAttempts >= r.maxFrontierLegs) {
-            return exhausted("site_investigation_leg_limit");
-        }
         Candidate candidate = nextCandidate();
         if (candidate == null) return exhausted(
                 frontierAttempts > 0 && frontierFailed == frontierAttempts
@@ -160,29 +150,28 @@ public final class BuildSiteInvestigationCompanionTask
         String parent = r.getToolCallId() == null ? "build-site" : r.getToolCallId();
         moveRecord = new MoveToTaskRecord(
                 parent + "-internal-site-frontier-" + (++moveSerial),
-                Math.min(investigationDeadline, now + LEG_TIMEOUT_TICKS),
+                now + INITIAL_LEG_LEASE_TICKS,
                 (double) target.getX(), null, (double) target.getZ(), null,
                 false);
-        // MoveTo owns a progress lease and may extend its record deadline. This separate ceiling
-        // keeps an investigation leg bounded even while the ordinary navigator is progressing.
-        legDeadline = Math.min(investigationDeadline, now + LEG_TIMEOUT_TICKS);
         moveChild = new MoveToCompanionTask(player, moveRecord);
     }
 
     private TaskState tickMove() {
         TaskState terminal;
-        if (player.level().getGameTime() >= legDeadline) {
+        if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
             moveChild.stop(player, Task.StopReason.REPLACED);
             terminal = TaskState.TIMEOUT;
         } else {
             terminal = runChild(moveChild);
-            if (terminal == null) return TaskState.RUNNING;
+            if (terminal == null) {
+                r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                return TaskState.RUNNING;
+            }
         }
         // Consume the child receipt locally. Move positions are deliberately not propagated.
         moveChild.result(terminal);
         moveChild = null;
         moveRecord = null;
-        legDeadline = 0L;
         if (terminal == TaskState.SUCCESS) frontierReached++; else frontierFailed++;
         stage = Stage.OBSERVE;
         return TaskState.RUNNING;
@@ -222,7 +211,12 @@ public final class BuildSiteInvestigationCompanionTask
             terminal = TaskState.TIMEOUT;
         } else {
             terminal = runChild(buildChild);
-            if (terminal == null) return TaskState.RUNNING;
+            if (terminal == null) {
+                // A large build inherits the child's live deadline. Once the construction task
+                // renews on verified cell progress, the semantic wrapper cannot cut it off early.
+                r.extendDeadlineTo(buildRecord.getDeadlineGameTime());
+                return TaskState.RUNNING;
+            }
         }
         buildResult = buildChild.result(terminal);
         buildChild = null;
@@ -306,7 +300,7 @@ public final class BuildSiteInvestigationCompanionTask
                 level.getMinBuildHeight() + 2, level.getMaxBuildHeight() - 3);
         BlockPos column = new BlockPos(x, aroundY, z);
         if (!level.hasChunkAt(column)) return null;
-        int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        int top = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
         for (int y = Math.min(top + 2, level.getMaxBuildHeight() - 2);
              y >= Math.max(level.getMinBuildHeight() + 1, top - 8); y--) {
             BlockPos feet = new BlockPos(x, y, z);
@@ -440,7 +434,6 @@ public final class BuildSiteInvestigationCompanionTask
         moveChild.result(terminal);
         moveChild = null;
         moveRecord = null;
-        legDeadline = 0L;
     }
 
     @Override
@@ -462,8 +455,6 @@ public final class BuildSiteInvestigationCompanionTask
         data.put("waterfront_required", waterfront);
         data.put("site_verified", siteVerified);
         data.put("max_distance", r.maxDistance);
-        data.put("max_frontier_legs", r.maxFrontierLegs);
-        data.put("max_investigation_seconds", r.maxInvestigationTicks / 20L);
         data.put("scan_cycles", scanCycles);
         data.put("frontier_legs_attempted", frontierAttempts);
         data.put("frontier_legs_reached", frontierReached);
@@ -517,8 +508,8 @@ public final class BuildSiteInvestigationCompanionTask
     @Override
     protected String timeoutMessage() {
         return siteVerified
-                ? "construction at the verified site timed out"
-                : "bounded first-person site investigation reached its time limit without a verified site";
+                ? "construction at the verified site stopped making verifiable progress"
+                : "first-person site investigation stopped making verifiable progress before a site was verified";
     }
 
     @Override

@@ -94,7 +94,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private int creativeSlot = -1;
     private ItemStack creativeStack = ItemStack.EMPTY;
     private FirstPersonActionGate selection = new FirstPersonActionGate();
+    private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private final LinkedHashSet<Long> verifyFailed = new LinkedHashSet<>();
+    private final List<ObservedCell> verifyFailureStates = new ArrayList<>();
     private List<BlockPos> scaffoldQueue = List.of();
     private BlockPos scaffold, siteMin, siteMax, failurePos;
     private String failureCode, note = "all native actions re-verified";
@@ -124,7 +126,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (cells == null) return;
         for (BlockPos cell : cells) {
-            if (cell != null) protectedCells.add(cell.asLong());
+            if (cell != null) {
+                protectedCells.add(cell.asLong());
+                forbiddenBodyCells.add(cell.asLong());
+            }
         }
     }
 
@@ -221,19 +226,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         inspectGenerated(target, generated);
         boolean done = matches(target, generated);
-        List<BuildPlacementGeometry.Gesture> gestures = List.of();
         if (!BuildCellRules.isAirTarget(target) && !done) {
             if (!(target.item() instanceof BlockItem)) addUnsupported("no_native_block_item", target.pos(),
                     "requested state has no block item that can be placed by hand",
                     List.of("placeable_substitute", "leave_for_player", "cancel"));
             else {
-                gestures = BuildPlacementGeometry.plan(player, target, targets);
-                if (gestures.isEmpty()) addUnsupported("no_exact_first_person_gesture", target.pos(),
+                if (!BuildPlacementGeometry.hasAnyGesture(player, target, targets))
+                    addUnsupported("no_exact_first_person_gesture", target.pos(),
                         "no bounded stance and click guarantees the authored state",
                         List.of("plain_full_block_substitute", "relax_state", "other_site", "cancel"));
             }
         }
-        CellPlan plan = new CellPlan(target, gestures, generated);
+        CellPlan plan = new CellPlan(target, generated);
         plans.add(plan); plansByPrimary.put(target.pos().asLong(), plan);
         if (done) markComplete(plan);
         else if (!BuildCellRules.isAirTarget(target) && target.costsMaterial())
@@ -304,8 +308,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (!clearQueue.isEmpty()) { clearing = clearQueue.get(0); phase = Phase.CLEAR_NAV; }
             else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
             else {
-                liveGestures = cell.gestures().isEmpty()
-                        ? BuildPlacementGeometry.plan(player, cell.target(), targets) : cell.gestures();
+                liveGestures = BuildPlacementGeometry.plan(player, cell.target(), targets);
                 phase = Phase.PLACE_NAV;
             }
             return TaskState.RUNNING;
@@ -362,7 +365,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (player.level().getBlockState(clearing).isAir()) return nextClear();
         return switch (digger.digTargetStep(clearing)) {
             case PROGRESSING -> TaskState.RUNNING;
-            case BROKE_TARGET -> { r.brokeOne(); yield nextClear(); }
+            case BROKE_TARGET -> { r.brokeOne(); renewBuildProgress(); yield nextClear(); }
             case BROKE_OCCLUDER -> {
                 failAt(clearing, "target-only breaker changed another block", FailureType.INTERNAL,
                         "unexpected_break_target", true); yield TaskState.FAILED;
@@ -379,8 +382,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (clearAt < clearQueue.size()) { clearing = clearQueue.get(clearAt); phase = Phase.CLEAR_NAV; }
         else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
         else {
-            liveGestures = cell.gestures().isEmpty()
-                    ? BuildPlacementGeometry.plan(player, cell.target(), targets) : cell.gestures();
+            liveGestures = BuildPlacementGeometry.plan(player, cell.target(), targets);
             phase = Phase.PLACE_NAV;
         }
         return TaskState.RUNNING;
@@ -388,9 +390,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState placeNavTick() {
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
-        if (gestureAt >= liveGestures.size() || gestureTries >= MAX_GESTURES) return deferOrFail();
+        while (gestureAt < liveGestures.size()
+                && !supportExists(liveGestures.get(gestureAt))) gestureAt++;
+        if (gestureAt >= liveGestures.size()) return deferOrFail();
         gesture = liveGestures.get(gestureAt);
-        if (!supportExists(gesture)) { gestureAt++; gestureTries++; return TaskState.RUNNING; }
         if (nav == null) {
             BlockPos stance = gesture.stance();
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), 1.0,
@@ -399,7 +402,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> { stopNav(); phase = Phase.SELECT_ITEM; yield TaskState.RUNNING; }
-            case FAILED -> { stopNav(); gestureAt++; gestureTries++; yield TaskState.RUNNING; }
+            case FAILED -> { stopNav(); gestureAt++; yield TaskState.RUNNING; }
         };
     }
 
@@ -452,17 +455,17 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failAt(cell.target().pos(), "item selection failed: " + selection.failure(),
                     FailureType.UNKNOWN, "item_selection_failed", false); return TaskState.FAILED;
         }
-        phase = Phase.AIM; aimTicks = 0; return TaskState.RUNNING;
+        phase = Phase.AIM; aimConvergence.reset(); return TaskState.RUNNING;
     }
 
     private TaskState aimTick() {
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
+        Vec3 eye = player.getEyePosition();
         InputDriver.halt(player); InputDriver.sneak(player, true); InputDriver.lookAt(player, gesture.point());
+        if (!aimConvergence.ready(player, gesture.point().subtract(eye))) return TaskState.RUNNING;
         HitResult crosshair = Interaction.nativeRaytrace(player, 4.5);
-        if (!(crosshair instanceof BlockHitResult hit) || !placesAt(hit, cell.target().pos())) {
-            if (++aimTicks < AIM_TICKS) return TaskState.RUNNING;
+        if (!(crosshair instanceof BlockHitResult hit) || !placesAt(hit, cell.target().pos()))
             return rejectGesture();
-        }
         BlockState before = player.level().getBlockState(cell.target().pos());
         BlockState predicted = BuildPlacementGeometry.predict(
                 player, cell.target(), hit, player.getYRot(), player.getXRot());
@@ -473,12 +476,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
         useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
                 confirmation(cell, frozen), USE_TIMEOUT);
-        useCount++; phase = Phase.WAIT_USE; return TaskState.RUNNING;
+        phase = Phase.WAIT_USE; return TaskState.RUNNING;
     }
 
     private TaskState rejectGesture() {
         InputDriver.halt(player); stopNav(); selection.reset();
-        gesture = null; gestureAt++; gestureTries++; aimTicks = 0; phase = Phase.PLACE_NAV;
+        aimConvergence.reset(); gesture = null; gestureAt++; phase = Phase.PLACE_NAV;
         return TaskState.RUNNING;
     }
 
@@ -489,21 +492,24 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!useReceipt.terminal()) return TaskState.RUNNING;
         NativeActionReceipt.Status status = useReceipt.status();
         String detail = useReceipt.detail(); useReceipt = null;
+        if (status == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED) return rejectGesture();
         if (status != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
             failAt(cell.target().pos(), "native placement not safely confirmed: " + detail,
-                    status == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED
-                            ? FailureType.NO_SUPPORT : FailureType.UNKNOWN,
+                    FailureType.UNKNOWN,
                     "placement_" + status.name().toLowerCase(),
                     status == NativeActionReceipt.Status.UNCERTAIN
                             || status == NativeActionReceipt.Status.DIVERGED);
             return TaskState.FAILED;
         }
+        useCount++;
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
         BlockState live = player.level().getBlockState(cell.target().pos());
         if (useCount < BuildPlacementGeometry.maximumUses(cell.target())
                 && BuildPlacementGeometry.isProgress(cell.target(), Blocks.AIR.defaultBlockState(), live)) {
+            renewBuildProgress();
             liveGestures = BuildPlacementGeometry.plan(player, cell.target(), targets);
-            gestureAt = 0; gestureTries = 0; gesture = null; selection.reset(); phase = Phase.PLACE_NAV;
+            gestureAt = 0; gesture = null; selection.reset(); aimConvergence.reset();
+            phase = Phase.PLACE_NAV;
             return TaskState.RUNNING;
         }
         failAt(cell.target().pos(), "click changed world but not to the requested verified state",
@@ -511,7 +517,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void finishPlaced() {
-        r.placedOne(); markComplete(cell);
+        r.placedOne(); renewBuildProgress(); markComplete(cell);
         if (creativeSlot >= 0 && !creativeStack.isEmpty()) {
             LocalPlayerContext ctx = ClientRuntime.requireContext(player);
             creativeReceipt = ctx.actions().creativeSetSlot(
@@ -535,43 +541,103 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState deferOrFail() {
-        int n = defers.merge(cell.target().pos().asLong(), 1, Integer::sum);
-        if (n <= MAX_DEFERS && queue.size() > 1) {
-            CellPlan delayed = queue.remove(queueAt); queue.add(delayed);
+        long key = cell.target().pos().asLong();
+        PlacementAttemptSignature signature = placementAttemptSignature();
+        if (!exhaustedPlacementStates.computeIfAbsent(key, ignored -> new HashSet<>()).add(signature)) {
+            failAt(cell.target().pos(),
+                    "the complete finite stance set reached the same body and world state again without progress",
+                    FailureType.NO_PATH, "placement_no_progress", false);
+            return TaskState.FAILED;
+        }
+
+        List<CellPlan> pending = pendingOtherCells(key);
+        if (!pending.isEmpty()) {
+            pending.add(cell);
+            queue = pending;
+            queueAt = 0;
             note = "support-dependent cells were deferred until supports existed";
             phase = Phase.SELECT; return TaskState.RUNNING;
         }
-        failAt(cell.target().pos(), "all bounded first-person stances were exhausted",
+        failAt(cell.target().pos(), "the complete finite first-person stance set was exhausted",
                 FailureType.NO_PATH, "placement_stances_exhausted", false); return TaskState.FAILED;
     }
 
-    private void finishCell() { markComplete(cell); queueAt++; resetCell(); phase = Phase.SELECT; }
-    private void resetCell() {
-        stopNav(); clearing = null; clearQueue = List.of(); clearAt = 0;
-        liveGestures = List.of(); gestureAt = 0; gestureTries = 0; gesture = null;
-        aimTicks = 0; useCount = 0; useReceipt = null; selection.reset();
+    private List<CellPlan> pendingOtherCells(long currentKey) {
+        List<CellPlan> pending = new ArrayList<>();
+        for (CellPlan candidate : plans) {
+            if (candidate.target().pos().asLong() != currentKey
+                    && !matches(candidate.target(), candidate.generated())) pending.add(candidate);
+        }
+        return pending;
     }
 
-    private void beginVerify() { stopNav(); verifyAt = 0; verifyFailed.clear(); phase = Phase.VERIFY; }
+    private PlacementAttemptSignature placementAttemptSignature() {
+        BlockPos feet = PathExecutor.playerFeet(player);
+        long hash = 0xcbf29ce484222325L;
+        hash = mixStateHash(hash, liveGestures.size());
+        for (BuildPlacementGeometry.Gesture candidate : liveGestures) {
+            hash = mixStateHash(hash, candidate.stance().asLong());
+            hash = mixStateHash(hash, candidate.clicked().asLong());
+            hash = mixStateHash(hash, candidate.face().ordinal());
+        }
+
+        BlockPos target = cell.target().pos();
+        for (int dy = -3; dy <= 3; dy++) {
+            for (int dx = -4; dx <= 4; dx++) {
+                for (int dz = -4; dz <= 4; dz++) {
+                    BlockPos observed = target.offset(dx, dy, dz);
+                    hash = mixStateHash(hash, observed.asLong());
+                    boolean loaded = player.level().isLoaded(observed);
+                    hash = mixStateHash(hash, loaded ? 1L : 0L);
+                    if (loaded) hash = mixStateHash(
+                            hash, player.level().getBlockState(observed).hashCode());
+                }
+            }
+        }
+        return new PlacementAttemptSignature(feet.asLong(), hash);
+    }
+
+    private static long mixStateHash(long hash, long value) {
+        return (hash ^ value) * 0x100000001b3L;
+    }
+
+    private void finishCell() {
+        exhaustedPlacementStates.remove(cell.target().pos().asLong());
+        markComplete(cell); queueAt++; resetCell(); phase = Phase.SELECT;
+    }
+    private void resetCell() {
+        stopNav(); clearing = null; clearQueue = List.of(); clearAt = 0;
+        liveGestures = List.of(); gestureAt = 0; gesture = null;
+        useCount = 0; useReceipt = null; selection.reset(); aimConvergence.reset();
+    }
+
+    private void beginVerify() {
+        stopNav(); verifyAt = 0; verifyFailed.clear(); verifyFailureStates.clear();
+        phase = Phase.VERIFY;
+    }
 
     private TaskState verifyTick() {
         int budget = PREFLIGHT_BUDGET;
         while (verifyAt < r.targets.size() && budget-- > 0) {
             BuildTaskRecord.Target target = r.targets.get(verifyAt);
             if (!player.level().isLoaded(target.pos())) return travelToLoad(target.pos(), false);
-            if (target.matches(player.level().getBlockState(target.pos()))) completed.add(target.pos().asLong());
+            BlockState state = player.level().getBlockState(target.pos());
+            if (target.matches(state)) completed.add(target.pos().asLong());
             else {
                 completed.remove(target.pos().asLong());
                 verifyFailed.add(BuildPlacementGeometry.primaryOf(target).asLong());
+                verifyFailureStates.add(new ObservedCell(target.pos().asLong(), state));
             }
             verifyAt++;
         }
         r.completed(completed.size());
         if (verifyAt < r.targets.size()) return TaskState.RUNNING;
         if (!verifyFailed.isEmpty()) {
-            if (repairPass++ >= MAX_REPAIRS) {
-                failAt(BlockPos.of(verifyFailed.iterator().next()), "final verification found mismatched cells",
-                        FailureType.TARGET_LOST, "final_verification_failed", false);
+            VerificationFailureSignature signature = verificationFailureSignature();
+            if (!exhaustedVerificationStates.add(signature)) {
+                failAt(BlockPos.of(verifyFailed.iterator().next()),
+                        "final verification repeated the same mismatched world state without net progress",
+                        FailureType.TARGET_LOST, "final_verification_no_progress", false);
                 return TaskState.FAILED;
             }
             List<CellPlan> repairs = new ArrayList<>();
@@ -581,7 +647,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             }
             if (repairs.size() != verifyFailed.size()) {
                 failAt(BlockPos.of(verifyFailed.iterator().next()),
-                        "a pre-existing cell changed and has no retained safe gesture",
+                        "a pre-existing cell changed and has no primary repair plan",
                         FailureType.TARGET_LOST, "externally_changed_preexisting_cell", false);
                 return TaskState.FAILED;
             }
@@ -594,6 +660,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 .sorted(Comparator.comparingInt((BlockPos position) -> position.getY()).reversed()
                         .thenComparingDouble(p -> p.distSqr(player.blockPosition()))).toList();
         scaffoldAt = 0; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
+    }
+
+    private VerificationFailureSignature verificationFailureSignature() {
+        return new VerificationFailureSignature(verifyFailureStates);
     }
 
     private TaskState scaffoldSelectTick() {
@@ -617,7 +687,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 return TaskState.FAILED;
             }
         }
+        retainVerifiedSitePosition();
         return TaskState.SUCCESS;
+    }
+
+    private void retainVerifiedSitePosition() {
+        if (siteMin == null || siteMax == null) return;
+        BlockPos center = new BlockPos(
+                Math.floorDiv(siteMin.getX() + siteMax.getX(), 2),
+                siteMin.getY(),
+                Math.floorDiv(siteMin.getZ() + siteMax.getZ(), 2));
+        r.retainVerifiedPosition(new InternalPositionReceipt.Position(
+                center.getX(), center.getY(), center.getZ(),
+                player.level().dimension().location().toString()));
     }
 
     private TaskState scaffoldNavTick() {
@@ -644,7 +726,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return switch (digger.digTargetStep(scaffold)) {
             case PROGRESSING -> TaskState.RUNNING;
             case BROKE_TARGET -> {
-                r.brokeOne(); scaffoldAt++; phase = Phase.SCAFFOLD_SELECT; yield TaskState.RUNNING;
+                r.brokeOne(); renewBuildProgress(); scaffoldAt++;
+                phase = Phase.SCAFFOLD_SELECT; yield TaskState.RUNNING;
             }
             case BROKE_OCCLUDER -> {
                 failAt(scaffold, "scaffold cleanup changed another block", FailureType.INTERNAL,
@@ -708,6 +791,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void markComplete(CellPlan plan) {
+        int before = r.completed();
         if (player.level().isLoaded(plan.target().pos())
                 && plan.target().matches(player.level().getBlockState(plan.target().pos())))
             completed.add(plan.target().pos().asLong());
@@ -718,6 +802,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 completed.add(effect.pos().asLong());
         }
         r.completed(completed.size());
+        if (r.completed() > before) renewBuildProgress();
+    }
+
+    private void renewBuildProgress() {
+        exhaustedPlacementStates.clear();
+        r.extendDeadlineTo(player.level().getGameTime() + BUILD_PROGRESS_LEASE_TICKS);
     }
 
     private int countMatching() {
@@ -768,8 +858,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void drainScaffolds() {
+        boolean added = false;
         for (BlockPos pos : BuildPlacementRegistry.drainScaffold(player))
-            if (!targets.containsKey(pos.asLong())) scaffolds.add(pos.immutable());
+            if (!targets.containsKey(pos.asLong())) added |= scaffolds.add(pos.immutable());
+        if (added) renewBuildProgress();
     }
     private void registerProvider() {
         if (!providerRegistered) { BuildPlacementRegistry.register(player, this); providerRegistered = true; }
@@ -790,22 +882,32 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         BuildTaskRecord.Target target = targets.get(pos.asLong());
         return target != null && target.acceptsPlacedState(state);
     }
-    @Override public CalculationContext forSearch(LocalPlayer p, LongSet sacred, LongSet denied) {
-        return ContextFactory.forSearch(p, union(sacred), union(denied), permit(),
-                (body, view, loaded, safe, s, d, terrain) -> new BuildCalculationContext(
-                        body, view, loaded, safe, s, d, terrain, targets,
+    @Override public CalculationContext forSearch(LocalPlayer p, LongSet sacred, LongSet denied,
+                                                  LongSet forbidden) {
+        return ContextFactory.forSearch(p, union(sacred), union(denied),
+                unionForbidden(forbidden), permit(),
+                (body, view, loaded, safe, s, d, f, terrain) -> new BuildCalculationContext(
+                        body, view, loaded, safe, s, d, f, terrain, targets,
                         inventory.availableStates(true), r.replaceExisting));
     }
-    @Override public CalculationContext forExecution(LocalPlayer p, LongSet sacred, LongSet denied) {
-        return ContextFactory.forExecution(p, union(sacred), union(denied), permit(),
-                (body, view, loaded, safe, s, d, terrain) -> new BuildCalculationContext(
-                        body, view, loaded, safe, s, d, terrain, targets,
+    @Override public CalculationContext forExecution(LocalPlayer p, LongSet sacred, LongSet denied,
+                                                     LongSet forbidden) {
+        return ContextFactory.forExecution(p, union(sacred), union(denied),
+                unionForbidden(forbidden), permit(),
+                (body, view, loaded, safe, s, d, f, terrain) -> new BuildCalculationContext(
+                        body, view, loaded, safe, s, d, f, terrain, targets,
                         inventory.availableStates(true), r.replaceExisting));
     }
     @Override public TerrainPermit permit() { return TerrainPermit.TERRAFORM; }
     private LongSet union(LongSet other) {
         if (other == null || other.isEmpty()) return protectedCells;
         LongOpenHashSet out = new LongOpenHashSet(protectedCells); out.addAll(other); return out;
+    }
+    private LongSet unionForbidden(LongSet other) {
+        if (other == null || other.isEmpty()) return forbiddenBodyCells;
+        LongOpenHashSet out = new LongOpenHashSet(forbiddenBodyCells);
+        out.addAll(other);
+        return out;
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
@@ -815,6 +917,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     @Override protected void cleanup() {
         if (digger.current() != null) digger.cancel();
         drainScaffolds(); unregisterProvider(); InputDriver.halt(player); selection.reset();
+        aimConvergence.reset();
         bestEffortCreativeCleanup(); super.cleanup();
     }
     private void bestEffortCreativeCleanup() {
