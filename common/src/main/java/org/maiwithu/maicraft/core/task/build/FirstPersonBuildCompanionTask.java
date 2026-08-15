@@ -16,10 +16,12 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
+import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.InternalPositionReceipt;
 
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
@@ -39,28 +41,32 @@ import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Receipt-driven construction performed only through the local first-person body. */
 class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecord>
         implements BuildPlacementRegistry.Provider, PlayerNav.ContextProvider {
+    /** Verified mutations renew this lease; elapsed total time never kills a progressing build. */
+    private static final long BUILD_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
     private static final int PREFLIGHT_BUDGET = 24;
     private static final int USE_TIMEOUT = 40;
     private static final int CREATIVE_TIMEOUT = 30;
-    private static final int AIM_TICKS = 12;
-    private static final int MAX_GESTURES = 12;
-    private static final int MAX_DEFERS = 3;
-    private static final int MAX_REPAIRS = 2;
 
     private enum Phase { PREFLIGHT, SELECT, CLEAR_NAV, CLEAR, PLACE_NAV, SELECT_ITEM,
         AIM, WAIT_USE, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK }
     private record CellPlan(BuildTaskRecord.Target target,
-                            List<BuildPlacementGeometry.Gesture> gestures,
                             List<BuildPlacementGeometry.GeneratedCell> generated) {
-        CellPlan { gestures = List.copyOf(gestures); generated = List.copyOf(generated); }
+        CellPlan { generated = List.copyOf(generated); }
+    }
+    private record PlacementAttemptSignature(long playerFeet, long worldStateHash) {}
+    private record ObservedCell(long pos, BlockState state) {}
+    private record VerificationFailureSignature(List<ObservedCell> cells) {
+        VerificationFailureSignature { cells = List.copyOf(cells); }
     }
 
     private final BuildCellRules rules;
@@ -68,6 +74,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BlockDigger digger;
     private final Map<Long, BuildTaskRecord.Target> targets = new LinkedHashMap<>();
     private final LongOpenHashSet protectedCells = new LongOpenHashSet();
+    private final LongOpenHashSet forbiddenBodyCells = new LongOpenHashSet();
     private final LongOpenHashSet completed = new LongOpenHashSet();
     private final List<BuildTaskRecord.Target> preflightOrder = new ArrayList<>();
     private final List<CellPlan> plans = new ArrayList<>();
@@ -77,12 +84,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final List<Map<String, Object>> unsupported = new ArrayList<>();
     private final List<Map<String, Object>> blocked = new ArrayList<>();
     private final LinkedHashSet<BlockPos> scaffolds = new LinkedHashSet<>();
-    private final Map<Long, Integer> defers = new HashMap<>();
+    private final Map<Long, Set<PlacementAttemptSignature>> exhaustedPlacementStates =
+            new HashMap<>();
+    private final Set<VerificationFailureSignature> exhaustedVerificationStates = new HashSet<>();
 
     private Phase phase = Phase.PREFLIGHT;
     private boolean preflightDone, providerRegistered, uncertain;
-    private int preflightAt, queueAt, clearAt, gestureAt, gestureTries, aimTicks, useCount;
-    private int verifyAt, repairPass, scaffoldAt;
+    private int preflightAt, queueAt, clearAt, gestureAt, useCount;
+    private int verifyAt, scaffoldAt;
     private List<CellPlan> queue = new ArrayList<>();
     private CellPlan cell;
     private List<BlockPos> clearQueue = List.of();
