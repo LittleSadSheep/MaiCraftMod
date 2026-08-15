@@ -105,6 +105,9 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                 if (actionCost >= COST_INF) {
                     continue;
                 }
+                if (calcContext.isForbiddenBodyCell(res.x, res.y, res.z)) {
+                    continue;
+                }
                 if (actionCost <= 0 || Double.isNaN(actionCost)) {
                     throw new IllegalStateException(String.format(
                             "%s 从 (%d,%d,%d) 算出了非法成本 %s",
