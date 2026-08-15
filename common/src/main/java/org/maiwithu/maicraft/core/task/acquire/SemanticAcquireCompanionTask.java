@@ -33,6 +33,9 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
+import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
+import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
+import org.maiwithu.maicraft.core.task.craft.CraftingWorkstationCoordinator;
 import org.maiwithu.maicraft.core.task.entity.EntitySemanticSafety;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchCompanionTask;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
@@ -49,7 +52,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * A bounded semantic acquisition coordinator. It never performs a physical action itself: every
+ * A progress-driven semantic acquisition coordinator. It never performs a physical action itself: every
  * effect is a child task, and every transition is based on a terminal receipt plus a fresh live
  * main-inventory observation.
  */
@@ -57,7 +60,8 @@ public final class SemanticAcquireCompanionTask
         extends AbstractCompanionTask<SemanticAcquireTaskRecord> {
     private static final int MAX_REPORTED_ATTEMPTS = 64;
     private static final int MAX_REPORTED_ISSUES = 64;
-    private static final int MAX_SOURCE_ATTEMPTS = 3;
+    private static final int PLANNER_STEPS_PER_TICK = 1;
+    private static final long PROGRESS_LEASE_TICKS = 60L * 20L;
     private static final int LANDMARK_PROTECTION_RADIUS = 12;
     private static final int MINE_TASK_SEARCH_REACH = 32 * 16 + 16;
     private static final long COLLECT_TICKS = 60L * 20L;
@@ -65,10 +69,7 @@ public final class SemanticAcquireCompanionTask
     private static final long MINE_PER_UNIT_TICKS = 30L * 20L;
     private static final long STORAGE_TICKS = 10L * 60L * 20L;
     private static final long HUNT_TICKS = 120L * 20L;
-    private static final int MAX_HUNT_TARGETS = 16;
-    private static final int MAX_HUNT_SEARCHES = 3;
     private static final int HUNT_SEARCH_DISTANCE = 512;
-    private static final int MAX_TRADE_ALTERNATIVES = 8;
 
     private enum HuntChildStage { NONE, SEARCH, ATTACK }
 
@@ -79,14 +80,18 @@ public final class SemanticAcquireCompanionTask
         final Set<ResourceLocation> lineageItems;
         final Set<String> lineageRecipes;
         final String parentRecipeId;
+        final List<SemanticAcquireTaskRecord.Source> allowedSources;
         final Set<String> rejectedRecipes = new LinkedHashSet<>();
         final Map<SemanticAcquireTaskRecord.Source, Integer> sourceAttempts =
                 new LinkedHashMap<>();
+        final Set<ResourceLocation> rejectedTradeOutputs = new LinkedHashSet<>();
+        final Set<String> exhaustedHuntSearchStates = new LinkedHashSet<>();
         int sourceCursor;
-        int craftRounds;
         int huntSearchAttempts;
         boolean huntSearchExpandedView;
         boolean miningToolPrerequisitePushed;
+        ResourceLocation preferredTradeOutput;
+        int lastObservedCount = -1;
 
         Need(
                 List<ResourceLocation> itemIds,
@@ -94,13 +99,15 @@ public final class SemanticAcquireCompanionTask
                 int depth,
                 Set<ResourceLocation> lineageItems,
                 Set<String> lineageRecipes,
-                String parentRecipeId) {
+                String parentRecipeId,
+                List<SemanticAcquireTaskRecord.Source> allowedSources) {
             this.itemIds = List.copyOf(itemIds);
             this.requiredFinalCount = requiredFinalCount;
             this.depth = depth;
             this.lineageItems = Set.copyOf(lineageItems);
             this.lineageRecipes = Set.copyOf(lineageRecipes);
             this.parentRecipeId = parentRecipeId;
+            this.allowedSources = List.copyOf(allowedSources);
         }
 
         int attempts(SemanticAcquireTaskRecord.Source source) {
@@ -116,9 +123,12 @@ public final class SemanticAcquireCompanionTask
             ResourceLocation outputItem,
             String recipeId,
             Map<String, Object> data,
-            int missing,
+            CraftPlanCost cost,
             boolean surfaceSupported,
-            boolean surfaceReady) {}
+            boolean surfaceReady,
+            List<ResourceLocation> surfacePrerequisiteItems) {}
+
+    private record ExecutableCraft(ResourceLocation outputItem, CraftOps.Plan plan) {}
 
     private record IngredientNeed(
             List<ResourceLocation> itemIds, int missing, Map<String, Object> fact) {}
@@ -153,11 +163,12 @@ public final class SemanticAcquireCompanionTask
     private SemanticAcquireTaskRecord.Source activeSource;
     private String activeDetail;
     private int activeBeforeCount;
+    private int activeLastObservedCount;
     private HuntChildStage activeHuntStage = HuntChildStage.NONE;
     private UUID activeHuntTarget;
     private final Set<UUID> rejectedHuntTargets = new LinkedHashSet<>();
     private int childSerial;
-    private int workUsed;
+    private int plannerStepsThisTick;
     private String failureCode;
     private DimensionBarrier failureDimension;
     private boolean outcomeUncertain;
@@ -176,12 +187,15 @@ public final class SemanticAcquireCompanionTask
                 0,
                 new LinkedHashSet<>(r.itemIds),
                 Set.of(),
-                null);
+                null,
+                r.allowedSources);
+        rootNeed.lastObservedCount = count(rootNeed.itemIds);
         needs.push(rootNeed);
     }
 
     @Override
     protected TaskState onTick() {
+        plannerStepsThisTick = 0;
         // This check deliberately precedes child advancement. A child may have made the semantic
         // fact true on the previous tick; no menu cleanup, recipe branch or mining swing is allowed
         // to continue merely because its internal task has not yet declared terminal success.
@@ -202,22 +216,21 @@ public final class SemanticAcquireCompanionTask
         }
 
         Need need = needs.peek();
-        if (count(need.itemIds) >= need.requiredFinalCount) {
+        int observedNeedCount = count(need.itemIds);
+        if (need.lastObservedCount >= 0 && observedNeedCount > need.lastObservedCount) {
+            renewProgressLease();
+        }
+        need.lastObservedCount = observedNeedCount;
+        if (observedNeedCount >= need.requiredFinalCount) {
             needs.pop();
+            renewProgressLease();
             return TaskState.RUNNING;
         }
-        if (workUsed >= r.workBudget) {
-            addIssue("planner", "work_budget_exhausted",
-                    "the bounded acquisition work budget was exhausted",
-                    Map.of("work_budget", r.workBudget, "work_used", workUsed,
-                            "need", itemStrings(need.itemIds)));
-            return exhaustNeed(need);
-        }
-        if (need.sourceCursor >= r.allowedSources.size()) {
+        if (need.sourceCursor >= need.allowedSources.size()) {
             return exhaustNeed(need);
         }
 
-        SemanticAcquireTaskRecord.Source source = r.allowedSources.get(need.sourceCursor);
+        SemanticAcquireTaskRecord.Source source = need.allowedSources.get(need.sourceCursor);
         return switch (source) {
             case INVENTORY -> observeInventorySource(need);
             case NEARBY -> attemptNearby(need);
@@ -239,14 +252,10 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptNearby(Need need) {
-        if (need.attempts(SemanticAcquireTaskRecord.Source.NEARBY) >= 1) {
-            advanceSource(need);
-            return TaskState.RUNNING;
-        }
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.NEARBY)) {
             return TaskState.RUNNING;
         }
-        if (!spendWork()) return exhaustNeed(need);
+        if (!takePlannerStep()) return TaskState.RUNNING;
         need.attempted(SemanticAcquireTaskRecord.Source.NEARBY);
         NearbySurvey survey = surveyNearby(need.itemIds);
         if (survey.protectedCount() > 0) {
@@ -279,10 +288,6 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptStorage(Need need) {
-        if (need.attempts(SemanticAcquireTaskRecord.Source.STORAGE) >= MAX_SOURCE_ATTEMPTS) {
-            advanceSource(need);
-            return TaskState.RUNNING;
-        }
         if (!Ae2ResourceSupply.available()) {
             addIssue("storage", "storage_adapter_unavailable",
                     "no supported client storage-network adapter is available",
@@ -292,7 +297,7 @@ public final class SemanticAcquireCompanionTask
         }
         int missing = missing(need);
         if (missing <= 0) return TaskState.RUNNING;
-        if (!spendWork()) return exhaustNeed(need);
+        if (!takePlannerStep()) return TaskState.RUNNING;
         need.attempted(SemanticAcquireTaskRecord.Source.STORAGE);
         Ae2ResourceSupply.Group group = new Ae2ResourceSupply.Group(
                 need.itemIds.getFirst(), need.itemIds, missing,
@@ -310,60 +315,74 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptCraft(Need need) {
-        if (need.craftRounds >= Math.max(4, r.maxRecipeDepth * 3)) {
-            addIssue("craft", "recipe_work_exhausted",
-                    "crafting did not close this need within its bounded recipe rounds",
-                    Map.of("depth", need.depth, "rounds", need.craftRounds,
-                            "rejected_recipes", List.copyOf(need.rejectedRecipes)));
-            advanceSource(need);
-            return TaskState.RUNNING;
-        }
-        if (need.depth > r.maxRecipeDepth) {
-            addIssue("craft", "recipe_depth_exhausted",
-                    "recursive crafting reached the configured depth limit",
-                    Map.of("depth", need.depth, "max_recipe_depth", r.maxRecipeDepth));
-            advanceSource(need);
-            return TaskState.RUNNING;
-        }
-
         int deficit = missing(need);
         List<CraftCandidate> candidates = new ArrayList<>();
+        List<ExecutableCraft> executable = new ArrayList<>();
+        CraftingWorkstationCoordinator.PlanningSnapshot workstation =
+                CraftOps.requiresWorkstationForAny(need.itemIds, player)
+                        ? CraftingWorkstationCoordinator.inspect(player) : null;
+        Set<String> excludedRecipes = new LinkedHashSet<>(need.lineageRecipes);
+        excludedRecipes.addAll(need.rejectedRecipes);
+        // One comparison round is one planner unit. Charging once per tag member made the result
+        // depend on registry order and could stop before the cheapest satisfiable alternative.
+        if (!takePlannerStep()) return TaskState.RUNNING;
         for (ResourceLocation output : need.itemIds) {
-            if (!spendWork()) break;
             int requestedOwnFinal = PlayerInv.buildableCount(
                     player.getInventory(), BuiltInRegistries.ITEM.get(output)) + deficit;
             ToolContext context = new ToolContext(
                     childId("craft-plan"), player.level().getGameTime());
             CraftOps.Plan plan = craftOps.plan(
-                    output.toString(), requestedOwnFinal, player, context);
+                    output.toString(), requestedOwnFinal, player, context,
+                    workstation, excludedRecipes);
             if (plan.executable()) {
-                need.craftRounds++;
-                need.attempted(SemanticAcquireTaskRecord.Source.CRAFT);
-                return startChild(need, SemanticAcquireTaskRecord.Source.CRAFT,
-                        plan.task(), "craft " + output + " from live recipe facts");
+                executable.add(new ExecutableCraft(output, plan));
+            } else {
+                collectCraftCandidates(output, plan, candidates);
             }
-            collectCraftCandidates(output, plan.immediate(), candidates);
+        }
+
+        ExecutableCraft selected = executable.stream()
+                .filter(candidate -> candidate.plan().cost() != null)
+                .min(Comparator.comparing(
+                        candidate -> candidate.plan().cost(), CraftPlanCost.ORDER))
+                .orElse(null);
+        if (selected != null) {
+            need.attempted(SemanticAcquireTaskRecord.Source.CRAFT);
+            return startChild(need, SemanticAcquireTaskRecord.Source.CRAFT,
+                    selected.plan().task(),
+                    "craft " + selected.outputItem() + " via the cheapest live satisfiable path");
+        }
+
+        CraftCandidate surfacePrerequisite = candidates.stream()
+                .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
+                .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
+                .filter(CraftCandidate::surfaceSupported)
+                .filter(candidate -> candidate.cost().missingMaterials() == 0)
+                .filter(candidate -> candidate.cost().surface()
+                        == CraftPlanCost.Surface.PREREQUISITE)
+                .filter(candidate -> !candidate.surfacePrerequisiteItems().isEmpty())
+                .sorted(Comparator.comparing(CraftCandidate::cost, CraftPlanCost.ORDER))
+                .findFirst().orElse(null);
+        if (surfacePrerequisite != null
+                && pushCraftingSurfacePrerequisite(need, surfacePrerequisite)) {
+            return TaskState.RUNNING;
         }
 
         CraftCandidate chosen = candidates.stream()
                 .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
                 .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
                 .filter(CraftCandidate::surfaceSupported)
-                .filter(candidate -> candidate.missing() > 0)
-                .sorted(Comparator
-                        .comparingInt(CraftCandidate::missing)
-                        .thenComparing(Comparator.comparing(
-                                CraftCandidate::surfaceReady).reversed())
-                        .thenComparing(CraftCandidate::recipeId))
+                .filter(candidate -> candidate.cost().missingMaterials() > 0)
+                .sorted(Comparator.comparing(CraftCandidate::cost, CraftPlanCost.ORDER))
                 .findFirst().orElse(null);
         if (chosen == null) {
             boolean surfaceMissing = candidates.stream().anyMatch(candidate ->
-                    candidate.missing() == 0
+                    candidate.cost().missingMaterials() == 0
                             && candidate.surfaceSupported() && !candidate.surfaceReady());
             addIssue("craft", surfaceMissing
-                            ? "crafting_surface_missing" : "no_bounded_recipe_path",
+                            ? "crafting_surface_missing" : "no_finite_recipe_path",
                     surfaceMissing
-                            ? "materials exist, but no compatible loaded crafting surface is ready"
+                            ? "materials exist, but no compatible crafting surface can be prepared from live facts"
                             : "no cycle-free client-known ordinary recipe path remained",
                     Map.of("candidate_count", candidates.size(),
                             "rejected_recipes", List.copyOf(need.rejectedRecipes),
@@ -381,16 +400,6 @@ public final class SemanticAcquireCompanionTask
                     Map.of("recipe_id", chosen.recipeId()));
             return TaskState.RUNNING;
         }
-        if (need.depth >= r.maxRecipeDepth) {
-            need.rejectedRecipes.add(chosen.recipeId());
-            addIssue("craft", "recipe_depth_exhausted",
-                    "the next missing ingredient would exceed the recursive recipe depth",
-                    Map.of("recipe_id", chosen.recipeId(),
-                            "max_recipe_depth", r.maxRecipeDepth,
-                            "ingredient", itemStrings(ingredient.itemIds())));
-            return TaskState.RUNNING;
-        }
-
         Set<ResourceLocation> lineageItems = new LinkedHashSet<>(need.lineageItems);
         lineageItems.addAll(ingredient.itemIds());
         Set<String> lineageRecipes = new LinkedHashSet<>(need.lineageRecipes);
@@ -398,8 +407,8 @@ public final class SemanticAcquireCompanionTask
         int ingredientFinal = count(ingredient.itemIds()) + ingredient.missing();
         Need childNeed = new Need(
                 ingredient.itemIds(), ingredientFinal, need.depth + 1,
-                lineageItems, lineageRecipes, chosen.recipeId());
-        need.craftRounds++;
+                lineageItems, lineageRecipes, chosen.recipeId(), need.allowedSources);
+        childNeed.lastObservedCount = count(childNeed.itemIds);
         recipeTrace.add(Map.of(
                 "recipe_id", chosen.recipeId(),
                 "output_item_id", chosen.outputItem().toString(),
@@ -407,14 +416,11 @@ public final class SemanticAcquireCompanionTask
                 "missing_item_ids", itemStrings(ingredient.itemIds()),
                 "missing_count", ingredient.missing()));
         needs.push(childNeed);
+        renewProgressLease();
         return TaskState.RUNNING;
     }
 
     private TaskState attemptMine(Need need) {
-        if (need.attempts(SemanticAcquireTaskRecord.Source.MINE) >= MAX_SOURCE_ATTEMPTS) {
-            advanceSource(need);
-            return TaskState.RUNNING;
-        }
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.MINE)) {
             return TaskState.RUNNING;
         }
@@ -448,16 +454,19 @@ public final class SemanticAcquireCompanionTask
                 advanceSource(need);
                 return TaskState.RUNNING;
             }
-            if (need.depth >= r.maxRecipeDepth) {
-                addIssue("mine", "tool_recipe_depth_exhausted",
-                        "preparing a suitable harvesting tool would exceed the recursive depth",
+            List<ResourceLocation> toolItems = tool.acceptableItemIds().stream()
+                    .filter(id -> !need.lineageItems.contains(id))
+                    .toList();
+            if (toolItems.isEmpty()) {
+                addIssue("mine", "tool_recipe_cycle",
+                        "every suitable harvesting-tool alternative is already in this finite prerequisite lineage",
                         Map.of("tool_family", tool.toolFamily(),
                                 "minimum_tier", tool.minimumTier()));
                 advanceSource(need);
                 return TaskState.RUNNING;
             }
             Set<ResourceLocation> lineage = new LinkedHashSet<>(need.lineageItems);
-            lineage.addAll(tool.acceptableItemIds());
+            lineage.addAll(toolItems);
             Need toolNeed = new Need(
                     toolItems, count(toolItems) + 1,
                     need.depth + 1, lineage, need.lineageRecipes, null,

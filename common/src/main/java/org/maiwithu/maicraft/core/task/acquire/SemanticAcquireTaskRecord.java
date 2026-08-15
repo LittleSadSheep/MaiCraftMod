@@ -12,19 +12,15 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** One bounded final-inventory acquisition goal. */
+/** One final-inventory acquisition goal governed by live progress and finite graph evidence. */
 public final class SemanticAcquireTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "acquire_items";
-    /** Large enough for ordinary modded item tags while recipe/source work remains budgeted. */
+    /** Large enough for ordinary modded item tags while planner work is sliced per tick. */
     public static final int MAX_ITEM_ALTERNATIVES = 256;
     /** Full 36-slot main-inventory ceiling for ordinary 64-stack materials. */
     public static final int MAX_FINAL_COUNT = 36 * 64;
     public static final int DEFAULT_RADIUS = 16;
     public static final int MAX_RADIUS = 48;
-    public static final int DEFAULT_RECIPE_DEPTH = 6;
-    public static final int MAX_RECIPE_DEPTH = 10;
-    public static final int DEFAULT_WORK_BUDGET = 64;
-    public static final int MAX_WORK_BUDGET = 192;
 
     /** Sources are semantic permissions, not concrete instructions. */
     public enum Source {
@@ -98,8 +94,6 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public final SourceHint sourceHint;
     public final List<String> protectedLabels;
     public final int searchRadius;
-    public final int maxRecipeDepth;
-    public final int workBudget;
 
     static {
         TaskFactory.register(SemanticAcquireTaskRecord.class,
@@ -115,9 +109,7 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
             boolean allowHarm,
             SourceHint sourceHint,
             List<String> protectedLabels,
-            int searchRadius,
-            int maxRecipeDepth,
-            int workBudget) {
+            int searchRadius) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.itemIds = validateItems(itemIds);
         this.count = Math.clamp(count, 1, MAX_FINAL_COUNT);
@@ -127,8 +119,6 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
         this.protectedLabels = normalizedStrings(
                 protectedLabels, 64, "protected labels");
         this.searchRadius = Math.clamp(searchRadius, 1, MAX_RADIUS);
-        this.maxRecipeDepth = Math.clamp(maxRecipeDepth, 1, MAX_RECIPE_DEPTH);
-        this.workBudget = Math.clamp(workBudget, 8, MAX_WORK_BUDGET);
     }
 
     /** Calling this method forces static task registration during Mod initialization. */
