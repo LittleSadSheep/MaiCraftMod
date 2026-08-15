@@ -298,3 +298,180 @@ final class PublicToolCatalog {
         boolean sequence = "maicraft:sequence".equals(ability);
         if (sequence && children.isEmpty()) throw bad("maicraft:sequence requires at least one child");
         if (!sequence && !children.isEmpty()) throw bad("only maicraft:sequence may contain children");
+        if (sequence && !goal.getAsJsonObject("parameters").entrySet().isEmpty()) {
+            throw bad("maicraft:sequence does not accept parameters");
+        }
+    }
+
+    private static void validateTarget(JsonObject target) {
+        only(target, "kind", "label", "position", "relation");
+        String kind = string(target, "kind", 1, 32, false);
+        if (!TARGET_KINDS.contains(kind)) throw bad("target kind has an unsupported value");
+        nullableString(target, "label", 1, 160);
+        nullableString(target, "relation", 1, 120);
+        boolean hasPosition = present(target, "position");
+        if (hasPosition) {
+            JsonObject position = object(target, "position");
+            only(position, "x", "y", "z", "dimension");
+            integer(position, "x", Integer.MIN_VALUE, Integer.MAX_VALUE);
+            integer(position, "y", Integer.MIN_VALUE, Integer.MAX_VALUE);
+            integer(position, "z", Integer.MIN_VALUE, Integer.MAX_VALUE);
+            nullableResource(position, "dimension");
+        }
+        if ("coordinates".equals(kind) != hasPosition) {
+            throw bad("position is required only for a coordinates target");
+        }
+        boolean hasLabel = present(target, "label");
+        if (!Set.of("current_place", "coordinates", "prior_result").contains(kind) && !hasLabel) {
+            throw bad("this target kind requires label");
+        }
+        if ("prior_result".equals(kind) && !present(target, "relation")) {
+            throw bad("prior_result requires relation");
+        }
+    }
+
+    private static void validateConstraint(JsonObject constraint) {
+        only(constraint, "kind", "description", "hard", "parameters");
+        defaults(constraint, "hard", true, "parameters", new JsonObject());
+        resource(string(constraint, "kind", 1, 256, false), "constraint kind");
+        string(constraint, "description", 1, 300, false);
+        if (!constraint.get("hard").isJsonPrimitive() || !constraint.getAsJsonPrimitive("hard").isBoolean()) {
+            throw bad("hard must be a boolean");
+        }
+        object(constraint, "parameters");
+    }
+
+    private static JsonObject tool(String name, String description, JsonObject inputSchema, JsonObject annotations) {
+        JsonObject tool = new JsonObject();
+        tool.addProperty("name", name);
+        tool.addProperty("description", description);
+        tool.add("inputSchema", inputSchema);
+        tool.add("annotations", annotations);
+        return tool;
+    }
+
+    private static JsonObject annotations(boolean readOnly, boolean destructive, boolean idempotent) {
+        JsonObject value = new JsonObject();
+        value.addProperty("readOnlyHint", readOnly);
+        value.addProperty("destructiveHint", destructive);
+        value.addProperty("idempotentHint", idempotent);
+        value.addProperty("openWorldHint", true);
+        return value;
+    }
+
+    private static JsonObject schema(String json) {
+        return JsonParser.parseString(json).getAsJsonObject();
+    }
+
+    private static JsonObject goalSchema(String json) {
+        JsonObject result = schema(json);
+        result.add("$defs", GOAL_DEFINITIONS.deepCopy());
+        return result;
+    }
+
+    private static void defaults(JsonObject object, Object... pairs) {
+        for (int i = 0; i < pairs.length; i += 2) {
+            String key = (String) pairs[i];
+            if (!object.has(key)) {
+                Object value = pairs[i + 1];
+                if (value instanceof String text) object.addProperty(key, text);
+                else if (value instanceof Number number) object.addProperty(key, number);
+                else if (value instanceof Boolean bool) object.addProperty(key, bool);
+                else object.add(key, ((JsonElement) value).deepCopy());
+            }
+        }
+    }
+
+    private static void only(JsonObject object, String... allowed) {
+        Set<String> names = Set.of(allowed);
+        object.keySet().forEach(key -> {
+            if (!names.contains(key)) throw bad("unexpected field: " + key);
+        });
+    }
+
+    private static void require(JsonObject object, String key) {
+        if (!present(object, key)) throw bad(key + " is required");
+    }
+
+    private static boolean present(JsonObject object, String key) {
+        return object.has(key) && !object.get(key).isJsonNull();
+    }
+
+    private static JsonObject object(JsonObject parent, String key) {
+        require(parent, key);
+        return asObject(parent.get(key), key);
+    }
+
+    private static JsonObject asObject(JsonElement value, String label) {
+        if (!value.isJsonObject()) throw bad(label + " must be an object");
+        return value.getAsJsonObject();
+    }
+
+    private static JsonArray array(JsonObject parent, String key, int max) {
+        require(parent, key);
+        if (!parent.get(key).isJsonArray()) throw bad(key + " must be an array");
+        JsonArray value = parent.getAsJsonArray(key);
+        if (value.size() > max) throw bad(key + " has too many entries");
+        return value;
+    }
+
+    private static String string(JsonObject object, String key, int min, int max, boolean nullable) {
+        if (!object.has(key)) throw bad(key + " is required");
+        JsonElement element = object.get(key);
+        if (element.isJsonNull() && nullable) return null;
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+            throw bad(key + " must be a string");
+        }
+        String value = element.getAsString();
+        if (value.length() < min || value.length() > max) throw bad(key + " has an invalid length");
+        return value;
+    }
+
+    private static void nullableString(JsonObject object, String key, int min, int max) {
+        if (object.has(key) && !object.get(key).isJsonNull()) string(object, key, min, max, false);
+    }
+
+    private static int integer(JsonObject object, String key, int min, int max) {
+        require(object, key);
+        JsonElement element = object.get(key);
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+            throw bad(key + " must be an integer");
+        }
+        try {
+            int value = element.getAsBigDecimal().intValueExact();
+            if (value < min || value > max) throw bad(key + " is outside the accepted range");
+            return value;
+        } catch (ArithmeticException exception) {
+            throw bad(key + " must be an integer");
+        }
+    }
+
+    private static void nullableResource(JsonObject object, String key) {
+        if (object.has(key) && !object.get(key).isJsonNull()) {
+            resource(string(object, key, 1, 256, false), key);
+        }
+    }
+
+    private static void nullableUuid(JsonObject object, String key) {
+        if (object.has(key) && !object.get(key).isJsonNull()) {
+            uuid(string(object, key, 36, 36, false), key);
+        }
+    }
+
+    private static void resource(String value, String label) {
+        if (!RESOURCE_ID.matcher(value).matches()) throw bad(label + " must be a namespaced resource identifier");
+    }
+
+    private static void uuid(String value, String label) {
+        if (!CANONICAL_UUID.matcher(value).matches()) throw bad(label + " must be a canonical lowercase UUID");
+        try {
+            UUID.fromString(value);
+        } catch (IllegalArgumentException exception) {
+            throw bad(label + " must be a valid UUID");
+        }
+    }
+
+    private static IllegalArgumentException bad(String message) {
+        return new IllegalArgumentException(message);
+    }
+}
