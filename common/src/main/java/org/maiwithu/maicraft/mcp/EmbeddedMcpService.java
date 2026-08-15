@@ -298,3 +298,303 @@ public final class EmbeddedMcpService implements AutoCloseable {
         sendJson(exchange, 200, success(id, result), session);
     }
 
+    private JsonElement dispatch(
+            Session session, String method, JsonElement rawParams, JsonElement requestId) {
+        return switch (method) {
+            case "ping" -> new JsonObject();
+            case "tools/list" -> listTools();
+            case "tools/call" -> callTool(session, optionalObject(rawParams), requestId);
+            case "resources/list" -> listResources();
+            case "resources/read" -> readResource(optionalObject(rawParams));
+            case "resources/subscribe" -> subscribeResource(session, optionalObject(rawParams));
+            case "resources/unsubscribe" -> unsubscribeResource(session, optionalObject(rawParams));
+            default -> throw new RpcException(-32601, "Method not found");
+        };
+    }
+
+    private JsonObject listTools() {
+        JsonObject result = new JsonObject();
+        result.add("tools", PublicToolCatalog.definitions());
+        return result;
+    }
+
+    private JsonObject callTool(Session session, JsonObject params, JsonElement requestId) {
+        only(params, "name", "arguments", "_meta");
+        optionalMeta(params);
+        String name = requiredString(params, "name");
+        if (!PublicToolCatalog.contains(name)) throw new RpcException(-32602, "Unknown tool");
+
+        JsonObject arguments;
+        try {
+            arguments = PublicToolCatalog.validateAndNormalize(name, params.get("arguments"));
+        } catch (IllegalArgumentException exception) {
+            return toolError("invalid_arguments", message(exception), true, true, null);
+        }
+
+        String requestKey = null;
+        if (PublicToolCatalog.EXECUTE.equals(name)) {
+            requestKey = nullableString(arguments, "request_key");
+            if (requestKey == null) {
+                requestKey = automaticRequestKey(session, requestId, arguments);
+                arguments.addProperty("request_key", requestKey);
+            }
+        }
+
+        CompletionStage<JsonElement> stage = null;
+        try {
+            stage = switch (name) {
+                case PublicToolCatalog.PERCEIVE -> runtime.perceive(arguments);
+                case PublicToolCatalog.PLAN -> runtime.plan(arguments);
+                case PublicToolCatalog.EXECUTE -> runtime.execute(arguments);
+                case PublicToolCatalog.TASK -> runtime.task(arguments);
+                default -> throw new IllegalStateException("unreachable tool dispatch");
+            };
+            JsonElement value = await(stage, requestTimeout(name, arguments));
+            return toolResult(value, false);
+        } catch (TimeoutException exception) {
+            RuntimeFacade.CancellationDisposition cancellation = cancelRuntimeCall(stage);
+            boolean mutating = mutatesSemanticState(name, arguments);
+            boolean outcomeKnown = !mutating || cancellation
+                    == RuntimeFacade.CancellationDisposition.CANCELLED_BEFORE_START
+                    || cancellation == RuntimeFacade.CancellationDisposition.CANCELLED_WHILE_WAITING;
+            String message = outcomeKnown
+                    ? "The request timed out before it could change semantic or game state."
+                    : "The request started before the transport timed out, so its outcome is unknown.";
+            return toolError("runtime_timeout", message, true, outcomeKnown, requestKey);
+        } catch (InterruptedException exception) {
+            RuntimeFacade.CancellationDisposition cancellation = cancelRuntimeCall(stage);
+            Thread.currentThread().interrupt();
+            boolean mutating = mutatesSemanticState(name, arguments);
+            boolean outcomeKnown = !mutating || cancellation
+                    == RuntimeFacade.CancellationDisposition.CANCELLED_BEFORE_START
+                    || cancellation == RuntimeFacade.CancellationDisposition.CANCELLED_WHILE_WAITING;
+            return toolError("transport_stopping",
+                    outcomeKnown
+                            ? "The MCP transport stopped before the request began."
+                            : "The transport stopped after the request began; its outcome is unknown.",
+                    true, outcomeKnown, requestKey);
+        } catch (Exception exception) {
+            Throwable failure = unwrap(exception);
+            if (failure instanceof SemanticContractException violation) {
+                return semanticContractError(violation, requestKey);
+            }
+            boolean outcomeKnown = !mutatesSemanticState(name, arguments);
+            return toolError("runtime_error", message(failure), true,
+                    outcomeKnown, requestKey);
+        }
+    }
+
+    private JsonObject listResources() {
+        JsonObject resource = new JsonObject();
+        resource.addProperty("uri", ATTENTION_URI.toString());
+        resource.addProperty("name", "Important events");
+        resource.addProperty("description", "Decision-relevant events emitted by the active game runtime.");
+        resource.addProperty("mimeType", "application/json");
+        JsonArray resources = new JsonArray();
+        resources.add(resource);
+        JsonObject result = new JsonObject();
+        result.add("resources", resources);
+        return result;
+    }
+
+    private JsonObject readResource(JsonObject params) {
+        only(params, "uri", "_meta");
+        optionalMeta(params);
+        requireAttentionUri(params);
+        CompletionStage<JsonElement> stage = runtime.readAttention();
+        try {
+            JsonElement snapshot = await(stage, config.requestTimeout());
+            JsonObject content = new JsonObject();
+            content.addProperty("uri", ATTENTION_URI.toString());
+            content.addProperty("mimeType", "application/json");
+            content.addProperty("text", GSON.toJson(nonNull(snapshot)));
+            JsonArray contents = new JsonArray();
+            contents.add(content);
+            JsonObject result = new JsonObject();
+            result.add("contents", contents);
+            return result;
+        } catch (TimeoutException exception) {
+            cancelRuntimeCall(stage);
+            throw new RpcException(-32001, "The game runtime did not respond before the MCP timeout");
+        } catch (InterruptedException exception) {
+            cancelRuntimeCall(stage);
+            Thread.currentThread().interrupt();
+            throw new RpcException(-32001, "The MCP transport stopped while reading attention");
+        } catch (Exception exception) {
+            throw new RpcException(-32603, message(unwrap(exception)));
+        }
+    }
+
+    private JsonObject subscribeResource(Session session, JsonObject params) {
+        only(params, "uri", "_meta");
+        optionalMeta(params);
+        requireAttentionUri(params);
+        session.attentionSubscribed.set(true);
+        return new JsonObject();
+    }
+
+    private JsonObject unsubscribeResource(Session session, JsonObject params) {
+        only(params, "uri", "_meta");
+        optionalMeta(params);
+        requireAttentionUri(params);
+        session.attentionSubscribed.set(false);
+        return new JsonObject();
+    }
+
+    private void handleGet(HttpExchange exchange) throws IOException {
+        String accept = exchange.getRequestHeaders().getFirst("Accept");
+        if (accept == null || !accept.contains("text/event-stream")) {
+            exchange.getResponseHeaders().set("Allow", "POST, DELETE");
+            sendStatus(exchange, 405, "GET requires Accept: text/event-stream");
+            return;
+        }
+        Session session = requireSession(exchange);
+        if (session == null || !validVersionHeader(exchange, session)) return;
+
+        Headers headers = exchange.getResponseHeaders();
+        headers.set("Content-Type", "text/event-stream");
+        headers.set("Cache-Control", "no-cache, no-transform");
+        headers.set("Connection", "keep-alive");
+        headers.set(SESSION_HEADER, session.id);
+        headers.set(VERSION_HEADER, session.version);
+        exchange.sendResponseHeaders(200, 0);
+
+        SseConnection connection = new SseConnection(exchange, session::touch);
+        session.attach(connection);
+        try {
+            connection.writeLoop();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        } finally {
+            session.detach(connection);
+            connection.close();
+        }
+    }
+
+    private void handleDelete(HttpExchange exchange) throws IOException {
+        Session session = requireSession(exchange);
+        if (session == null || !validVersionHeader(exchange, session)) return;
+        sessions.remove(session.id, session);
+        session.close();
+        exchange.sendResponseHeaders(204, -1);
+        exchange.close();
+    }
+
+    private void publishAttentionUpdate() {
+        JsonObject params = new JsonObject();
+        params.addProperty("uri", ATTENTION_URI.toString());
+        JsonObject notification = new JsonObject();
+        notification.addProperty("jsonrpc", "2.0");
+        notification.addProperty("method", "notifications/resources/updated");
+        notification.add("params", params);
+
+        sessions.values().forEach(session -> {
+            // Resource notifications are advisory. Enqueue is a non-blocking,
+            // one-slot coalescing signal; the Minecraft/attention publication
+            // thread never writes, flushes, or closes a socket.
+            if (session.attentionSubscribed.get()) session.enqueue(notification);
+        });
+    }
+
+    private Session createSession(String negotiatedVersion) {
+        reapSessionsSafely();
+        Session created = new Session(UUID.randomUUID().toString(), negotiatedVersion);
+        sessions.put(created.id, created);
+        trimSessions();
+        return created;
+    }
+
+    private void reapSessionsSafely() {
+        try {
+            long now = System.nanoTime();
+            sessions.forEach((id, session) -> {
+                if (session.expired(now) && sessions.remove(id, session)) session.close();
+            });
+            trimSessions();
+        } catch (RuntimeException ignored) {
+            // Maintenance is best effort; one malformed/stale session must not
+            // cancel the periodic reaper.
+        }
+    }
+
+    private void trimSessions() {
+        int overflow = sessions.size() - MAX_SESSIONS;
+        if (overflow <= 0) return;
+        List<Session> oldest = new ArrayList<>(sessions.values());
+        oldest.sort(Comparator.comparingLong(Session::lastActivityNanos));
+        for (Session session : oldest) {
+            if (overflow-- <= 0) break;
+            if (sessions.remove(session.id, session)) session.close();
+        }
+    }
+
+    private Session requireSession(HttpExchange exchange) throws IOException {
+        String id = exchange.getRequestHeaders().getFirst(SESSION_HEADER);
+        if (id == null || id.isBlank()) {
+            sendStatus(exchange, 400, "MCP session header is required");
+            return null;
+        }
+        Session session = sessions.get(id);
+        if (session == null || session.closed.get()) {
+            sendStatus(exchange, 404, "Unknown or expired MCP session");
+            return null;
+        }
+        session.touch();
+        return session;
+    }
+
+    private boolean validVersionHeader(HttpExchange exchange, Session session) throws IOException {
+        String supplied = exchange.getRequestHeaders().getFirst(VERSION_HEADER);
+        String effective = supplied == null ? "2025-03-26" : supplied;
+        if (!SUPPORTED_VERSIONS.contains(effective)) {
+            sendStatus(exchange, 400, "Unsupported MCP protocol version");
+            return false;
+        }
+        // A missing header has the compatibility meaning defined by the transport.
+        if (supplied != null && !session.version.equals(supplied)) {
+            sendStatus(exchange, 400, "MCP protocol version does not match the session");
+            return false;
+        }
+        return true;
+    }
+
+    private String readBody(HttpExchange exchange) throws IOException {
+        String lengthHeader = exchange.getRequestHeaders().getFirst("Content-Length");
+        if (lengthHeader != null) {
+            try {
+                if (Long.parseLong(lengthHeader) > config.maxRequestBytes()) {
+                    throw new PayloadTooLargeException("MCP request body is too large");
+                }
+            } catch (NumberFormatException exception) {
+                throw new IllegalArgumentException("Invalid Content-Length", exception);
+            }
+        }
+        try (InputStream input = exchange.getRequestBody();
+             ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(config.maxRequestBytes(), 16_384))) {
+            byte[] buffer = new byte[8_192];
+            int total = 0;
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                total += read;
+                if (total > config.maxRequestBytes()) {
+                    throw new PayloadTooLargeException("MCP request body is too large");
+                }
+                output.write(buffer, 0, read);
+            }
+            return output.toString(StandardCharsets.UTF_8);
+        }
+    }
+
+    private boolean authenticated(String authorization) {
+        if (config.bearerToken().isBlank()) return true;
+        if (authorization == null || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) return false;
+        byte[] expected = config.bearerToken().getBytes(StandardCharsets.UTF_8);
+        byte[] supplied = authorization.substring(7).trim().getBytes(StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(expected, supplied);
+    }
+
+    private boolean validOrigin(String origin) {
+        if (origin == null || origin.isBlank()) return true;
+        try {
+            URI uri = URI.create(origin);
+            String scheme = uri.getScheme();
