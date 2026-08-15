@@ -9,6 +9,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.pathing.cache.PathCaches;
 import org.maiwithu.maicraft.core.scan.BlockSearch;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
@@ -70,6 +71,7 @@ public final class ClientRuntime {
             bodyPresent = true;
             BlockSearch.tick(context.level());
             TargetIndex.clientTick(context.level());
+            Ae2ResourceSupply.observeNearbyAccess(context.player());
             GameplayAttentionMonitor.tick(context.player());
             IntentRuntime intents = IntentRuntime.get();
             intents.beforeBodyTick(minecraft);
