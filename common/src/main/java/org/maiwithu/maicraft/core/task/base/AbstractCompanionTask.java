@@ -61,6 +61,10 @@ import java.util.Map;
 public abstract class AbstractCompanionTask<R extends TaskRecord>
         implements Task {
 
+    /** A body task may run indefinitely while its navigator keeps making verified progress. */
+    private static final long NAV_PROGRESS_LEASE_TICKS = 30L * 20L;
+    private static final int NAV_PROGRESS_GRACE_TICKS = 100;
+
     /** The body this task drives. */
     protected final LocalPlayer player;
     /** The typed input record for this task. */
@@ -138,6 +142,8 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         // 冻结,任务会在第一次搜索返回前就被判 TIMEOUT。
         if (nav != null && nav.planningInFlight()) {
             r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+        } else if (nav != null && nav.hasRecentPhysicalProgress(NAV_PROGRESS_GRACE_TICKS)) {
+            r.extendDeadlineTo(player.level().getGameTime() + NAV_PROGRESS_LEASE_TICKS);
         }
         try {
             return onTick();
@@ -268,10 +274,15 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
 
     /** Stop and forget the active nav (idempotent); its terrain ledger joins the task's journey. */
     protected void stopNav() {
-        if (nav != null) {
-            journey.addAll(nav.ledger());
-            nav.stop();
-            nav = null;
+        PlayerNav active = nav;
+        nav = null;
+        if (active == null) return;
+        try {
+            journey.addAll(active.ledger());
+        } finally {
+            // Releasing the body and cancelling in-flight path work is the invariant;
+            // a broken accounting receipt must never keep a navigation alive.
+            active.stop();
         }
     }
 
