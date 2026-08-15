@@ -7,7 +7,9 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -23,6 +25,9 @@ public final class IntentTaskRecord extends TaskRecord {
     private final String bindingKey;
     private final List<StepSnapshot> stepResults = new ArrayList<>();
     private final List<AttemptSnapshot> attempts = new ArrayList<>();
+    /** Opaque verified positions used only for semantic prior_result binding. */
+    private final LinkedHashMap<Integer, Goal.WorldPosition> internalStepPositions =
+            new LinkedHashMap<>();
 
     private int stepIndex;
     private PauseSnapshot pause;
@@ -54,6 +59,7 @@ public final class IntentTaskRecord extends TaskRecord {
             List<Goal> steps,
             int stepIndex,
             List<StepSnapshot> stepResults,
+            Map<Integer, Goal.WorldPosition> internalStepPositions,
             List<AttemptSnapshot> attempts,
             DecisionSnapshot decision,
             DecisionAnswer pendingAnswer,
@@ -65,6 +71,13 @@ public final class IntentTaskRecord extends TaskRecord {
         record.steps.addAll(steps);
         record.stepIndex = stepIndex;
         record.stepResults.addAll(stepResults);
+        for (Map.Entry<Integer, Goal.WorldPosition> entry
+                : internalStepPositions.entrySet()) {
+            int index = entry.getKey();
+            if (index >= 0 && index < stepIndex && entry.getValue() != null) {
+                record.internalStepPositions.put(index, entry.getValue());
+            }
+        }
         record.attempts.addAll(attempts.stream().skip(
                 Math.max(0, attempts.size() - MAX_ATTEMPTS)).toList());
         record.decision = decision;
@@ -89,6 +102,10 @@ public final class IntentTaskRecord extends TaskRecord {
     public int stepIndex() { return stepIndex; }
     public List<StepSnapshot> stepResults() { return List.copyOf(stepResults); }
     public List<AttemptSnapshot> attempts() { return List.copyOf(attempts); }
+    /** Persistence-only snapshot; the MCP facade deliberately never serializes this map. */
+    public Map<Integer, Goal.WorldPosition> internalPositionReceipts() {
+        return Map.copyOf(internalStepPositions);
+    }
     public PauseSnapshot pauseSnapshot() { return pause; }
     public DecisionSnapshot decisionSnapshot() { return decision; }
     public TerminalSnapshot terminalSnapshot() { return terminal; }
@@ -114,6 +131,22 @@ public final class IntentTaskRecord extends TaskRecord {
         stepResults.add(snapshot);
         stepIndex++;
         changed();
+    }
+
+    Goal.WorldPosition internalStepPosition(int index) {
+        return internalStepPositions.get(index);
+    }
+
+    void retainInternalStepPosition(int index, Goal.WorldPosition position) {
+        if (index < 0 || index >= steps.size() || position == null) {
+            throw new IllegalArgumentException("invalid internal semantic position receipt");
+        }
+        internalStepPositions.put(index, position);
+        changed();
+    }
+
+    void discardInternalStepPosition(int index) {
+        if (internalStepPositions.remove(index) != null) changed();
     }
 
     void addAttempt(AttemptSnapshot snapshot) {

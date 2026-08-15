@@ -174,7 +174,7 @@ public final class SemanticAbilityCatalog {
                             field("allow_rare_consumables", "boolean", "Explicitly permits the real ender-pearl use required for End Gateway traversal; default false."),
                             field("protected_labels", "array<string>", "Remembered areas or possessions that must not be touched.")));
             case "maicraft:craft" -> contract(
-                    "Craft an item. Recipe choice, GUI slots and intermediate ingredients belong to MaiCraft.",
+                    "Craft an item. Recipe choice, intermediate ingredients, workstation approach or bounded crafting-table preparation, placement and GUI slots belong to MaiCraft.",
                     targets("nearest", "prior_result"),
                     fields(
                             field("item_id", "resource_id", "Requested output."),
@@ -227,12 +227,12 @@ public final class SemanticAbilityCatalog {
                             field("preferred_materials", "array<resource_id>", "Palette preferences, never per-cell assignments."),
                             field("replace_existing", "boolean", "Explicit permission to replace occupied cells; default false.")));
             case "maicraft:light_area" -> contract(
-                    "Observe, construct and verify actual block-light coverage over a bounded loaded semantic area.",
+                    "Discover a semantic area's connected block boundary, construct lighting and verify actual block-light coverage.",
                     targets("area", "landmark", "coordinates", "current_place", "prior_result"),
                     fields(
-                            field("radius", "integer", "Bounded area radius; default 16."),
+                            field("radius", "integer", "Optional explicit player-authored geometric boundary. Do not invent one; when omitted MaiCraft progressively closes the connected component from the semantic landmark seed."),
                             field("minimum_light", "integer", "Required observed block-light threshold, 1-15."),
-                            field("coverage", "string", "All, most, crop_growth or player_visibility; defines which observed cells count."),
+                            field("coverage", "string", "All, most, crop_growth or player_visibility; defines which observed cells count. Use crop_growth for a cultivated farm so farmland/crops, not open terrain, define its component."),
                             field("block_id", "resource_id", "Optional preferred light-source item/block, never a placement instruction."),
                             field("light_preferences", "array<resource_id>", "Ordered aesthetic source preferences; carried alternatives remain usable."),
                             field("material_policy", "string", "Ordinary, storage_available or inventory_only; storage is inspected before automatic crafting."),
@@ -240,6 +240,7 @@ public final class SemanticAbilityCatalog {
                             field("allow_harm", "boolean", "Explicit harmful acquisition permission; false unless the player grants it."),
                             field("protected_labels", "array<string>", "Remembered areas/possessions that placement must not touch."),
                             field("style", "string", "Auto, ground, wall, hanging or unobtrusive; MaiCraft still chooses cells."),
+                            field("max_placements", "integer", "Optional explicit total placement budget; omit it to let measured coverage and convergence end the task."),
                             field("placement_preference", "string", "Safe-candidate tie-break after measured coverage gain: coverage_optimal (default), central_unplanted (crop_growth only) or unobtrusive; MaiCraft still chooses cells.")));
             case "maicraft:connect_mechanical_power" -> contract(
                     "Connect two semantic mechanical networks while respecting axes, stress and protected terrain.",

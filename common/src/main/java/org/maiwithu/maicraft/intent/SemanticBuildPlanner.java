@@ -23,9 +23,9 @@ import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.StemBlock;
 import net.minecraft.world.level.block.TransparentBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 
 import java.util.ArrayList;
@@ -104,11 +104,32 @@ public final class SemanticBuildPlanner {
         }
 
         Goal.WorldPosition anchor = target(goal, player, runtime);
-        if (anchor == null) return decision(goal,
-                "The semantic target is unresolved, unloaded, or in another dimension.",
-                option("recover", "Travel semantically to load the intended area."),
-                option("replace_goal", "Choose current_place, loaded coordinates or a landmark."),
-                option("skip", "Skip this structure."), option("cancel", "Cancel the task."));
+        if (anchor == null) {
+            Goal.SemanticTarget semantic = goal.target();
+            boolean named = semantic != null
+                    && ("area".equals(semantic.kind()) || "landmark".equals(semantic.kind()));
+            IntentRuntime.Landmark landmark = named && semantic.label() != null
+                    ? runtime.landmark(semantic.label()) : null;
+            String message;
+            if (named && landmark == null) {
+                String label = semantic.label() == null || semantic.label().isBlank()
+                        ? "the requested named area" : "'" + semantic.label() + "'";
+                message = "Build target " + label + " is not remembered for this world. "
+                        + "MaiCraft refused to build near the player as a substitute.";
+            } else if (named) {
+                message = "The remembered build target belongs to another dimension. "
+                        + "MaiCraft refused to reinterpret it as a local site.";
+            } else if (semantic != null && "prior_result".equals(semantic.kind())) {
+                message = "Build target prior_result did not match one authoritative earlier "
+                        + "successful place. MaiCraft refused to guess a site.";
+            } else {
+                message = "The semantic build target is unresolved or unavailable.";
+            }
+            return decision(goal, message,
+                    option("recover", "Reach and remember a verifiable area; an arbitrary ownership label may need the player to identify it."),
+                    option("replace_goal", "Choose current_place, a same-dimension remembered label, or an authoritative prior_result."),
+                    option("skip", "Skip this structure."), option("cancel", "Cancel the task."));
+        }
 
         StyleProfile style = styleProfile(text(p, "style"), purpose);
         boolean waterfront = waterfront(purpose, features);
@@ -383,7 +404,7 @@ public final class SemanticBuildPlanner {
         int low = Integer.MAX_VALUE, high = Integer.MIN_VALUE;
         for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
             if (!loadedColumn(level, x, z, anchorY)) return null;
-            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            int y = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
             if (y <= level.getMinBuildHeight() + 4
                     || y + size.wallHeight() + 22 >= level.getMaxBuildHeight()) return null;
             BlockPos ground = new BlockPos(x, y - 1, z);
@@ -433,7 +454,7 @@ public final class SemanticBuildPlanner {
         for (int x = minX - 3; x <= maxX + 3; x++) for (int z = minZ - 3; z <= maxZ + 3; z++) {
             if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) continue;
             if (!loadedColumn(level, x, z, anchorY)) return false;
-            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            int y = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
             BlockPos surface = new BlockPos(x, y - 1, z);
             BlockState state = level.getBlockState(surface);
             if (!state.getFluidState().isEmpty()) {
@@ -1358,6 +1379,14 @@ public final class SemanticBuildPlanner {
         Set<String> raw = stringSet(element);
         Set<String> out = new LinkedHashSet<>(raw);
         if (out.remove("pier")) out.add("dock");
+        if (out.remove("interior_space")) out.add("interior");
+        if (out.remove("interior_spaces")) out.add("interior");
+        // Every generated occupiable structure already has these invariants. Treating ordinary
+        // language for them as an unsupported optional feature needlessly sends the goal back to
+        // the LLM even though no design choice or extra permission is required.
+        out.removeAll(Set.of(
+                "door", "doors", "entrance", "entrances",
+                "roof", "roofs", "floor", "floors", "walls"));
         return Set.copyOf(out);
     }
 

@@ -6,6 +6,8 @@ import com.google.gson.JsonParser;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskDispatch;
 import org.maiwithu.maicraft.task.TaskFactory;
@@ -37,7 +39,11 @@ final class IntentTask implements Task {
             "button", "click", "clicks", "slot", "slots", "inventory_slots",
             "slot_clicks", "click_sequence", "route", "waypoints", "path_nodes",
             "block_ops", "placements", "cells", "continuation_token",
-            "continuation_prefix_hash");
+            "continuation_prefix_hash", "verified_position", "failure_position",
+            "final_position", "site_min", "site_max", "remaining_scaffolds",
+            "origin", "observed_loaded_bounds", "explored_centers",
+            "observed_unloaded_frontier_samples", "failed_legs",
+            "x", "y", "z", "position", "center", "location", "destination", "bounds");
 
     private final LocalPlayer player;
     private final IntentTaskRecord record;
@@ -53,9 +59,6 @@ final class IntentTask implements Task {
     private long childSerial;
     /** Opaque one-use receipts stay inside the Mod; the model only chooses semantic retry. */
     private final Map<String, UUID> mechanicalContinuations = new LinkedHashMap<>();
-    /** Verified positions retained inside the semantic parent, never rendered into tool results. */
-    private final Map<Integer, Goal.WorldPosition> internalStepPositions = new LinkedHashMap<>();
-
     IntentTask(LocalPlayer player, IntentTaskRecord record, IntentRuntime runtime) {
         this.player = player;
         this.record = record;
@@ -142,11 +145,9 @@ final class IntentTask implements Task {
         }
         if (action instanceof IntentAction.Remember remember) {
             runtime.remember(remember.label(), remember.position());
+            record.retainInternalStepPosition(record.stepIndex(), remember.position());
             completeStep(TaskResult.ok("remembered " + remember.label(),
-                    Map.of("label", remember.label(),
-                            "x", remember.position().x(),
-                            "y", remember.position().y(),
-                            "z", remember.position().z())));
+                    Map.of("label", remember.label())));
             return afterImmediate();
         }
         if (action instanceof IntentAction.Wait nextWait) {
@@ -236,24 +237,28 @@ final class IntentTask implements Task {
     }
 
     private TaskState finishChild() {
-        TaskState state = childRecord.getState();
+        Task finishingChild = child;
+        TaskRecord finishingRecord = childRecord;
+        TaskState state = finishingRecord.getState();
         TaskResult result;
         try {
-            result = child.result(state);
+            result = finishingChild.result(state);
         } catch (RuntimeException exception) {
             result = TaskResult.fail("child result failed: " + safeMessage(exception));
             state = TaskState.FAILED;
+        } finally {
+            releaseBody();
+            if (child == finishingChild) clearChild();
         }
         if (result == null) result = defaultResult(state);
         InternalPositionReceipt.Position internalPosition = result.success()
-                && childRecord instanceof InternalPositionReceipt receipt
+                && finishingRecord instanceof InternalPositionReceipt receipt
                 ? receipt.internalVerifiedPosition() : null;
         if (internalPosition != null) {
-            internalStepPositions.put(record.stepIndex(), new Goal.WorldPosition(
+            record.retainInternalStepPosition(record.stepIndex(), new Goal.WorldPosition(
                     internalPosition.x(), internalPosition.y(), internalPosition.z(),
                     internalPosition.dimension()));
         }
-        clearChild();
         if (!result.success()) {
             return failStep(state, result);
         }
@@ -287,11 +292,11 @@ final class IntentTask implements Task {
                     currentGoal(), safeMessage(exception)));
         }
         if ("recover".equals(answer.choice())) {
-            internalStepPositions.remove(record.stepIndex());
+            record.discardInternalStepPosition(record.stepIndex());
             record.insertRecovery(semanticGoal);
             runtime.semanticPlanChanged(record, semanticGoal, false);
         } else {
-            internalStepPositions.remove(record.stepIndex());
+            record.discardInternalStepPosition(record.stepIndex());
             record.replaceCurrent(semanticGoal);
             runtime.semanticPlanChanged(record, semanticGoal, true);
         }
@@ -301,7 +306,7 @@ final class IntentTask implements Task {
     private TaskState failStep(TaskState state, TaskResult result) {
         TaskState failureState = state == null ? TaskState.FAILED : state;
         // A failed/abandoned execution can never authorize a later prior_result binding.
-        internalStepPositions.remove(record.stepIndex());
+        record.discardInternalStepPosition(record.stepIndex());
         captureMechanicalContinuation(currentGoal(), result);
         TaskResult failure = semanticResult(
                 result == null ? TaskResult.fail("internal action failed") : result);
@@ -411,7 +416,7 @@ final class IntentTask implements Task {
         for (int index = completed.size() - 1; index >= 0; index--) {
             IntentTaskRecord.StepSnapshot step = completed.get(index);
             if (!step.success()) continue;
-            Goal.WorldPosition internal = internalStepPositions.get(step.index());
+            Goal.WorldPosition internal = record.internalStepPosition(step.index());
             if (internal != null) {
                 Goal sourceGoal = step.index() >= 0 && step.index() < record.steps().size()
                         ? record.steps().get(step.index()) : null;
@@ -538,18 +543,43 @@ final class IntentTask implements Task {
 
     @Override
     public void stop(LocalPlayer ignored, StopReason reason) {
-        if (child == null) return;
-        try {
-            child.stop(player, reason);
-        } catch (RuntimeException ignoredFailure) {
+        Task stoppingChild = child;
+        TaskRecord stoppingRecord = childRecord;
+        if (stoppingChild == null) {
+            releaseBody();
+            return;
         }
-        if (reason != StopReason.PREEMPTED) {
-            if (!childRecord.getState().isTerminal()) childRecord.setState(TaskState.CANCELLED);
+        if (reason == StopReason.PREEMPTED) {
             try {
-                childRecord.setResult(child.result(childRecord.getState()));
+                stoppingChild.stop(player, reason);
             } catch (RuntimeException ignoredFailure) {
+                // The logical child is deliberately retained for resume.
+            } finally {
+                releaseBody();
             }
-            clearChild();
+            return;
+        }
+
+        try {
+            try {
+                stoppingChild.stop(player, reason);
+            } catch (RuntimeException ignoredFailure) {
+                // result() below remains the authoritative logical cleanup path.
+            }
+            if (stoppingRecord != null && !stoppingRecord.getState().isTerminal()) {
+                stoppingRecord.setState(TaskState.CANCELLED);
+            }
+            try {
+                TaskState state = stoppingRecord == null
+                        ? TaskState.CANCELLED : stoppingRecord.getState();
+                TaskResult cleanupResult = stoppingChild.result(state);
+                if (stoppingRecord != null) stoppingRecord.setResult(cleanupResult);
+            } catch (RuntimeException ignoredFailure) {
+                // Physical release in finally must still run when logical cleanup is broken.
+            }
+        } finally {
+            releaseBody();
+            if (child == stoppingChild) clearChild();
         }
     }
 
@@ -620,8 +650,42 @@ final class IntentTask implements Task {
 
     private void abandonChildAfterUnexpectedFailure() {
         Task failed = child;
-        clearChild();
-        if (failed == null) return;
+        TaskRecord failedRecord = childRecord;
+        if (failed == null) {
+            releaseBody();
+            return;
+        }
+        try {
+            try {
+                failed.stop(player, StopReason.REPLACED);
+            } catch (RuntimeException ignoredFailure) {
+                // result() below still gets a chance to release logical resources.
+            }
+            TaskState cleanupState = TaskState.FAILED;
+            if (failedRecord != null) {
+                if (!failedRecord.getState().isTerminal()) failedRecord.setState(cleanupState);
+                cleanupState = failedRecord.getState();
+            }
+            try {
+                TaskResult cleanupResult = failed.result(cleanupState);
+                if (failedRecord != null && failedRecord.getResult() == null) {
+                    failedRecord.setResult(cleanupResult);
+                }
+            } catch (RuntimeException ignoredFailure) {
+                // Recovery must remain available even when child cleanup itself is broken.
+            }
+        } finally {
+            releaseBody();
+            if (child == failed) clearChild();
+        }
+    }
+
+    /** Terminal body release is idempotent and must survive either half failing. */
+    private void releaseBody() {
+        try {
+            InputDriver.halt(player);
+        } catch (RuntimeException ignoredFailure) {
+        }
         try {
             ClientRuntime.requireContext(player).body().releaseAll();
         } catch (RuntimeException ignoredFailure) {
