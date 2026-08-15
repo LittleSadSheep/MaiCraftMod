@@ -598,3 +598,303 @@ public final class EmbeddedMcpService implements AutoCloseable {
         try {
             URI uri = URI.create(origin);
             String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (scheme == null || host == null
+                    || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+                return false;
+            }
+            String literal = host.toLowerCase(Locale.ROOT);
+            if (literal.length() > 2 && literal.charAt(0) == '['
+                    && literal.charAt(literal.length() - 1) == ']') {
+                literal = literal.substring(1, literal.length() - 1);
+            }
+            return "localhost".equals(literal)
+                    || "127.0.0.1".equals(literal)
+                    || "::1".equals(literal);
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    private void installShutdownHook() {
+        Thread hook = new Thread(this::stop, "maicraft-mcp-shutdown");
+        hook.setDaemon(true);
+        Runtime.getRuntime().addShutdownHook(hook);
+        shutdownHook = hook;
+    }
+
+    private void removeShutdownHook() {
+        Thread hook = shutdownHook;
+        shutdownHook = null;
+        if (hook == null || hook == Thread.currentThread()) return;
+        try {
+            Runtime.getRuntime().removeShutdownHook(hook);
+        } catch (IllegalStateException ignored) {
+            // The JVM is already shutting down and will finish this hook normally.
+        }
+    }
+
+    private static JsonObject toolResult(JsonElement value, boolean isError) {
+        JsonElement payload = nonNull(value);
+        String text = GSON.toJson(payload);
+        JsonObject contentItem = new JsonObject();
+        contentItem.addProperty("type", "text");
+        contentItem.addProperty("text", text);
+        JsonArray content = new JsonArray();
+        content.add(contentItem);
+
+        JsonObject result = new JsonObject();
+        result.add("content", content);
+        JsonObject structured = payload.isJsonObject() ? payload.getAsJsonObject() : new JsonObject();
+        if (!payload.isJsonObject()) structured.add("value", payload);
+        result.add("structuredContent", structured);
+        result.addProperty("isError", isError);
+        return result;
+    }
+
+    private static JsonObject toolError(
+            String code, String message, boolean retryable, boolean outcomeKnown, String requestKey) {
+        return toolError(code, message, retryable, outcomeKnown, requestKey, null);
+    }
+
+    private static JsonObject toolError(
+            String code, String message, boolean retryable, boolean outcomeKnown,
+            String requestKey, JsonObject details) {
+        JsonObject error = new JsonObject();
+        error.addProperty("code", code);
+        error.addProperty("message", message);
+        error.addProperty("retryable", retryable);
+        error.addProperty("outcome_known", outcomeKnown);
+        if (requestKey != null) error.addProperty("request_key", requestKey);
+        if (details != null) {
+            details.entrySet().forEach(entry ->
+                    error.add(entry.getKey(), entry.getValue().deepCopy()));
+        }
+
+        JsonArray suggestions = new JsonArray();
+        if (!outcomeKnown) {
+            if (requestKey != null) {
+                JsonObject query = new JsonObject();
+                query.addProperty("tool", PublicToolCatalog.TASK);
+                JsonObject arguments = new JsonObject();
+                arguments.addProperty("action", "list");
+                arguments.addProperty("request_key", requestKey);
+                query.add("arguments", arguments);
+                suggestions.add(query);
+            } else {
+                suggestions.add("Query current task and world state before deciding whether to retry.");
+            }
+        } else if (retryable) {
+            suggestions.add("Re-observe current facts, then retry with the same request_key when present.");
+        }
+        error.add("suggested_actions", suggestions);
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("success", false);
+        payload.add("error", error);
+        return toolResult(payload, true);
+    }
+
+    private static JsonObject semanticContractError(
+            SemanticContractException violation, String requestKey) {
+        JsonObject details = new JsonObject();
+        details.addProperty("violation", violation.violationCode());
+        details.addProperty("path", violation.path());
+        details.addProperty("ability", violation.ability());
+        return toolError("invalid_semantic_goal", violation.getMessage(),
+                true, true, requestKey, details);
+    }
+
+    private Duration requestTimeout(String toolName, JsonObject arguments) {
+        Duration base = config.requestTimeout();
+        if (PublicToolCatalog.PERCEIVE.equals(toolName)
+                && "attention".equals(nullableString(arguments, "view"))
+                && arguments.has("wait_ms")) {
+            return base.plusMillis(arguments.get("wait_ms").getAsLong());
+        }
+        return base;
+    }
+
+    private static boolean mutatesSemanticState(String toolName, JsonObject arguments) {
+        if (PublicToolCatalog.PERCEIVE.equals(toolName)) return false;
+        if (PublicToolCatalog.PLAN.equals(toolName) || PublicToolCatalog.EXECUTE.equals(toolName)) {
+            return true;
+        }
+        if (!PublicToolCatalog.TASK.equals(toolName)) return false;
+        String action = nullableString(arguments, "action");
+        return !("get".equals(action) || "list".equals(action));
+    }
+
+    private static RuntimeFacade.CancellationDisposition cancelRuntimeCall(
+            CompletionStage<JsonElement> stage) {
+        if (stage == null) return RuntimeFacade.CancellationDisposition.SETTLED;
+        if (stage instanceof RuntimeFacade.ManagedCall managed) return managed.cancelCall();
+        return stage.toCompletableFuture().cancel(false)
+                ? RuntimeFacade.CancellationDisposition.CANCELLED_BEFORE_START
+                : RuntimeFacade.CancellationDisposition.ALREADY_STARTED;
+    }
+
+    private static String automaticRequestKey(
+            Session session, JsonElement requestId, JsonObject normalizedArguments) {
+        JsonObject semanticArguments = normalizedArguments.deepCopy();
+        semanticArguments.remove("request_key");
+        String material = session.id + "\n" + GSON.toJson(idOrNull(requestId))
+                + "\n" + GSON.toJson(semanticArguments);
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(material.getBytes(StandardCharsets.UTF_8));
+            return "mcp-" + HexFormat.of().formatHex(digest, 0, 16);
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    private static JsonElement await(CompletionStage<JsonElement> stage, Duration timeout) throws Exception {
+        if (stage == null) throw new IllegalStateException("runtime returned no completion stage");
+        return nonNull(stage.toCompletableFuture().get(timeout.toMillis(), TimeUnit.MILLISECONDS));
+    }
+
+    private static Throwable unwrap(Throwable throwable) {
+        Throwable current = throwable;
+        while ((current instanceof CompletionException || current instanceof java.util.concurrent.ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private static String message(Throwable throwable) {
+        String value = throwable == null ? null : throwable.getMessage();
+        return value == null || value.isBlank() ? "Game runtime call failed" : value;
+    }
+
+    private static JsonElement nonNull(JsonElement element) {
+        return element == null ? JsonNull.INSTANCE : element;
+    }
+
+    private static JsonObject optionalObject(JsonElement element) {
+        if (element == null || element.isJsonNull()) return new JsonObject();
+        if (!element.isJsonObject()) throw new IllegalArgumentException("params must be an object");
+        return element.getAsJsonObject();
+    }
+
+    private static String requiredString(JsonObject object, String key) {
+        JsonElement value = object.get(key);
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+            throw new IllegalArgumentException(key + " must be a string");
+        }
+        return value.getAsString();
+    }
+
+    private static String nullableString(JsonObject object, String key) {
+        JsonElement value = object.get(key);
+        return value == null || value.isJsonNull() ? null : value.getAsString();
+    }
+
+    private static void optionalMeta(JsonObject params) {
+        JsonElement meta = params.get("_meta");
+        if (meta != null && !meta.isJsonNull() && !meta.isJsonObject()) {
+            throw new IllegalArgumentException("_meta must be an object");
+        }
+    }
+
+    private static void only(JsonObject object, String... names) {
+        Set<String> allowed = Set.of(names);
+        object.keySet().forEach(name -> {
+            if (!allowed.contains(name)) throw new IllegalArgumentException("unexpected parameter: " + name);
+        });
+    }
+
+    private static void requireAttentionUri(JsonObject params) {
+        if (!ATTENTION_URI.toString().equals(requiredString(params, "uri"))) {
+            throw new RpcException(-32002, "Resource not found");
+        }
+    }
+
+    private static JsonObject success(JsonElement id, JsonElement result) {
+        JsonObject response = new JsonObject();
+        response.addProperty("jsonrpc", "2.0");
+        response.add("id", idOrNull(id));
+        response.add("result", nonNull(result));
+        return response;
+    }
+
+    private static JsonObject error(JsonElement id, int code, String message) {
+        JsonObject body = new JsonObject();
+        body.addProperty("code", code);
+        body.addProperty("message", message);
+        JsonObject response = new JsonObject();
+        response.addProperty("jsonrpc", "2.0");
+        response.add("id", idOrNull(id));
+        response.add("error", body);
+        return response;
+    }
+
+    private static JsonElement idOrNull(JsonElement id) {
+        return id == null ? JsonNull.INSTANCE : id;
+    }
+
+    private static void sendJson(HttpExchange exchange, int status, JsonObject body, Session session) throws IOException {
+        byte[] bytes = GSON.toJson(body).getBytes(StandardCharsets.UTF_8);
+        Headers headers = exchange.getResponseHeaders();
+        headers.set("Content-Type", "application/json; charset=utf-8");
+        headers.set("Cache-Control", "no-store");
+        if (session != null) {
+            headers.set(SESSION_HEADER, session.id);
+            headers.set(VERSION_HEADER, session.version);
+        }
+        exchange.sendResponseHeaders(status, bytes.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(bytes);
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private static void sendStatus(HttpExchange exchange, int status, String message) throws IOException {
+        byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+        exchange.sendResponseHeaders(status, bytes.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(bytes);
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private static void sendStatusSafely(HttpExchange exchange, int status, String message) {
+        try {
+            sendStatus(exchange, status, message);
+        } catch (IOException ignored) {
+            exchange.close();
+        }
+    }
+
+    private static void closeQuietly(AutoCloseable closeable) {
+        if (closeable == null) return;
+        try {
+            closeable.close();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static final class Session {
+        private final String id;
+        private final String version;
+        private final AtomicBoolean attentionSubscribed = new AtomicBoolean();
+        private final AtomicBoolean initialized = new AtomicBoolean();
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final AtomicReference<SseConnection> connection = new AtomicReference<>();
+        private volatile long lastActivityNanos = System.nanoTime();
+
+        private Session(String id, String version) {
+            this.id = id;
+            this.version = version;
+        }
+
+        private void touch() {
+            lastActivityNanos = System.nanoTime();
+        }
+
+        private long lastActivityNanos() {
+            return lastActivityNanos;
