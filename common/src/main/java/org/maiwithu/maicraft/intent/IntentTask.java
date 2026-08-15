@@ -623,9 +623,8 @@ final class IntentTask implements Task {
         clearChild();
         if (failed == null) return;
         try {
-            failed.stop(player, StopReason.REPLACED);
+            ClientRuntime.requireContext(player).body().releaseAll();
         } catch (RuntimeException ignoredFailure) {
-            // Recovery must remain available even when child cleanup itself is broken.
         }
     }
 
@@ -736,6 +735,14 @@ final class IntentTask implements Task {
                 || key.endsWith("_routes")
                 || key.endsWith("_waypoints")
                 || key.endsWith("_path_nodes")
+                || key.endsWith("_position")
+                || key.endsWith("_center")
+                || key.endsWith("_location")
+                || key.endsWith("_destination")
+                || key.endsWith("_bounds")
+                || key.endsWith("_x")
+                || key.endsWith("_y")
+                || key.endsWith("_z")
                 || key.endsWith("_entity_id")
                 || key.endsWith("_entity_ids")
                 || key.endsWith("_runtime_id")
@@ -746,7 +753,14 @@ final class IntentTask implements Task {
         if (raw == null) return "";
         return raw
                 .replaceAll("(?i)entity\\s*#?\\s*\\d+", "selected entity")
-                .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target");
+                .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target")
+                .replaceAll(
+                        "(?i)(?:location\\s+)?x\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\s+z\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?(?:,?\\s*standing\\s+on\\s+the\\s+ground\\s+at\\s+y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?)?",
+                        "the internally verified location")
+                .replaceAll("(?<!\\d)-?\\d+\\s*,\\s*-?\\d+\\s*,\\s*-?\\d+(?!\\d)",
+                        "the internally verified location")
+                .replaceAll("(?i)\\b[xyz]\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?",
+                        "the internally verified coordinate");
     }
 
     @Override

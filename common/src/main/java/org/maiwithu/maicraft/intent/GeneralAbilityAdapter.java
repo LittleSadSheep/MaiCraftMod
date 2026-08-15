@@ -20,6 +20,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 
 import java.util.ArrayList;
@@ -444,6 +445,18 @@ public final class GeneralAbilityAdapter {
         ClientLevel level = player.clientLevel;
         Block block = BuiltInRegistries.BLOCK.get(id);
         BlockPos center = semanticCenter(goal, player, runtime);
+        if (center == null) {
+            Goal.SemanticTarget target = goal.target();
+            String label = target == null || target.label() == null
+                    ? "the requested semantic place" : "'" + target.label() + "'";
+            return decision(goal,
+                    "Block interaction target " + label + " is not an authoritative same-dimension "
+                            + "place. MaiCraft refused to search near the player as a substitute.",
+                    List.of(
+                            option("recover", "Reach and remember a verifiable place; an arbitrary ownership label may need the player to identify it."),
+                            option("replace_goal", "Use current_place, a same-dimension remembered label, or an authoritative prior_result."),
+                            option("cancel", "Cancel without interacting with a block.")), null);
+        }
         int radius = integer(goal.parameters(), "radius", 64, 4, 128);
         int chunkRadius = Math.max(1, (radius + 15) / 16);
         TargetIndex.Result query;
@@ -484,10 +497,10 @@ public final class GeneralAbilityAdapter {
         use.addProperty("y", target.getY());
         use.addProperty("z", target.getZ());
         if (itemId != null) use.addProperty("item_id", itemId);
-        if (player.getEyePosition().distanceToSqr(Vec3.atCenterOf(target)) <= 4.5D * 4.5D) {
+        if (hasLoadedInteractionLine(level, player, player.getEyePosition(), target)) {
             return new IntentAction.Tool("interact_at", use.toString());
         }
-        BlockPos stand = interactionStand(level, target, player.blockPosition());
+        BlockPos stand = interactionStand(level, player, target, player.blockPosition());
         if (stand == null) {
             JsonObject facts = new JsonObject();
             facts.addProperty("block_id", id.toString());
@@ -807,6 +820,8 @@ public final class GeneralAbilityAdapter {
     private static BlockPos semanticCenter(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         Goal.SemanticTarget target = goal.target();
         if (target == null) return player.blockPosition();
+        if ("current_place".equals(lower(target.kind()))
+                || "nearest".equals(lower(target.kind()))) return player.blockPosition();
         Goal.WorldPosition position = target.position();
         if (sameDimension(position, player)) return new BlockPos(position.x(), position.y(), position.z());
         String kind = lower(target.kind());
@@ -817,10 +832,11 @@ public final class GeneralAbilityAdapter {
                 return new BlockPos(at.x(), at.y(), at.z());
             }
         }
-        return player.blockPosition();
+        return null;
     }
 
-    private static BlockPos interactionStand(ClientLevel level, BlockPos target, BlockPos current) {
+    private static BlockPos interactionStand(
+            ClientLevel level, LocalPlayer player, BlockPos target, BlockPos current) {
         List<BlockPos> candidates = new ArrayList<>();
         for (int radius = 1; radius <= 3; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -829,7 +845,12 @@ public final class GeneralAbilityAdapter {
                     for (int dy = -2; dy <= 1; dy++) {
                         BlockPos feet = target.offset(dx, dy, dz);
                         if (isStandable(level, feet)
-                                && Vec3.atCenterOf(feet).distanceToSqr(Vec3.atCenterOf(target)) <= 4.5D * 4.5D) {
+                                && hasLoadedInteractionLine(
+                                        level,
+                                        player,
+                                        Vec3.atBottomCenterOf(feet)
+                                                .add(0.0D, player.getEyeHeight(), 0.0D),
+                                        target)) {
                             candidates.add(feet.immutable());
                         }
                     }
@@ -840,11 +861,24 @@ public final class GeneralAbilityAdapter {
     }
 
     private static boolean isStandable(ClientLevel level, BlockPos feet) {
+        if (!level.isLoaded(feet) || !level.isLoaded(feet.above())
+                || !level.isLoaded(feet.below())) return false;
         if (!level.getFluidState(feet).isEmpty() || !level.getFluidState(feet.above()).isEmpty()) return false;
         if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()) return false;
         if (!level.getBlockState(feet.above()).getCollisionShape(level, feet.above()).isEmpty()) return false;
         BlockPos support = feet.below();
         return level.getBlockState(support).isFaceSturdy(level, support, Direction.UP);
+    }
+
+    /**
+     * Candidate stances and the current-position shortcut must prove the same thing the eventual
+     * first-person crosshair will need: a loaded, full-reach OUTLINE ray accepted by the shared
+     * target policy. Distance alone is not interaction reach through a wall.
+     */
+    private static boolean hasLoadedInteractionLine(
+            ClientLevel level, LocalPlayer player, Vec3 eye, BlockPos target) {
+        return FirstPersonInteractionTargeting.hasLoadedReachLine(
+                level, player, eye, target, 4.5D);
     }
 
     private static String blockId(Goal goal, JsonObject p) {

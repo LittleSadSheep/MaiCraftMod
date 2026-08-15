@@ -42,11 +42,27 @@ public final class IntentRuntime {
     private static final int MAX_ATTENTION = 256;
     private static final int MAX_REQUEST_KEYS = 512;
     private static final int MAX_LANDMARKS = 256;
+    private static final int MAX_ATTENTION_ARRAY = 12;
+    private static final int MAX_ATTENTION_STRING = 1_024;
     private static final long SAVE_INTERVAL_NANOS = 5_000_000_000L;
     private static final Set<String> ATTENTION_INTERNAL_KEYS = Set.of(
             "entity_id", "entity_ids", "runtime_id", "runtime_ids",
             "slot", "slots", "click", "clicks", "route", "waypoints",
-            "path_nodes", "block_ops", "placements", "cells");
+            "path_nodes", "block_ops", "placements", "cells",
+            "x", "y", "z", "position", "center", "location", "destination", "bounds");
+    private static final Set<String> ATTENTION_RESULT_DATA_KEYS = Set.of(
+            "task_id", "failure_code", "failure_type", "requires_decision",
+            "requires_narration", "outcome_uncertain", "recoverable", "goal",
+            "item_ids", "required_final_count", "observed_final_count", "missing",
+            "allowed_sources", "achieved_coverage",
+            "required_coverage", "dark_cell_count", "site_verified",
+            "waterfront_required", "max_distance", "farthest_body_distance",
+            "target", "requested", "gathered", "confirmed_target_breaks", "scope",
+            "last_probe", "suggestions", "recovery_options", "decision", "recovery", "steps");
+    private static final Set<String> ATTENTION_ISSUE_FACT_KEYS = Set.of(
+            "failure_type", "recipe_id", "missing", "item_ids", "required_final_count",
+            "observed_final_count", "target", "requested",
+            "gathered", "confirmed_target_breaks", "candidate_count");
 
     private static final Set<String> CORE_ABILITIES = Set.of(
             "maicraft:remember_place",
@@ -342,7 +358,8 @@ public final class IntentRuntime {
                     IntentTaskRecord record = IntentTaskRecord.restored(
                             snapshot.id(), snapshot.planId(), snapshot.goal(),
                             stateIdentity.key(), snapshot.steps(), snapshot.stepIndex(),
-                            snapshot.completed(), snapshot.attempts(), snapshot.decision(),
+                            snapshot.completed(), snapshot.internalPositions(),
+                            snapshot.attempts(), snapshot.decision(),
                             snapshot.pendingAnswer(), snapshot.terminal(), gameTime);
                     record.bindDirty(this::markDirty);
                     if (tasks.putIfAbsent(record.externalId(), record) != null) {
@@ -547,7 +564,7 @@ public final class IntentRuntime {
             case CANCELLED -> "cancelled";
             default -> "failed";
         };
-        JsonObject data = result == null ? new JsonObject() : resultJson(result);
+        JsonObject data = result == null ? new JsonObject() : compactAttentionResult(resultJson(result));
         String message = result == null ? state.name().toLowerCase() : result.message();
         publish(type, record, message, data);
     }
@@ -577,18 +594,75 @@ public final class IntentRuntime {
     }
 
     private static JsonObject sanitizeAttentionContext(JsonObject source) {
-        JsonElement sanitized = sanitizeAttentionValue(source);
+        JsonObject compactSource = source.deepCopy();
+        if (compactSource.has("failure") && compactSource.get("failure").isJsonObject()) {
+            compactSource.add(
+                    "failure", compactAttentionResult(compactSource.getAsJsonObject("failure")));
+        }
+        JsonElement sanitized = sanitizeAttentionValue(compactSource);
         return sanitized != null && sanitized.isJsonObject()
                 ? sanitized.getAsJsonObject() : new JsonObject();
+    }
+
+    private static JsonObject compactAttentionResult(JsonObject source) {
+        JsonObject result = new JsonObject();
+        copyAttentionField(source, result, "success");
+        copyAttentionField(source, result, "message");
+        copyAttentionField(source, result, "timed_out");
+        copyAttentionField(source, result, "interrupted");
+        if (!source.has("data") || !source.get("data").isJsonObject()) return result;
+
+        JsonObject sourceData = source.getAsJsonObject("data");
+        JsonObject data = new JsonObject();
+        for (String key : ATTENTION_RESULT_DATA_KEYS) {
+            copyAttentionField(sourceData, data, key);
+        }
+        if (sourceData.has("issues") && sourceData.get("issues").isJsonArray()) {
+            JsonArray issues = new JsonArray();
+            JsonArray all = sourceData.getAsJsonArray("issues");
+            int from = Math.max(0, all.size() - 6);
+            for (int index = from; index < all.size(); index++) {
+                JsonElement value = all.get(index);
+                if (!value.isJsonObject()) continue;
+                JsonObject sourceIssue = value.getAsJsonObject();
+                JsonObject issue = new JsonObject();
+                copyAttentionField(sourceIssue, issue, "source");
+                copyAttentionField(sourceIssue, issue, "code");
+                copyAttentionField(sourceIssue, issue, "summary");
+                if (sourceIssue.has("facts") && sourceIssue.get("facts").isJsonObject()) {
+                    JsonObject facts = new JsonObject();
+                    for (String key : ATTENTION_ISSUE_FACT_KEYS) {
+                        copyAttentionField(sourceIssue.getAsJsonObject("facts"), facts, key);
+                    }
+                    if (facts.size() > 0) issue.add("facts", facts);
+                }
+                issues.add(issue);
+            }
+            if (issues.size() > 0) data.add("issues", issues);
+        }
+        if (data.size() > 0) result.add("data", data);
+        return result;
+    }
+
+    private static void copyAttentionField(JsonObject source, JsonObject target, String key) {
+        if (!source.has(key)) return;
+        JsonElement sanitized = sanitizeAttentionValue(source.get(key));
+        if (sanitized != null) target.add(key, sanitized);
     }
 
     private static JsonElement sanitizeAttentionValue(JsonElement value) {
         if (value == null || value.isJsonNull()) return null;
         if (value.isJsonArray()) {
             JsonArray clean = new JsonArray();
-            for (JsonElement element : value.getAsJsonArray()) {
+            JsonArray source = value.getAsJsonArray();
+            int copied = 0;
+            for (JsonElement element : source) {
+                if (copied >= MAX_ATTENTION_ARRAY) break;
                 JsonElement nested = sanitizeAttentionValue(element);
-                if (nested != null) clean.add(nested);
+                if (nested != null) {
+                    clean.add(nested);
+                    copied++;
+                }
             }
             return clean;
         }
@@ -602,9 +676,13 @@ public final class IntentRuntime {
             return clean;
         }
         if (value.getAsJsonPrimitive().isString()) {
-            return new JsonPrimitive(value.getAsString()
+            String sanitized = value.getAsString()
                     .replaceAll("(?i)entity\\s*#?\\s*\\d+", "selected entity")
-                    .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target"));
+                    .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target");
+            if (sanitized.length() > MAX_ATTENTION_STRING) {
+                sanitized = sanitized.substring(0, MAX_ATTENTION_STRING) + "...";
+            }
+            return new JsonPrimitive(sanitized);
         }
         return value.deepCopy();
     }
@@ -615,7 +693,11 @@ public final class IntentRuntime {
                 || key.endsWith("_cells") || key.endsWith("_ops")
                 || key.endsWith("_placements") || key.endsWith("_receipts")
                 || key.endsWith("_routes") || key.endsWith("_waypoints")
-                || key.endsWith("_path_nodes") || key.endsWith("_entity_id")
+                || key.endsWith("_path_nodes") || key.endsWith("_position")
+                || key.endsWith("_center") || key.endsWith("_location")
+                || key.endsWith("_destination") || key.endsWith("_bounds")
+                || key.endsWith("_x") || key.endsWith("_y") || key.endsWith("_z")
+                || key.endsWith("_entity_id")
                 || key.endsWith("_entity_ids") || key.endsWith("_runtime_id")
                 || key.endsWith("_runtime_ids");
     }

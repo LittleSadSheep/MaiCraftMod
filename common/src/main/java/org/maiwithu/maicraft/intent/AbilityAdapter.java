@@ -12,7 +12,7 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.levelgen.Heightmap;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 
 import java.util.List;
@@ -205,8 +205,8 @@ final class AbilityAdapter {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
                     int x = origin.getX() + dx;
                     int z = origin.getZ() + dz;
-                    int y = player.clientLevel.getHeight(
-                            Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                    int y = ClientSurfaceHeight.motionBlockingNoLeaves(
+                            player.clientLevel, x, z);
                     BlockPos foot = new BlockPos(x, y, z);
                     for (Direction facing : Direction.Plane.HORIZONTAL) {
                         BlockPos head = foot.relative(facing);
@@ -244,7 +244,21 @@ final class AbilityAdapter {
         } else {
             Goal.WorldPosition position = position(goal, player, runtime);
             if (position == null) {
-                String exploreTarget = exploreTarget(goal, runtime);
+                Goal.SemanticTarget semantic = goal.target();
+                if (isNamedPlace(semantic)) {
+                    return unresolvedNamedPlaceDecision(
+                            goal, semantic, player, runtime, "Travel");
+                }
+                if (semantic != null && "prior_result".equals(semantic.kind())) {
+                    return decision(goal,
+                            "Travel could not bind prior_result to one authoritative earlier successful place. "
+                                    + "MaiCraft refused to guess a destination or start an unrelated exploration.",
+                            List.of(
+                                    option("recover", "Provide details.goal to produce or remember the intended place first."),
+                                    option("replace_goal", "Use a remembered landmark, current_place, or an explicit coast/biome discovery goal."),
+                                    option("cancel", "Cancel without moving.")));
+                }
+                String exploreTarget = exploreTarget(goal);
                 if (exploreTarget == null) {
                     return decision(goal,
                             "Travel needs coordinates, a remembered landmark, block_id, coast, biome id or biome tag.",
@@ -409,7 +423,7 @@ final class AbilityAdapter {
         return new IntentAction.Tool("obtain_elytra", args.toString());
     }
 
-    private static String exploreTarget(Goal goal, IntentRuntime runtime) {
+    private static String exploreTarget(Goal goal) {
         String target = string(goal.parameters(), "semantic_target");
         if (target == null) target = string(goal.parameters(), "biome_id");
         if (target == null) {
@@ -417,9 +431,7 @@ final class AbilityAdapter {
             if (tag != null) target = tag.startsWith("#") ? tag : "#" + tag;
         }
         Goal.SemanticTarget semantic = goal.target();
-        if (target == null && semantic != null
-                && ("nearest".equals(semantic.kind())
-                    || ("area".equals(semantic.kind()) && runtime.landmark(semantic.label()) == null))) {
+        if (target == null && semantic != null && "nearest".equals(semantic.kind())) {
             target = semantic.label();
         }
         if (target == null && semantic != null && "nearest".equals(semantic.kind())) {
@@ -439,7 +451,11 @@ final class AbilityAdapter {
         JsonObject args = new JsonObject();
         args.addProperty("item_id", item);
         args.addProperty("count", integer(parameters, "count", 1, 1, 256));
-        return new IntentAction.Tool("craft", args.toString());
+        JsonArray sources = new JsonArray();
+        sources.add("inventory");
+        sources.add("craft");
+        args.add("allowed_sources", sources);
+        return new IntentAction.Tool("acquire_items", args.toString());
     }
 
     private static IntentAction cook(Goal goal) {
@@ -494,14 +510,16 @@ final class AbilityAdapter {
         boolean semanticPlace = target != null
                 && ("area".equals(target.kind()) || "landmark".equals(target.kind()));
         if (center == null && semanticPlace) {
-            String label = target.label() == null || target.label().isBlank()
-                    ? "the requested semantic area" : "'" + target.label() + "'";
+            return unresolvedNamedPlaceDecision(
+                    goal, target, player, runtime, "Lighting");
+        }
+        if (center == null && target != null && "prior_result".equals(target.kind())) {
             return decision(goal,
-                    "Lighting target " + label + " is not a remembered same-dimension place. "
-                            + "MaiCraft refused to substitute the player's current position.",
+                    "Lighting prior_result did not match one authoritative earlier successful "
+                            + "place. MaiCraft refused to illuminate the player's current area instead.",
                     List.of(
-                            option("recover", "Provide details.goal to remember, discover, or travel to the intended area first."),
-                            option("replace_goal", "Use current_place, loaded coordinates, a resolved landmark, or an earlier verified result."),
+                            option("recover", "Provide details.goal to produce or remember the intended area first."),
+                            option("replace_goal", "Use current_place or an exact label from perceive(view=landmarks)."),
                             option("cancel", "Cancel without changing any area.")));
         }
         if (center == null) {
@@ -510,7 +528,10 @@ final class AbilityAdapter {
                     List.of(option("replace_goal", "Provide one unambiguous semantic target."),
                             option("cancel", "Cancel the task.")));
         }
-        boolean resolveLoadedComponent = target != null && "area".equals(target.kind());
+        boolean explicitRadius = parameters.has("radius")
+                && !parameters.get("radius").isJsonNull();
+        boolean resolveLoadedComponent = (target != null && "area".equals(target.kind()))
+                || !explicitRadius;
         String coverage = string(parameters, "coverage");
         if (coverage == null) coverage = "most";
         if (!List.of("all", "most", "crop_growth", "player_visibility").contains(coverage)) {
@@ -547,7 +568,10 @@ final class AbilityAdapter {
         args.addProperty("center_x", center.x());
         args.addProperty("center_y", center.y());
         args.addProperty("center_z", center.z());
-        args.addProperty("radius", integer(parameters, "radius", 16, 1, 48));
+        if (explicitRadius) {
+            args.addProperty("radius", integer(parameters, "radius", 1, 1,
+                    org.maiwithu.maicraft.core.task.lighting.SemanticLightAreaTaskRecord.MAX_EXPLICIT_RADIUS));
+        }
         args.addProperty("coverage", coverage);
         args.addProperty("placement_preference", placementPreference);
         args.addProperty("minimum_light", integer(parameters, "minimum_light",
@@ -558,7 +582,7 @@ final class AbilityAdapter {
         }
         for (String key : List.of("style", "block_id", "light_preferences",
                 "material_policy", "allowed_sources", "allow_harm",
-                "protected_labels", "max_passes", "max_placements")) {
+                "protected_labels", "max_placements")) {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
         if (!args.has("protected_labels") && parameters.has("preserve")
@@ -577,9 +601,20 @@ final class AbilityAdapter {
         Goal.WorldPosition destination = position(goal, player, runtime);
         if (destination == null) destination = namedPosition(destinationLabel, player, runtime);
         if (source == null || destination == null) {
+            String sourceIssue = source == null
+                    ? namedEndpointIssue("source", sourceLabel, player, runtime)
+                    : null;
+            String destinationIssue = destination == null
+                    ? destinationEndpointIssue(goal.target(), destinationLabel, player, runtime)
+                    : null;
+            String issue = sourceIssue == null ? destinationIssue
+                    : destinationIssue == null ? sourceIssue
+                    : sourceIssue + "; " + destinationIssue;
             return decision(goal,
-                    "Both mechanical endpoint regions must resolve to remembered or prior-result places before routing.",
-                    List.of(option("recover", "Provide details.goal to remember or travel to the unresolved semantic endpoint."),
+                    "Mechanical connection paused before survey: " + issue
+                            + ". MaiCraft refused to invent endpoint coordinates.",
+                    List.of(option("recover", "Provide details.goal to reach and remember a verifiable endpoint; an arbitrary human label may need the player to identify it."),
+                            option("replace_goal", "Use two same-dimension remembered labels or one authoritative prior_result destination."),
                             option("skip", "Leave the networks unchanged."),
                             option("cancel", "Cancel the whole task.")));
         }
@@ -638,7 +673,7 @@ final class AbilityAdapter {
         for (String key : List.of(
                 "item_id", "item_ids", "item_tag", "item_tags", "count",
                 "allowed_sources", "allow_harm",
-                "protected_labels", "radius", "max_recipe_depth", "work_budget",
+                "protected_labels", "radius",
                 "source_hint")) {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
@@ -692,6 +727,59 @@ final class AbilityAdapter {
         IntentRuntime.Landmark landmark = runtime.landmark(label);
         return landmark == null || !sameDimension(landmark.position(), player)
                 ? null : landmark.position();
+    }
+
+    private static boolean isNamedPlace(Goal.SemanticTarget target) {
+        return target != null
+                && ("landmark".equals(target.kind()) || "area".equals(target.kind()));
+    }
+
+    private static IntentAction unresolvedNamedPlaceDecision(
+            Goal goal, Goal.SemanticTarget target, LocalPlayer player,
+            IntentRuntime runtime, String action) {
+        String label = target.label() == null || target.label().isBlank()
+                ? "the requested named place" : "'" + target.label() + "'";
+        IntentRuntime.Landmark landmark = target.label() == null
+                ? null : runtime.landmark(target.label());
+        String reason;
+        if (landmark == null) {
+            reason = label + " is not remembered for this world";
+        } else if (!sameDimension(landmark.position(), player)) {
+            reason = label + " is remembered in another dimension";
+        } else {
+            reason = label + " could not be resolved from authoritative semantic memory";
+        }
+        return decision(goal,
+                action + " target " + reason + ". MaiCraft refused to use the current position, "
+                        + "guess coordinates, or reinterpret the label as an exploration target.",
+                List.of(
+                        option("recover", "Provide details.goal to reach and remember a verifiable place; an arbitrary ownership label may need the player to identify it."),
+                        option("replace_goal", "Choose an exact label from perceive(view=landmarks), current_place, or an explicit coast/biome discovery."),
+                        option("cancel", "Cancel without moving or changing the world.")));
+    }
+
+    private static String namedEndpointIssue(
+            String endpoint, String label, LocalPlayer player, IntentRuntime runtime) {
+        if (label == null || label.isBlank()) return endpoint + "_label is missing";
+        if ("current_place".equals(label)) return endpoint + " current_place is unavailable";
+        IntentRuntime.Landmark landmark = runtime.landmark(label);
+        if (landmark == null) return endpoint + " label '" + label + "' is not remembered";
+        if (!sameDimension(landmark.position(), player)) {
+            return endpoint + " label '" + label + "' belongs to another dimension";
+        }
+        return endpoint + " label '" + label + "' has no authoritative position";
+    }
+
+    private static String destinationEndpointIssue(
+            Goal.SemanticTarget target, String label,
+            LocalPlayer player, IntentRuntime runtime) {
+        if (target != null && "prior_result".equals(target.kind())) {
+            return "destination prior_result did not match one authoritative earlier successful place";
+        }
+        if (isNamedPlace(target)) {
+            return namedEndpointIssue("destination", target.label(), player, runtime);
+        }
+        return namedEndpointIssue("destination", label, player, runtime);
     }
 
     private static Goal.WorldPosition rememberPosition(
