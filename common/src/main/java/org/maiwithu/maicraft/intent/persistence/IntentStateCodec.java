@@ -39,7 +39,8 @@ public final class IntentStateCodec {
             "button", "click", "clicks", "slot", "slots", "inventory_slots",
             "slot_clicks", "click_sequence", "route", "waypoints", "path_nodes",
             "block_ops", "placements", "cells", "receipt", "receipts",
-            "exception", "stacktrace", "stack_trace");
+            "exception", "stacktrace", "stack_trace",
+            "x", "y", "z", "position", "center", "location", "destination", "bounds");
     private static final Set<String> GOAL_INTERNAL_KEYS = Set.of(
             "entity_id", "entity_ids", "entity_uuid", "entity_uuids",
             "runtime_id", "runtime_ids", "target_runtime_id", "target_runtime_ids",
@@ -57,6 +58,7 @@ public final class IntentStateCodec {
             List<Goal> steps,
             int stepIndex,
             List<IntentTaskRecord.StepSnapshot> completed,
+            Map<Integer, Goal.WorldPosition> internalPositions,
             List<IntentTaskRecord.AttemptSnapshot> attempts,
             IntentTaskRecord.DecisionSnapshot decision,
             IntentTaskRecord.DecisionAnswer pendingAnswer,
@@ -148,6 +150,20 @@ public final class IntentStateCodec {
             completed.add(item);
         });
         value.add("completed_steps", completed);
+
+        // These coordinates are an opaque Mod-owned handoff between semantic children. They are
+        // persisted separately from public results and are never emitted by the MCP facade.
+        JsonArray internalPositions = new JsonArray();
+        task.internalPositionReceipts().entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .limit(MAX_STEPS)
+                .forEach(entry -> {
+                    JsonObject item = new JsonObject();
+                    item.addProperty("step_index", entry.getKey());
+                    item.add("position", worldPosition(entry.getValue()));
+                    internalPositions.add(item);
+                });
+        value.add("internal_positions", internalPositions);
 
         JsonArray attempts = new JsonArray();
         List<IntentTaskRecord.AttemptSnapshot> attemptValues = task.attempts();
@@ -279,6 +295,25 @@ public final class IntentStateCodec {
                     "persisted completed semantic steps exceed current progress");
         }
 
+        Map<Integer, Goal.WorldPosition> internalPositions = new LinkedHashMap<>();
+        for (JsonElement element : array(value, "internal_positions", MAX_STEPS)) {
+            JsonObject item = element.getAsJsonObject();
+            int positionStepIndex = integer(item, "step_index", -1);
+            if (positionStepIndex < 0 || positionStepIndex >= stepIndex) {
+                throw new IllegalArgumentException(
+                        "persisted internal position receipt is outside completed progress");
+            }
+            if (!item.has("position") || !item.get("position").isJsonObject()) {
+                throw new IllegalArgumentException(
+                        "persisted internal position receipt has no position");
+            }
+            if (internalPositions.put(positionStepIndex,
+                    decodePosition(item.getAsJsonObject("position"))) != null) {
+                throw new IllegalArgumentException(
+                        "duplicate persisted internal position receipt");
+            }
+        }
+
         List<IntentTaskRecord.AttemptSnapshot> attempts = new ArrayList<>();
         for (JsonElement element : array(value, "attempts", MAX_ATTEMPTS)) {
             JsonObject item = element.getAsJsonObject();
@@ -303,7 +338,8 @@ public final class IntentStateCodec {
                 ? decodeTerminal(value.getAsJsonObject("terminal")) : null;
         return new TaskSnapshot(
                 id, planId, goal, List.copyOf(steps), stepIndex,
-                List.copyOf(completed), List.copyOf(attempts),
+                List.copyOf(completed), Map.copyOf(internalPositions),
+                List.copyOf(attempts),
                 decision, answer, terminal);
     }
 
@@ -449,7 +485,11 @@ public final class IntentStateCodec {
                 || lower.endsWith("_click") || lower.endsWith("_clicks")
                 || lower.endsWith("_route") || lower.endsWith("_waypoints")
                 || lower.endsWith("_path_nodes") || lower.endsWith("_receipt")
-                || lower.endsWith("_receipts");
+                || lower.endsWith("_receipts") || lower.endsWith("_position")
+                || lower.endsWith("_center") || lower.endsWith("_location")
+                || lower.endsWith("_destination") || lower.endsWith("_bounds")
+                || lower.endsWith("_x") || lower.endsWith("_y")
+                || lower.endsWith("_z");
     }
 
     /** Goal metadata may contain semantic equipment slots; only native menu slots are forbidden. */
