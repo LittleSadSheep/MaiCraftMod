@@ -72,9 +72,8 @@ public final class SemanticElytraCompanionTask
     private static final String END = "minecraft:the_end";
     private static final int MAIN_ISLAND_RADIUS = 512;
     private static final int GATEWAY_SCAN_RADIUS = 384;
-    private static final int GATEWAY_SCAN_TICKS = 240;
     private static final int GATEWAY_BUILD_BUDGET = 8;
-    private static final int MAX_GATEWAY_FRONTIERS = 32;
+    private static final int INITIAL_GATEWAY_CANDIDATES = 16;
     private static final int GATEWAY_FRONTIER_STEP = 64;
     private static final int TELEPORT_CONFIRM_TICKS = 240;
     private static final double TELEPORT_MIN_DISTANCE = 64.0D;
@@ -82,14 +81,11 @@ public final class SemanticElytraCompanionTask
     private static final int LANDMARK_PROTECTION_RADIUS = 12;
     private static final int SHIP_ENTITY_SCAN_RADIUS = 192;
     private static final int SHIP_FRONTIER_STEP = 48;
-    private static final int MAX_SHIP_FRONTIERS = 24;
-    private static final int MAX_END_CITIES = 8;
     private static final int CITY_EXCLUSION_RADIUS = 160;
     private static final int SHIP_SIGNATURE_RADIUS = 18;
     private static final int SHIP_MIN_PURPUR = 40;
     private static final int SHIP_MIN_CHESTS = 2;
     private static final int SHIP_MIN_BREWING_STANDS = 1;
-    private static final int MAX_COMBAT_ENCOUNTERS = 2;
     private static final int HOSTILE_RADIUS = 16;
     private static final int DROP_SETTLE_TICKS = 10;
     private static final float SAFETY_HEALTH_FLOOR = 8.0F;
@@ -125,6 +121,7 @@ public final class SemanticElytraCompanionTask
     private boolean shipFrameVerified;
     private int gatewayScans;
     private int gatewayIncompleteScans;
+    private int gatewayCandidateWindow = INITIAL_GATEWAY_CANDIDATES;
     private int gatewayFrontiersAttempted;
     private int gatewayFrontiersFailed;
     private int gatewayMoveAttempts;
@@ -234,7 +231,7 @@ public final class SemanticElytraCompanionTask
                 childId("pearl"), childDeadline(8L * 60L * 20L),
                 List.of(BuiltInRegistries.ITEM.getKey(Items.ENDER_PEARL)),
                 1, sources, r.allowCombat, hint, r.protectedLabels,
-                32, 6, 96), Purpose.ACQUIRE_PEARL);
+                32), Purpose.ACQUIRE_PEARL);
     }
 
     private TaskState findGateway() {
@@ -246,7 +243,7 @@ public final class SemanticElytraCompanionTask
         int chunks = Math.max(1, (radius + 15) / 16);
         TargetIndex.Result observed = TargetIndex.query(
                 player.clientLevel, player.blockPosition(), gatewayBlocks,
-                16, chunks, GATEWAY_BUILD_BUDGET);
+                gatewayCandidateWindow, chunks, GATEWAY_BUILD_BUDGET);
         gatewayScans++;
         if (!observed.complete()) gatewayIncompleteScans++;
 
@@ -273,21 +270,29 @@ public final class SemanticElytraCompanionTask
             phase = Phase.MOVE_GATEWAY;
             return TaskState.RUNNING;
         }
+        if (!observed.complete()) {
+            // The loaded-area gateway index is finite but intentionally built in small batches.
+            // Do not turn a fixed number of scan ticks into evidence that no gateway exists, or
+            // consume the semantic lease while those bounded batches are still advancing.
+            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+            return TaskState.RUNNING;
+        }
+        if (protectedOnly && observed.hits().size() >= gatewayCandidateWindow
+                && gatewayCandidateWindow < Integer.MAX_VALUE / 2) {
+            // TargetIndex returns a nearest window.  Exhaust that finite result set before
+            // concluding that every in-scope gateway is protected.
+            gatewayCandidateWindow *= 2;
+            return TaskState.RUNNING;
+        }
         if (protectedOnly) {
             return failFinal("gateway_protected",
                     "Every verified loaded End Gateway is inside a protected area.",
                     FailureType.ENTITY_BLOCKED);
         }
-        if (gatewayScans < GATEWAY_SCAN_TICKS && !observed.complete()) {
-            return TaskState.RUNNING;
-        }
         BlockPos frontier = nextGatewayFrontier();
         if (frontier == null) {
-            return failFinal(observed.complete()
-                            ? "gateway_frontier_exhausted" : "gateway_scan_incomplete",
-                    observed.complete()
-                            ? "Bounded first-person main-island frontier exploration ended without observing a real End Gateway."
-                            : "The bounded loaded-terrain gateway index and frontier budget ended without complete evidence.",
+            return failFinal("gateway_frontier_exhausted",
+                    "Bounded first-person main-island frontier exploration ended without observing a real End Gateway.",
                     FailureType.TARGET_LOST);
         }
         return startChild(new MoveToTaskRecord(
@@ -415,11 +420,6 @@ public final class SemanticElytraCompanionTask
 
     private TaskState searchEndCity() {
         if (outerSearchOrigin == null) outerSearchOrigin = player.blockPosition().immutable();
-        if (endCitySearches >= MAX_END_CITIES) {
-            return failFinal("end_city_search_exhausted",
-                    "The bounded multi-city budget ended without a verified End Ship elytra frame.",
-                    FailureType.TARGET_LOST);
-        }
         int remaining = remainingOuterSearchDistance();
         if (remaining < PhysicalStructureSearchTaskRecord.MIN_DISTANCE) {
             return failFinal("end_city_distance_exhausted",
@@ -583,7 +583,13 @@ public final class SemanticElytraCompanionTask
         Task finished = activeChild;
         Purpose purpose = activePurpose;
         TaskState terminal = runChild(finished);
-        if (terminal == null) return TaskState.RUNNING;
+        if (terminal == null) {
+            // The child owns the evidence for continued liveness (physical movement, observed
+            // acquisition, combat or structure-search progress).  Preserve that renewed lease at
+            // the semantic root instead of enforcing the tool's original wall-clock estimate.
+            if (activeRecord != null) r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
+            return TaskState.RUNNING;
+        }
         BlockPos verifiedAnchor = purpose == Purpose.SEARCH_END_CITY
                         && finished instanceof PhysicalStructureSearchCompanionTask search
                 ? search.verifiedEvidenceAnchor() : null;
@@ -721,11 +727,6 @@ public final class SemanticElytraCompanionTask
             return failFinal("combat_permission_required",
                     "An explicitly hostile loaded mob is blocking progress, but allow_combat is false.",
                     FailureType.ENTITY_BLOCKED);
-        }
-        if (combatEncounters >= MAX_COMBAT_ENCOUNTERS) {
-            return failFinal("combat_budget_exhausted",
-                    "The bounded combat budget is exhausted; further fighting needs a new decision.",
-                    FailureType.HAZARD);
         }
         List<Integer> targets = blockers.stream().limit(16).map(Mob::getId).toList();
         if (targets.isEmpty()) {
@@ -1065,7 +1066,9 @@ public final class SemanticElytraCompanionTask
 
     private BlockPos nextGatewayFrontier() {
         int maximum = Math.min(r.maxSearchDistance, GATEWAY_SCAN_RADIUS);
-        while (gatewayFrontiersAttempted < MAX_GATEWAY_FRONTIERS) {
+        int frontierCount = ((maximum + GATEWAY_FRONTIER_STEP - 1)
+                / GATEWAY_FRONTIER_STEP) * 8;
+        while (gatewayFrontiersAttempted < frontierCount) {
             int index = gatewayFrontiersAttempted++;
             int ring = index / 8 + 1;
             int direction = index % 8;
@@ -1086,7 +1089,10 @@ public final class SemanticElytraCompanionTask
     }
 
     private BlockPos nextShipFrontier() {
-        if (cityAnchor == null || shipFrontiersThisCity >= MAX_SHIP_FRONTIERS) {
+        int maximum = Math.min(r.maxSearchDistance, SHIP_ENTITY_SCAN_RADIUS);
+        int frontierCount = ((maximum + SHIP_FRONTIER_STEP - 1)
+                / SHIP_FRONTIER_STEP) * 8;
+        if (cityAnchor == null || shipFrontiersThisCity >= frontierCount) {
             return null;
         }
         int index = shipFrontiersThisCity;
@@ -1178,8 +1184,9 @@ public final class SemanticElytraCompanionTask
     }
 
     private long childDeadline(long ticks) {
-        return Math.min(r.getDeadlineGameTime(),
-                player.level().getGameTime() + ticks);
+        long lease = player.level().getGameTime() + ticks;
+        r.extendDeadlineTo(lease);
+        return lease;
     }
 
     private void clearActiveChild(TaskState terminal) {
@@ -1319,7 +1326,7 @@ public final class SemanticElytraCompanionTask
 
     @Override
     protected String timeoutMessage() {
-        return "The bounded first-person elytra search timed out and stopped without assuming success.";
+        return "The bounded first-person elytra search stopped making verifiable progress and did not assume success.";
     }
 
     @Override

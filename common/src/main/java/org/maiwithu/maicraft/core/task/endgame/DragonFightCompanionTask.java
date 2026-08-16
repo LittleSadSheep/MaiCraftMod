@@ -29,7 +29,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -40,6 +39,7 @@ import org.maiwithu.maicraft.core.WorkProfile;
 import org.maiwithu.maicraft.core.act.Ballistics;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.Menace;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildCompanionTask;
@@ -83,15 +83,9 @@ public final class DragonFightCompanionTask
     private static final int CONFIRM_TIMEOUT_TICKS = 1_200;
     private static final int NATURAL_RECOVERY_TIMEOUT_TICKS = 800;
     private static final int WAIT_FOR_SAFE_DRAGON_TICKS = 4_800;
-    private static final int MAX_CRYSTAL_ATTACKS = 5;
-    private static final int MAX_CAGE_OPENINGS_PER_CRYSTAL = 3;
-    private static final int MAX_DRAGON_ATTACK_ROUNDS = 24;
-    private static final int MAX_RECOVERY_ACTIONS = 24;
     private static final int MAX_FAILED_FOODS = 4;
     private static final int CRITICAL_HUNGER = 6;
     private static final int TOWER_COVERAGE_RADIUS = 80;
-    private static final int MAX_SURVEY_MOVES = 16;
-    private static final int MAX_CRYSTAL_POSITION_ATTEMPTS = 4;
     private static final int MAX_TRANSIENT_DRAGON_FAILURES = 4;
     private static final double CRYSTAL_SHOT_MAX_RANGE = 96.0D;
     private static final double CRYSTAL_BLAST_MARGIN = 1.0D;
@@ -110,10 +104,10 @@ public final class DragonFightCompanionTask
     private UUID selectedCrystalUuid;
     private BlockPos selectedCrystalLastPosition;
     private int selectedCrystalRuntimeId = -1;
+    /** Candidate currently delegated to the movement child; rejected only if that child fails. */
+    private BlockPos activeCrystalVantage;
     private AttackTaskRecord activeAttackRecord;
     private List<BlockPos> cagePlan = List.of();
-    private final Map<UUID, Integer> crystalAttacks = new LinkedHashMap<>();
-    private final Map<UUID, Integer> cageOpenings = new LinkedHashMap<>();
     private final Map<UUID, BlockPos> unresolvedCrystals = new LinkedHashMap<>();
     private List<BlockPos> cageProtectedCells = List.of();
     private final List<BlockPos> protectedAnchors = new ArrayList<>();
@@ -146,12 +140,13 @@ public final class DragonFightCompanionTask
     private int surveyMoves;
     private int surveyMovesWithoutProgress;
     private int coverageCountBeforeMove;
-    private int crystalPositionAttempts;
     private int transientDragonFailures;
     private int healingSurveyAttempts;
     private int rareConsumablesConsumed;
     private final Set<Long> requiredTowerChunks = new HashSet<>();
     private final Set<Long> observedTowerChunks = new HashSet<>();
+    /** Distinct loaded stances tried for the selected crystal; exhaustion is geometric, not numeric. */
+    private final Set<Long> attemptedCrystalVantages = new HashSet<>();
     private final Set<Item> failedFoods = new HashSet<>();
     private String failureCode;
     private List<String> recoveryOptions = List.of();
@@ -381,7 +376,7 @@ public final class DragonFightCompanionTask
             phase = Phase.OBSERVE;
             return TaskState.RUNNING;
         }
-        if (surveyMoves >= MAX_SURVEY_MOVES || surveyMovesWithoutProgress >= 4) {
+        if (surveyMovesWithoutProgress >= 4) {
             return failDecision("tower_coverage_incomplete",
                     "The bounded first-person survey could not load every main-island tower "
                             + "observation sector, so an empty client entity list is not proof that "
@@ -499,15 +494,8 @@ public final class DragonFightCompanionTask
                             "handle the remaining crystal manually"));
         }
 
-        if (!safeCrystalFiringPosition(target)) {
-            if (crystalPositionAttempts >= MAX_CRYSTAL_POSITION_ATTEMPTS) {
-                return failDecision("safe_crystal_stance_exhausted",
-                        "No bounded first-person move established a loaded firing stance outside "
-                                + "the crystal blast span.",
-                        FailureType.HAZARD,
-                        List.of("clear a safe ranged stance", "return to stable main-island ground",
-                                "retry after the firing lane changes"));
-            }
+        if (!safeCrystalFiringPosition(target)
+                || attemptedCrystalVantages.contains(player.blockPosition().asLong())) {
             BlockPos vantage = findCrystalVantage(target, false);
             if (vantage == null) {
                 return failDecision("no_safe_crystal_stance",
@@ -518,7 +506,7 @@ public final class DragonFightCompanionTask
                                 "create a safe ranged platform manually",
                                 "retry from farther away"));
             }
-            crystalPositionAttempts++;
+            activeCrystalVantage = vantage.immutable();
             MoveToTaskRecord move = new MoveToTaskRecord(
                     childId("crystal-stance"), childDeadline(2L * 60L * 20L),
                     (double) vantage.getX(), (double) vantage.getY(),
@@ -529,16 +517,14 @@ public final class DragonFightCompanionTask
         if (!hasSafeCrystalShot(target)) {
             CageObservation cage = observeVerifiedCage(target);
             if (cage != null) return startCageOpening(target, cage);
-            if (crystalPositionAttempts < MAX_CRYSTAL_POSITION_ATTEMPTS) {
-                BlockPos vantage = findCrystalVantage(target, true);
-                if (vantage != null) {
-                    crystalPositionAttempts++;
-                    MoveToTaskRecord move = new MoveToTaskRecord(
-                            childId("crystal-line"), childDeadline(2L * 60L * 20L),
-                            (double) vantage.getX(), (double) vantage.getY(),
-                            (double) vantage.getZ(), null, false);
-                    return startChild(move, Purpose.POSITION_CRYSTAL);
-                }
+            BlockPos vantage = findCrystalVantage(target, true);
+            if (vantage != null) {
+                activeCrystalVantage = vantage.immutable();
+                MoveToTaskRecord move = new MoveToTaskRecord(
+                        childId("crystal-line"), childDeadline(2L * 60L * 20L),
+                        (double) vantage.getX(), (double) vantage.getY(),
+                        (double) vantage.getZ(), null, false);
+                return startChild(move, Purpose.POSITION_CRYSTAL);
             }
             return failDecision("crystal_occlusion_unverified",
                     "No safe arrow trajectory reached the crystal, and the blocking geometry "
@@ -549,15 +535,6 @@ public final class DragonFightCompanionTask
                             "retry after the firing lane changes"));
         }
 
-        int attempts = crystalAttacks.getOrDefault(selectedCrystalUuid, 0);
-        if (attempts >= MAX_CRYSTAL_ATTACKS) {
-            return failDecision("crystal_attack_exhausted",
-                    "One observed crystal survived every bounded first-person attack attempt.",
-                    FailureType.OUT_OF_REACH,
-                    List.of("change the ranged loadout", "reposition for line of sight",
-                            "inspect the enclosure manually"));
-        }
-        crystalAttacks.put(selectedCrystalUuid, attempts + 1);
         AttackTaskRecord attack = new AttackTaskRecord(
                 childId("crystal"), childDeadline(3L * 60L * 20L),
                 List.of(target.getId()), false, true);
@@ -602,8 +579,11 @@ public final class DragonFightCompanionTask
                     List.of("inspect the firing receipt", "retry after the world state settles"));
         }
         FailureType type = lastFailure();
-        if (transientExecutionFailure(type)
-                && crystalPositionAttempts < MAX_CRYSTAL_POSITION_ATTEMPTS) {
+        if (transientExecutionFailure(type)) {
+            // Reject this concrete stance after a whole bounded child made no verified change.
+            // The next pass explores another loaded candidate; termination is exhaustion of
+            // those real candidates, not an arbitrary retry number.
+            attemptedCrystalVantages.add(player.blockPosition().asLong());
             phase = Phase.CRYSTALS;
             return TaskState.RUNNING;
         }
@@ -684,13 +664,6 @@ public final class DragonFightCompanionTask
         }
         safeDragonWaitSince = -1L;
         if (now < nextDragonAttemptAt) return TaskState.RUNNING;
-        if (dragonAttackRounds >= MAX_DRAGON_ATTACK_ROUNDS) {
-            return failDecision("dragon_attack_exhausted",
-                    "The dragon remained alive after every bounded first-person attack round.",
-                    FailureType.OUT_OF_REACH,
-                    List.of("repair or improve the combat loadout", "wait for a safer perch",
-                            "inspect the encounter before retrying"));
-        }
         dragonAttackRounds++;
         AttackTaskRecord attack = new AttackTaskRecord(
                 childId("dragon"), childDeadline(12L * 60L * 20L),
@@ -746,14 +719,6 @@ public final class DragonFightCompanionTask
     }
 
     private TaskState tickRecover() {
-        if (recoveryActions >= MAX_RECOVERY_ACTIONS) {
-            return failDecision("recovery_exhausted",
-                    "Combat had to be interrupted too many times to maintain the requested health "
-                            + "and hazard safety envelope.",
-                    FailureType.HAZARD,
-                    List.of("improve armor and food supplies", "lower minimum_health explicitly",
-                            "resume from a safer main-island position"));
-        }
         if (dangerousBreath() != null || !safePlayerPosition()) {
             BlockPos safe = findSafeHaven();
             if (safe == null) {
@@ -813,7 +778,12 @@ public final class DragonFightCompanionTask
         Task finished = activeChild;
         Purpose purpose = activePurpose;
         TaskState terminal = runChild(finished);
-        if (terminal == null) return TaskState.RUNNING;
+        if (terminal == null) {
+            // A child may renew itself from verified physical progress.  The encounter root must
+            // inherit that lease or its initial estimate becomes an unrelated total-duration cap.
+            if (activeRecord != null) r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
+            return TaskState.RUNNING;
+        }
         TaskResult receipt = finished.result(terminal);
         activeChild = null;
         activeRecord = null;
@@ -852,9 +822,14 @@ public final class DragonFightCompanionTask
         EndCrystal target = selectedCrystalUuid == null ? null : findCrystal(selectedCrystalUuid);
         if (terminal == TaskState.SUCCESS && receipt != null && receipt.success()
                 && target != null && safeCrystalFiringPosition(target)) {
+            activeCrystalVantage = null;
             selectCrystal(target);
             phase = Phase.CRYSTALS;
             return TaskState.RUNNING;
+        }
+        if (activeCrystalVantage != null) {
+            attemptedCrystalVantages.add(activeCrystalVantage.asLong());
+            activeCrystalVantage = null;
         }
         if (target == null) invalidateCoverage(selectedCrystalLastPosition);
         return childFailureDecision("crystal_position_failed",
@@ -1170,8 +1145,7 @@ public final class DragonFightCompanionTask
                     if (!insideRadius(x, z, fightOrigin, SAFE_HAVEN_RADIUS)) continue;
                     BlockPos probe = new BlockPos(x, body.getY(), z);
                     if (!level.isLoaded(probe)) continue;
-                    int surfaceY = level.getHeight(
-                            Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                    int surfaceY = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
                     for (int y = Math.min(surfaceY, body.getY() + 6);
                             y >= Math.max(level.getMinBuildHeight() + 2, body.getY() - 14);
                             y--) {
@@ -1390,7 +1364,7 @@ public final class DragonFightCompanionTask
                 int cx = SectionPos.blockToSectionCoord(x);
                 int cz = SectionPos.blockToSectionCoord(z);
                 if (level.getChunkSource().getChunkNow(cx, cz) == null) continue;
-                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                int y = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
                 BlockPos candidate = new BlockPos(x, y, z);
                 if (!standable(candidate)
                         || protectedNear(candidate, PROTECTED_RADIUS)
@@ -1421,7 +1395,10 @@ public final class DragonFightCompanionTask
 
     private void selectCrystal(EndCrystal crystal) {
         UUID uuid = crystal.getUUID();
-        if (!uuid.equals(selectedCrystalUuid)) crystalPositionAttempts = 0;
+        if (!uuid.equals(selectedCrystalUuid)) {
+            attemptedCrystalVantages.clear();
+            activeCrystalVantage = null;
+        }
         selectedCrystal = crystal;
         selectedCrystalUuid = uuid;
         selectedCrystalLastPosition = crystal.blockPosition().immutable();
@@ -1433,7 +1410,8 @@ public final class DragonFightCompanionTask
         selectedCrystalUuid = null;
         selectedCrystalLastPosition = null;
         selectedCrystalRuntimeId = -1;
-        crystalPositionAttempts = 0;
+        attemptedCrystalVantages.clear();
+        activeCrystalVantage = null;
     }
 
     private EndCrystal findCrystal(UUID uuid) {
@@ -1501,13 +1479,14 @@ public final class DragonFightCompanionTask
                     int cx = SectionPos.blockToSectionCoord(x);
                     int cz = SectionPos.blockToSectionCoord(z);
                     if (level.getChunkSource().getChunkNow(cx, cz) == null) continue;
-                    int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                    int y = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
                     BlockPos candidate = new BlockPos(x, y, z);
                     Vec3 feet = Vec3.atCenterOf(candidate);
                     double distanceSquared = feet.distanceToSqr(target.position());
                     if (distanceSquared < square(minimum)
                             || distanceSquared > square(CRYSTAL_SHOT_MAX_RANGE)
                             || player.distanceToSqr(feet) < 16.0D
+                            || attemptedCrystalVantages.contains(candidate.asLong())
                             || !standable(candidate)
                             || protectedNear(candidate, PROTECTED_RADIUS)
                             || nearBreath(candidate, 7.0D)
@@ -1633,15 +1612,6 @@ public final class DragonFightCompanionTask
                     List.of("revise protected_labels explicitly",
                             "handle the cage manually"));
         }
-        int attempts = cageOpenings.getOrDefault(selectedCrystalUuid, 0);
-        if (attempts >= MAX_CAGE_OPENINGS_PER_CRYSTAL) {
-            return failDecision("cage_opening_exhausted",
-                    "The same verified cage aperture resisted every bounded first-person opening "
-                            + "attempt.",
-                    FailureType.OUT_OF_REACH,
-                    List.of("inspect the cage manually", "change tools and retry"));
-        }
-        cageOpenings.put(selectedCrystalUuid, attempts + 1);
         cagePlan = List.copyOf(cage.opening());
 
         Set<BlockPos> protectedCells = new HashSet<>();
@@ -1883,6 +1853,7 @@ public final class DragonFightCompanionTask
         activeAttackRecord = null;
         activePurpose = null;
         activeFood = null;
+        activeCrystalVantage = null;
     }
 
     private static boolean transientExecutionFailure(FailureType type) {
@@ -1904,7 +1875,9 @@ public final class DragonFightCompanionTask
     }
 
     private long childDeadline(long ticks) {
-        return Math.min(r.getDeadlineGameTime(), player.level().getGameTime() + ticks);
+        long lease = player.level().getGameTime() + ticks;
+        r.extendDeadlineTo(lease);
+        return lease;
     }
 
     private TaskState failDecision(
@@ -1995,7 +1968,8 @@ public final class DragonFightCompanionTask
     }
 
     @Override protected String timeoutMessage() {
-        return "the Ender Dragon encounter timed out in phase " + phase.name().toLowerCase()
+        return "the Ender Dragon encounter stopped making verifiable progress in phase "
+                + phase.name().toLowerCase()
                 + "; no unverified victory was reported";
     }
 
