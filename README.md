@@ -29,4 +29,4 @@ MaiCraft 是一个 Minecraft 1.21.1 客户端 Mod：LLM 只表达游玩意图，
 
 ## 许可证
 
-MaiCraft 全部代码采用 GNU General Public License v3.0，详见 [LICENSE](LICENSE)。
+MaiCraft 全部代码采用 GNU General Public License v3.0 only（SPDX：`GPL-3.0-only`），详见 [LICENSE](LICENSE)。
