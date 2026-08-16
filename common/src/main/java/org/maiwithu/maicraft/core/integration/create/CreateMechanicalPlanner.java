@@ -3,11 +3,12 @@ package org.maiwithu.maicraft.core.integration.create;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -20,26 +21,14 @@ import net.minecraft.world.level.block.CocoaBlock;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.StemBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 
-/** Loaded-only endpoint survey and deterministic, preserve-existing route planning. */
+/** Endpoint survey plus tick-sliced, preserve-existing mechanical route planning. */
 final class CreateMechanicalPlanner {
-    private static final int MAX_ENDPOINT_CANDIDATES = 32;
-    private static final int MAX_LAYER_OFFSET = 12;
-    private static final int MAX_ROUTE_RUNS = 5;
-    private static final int MAX_ENDPOINT_PAIR_ATTEMPTS = 96;
     private static final Direction[] VERTICAL = {Direction.UP, Direction.DOWN};
 
     private record Candidate(CreateMechanicalPlan.KineticEndpoint endpoint, double hintDistance) {}
-    private record RouteCandidate(
-            CreateMechanicalPlan.KineticEndpoint source,
-            CreateMechanicalPlan.KineticEndpoint destination,
-            BlockPos receiver,
-            List<BlockPos> positions,
-            int unloadedCells,
-            int score) {}
 
     private CreateMechanicalPlanner() {}
 
@@ -80,6 +69,12 @@ final class CreateMechanicalPlanner {
                         || Math.abs(candidate.endpoint().speed()) <= 0.0001f)
                 .toList();
         long poweredDestinations = destinationScan.candidates.size() - destinationCandidates.size();
+        if (destinationCandidates.isEmpty() && destinationScan.unloadedCells > 0) {
+            facts.put("failure_code", "destination_needs_exploration");
+            facts.put("detail", "part of the destination endpoint region is still unloaded, so visible powered endpoints cannot prove that no compatible destination exists");
+            facts.put("recovery_options", List.of("travel_near_destination", "cancel"));
+            return CreateMechanicalPlan.Result.fail("destination_needs_exploration", facts);
+        }
         if (destinationCandidates.isEmpty() && poweredDestinations > 0 && !request.allowFreeReceiver()) {
             facts.put("failure_code", "destination_already_powered");
             facts.put("detail", "the visible destination is already on a live kinetic network; public facts cannot prove it is the requested source network");
@@ -87,66 +82,23 @@ final class CreateMechanicalPlanner {
             return CreateMechanicalPlan.Result.fail("destination_already_powered", facts);
         }
         if (destinationCandidates.isEmpty() && !request.allowFreeReceiver()) {
-            String code = destinationScan.unloadedCells > 0
-                    ? "destination_needs_exploration" : "kinetic_destination_not_found";
-            facts.put("failure_code", code);
+            facts.put("failure_code", "kinetic_destination_not_found");
             facts.put("detail", "no loaded unpowered kinetic endpoint with a vertical shaft was observed");
             facts.put("recovery_options", List.of("travel_near_destination", "inspect_destination", "allow_verified_free_receiver", "cancel"));
-            return CreateMechanicalPlan.Result.fail(code, facts);
+            return CreateMechanicalPlan.Result.fail("kinetic_destination_not_found", facts);
         }
 
-        RouteSearch routeSearch = findBestRoute(player, request, sourceScan.candidates,
-                destinationCandidates);
-        if (routeSearch.best == null) {
-            String code = routeSearch.unloadedCandidates > 0
-                    ? "route_needs_exploration" : "no_preserving_route";
-            facts.put("failure_code", code);
-            facts.put("detail", "no loaded preserving chain-cell route with a safe pathing-compatible placement corridor and at most five axis runs was verified");
-            facts.put("blocked_route_candidates", routeSearch.blockedCandidates);
-            facts.put("unloaded_route_candidates", routeSearch.unloadedCandidates);
-            facts.put("recovery_options", List.of("travel_to_load_corridor", "choose_other_endpoint", "move_obstruction", "cancel"));
-            return CreateMechanicalPlan.Result.fail(code, facts);
-        }
-
-        RouteCandidate candidate = routeSearch.best;
-        List<CreateMechanicalPlan.RouteCell> cells = materializeCells(level, candidate);
-        if (cells == null) {
-            facts.put("failure_code", "placement_stance_unavailable");
-            facts.put("detail", "the route target cells preserve existing blocks, but at least one cell has no safe reachable first-person placement stance");
-            facts.put("recovery_options", List.of("choose_other_endpoint", "make_corridor_accessible", "cancel"));
-            return CreateMechanicalPlan.Result.fail("placement_stance_unavailable", facts);
-        }
-        String geometry = CreateMechanicalPlan.geometry(candidate.positions);
-        String routeHash = CreateMechanicalPlan.hashRoute(candidate.positions, geometry);
-        CreateMechanicalPlan plan = new CreateMechanicalPlan(
-                candidate.source,
-                candidate.destination,
-                candidate.receiver,
-                cells,
-                geometry,
-                routeHash,
-                false,
-                candidate.source.speed(),
-                candidate.destination != null && candidate.destination.network()
-                        && Math.abs(candidate.destination.speed()) > 0.0001f);
-        facts.put("source", candidate.source.position().toShortString());
-        facts.put("source_speed", candidate.source.speed());
-        facts.put("destination", plan.destinationPosition().toShortString());
-        facts.put("receiver", candidate.receiver.toShortString());
-        facts.put("delivery_kind", candidate.destination == null ? "verified_free_receiver" : "kinetic_machine");
-        facts.put("route_cells", cells.size());
-        facts.put("route_runs", countRuns(candidate.positions));
-        facts.put("route_hash", routeHash);
-        facts.put("transmission", request.transmission() == CreateMechanicalPower.Transmission.AUTO
-                ? "auto_selected_encased_chain_drive" : "encased_chain_drive");
-        facts.put("numeric_stress_margin_supported", false);
-        facts.put("stress_evidence",
-                "live network presence, non-zero speed, and optional boolean overstress only; numeric capacity/impact margin is not a stable reflected contract");
-        facts.put("preserve_existing", true);
-        facts.put("terrain_mutation", false);
-        facts.put("route_layer_strategy", "endpoint_layers_then_loaded_surface_samples");
-        facts.put("placement_corridor", "shared_pathing_walkability_without_digging_or_support_building");
-        return CreateMechanicalPlan.Result.ok(plan, facts);
+        // Route planning is intentionally delegated to the progressive, tick-sliced search. A
+        // synchronous exhaustive endpoint-pair/A* pass here would freeze the client precisely on
+        // the large but legitimate jobs this integration is meant to support.
+        facts.put("failure_code", "route_needs_exploration");
+        facts.put("detail", "compatible endpoint facts are available; the preserving route now requires tick-sliced obstacle-aware investigation");
+        facts.put("source_endpoint_candidates", sourceScan.candidates.size());
+        facts.put("destination_endpoint_candidates", destinationCandidates.size());
+        facts.put("route_search", "bounded_3d_chain_drive_state_a_star");
+        facts.put("recovery_options", List.of(
+                "continue_progressive_route_search", "choose_other_endpoint", "cancel"));
+        return CreateMechanicalPlan.Result.fail("route_needs_exploration", facts);
     }
 
     private record Scan(

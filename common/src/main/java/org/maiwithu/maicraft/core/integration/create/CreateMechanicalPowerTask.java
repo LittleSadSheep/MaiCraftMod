@@ -349,19 +349,34 @@ final class CreateMechanicalPowerTask
             if (duringTick) {
                 beginFailure("missing_material", detail, FailureType.NO_MATERIAL, recovery, false);
             } else {
-                failNow("missing_material", detail, FailureType.NO_MATERIAL, recovery);
+                startMaterialSupply(Math.max(1, desiredBatch), false);
             }
             return false;
         }
+
+        // Before the first mutation, fill the currently available carrying capacity and then
+        // investigate again. After a confirmed prefix exists, use what is already carried and
+        // restock at the exact batch boundary; requiring the entire route in one inventory would
+        // be an arbitrary 36-slot gate on otherwise valid long construction.
+        if (cursor == 0 && r.continuationToken == null
+                && initialInventoryCount < desiredBatch) {
+            startMaterialSupply(desiredBatch, false);
+            return false;
+        }
+        data.put("required_chain_drives_this_attempt",
+                Math.min(remaining, initialInventoryCount));
         if (!plan.progressive()) {
             long scaledBudget = player.level().getGameTime()
-                    + Math.max(600L, required * 160L + 400L);
+                    + Math.max(600L,
+                            (long) Math.min(remaining, initialInventoryCount) * 160L + 400L);
             r.extendDeadlineTo(scaledBudget);
         }
+        materialBatches++;
+        data.put("material_batches", materialBatches);
         return true;
     }
 
-    private void startMaterialSupply(int requiredFinalCount) {
+    private void startMaterialSupply(int requiredFinalCount, boolean afterConfirmedPrefix) {
         ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(chainItem);
         supply.begin(player, r.getToolCallId(), r.getDeadlineGameTime(),
                 new SemanticMaterialSupplyCoordinator.Demand(
@@ -370,12 +385,14 @@ final class CreateMechanicalPowerTask
                 r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels);
         r.extendDeadlineTo(supply.childDeadline());
         supplyRounds++;
+        continuingAfterRestock = afterConfirmedPrefix;
         phase = Phase.SUPPLY;
     }
 
     private TaskState tickSupply(LocalPlayerContext context) {
         SemanticMaterialSupplyCoordinator.Tick tick = supply.tick(player, this::runChild);
         if (tick.status() == SemanticMaterialSupplyCoordinator.Status.RUNNING) {
+            r.extendDeadlineTo(supply.childDeadline());
             return TaskState.RUNNING;
         }
         supplyReceipts.add(tick.receipt());
@@ -387,11 +404,96 @@ final class CreateMechanicalPowerTask
                     tick.failureType(), recoveryIds(tick.receipt().get("recovery_options")), false);
             return TaskState.RUNNING;
         }
-        return replanAfterSupply(context);
+        return continuingAfterRestock
+                ? resumeAfterRestock(context)
+                : replanAfterSupply(context);
+    }
+
+    private TaskState restoreForNextBatch(LocalPlayerContext context) {
+        InputDriver.halt(player);
+        if (stager != null) {
+            CreateMechanicalStager.Status restored = stager.restore(context);
+            if (restored == CreateMechanicalStager.Status.RUNNING) return TaskState.RUNNING;
+            if (restored == CreateMechanicalStager.Status.FAILED
+                    || restored == CreateMechanicalStager.Status.UNCERTAIN) {
+                restoreRetryBlocked = true;
+                beginFailure(restored == CreateMechanicalStager.Status.UNCERTAIN
+                                ? "inventory_restoration_uncertain"
+                                : "inventory_restoration_failed",
+                        stager.detail(), restored == CreateMechanicalStager.Status.FAILED
+                                ? FailureType.NO_SPACE : FailureType.UNKNOWN,
+                        List.of("inspect_inventory", "do_not_repeat_blindly", "cancel"),
+                        restored == CreateMechanicalStager.Status.UNCERTAIN);
+                return TaskState.RUNNING;
+            }
+        }
+        stager = null;
+
+        int remaining = plan.cells().size() - cursor;
+        if (remaining <= 0) {
+            phase = Phase.VERIFY;
+            return TaskState.RUNNING;
+        }
+        int carried = inventoryCount(player, chainItem);
+        if (carried > 0) return resumeBatchFromInventory(context);
+
+        int desiredBatch = Math.min(remaining, carryingCapacity(player, chainItem));
+        if (desiredBatch <= 0) {
+            beginFailure("material_inventory_full",
+                    "the confirmed route can continue, but no inventory capacity is available "
+                            + "for another chain-drive batch",
+                    FailureType.NO_SPACE,
+                    List.of("make_inventory_space", "resume", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        startMaterialSupply(desiredBatch, true);
+        return TaskState.RUNNING;
+    }
+
+    private TaskState resumeAfterRestock(LocalPlayerContext context) {
+        continuingAfterRestock = false;
+        return resumeBatchFromInventory(context);
+    }
+
+    private TaskState resumeBatchFromInventory(LocalPlayerContext context) {
+        int carried = inventoryCount(player, chainItem);
+        if (carried <= 0) {
+            beginFailure("material_supply_not_observed",
+                    "the next route batch was reported supplied, but no usable chain drive is "
+                            + "present in the live inventory",
+                    FailureType.NO_MATERIAL,
+                    List.of("inspect_inventory", "retry_supply", "cancel"), false);
+            return TaskState.RUNNING;
+        }
+        startCursor = cursor;
+        initialInventoryCount = carried;
+        stager = new CreateMechanicalStager(player);
+        data.put("remaining_route_chain_drives", plan.cells().size() - cursor);
+        data.put("required_chain_drives_this_attempt",
+                Math.min(plan.cells().size() - cursor, carried));
+        data.put("available_chain_drives", carried);
+        materialBatches++;
+        data.put("material_batches", materialBatches);
+        renewProgressLease();
+
+        if (plan.progressive()) {
+            resumeAuditIndex = 0;
+            phase = Phase.RESUME_AUDIT;
+            return TaskState.RUNNING;
+        }
+        Validation validation = validateWholeRoute(context.level());
+        if (validation != null) {
+            beginFailure(validation.code, validation.detail,
+                    validation.type, validation.recovery, false);
+            return TaskState.RUNNING;
+        }
+        phase = Phase.PREPARE;
+        return TaskState.RUNNING;
     }
 
     /** Supply invalidates every pre-supply route fact; investigate again before any placement. */
     private TaskState replanAfterSupply(LocalPlayerContext context) {
+        continuingAfterRestock = false;
         if (progressiveSurvey != null) progressiveSurvey.stop();
         progressiveSurvey = null;
         constructionTravel.stop();
@@ -408,9 +510,8 @@ final class CreateMechanicalPowerTask
         if (planned.plan() == null) {
             if (progressiveEligible(planned.failureCode())) {
                 progressiveSurvey = new CreateProgressiveSurvey(r.request);
-                progressiveStartedGameTime = context.level().getGameTime();
-                progressiveActiveTicks = 0L;
-                r.extendDeadlineTo(progressiveStartedGameTime + 36_000L);
+                progressiveProgressRevision = progressiveSurvey.progressRevision();
+                renewProgressLease();
                 data.put("progressive_survey", true);
                 phase = Phase.PROGRESSIVE;
                 return TaskState.RUNNING;
@@ -431,6 +532,20 @@ final class CreateMechanicalPowerTask
             phase = Phase.VERIFY;
             return TaskState.RUNNING;
         }
+        int expectedInventory = initialInventoryCount - (cursor - startCursor);
+        int actualInventory = inventoryCount(player, chainItem);
+        if (expectedInventory == 0) {
+            // The prior batch is exactly accounted for. Restore staging before accepting any
+            // newly observed items or asking the internal supplier for the next finite batch.
+            phase = Phase.RESTOCK_RESTORE;
+            return TaskState.RUNNING;
+        }
+        if (actualInventory != expectedInventory) {
+            beginFailure("material_changed",
+                    "the exact chain-drive inventory budget changed between confirmed placements",
+                    FailureType.NO_MATERIAL, List.of("inspect_inventory", "cancel"), false);
+            return TaskState.RUNNING;
+        }
         if (plan.progressive()) {
             CreateMechanicalPlan.RouteCell active = plan.cells().get(cursor);
             if (!context.level().isLoaded(active.position())
@@ -442,6 +557,7 @@ final class CreateMechanicalPowerTask
                                 ? active.support() : active.stand();
                 CreateProgressiveSurvey.Travel.Status travel = constructionTravel.tick(
                         player, loadTarget, 2);
+                observeConstructionTravelProgress();
                 if (travel == CreateProgressiveSurvey.Travel.Status.RUNNING) {
                     return TaskState.RUNNING;
                 }
@@ -458,14 +574,6 @@ final class CreateMechanicalPowerTask
         Validation validation = validateWholeRoute(context.level());
         if (validation != null) {
             beginFailure(validation.code, validation.detail, validation.type, validation.recovery, false);
-            return TaskState.RUNNING;
-        }
-        int expectedInventory = initialInventoryCount - (cursor - startCursor);
-        int actualInventory = inventoryCount(player, chainItem);
-        if (actualInventory != expectedInventory) {
-            beginFailure("material_changed",
-                    "the exact chain-drive inventory budget changed between confirmed placements",
-                    FailureType.NO_MATERIAL, List.of("inspect_inventory", "cancel"), false);
             return TaskState.RUNNING;
         }
         CreateMechanicalStager.Status staged = stager.ensureChainSelected(context, chainItem);
@@ -598,6 +706,7 @@ final class CreateMechanicalPowerTask
             return TaskState.RUNNING;
         }
         cursor++;
+        renewProgressLease();
         readyTicks = 0;
         context.body().clearLook();
         data.put("confirmed_route_cells", cursor);
@@ -640,7 +749,7 @@ final class CreateMechanicalPowerTask
                     : "live_at_acceptance");
             data.put("acceptance_basis",
                     "the formerly unpowered destination became a live non-zero-speed endpoint after the exact contiguous route was confirmed");
-            data.put("placed_this_attempt", cursor - startCursor);
+            data.put("placed_this_attempt", cursor - invocationStartCursor);
             data.put("confirmed_route_cells", cursor);
             failureCode = null;
             failureDetail = null;
@@ -659,6 +768,15 @@ final class CreateMechanicalPowerTask
 
     private TaskState restoreAndFinish(LocalPlayerContext context) {
         InputDriver.halt(player);
+        if (restoreRetryBlocked) {
+            data.put("inventory_restoration", stager == null
+                    ? "automatic restoration retry blocked after a terminal receipt"
+                    : stager.detail());
+            fail(failureDetail == null
+                    ? "inventory restoration stopped after a terminal receipt"
+                    : failureDetail, failureType);
+            return TaskState.FAILED;
+        }
         CreateMechanicalStager.Status restored = stager == null
                 ? CreateMechanicalStager.Status.RESTORED : stager.restore(context);
         if (restored == CreateMechanicalStager.Status.RUNNING) return TaskState.RUNNING;
@@ -884,7 +1002,9 @@ final class CreateMechanicalPowerTask
                 "source_unloaded_cells", "destination_loaded_cells",
                 "destination_unloaded_cells", "numeric_stress_margin_supported",
                 "stress_evidence", "delivery_kind", "required_chain_drives_this_attempt",
-                "available_chain_drives", "source_speed", "destination_speed",
+                "total_route_chain_drives", "remaining_route_chain_drives",
+                "available_chain_drives", "material_batches",
+                "source_speed", "destination_speed",
                 "source_overstressed", "destination_overstressed", "speed_unit",
                 "network_live", "source_verification", "acceptance_basis",
                 "placed_this_attempt",
@@ -914,7 +1034,7 @@ final class CreateMechanicalPowerTask
     protected String timeoutMessage() {
         if (failureCode == null) {
             failureCode = "timeout";
-            failureDetail = "the bounded mechanical connection deadline elapsed";
+            failureDetail = "the mechanical connection stopped making verifiable progress and its liveness lease expired";
             recoveryOptions = placementReceipt == null && (stager == null || !stager.hasPendingReceipt())
                     ? List.of("resume_if_token_present", "inspect_partial_route", "cancel")
                     : List.of("inspect_world_and_inventory", "do_not_retry_blindly", "cancel");
@@ -935,6 +1055,48 @@ final class CreateMechanicalPowerTask
             total += CreateMechanicalStager.usable(player.getInventory().getItem(slot), item);
         }
         return total;
+    }
+
+    /** Maximum final count that the current 36-slot inventory can physically carry. */
+    private static int carryingCapacity(LocalPlayer player, Item item) {
+        int capacity = 0;
+        int defaultStack = new ItemStack(item).getMaxStackSize();
+        for (int slot = 0; slot < Math.min(36, player.getInventory().getContainerSize()); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty()) {
+                capacity += defaultStack;
+            } else if (CreateMechanicalStager.usable(stack, item) > 0) {
+                capacity += stack.getMaxStackSize();
+            }
+        }
+        return capacity;
+    }
+
+    private void renewProgressLease() {
+        r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
+    }
+
+    private void observeProgressiveSurveyProgress() {
+        if (progressiveSurvey == null) return;
+        long revision = progressiveSurvey.progressRevision();
+        boolean advanced = revision > progressiveProgressRevision;
+        progressiveProgressRevision = Math.max(progressiveProgressRevision, revision);
+        if (advanced
+                || progressiveSurvey.hasRecentPhysicalProgress(PROGRESS_GRACE_TICKS)
+                || progressiveSurvey.planningInFlight()) {
+            renewProgressLease();
+        }
+    }
+
+    private void observeConstructionTravelProgress() {
+        long revision = constructionTravel.progressRevision();
+        boolean advanced = revision > constructionProgressRevision;
+        constructionProgressRevision = Math.max(constructionProgressRevision, revision);
+        if (advanced
+                || constructionTravel.hasRecentPhysicalProgress(PROGRESS_GRACE_TICKS)
+                || constructionTravel.planningInFlight()) {
+            renewProgressLease();
+        }
     }
 
     private static BlockHitResult nativeRaycast(LocalPlayer player) {
