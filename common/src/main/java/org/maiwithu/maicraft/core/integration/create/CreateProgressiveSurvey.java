@@ -23,22 +23,31 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
  */
 final class CreateProgressiveSurvey {
     enum Status { RUNNING, READY, FAILED }
-    private enum Phase { SOURCE, DESTINATION, CORRIDOR, RETURN_SOURCE, READY, FAILED }
+    private enum Phase {
+        SOURCE, DESTINATION, ENDPOINT_PAIRS, ROUTE_SEARCH, CORRIDOR,
+        RETURN_SOURCE, READY, FAILED
+    }
 
     record Failure(String code, String detail, FailureType type, List<String> recovery) {}
 
     private static final int CELLS_PER_TICK = 48;
-    private static final int MAX_TRAVEL_FAILURES = 5;
+    private static final int ROUTE_EXPANSIONS_PER_TICK = 64;
 
     private final CreateMechanicalPower.Request request;
     private final Travel travel = new Travel();
     private Phase phase = Phase.SOURCE;
+    private List<CreateMechanicalPlan.KineticEndpoint> sourceCandidates = List.of();
+    private List<CreateMechanicalPlan.KineticEndpoint> destinationCandidates = List.of();
+    private List<BlockPos> receiverCandidates = List.of();
+    private int endpointSourceIndex;
+    private int endpointTargetIndex;
     private CreateMechanicalPlan.KineticEndpoint source;
     private CreateMechanicalPlan.KineticEndpoint destination;
     private BlockPos receiver;
     private CreateMechanicalPlanner.TentativeRoute route;
-    private List<CreateMechanicalPlanner.TentativeRoute> routeCandidates = List.of();
-    private int routeCandidateIndex;
+    private CreateMechanicalPlanner.ObstacleAwareRouteSearch obstacleRouteSearch;
+    private long absorbedRouteSearchRevision;
+    private final Set<Long> rejectedRouteCells = new HashSet<>();
     private List<CreateMechanicalPlan.RouteCell> surveyed;
     private Set<BlockPos> routeSet;
     private int corridorIndex = -1;
@@ -46,20 +55,29 @@ final class CreateProgressiveSurvey {
     private Failure failure;
     private int sourceLoadedCells;
     private int sourceUnloadedCells;
+    private int sourceObservedHighWater;
     private int destinationLoadedCells;
     private int destinationUnloadedCells;
+    private int destinationObservedHighWater;
     private int travelSegments;
+    private int rejectedRouteCandidates;
+    private boolean sawRouteCandidate;
+    private String lastCorridorRejectionDetail;
+    private long progressRevision;
 
     CreateProgressiveSurvey(CreateMechanicalPower.Request request) {
         this.request = request;
     }
 
     Status tick(LocalPlayerContext context) {
+        travel.observeGameTime(context.level().getGameTime());
         if (phase == Phase.READY) return Status.READY;
         if (phase == Phase.FAILED) return Status.FAILED;
         return switch (phase) {
             case SOURCE -> surveySource(context);
             case DESTINATION -> surveyDestination(context);
+            case ENDPOINT_PAIRS -> beginEndpointPair(context.level());
+            case ROUTE_SEARCH -> tickObstacleRouteSearch();
             case CORRIDOR -> surveyCorridor(context);
             case RETURN_SOURCE -> returnSource(context);
             default -> Status.FAILED;
@@ -73,78 +91,101 @@ final class CreateProgressiveSurvey {
     int sourceUnloadedCells() { return sourceUnloadedCells; }
     int destinationLoadedCells() { return destinationLoadedCells; }
     int destinationUnloadedCells() { return destinationUnloadedCells; }
-    int rejectedRouteCandidates() { return routeCandidateIndex; }
+    int rejectedRouteCandidates() { return rejectedRouteCandidates; }
+    boolean hasRecentPhysicalProgress(int graceTicks) {
+        return travel.hasRecentPhysicalProgress(graceTicks);
+    }
+    boolean planningInFlight() { return travel.planningInFlight(); }
+    long progressRevision() { return progressRevision + travel.progressRevision(); }
 
     void pause() { travel.pause(); }
-    void stop() { travel.stop(); }
+    void stop() {
+        travel.stop();
+        obstacleRouteSearch = null;
+    }
 
     private Status surveySource(LocalPlayerContext context) {
         CreateMechanicalPlanner.EndpointSurvey survey = CreateMechanicalPlanner.surveyEndpoint(
                 context.level(), request.source(), true);
+        sourceObservedHighWater = recordObservedCells(
+                sourceObservedHighWater, survey.loadedCells());
         sourceLoadedCells = survey.loadedCells();
         sourceUnloadedCells = survey.unloadedCells();
-        if (!survey.endpoints().isEmpty()) {
-            source = survey.endpoints().stream()
-                    .min(Comparator.comparingDouble(endpoint ->
-                            endpoint.position().distSqr(request.source().center())))
-                    .orElseThrow();
-            travel.stop();
-            phase = Phase.DESTINATION;
-            return Status.RUNNING;
+        if (survey.unloadedCells() > 0) {
+            BlockPos observation = survey.nextObservation() == null
+                    ? request.source().center() : survey.nextObservation();
+            return travelToward(context, observation, 2,
+                    "source_unreachable",
+                    "could not reach a loaded observation position for the source region");
         }
-        if (survey.unloadedCells() == 0) {
+        if (survey.endpoints().isEmpty()) {
             return fail("powered_source_not_found",
                     "the fully observed source region contains no live non-zero-speed vertical-shaft endpoint",
                     FailureType.TARGET_LOST,
                     List.of("restore_source_power", "choose_other_source", "cancel"));
         }
-        BlockPos observation = survey.nextObservation() == null
-                ? request.source().center() : survey.nextObservation();
-        return travelToward(context, observation, 2,
-                "source_unreachable", "could not reach a loaded observation position for the source region");
+        sourceCandidates = List.copyOf(survey.endpoints());
+        markProgress();
+        travel.stop();
+        transitionTo(Phase.DESTINATION);
+        return Status.RUNNING;
     }
 
     private Status surveyDestination(LocalPlayerContext context) {
         CreateMechanicalPlanner.EndpointSurvey survey = CreateMechanicalPlanner.surveyEndpoint(
                 context.level(), request.destination(), false);
+        destinationObservedHighWater = recordObservedCells(
+                destinationObservedHighWater, survey.loadedCells());
         destinationLoadedCells = survey.loadedCells();
         destinationUnloadedCells = survey.unloadedCells();
+        if (survey.unloadedCells() > 0) {
+            BlockPos observation = survey.nextObservation() == null
+                    ? request.destination().center() : survey.nextObservation();
+            return travelToward(context, observation, 2,
+                    "destination_unreachable",
+                    "could not reach a loaded observation position for the destination region");
+        }
         List<CreateMechanicalPlan.KineticEndpoint> unpowered = survey.endpoints().stream()
                 .filter(endpoint -> !endpoint.network() || Math.abs(endpoint.speed()) <= 0.0001f)
                 .sorted(Comparator.comparingDouble(endpoint ->
                         endpoint.position().distSqr(request.destination().center())))
                 .toList();
         if (!unpowered.isEmpty()) {
-            destination = unpowered.get(0);
-            receiver = destination.position().relative(destination.shaftFace());
-            return beginCorridor(context.level());
+            destinationCandidates = List.copyOf(unpowered);
+            receiverCandidates = List.of();
+            markProgress();
+            return startCorridorSearch(context.level());
         }
         if (request.allowFreeReceiver()) {
             List<BlockPos> free = CreateMechanicalPlanner.surveyFreeReceivers(
                     context.level(), request.destination());
             if (!free.isEmpty()) {
-                destination = null;
-                receiver = free.get(0);
-                return beginCorridor(context.level());
+                destinationCandidates = List.of();
+                receiverCandidates = List.copyOf(free);
+                markProgress();
+                return startCorridorSearch(context.level());
             }
         }
-        if (survey.unloadedCells() == 0) {
-            if (survey.poweredEndpoints() > 0) {
-                return fail("destination_already_powered",
-                        "the fully observed destination region has only already-powered endpoints, so requested source membership is not provable",
-                        FailureType.TARGET_LOST,
-                        List.of("inspect_existing_network", "choose_unpowered_destination", "cancel"));
-            }
-            return fail("kinetic_destination_not_found",
-                    "the fully observed destination region contains no compatible unpowered endpoint or approved free receiver",
+        if (survey.poweredEndpoints() > 0) {
+            return fail("destination_already_powered",
+                    "the fully observed destination region has only already-powered endpoints, so requested source membership is not provable",
                     FailureType.TARGET_LOST,
-                    List.of("place_destination_machine", "allow_verified_free_receiver", "cancel"));
+                    List.of("inspect_existing_network", "choose_unpowered_destination", "cancel"));
         }
-        BlockPos observation = survey.nextObservation() == null
-                ? request.destination().center() : survey.nextObservation();
-        return travelToward(context, observation, 2,
-                "destination_unreachable",
-                "could not reach a loaded observation position for the destination region");
+        return fail("kinetic_destination_not_found",
+                "the fully observed destination region contains no compatible unpowered endpoint or approved free receiver",
+                FailureType.TARGET_LOST,
+                List.of("place_destination_machine", "allow_verified_free_receiver", "cancel"));
+    }
+
+    private Status startCorridorSearch(ClientLevel level) {
+        endpointSourceIndex = 0;
+        endpointTargetIndex = 0;
+        rejectedRouteCells.clear();
+        sawRouteCandidate = false;
+        lastCorridorRejectionDetail = null;
+        transitionTo(Phase.ENDPOINT_PAIRS);
+        return beginEndpointPair(level);
     }
 
     private Status beginEndpointPair(ClientLevel level) {
