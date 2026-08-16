@@ -197,8 +197,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private void observeColumn(ClientLevel level, int x, int z) {
-        int surface = Math.clamp(level.getHeight(
-                        Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z),
+        int surface = Math.clamp(ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z),
                 level.getMinBuildHeight() + 1, level.getMaxBuildHeight() - 2);
         int minY = Math.max(level.getMinBuildHeight() + 1, r.center.getY() - 12);
         int maxY = Math.min(level.getMaxBuildHeight() - 2, r.center.getY() + 12);
@@ -208,7 +207,6 @@ public final class SemanticLightAreaCompanionTask
             if (y > level.getMinBuildHeight() && y < level.getMaxBuildHeight() - 1) ys.add(y);
         }
         for (int y : ys) {
-            if (samples.size() >= MAX_TARGET_SAMPLES) return;
             BlockPos pos = new BlockPos(x, y, z);
             BlockState state = level.getBlockState(pos);
             String sensitive = sensitiveReason(level, pos, state);
@@ -239,8 +237,8 @@ public final class SemanticLightAreaCompanionTask
 
     private TaskState tickPlan() {
         ClientLevel level = ClientRuntime.requireContext(player).level();
-        if (passes >= r.maxPasses || requestedPlacements >= r.maxPlacements) {
-            return exhausted("bounded lighting passes or placement budget were exhausted");
+        if (r.hasPlacementBudget() && requestedPlacements >= r.maxPlacements) {
+            return placementBudgetReached();
         }
         source = chooseSource();
         if (source == null) {
@@ -262,10 +260,19 @@ public final class SemanticLightAreaCompanionTask
                             "review protected_labels; no protected block was modified"));
             return TaskState.FAILED;
         }
+        String candidateFingerprint = candidateFingerprint(source, candidates);
+        if (candidateFingerprint.equals(lastUnproductiveCandidateFingerprint)) {
+            return exhausted("a complete observe/build/verify round produced no additional lit "
+                    + "cells and the same safe candidate frontier was observed again");
+        }
 
         int stillNeeded = Math.max(1,
                 (int) Math.ceil(targetCells.size() * r.coverage.requiredRatio()) - litCells);
-        int cap = Math.min(MAX_PASS_BATCH, r.maxPlacements - requestedPlacements);
+        int cap = MAX_PASS_BATCH;
+        if (r.hasPlacementBudget()) {
+            cap = Math.min(cap, r.maxPlacements - requestedPlacements);
+        }
+        if (cap <= 0) return placementBudgetReached();
         List<Candidate> selected = greedy(candidates, stillNeeded, cap);
         if (selected.isEmpty()) return exhausted("the safe candidates cannot improve measured dark cells");
 
@@ -285,19 +292,21 @@ public final class SemanticLightAreaCompanionTask
             supply.begin(player, r.getToolCallId(), r.getDeadlineGameTime(),
                     new SemanticMaterialSupplyCoordinator.Demand(
                             List.of(sourceId), requiredMaterials, "investigated lighting layout"),
-                    r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels);
+                    r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels,
+                    protectedNavigationCells);
             r.extendDeadlineTo(supply.childDeadline());
             supplyRounds++;
             stage = Stage.SUPPLY;
             return TaskState.RUNNING;
         }
-        startBuild(targets, consume);
+        startBuild(targets, consume, candidateFingerprint);
         return TaskState.RUNNING;
     }
 
     private TaskState tickSupply() {
         SemanticMaterialSupplyCoordinator.Tick tick = supply.tick(player, this::runChild);
         if (tick.status() == SemanticMaterialSupplyCoordinator.Status.RUNNING) {
+            r.extendDeadlineTo(supply.childDeadline());
             return TaskState.RUNNING;
         }
         supplyReceipts.add(tick.receipt());
@@ -321,25 +330,33 @@ public final class SemanticLightAreaCompanionTask
         return TaskState.RUNNING;
     }
 
-    private void startBuild(List<BuildTaskRecord.Target> targets, boolean consume) {
+    private void startBuild(
+            List<BuildTaskRecord.Target> targets,
+            boolean consume,
+            String candidateFingerprint) {
         for (BuildTaskRecord.Target target : targets) {
             attemptedPositions.add(target.pos().asLong());
         }
         String parent = r.getToolCallId() == null ? "light_area" : r.getToolCallId();
         long now = player.level().getGameTime();
-        BuildTaskRecord build = new BuildTaskRecord(
+        buildRecord = new BuildTaskRecord(
                 parent + "-lighting-pass-" + (passes + 1),
                 now + BuildTool.timeoutTicksFor(targets.size(), consume),
                 targets, false, consume, false);
-        buildChild = new BuildCompanionTask(player, build);
+        buildChild = new BuildCompanionTask(player, buildRecord);
         buildChild.protectNavigationCells(protectedNavigationCells);
+        observedBuildProgress = 0;
+        passBaselineLitCells = litCells;
+        activeCandidateFingerprint = candidateFingerprint;
         requestedPlacements += targets.size();
         passes++;
+        r.extendDeadlineTo(buildRecord.getDeadlineGameTime());
         stage = Stage.BUILD;
     }
 
     private TaskState tickBuild() {
         TaskState terminal = runChild(buildChild);
+        propagateBuildProgress();
         if (terminal == null) return TaskState.RUNNING;
         lastBuildResult = buildChild.result(terminal);
         Map<String, Object> receipt = new LinkedHashMap<>();
@@ -352,6 +369,7 @@ public final class SemanticLightAreaCompanionTask
         }
         childReceipts.add(receipt);
         buildChild = null;
+        buildRecord = null;
         settledAt = SETTLE_TICKS;
         stage = Stage.SETTLE;
         return TaskState.RUNNING;
@@ -387,9 +405,30 @@ public final class SemanticLightAreaCompanionTask
         darkCells = List.copyOf(verifyDark);
         achievedCoverage = targetCells.isEmpty() ? 0.0D
                 : (double) litCells / (double) targetCells.size();
+        if (litCells > passBaselineLitCells) {
+            lastUnproductiveCandidateFingerprint = null;
+            renewLightingProgress();
+        } else {
+            lastUnproductiveCandidateFingerprint = activeCandidateFingerprint;
+        }
+        activeCandidateFingerprint = null;
         if (meetsRequirement()) return TaskState.SUCCESS;
         stage = Stage.PLAN;
         return TaskState.RUNNING;
+    }
+
+    private void propagateBuildProgress() {
+        if (buildRecord == null) return;
+        r.extendDeadlineTo(buildRecord.getDeadlineGameTime());
+        int current = buildRecord.completed() + buildRecord.placed() + buildRecord.broken();
+        if (current > observedBuildProgress) {
+            observedBuildProgress = current;
+            renewLightingProgress();
+        }
+    }
+
+    private void renewLightingProgress() {
+        r.extendDeadlineTo(player.level().getGameTime() + LIGHTING_PROGRESS_LEASE_TICKS);
     }
 
     private void evaluateCurrentLight(ClientLevel level) {
@@ -406,7 +445,8 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private boolean meetsRequirement() {
-        return achievedCoverage + 1.0E-9D >= r.coverage.requiredRatio();
+        return areaBoundaryVerified
+                && achievedCoverage + 1.0E-9D >= r.coverage.requiredRatio();
     }
 
     private LightSource chooseSource() {
@@ -474,12 +514,32 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private void resetObservationForReplan() {
-        columnIndex = 0;
+        explicitScanDx = r.hasExplicitRadius() ? -r.radius : 0;
+        explicitScanDz = r.hasExplicitRadius() ? -r.radius : 0;
+        explicitScanComplete = false;
         unloadedColumns = 0;
         loadedColumns = 0;
         samples.clear();
         protectedFacts.clear();
         protectedNavigationCells.clear();
+        seedColumns.clear();
+        queuedSeedColumns.clear();
+        componentCells.clear();
+        queuedComponentCells.clear();
+        observedComponentCells.clear();
+        componentFrontiers.clear();
+        componentFrontierOrder.clear();
+        rejectedComponentFrontiers.clear();
+        placementFootprintColumns.clear();
+        attemptedSurveyMoves.clear();
+        seedSearchInitialized = false;
+        componentSeeded = false;
+        areaBoundaryVerified = false;
+        seedColumnsObserved = 0;
+        componentFrontiersObserved = 0;
+        componentFrontiersLoaded = 0;
+        surveyLegs = 0;
+        surveyLegFailures = 0;
         targetCells = List.of();
         darkCells = List.of();
         achievedCoverage = 0.0D;
@@ -530,6 +590,24 @@ public final class SemanticLightAreaCompanionTask
                     candidate.preferenceScore(), Set.copyOf(covers)));
         }
         return result;
+    }
+
+    private static String candidateFingerprint(
+            LightSource light, List<Candidate> candidates) {
+        long hash = 0xcbf29ce484222325L;
+        for (int i = 0; i < light.id().length(); i++) {
+            hash ^= light.id().charAt(i);
+            hash *= 0x100000001b3L;
+        }
+        List<Long> positions = candidates.stream()
+                .map(candidate -> candidate.pos().asLong())
+                .sorted()
+                .toList();
+        for (long position : positions) {
+            hash ^= position;
+            hash *= 0x100000001b3L;
+        }
+        return light.id() + ':' + positions.size() + ':' + Long.toUnsignedString(hash, 16);
     }
 
     private Candidate groundCandidate(ClientLevel level, LightSource light, BlockPos pos) {
@@ -604,40 +682,6 @@ public final class SemanticLightAreaCompanionTask
         return selected;
     }
 
-    private List<Sample> nearestConnectedComponent(List<Sample> input) {
-        Map<Long, Sample> remaining = new HashMap<>();
-        for (Sample sample : input) remaining.put(sample.pos().asLong(), sample);
-        List<Sample> best = List.of();
-        double bestDistance = Double.POSITIVE_INFINITY;
-        while (!remaining.isEmpty()) {
-            Sample seed = remaining.values().iterator().next();
-            remaining.remove(seed.pos().asLong());
-            ArrayDeque<Sample> queue = new ArrayDeque<>();
-            List<Sample> component = new ArrayList<>();
-            queue.add(seed);
-            while (!queue.isEmpty()) {
-                Sample sample = queue.removeFirst();
-                component.add(sample);
-                for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
-                    if (dx == 0 && dz == 0) continue;
-                    for (int dy = -1; dy <= 1; dy++) {
-                        long key = BlockPos.asLong(sample.pos().getX() + dx,
-                                sample.pos().getY() + dy, sample.pos().getZ() + dz);
-                        Sample next = remaining.remove(key);
-                        if (next != null) queue.addLast(next);
-                    }
-                }
-            }
-            double distance = component.stream().mapToDouble(sample ->
-                    sample.pos().distSqr(r.center)).min().orElse(Double.POSITIVE_INFINITY);
-            if (distance < bestDistance || (distance == bestDistance && component.size() > best.size())) {
-                best = component;
-                bestDistance = distance;
-            }
-        }
-        return List.copyOf(best);
-    }
-
     private boolean isGrowthCell(BlockState state) {
         return state.is(BlockTags.CROPS) || state.getBlock() instanceof CropBlock;
     }
@@ -690,9 +734,9 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private boolean inside(BlockPos pos) {
-        int dx = pos.getX() - r.center.getX();
-        int dz = pos.getZ() - r.center.getZ();
-        return dx * dx + dz * dz <= r.radius * r.radius;
+        if (r.hasExplicitRadius()) return insideRequestedBoundary(pos);
+        return placementFootprintColumns.contains(
+                BlockPos.asLong(pos.getX(), 0, pos.getZ()));
     }
 
     private static int horizontalDistanceSquared(BlockPos left, BlockPos right) {
@@ -706,16 +750,6 @@ public final class SemanticLightAreaCompanionTask
         return level.isLoaded(new BlockPos(x, y, z));
     }
 
-    private static List<Offset> makeOffsets(int radius) {
-        List<Offset> result = new ArrayList<>();
-        for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) {
-            int distance = dx * dx + dz * dz;
-            if (distance <= radius * radius) result.add(new Offset(dx, dz, distance));
-        }
-        result.sort(Comparator.comparingInt(Offset::distanceSquared));
-        return List.copyOf(result);
-    }
-
     private TaskState exhausted(String reason) {
         giveUp("verified_coverage_not_reached", reason + "; actual achieved_coverage="
                         + String.format(java.util.Locale.ROOT, "%.3f", achievedCoverage),
@@ -723,6 +757,18 @@ public final class SemanticLightAreaCompanionTask
                 List.of("supply a different light source or style",
                         "use a smaller area or lower required coverage",
                         "inspect the aggregate dark-area evidence and choose a semantic prerequisite"));
+        return TaskState.FAILED;
+    }
+
+    private TaskState placementBudgetReached() {
+        giveUp("placement_budget_reached",
+                "the explicit max_placements=" + r.maxPlacements
+                        + " decision boundary was reached at achieved_coverage="
+                        + String.format(java.util.Locale.ROOT, "%.3f", achievedCoverage),
+                FailureType.INTERRUPTED,
+                List.of("authorize a larger max_placements budget",
+                        "change the light source, style or required coverage",
+                        "stop with the already confirmed lighting changes"));
         return TaskState.FAILED;
     }
 
@@ -737,8 +783,13 @@ public final class SemanticLightAreaCompanionTask
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("verified", meetsRequirement());
         data.put("semantic_target", r.semanticTarget == null ? "loaded_area" : r.semanticTarget);
-        data.put("scope", "loaded_client_level_only");
-        data.put("radius", r.radius);
+        data.put("scope", r.resolveLoadedComponent
+                ? "live_loaded_connected_component_with_first_person_frontier_loading"
+                : "explicit_player_authored_geometric_boundary");
+        data.put("area_boundary_verified", areaBoundaryVerified);
+        data.put("boundary_source", r.hasExplicitRadius()
+                ? "explicit_player_radius" : "observed_connected_component_closure");
+        if (r.hasExplicitRadius()) data.put("radius", r.radius);
         data.put("minimum_light", r.minimumLight);
         data.put("coverage", r.coverage.name().toLowerCase(java.util.Locale.ROOT));
         data.put("placement_preference",
@@ -750,8 +801,16 @@ public final class SemanticLightAreaCompanionTask
         data.put("dark_cell_count", darkCells.size());
         data.put("loaded_columns", loadedColumns);
         data.put("unloaded_columns", unloadedColumns);
+        data.put("seed_columns_observed", seedColumnsObserved);
+        data.put("component_frontiers_observed", componentFrontiersObserved);
+        data.put("component_frontiers_loaded", componentFrontiersLoaded);
+        data.put("unresolved_component_frontiers", componentFrontiers.size());
+        data.put("survey_legs", surveyLegs);
+        data.put("survey_leg_failures", surveyLegFailures);
         data.put("passes", passes);
         data.put("requested_placements", requestedPlacements);
+        data.put("placement_budget_explicit", r.hasPlacementBudget());
+        if (r.hasPlacementBudget()) data.put("max_placements", r.maxPlacements);
         data.put("protected_footprint_facts", Map.copyOf(protectedFacts));
         data.put("build_receipts", List.copyOf(childReceipts));
         data.put("material_policy", r.materialPolicy.id());
@@ -768,7 +827,8 @@ public final class SemanticLightAreaCompanionTask
     }
 
     @Override protected String successMessage() {
-        return "actual block light verified across " + litCells + "/" + targetCells.size()
+        return "semantic area boundary and actual block light verified across "
+                + litCells + "/" + targetCells.size()
                 + " semantic area cells (coverage "
                 + String.format(java.util.Locale.ROOT, "%.1f%%", achievedCoverage * 100.0D) + ")";
     }
@@ -782,11 +842,18 @@ public final class SemanticLightAreaCompanionTask
     }
 
     @Override protected void cleanup() {
+        if (surveyMoveChild != null) {
+            surveyMoveChild.stop(player, Task.StopReason.REPLACED);
+            surveyMoveChild.result(TaskState.CANCELLED);
+            surveyMoveChild = null;
+        }
+        surveyMoveRecord = null;
         if (buildChild != null) {
             buildChild.stop(player, Task.StopReason.REPLACED);
             buildChild.result(TaskState.CANCELLED);
             buildChild = null;
         }
+        buildRecord = null;
         if (supply.active()) supply.cancel(player);
         super.cleanup();
     }
