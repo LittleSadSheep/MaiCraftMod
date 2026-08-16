@@ -56,6 +56,8 @@ public final class SemanticContainerCompanionTask
     private static final int LANDMARK_PROTECTION_RADIUS = 12;
     private static final int OTHER_PLAYER_RADIUS = 6;
     private static final long MENU_WAIT_TICKS = 80L;
+    /** A verified equal-and-opposite inventory delta renews a long multi-stack transfer. */
+    private static final long TRANSFER_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
 
     private enum Phase { SURVEY, APPROACH, OPEN, WAIT_MENU, PLAN, TRANSFER, CLEANUP, COMPLETE }
     private enum Purpose { OPEN, TRANSFER, CLOSE }
@@ -83,6 +85,7 @@ public final class SemanticContainerCompanionTask
     private MenuView view;
     private TagKey<Item> itemTag;
     private Task activeChild;
+    private TaskRecord activeRecord;
     private Purpose activePurpose;
     private int childSerial;
     private int approachDudTicks;
@@ -634,6 +637,7 @@ public final class SemanticContainerCompanionTask
         stableFingerprint = fingerprint(player.containerMenu);
         pendingMove = null;
         planIndex++;
+        r.extendDeadlineTo(player.level().getGameTime() + TRANSFER_PROGRESS_LEASE_TICKS);
         phase = Phase.TRANSFER;
         return TaskState.RUNNING;
     }
@@ -663,10 +667,14 @@ public final class SemanticContainerCompanionTask
 
     private TaskState tickChild() {
         TaskState terminal = runChild(activeChild);
-        if (terminal == null) return TaskState.RUNNING;
+        if (terminal == null) {
+            if (activeRecord != null) r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
+            return TaskState.RUNNING;
+        }
         TaskResult result = activeChild.result(terminal);
         Purpose purpose = activePurpose;
         activeChild = null;
+        activeRecord = null;
         activePurpose = null;
         boolean success = terminal == TaskState.SUCCESS && result != null && result.success();
         if (!success) {
@@ -725,8 +733,10 @@ public final class SemanticContainerCompanionTask
     }
 
     private TaskState start(TaskRecord record, Purpose purpose) {
+        activeRecord = record;
         activeChild = TaskFactory.create(player, record);
         activePurpose = purpose;
+        r.extendDeadlineTo(record.getDeadlineGameTime());
         return TaskState.RUNNING;
     }
 
@@ -855,7 +865,9 @@ public final class SemanticContainerCompanionTask
     }
 
     private long childDeadline(long ticks) {
-        return Math.min(r.getDeadlineGameTime(), player.level().getGameTime() + ticks);
+        long lease = player.level().getGameTime() + ticks;
+        r.extendDeadlineTo(lease);
+        return lease;
     }
 
     @Override protected void cleanup() {
@@ -863,6 +875,7 @@ public final class SemanticContainerCompanionTask
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
             activeChild = null;
+            activeRecord = null;
             activePurpose = null;
         }
         if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
@@ -939,7 +952,7 @@ public final class SemanticContainerCompanionTask
     }
 
     @Override protected String timeoutMessage() {
-        return "container management timed out after " + movedCount
+        return "container management stopped making verified progress after " + movedCount
                 + " verified item(s); no unverified retry was attempted";
     }
 

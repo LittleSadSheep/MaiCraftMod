@@ -17,6 +17,8 @@ import org.maiwithu.maicraft.task.TaskState;
 /** Cursor-safe, live-state container transfer task. */
 public final class ContainerTransferCompanionTask
         extends AbstractCompanionTask<ContainerTransferTaskRecord> {
+    /** Confirmed native menu changes keep a large transfer alive; pending receipts do not. */
+    private static final long CLICK_PROGRESS_LEASE_TICKS = 60L * 20L;
     private enum Phase { BEGIN, QUICK, PICKUP, PLACE_ALL, PLACE_ONE, SWAP_DEST, RETURN_CURSOR, FAILING }
     private int moveIndex;
     private Phase phase = Phase.BEGIN;
@@ -57,6 +59,7 @@ public final class ContainerTransferCompanionTask
                 return beginFailure("container click was not confirmed: " + detail);
             }
             receipt = null;
+            r.extendDeadlineTo(player.level().getGameTime() + CLICK_PROGRESS_LEASE_TICKS);
             afterConfirmedClick();
         }
         if (phase == Phase.FAILING) {
