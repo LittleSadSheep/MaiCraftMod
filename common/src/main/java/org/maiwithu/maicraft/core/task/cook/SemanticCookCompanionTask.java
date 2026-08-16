@@ -26,13 +26,13 @@ import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
@@ -50,6 +50,12 @@ import org.maiwithu.maicraft.task.TaskState;
 /** Receipt-driven furnace-family executor; all concrete operations stay internal. */
 public final class SemanticCookCompanionTask
         extends AbstractCompanionTask<SemanticCookTaskRecord> {
+    /**
+     * Furnace progress is live server evidence, so each observed change renews a
+     * no-progress lease instead of spending one fixed wall-clock budget for the
+     * whole (possibly multi-batch, Mod-recipe) cooking goal.
+     */
+    private static final long COOK_PROGRESS_LEASE_TICKS = 30L * 20L;
     private enum Phase { RESOLVE, PREPARE, OPEN, WAIT_MENU, VALIDATE, LOAD_INPUT,
         LOAD_FUEL, WAIT_COOK, CLEANUP, COMPLETE }
     private enum Purpose { ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION, PLACE_STATION,
@@ -81,6 +87,7 @@ public final class SemanticCookCompanionTask
     private long waitMenuSince;
     private long lastCookEvidenceTick;
     private String lastCookEvidence = "";
+    private BlockPos openAttemptStation;
     private int openAttempts;
     private Task activeChild;
     private TaskRecord activeRecord;
@@ -344,7 +351,7 @@ public final class SemanticCookCompanionTask
                         .filter(source -> source != SemanticAcquireTaskRecord.Source.COOK)
                         .toList(),
                 r.allowHarm, SemanticAcquireTaskRecord.SourceHint.empty(),
-                r.protectedLabels, 16, 6, 64);
+                r.protectedLabels, 16);
         return start(child, purpose);
     }
 
@@ -352,12 +359,18 @@ public final class SemanticCookCompanionTask
         if (stationPos == null
                 || !player.level().getBlockState(stationPos).is(candidate.device.block)) {
             stationPos = null;
+            openAttemptStation = null;
+            openAttempts = 0;
             phase = Phase.PREPARE;
             return TaskState.RUNNING;
         }
         if (!withinReach(stationPos)) {
             phase = Phase.PREPARE;
             return TaskState.RUNNING;
+        }
+        if (!stationPos.equals(openAttemptStation)) {
+            openAttemptStation = stationPos;
+            openAttempts = 0;
         }
         openAttempts++;
         return start(new InteractAtTaskRecord(
@@ -372,6 +385,9 @@ public final class SemanticCookCompanionTask
                         "The opened workstation does not match the selected cooking recipe.",
                         FailureType.TARGET_LOST);
             }
+            // This counter is a consecutive confirmation retry budget for one
+            // open operation, not a lifetime cap across later cooking batches.
+            openAttempts = 0;
             openedMenu = true;
             phase = Phase.VALIDATE;
             return TaskState.RUNNING;
@@ -461,6 +477,7 @@ public final class SemanticCookCompanionTask
         if (!evidence.equals(lastCookEvidence)) {
             lastCookEvidence = evidence;
             lastCookEvidenceTick = player.level().getGameTime();
+            renewCookProgressLease();
         }
         if (!input.isEmpty() && data(menu, 0) <= 0
                 && menu.getSlot(1).getItem().isEmpty()) {
@@ -547,8 +564,27 @@ public final class SemanticCookCompanionTask
     }
 
     private TaskState tickChild() {
-        TaskState terminal = runChild(activeChild);
-        if (terminal == null) return TaskState.RUNNING;
+        TaskState terminal;
+        if (activeRecord != null
+                && player.level().getGameTime() >= activeRecord.getDeadlineGameTime()) {
+            // Nested tasks are not driven by TaskSlot, so enforce the child's
+            // own no-progress lease here and let its timeout receipt flow back
+            // through the semantic cooking failure instead of timing out the
+            // parent first with no prerequisite context.
+            activeChild.stop(player, Task.StopReason.REPLACED);
+            terminal = TaskState.TIMEOUT;
+        } else {
+            terminal = runChild(activeChild);
+        }
+        if (terminal == null) {
+            // Long prerequisite/navigation children own their liveness evidence.
+            // Carry their renewed no-progress lease into this semantic parent so
+            // the parent cannot time out while the child is still advancing.
+            if (activeRecord != null) {
+                extendParentPast(activeRecord.getDeadlineGameTime());
+            }
+            return TaskState.RUNNING;
+        }
         TaskResult result = activeChild.result(terminal);
         Purpose purpose = activePurpose;
         activeChild = null;
@@ -630,6 +666,7 @@ public final class SemanticCookCompanionTask
         activeRecord = record;
         activeChild = TaskFactory.create(player, record);
         activePurpose = purpose;
+        extendParentPast(record.getDeadlineGameTime());
         return TaskState.RUNNING;
     }
 
@@ -715,6 +752,11 @@ public final class SemanticCookCompanionTask
         lastCookEvidence = menu == null ? "" : data(menu, 0) + ":" + data(menu, 2)
                 + ":" + data(menu, 3) + ":" + menu.getSlot(0).getItem().getCount()
                 + ":" + menu.getSlot(2).getItem().getCount();
+        renewCookProgressLease();
+    }
+
+    private void renewCookProgressLease() {
+        r.extendDeadlineTo(player.level().getGameTime() + COOK_PROGRESS_LEASE_TICKS);
     }
 
     private boolean stationReady(Device device) {
@@ -755,9 +797,8 @@ public final class SemanticCookCompanionTask
                         BlockPos cell = origin.offset(dx, dy, dz);
                         if (validSite(cell)) return cell;
                     }
-                    int surfaceY = player.clientLevel.getHeight(
-                            Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                            origin.getX() + dx, origin.getZ() + dz);
+                    int surfaceY = ClientSurfaceHeight.motionBlockingNoLeaves(
+                            player.clientLevel, origin.getX() + dx, origin.getZ() + dz);
                     BlockPos surface = new BlockPos(
                             origin.getX() + dx, surfaceY, origin.getZ() + dz);
                     if (validSite(surface)) return surface;
@@ -796,7 +837,19 @@ public final class SemanticCookCompanionTask
     }
 
     private long childDeadline(long ticks) {
-        return Math.min(r.getDeadlineGameTime(), player.level().getGameTime() + ticks);
+        // `ticks` is this child's initial no-progress lease, not a slice of the
+        // parent's original total duration. Healthy children may renew it and
+        // tickChild propagates that renewal back to the parent.
+        long lease = player.level().getGameTime() + ticks;
+        extendParentPast(lease);
+        return lease;
+    }
+
+    private void extendParentPast(long childDeadline) {
+        // One extra tick lets the parent observe and report a child lease expiry;
+        // equality would make TaskSlot time out the parent before tickChild runs.
+        r.extendDeadlineTo(childDeadline == Long.MAX_VALUE
+                ? Long.MAX_VALUE : childDeadline + 1L);
     }
 
     private static int ceilDiv(long numerator, long denominator) {
