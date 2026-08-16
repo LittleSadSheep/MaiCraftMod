@@ -196,6 +196,128 @@ public final class SemanticLightAreaCompanionTask
         return TaskState.RUNNING;
     }
 
+    private TaskState continueSurveyToward(
+            ClientLevel level,
+            BlockPos destination,
+            SurveyMovePurpose purpose,
+            long frontierKey) {
+        BlockPos approach = level.isLoaded(destination)
+                ? safeSurveyApproach(level, destination) : null;
+        if (approach == null) approach = loadedTravelCellToward(level, destination);
+        if (approach == null) {
+            if (purpose == SurveyMovePurpose.LOAD_COMPONENT_FRONTIER
+                    && frontierKey != Long.MIN_VALUE) {
+                rejectedComponentFrontiers.add(frontierKey);
+                return TaskState.RUNNING;
+            }
+            giveUp("semantic_area_seed_unreachable",
+                    "no new loaded, safe first-person stance leads toward the semantic landmark seed",
+                    FailureType.NO_PATH,
+                    List.of("clear or authorize the semantic route obstacle, then resume",
+                            "move closer to the remembered area and retry",
+                            "cancel without changing the world"));
+            return TaskState.FAILED;
+        }
+        startSurveyMove(approach, purpose, frontierKey);
+        return TaskState.RUNNING;
+    }
+
+    private BlockPos loadedTravelCellToward(ClientLevel level, BlockPos destination) {
+        BlockPos current = player.blockPosition();
+        double dx = destination.getX() - current.getX();
+        double dz = destination.getZ() - current.getZ();
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        if (distance < 1.0D) return null;
+        double farthest = Math.min(64.0D, distance);
+        for (double leg = farthest; leg >= Math.min(4.0D, farthest); leg -= 4.0D) {
+            int x = (int) Math.round(current.getX() + dx / distance * leg);
+            int z = (int) Math.round(current.getZ() + dz / distance * leg);
+            BlockPos candidate = safeSurveyApproach(level,
+                    new BlockPos(x, current.getY(), z));
+            if (candidate != null) return candidate;
+        }
+        return null;
+    }
+
+    private BlockPos safeSurveyApproach(ClientLevel level, BlockPos around) {
+        for (int radius = 0; radius <= 8; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) {
+                if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                int x = around.getX() + dx;
+                int z = around.getZ() + dz;
+                if (!columnLoaded(level, x, z)) continue;
+                int surface = Math.clamp(ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z),
+                        level.getMinBuildHeight() + 1, level.getMaxBuildHeight() - 2);
+                for (int d = 0; d <= 8; d++) {
+                    int[] ys = d == 0
+                            ? new int[]{surface, around.getY()}
+                            : new int[]{surface + d, surface - d, around.getY() + d,
+                                    around.getY() - d};
+                    for (int y : ys) {
+                        if (y <= level.getMinBuildHeight()
+                                || y >= level.getMaxBuildHeight() - 1) continue;
+                        BlockPos candidate = new BlockPos(x, y, z);
+                        if (protectedNavigationCells.contains(candidate)
+                                || attemptedSurveyMoves.contains(candidate.asLong())) continue;
+                        if (isWalkable(level, candidate)) return candidate;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private void startSurveyMove(
+            BlockPos target, SurveyMovePurpose purpose, long frontierKey) {
+        String parent = r.getToolCallId() == null ? "light-area" : r.getToolCallId();
+        long now = player.level().getGameTime();
+        surveyMoveRecord = new MoveToTaskRecord(
+                parent + "-internal-boundary-survey-" + (++surveyMoveSerial),
+                now + 90L * 20L,
+                (double) target.getX(), (double) target.getY(), (double) target.getZ(),
+                null, false);
+        surveyMoveChild = new MoveToCompanionTask(player, surveyMoveRecord);
+        surveyMovePurpose = purpose;
+        activeComponentFrontier = frontierKey;
+        attemptedSurveyMoves.add(target.asLong());
+        surveyLegs++;
+        r.extendDeadlineTo(surveyMoveRecord.getDeadlineGameTime());
+        stage = Stage.TRAVEL_SURVEY;
+    }
+
+    private TaskState tickSurveyMove() {
+        TaskState terminal;
+        if (player.level().getGameTime() >= surveyMoveRecord.getDeadlineGameTime()) {
+            surveyMoveChild.stop(player, Task.StopReason.REPLACED);
+            terminal = TaskState.TIMEOUT;
+        } else {
+            terminal = NavigationSafetyContext.withForbiddenBodyCells(
+                    protectedNavigationCells, () -> runChild(surveyMoveChild));
+        }
+        r.extendDeadlineTo(surveyMoveRecord.getDeadlineGameTime());
+        if (terminal == null) return TaskState.RUNNING;
+        surveyMoveChild.result(terminal);
+        if (terminal != TaskState.SUCCESS) {
+            surveyLegFailures++;
+        } else {
+            renewLightingProgress();
+        }
+        surveyMoveChild = null;
+        surveyMoveRecord = null;
+        surveyMovePurpose = null;
+        activeComponentFrontier = Long.MIN_VALUE;
+        stage = Stage.OBSERVE;
+        return TaskState.RUNNING;
+    }
+
+    private boolean insideRequestedBoundary(BlockPos pos) {
+        if (!r.hasExplicitRadius()) return true;
+        long dx = (long) pos.getX() - r.center.getX();
+        long dz = (long) pos.getZ() - r.center.getZ();
+        long radius = r.radius;
+        return dx * dx + dz * dz <= radius * radius;
+    }
+
     private void observeColumn(ClientLevel level, int x, int z) {
         int surface = Math.clamp(ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z),
                 level.getMinBuildHeight() + 1, level.getMaxBuildHeight() - 2);
