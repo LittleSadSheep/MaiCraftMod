@@ -25,6 +25,7 @@ final class SemanticGoalContract {
 
         validateObjectKeys(goal.parameters(), SemanticAbilityCatalog.parameterNames(ability),
                 path + ".parameters", ability, "unknown_parameter");
+        validateProtectedLabels(goal.parameters(), path + ".parameters", ability);
         validateObjectKeys(goal.preferences(), SemanticAbilityCatalog.preferenceNames(ability),
                 path + ".preferences", ability, "unknown_preference");
         validateTarget(goal, path, ability);
@@ -34,10 +35,6 @@ final class SemanticGoalContract {
             if (goal.target() != null) {
                 throw violation("sequence_target_not_allowed", path + ".target", ability,
                         "maicraft:sequence accepts ordered children only; target is not allowed.");
-            }
-            if (!goal.parameters().entrySet().isEmpty()) {
-                throw violation("sequence_parameters_not_allowed", path + ".parameters", ability,
-                        "maicraft:sequence accepts ordered children only; parameters are not allowed.");
             }
             if (!goal.preferences().entrySet().isEmpty()) {
                 throw violation("sequence_preferences_not_allowed", path + ".preferences", ability,
@@ -79,6 +76,24 @@ final class SemanticGoalContract {
         if (kind == null || !SemanticAbilityCatalog.targetKinds(ability).contains(kind)) {
             throw violation("unsupported_target_kind", path + ".target.kind", ability,
                     ability + " does not accept target kind '" + kind + "'.");
+        }
+    }
+
+    private static void validateProtectedLabels(
+            JsonObject parameters, String path, String ability) {
+        if (!parameters.has("protected_labels")) return;
+        if (!parameters.get("protected_labels").isJsonArray()) {
+            throw violation("invalid_protected_labels", path + ".protected_labels", ability,
+                    "protected_labels must be an array of remembered semantic labels.");
+        }
+        for (int index = 0; index < parameters.getAsJsonArray("protected_labels").size(); index++) {
+            var value = parameters.getAsJsonArray("protected_labels").get(index);
+            if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()
+                    || value.getAsString().isBlank()) {
+                throw violation("invalid_protected_label",
+                        path + ".protected_labels[" + index + "]", ability,
+                        "Each protected label must be a non-empty semantic name, never coordinates.");
+            }
         }
     }
 

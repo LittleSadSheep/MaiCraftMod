@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -28,6 +29,9 @@ public final class IntentTaskRecord extends TaskRecord {
     /** Opaque verified positions used only for semantic prior_result binding. */
     private final LinkedHashMap<Integer, Goal.WorldPosition> internalStepPositions =
             new LinkedHashMap<>();
+    /** Opaque measured area protections; public task snapshots deliberately omit them. */
+    private final LinkedHashMap<Integer, List<InternalAreaProtectionReceipt.Footprint>>
+            internalAreaProtections = new LinkedHashMap<>();
 
     private int stepIndex;
     private PauseSnapshot pause;
@@ -60,6 +64,7 @@ public final class IntentTaskRecord extends TaskRecord {
             int stepIndex,
             List<StepSnapshot> stepResults,
             Map<Integer, Goal.WorldPosition> internalStepPositions,
+            Map<Integer, List<InternalAreaProtectionReceipt.Footprint>> internalAreaProtections,
             List<AttemptSnapshot> attempts,
             DecisionSnapshot decision,
             DecisionAnswer pendingAnswer,
@@ -76,6 +81,14 @@ public final class IntentTaskRecord extends TaskRecord {
             int index = entry.getKey();
             if (index >= 0 && index < stepIndex && entry.getValue() != null) {
                 record.internalStepPositions.put(index, entry.getValue());
+            }
+        }
+        for (Map.Entry<Integer, List<InternalAreaProtectionReceipt.Footprint>> entry
+                : internalAreaProtections.entrySet()) {
+            int index = entry.getKey();
+            if (index >= 0 && index < stepIndex && entry.getValue() != null
+                    && !entry.getValue().isEmpty()) {
+                record.internalAreaProtections.put(index, List.copyOf(entry.getValue()));
             }
         }
         record.attempts.addAll(attempts.stream().skip(
@@ -105,6 +118,11 @@ public final class IntentTaskRecord extends TaskRecord {
     /** Persistence-only snapshot; the MCP facade deliberately never serializes this map. */
     public Map<Integer, Goal.WorldPosition> internalPositionReceipts() {
         return Map.copyOf(internalStepPositions);
+    }
+    /** Persistence-only snapshot; concrete cells never enter the MCP facade. */
+    public Map<Integer, List<InternalAreaProtectionReceipt.Footprint>>
+            internalAreaProtectionReceipts() {
+        return Map.copyOf(internalAreaProtections);
     }
     public PauseSnapshot pauseSnapshot() { return pause; }
     public DecisionSnapshot decisionSnapshot() { return decision; }
@@ -147,6 +165,18 @@ public final class IntentTaskRecord extends TaskRecord {
 
     void discardInternalStepPosition(int index) {
         if (internalStepPositions.remove(index) != null) changed();
+    }
+
+    void retainInternalAreaProtections(
+            int index, List<InternalAreaProtectionReceipt.Footprint> protections) {
+        if (index < 0 || index >= steps.size() || protections == null) {
+            throw new IllegalArgumentException("invalid internal semantic area receipt");
+        }
+        List<InternalAreaProtectionReceipt.Footprint> clean = protections.stream()
+                .filter(Objects::nonNull).toList();
+        if (clean.isEmpty()) return;
+        internalAreaProtections.put(index, List.copyOf(clean));
+        changed();
     }
 
     void addAttempt(AttemptSnapshot snapshot) {

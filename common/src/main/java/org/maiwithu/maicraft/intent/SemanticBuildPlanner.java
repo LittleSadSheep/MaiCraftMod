@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 
 import java.util.ArrayList;
@@ -410,6 +411,7 @@ public final class SemanticBuildPlanner {
             BlockPos ground = new BlockPos(x, y - 1, z);
             BlockState state = level.getBlockState(ground);
             if (!state.getFluidState().isEmpty() || !state.isFaceSturdy(level, ground, Direction.UP)
+                    || protectedCell(ground) || protectedCell(ground.above())
                     || sensitive(level, ground) || BlockHelper.isHazard(level, ground)) return null;
             heights[x - minX][z - minZ] = y;
             low = Math.min(low, y); high = Math.max(high, y);
@@ -425,7 +427,8 @@ public final class SemanticBuildPlanner {
             int bottom = Math.min(columnY - 3, baseY - (terrain.equals("embedded") ? 4 : 1));
             for (int y = bottom; y <= roofTop; y++) {
                 BlockPos pos = new BlockPos(x, y, z);
-                if (!level.isLoaded(pos) || sensitive(level, pos) || BlockHelper.isHazard(level, pos)) return null;
+                if (!level.isLoaded(pos) || protectedCell(pos)
+                        || sensitive(level, pos) || BlockHelper.isHazard(level, pos)) return null;
                 BlockState state = level.getBlockState(pos);
                 if (!state.getFluidState().isEmpty()) return null;
                 if (!replace && y >= baseY && !state.canBeReplaced()) return null;
@@ -461,11 +464,13 @@ public final class SemanticBuildPlanner {
                 if (allowWater && state.getFluidState().is(FluidTags.WATER)) continue;
                 return false;
             }
-            if (sensitive(level, surface) || BlockHelper.isHazard(level, surface)
+            if (protectedCell(surface) || protectedCell(surface.above())
+                    || sensitive(level, surface) || BlockHelper.isHazard(level, surface)
                     || y < low - 3 || y > high + 3) return false;
             for (int scanY = baseY; scanY <= roofTop; scanY++) {
                 BlockPos pos = new BlockPos(x, scanY, z);
-                if (!level.isLoaded(pos) || sensitive(level, pos) || BlockHelper.isHazard(level, pos)) return false;
+                if (!level.isLoaded(pos) || protectedCell(pos)
+                        || sensitive(level, pos) || BlockHelper.isHazard(level, pos)) return false;
                 BlockState occupied = level.getBlockState(pos);
                 if (!occupied.getFluidState().isEmpty() && scanY >= baseY) return false;
                 if (!replace && !occupied.canBeReplaced()) return false;
@@ -494,7 +499,8 @@ public final class SemanticBuildPlanner {
                 int floor = waterFloor(level, x, z, y);
                 if (floor == Integer.MIN_VALUE) { valid = false; break; }
                 BlockPos deck = new BlockPos(x, y + 1, z);
-                if (!level.isLoaded(deck.above()) || sensitive(level, deck)
+                if (!level.isLoaded(deck.above()) || protectedCell(deck)
+                        || protectedCell(deck.above()) || sensitive(level, deck)
                         || sensitive(level, deck.above())
                         || !level.getFluidState(deck).isEmpty()
                         || !level.getFluidState(deck.above()).isEmpty()
@@ -1302,6 +1308,11 @@ public final class SemanticBuildPlanner {
                 || block instanceof CropBlock || block instanceof StemBlock
                 || block instanceof AttachedStemBlock || block instanceof CocoaBlock
                 || state.is(Blocks.NETHER_WART) || state.is(Blocks.SWEET_BERRY_BUSH);
+    }
+
+    private static boolean protectedCell(BlockPos pos) {
+        return NavigationSafetyContext.protectsMutation(pos)
+                || NavigationSafetyContext.forbidsBody(pos);
     }
 
     private static boolean loadedColumn(ClientLevel level, int x, int z, int aroundY) {

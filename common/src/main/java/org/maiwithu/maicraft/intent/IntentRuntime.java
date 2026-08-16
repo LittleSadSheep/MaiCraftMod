@@ -359,6 +359,7 @@ public final class IntentRuntime {
                             snapshot.id(), snapshot.planId(), snapshot.goal(),
                             stateIdentity.key(), snapshot.steps(), snapshot.stepIndex(),
                             snapshot.completed(), snapshot.internalPositions(),
+                            snapshot.internalAreaProtections(),
                             snapshot.attempts(), snapshot.decision(),
                             snapshot.pendingAnswer(), snapshot.terminal(), gameTime);
                     record.bindDirty(this::markDirty);

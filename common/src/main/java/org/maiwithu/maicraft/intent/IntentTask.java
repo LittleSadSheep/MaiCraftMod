@@ -4,14 +4,21 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.entity.InputDriver;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskDispatch;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
+import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
@@ -25,6 +32,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * A semantic parent task. Internal body tools become child tasks and are driven
@@ -59,6 +67,10 @@ final class IntentTask implements Task {
     private long childSerial;
     /** Opaque one-use receipts stay inside the Mod; the model only chooses semantic retry. */
     private final Map<String, UUID> mechanicalContinuations = new LinkedHashMap<>();
+    private String cachedProtectionDimension;
+    private int cachedProtectionStep = -1;
+    private LongSet cachedProtectedMutationCells = LongSets.emptySet();
+    private LongSet cachedForbiddenBodyCells = LongSets.emptySet();
     IntentTask(LocalPlayer player, IntentTaskRecord record, IntentRuntime runtime) {
         this.player = player;
         this.record = record;
@@ -176,8 +188,11 @@ final class IntentTask implements Task {
         String childCallId = "intent-" + record.externalId() + "-"
                 + record.stepIndex() + "-" + (++childSerial);
         try {
-            TaskDispatch.captureNext(captured::set, () ->
-                    tool.onGameCall(childCallId, action.arguments(), player, immediate::set));
+            withExplicitAreaProtection(() -> {
+                TaskDispatch.captureNext(captured::set, () ->
+                        tool.onGameCall(childCallId, action.arguments(), player, immediate::set));
+                return null;
+            });
         } catch (RuntimeException exception) {
             return failStep(
                     TaskState.FAILED,
@@ -189,9 +204,12 @@ final class IntentTask implements Task {
             childRecord = captured.get();
             childRecord.setState(TaskState.RUNNING);
             childRecord.markStarted(player.level().getGameTime());
-            child = TaskFactory.create(player, childRecord);
+            child = withExplicitAreaProtection(() -> TaskFactory.create(player, childRecord));
             try {
-                child.start(player);
+                withExplicitAreaProtection(() -> {
+                    child.start(player);
+                    return null;
+                });
             } catch (RuntimeException exception) {
                 childRecord.setState(TaskState.FAILED);
                 try {
@@ -226,7 +244,7 @@ final class IntentTask implements Task {
             childRecord.setState(TaskState.TIMEOUT);
         } else {
             try {
-                childRecord.setState(child.tick(player));
+                childRecord.setState(withExplicitAreaProtection(() -> child.tick(player)));
             } catch (RuntimeException exception) {
                 childRecord.setState(TaskState.FAILED);
                 childRecord.setResult(TaskResult.fail(
@@ -242,7 +260,8 @@ final class IntentTask implements Task {
         TaskState state = finishingRecord.getState();
         TaskResult result;
         try {
-            result = finishingChild.result(state);
+            TaskState finalState = state;
+            result = withExplicitAreaProtection(() -> finishingChild.result(finalState));
         } catch (RuntimeException exception) {
             result = TaskResult.fail("child result failed: " + safeMessage(exception));
             state = TaskState.FAILED;
@@ -258,6 +277,12 @@ final class IntentTask implements Task {
             record.retainInternalStepPosition(record.stepIndex(), new Goal.WorldPosition(
                     internalPosition.x(), internalPosition.y(), internalPosition.z(),
                     internalPosition.dimension()));
+        }
+        if (result.success()
+                && finishingRecord instanceof InternalAreaProtectionReceipt receipt) {
+            record.retainInternalAreaProtections(
+                    record.stepIndex(), receipt.internalAreaProtections());
+            invalidateProtectionCache();
         }
         if (!result.success()) {
             return failStep(state, result);
@@ -300,6 +325,7 @@ final class IntentTask implements Task {
             record.replaceCurrent(semanticGoal);
             runtime.semanticPlanChanged(record, semanticGoal, true);
         }
+        invalidateProtectionCache();
         return TaskState.RUNNING;
     }
 
@@ -331,13 +357,15 @@ final class IntentTask implements Task {
         Object value = raw == null || raw.data() == null
                 ? null : raw.data().get("continuation_token");
         if (value == null) {
-            mechanicalContinuations.remove(key);
+            CreateMechanicalPower.discardContinuation(mechanicalContinuations.remove(key));
             return;
         }
         try {
-            mechanicalContinuations.put(key, UUID.fromString(String.valueOf(value)));
+            UUID next = UUID.fromString(String.valueOf(value));
+            UUID prior = mechanicalContinuations.put(key, next);
+            if (!next.equals(prior)) CreateMechanicalPower.discardContinuation(prior);
         } catch (IllegalArgumentException invalid) {
-            mechanicalContinuations.remove(key);
+            CreateMechanicalPower.discardContinuation(mechanicalContinuations.remove(key));
         }
     }
 
@@ -346,7 +374,8 @@ final class IntentTask implements Task {
     }
 
     private void discardContinuation(Goal goal) {
-        if (goal != null) mechanicalContinuations.remove(continuationKey(goal));
+        if (goal != null) CreateMechanicalPower.discardContinuation(
+                mechanicalContinuations.remove(continuationKey(goal)));
     }
 
     private static String continuationKey(Goal goal) {
@@ -646,6 +675,75 @@ final class IntentTask implements Task {
     private void clearChild() {
         child = null;
         childRecord = null;
+    }
+
+    /**
+     * Apply only receipts whose human label is explicitly present in the current goal's
+     * protected_labels.  Observing an area never silently turns it into a constraint.
+     */
+    private <T> T withExplicitAreaProtection(Supplier<T> operation) {
+        refreshProtectionCache();
+        return NavigationSafetyContext.withProtectedArea(
+                cachedProtectedMutationCells, cachedForbiddenBodyCells, operation);
+    }
+
+    private void refreshProtectionCache() {
+        String dimension = player.level().dimension().location().toString();
+        int step = record.stepIndex();
+        if (step == cachedProtectionStep && dimension.equals(cachedProtectionDimension)) return;
+        cachedProtectionDimension = dimension;
+        cachedProtectionStep = step;
+        LongOpenHashSet mutation = new LongOpenHashSet();
+        LongOpenHashSet body = new LongOpenHashSet();
+        java.util.LinkedHashSet<String> requested = new java.util.LinkedHashSet<>(
+                explicitProtectedLabels(currentGoal()));
+        if ("maicraft:sequence".equals(record.goal().ability())) {
+            requested.addAll(explicitProtectedLabels(record.goal()));
+        }
+        if (!requested.isEmpty()) {
+            for (Map.Entry<Integer, List<InternalAreaProtectionReceipt.Footprint>> entry
+                    : record.internalAreaProtectionReceipts().entrySet()) {
+                if (entry.getKey() >= step) continue;
+                for (InternalAreaProtectionReceipt.Footprint footprint : entry.getValue()) {
+                    if (!dimension.equals(footprint.dimension())
+                            || footprint.semanticLabel() == null
+                            || !requested.contains(normalizeProtectionLabel(
+                                    footprint.semanticLabel()))) continue;
+                    footprint.protectedMutationCells().forEach(mutation::add);
+                    footprint.forbiddenBodyCells().forEach(body::add);
+                }
+            }
+        }
+        cachedProtectedMutationCells = mutation.isEmpty()
+                ? LongSets.emptySet() : LongSets.unmodifiable(mutation);
+        cachedForbiddenBodyCells = body.isEmpty()
+                ? LongSets.emptySet() : LongSets.unmodifiable(body);
+    }
+
+    private static Set<String> explicitProtectedLabels(Goal goal) {
+        if (goal == null) return Set.of();
+        JsonObject parameters = goal.parameters();
+        if (!parameters.has("protected_labels")
+                || !parameters.get("protected_labels").isJsonArray()) return Set.of();
+        java.util.LinkedHashSet<String> labels = new java.util.LinkedHashSet<>();
+        for (var element : parameters.getAsJsonArray("protected_labels")) {
+            if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()
+                    && !element.getAsString().isBlank()) {
+                labels.add(normalizeProtectionLabel(element.getAsString()));
+            }
+        }
+        return Set.copyOf(labels);
+    }
+
+    private static String normalizeProtectionLabel(String label) {
+        return label.strip().toLowerCase(Locale.ROOT);
+    }
+
+    private void invalidateProtectionCache() {
+        cachedProtectionStep = -1;
+        cachedProtectionDimension = null;
+        cachedProtectedMutationCells = LongSets.emptySet();
+        cachedForbiddenBodyCells = LongSets.emptySet();
     }
 
     private void abandonChildAfterUnexpectedFailure() {

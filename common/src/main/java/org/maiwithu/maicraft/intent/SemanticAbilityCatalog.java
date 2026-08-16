@@ -125,7 +125,8 @@ public final class SemanticAbilityCatalog {
                             field("biome_id", "resource_id", "Optional exact biome to discover."),
                             field("biome_tag", "resource_id", "Optional biome tag to discover."),
                             field("max_distance", "integer", "Bounded exploration radius; omit for the Mod default."),
-                            field("may_alter_terrain", "boolean", "Hard consent to dig, bridge or pillar; default false.")));
+                            field("may_alter_terrain", "boolean", "Hard consent to dig, bridge or pillar; default false."),
+                            field("protected_labels", "array<string>", "Remembered areas whose previously measured footprint this movement must preserve.")));
             case "maicraft:travel_dimension" -> contract(
                     "Reach another dimension through a real portal. MaiCraft discovers the loaded portal, walks into it, survives the LocalPlayer replacement and verifies the destination.",
                     targets("current_place", "landmark", "area", "prior_result"),
@@ -225,7 +226,8 @@ public final class SemanticAbilityCatalog {
                             field("terrain_fit", "string", "Surface, embedded, cave, hillside or underground."),
                             field("material_policy", "string", "Available, storage_available, specified or preserve_rare."),
                             field("preferred_materials", "array<resource_id>", "Palette preferences, never per-cell assignments."),
-                            field("replace_existing", "boolean", "Explicit permission to replace occupied cells; default false.")));
+                            field("replace_existing", "boolean", "Explicit permission to replace occupied cells; default false."),
+                            field("protected_labels", "array<string>", "Remembered areas whose previously measured footprint site choice, supply and construction must preserve.")));
             case "maicraft:light_area" -> contract(
                     "Discover a semantic area's connected block boundary, construct lighting and verify actual block-light coverage.",
                     targets("area", "landmark", "coordinates", "current_place", "prior_result"),
@@ -249,7 +251,7 @@ public final class SemanticAbilityCatalog {
                             field("source_label", "string", "Existing powered network or landmark."),
                             field("target_label", "string", "Destination machine, structure or landmark."),
                             field("transmission", "string", "Requested family such as chain_drive."),
-                            field("allow_new_receiver", "boolean", "May terminate at a verified empty receiver cell when no destination machine exists."),
+                            field("allow_new_receiver", "boolean", "May terminate at the nearest authoritative endpoint evidence when that evidence is a verified empty receiver rather than a machine."),
                             field("material_policy", "string", "Ordinary, storage_available or inventory_only; applied after route investigation."),
                             field("allowed_sources", "array<string>", "Permitted semantic material sources; storage is tried before crafting."),
                             field("allow_harm", "boolean", "Explicit harmful acquisition permission; never inferred."),
@@ -261,9 +263,10 @@ public final class SemanticAbilityCatalog {
                             field("condition", "string", "Elapsed, day, night, health_full or not_hungry."),
                             field("after_s", "integer", "Minimum elapsed seconds when relevant.")));
             case "maicraft:sequence" -> contract(
-                    "Run semantic child goals in order; each child remains independently observable and recoverable.",
+                    "Run semantic child goals in order; each child remains independently observable and recoverable, while explicit area protection can span later children.",
                     targets(),
-                    fields());
+                    fields(field("protected_labels", "array<string>",
+                            "Remembered areas whose internally measured footprint every later child must preserve; never provide cells or coordinates.")));
             default -> contract(
                     "Unknown semantic ability.",
                     targets(),
