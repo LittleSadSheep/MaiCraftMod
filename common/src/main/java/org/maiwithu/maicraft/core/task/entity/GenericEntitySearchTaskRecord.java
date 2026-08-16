@@ -83,7 +83,8 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
         this.count = Math.clamp(count, 1, MAX_COUNT);
         this.maxDistance = Math.clamp(maxDistance, MIN_DISTANCE, MAX_DISTANCE);
         int rings = Math.max(1, (this.maxDistance + WAYPOINT_GRID - 1) / WAYPOINT_GRID);
-        this.maxWaypoints = Math.clamp(rings * rings * 4, 8, 128);
+        // Cover the requested radius rather than silently truncating it after 128 legs.
+        this.maxWaypoints = Math.max(8, rings * rings * 4);
         this.mayAlterTerrain = mayAlterTerrain;
         this.protectedLabels = normalizeStrings(protectedLabels, 64, "protected labels");
         this.harmIntent = harmIntent;

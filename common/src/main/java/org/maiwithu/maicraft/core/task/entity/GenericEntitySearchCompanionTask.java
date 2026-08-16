@@ -29,7 +29,8 @@ public final class GenericEntitySearchCompanionTask
     public static final int LOADED_EVIDENCE_RADIUS = 112;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
-    private static final int LEG_TIMEOUT_TICKS = 90 * 20;
+    /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
+    private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_SPIRAL_PROBES = 10_000;
 
@@ -38,7 +39,7 @@ public final class GenericEntitySearchCompanionTask
     private BlockPos origin;
     private Stage stage;
     private MoveToCompanionTask moveChild;
-    private long legDeadline;
+    private MoveToTaskRecord moveRecord;
     private int legSerial;
     private int scanCycles;
     private int frontierAttempts;
@@ -134,26 +135,31 @@ public final class GenericEntitySearchCompanionTask
     private void startMove(BlockPos target) {
         long now = player.level().getGameTime();
         String parent = r.getToolCallId() == null ? "find-entity" : r.getToolCallId();
-        MoveToTaskRecord moveRecord = new MoveToTaskRecord(
+        moveRecord = new MoveToTaskRecord(
                 parent + "-internal-frontier-" + (++legSerial),
-                Math.min(r.getDeadlineGameTime(), now + LEG_TIMEOUT_TICKS),
+                now + INITIAL_LEG_LEASE_TICKS,
                 (double) target.getX(), null, (double) target.getZ(), null,
                 r.mayAlterTerrain);
         moveChild = new MoveToCompanionTask(player, moveRecord);
-        legDeadline = Math.min(r.getDeadlineGameTime(), now + LEG_TIMEOUT_TICKS);
     }
 
     private TaskState tickFrontierTravel() {
         TaskState terminal;
-        if (player.level().getGameTime() >= legDeadline) {
+        if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
             moveChild.stop(player, Task.StopReason.REPLACED);
             terminal = TaskState.TIMEOUT;
         } else {
             terminal = runChild(moveChild);
-            if (terminal == null) return TaskState.RUNNING;
+            if (terminal == null) {
+                // The child owns the liveness signal. Carry its renewed progress lease to this
+                // semantic parent instead of imposing an unrelated wall-clock leg timeout.
+                r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                return TaskState.RUNNING;
+            }
         }
         moveChild.result(terminal);
         moveChild = null;
+        moveRecord = null;
         if (terminal == TaskState.SUCCESS) frontierReached++; else frontierFailed++;
         stage = Stage.OBSERVE;
         return TaskState.RUNNING;
@@ -260,6 +266,7 @@ public final class GenericEntitySearchCompanionTask
         moveChild.stop(player, Task.StopReason.REPLACED);
         moveChild.result(terminal);
         moveChild = null;
+        moveRecord = null;
     }
 
     @Override
@@ -321,7 +328,8 @@ public final class GenericEntitySearchCompanionTask
 
     @Override
     protected String timeoutMessage() {
-        return "entity search timed out with " + observedSafe.size() + "/" + r.count
+        return "entity search stopped making verifiable progress with "
+                + observedSafe.size() + "/" + r.count
                 + " acceptable observations; partial evidence was not reported as success";
     }
 
