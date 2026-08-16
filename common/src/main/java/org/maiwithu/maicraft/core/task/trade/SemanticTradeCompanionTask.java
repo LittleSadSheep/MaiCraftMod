@@ -47,6 +47,7 @@ public final class SemanticTradeCompanionTask
         extends AbstractCompanionTask<SemanticTradeTaskRecord> {
     private static final int LANDMARK_PROTECTION_RADIUS = 12;
     private static final long MENU_WAIT_TICKS = 80L;
+    private static final long TRADE_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
 
     private enum Phase {
         SURVEY, OPEN, WAIT_MENU, SELECT, PAY, TAKE, CLEANUP, COMPLETE
@@ -90,6 +91,7 @@ public final class SemanticTradeCompanionTask
     private AbstractVillager merchant;
     private OfferPlan offerPlan;
     private Task activeChild;
+    private TaskRecord activeRecord;
     private Purpose activePurpose;
     private int childSerial;
     private boolean openedMenu;
@@ -647,10 +649,14 @@ public final class SemanticTradeCompanionTask
 
     private TaskState tickChild() {
         TaskState terminal = runChild(activeChild);
-        if (terminal == null) return TaskState.RUNNING;
+        if (terminal == null) {
+            if (activeRecord != null) r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
+            return TaskState.RUNNING;
+        }
         TaskResult result = activeChild.result(terminal);
         Purpose purpose = activePurpose;
         activeChild = null;
+        activeRecord = null;
         activePurpose = null;
         boolean success = terminal == TaskState.SUCCESS
                 && result != null && result.success();
@@ -720,6 +726,7 @@ public final class SemanticTradeCompanionTask
                             FailureType.UNKNOWN);
                 }
                 completedTrades++;
+                r.extendDeadlineTo(player.level().getGameTime() + TRADE_PROGRESS_LEASE_TICKS);
                 effectsStarted = false;
                 if (observed >= r.count) {
                     finishRequested = true;
@@ -740,8 +747,10 @@ public final class SemanticTradeCompanionTask
     }
 
     private TaskState start(TaskRecord record, Purpose purpose) {
+        activeRecord = record;
         activeChild = TaskFactory.create(player, record);
         activePurpose = purpose;
+        r.extendDeadlineTo(record.getDeadlineGameTime());
         return TaskState.RUNNING;
     }
 
@@ -828,7 +837,9 @@ public final class SemanticTradeCompanionTask
     }
 
     private long childDeadline(long ticks) {
-        return Math.min(r.getDeadlineGameTime(), player.level().getGameTime() + ticks);
+        long lease = player.level().getGameTime() + ticks;
+        r.extendDeadlineTo(lease);
+        return lease;
     }
 
     private static int ceilDiv(int numerator, int denominator) {
@@ -841,6 +852,7 @@ public final class SemanticTradeCompanionTask
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
             activeChild = null;
+            activeRecord = null;
             activePurpose = null;
         }
         if (openedMenu && player.containerMenu != player.inventoryMenu) {
@@ -934,7 +946,8 @@ public final class SemanticTradeCompanionTask
 
     @Override
     protected String timeoutMessage() {
-        return "trading timed out; the real main inventory holds " + outputCount()
+        return "trading stopped making verifiable first-person progress; the real main inventory holds "
+                + outputCount()
                 + " of required final " + r.count;
     }
 

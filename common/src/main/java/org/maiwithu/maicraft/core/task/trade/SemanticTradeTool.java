@@ -68,11 +68,11 @@ public final class SemanticTradeTool implements MaiCraftTool {
         List<String> labels = strings(args.get("protected_labels"), "protected_labels");
         int radius = integer(args, "radius", SemanticTradeTaskRecord.DEFAULT_RADIUS,
                 1, SemanticTradeTaskRecord.MAX_RADIUS);
-        long ticks = Math.clamp(4L * 60L * 20L + (long) count * 120L,
+        long initialLease = Math.clamp(4L * 60L * 20L + (long) count * 120L,
                 4L * 60L * 20L, 30L * 60L * 20L);
         var context = ctx(toolCallId, player);
         var record = new SemanticTradeTaskRecord(
-                context.toolCallId(), context.deadline(ticks), itemId, count,
+                context.toolCallId(), context.deadline(initialLease), itemId, count,
                 SemanticTradeTaskRecord.MerchantKind.parse(text(args, "merchant_kind")),
                 payments, labels, radius);
         setTask(player, record, args, reply);
