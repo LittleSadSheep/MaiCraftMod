@@ -585,88 +585,236 @@ final class CreateMechanicalPlanner {
                 : routes.get(0);
     }
 
-    static List<TentativeRoute> tentativeRoutes(
+        private record RouteState(
+                BlockPos position, Direction.Axis connectionAxis, Direction lastMove) {}
+        private record PlacementEdge(BlockPos support, BlockPos target) {}
+        private record OpenNode(RouteState state, long cost, long estimate) {}
+
+        private final ClientLevel level;
+        private final CreateMechanicalPlan.KineticEndpoint source;
+        private final CreateMechanicalPlan.KineticEndpoint destination;
+        private final BlockPos receiver;
+        private final BlockPos start;
+        private final Set<Long> rejectedCells;
+        private final Bounds bounds;
+        private final PriorityQueue<OpenNode> open = new PriorityQueue<>(
+                Comparator.comparingLong(OpenNode::estimate)
+                        .thenComparingLong(OpenNode::cost)
+                        .thenComparingLong(node -> node.state().position().asLong())
+                        .thenComparingInt(node -> node.state().connectionAxis().ordinal())
+                        .thenComparingInt(node -> node.state().lastMove() == null
+                                ? -1 : node.state().lastMove().ordinal()));
+        private final Map<RouteState, Long> bestCost = new HashMap<>();
+        private final Map<RouteState, RouteState> cameFrom = new HashMap<>();
+        private final Set<RouteState> closed = new HashSet<>();
+        private final Map<PlacementEdge, Boolean> loadedPlacementEdges = new HashMap<>();
+        private TentativeRoute route;
+        private long progressRevision;
+
+        private ObstacleAwareRouteSearch(
+                ClientLevel level,
+                CreateMechanicalPower.Request request,
+                CreateMechanicalPlan.KineticEndpoint source,
+                CreateMechanicalPlan.KineticEndpoint destination,
+                BlockPos receiver,
+                Set<Long> rejectedCells) {
+            this.level = level;
+            this.source = source;
+            this.destination = destination;
+            this.receiver = receiver.immutable();
+            this.start = source.position().relative(source.shaftFace()).immutable();
+            this.rejectedCells = Set.copyOf(rejectedCells);
+            this.bounds = bounds(request, start, receiver);
+            if (startPlacementAllowed()) {
+                addRoot(Direction.Axis.X);
+                addRoot(Direction.Axis.Z);
+            }
+        }
+
+        ObstacleRouteStatus tick(int expansionBudget) {
+            int remaining = Math.max(1, expansionBudget);
+            while (remaining-- > 0) {
+                SearchStep step = step();
+                progressRevision++;
+                if (step == SearchStep.RUNNING) continue;
+                return step == SearchStep.FOUND
+                        ? ObstacleRouteStatus.FOUND : ObstacleRouteStatus.EXHAUSTED;
+            }
+            return ObstacleRouteStatus.RUNNING;
+        }
+
+        TentativeRoute route() { return route; }
+        long progressRevision() { return progressRevision; }
+
+        private void addRoot(Direction.Axis axis) {
+            RouteState root = new RouteState(start, axis, null);
+            bestCost.put(root, 0L);
+            open.add(new OpenNode(root, 0L, heuristic(start)));
+        }
+
+        private SearchStep step() {
+            OpenNode node = open.poll();
+            if (node == null) return SearchStep.EXHAUSTED;
+            RouteState state = node.state();
+            Long known = bestCost.get(state);
+            if (known == null || known.longValue() != node.cost()
+                    || !closed.add(state)) return SearchStep.RUNNING;
+            if (!cellAllowed(state.position())) return SearchStep.RUNNING;
+            if (state.position().equals(receiver)) {
+                List<BlockPos> positions = reconstruct(state);
+                if (!positions.isEmpty() && !hasDuplicate(positions)) {
+                    String geometry = CreateMechanicalPlan.geometry(positions);
+                    String routeHash = CreateMechanicalPlan.hashRoute(positions, geometry);
+                    route = new TentativeRoute(source, destination, receiver,
+                            positions, geometry, routeHash);
+                    return SearchStep.FOUND;
+                }
+                return SearchStep.RUNNING;
+            }
+            for (RouteState next : neighbours(state)) {
+                if (closed.contains(next) || !transitionAllowed(state, next)) continue;
+                long candidate = node.cost() + transitionCost(state, next);
+                Long prior = bestCost.get(next);
+                if (prior != null && prior <= candidate) continue;
+                bestCost.put(next, candidate);
+                cameFrom.put(next, state);
+                open.add(new OpenNode(next, candidate,
+                        candidate + heuristic(next.position())));
+            }
+            return SearchStep.RUNNING;
+        }
+
+        private List<RouteState> neighbours(RouteState state) {
+            List<RouteState> result = new ArrayList<>(6);
+            Direction[] along = state.connectionAxis() == Direction.Axis.X
+                    ? new Direction[]{Direction.WEST, Direction.EAST}
+                    : new Direction[]{Direction.NORTH, Direction.SOUTH};
+            for (Direction direction : along) addNeighbour(result, state, direction,
+                    state.connectionAxis());
+            for (Direction direction : VERTICAL) {
+                addNeighbour(result, state, direction, Direction.Axis.X);
+                addNeighbour(result, state, direction, Direction.Axis.Z);
+            }
+            return result;
+        }
+
+        private void addNeighbour(
+                List<RouteState> result,
+                RouteState state,
+                Direction direction,
+                Direction.Axis nextConnectionAxis) {
+            if (state.lastMove() != null
+                    && direction == state.lastMove().getOpposite()) return;
+            result.add(new RouteState(state.position().relative(direction).immutable(),
+                    nextConnectionAxis, direction));
+        }
+
+        private boolean transitionAllowed(RouteState from, RouteState to) {
+            Direction direction = CreateMechanicalPlan.between(
+                    from.position(), to.position());
+            if (direction == null || !mechanicallyContinuous(from, to, direction)
+                    || !cellAllowed(to.position())) return false;
+            if (!level.isLoaded(from.position()) || !level.isLoaded(to.position())) return true;
+            PlacementEdge edge = new PlacementEdge(from.position(), to.position());
+            return loadedPlacementEdges.computeIfAbsent(edge, ignored ->
+                    findStand(level, to.position(), Set.of(
+                            from.position(), to.position())) != null);
+        }
+
+        private static boolean mechanicallyContinuous(
+                RouteState from, RouteState to, Direction direction) {
+            if (direction.getAxis() == Direction.Axis.Y) return true;
+            return from.connectionAxis() == direction.getAxis()
+                    && to.connectionAxis() == direction.getAxis();
+        }
+
+        private long transitionCost(RouteState from, RouteState to) {
+            Direction direction = CreateMechanicalPlan.between(
+                    from.position(), to.position());
+            long cost = direction != null && direction.getAxis() == Direction.Axis.Y ? 2L : 1L;
+            if (!level.isLoaded(to.position())) cost++;
+            return cost;
+        }
+
+        private boolean startPlacementAllowed() {
+            if (!cellAllowed(start)) return false;
+            BlockPos support = source.position();
+            if (!level.isLoaded(start) || !level.isLoaded(support)) return true;
+            return findStand(level, start, Set.of(support, start)) != null;
+        }
+
+        private boolean cellAllowed(BlockPos position) {
+            if (!bounds.contains(position)
+                    || rejectedCells.contains(position.asLong())
+                    || level.isOutsideBuildHeight(position)
+                    || !level.getWorldBorder().isWithinBounds(position)) return false;
+            return !level.isLoaded(position) || isEmptyRouteCell(level, position);
+        }
+
+        private long heuristic(BlockPos position) {
+            return Math.abs((long) position.getX() - receiver.getX())
+                    + Math.abs((long) position.getY() - receiver.getY())
+                    + Math.abs((long) position.getZ() - receiver.getZ());
+        }
+
+        private List<BlockPos> reconstruct(RouteState goal) {
+            List<BlockPos> reverse = new ArrayList<>();
+            RouteState cursor = goal;
+            while (cursor != null) {
+                reverse.add(cursor.position());
+                cursor = cameFrom.get(cursor);
+            }
+            List<BlockPos> forward = new ArrayList<>(reverse.size());
+            for (int i = reverse.size() - 1; i >= 0; i--) {
+                forward.add(reverse.get(i).immutable());
+            }
+            return List.copyOf(forward);
+        }
+
+        private static Bounds bounds(
+                CreateMechanicalPower.Request request, BlockPos start, BlockPos receiver) {
+            CreateMechanicalPower.Endpoint source = request.source();
+            CreateMechanicalPower.Endpoint destination = request.destination();
+            int minX = Math.min(Math.min(source.center().getX() - source.searchRadius(),
+                            destination.center().getX() - destination.searchRadius()),
+                    Math.min(start.getX(), receiver.getX()));
+            int maxX = Math.max(Math.max(source.center().getX() + source.searchRadius(),
+                            destination.center().getX() + destination.searchRadius()),
+                    Math.max(start.getX(), receiver.getX()));
+            int minY = Math.min(Math.min(source.center().getY() - source.searchRadius(),
+                            destination.center().getY() - destination.searchRadius()),
+                    Math.min(start.getY(), receiver.getY()));
+            int maxY = Math.max(Math.max(source.center().getY() + source.searchRadius(),
+                            destination.center().getY() + destination.searchRadius()),
+                    Math.max(start.getY(), receiver.getY()));
+            int minZ = Math.min(Math.min(source.center().getZ() - source.searchRadius(),
+                            destination.center().getZ() - destination.searchRadius()),
+                    Math.min(start.getZ(), receiver.getZ()));
+            int maxZ = Math.max(Math.max(source.center().getZ() + source.searchRadius(),
+                            destination.center().getZ() + destination.searchRadius()),
+                    Math.max(start.getZ(), receiver.getZ()));
+            return new Bounds(minX, maxX, minY, maxY, minZ, maxZ);
+        }
+    }
+
+    static ObstacleAwareRouteSearch obstacleAwareRouteSearch(
             ClientLevel level,
+            CreateMechanicalPower.Request request,
             CreateMechanicalPlan.KineticEndpoint source,
             CreateMechanicalPlan.KineticEndpoint destination,
-            BlockPos receiver) {
-        BlockPos start = source.position().relative(source.shaftFace());
-        List<List<BlockPos>> candidates = new ArrayList<>();
-        if (start.getX() == receiver.getX() || start.getZ() == receiver.getZ()) {
-            candidates.add(alignedRoute(start, receiver));
-        }
-        for (int layer : candidateLayers(level, start, receiver)) {
-            for (boolean xFirst : new boolean[]{true, false}) {
-                for (int pivot : new int[]{1, -1}) {
-                    candidates.add(fiveRunRoute(start, receiver, layer, xFirst, pivot));
-                }
-            }
-        }
-        List<TentativeRoute> approved = new ArrayList<>();
-        Set<String> identities = new HashSet<>();
-        for (List<BlockPos> route : candidates) {
-            if (route.isEmpty() || route.size() > 16_384 || hasDuplicate(route)
-                    || countRuns(route) > MAX_ROUTE_RUNS) continue;
-            boolean bounded = true;
-            for (BlockPos position : route) {
-                if (level.isOutsideBuildHeight(position)
-                        || !level.getWorldBorder().isWithinBounds(position)) {
-                    bounded = false;
-                    break;
-                }
-            }
-            if (bounded) {
-                List<BlockPos> frozen = List.copyOf(route);
-                String geometry = CreateMechanicalPlan.geometry(frozen);
-                String hash = CreateMechanicalPlan.hashRoute(frozen, geometry);
-                if (identities.add(hash)) {
-                    approved.add(new TentativeRoute(source, destination, receiver, frozen,
-                            geometry, hash, null, null));
-                }
-            }
-        }
-        approved.sort(Comparator.comparingInt((TentativeRoute candidate) -> candidate.positions().size())
-                .thenComparing(TentativeRoute::routeHash));
-        return approved.size() <= MAX_ENDPOINT_PAIR_ATTEMPTS
-                ? List.copyOf(approved)
-                : List.copyOf(approved.subList(0, MAX_ENDPOINT_PAIR_ATTEMPTS));
+            BlockPos receiver,
+            Set<Long> rejectedCells) {
+        return new ObstacleAwareRouteSearch(
+                level, request, source, destination, receiver, rejectedCells);
     }
 
-    /**
-     * Prefer the endpoint layer and its small deterministic offsets, then add a handful of
-     * already-loaded terrain surfaces. This lets a high machine reach an existing ground-level
-     * service corridor without scanning dozens of speculative Y layers or changing terrain.
-     */
-    private static List<Integer> candidateLayers(
-            ClientLevel level, BlockPos start, BlockPos receiver) {
-        int base = Math.max(start.getY(), receiver.getY());
-        LinkedHashSet<Integer> layers = new LinkedHashSet<>();
-        addLayer(level, layers, base);
-        for (int offset = 1; offset <= MAX_LAYER_OFFSET; offset++) {
-            addLayer(level, layers, base + offset);
-            addLayer(level, layers, base - offset);
-        }
-
-        List<BlockPos> probes = List.of(
-                start,
-                receiver,
-                new BlockPos(Math.floorDiv(start.getX() + receiver.getX(), 2),
-                        base, Math.floorDiv(start.getZ() + receiver.getZ(), 2)),
-                new BlockPos(receiver.getX(), base, start.getZ()),
-                new BlockPos(start.getX(), base, receiver.getZ()));
-        for (BlockPos probe : probes) {
-            if (!level.hasChunkAt(probe)) continue;
-            int surface = level.getHeight(
-                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, probe.getX(), probe.getZ());
-            addLayer(level, layers, surface);
-            addLayer(level, layers, surface + 1);
-        }
-        return List.copyOf(layers);
-    }
-
-    private static void addLayer(ClientLevel level, Set<Integer> layers, int y) {
-        if (y > level.getMinBuildHeight() && y < level.getMaxBuildHeight() - 1) layers.add(y);
-    }
+    record TentativeRoute(
+            CreateMechanicalPlan.KineticEndpoint source,
+            CreateMechanicalPlan.KineticEndpoint destination,
+            BlockPos receiver,
+            List<BlockPos> positions,
+            String geometry,
+            String routeHash) {}
 
     static CreateMechanicalPlan.RouteCell surveyCell(
             ClientLevel level, TentativeRoute route, int index) {
