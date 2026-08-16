@@ -28,6 +28,8 @@ import org.maiwithu.maicraft.task.TaskState;
  */
 public final class ReachMilestoneCompanionTask
         extends AbstractCompanionTask<ReachMilestoneTaskRecord> {
+    /** Fresh liveness granted when a new typed phase begins; child progress may renew it again. */
+    private static final long CHILD_PROGRESS_LEASE_TICKS = 3L * 60L * 20L;
     private static final List<Block> INDEXED_BLOCKS =
             List.of(Blocks.END_PORTAL_FRAME, Blocks.END_PORTAL);
 
@@ -95,7 +97,13 @@ public final class ReachMilestoneCompanionTask
         Purpose purpose = activePurpose;
         ProgressionRequirementProfile.Requirement requirement = activeRequirement;
         TaskState terminal = runChild(child);
-        if (terminal == null) return TaskState.RUNNING;
+        if (terminal == null) {
+            // Structure search, acquisition, movement and encounter children renew their own
+            // records only from verified progress.  Carry that lease through the semantic root;
+            // otherwise a healthy multi-hour milestone can be killed by its original wall clock.
+            if (record != null) r.extendDeadlineTo(record.getDeadlineGameTime());
+            return TaskState.RUNNING;
+        }
 
         BlockPos discoveredAnchor = null;
         if (purpose == Purpose.STRUCTURE_SEARCH
@@ -352,6 +360,9 @@ public final class ReachMilestoneCompanionTask
             ProgressionRequirementProfile.Requirement requirement,
             ProgressionFacts facts,
             Phase nextPhase) {
+        long freshLease = player.level().getGameTime() + CHILD_PROGRESS_LEASE_TICKS;
+        record.extendDeadlineTo(freshLease);
+        r.extendDeadlineTo(record.getDeadlineGameTime());
         activeRecord = record;
         activeChild = TaskFactory.create(player, record);
         activePurpose = purpose;
@@ -417,6 +428,12 @@ public final class ReachMilestoneCompanionTask
     @Override
     protected String successMessage() {
         return "Verified progression milestone " + r.milestone.id() + ".";
+    }
+
+    @Override
+    protected String timeoutMessage() {
+        return "Progression toward " + r.milestone.id()
+                + " stopped making verifiable progress in phase " + phase.id + ".";
     }
 
     private static boolean bool(Map<String, Object> data, String key) {

@@ -51,9 +51,7 @@ public final class ProgressionChildFactory {
                 callId("supply"), parent.getDeadlineGameTime(), requirement.alternatives(),
                 requirement.finalCount(), sources, allowHostileHunt,
                 requirement.sourceHint(), parent.protectedLabels,
-                SemanticAcquireTaskRecord.MAX_RADIUS,
-                SemanticAcquireTaskRecord.MAX_RECIPE_DEPTH,
-                SemanticAcquireTaskRecord.MAX_WORK_BUDGET);
+                SemanticAcquireTaskRecord.MAX_RADIUS);
     }
 
     public EquipTaskRecord equip(
