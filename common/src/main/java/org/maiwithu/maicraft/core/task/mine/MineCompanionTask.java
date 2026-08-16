@@ -117,6 +117,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      */
     private static final int STALL_TICKS = 400;
 
+    /** Renewed only by a confirmed target break or meaningful body displacement. */
+    private static final int PROGRESS_LEASE_TICKS = STALL_TICKS + 40;
+
     /** 挪出这么远就算"她在动",进度计时重新起算。 */
     private static final double STALL_MOVE = 2.0;
 
@@ -1093,6 +1096,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private void noteProgress() {
         lastProgressTick = player.level().getGameTime();
         lastProgressPos = player.blockPosition();
+        r.extendDeadlineTo(lastProgressTick + PROGRESS_LEASE_TICKS);
     }
 
     /**
@@ -1113,6 +1117,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 烧完——她被判"够不着",其实只是在等路。与任务 deadline 的同一条保护(AbstractCompanionTask)。
         if (nav != null && nav.planningInFlight()) {
             lastProgressTick++;
+            return null;
+        }
+        // A partial TargetIndex result is not a finished search space.  Building the index is
+        // deliberately split across bounded batches, so a large/just-loaded area may need more
+        // than STALL_TICKS even though every query is advancing that finite scan.  Do not turn
+        // that per-batch budget into an accidental wall-clock cap on the semantic mine task.
+        // Once coverage is complete, the ordinary no-movement/no-break lease below applies.
+        if (!lastQueryComplete) {
+            lastProgressTick = now;
+            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
             return null;
         }
         if (now - lastProgressTick < STALL_TICKS) {
@@ -1195,7 +1209,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     @Override
     protected String timeoutMessage() {
-        return "timed out after gathering " + r.getMined() + "/" + r.count + " " + r.label;
+        return "stopped making verified movement or mining progress after gathering "
+                + r.getMined() + "/" + r.count + " " + r.label;
     }
 
     @Override
