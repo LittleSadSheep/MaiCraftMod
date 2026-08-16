@@ -42,8 +42,7 @@ public final class DimensionTravelCompanionTask
     private static final String NETHER = "minecraft:the_nether";
     private static final String END = "minecraft:the_end";
     private static final int INDEX_BUILD_BUDGET = 8;
-    private static final int MAX_PORTAL_CANDIDATES = 32;
-    private static final int MAX_FAILED_CANDIDATES = 8;
+    private static final int INITIAL_PORTAL_CANDIDATES = 32;
     private static final int MAX_CONNECTED_PORTAL_CELLS = 256;
     private static final int MAX_PORTAL_ENTRY_TICKS = 20 * 20;
     private static final long HANDOFF_REFRESH_NANOS = 25_000_000_000L;
@@ -60,11 +59,15 @@ public final class DimensionTravelCompanionTask
     private String issueCode;
     private Phase phase = Phase.FIND;
     private MoveToCompanionTask moveChild;
+    private MoveToTaskRecord moveRecord;
     private long handoffToken;
     private int portalEntryTicks;
     private boolean arrived;
     private boolean cleaned;
     private long handoffPreparedAtNanos;
+    private String lastPortalFailure;
+    /** Grows only when the current nearest window has been exhausted. */
+    private int portalCandidateWindow = INITIAL_PORTAL_CANDIDATES;
 
     public DimensionTravelCompanionTask(
             LocalPlayer player, DimensionTravelTaskRecord record) {
@@ -113,7 +116,7 @@ public final class DimensionTravelCompanionTask
                 (ClientLevel) player.level(),
                 player.blockPosition(),
                 targetBlocks,
-                MAX_PORTAL_CANDIDATES,
+                portalCandidateWindow,
                 chunkRadius,
                 INDEX_BUILD_BUDGET);
         portal = observed.hits().stream()
@@ -125,12 +128,31 @@ public final class DimensionTravelCompanionTask
                         (BlockPos position) -> position.distSqr(player.blockPosition())))
                 .orElse(null);
         if (portal == null) {
-            if (!observed.complete()) return TaskState.RUNNING;
+            if (!observed.complete()) {
+                // TargetIndex advances a finite loaded-area scan in bounded batches.  Waiting
+                // for those batches must not consume the semantic task's liveness lease (notably
+                // on accelerated-tick clients); only a complete scan may support "not found".
+                r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+                return TaskState.RUNNING;
+            }
+            // TargetIndex intentionally returns a nearest window. If every member of that
+            // finite window has already failed, widen the window instead of pretending that an
+            // arbitrary number of portal attempts exhausted the loaded search scope.
+            if (observed.hits().size() >= portalCandidateWindow
+                    && portalCandidateWindow < Integer.MAX_VALUE / 2) {
+                portalCandidateWindow *= 2;
+                return TaskState.RUNNING;
+            }
             failIssue(
-                    "portal_not_observed",
-                    "No portal for " + r.destinationDimension + " is visible in the loaded client "
-                            + "world within " + r.searchRadius + " blocks. Explore to load one, or "
-                            + "explicitly request preparation of an appropriate portal.");
+                    attempted.isEmpty() ? "portal_not_observed" : "portal_unreachable",
+                    attempted.isEmpty()
+                            ? "No portal for " + r.destinationDimension
+                                    + " is visible in the loaded client world within "
+                                    + r.searchRadius + " blocks. Explore to load one, or explicitly "
+                                    + "request preparation of an appropriate portal."
+                            : "Every observed portal candidate inside the requested loaded search "
+                                    + "scope was exhausted"
+                                    + (lastPortalFailure == null ? "." : ": " + lastPortalFailure));
             return TaskState.FAILED;
         }
         portalCells = connectedPortalCells(portal);
@@ -140,7 +162,7 @@ public final class DimensionTravelCompanionTask
             return TaskState.RUNNING;
         }
 
-        MoveToTaskRecord moveRecord = new MoveToTaskRecord(
+        moveRecord = new MoveToTaskRecord(
                 "dimension-portal-" + r.getId() + "-" + attempted.size(),
                 r.getDeadlineGameTime(),
                 (double) portal.getX(),
@@ -157,9 +179,13 @@ public final class DimensionTravelCompanionTask
     private TaskState tickMove() {
         armHandoffIfNear();
         TaskState terminal = runChild(moveChild);
-        if (terminal == null) return TaskState.RUNNING;
+        if (terminal == null) {
+            r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+            return TaskState.RUNNING;
+        }
         TaskResult result = moveChild.result(terminal);
         moveChild = null;
+        moveRecord = null;
         if (r.destinationDimension.equals(dimension())) {
             arrived = true;
             return TaskState.SUCCESS;
@@ -170,16 +196,13 @@ public final class DimensionTravelCompanionTask
             return TaskState.RUNNING;
         }
         revokeHandoff();
+        lastPortalFailure = result == null || result.message() == null
+                ? "the first-person approach failed" : result.message();
         attempted.add(portal.asLong());
+        attempted.addAll(portalCells);
         portal = null;
         portalCells = Set.of();
         phase = Phase.FIND;
-        if (attempted.size() >= MAX_FAILED_CANDIDATES) {
-            failIssue(
-                    "portal_unreachable",
-                    "Observed portal candidates could not be reached safely with the allowed terrain policy.");
-            return TaskState.FAILED;
-        }
         return TaskState.RUNNING;
     }
 
@@ -214,15 +237,13 @@ public final class DimensionTravelCompanionTask
     private TaskState rejectCurrentPortal(String reason) {
         InputDriver.halt(player);
         revokeHandoff();
+        lastPortalFailure = reason;
         if (portal != null) attempted.add(portal.asLong());
+        attempted.addAll(portalCells);
         portal = null;
         portalCells = Set.of();
         phase = Phase.FIND;
         portalEntryTicks = 0;
-        if (attempted.size() >= MAX_FAILED_CANDIDATES) {
-            failIssue("portal_unreachable", reason);
-            return TaskState.FAILED;
-        }
         return TaskState.RUNNING;
     }
 
@@ -315,7 +336,12 @@ public final class DimensionTravelCompanionTask
                 childComplete = false;
                 complete = false;
             }
-            if (childComplete) moveChild = null;
+            if (childComplete) {
+                moveChild = null;
+                moveRecord = null;
+            }
+        } else {
+            moveRecord = null;
         }
         if (indexedLevel != null && !targetBlocks.isEmpty()) {
             try {
@@ -427,7 +453,7 @@ public final class DimensionTravelCompanionTask
 
     @Override
     protected String timeoutMessage() {
-        return "dimension travel timed out before the requested world was observed";
+        return "dimension travel stopped making verifiable progress before the requested world was observed";
     }
 
     @Override
