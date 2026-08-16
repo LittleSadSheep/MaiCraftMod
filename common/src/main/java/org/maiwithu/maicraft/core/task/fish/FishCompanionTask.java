@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.InteractionHand;
@@ -54,7 +55,6 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private static final double MIN_CAST_DISTANCE = 4.0;
     private static final double IDEAL_CAST_DISTANCE = 6.0;
     private static final double WATER_SURFACE_OFFSET = 0.85;
-    private static final int AIM_TICKS = 3;
     private static final int CAST_SETTLE_TIMEOUT = 5 * 20;
     private static final int CAST_LIFETIME = 60 * 20;
     private static final int COOLDOWN_TICKS = 10;
@@ -91,6 +91,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private int lootCloseTicks;
     private int unreachableLoot;
     private final FirstPersonActionGate rodSelection = new FirstPersonActionGate();
+    private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private NativeActionReceipt rodReceipt;
     private boolean catchCounted;
 
@@ -251,6 +252,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
         phase = Phase.AIM;
         phaseTicks = 0;
+        aimConvergence.reset();
         aimAtTarget();
         return TaskState.RUNNING;
     }
@@ -259,8 +261,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         if (!isCastableSurface(target) || !trajectoryClear(player.getEyePosition(), target)) {
             return failedCast("the selected water surface became obstructed", true);
         }
-        aimAtTarget();
-        if (++phaseTicks < AIM_TICKS) return TaskState.RUNNING;
+        if (!aimAtTarget()) return TaskState.RUNNING;
 
         double pitch = castPitchDegrees(player.getEyePosition(), target);
         var context = ClientRuntime.requireContext(player);
@@ -580,8 +581,11 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return BlockHelper.playerFeet(player.level(), player.getX(), player.getY(), player.getZ());
     }
 
-    private void aimAtTarget() {
-        InputDriver.lookAt(player, castAimPoint(player.getEyePosition(), target));
+    private boolean aimAtTarget() {
+        Vec3 eye = player.getEyePosition();
+        Vec3 aim = castAimPoint(eye, target);
+        InputDriver.lookAt(player, aim);
+        return aimConvergence.ready(player, aim.subtract(eye));
     }
 
     private static Vec3 castAimPoint(Vec3 eye, BlockPos target) {
@@ -708,6 +712,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         InputDriver.halt(player);
         discardHook();
         rodSelection.reset();
+        aimConvergence.reset();
         rodReceipt = null;
         clearLootTracking();
         super.cleanup();
