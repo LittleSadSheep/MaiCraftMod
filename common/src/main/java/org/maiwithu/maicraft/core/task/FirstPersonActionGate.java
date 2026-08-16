@@ -20,23 +20,18 @@ public final class FirstPersonActionGate {
     private NativeActionReceipt selecting;
     private int requestedInventorySlot = -1;
     private int selectedHotbarSlot = -1;
+    /** The S -> H swap was confirmed; both the cached S and rediscovered H name this transaction. */
+    private boolean stagedToHotbar;
     private boolean ready;
     private String failure = "selection was not confirmed";
 
     public Status select(LocalPlayer player, int inventorySlot) {
-        if (inventorySlot < 0 || inventorySlot >= Math.min(36, player.getInventory().getContainerSize())) {
-            failure = "inventory slot is unavailable: " + inventorySlot;
-            return Status.FAILED;
-        }
-        if (requestedInventorySlot != -1 && requestedInventorySlot != inventorySlot) {
-            failure = "selection target changed while a receipt was pending";
-            return Status.FAILED;
-        }
-        requestedInventorySlot = inventorySlot;
-        if (ready) return Status.READY;
-        LocalPlayerContext context = ClientRuntime.requireContext(player);
-
+        // A confirmed main-inventory -> hotbar swap necessarily changes where a caller that
+        // rediscovers the item will find it (source S becomes hotbar H). Settle that transaction
+        // before validating/comparing the freshly discovered slot; otherwise a correct S -> H
+        // transition is misreported as "selection target changed" while its receipt is pending.
         if (staging != null) {
+            LocalPlayerContext context = ClientRuntime.requireContext(player);
             staging = context.menus().poll(context, staging);
             if (!staging.terminal()) return Status.RUNNING;
             if (staging.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
@@ -44,8 +39,24 @@ public final class FirstPersonActionGate {
                 return Status.FAILED;
             }
             staging = null;
-            return Status.RUNNING; // one native mutation per tick; select on the next tick
+            stagedToHotbar = true;
+            return Status.RUNNING; // keep selection as a separate, later-tick native mutation
         }
+
+        if (inventorySlot < 0 || inventorySlot >= Math.min(36, player.getInventory().getContainerSize())) {
+            failure = "inventory slot is unavailable: " + inventorySlot;
+            return Status.FAILED;
+        }
+        boolean stagedAlias = stagedToHotbar && inventorySlot == selectedHotbarSlot;
+        if (requestedInventorySlot != -1
+                && requestedInventorySlot != inventorySlot
+                && !stagedAlias) {
+            failure = "selection target changed while a receipt was pending";
+            return Status.FAILED;
+        }
+        if (requestedInventorySlot == -1) requestedInventorySlot = inventorySlot;
+        if (ready) return Status.READY;
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
 
         if (selecting != null) {
             selecting = context.actions().poll(context, selecting);
@@ -57,6 +68,18 @@ public final class FirstPersonActionGate {
             selecting = null;
             ready = true;
             return Status.READY;
+        }
+
+        // Do not swap S back into H when a caller intentionally keeps passing its cached source
+        // slot. The confirmed transaction has already made H the physical selection target.
+        if (stagedToHotbar) {
+            if (player.getInventory().selected == selectedHotbarSlot) {
+                ready = true;
+                return Status.READY;
+            }
+            selecting = context.actions().selectHotbar(
+                    context, selectedHotbarSlot, CONFIRM_TICKS);
+            return Status.RUNNING;
         }
 
         selectedHotbarSlot = inventorySlot < 9
@@ -84,6 +107,7 @@ public final class FirstPersonActionGate {
         selecting = null;
         requestedInventorySlot = -1;
         selectedHotbarSlot = -1;
+        stagedToHotbar = false;
         ready = false;
     }
 }
