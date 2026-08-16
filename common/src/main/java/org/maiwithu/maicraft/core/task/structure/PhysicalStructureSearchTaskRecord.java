@@ -100,7 +100,6 @@ public final class PhysicalStructureSearchTaskRecord extends TaskRecord {
             for (BlockPos position : excludedEvidenceAnchors) {
                 if (position != null && seen.add(position.asLong())) {
                     exclusions.add(position.immutable());
-                    if (exclusions.size() >= 64) break;
                 }
             }
         }

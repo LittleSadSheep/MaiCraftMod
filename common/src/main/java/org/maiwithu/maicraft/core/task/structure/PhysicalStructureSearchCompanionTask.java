@@ -71,12 +71,11 @@ public final class PhysicalStructureSearchCompanionTask
     private static final int FRONTIER_GRID = 64;
     private static final int MAX_FRONTIER_LEG = 80;
     private static final int MIN_FRONTIER_LEG = 12;
-    private static final int MAX_FRONTIER_PROBES = 10_000;
-    private static final int MAX_FRONTIER_LEGS = 256;
-    private static final int MAX_EVIDENCE_APPROACHES = 8;
-    private static final int LEG_TIMEOUT_TICKS = 90 * 20;
+    /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
+    private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int MOVING_EVIDENCE_SCAN_INTERVAL = 5;
-    private static final int MAX_EYE_THROWS = 20;
+    /** A receipt-confirmed throw renews search liveness; distance and inventory bound the search. */
+    private static final int EYE_PROGRESS_LEASE_TICKS = 3 * 60 * 20;
     private static final int EYE_RECEIPT_TICKS = 40;
     private static final int EYE_SPAWN_RADIUS = 12;
     private static final int EYE_REACQUIRE_RADIUS = 40;
@@ -101,7 +100,7 @@ public final class PhysicalStructureSearchCompanionTask
     private boolean stronghold;
     private boolean cleaned;
     private MoveToCompanionTask moveChild;
-    private long legDeadline;
+    private MoveToTaskRecord moveRecord;
     private int legSerial;
     private int frontierAttempts;
     private int frontierReached;
@@ -237,7 +236,10 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     private TaskState tickObserve(EvidenceScan scan) {
-        if (!scan.complete()) return TaskState.RUNNING;
+        if (!scan.complete()) {
+            keepFiniteEvidenceScanAlive();
+            return TaskState.RUNNING;
+        }
         if (stronghold) {
             if (pendingDirection != null
                     && pendingDirectionDistance >= MIN_FRONTIER_LEG) {
@@ -250,14 +252,6 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     private TaskState tickSelectAndThrow() {
-        if (eyesConsumed >= MAX_EYE_THROWS) {
-            failIssue(
-                    "eye_throw_budget_exhausted",
-                    "The bounded stronghold search used " + eyesConsumed
-                            + " confirmed eye throws without loading an end portal frame.",
-                    FailureType.TARGET_LOST);
-            return TaskState.FAILED;
-        }
         int slot = findEyeSlot();
         if (slot < 0) {
             failIssue(
@@ -368,6 +362,7 @@ public final class PhysicalStructureSearchCompanionTask
             return TaskState.FAILED;
         }
         eyesConsumed++;
+        r.extendDeadlineTo(player.level().getGameTime() + EYE_PROGRESS_LEASE_TICKS);
         trackStart = trackedEye.position();
         trackLast = trackStart;
         trackTicks = 0;
@@ -471,14 +466,6 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     private TaskState beginFrontierTravel() {
-        if (frontierAttempts >= MAX_FRONTIER_LEGS) {
-            failIssue(
-                    "frontier_budget_exhausted",
-                    "Bounded first-person frontier exploration finished without a matching loaded "
-                            + "evidence cluster for " + r.structureId + ".",
-                    FailureType.TARGET_LOST);
-            return TaskState.FAILED;
-        }
         BlockPos frontier = nextFrontier();
         if (frontier == null) {
             failIssue(
@@ -499,14 +486,6 @@ public final class PhysicalStructureSearchCompanionTask
             verifiedEvidence = match;
             return TaskState.SUCCESS;
         }
-        if (evidenceApproaches >= MAX_EVIDENCE_APPROACHES) {
-            failIssue(
-                    "evidence_unreachable",
-                    "Visible evidence was repeatedly observed, but no approach could be completed "
-                            + "under the allowed terrain policy.",
-                    FailureType.NO_PATH);
-            return TaskState.FAILED;
-        }
         evidenceApproaches++;
         startMove(match.position(), true);
         stage = Stage.MOVE_EVIDENCE;
@@ -522,15 +501,19 @@ public final class PhysicalStructureSearchCompanionTask
             return TaskState.FAILED;
         }
         TaskState terminal;
-        if (player.level().getGameTime() >= legDeadline) {
+        if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
             moveChild.stop(player, Task.StopReason.REPLACED);
             terminal = TaskState.TIMEOUT;
         } else {
             terminal = runChild(moveChild);
-            if (terminal == null) return TaskState.RUNNING;
+            if (terminal == null) {
+                r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                return TaskState.RUNNING;
+            }
         }
         TaskResult result = moveChild.result(terminal);
         moveChild = null;
+        moveRecord = null;
 
         if (terminal == TaskState.SUCCESS && result != null && result.success()) {
             if (evidenceMove) {
@@ -562,14 +545,6 @@ public final class PhysicalStructureSearchCompanionTask
                         FailureType.NO_PATH);
                 return TaskState.FAILED;
             }
-            if (evidenceApproaches >= MAX_EVIDENCE_APPROACHES) {
-                failIssue(
-                        "evidence_unreachable",
-                        "Loaded evidence was found, but first-person approach failed under the "
-                                + "allowed terrain policy.",
-                        FailureType.NO_PATH);
-                return TaskState.FAILED;
-            }
             stage = Stage.OBSERVE;
             return TaskState.RUNNING;
         }
@@ -588,7 +563,10 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     private TaskState tickEvidenceVerification(EvidenceScan scan) {
-        if (!scan.complete()) return TaskState.RUNNING;
+        if (!scan.complete()) {
+            keepFiniteEvidenceScanAlive();
+            return TaskState.RUNNING;
+        }
         EvidenceMatch match = scan.match();
         if (match != null && activeEvidence != null
                 && horizontalDistance(match.position(), activeEvidence.position())
@@ -625,6 +603,14 @@ public final class PhysicalStructureSearchCompanionTask
         hits.sort(Comparator.comparingDouble(
                 position -> position.distSqr(player.blockPosition())));
         return new EvidenceScan(matchEvidence(hits), complete, hits.size());
+    }
+
+    /**
+     * Evidence indexing is a finite loaded-area search split into bounded per-tick batches.  Keep
+     * that batching from becoming a wall-clock task cap while preserving the scan's fixed radius.
+     */
+    private void keepFiniteEvidenceScanAlive() {
+        r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
     }
 
     private EvidenceMatch matchEvidence(List<BlockPos> hits) {
@@ -699,28 +685,29 @@ public final class PhysicalStructureSearchCompanionTask
     private void startMove(BlockPos target, boolean exact) {
         long now = player.level().getGameTime();
         String parentCall = r.getToolCallId() == null ? "structure-search" : r.getToolCallId();
-        MoveToTaskRecord moveRecord = new MoveToTaskRecord(
+        moveRecord = new MoveToTaskRecord(
                 parentCall + "-internal-structure-leg-" + (++legSerial),
-                now + LEG_TIMEOUT_TICKS,
+                now + INITIAL_LEG_LEASE_TICKS,
                 (double) target.getX(),
                 exact ? (double) target.getY() : null,
                 (double) target.getZ(),
                 null,
                 r.mayAlterTerrain);
         moveChild = new MoveToCompanionTask(player, moveRecord);
-        legDeadline = now + LEG_TIMEOUT_TICKS;
     }
 
     private BlockPos nextFrontier() {
-        for (int probe = 0; probe < MAX_FRONTIER_PROBES; probe++) {
+        int finalRing = (int) Math.ceil(
+                (r.maxDistance + SCOPE_TOLERANCE) / (double) FRONTIER_GRID) + 1;
+        while (true) {
             BlockPos desired = nextSpiralPoint();
+            if (Math.max(Math.abs(spiralX), Math.abs(spiralZ)) > finalRing) return null;
             if (!insideScope(desired)) continue;
             BlockPos frontier = loadedFrontierToward(desired);
             if (frontier == null) continue;
             long key = BlockPos.asLong(frontier.getX(), 0, frontier.getZ());
             if (attemptedFrontiers.add(key)) return frontier;
         }
-        return null;
     }
 
     private BlockPos nextSpiralPoint() {
@@ -891,6 +878,7 @@ public final class PhysicalStructureSearchCompanionTask
             moveChild.result(terminal);
         } finally {
             moveChild = null;
+            moveRecord = null;
         }
     }
 
@@ -990,8 +978,7 @@ public final class PhysicalStructureSearchCompanionTask
                     "description", "Keep the current dimension and stop this search."));
             return List.copyOf(options);
         }
-        if ((issueCode != null && issueCode.startsWith("ender_eye"))
-                || "eye_throw_budget_exhausted".equals(issueCode)) {
+        if (issueCode != null && issueCode.startsWith("ender_eye")) {
             options.add(Map.of(
                     "choice", "acquire",
                     "item", "minecraft:ender_eye",
@@ -1028,8 +1015,8 @@ public final class PhysicalStructureSearchCompanionTask
 
     @Override
     protected String timeoutMessage() {
-        return "physical structure search timed out before " + r.structureId
-                + " was verified; no hidden locate result was substituted";
+        return "physical structure search stopped making verifiable progress before "
+                + r.structureId + " was verified; no hidden locate result was substituted";
     }
 
     @Override
