@@ -4,11 +4,14 @@ package org.maiwithu.maicraft.core.task.supply;
 import java.util.Objects;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /** Retains one reviewed build while AE supply and carried-material batches execute. */
-public final class SemanticBuildSupplyTaskRecord extends TaskRecord {
+public final class SemanticBuildSupplyTaskRecord extends TaskRecord
+        implements InternalPositionReceipt {
     public final BuildTaskRecord plan;
+    private Position verifiedPosition;
 
     static {
         TaskFactory.register(SemanticBuildSupplyTaskRecord.class,
@@ -22,6 +25,15 @@ public final class SemanticBuildSupplyTaskRecord extends TaskRecord {
     }
 
     public static void ensureRegistered() {}
+
+    void retainVerifiedPosition(Position position) {
+        verifiedPosition = position;
+    }
+
+    @Override
+    public Position internalVerifiedPosition() {
+        return verifiedPosition;
+    }
 
     @Override
     public String describe() {

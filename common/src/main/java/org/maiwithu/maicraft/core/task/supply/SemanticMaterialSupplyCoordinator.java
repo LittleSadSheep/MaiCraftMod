@@ -16,6 +16,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireCompanionTask;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
@@ -27,13 +29,17 @@ import org.maiwithu.maicraft.task.TaskState;
  * Reusable investigate/supply/re-investigate seam for semantic parent tasks.
  *
  * <p>The parent owns the live-world plan.  This coordinator only accepts the plan's aggregate
- * final-inventory fact, delegates that one bounded prerequisite to {@code acquire_items}, and
- * returns a semantic receipt.  A successful tick deliberately means "discard the old plan and
- * investigate again", never "continue executing the cells that were planned before supply".
+ * final-inventory fact, delegates that one progress-driven prerequisite to {@code acquire_items}, and
+ * returns a semantic receipt after coming back to the investigation site. The parent owns the
+ * continuation policy: an initial supply normally triggers full re-investigation, while a parent
+ * with a separately verified built prefix may re-check that prefix and the exact remaining route
+ * before continuing. This coordinator itself never authorizes stale planned cells.
  */
 public final class SemanticMaterialSupplyCoordinator {
-    /** Includes bounded acquisition and a terrain-preserving first-person return to the survey. */
-    public static final long SUPPLY_DEADLINE_TICKS = 30L * 60L * 20L;
+    /** Initial no-progress lease; the active acquire record may extend it from verified progress. */
+    public static final long SUPPLY_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
+    private static final long RETURN_PROGRESS_LEASE_TICKS = 30L * 20L;
+    private static final int RETURN_PROGRESS_GRACE_TICKS = 100;
 
     public enum MaterialPolicy {
         ORDINARY("ordinary"),
@@ -99,6 +105,7 @@ public final class SemanticMaterialSupplyCoordinator {
             String message) {}
 
     private SemanticAcquireCompanionTask child;
+    private SemanticAcquireTaskRecord childRecord;
     private Demand demand;
     private MaterialPolicy materialPolicy;
     private List<SemanticAcquireTaskRecord.Source> sources = List.of();
@@ -109,13 +116,16 @@ public final class SemanticMaterialSupplyCoordinator {
     private PlayerNav returnNavigation;
     private Map<String, Object> pendingReceipt;
     private String pendingMessage;
+    private List<BlockPos> forbiddenNavigationCells = List.of();
 
     public boolean active() {
         return child != null || pendingReceipt != null || returnNavigation != null;
     }
 
     public long childDeadline() {
-        return childDeadline;
+        return childRecord == null
+                ? childDeadline
+                : Math.max(childDeadline, childRecord.getDeadlineGameTime());
     }
 
     /** Start one exact, currently observed shortage.  Parents must not call this for a met fact. */
@@ -128,14 +138,40 @@ public final class SemanticMaterialSupplyCoordinator {
             List<SemanticAcquireTaskRecord.Source> requestedSources,
             boolean allowHarm,
             List<String> protectedLabels) {
+        begin(player, parentCallId, parentDeadline, demand, policy, requestedSources,
+                allowHarm, protectedLabels, List.of());
+    }
+
+    /**
+     * Start one exact shortage while carrying the parent's observed no-step cells through every
+     * nested acquisition and return-navigation tick.  The child receives positions internally;
+     * they never become part of the public semantic tool contract.
+     */
+    public void begin(
+            LocalPlayer player,
+            String parentCallId,
+            long parentDeadline,
+            Demand demand,
+            MaterialPolicy policy,
+            List<SemanticAcquireTaskRecord.Source> requestedSources,
+            boolean allowHarm,
+            List<String> protectedLabels,
+            Iterable<BlockPos> forbiddenNavigationCells) {
         if (active()) throw new IllegalStateException("material supply child is already active");
         this.demand = Objects.requireNonNull(demand, "demand");
         this.materialPolicy = policy == null ? MaterialPolicy.ORDINARY : policy;
         this.sources = resolveSources(this.materialPolicy, requestedSources);
+        LinkedHashSet<BlockPos> forbidden = new LinkedHashSet<>();
+        if (forbiddenNavigationCells != null) {
+            for (BlockPos cell : forbiddenNavigationCells) {
+                if (cell != null) forbidden.add(cell.immutable());
+            }
+        }
+        this.forbiddenNavigationCells = List.copyOf(forbidden);
         long now = player.level().getGameTime();
         investigationOrigin = player.blockPosition().immutable();
         originDimension = player.level().dimension().location().toString();
-        childDeadline = Math.max(parentDeadline, now + SUPPLY_DEADLINE_TICKS);
+        childDeadline = now + SUPPLY_INITIAL_LEASE_TICKS;
         String prefix = parentCallId == null || parentCallId.isBlank()
                 ? "semantic-work" : parentCallId;
         SemanticAcquireTaskRecord record = new SemanticAcquireTaskRecord(
@@ -147,9 +183,8 @@ public final class SemanticMaterialSupplyCoordinator {
                 allowHarm,
                 SemanticAcquireTaskRecord.SourceHint.empty(),
                 protectedLabels,
-                SemanticAcquireTaskRecord.DEFAULT_RADIUS,
-                8,
-                128);
+                SemanticAcquireTaskRecord.DEFAULT_RADIUS);
+        childRecord = record;
         child = new SemanticAcquireCompanionTask(player, record);
     }
 
@@ -163,7 +198,9 @@ public final class SemanticMaterialSupplyCoordinator {
         }
         if (pendingReceipt != null) return tickReturn(player);
         if (child == null) throw new IllegalStateException("material supply child is missing");
-        TaskState terminal = childRunner.apply(child);
+        TaskState terminal = NavigationSafetyContext.withForbiddenBodyCells(
+                forbiddenNavigationCells, () -> childRunner.apply(child));
+        childDeadline = Math.max(childDeadline, childRecord.getDeadlineGameTime());
         if (terminal == null) {
             return new Tick(Status.RUNNING, Map.of(), FailureType.UNKNOWN, "material supply running");
         }
@@ -177,6 +214,7 @@ public final class SemanticMaterialSupplyCoordinator {
                 ? (proven ? "material fact satisfied" : "material supply did not complete")
                 : result.message();
         child = null;
+        childRecord = null;
         if (!proven) {
             clear();
             return new Tick(Status.FAILED, receipt, type, message);
@@ -302,13 +340,24 @@ public final class SemanticMaterialSupplyCoordinator {
             return new Tick(Status.SUPPLIED_REPLAN, Map.copyOf(receipt),
                     FailureType.UNKNOWN, message);
         }
-        if (returnNavigation == null) {
-            BlockPos origin = investigationOrigin;
-            returnNavigation = new PlayerNav(player, origin, 1.0,
-                    () -> player.blockPosition().distSqr(origin) <= 4.0D);
-        }
-        PlayerNav.Status status = returnNavigation.tick();
+        PlayerNav.Status status = NavigationSafetyContext.withForbiddenBodyCells(
+                forbiddenNavigationCells, () -> {
+                    if (returnNavigation == null) {
+                        BlockPos origin = investigationOrigin;
+                        returnNavigation = PlayerNav.toGoal(
+                                player, () -> NavGoal.near(origin, 2.0D), 1.0,
+                                () -> player.blockPosition().distSqr(origin) <= 4.0D);
+                    }
+                    return returnNavigation.tick();
+                });
         if (status == PlayerNav.Status.RUNNING) {
+            if (returnNavigation.planningInFlight()) {
+                childDeadline++;
+            } else if (returnNavigation.hasRecentPhysicalProgress(
+                    RETURN_PROGRESS_GRACE_TICKS)) {
+                childDeadline = Math.max(childDeadline,
+                        player.level().getGameTime() + RETURN_PROGRESS_LEASE_TICKS);
+            }
             return new Tick(Status.RUNNING, Map.of(), FailureType.UNKNOWN,
                     "returning to the investigated worksite");
         }
@@ -395,6 +444,7 @@ public final class SemanticMaterialSupplyCoordinator {
 
     private void clear() {
         child = null;
+        childRecord = null;
         demand = null;
         sources = List.of();
         childDeadline = 0L;
@@ -403,5 +453,6 @@ public final class SemanticMaterialSupplyCoordinator {
         returnNavigation = null;
         pendingReceipt = null;
         pendingMessage = null;
+        forbiddenNavigationCells = List.of();
     }
 }

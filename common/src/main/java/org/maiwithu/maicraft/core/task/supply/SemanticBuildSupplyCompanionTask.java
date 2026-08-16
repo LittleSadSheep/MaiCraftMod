@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifier;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
@@ -131,7 +132,13 @@ final class SemanticBuildSupplyCompanionTask
             terminal = TaskState.TIMEOUT;
         } else {
             terminal = runChild(activeChild);
-            if (terminal == null) return TaskState.RUNNING;
+            if (terminal == null) {
+                // Child records own their liveness evidence. Carry any progress-based renewal
+                // outward so a large healthy construction or AE preparation is not cut off by
+                // the coordinator's original estimate.
+                r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
+                return TaskState.RUNNING;
+            }
         }
         TaskResult result = activeChild.result(terminal);
         ChildKind kind = activeKind;
@@ -191,11 +198,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private void startBuild() {
-        if (++buildRounds > 128) {
-            stopWith("construction_batch_limit",
-                    "construction exceeded the bounded batch count", FailureType.INTERNAL);
-            return;
-        }
+        buildRounds++;
         long now = player.level().getGameTime();
         BuildTaskRecord source = activePlan;
         BuildTaskRecord batch = new BuildTaskRecord(
@@ -267,12 +270,34 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private boolean verifyTraversability() {
-        if (activePlan.traversabilityContract() == null) return true;
+        if (activePlan.traversabilityContract() == null) {
+            retainVerifiedPosition();
+            return true;
+        }
         traversabilityResult = BuildTraversabilityVerifier.verify(
                 player.clientLevel, activePlan.traversabilityContract());
-        if (traversabilityResult.valid()) return true;
+        if (traversabilityResult.valid()) {
+            retainVerifiedPosition();
+            return true;
+        }
         stopWith(traversabilityResult.code(), traversabilityResult.message(), FailureType.NO_PATH);
         return false;
+    }
+
+    private void retainVerifiedPosition() {
+        if (activePlan.targets.isEmpty()) return;
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (BuildTaskRecord.Target target : activePlan.targets) {
+            BlockPos pos = target.pos();
+            minX = Math.min(minX, pos.getX()); minY = Math.min(minY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ()); maxX = Math.max(maxX, pos.getX());
+            maxZ = Math.max(maxZ, pos.getZ());
+        }
+        r.retainVerifiedPosition(new InternalPositionReceipt.Position(
+                Math.floorDiv(minX + maxX, 2), minY,
+                Math.floorDiv(minZ + maxZ, 2),
+                player.level().dimension().location().toString()));
     }
 
     private int remainingCellCount() {
@@ -472,17 +497,10 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private Map<String, Object> verifiedCenter() {
-        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
-        int maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
-        for (BuildTaskRecord.Target target : activePlan.targets) {
-            BlockPos pos = target.pos();
-            minX = Math.min(minX, pos.getX()); minY = Math.min(minY, pos.getY());
-            minZ = Math.min(minZ, pos.getZ()); maxX = Math.max(maxX, pos.getX());
-            maxZ = Math.max(maxZ, pos.getZ());
-        }
-        return Map.of("x", Math.floorDiv(minX + maxX, 2), "y", minY,
-                "z", Math.floorDiv(minZ + maxZ, 2),
-                "dimension", player.level().dimension().location().toString(),
+        InternalPositionReceipt.Position position = r.internalVerifiedPosition();
+        if (position == null) return Map.of();
+        return Map.of("x", position.x(), "y", position.y(),
+                "z", position.z(), "dimension", position.dimension(),
                 "kind", "verified_site_center");
     }
 
