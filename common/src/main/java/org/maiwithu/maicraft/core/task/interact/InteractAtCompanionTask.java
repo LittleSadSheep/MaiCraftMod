@@ -8,9 +8,11 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.act.PressReceipt;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.GoToThenDoTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -40,6 +42,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private Interaction interaction;
     private final org.maiwithu.maicraft.core.task.FirstPersonActionGate selection =
             new org.maiwithu.maicraft.core.task.FirstPersonActionGate();
+    private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private boolean itemSelected;
     /** 按键前的世界快照,收尾时对账出"真发生了什么"(见 {@link PressReceipt})。 */
     private PressReceipt receipt;
@@ -100,26 +103,40 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 itemSelected = true;
             }
             if (r.aim != null) {
-                InputDriver.lookAt(player, Vec3.atCenterOf(r.aim));
+                Vec3 aim = Vec3.atCenterOf(r.aim);
+                InputDriver.lookAt(player, aim);
+                // requestLook is applied/rate-limited at endTick. Always cross that boundary and
+                // wait for the actual camera vector to converge before trusting nativeRaytrace;
+                // otherwise the old view can turn ordinary camera lag into a false obstruction.
+                if (!aimConvergence.ready(player, aim.subtract(player.getEyePosition()))) {
+                    return TaskState.RUNNING;
+                }
             }
             HitResult hit = Interaction.nativeRaytrace(player, REACH);
-            // 目标格本身是实心方块、而准星实际落在别的方块上 = 被遮挡:
-            // 拒绝并点名遮挡物(点下去只会交互到错误对象还谎报成功)。
-            // 目标格是空气或流体的瞄点保持准星穿透语义——流体本来就不该被准星
-            // 点中,对水面右键的原版含义正是"射线穿过去,物品自己找水"(桶、船)。
+            // 与语义预检共用同一套遮挡口径:普通目标命中更近的别块就是被挡住;
+            // 空气保持穿透语义;流体用原版 Fluid.NONE 射线,允许命中水后方的块
+            // (桶、船会在方块未消费后落到物品自用),但水前面的墙仍是真遮挡。
             if (r.aim != null
-                    && !player.level().getBlockState(r.aim).isAir()
-                    && !(player.level().getBlockState(r.aim).getBlock()
-                            instanceof net.minecraft.world.level.block.LiquidBlock)
-                    && hit instanceof net.minecraft.world.phys.BlockHitResult blockedHit
-                    && !blockedHit.getBlockPos().equals(r.aim)) {
-                var blocker = blockedHit.getBlockPos();
-                String blockerId = BuiltInRegistries.BLOCK
-                        .getKey(player.level().getBlockState(blocker).getBlock()).getPath();
+                    && FirstPersonInteractionTargeting.blockedByWorld(
+                            player.level(), player.getEyePosition(), r.aim,
+                            player.getEyePosition().add(
+                                    player.getViewVector(1.0F).scale(REACH)), hit)) {
+                String landing;
+                if (hit instanceof net.minecraft.world.phys.BlockHitResult blockedHit
+                        && hit.getType() == HitResult.Type.BLOCK) {
+                    var blocker = blockedHit.getBlockPos();
+                    String blockerId = BuiltInRegistries.BLOCK
+                            .getKey(player.level().getBlockState(blocker).getBlock()).getPath();
+                    landing = blockerId + " at " + blocker.getX() + "," + blocker.getY()
+                            + "," + blocker.getZ();
+                } else if (hit instanceof net.minecraft.world.phys.EntityHitResult entityHit) {
+                    landing = "an entity at " + entityHit.getEntity().blockPosition().toShortString();
+                } else {
+                    landing = "empty space before reaching the target";
+                }
                 fail("aim " + aimLabel() + " is blocked from here — the crosshair lands on "
-                        + blockerId + " at " + blocker.getX() + "," + blocker.getY() + ","
-                        + blocker.getZ() + " instead. break_block that blocker, or goto the"
-                        + " target's open side, then retry.", FailureType.OCCLUDED);
+                        + landing + " instead. Reposition to the target's open side, then retry.",
+                        FailureType.OCCLUDED);
                 return TaskState.FAILED;
             }
             // A right-click landing on a block activates it (opens a station's GUI,
@@ -207,6 +224,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     @Override
     protected void cleanup() {
         if (interaction != null) interaction.stop();
+        selection.reset();
+        aimConvergence.reset();
         super.cleanup();
     }
 
