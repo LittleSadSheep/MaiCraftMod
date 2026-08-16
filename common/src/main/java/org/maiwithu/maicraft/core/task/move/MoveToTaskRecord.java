@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.move;
 
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.InternalPositionReceipt;
 
 /**
  * Typed task descriptor for the {@code goto} tool. The goal type is chosen
@@ -26,7 +27,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
  * {@code TerrainPermit}); when the only route would, the failure lists exactly which
  * blocks and the model decides whether to re-send with consent.
  */
-public final class MoveToTaskRecord extends TaskRecord {
+public final class MoveToTaskRecord extends TaskRecord implements InternalPositionReceipt {
 
     public static final String TOOL_NAME = "goto";
 
@@ -41,6 +42,8 @@ public final class MoveToTaskRecord extends TaskRecord {
     public final Kind kind;
     /** Consent to dig / bridge / pillar en route. False = the walk leaves every block as it was. */
     public final boolean mayAlterTerrain;
+    /** Successful live body receipt; never copied into the public TaskResult. */
+    private Position verifiedPosition;
 
     public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
                             Double x, Double y, Double z, String block, boolean mayAlterTerrain) {
@@ -51,6 +54,15 @@ public final class MoveToTaskRecord extends TaskRecord {
         this.block = block == null || block.isBlank() ? null : block.trim();
         this.kind = resolveKind(x, y, z, this.block);
         this.mayAlterTerrain = mayAlterTerrain;
+    }
+
+    void retainVerifiedPosition(Position position) {
+        verifiedPosition = position;
+    }
+
+    @Override
+    public Position internalVerifiedPosition() {
+        return verifiedPosition;
     }
 
     /**

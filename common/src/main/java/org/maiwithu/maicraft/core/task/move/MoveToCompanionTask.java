@@ -48,10 +48,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
      *  slow legitimate move (a long bare-hand dig holds the executor's progress clock
      *  at 0 anyway; this covers place maneuvers and replan gaps). */
     private static final int PROGRESS_GRACE_TICKS = 100;
-    /** Hard check-in cap: even a healthy marathon yields (with a resumable result) after
-     *  this long, bounding how long the LLM goes without control. Renewals never push
-     *  the deadline past start + this. */
-    private static final long CHECK_IN_CAP_TICKS = 5 * 60 * 20;
     /** When the planner CAN'T reach the exact goal, a stop within this of the
      *  requested column still counts as "got there" (a teaching success, not a
      *  thrash). This is the only tolerance — arrival itself is exact. */
@@ -72,9 +68,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private int settleTicks = 0;                  // ticks of no progress after the planner gave up
     /** The one near-retry recovery rung has been consumed (ladder state — survives suspend). */
     private boolean nearRetried;
-    /** Absolute ceiling for lease renewals (start + {@link #CHECK_IN_CAP_TICKS}); 0 = unset. */
-    private long leaseCapGameTime;
-
     /** FIND(就近方块)子系统:扫描/入册/契约/轮换全在组件里,此处只驱动。 */
     private NearestBlockFinder finder;
 
@@ -102,7 +95,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             long extra = Math.min(MAX_EXTRA_TICKS,
                     600 + (long) (repDistance() * TICKS_PER_BLOCK));
             r.extendDeadlineTo(player.level().getGameTime() + extra);
-            leaseCapGameTime = player.level().getGameTime() + CHECK_IN_CAP_TICKS;
             org.maiwithu.maicraft.core.Constants.LOG.info(
                     "[maicraft-task] goto start kind={} target={},{},{} 驾船先行",
                     r.kind, bx, by, bz);
@@ -122,7 +114,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             long findExtra = Math.min(MAX_EXTRA_TICKS,
                     600 + (long) NearestBlockFinder.BUDGET_BLOCKS * TICKS_PER_BLOCK);
             r.extendDeadlineTo(player.level().getGameTime() + findExtra);
-            leaseCapGameTime = player.level().getGameTime() + CHECK_IN_CAP_TICKS;
             finder.kickScan();
             org.maiwithu.maicraft.core.Constants.LOG.info(
                     "[maicraft-task] goto start kind=FIND block={}", r.block);
@@ -149,7 +140,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // here — the progress lease below takes over once the journey is under way).
         long extra = Math.min(MAX_EXTRA_TICKS, 600 + (long) (repDistance() * TICKS_PER_BLOCK));
         r.extendDeadlineTo(player.level().getGameTime() + extra);
-        leaseCapGameTime = player.level().getGameTime() + CHECK_IN_CAP_TICKS;
         // BLOCK targets go through the compiled front door so the target cell is
         // SACRED when solid — the route may neither dig through nor bury the very
         // block it was asked to reach. COLUMN/YLEVEL have no block objective.
@@ -241,7 +231,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected TaskState onTick() {
         // reached() is checked BEFORE the nav==null guard so an already-at-target start
         // (which never builds a nav) lands on SUCCESS rather than the defensive FAILED.
-        if (reached()) return TaskState.SUCCESS;
+        if (reached()) return successAtBody();
         if (boatLeg != null) {
             return tickBoatLeg();
         }
@@ -256,13 +246,15 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             return TaskState.FAILED;
         }
         // Progress lease: while the nav is consuming its plan (steps advancing / digging),
-        // keep the deadline PROGRESS_LEASE ahead — never past the check-in cap. Plan
+        // keep the deadline PROGRESS_LEASE ahead. There is deliberately no wall-clock
+        // ceiling: a long route that is still making verified physical progress is healthy.
+        // Plan
         // consumption, NOT goal distance, is the liveness signal: healthy routes routinely
         // move away from the goal (skirting a lake, spiraling down), and the flat budget
         // above can't price terrain (a dig-heavy route once died 1 block short).
-        if (nav.stallTicks() <= PROGRESS_GRACE_TICKS && leaseCapGameTime > 0) {
+        if (nav.stallTicks() <= PROGRESS_GRACE_TICKS) {
             long now = player.level().getGameTime();
-            r.extendDeadlineTo(Math.min(now + PROGRESS_LEASE_TICKS, leaseCapGameTime));
+            r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
         }
         // Track passive progress toward the goal: the planner stops at the water surface
         // above an underwater target, but the body keeps drifting toward it on its own (it
@@ -276,7 +268,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
-            case ARRIVED -> TaskState.SUCCESS;
+            case ARRIVED -> successAtBody();
             case FAILED -> {
                 // FIND:打不通就近候选 -> 除名,朝余下候选重开导航
                 if (r.kind == MoveToTaskRecord.Kind.FIND && finder.rotateAfterFailure()) {
@@ -294,7 +286,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     yield TaskState.RUNNING;
                 }
                 // Otherwise: as close as the terrain allows → (teaching) success or fail.
-                if (closeEnoughToSucceed()) yield TaskState.SUCCESS;
+                if (closeEnoughToSucceed()) yield successAtBody();
                 // Recovery ladder — ONE retry rung, land nav only: re-plan accepting
                 // anywhere within NEAR_SUCCESS_RADIUS of the destination. Goal-consistent,
                 // not scope creep: a stop within that radius already counts as arrival
@@ -328,9 +320,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
      */
     private TaskState tickBoatLeg() {
         // 船腿的续约与步行段同一制式:还在消耗航线就把期限保持在租约窗口里
-        if (boatLeg.progressing() && leaseCapGameTime > 0) {
+        if (boatLeg.progressing()) {
             long now = player.level().getGameTime();
-            r.extendDeadlineTo(Math.min(now + PROGRESS_LEASE_TICKS, leaseCapGameTime));
+            r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
         }
         var status = boatLeg.tick();
         if (status == org.maiwithu.maicraft.core.pathing.execute.BoatNav.Status.RUNNING) {
@@ -344,7 +336,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             org.maiwithu.maicraft.core.Constants.LOG.info(
                     "[maicraft-task] 船腿结束({}),目标已在船下 feet={}", how,
                     player.blockPosition().toShortString());
-            return TaskState.SUCCESS;
+            return successAtBody();
         }
         org.maiwithu.maicraft.core.Constants.LOG.info(
                 "[maicraft-task] 船腿结束({}),接步行 feet={}", how,
@@ -400,6 +392,15 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         double dx = (cellX + 0.5) - player.getX();
         double dz = (cellZ + 0.5) - player.getZ();
         return dx * dx + dz * dz;
+    }
+
+    /** Capture only a terminal verified arrival; failed/cancelled movement has no handoff receipt. */
+    private TaskState successAtBody() {
+        BlockPos body = player.blockPosition();
+        r.retainVerifiedPosition(new org.maiwithu.maicraft.task.InternalPositionReceipt.Position(
+                body.getX(), body.getY(), body.getZ(),
+                player.level().dimension().location().toString()));
+        return TaskState.SUCCESS;
     }
 
     /** Representative remaining distance (blocks) for the deadline estimate. */
@@ -484,17 +485,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected String timeoutMessage() {
         int gy = player.blockPosition().getY();
         double remaining = repDistance();
-        // Two different stories for the model: a stall (progress dried up — something is
-        // wrong, reconsider) vs a check-in (journey healthy but longer than the cap —
-        // resuming is the right move).
-        boolean stalled = nav == null || nav.stallTicks() > PROGRESS_GRACE_TICKS;
         return "timed out " + String.format("%.1f", remaining) + " blocks from target (now at "
-                + bx(gy) + "); "
-                + (stalled
-                        ? "progress had stopped — likely blocked; call goto again to retry, or"
-                                + " try a nearer waypoint / scan_blocks for a way through."
-                        : "the journey was still progressing and simply exceeded its check-in budget;"
-                                + " call goto again with the same target to resume.");
+                + bx(gy) + "); verified route progress stopped long enough for the progress lease"
+                + " to expire. Reassess the obstruction or continue from this position.";
     }
 
     @Override
