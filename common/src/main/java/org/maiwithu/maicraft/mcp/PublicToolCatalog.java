@@ -83,9 +83,9 @@ final class PublicToolCatalog {
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks"],"default":"situation"},
+                                "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks"],"default":"situation","description":"landmarks returns durable semantic labels and same-dimension availability; stored coordinates remain private to MaiCraft."},
                                 "focus":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
-                                 "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+                                 "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For view=tasks, return one full task when present; otherwise list concise recent task summaries."},
                                  "after_cursor":{"type":"integer","minimum":0,"default":0},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"For view=attention, wait up to this duration for a newer event without polling raw game state."},
                                  "limit":{"type":"integer","minimum":1,"maximum":20,"default":10},
@@ -205,8 +205,8 @@ final class PublicToolCatalog {
         integer(value, "limit", 1, 20);
         string(value, "server_id", 1, 128, false);
         boolean hasTask = present(value, "task_id");
-        if ("tasks".equals(view) != hasTask) {
-            throw bad("task_id is required only when view is tasks");
+        if (hasTask && !"tasks".equals(view)) {
+            throw bad("task_id is only supported by the tasks view");
         }
         if (cursor != 0 && !"attention".equals(view)) {
             throw bad("after_cursor is only supported by the attention view");

@@ -13,11 +13,11 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.SemanticAbilityCatalog;
@@ -142,14 +142,22 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             case "surroundings" -> surroundings(player);
             case "abilities" -> abilities(nullableString(arguments, "focus"));
             case "tasks" -> {
-                UUID taskId = UUID.fromString(arguments.get("task_id").getAsString());
-                IntentTaskRecord record = requireTask(taskId);
-                yield taskSnapshot(record);
+                String rawTaskId = nullableString(arguments, "task_id");
+                if (rawTaskId != null) {
+                    yield taskSnapshot(requireTask(UUID.fromString(rawTaskId)));
+                }
+                JsonArray tasks = new JsonArray();
+                for (IntentTaskRecord record : intents.tasks(arguments.get("limit").getAsInt())) {
+                    tasks.add(taskSummary(record));
+                }
+                JsonObject result = new JsonObject();
+                result.add("tasks", tasks);
+                yield result;
             }
             case "attention" -> intents.attention(
                     arguments.get("after_cursor").getAsLong(),
                     arguments.get("limit").getAsInt());
-            case "landmarks" -> landmarks();
+            case "landmarks" -> landmarks(player);
             default -> throw new IllegalArgumentException("unknown perceive view: " + view);
         };
     }
@@ -319,7 +327,12 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             for (int dz = -radius; dz <= radius; dz += stride) {
                 int x = origin.getX() + dx;
                 int z = origin.getZ() + dz;
-                int y = player.level().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                BlockPos columnProbe = new BlockPos(x, origin.getY(), z);
+                if (!player.level().isLoaded(columnProbe)) {
+                    hazards.merge("unloaded_boundary", 1, Integer::sum);
+                    continue;
+                }
+                int y = ClientSurfaceHeight.motionBlockingNoLeaves(player.clientLevel, x, z);
                 BlockPos feet = new BlockPos(x, y, z);
                 BlockPos support = feet.below();
                 var supportState = player.level().getBlockState(support);
@@ -410,16 +423,25 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    private JsonObject landmarks() {
+    private JsonObject landmarks(LocalPlayer player) {
         JsonArray entries = new JsonArray();
+        String currentDimension = player.level().dimension().location().toString();
         for (IntentRuntime.Landmark landmark : intents.landmarks()) {
             JsonObject item = new JsonObject();
             item.addProperty("label", landmark.label());
-            item.add("position", worldPosition(landmark.position()));
+            String dimension = landmark.position().dimension();
+            if (dimension != null && !dimension.isBlank()) {
+                item.addProperty("dimension", dimension);
+            }
+            item.addProperty("available_here",
+                    dimension == null || dimension.isBlank()
+                            || dimension.equals(currentDimension));
             entries.add(item);
         }
         JsonObject result = new JsonObject();
         result.add("landmarks", entries);
+        result.addProperty("location_boundary",
+                "Use landmark labels as semantic targets; exact stored coordinates remain inside MaiCraft.");
         return result;
     }
 
@@ -483,8 +505,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("task_id", record.externalId().toString());
         result.addProperty("state", publicState(record));
         result.addProperty("outcome", record.goal().outcome());
-        result.addProperty("step", record.stepIndex());
-        result.addProperty("steps", record.steps().size());
+        result.addProperty("step_index", record.stepIndex());
+        result.addProperty("step_count", record.steps().size());
         return result;
     }
 
@@ -574,15 +596,6 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 || block == Blocks.CAMPFIRE || block == Blocks.SOUL_CAMPFIRE
                 || block == Blocks.MAGMA_BLOCK || block == Blocks.CACTUS
                 || block == Blocks.POWDER_SNOW || block == Blocks.SWEET_BERRY_BUSH;
-    }
-
-    private static JsonObject worldPosition(Goal.WorldPosition position) {
-        JsonObject result = new JsonObject();
-        result.addProperty("x", position.x());
-        result.addProperty("y", position.y());
-        result.addProperty("z", position.z());
-        if (position.dimension() != null) result.addProperty("dimension", position.dimension());
-        return result;
     }
 
     private IntentTaskRecord currentIntent() {
