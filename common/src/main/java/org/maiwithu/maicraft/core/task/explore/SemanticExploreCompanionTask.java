@@ -19,16 +19,17 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.TagKey;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.CompassUtil;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
@@ -58,9 +59,9 @@ public final class SemanticExploreCompanionTask
     private static final int COAST_LOCAL_RADIUS = 4;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
-    private static final int LEG_TIMEOUT_TICKS = 90 * 20;
+    /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
+    private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
-    private static final int MAX_TARGET_ATTEMPTS = 24;
     private static final int MAX_REPORTED_FAILURES = 16;
     private static final int MAX_REPORTED_FRONTIERS = 16;
     private static final int MAX_SPIRAL_PROBES = 10_000;
@@ -96,7 +97,7 @@ public final class SemanticExploreCompanionTask
     private final Map<Long, SurfaceInfo> surfaceCache = new HashMap<>();
 
     private MoveToCompanionTask moveChild;
-    private long legDeadline;
+    private MoveToTaskRecord moveRecord;
     private int legSerial;
     private TargetCandidate candidate;
     private BlockPos activeWaypoint;
@@ -248,6 +249,10 @@ public final class SemanticExploreCompanionTask
             }
         }
         if (observationColumn < offsets.size()) {
+            // Observation deliberately samples a finite local grid in bounded per-tick slices.
+            // Preserve that CPU budget without charging the semantic liveness lease for queued
+            // slices (especially when game ticks are accelerated).
+            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
             return TaskState.RUNNING;
         }
         return startNextWaypoint(level);
@@ -300,12 +305,6 @@ public final class SemanticExploreCompanionTask
     }
 
     private TaskState startTargetTravel(TargetCandidate found) {
-        if (targetAttempts >= MAX_TARGET_ATTEMPTS) {
-            fail("observed semantic matches, but none of " + targetAttempts
-                    + " bounded approach attempts reached a verifiable stance",
-                    FailureType.NO_PATH);
-            return TaskState.FAILED;
-        }
         candidate = found;
         targetAttempts++;
         startMove(found.approach(), true);
@@ -331,31 +330,35 @@ public final class SemanticExploreCompanionTask
     private void startMove(BlockPos target, boolean exact) {
         long now = player.level().getGameTime();
         String parentCall = r.getToolCallId() == null ? "explore" : r.getToolCallId();
-        MoveToTaskRecord moveRecord = new MoveToTaskRecord(
+        moveRecord = new MoveToTaskRecord(
                 parentCall + "-internal-leg-" + (++legSerial),
-                now + LEG_TIMEOUT_TICKS,
+                now + INITIAL_LEG_LEASE_TICKS,
                 (double) target.getX(),
                 exact ? (double) target.getY() : null,
                 (double) target.getZ(),
                 null,
                 r.mayAlterTerrain);
         moveChild = new MoveToCompanionTask(player, moveRecord);
-        legDeadline = now + LEG_TIMEOUT_TICKS;
     }
 
     private TaskState tickTravel(boolean targetTravel) {
         TaskState terminal;
-        if (player.level().getGameTime() >= legDeadline) {
+        if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
             moveChild.stop(player, Task.StopReason.REPLACED);
             terminal = TaskState.TIMEOUT;
         } else {
             terminal = runChild(moveChild);
             if (terminal == null) {
+                // A long healthy journey remains alive as long as its physical child continues
+                // to renew a verified-progress lease. Semantic radius/waypoint bounds still cap
+                // the search scope; elapsed wall-clock time does not redefine the goal.
+                r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
                 return TaskState.RUNNING;
             }
         }
         TaskResult result = moveChild.result(terminal);
         moveChild = null;
+        moveRecord = null;
 
         if (targetTravel) {
             if (terminal == TaskState.SUCCESS) {
@@ -401,6 +404,9 @@ public final class SemanticExploreCompanionTask
         if (verified != null) {
             verifiedPosition = player.blockPosition().immutable();
             verifiedDescription = verified.description();
+            r.retainVerifiedPosition(new InternalPositionReceipt.Position(
+                    verifiedPosition.getX(), verifiedPosition.getY(), verifiedPosition.getZ(),
+                    player.level().dimension().location().toString()));
             return TaskState.SUCCESS;
         }
 
@@ -475,7 +481,7 @@ public final class SemanticExploreCompanionTask
             result = new SurfaceInfo(SurfaceKind.UNKNOWN, null, null, 0);
         } else {
             int height = Math.clamp(
-                    level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z),
+                    ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z),
                     level.getMinBuildHeight() + 1,
                     level.getMaxBuildHeight() - 1);
             BlockPos top = new BlockPos(x, height - 1, z);
@@ -626,6 +632,7 @@ public final class SemanticExploreCompanionTask
         moveChild.stop(player, Task.StopReason.REPLACED);
         moveChild.result(terminal);
         moveChild = null;
+        moveRecord = null;
     }
 
     private boolean insideScope(int x, int z) {
@@ -735,7 +742,7 @@ public final class SemanticExploreCompanionTask
     }
 
     @Override protected String timeoutMessage() {
-        return "semantic exploration timed out before " + canonicalTarget
+        return "semantic exploration stopped making verifiable progress before " + canonicalTarget
                 + " was verified; the explored range and unloaded frontier are in data";
     }
 
