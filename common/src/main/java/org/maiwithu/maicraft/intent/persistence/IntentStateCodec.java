@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 
 /** Version-one semantic-only JSON codec. It has no representation for native child state. */
 public final class IntentStateCodec {
@@ -59,6 +60,7 @@ public final class IntentStateCodec {
             int stepIndex,
             List<IntentTaskRecord.StepSnapshot> completed,
             Map<Integer, Goal.WorldPosition> internalPositions,
+            Map<Integer, List<InternalAreaProtectionReceipt.Footprint>> internalAreaProtections,
             List<IntentTaskRecord.AttemptSnapshot> attempts,
             IntentTaskRecord.DecisionSnapshot decision,
             IntentTaskRecord.DecisionAnswer pendingAnswer,
@@ -164,6 +166,35 @@ public final class IntentStateCodec {
                     internalPositions.add(item);
                 });
         value.add("internal_positions", internalPositions);
+
+        // Exact cells remain in a private persistence lane and are never sanitized into public
+        // task results. The existing four-megabyte state envelope is the sole storage bound.
+        JsonArray internalAreaProtections = new JsonArray();
+        task.internalAreaProtectionReceipts().entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .limit(MAX_STEPS)
+                .forEach(entry -> {
+                    JsonObject item = new JsonObject();
+                    item.addProperty("step_index", entry.getKey());
+                    JsonArray footprints = new JsonArray();
+                    for (InternalAreaProtectionReceipt.Footprint footprint : entry.getValue()) {
+                        JsonObject encoded = new JsonObject();
+                        if (footprint.semanticLabel() != null) {
+                            encoded.addProperty("semantic_label", bounded(footprint.semanticLabel()));
+                        }
+                        if (footprint.dimension() != null) {
+                            encoded.addProperty("dimension", bounded(footprint.dimension()));
+                        }
+                        encoded.add("protected_mutation_cells",
+                                packedCells(footprint.protectedMutationCells()));
+                        encoded.add("forbidden_body_cells",
+                                packedCells(footprint.forbiddenBodyCells()));
+                        footprints.add(encoded);
+                    }
+                    item.add("footprints", footprints);
+                    internalAreaProtections.add(item);
+                });
+        value.add("internal_area_protections", internalAreaProtections);
 
         JsonArray attempts = new JsonArray();
         List<IntentTaskRecord.AttemptSnapshot> attemptValues = task.attempts();
@@ -314,6 +345,36 @@ public final class IntentStateCodec {
             }
         }
 
+        Map<Integer, List<InternalAreaProtectionReceipt.Footprint>>
+                internalAreaProtections = new LinkedHashMap<>();
+        for (JsonElement element : array(value, "internal_area_protections", MAX_STEPS)) {
+            JsonObject item = element.getAsJsonObject();
+            int protectionStepIndex = integer(item, "step_index", -1);
+            if (protectionStepIndex < 0 || protectionStepIndex >= stepIndex) {
+                throw new IllegalArgumentException(
+                        "persisted internal area receipt is outside completed progress");
+            }
+            List<InternalAreaProtectionReceipt.Footprint> footprints = new ArrayList<>();
+            for (JsonElement footprintElement : array(item, "footprints", MAX_STEPS)) {
+                JsonObject footprint = footprintElement.getAsJsonObject();
+                String label = footprint.has("semantic_label")
+                        && footprint.get("semantic_label").isJsonPrimitive()
+                        ? bounded(footprint.get("semantic_label").getAsString()) : null;
+                String dimension = footprint.has("dimension")
+                        && footprint.get("dimension").isJsonPrimitive()
+                        ? bounded(footprint.get("dimension").getAsString()) : null;
+                footprints.add(new InternalAreaProtectionReceipt.Footprint(
+                        label, dimension,
+                        decodePackedCells(footprint, "protected_mutation_cells"),
+                        decodePackedCells(footprint, "forbidden_body_cells")));
+            }
+            if (internalAreaProtections.put(
+                    protectionStepIndex, List.copyOf(footprints)) != null) {
+                throw new IllegalArgumentException(
+                        "duplicate persisted internal area receipt");
+            }
+        }
+
         List<IntentTaskRecord.AttemptSnapshot> attempts = new ArrayList<>();
         for (JsonElement element : array(value, "attempts", MAX_ATTEMPTS)) {
             JsonObject item = element.getAsJsonObject();
@@ -339,8 +400,26 @@ public final class IntentStateCodec {
         return new TaskSnapshot(
                 id, planId, goal, List.copyOf(steps), stepIndex,
                 List.copyOf(completed), Map.copyOf(internalPositions),
+                Map.copyOf(internalAreaProtections),
                 List.copyOf(attempts),
                 decision, answer, terminal);
+    }
+
+    private static JsonArray packedCells(List<Long> cells) {
+        JsonArray result = new JsonArray();
+        if (cells != null) for (Long cell : cells) if (cell != null) result.add(cell);
+        return result;
+    }
+
+    private static List<Long> decodePackedCells(JsonObject value, String key) {
+        List<Long> result = new ArrayList<>();
+        for (JsonElement element : array(value, key, Integer.MAX_VALUE)) {
+            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+                throw new IllegalArgumentException(key + " must contain packed block positions");
+            }
+            result.add(element.getAsLong());
+        }
+        return List.copyOf(result);
     }
 
     private static IntentTaskRecord.DecisionSnapshot decodeDecision(JsonObject value) {
