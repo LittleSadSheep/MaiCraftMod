@@ -191,6 +191,306 @@ public final class SemanticLightAreaCompanionTask
             return TaskState.FAILED;
         }
         evaluateCurrentLight(level);
+        areaBoundaryVerified = true;
+        if (meetsRequirement()) return TaskState.SUCCESS;
+        stage = Stage.PLAN;
+        return TaskState.RUNNING;
+    }
+
+    private void advanceExplicitScan() {
+        if (explicitScanDz < r.radius) {
+            explicitScanDz++;
+            return;
+        }
+        explicitScanDz = -r.radius;
+        if (explicitScanDx < r.radius) explicitScanDx++;
+        else explicitScanComplete = true;
+    }
+
+    /**
+     * Discover one complete semantic component. A landmark is only the search seed: neither its
+     * coordinates nor a guessed radius become the area's boundary. Every accepted cell was read
+     * while loaded, and every unloaded edge is either loaded by first-person travel or reported as
+     * unreachable before any lighting plan is frozen.
+     */
+    private TaskState tickConnectedObservation() {
+        ClientLevel level = ClientRuntime.requireContext(player).level();
+        if (!columnLoaded(level, r.center.getX(), r.center.getZ())) {
+            return continueSurveyToward(level, r.center, SurveyMovePurpose.LOAD_ANCHOR,
+                    Long.MIN_VALUE);
+        }
+
+        if (!componentSeeded) {
+            TaskState seedState = tickSeedDiscovery(level);
+            if (seedState != null) return seedState;
+        }
+
+        int cellBudget = COMPONENT_CELLS_PER_TICK;
+        while (cellBudget-- > 0 && !componentCells.isEmpty()) {
+            BlockPos requested = componentCells.removeFirst();
+            long requestedKey = requested.asLong();
+            if (!observedComponentCells.add(requestedKey)) continue;
+            if (!insideRequestedBoundary(requested)) continue;
+            if (!level.isLoaded(requested)) {
+                // The cell was loaded when queued but moved outside the client view meanwhile.
+                // Its already-observed neighbour remains the only evidence-backed approach.
+                observedComponentCells.remove(requestedKey);
+                continue;
+            }
+            Sample sample = componentSample(level, requested);
+            if (sample == null) continue;
+            samples.put(sample.pos().asLong(), sample);
+            noteComponentSafety(level, sample.pos());
+            addPlacementFootprint(sample.pos());
+            renewLightingProgress();
+
+            expandComponentNeighbours(level, sample.pos());
+        }
+        if (!componentCells.isEmpty()) return TaskState.RUNNING;
+
+        recheckLoadedComponentFrontiers(level);
+        if (!componentCells.isEmpty()) return TaskState.RUNNING;
+        // FRONTIERS_PER_TICK is a CPU slice, never a task boundary. Finish consuming live
+        // loaded facts before choosing a physical loading leg.
+        for (ComponentFrontier frontier : componentFrontiers.values()) {
+            if (level.isLoaded(frontier.unknownCell())) return TaskState.RUNNING;
+        }
+        ComponentFrontier frontier = nextComponentFrontier(level);
+        if (frontier != null) {
+            long key = frontier.unknownCell().asLong();
+            return continueSurveyToward(level, frontier.knownCell(),
+                    SurveyMovePurpose.LOAD_COMPONENT_FRONTIER, key);
+        }
+        if (!componentFrontiers.isEmpty()) {
+            giveUp("semantic_area_frontier_unreachable",
+                    "the connected semantic component still has unloaded edges, but every "
+                            + "evidence-backed first-person approach is currently unreachable",
+                    FailureType.NO_PATH,
+                    List.of("remove or authorize a semantic route obstacle, then resume",
+                            "approach the unresolved side of the area and retry",
+                            "stop without claiming whole-area coverage"));
+            return TaskState.FAILED;
+        }
+        return finishConnectedObservation(level);
+    }
+
+    private void expandComponentNeighbours(ClientLevel level, BlockPos from) {
+        // Direct 8-neighbour morphology handles ordinary contiguous beds and one-block height
+        // terraces. No gap cell is ever added to the coverage denominator.
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            if (dx == 0 && dz == 0) continue;
+            inspectComponentLanding(level, from, from.offset(dx, -1, dz));
+            inspectComponentLanding(level, from, from.offset(dx, 0, dz));
+            inspectComponentLanding(level, from, from.offset(dx, 1, dz));
+        }
+        // A real one-cell service seam (water channel, dirt path or walkable aisle) may split a
+        // single semantic region into two block components. Bridge only that one observed seam and
+        // require a real matching member on the far side; this is local morphology, not a radius.
+        int[][] cardinals = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int[] direction : cardinals) {
+            BlockPos gap = from.offset(direction[0], 0, direction[1]);
+            if (!level.isLoaded(gap) || !isObservedServiceGap(level, gap)) continue;
+            for (int dy = -1; dy <= 1; dy++) {
+                inspectComponentLanding(level, from,
+                        from.offset(direction[0] * 2, dy, direction[1] * 2));
+            }
+        }
+    }
+
+    private void inspectComponentLanding(
+            ClientLevel level, BlockPos known, BlockPos landing) {
+        if (!insideRequestedBoundary(landing)) return;
+        if (level.isLoaded(landing)) {
+            Sample match = componentSample(level, landing);
+            if (match != null && queuedComponentCells.add(match.pos().asLong())) {
+                componentCells.addLast(match.pos());
+            }
+        } else {
+            addComponentFrontier(known, landing);
+        }
+    }
+
+    private boolean isObservedServiceGap(ClientLevel level, BlockPos cell) {
+        if (componentSample(level, cell) != null) return false;
+        BlockState state = level.getBlockState(cell);
+        BlockState below = level.getBlockState(cell.below());
+        return state.getFluidState().is(FluidTags.WATER)
+                || below.getFluidState().is(FluidTags.WATER)
+                || state.getBlock() instanceof DirtPathBlock
+                || below.getBlock() instanceof DirtPathBlock
+                || (state.getCollisionShape(level, cell).isEmpty()
+                        && state.getFluidState().isEmpty()
+                        && below.is(BlockTags.DIRT)
+                        && below.isFaceSturdy(level, cell.below(), Direction.UP));
+    }
+
+    /** Returns null once a real matching seed has been enqueued. */
+    private TaskState tickSeedDiscovery(ClientLevel level) {
+        if (!seedSearchInitialized) {
+            seedSearchInitialized = true;
+            enqueueSeedColumn(r.center.getX(), r.center.getZ(), level);
+        }
+        int budget = COLUMNS_PER_TICK;
+        while (budget-- > 0 && !seedColumns.isEmpty()) {
+            BlockPos column = BlockPos.of(seedColumns.removeFirst());
+            int x = column.getX();
+            int z = column.getZ();
+            if (!columnLoaded(level, x, z)) continue;
+            seedColumnsObserved++;
+            loadedColumns++;
+            renewLightingProgress();
+            Sample nearest = nearestMatchingSampleInColumn(level, x, z);
+            if (nearest != null) {
+                componentSeeded = true;
+                queuedComponentCells.add(nearest.pos().asLong());
+                componentCells.addLast(nearest.pos());
+                renewLightingProgress();
+                return null;
+            }
+            enqueueSeedColumn(x + 1, z, level);
+            enqueueSeedColumn(x - 1, z, level);
+            enqueueSeedColumn(x, z + 1, level);
+            enqueueSeedColumn(x, z - 1, level);
+        }
+        if (!seedColumns.isEmpty()) return TaskState.RUNNING;
+        giveUp("no_matching_area_seed",
+                "the semantic landmark's complete currently loaded column component contains no "
+                        + "cell matching coverage="
+                        + r.coverage.name().toLowerCase(java.util.Locale.ROOT),
+                FailureType.TARGET_LOST,
+                List.of("remember a point inside or immediately beside the intended semantic area",
+                        "choose the coverage semantics that define the intended cells",
+                        "cancel without changing the world"));
+        return TaskState.FAILED;
+    }
+
+    private void enqueueSeedColumn(int x, int z, ClientLevel level) {
+        if (!columnLoaded(level, x, z)) return;
+        if (r.hasExplicitRadius() && !insideRequestedBoundary(new BlockPos(x, r.center.getY(), z))) {
+            return;
+        }
+        long key = BlockPos.asLong(x, 0, z);
+        if (queuedSeedColumns.add(key)) seedColumns.addLast(key);
+    }
+
+    private Sample nearestMatchingSampleInColumn(ClientLevel level, int x, int z) {
+        Sample best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (int y : observationYs(level, x, z)) {
+            Sample candidate = componentSample(level, new BlockPos(x, y, z));
+            if (candidate == null) continue;
+            int distance = Math.abs(candidate.pos().getY() - r.center.getY());
+            if (best == null || distance < bestDistance) {
+                best = candidate;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    private Set<Integer> observationYs(ClientLevel level, int x, int z) {
+        int surface = Math.clamp(ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z),
+                level.getMinBuildHeight() + 1, level.getMaxBuildHeight() - 2);
+        Set<Integer> ys = new LinkedHashSet<>();
+        for (int d = 0; d <= 16; d++) {
+            int above = r.center.getY() + d;
+            int below = r.center.getY() - d;
+            if (above > level.getMinBuildHeight() && above < level.getMaxBuildHeight() - 1) {
+                ys.add(above);
+            }
+            if (below > level.getMinBuildHeight() && below < level.getMaxBuildHeight() - 1) {
+                ys.add(below);
+            }
+        }
+        for (int y = surface - 4; y <= surface + 3; y++) {
+            if (y > level.getMinBuildHeight() && y < level.getMaxBuildHeight() - 1) ys.add(y);
+        }
+        return ys;
+    }
+
+    private Sample componentSample(ClientLevel level, BlockPos pos) {
+        if (!level.isLoaded(pos) || !level.isLoaded(pos.below()) || !level.isLoaded(pos.above())) {
+            return null;
+        }
+        BlockState state = level.getBlockState(pos);
+        boolean matches = r.coverage == SemanticLightAreaTaskRecord.Coverage.CROP_GROWTH
+                ? isGrowthCell(state) || level.getBlockState(pos.below()).getBlock() instanceof FarmBlock
+                : isWalkable(level, pos);
+        if (!matches) return null;
+        return new Sample(pos.immutable(), level.getBrightness(LightLayer.BLOCK, pos));
+    }
+
+    private void noteComponentSafety(ClientLevel level, BlockPos sample) {
+        BlockState state = level.getBlockState(sample);
+        BlockState support = level.getBlockState(sample.below());
+        String stateReason = sensitiveReason(level, sample, state);
+        String supportReason = sensitiveReason(level, sample.below(), support);
+        if (stateReason != null) protectedFacts.merge(stateReason, 1, Integer::sum);
+        if (supportReason != null) protectedFacts.merge(supportReason, 1, Integer::sum);
+        if (isGrowthCell(state) || support.getBlock() instanceof FarmBlock) {
+            protectedNavigationCells.add(sample.immutable());
+        }
+    }
+
+    private void addPlacementFootprint(BlockPos sample) {
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            placementFootprintColumns.add(BlockPos.asLong(
+                    sample.getX() + dx, 0, sample.getZ() + dz));
+        }
+    }
+
+    private void addComponentFrontier(BlockPos known, BlockPos unknown) {
+        long key = unknown.asLong();
+        if (rejectedComponentFrontiers.contains(key)
+                || componentFrontiers.containsKey(key)) return;
+        componentFrontiers.put(key,
+                new ComponentFrontier(known.immutable(), unknown.immutable()));
+        componentFrontierOrder.addLast(key);
+        componentFrontiersObserved++;
+        unloadedColumns++;
+    }
+
+    private void recheckLoadedComponentFrontiers(ClientLevel level) {
+        int budget = Math.min(FRONTIERS_PER_TICK, componentFrontierOrder.size());
+        while (budget-- > 0 && !componentFrontierOrder.isEmpty()) {
+            long key = componentFrontierOrder.removeFirst();
+            ComponentFrontier frontier = componentFrontiers.get(key);
+            if (frontier == null) continue;
+            if (!level.isLoaded(frontier.unknownCell())) {
+                componentFrontierOrder.addLast(key);
+                continue;
+            }
+            componentFrontiers.remove(key);
+            componentFrontiersLoaded++;
+            Sample match = componentSample(level, frontier.unknownCell());
+            if (match != null && queuedComponentCells.add(match.pos().asLong())) {
+                componentCells.addLast(match.pos());
+            } else if (level.isLoaded(frontier.knownCell())) {
+                // Loading a non-member seam can reveal a real member immediately beyond it.
+                // Re-expand the known edge so the one-cell morphology bridge is evaluated from
+                // newly available facts before boundary closure is considered.
+                expandComponentNeighbours(level, frontier.knownCell());
+            }
+            renewLightingProgress();
+        }
+    }
+
+    private ComponentFrontier nextComponentFrontier(ClientLevel level) {
+        ComponentFrontier best = null;
+        double bestDistance = Double.POSITIVE_INFINITY;
+        for (ComponentFrontier frontier : componentFrontiers.values()) {
+            long key = frontier.unknownCell().asLong();
+            if (rejectedComponentFrontiers.contains(key)) continue;
+            double distance = frontier.knownCell().distSqr(player.blockPosition());
+            if (best == null || distance < bestDistance) {
+                best = frontier;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    private TaskState finishConnectedObservation(ClientLevel level) {
         if (meetsRequirement()) return TaskState.SUCCESS;
         stage = Stage.PLAN;
         return TaskState.RUNNING;
