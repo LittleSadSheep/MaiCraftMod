@@ -6,7 +6,9 @@ import org.maiwithu.maicraft.core.pathing.cache.PathCaches;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.ChunkLoadedTest;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -65,7 +67,7 @@ public final class ContextFactory {
         }
         LoadedChunks loaded = PathCaches.ensureSnapshot(level, player.blockPosition());
         CachedNavView view = new CachedNavView(loaded);
-        return builder.create(player, view, view::isLoaded, true, sacred, deniedPlace,
+        return builder.create(player, view, view::isLoaded, true, protectedSacred(sacred), deniedPlace,
                 forbiddenBodyCells, permit);
     }
 
@@ -98,12 +100,21 @@ public final class ContextFactory {
         var view = org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(player.level());
         ChunkLoadedTest loaded = view instanceof org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView v
                 ? v::isLoaded : ChunkLoadedTest.ALWAYS;
-        return builder.create(player, view, loaded, false, sacred, deniedPlace,
+        return builder.create(player, view, loaded, false, protectedSacred(sacred), deniedPlace,
                 forbiddenBodyCells, permit);
     }
 
     /** 无目标格/禁放格开关的执行期实时上下文。 */
     public static CalculationContext forExecution(LocalPlayer player, TerrainPermit permit) {
         return forExecution(player, LongSets.emptySet(), LongSets.emptySet(), permit);
+    }
+
+    private static LongSet protectedSacred(LongSet taskSacred) {
+        LongSet inherited = NavigationSafetyContext.protectedMutationCells();
+        if (inherited.isEmpty()) return taskSacred;
+        if (taskSacred == null || taskSacred.isEmpty()) return inherited;
+        LongOpenHashSet combined = new LongOpenHashSet(taskSacred);
+        combined.addAll(inherited);
+        return LongSets.unmodifiable(combined);
     }
 }
