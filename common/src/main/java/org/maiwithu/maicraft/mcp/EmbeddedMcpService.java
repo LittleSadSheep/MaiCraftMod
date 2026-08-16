@@ -126,6 +126,11 @@ public final class EmbeddedMcpService implements AutoCloseable {
         return server.getAddress().getPort();
     }
 
+    /** Number of currently live MCP transport sessions, for the local read-only status command. */
+    public int sessionCount() {
+        return sessions.size();
+    }
+
     /**
      * Stops accepting work without waiting for game-thread calls or running tasks.
      */
