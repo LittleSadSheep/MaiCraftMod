@@ -30,6 +30,7 @@ public final class ClientRuntime {
 
     private static final ClientActorBoundary ACTOR = new ClientActorBoundary();
     private static EmbeddedMcpService mcp;
+    private static String lastMcpError;
     private static boolean bodyPresent;
 
     private ClientRuntime() {}
@@ -43,12 +44,17 @@ public final class ClientRuntime {
         try {
             candidate.start();
             mcp = candidate;
+            lastMcpError = null;
             Constants.LOG.info("MaiCraft embedded MCP listening on http://127.0.0.1:{}/mcp",
                     candidate.port());
-        } catch (IOException failure) {
+        } catch (IOException | RuntimeException failure) {
             candidate.close();
-            throw new IllegalStateException(
-                    "could not start MaiCraft embedded MCP on port " + DEFAULT_MCP_PORT, failure);
+            mcp = null;
+            lastMcpError = "could not listen on port " + DEFAULT_MCP_PORT + ": "
+                    + (failure.getMessage() == null
+                    ? failure.getClass().getSimpleName() : failure.getMessage());
+            Constants.LOG.error("MaiCraft embedded MCP failed to start; /maicraft status remains available",
+                    failure);
         }
     }
 
@@ -154,6 +160,20 @@ public final class ClientRuntime {
 
     public static synchronized boolean isMcpRunning() {
         return mcp != null && mcp.isRunning();
+    }
+
+    /** Actual loopback port, or {@code -1} while the embedded MCP endpoint is stopped. */
+    public static synchronized int mcpPort() {
+        return mcp == null ? -1 : mcp.port();
+    }
+
+    /** Live transport sessions; this is diagnostic state and never gates execution. */
+    public static synchronized int mcpSessionCount() {
+        return mcp == null ? 0 : mcp.sessionCount();
+    }
+
+    public static synchronized String lastMcpError() {
+        return lastMcpError;
     }
 
     private static void bodyGone() {
