@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.entity.InputDriver;
@@ -17,7 +18,7 @@ import org.maiwithu.maicraft.task.TaskState;
 
 public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRecord> {
     private NativeActionReceipt receipt;
-    private int aimTicks;
+    private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     public SleepCompanionTask(LocalPlayer player, SleepTaskRecord record) { super(player, record); }
     @Override protected TaskState onTick() {
         if (player.isSleeping()) return TaskState.SUCCESS;
@@ -31,17 +32,18 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
                 fail("bed is outside interaction reach", FailureType.OUT_OF_REACH);
                 return TaskState.FAILED;
             }
-            InputDriver.lookAt(player, Vec3.atCenterOf(r.bed));
+            Vec3 aim = Vec3.atCenterOf(r.bed);
+            InputDriver.lookAt(player, aim);
+            if (!aimConvergence.ready(player, aim.subtract(player.getEyePosition()))) {
+                return TaskState.RUNNING;
+            }
             HitResult aimed = Interaction.nativeRaytrace(player, 4.5);
             if (!(aimed instanceof BlockHitResult hit)
                     || !(context.level().getBlockState(hit.getBlockPos()).getBlock()
                             instanceof net.minecraft.world.level.block.BedBlock)
                     || hit.getBlockPos().distManhattan(r.bed) > 1) {
-                if (++aimTicks >= 5) {
-                    fail("bed is occluded from the current stance", FailureType.OCCLUDED);
-                    return TaskState.FAILED;
-                }
-                return TaskState.RUNNING;
+                fail("bed is occluded from the current stance", FailureType.OCCLUDED);
+                return TaskState.FAILED;
             }
             receipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND, hit,
                     c -> c.player().isSleeping() ? NativeConfirmation.Verdict.APPLIED
@@ -55,7 +57,7 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
                 + receipt.detail(), FailureType.UNKNOWN);
         return TaskState.FAILED;
     }
-    @Override protected void cleanup() { receipt = null; }
+    @Override protected void cleanup() { receipt = null; aimConvergence.reset(); }
     @Override protected String successMessage() { return "sleeping in bed"; }
     @Override protected String cancelledMessage() { return "sleep interrupted"; }
 }
