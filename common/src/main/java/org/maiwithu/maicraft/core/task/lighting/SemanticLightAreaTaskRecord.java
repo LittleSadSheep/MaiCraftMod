@@ -9,13 +9,14 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** A bounded semantic lighting outcome; placement cells are deliberately absent. */
+/** A semantic lighting outcome; placement cells are deliberately absent. */
 public final class SemanticLightAreaTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "light_area";
     public static final int MIN_RADIUS = 1;
-    public static final int MAX_RADIUS = 48;
-    public static final int DEFAULT_MAX_PASSES = 4;
-    public static final int DEFAULT_MAX_PLACEMENTS = 192;
+    /** Minecraft's practical world border, not a work or exploration budget. */
+    public static final int MAX_EXPLICIT_RADIUS = 29_999_984;
+    /** Explicit user-authored placement budgets may cover the whole observed sample set. */
+    public static final int MAX_EXPLICIT_PLACEMENTS = 24_000;
 
     static {
         TaskFactory.register(SemanticLightAreaTaskRecord.class,
@@ -92,8 +93,9 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord {
     public final BlockPos center;
     /** Optional semantic area label retained for evidence/result reporting, never parsed as coordinates. */
     public final String semanticTarget;
-    /** Resolve the nearest matching loaded connected component around {@link #center}. */
+    /** Resolve and close the matching connected component seeded around {@link #center}. */
     public final boolean resolveLoadedComponent;
+    /** Optional player-authored geometric boundary. Zero means discover the semantic boundary. */
     public final int radius;
     public final int minimumLight;
     public final Coverage coverage;
@@ -104,7 +106,7 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord {
     public final SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy;
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final boolean allowHarm;
-    public final int maxPasses;
+    /** Zero means no user-authored total placement budget. */
     public final int maxPlacements;
 
     public SemanticLightAreaTaskRecord(
@@ -123,14 +125,14 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord {
             SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy,
             List<SemanticAcquireTaskRecord.Source> allowedSources,
             boolean allowHarm,
-            int maxPasses,
             int maxPlacements) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.center = center.immutable();
         this.semanticTarget = semanticTarget == null || semanticTarget.isBlank()
                 ? null : semanticTarget.strip();
         this.resolveLoadedComponent = resolveLoadedComponent;
-        this.radius = Math.clamp(radius, MIN_RADIUS, MAX_RADIUS);
+        this.radius = radius <= 0 ? 0
+                : Math.clamp(radius, MIN_RADIUS, MAX_EXPLICIT_RADIUS);
         this.minimumLight = Math.clamp(minimumLight, 1, 15);
         this.coverage = coverage == null ? Coverage.MOST : coverage;
         this.style = style == null ? Style.AUTO : style;
@@ -147,8 +149,16 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord {
                 ? SemanticMaterialSupplyCoordinator.MaterialPolicy.ORDINARY : materialPolicy;
         this.allowedSources = allowedSources == null ? List.of() : List.copyOf(allowedSources);
         this.allowHarm = allowHarm;
-        this.maxPasses = Math.clamp(maxPasses, 1, 8);
-        this.maxPlacements = Math.clamp(maxPlacements, 1, 512);
+        this.maxPlacements = maxPlacements <= 0 ? 0
+                : Math.clamp(maxPlacements, 1, MAX_EXPLICIT_PLACEMENTS);
+    }
+
+    public boolean hasPlacementBudget() {
+        return maxPlacements > 0;
+    }
+
+    public boolean hasExplicitRadius() {
+        return radius > 0;
     }
 
     private static List<String> clean(List<String> values) {
@@ -164,7 +174,10 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord {
     public static void ensureRegistered() {}
 
     @Override public String describe() {
-        return "实测并补足半径 " + radius + " 格区域的方块亮度至 " + minimumLight
+        String scope = hasExplicitRadius()
+                ? "玩家明确限定的半径 " + radius + " 格区域"
+                : "从语义地标实测闭合的连通区域";
+        return "实测并补足" + scope + "的方块亮度至 " + minimumLight
                 + "（" + coverage.name().toLowerCase(Locale.ROOT) + "，"
                 + placementPreference.name().toLowerCase(Locale.ROOT) + "）";
     }

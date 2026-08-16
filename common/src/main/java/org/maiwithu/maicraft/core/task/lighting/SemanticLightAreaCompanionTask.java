@@ -22,7 +22,6 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.CropBlock;
@@ -34,9 +33,13 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.WorkProfile;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
+import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.intent.IntentRuntime;
@@ -48,34 +51,65 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class SemanticLightAreaCompanionTask
         extends AbstractCompanionTask<SemanticLightAreaTaskRecord> {
 
-    private enum Stage { OBSERVE, PLAN, SUPPLY, BUILD, SETTLE, VERIFY }
-    private record Offset(int dx, int dz, int distanceSquared) {}
+    private enum Stage {
+        OBSERVE, TRAVEL_SURVEY, PLAN, SUPPLY, BUILD, SETTLE, VERIFY
+    }
+    private enum SurveyMovePurpose { LOAD_ANCHOR, LOAD_COMPONENT_FRONTIER }
     private record Sample(BlockPos pos, int light) {}
+    private record ComponentFrontier(BlockPos knownCell, BlockPos unknownCell) {}
     private record LightSource(
             Item item, Block block, String id, int emission, int available, int priority) {}
     private record Candidate(
             BlockPos pos, BlockState state, int preferenceScore, Set<Long> covers) {}
 
     private static final int COLUMNS_PER_TICK = 18;
+    private static final int COMPONENT_CELLS_PER_TICK = 96;
+    private static final int FRONTIERS_PER_TICK = 192;
     private static final int VERIFY_PER_TICK = 256;
     private static final int SETTLE_TICKS = 5;
-    private static final int MAX_TARGET_SAMPLES = 24_000;
     private static final int MAX_CANDIDATES = 4_096;
     private static final int MAX_PASS_BATCH = 48;
+    private static final long LIGHTING_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
     private static final int PROTECTED_LABEL_RADIUS = 4;
     private static final List<String> DEFAULT_LIGHT_IDS = List.of(
             "minecraft:torch", "minecraft:lantern", "minecraft:glowstone",
             "minecraft:sea_lantern", "minecraft:shroomlight");
 
     private Stage stage;
-    private List<Offset> offsets = List.of();
-    private int columnIndex;
+    private int explicitScanDx;
+    private int explicitScanDz;
+    private boolean explicitScanComplete;
     private int unloadedColumns;
     private int loadedColumns;
     private final Map<Long, Sample> samples = new LinkedHashMap<>();
     private final Map<String, Integer> protectedFacts = new LinkedHashMap<>();
     private final List<BlockPos> protectedAnchors = new ArrayList<>();
     private final Set<BlockPos> protectedNavigationCells = new LinkedHashSet<>();
+    /** Seed discovery visits every currently loaded column reachable from the landmark column. */
+    private final ArrayDeque<Long> seedColumns = new ArrayDeque<>();
+    private final Set<Long> queuedSeedColumns = new HashSet<>();
+    /** The component itself is expanded only through live matching block facts. */
+    private final ArrayDeque<BlockPos> componentCells = new ArrayDeque<>();
+    private final Set<Long> queuedComponentCells = new HashSet<>();
+    private final Set<Long> observedComponentCells = new HashSet<>();
+    private final Map<Long, ComponentFrontier> componentFrontiers = new LinkedHashMap<>();
+    private final ArrayDeque<Long> componentFrontierOrder = new ArrayDeque<>();
+    private final Set<Long> rejectedComponentFrontiers = new HashSet<>();
+    private final Set<Long> placementFootprintColumns = new HashSet<>();
+    private final Set<Long> attemptedSurveyMoves = new HashSet<>();
+    private boolean seedSearchInitialized;
+    private boolean componentSeeded;
+    private boolean areaBoundaryVerified;
+    private int seedColumnsObserved;
+    private int componentFrontiersObserved;
+    private int componentFrontiersLoaded;
+    private int surveyLegs;
+    private int surveyLegFailures;
+    private MoveToCompanionTask surveyMoveChild;
+    private MoveToTaskRecord surveyMoveRecord;
+    private SurveyMovePurpose surveyMovePurpose;
+    private long activeComponentFrontier = Long.MIN_VALUE;
+    private int surveyMoveSerial;
     private List<Sample> targetCells = List.of();
     private List<Sample> darkCells = List.of();
     private double achievedCoverage;
@@ -90,6 +124,11 @@ public final class SemanticLightAreaCompanionTask
     private int requestedPlacements;
     private int settledAt;
     private BuildCompanionTask buildChild;
+    private BuildTaskRecord buildRecord;
+    private int observedBuildProgress;
+    private int passBaselineLitCells;
+    private String activeCandidateFingerprint;
+    private String lastUnproductiveCandidateFingerprint;
     private TaskResult lastBuildResult;
     private final List<Map<String, Object>> childReceipts = new ArrayList<>();
     private final SemanticMaterialSupplyCoordinator supply =
@@ -144,13 +183,17 @@ public final class SemanticLightAreaCompanionTask
             protectedAnchors.add(new BlockPos(
                     landmark.position().x(), landmark.position().y(), landmark.position().z()));
         }
-        offsets = makeOffsets(r.radius);
+        if (r.hasExplicitRadius()) {
+            explicitScanDx = -r.radius;
+            explicitScanDz = -r.radius;
+        }
         stage = Stage.OBSERVE;
     }
 
     @Override protected TaskState onTick() {
         return switch (stage) {
             case OBSERVE -> tickObserve();
+            case TRAVEL_SURVEY -> tickSurveyMove();
             case PLAN -> tickPlan();
             case SUPPLY -> tickSupply();
             case BUILD -> tickBuild();
@@ -160,25 +203,53 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private TaskState tickObserve() {
+        if (r.resolveLoadedComponent) return tickConnectedObservation();
+        if (!r.hasExplicitRadius()) {
+            giveUp("semantic_area_boundary_missing",
+                    "no connected-component discovery or player-authored geometric boundary was supplied",
+                    FailureType.TARGET_LOST,
+                    List.of("retry against an area or landmark seed so the Mod can discover its boundary",
+                            "have the player state an explicit geometric boundary",
+                            "cancel without changing the world"));
+            return TaskState.FAILED;
+        }
+        return tickExplicitBoundaryObservation();
+    }
+
+    private TaskState tickExplicitBoundaryObservation() {
         ClientLevel level = ClientRuntime.requireContext(player).level();
         int budget = COLUMNS_PER_TICK;
-        while (budget-- > 0 && columnIndex < offsets.size()) {
-            Offset offset = offsets.get(columnIndex++);
-            int x = r.center.getX() + offset.dx();
-            int z = r.center.getZ() + offset.dz();
+        while (budget-- > 0 && !explicitScanComplete) {
+            int dx = explicitScanDx;
+            int dz = explicitScanDz;
+            advanceExplicitScan();
+            long distance = (long) dx * dx + (long) dz * dz;
+            if (distance > (long) r.radius * r.radius) continue;
+            int x = r.center.getX() + dx;
+            int z = r.center.getZ() + dz;
             if (!columnLoaded(level, x, z)) {
                 unloadedColumns++;
+                renewLightingProgress();
                 continue;
             }
             loadedColumns++;
             observeColumn(level, x, z);
+            renewLightingProgress();
         }
-        if (columnIndex < offsets.size()) return TaskState.RUNNING;
+        if (!explicitScanComplete) return TaskState.RUNNING;
+
+        if (unloadedColumns > 0) {
+            giveUp("explicit_area_not_fully_loaded",
+                    "the player-authored geometric boundary includes unloaded columns; they were "
+                            + "not silently omitted from the coverage denominator",
+                    FailureType.TARGET_LOST,
+                    List.of("move so the full explicit boundary is loaded, then retry",
+                            "let MaiCraft discover a connected semantic component instead",
+                            "stop without claiming whole-area coverage"));
+            return TaskState.FAILED;
+        }
 
         targetCells = new ArrayList<>(samples.values());
-        if (r.resolveLoadedComponent && !targetCells.isEmpty()) {
-            targetCells = nearestConnectedComponent(targetCells);
-        }
         if (targetCells.isEmpty()) {
             giveUp(unloadedColumns > 0 ? "area_not_loaded" : "no_matching_area_cells",
                     unloadedColumns > 0
@@ -491,6 +562,29 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private TaskState finishConnectedObservation(ClientLevel level) {
+        targetCells = List.copyOf(samples.values());
+        if (targetCells.isEmpty()) {
+            giveUp("no_matching_area_cells",
+                    "connected-area discovery closed without retaining a matching cell",
+                    FailureType.TARGET_LOST,
+                    List.of("resolve a different semantic landmark seed",
+                            "choose another coverage policy",
+                            "cancel without changing the world"));
+            return TaskState.FAILED;
+        }
+        for (Sample sample : targetCells) {
+            if (!level.isLoaded(sample.pos())) {
+                giveUp("discovered_area_no_longer_loaded",
+                        "the connected component was larger than the currently verifiable client view",
+                        FailureType.TARGET_LOST,
+                        List.of("move near the component center and resume whole-area verification",
+                                "increase client view distance if the complete area physically exceeds it",
+                                "stop without claiming whole-area coverage"));
+                return TaskState.FAILED;
+            }
+        }
+        areaBoundaryVerified = true;
+        evaluateCurrentLight(level);
         if (meetsRequirement()) return TaskState.SUCCESS;
         stage = Stage.PLAN;
         return TaskState.RUNNING;
