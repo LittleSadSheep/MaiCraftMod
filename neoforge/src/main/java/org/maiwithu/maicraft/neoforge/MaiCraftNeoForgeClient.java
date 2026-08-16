@@ -2,16 +2,19 @@
 package org.maiwithu.maicraft.neoforge;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.commands.Commands;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
+import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
+import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.MaiCraftCore;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
@@ -23,6 +26,7 @@ public final class MaiCraftNeoForgeClient {
         modBus.addListener(this::onClientSetup);
         NeoForge.EVENT_BUS.addListener(this::onClientTick);
         NeoForge.EVENT_BUS.addListener(this::onChatReceived);
+        NeoForge.EVENT_BUS.addListener(this::onRegisterClientCommands);
         NeoForge.EVENT_BUS.addListener(this::onGameShuttingDown);
     }
 
@@ -46,6 +50,12 @@ public final class MaiCraftNeoForgeClient {
         }
         GameplayAttentionMonitor.chat(
                 senderName, senderId, event.getMessage().getString(), event.isSystem());
+    }
+
+    private void onRegisterClientCommands(RegisterClientCommandsEvent event) {
+        event.getDispatcher().register(Commands.literal("maicraft")
+                .then(Commands.literal("status").executes(context ->
+                        MaiCraftStatus.showInChat())));
     }
 
     private void onGameShuttingDown(GameShuttingDownEvent event) {

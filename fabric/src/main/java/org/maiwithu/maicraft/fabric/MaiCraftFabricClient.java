@@ -2,11 +2,14 @@
 package org.maiwithu.maicraft.fabric;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
+import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.core.MaiCraftCore;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 
@@ -24,5 +27,9 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
                         sender.getName(), sender.getId(), message.getString(), false));
         ClientReceiveMessageEvents.GAME.register((message, overlay) ->
                 GameplayAttentionMonitor.chat(null, null, message.getString(), true));
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
+                dispatcher.register(ClientCommandManager.literal("maicraft")
+                        .then(ClientCommandManager.literal("status").executes(context ->
+                                MaiCraftStatus.showInChat()))));
     }
 }
