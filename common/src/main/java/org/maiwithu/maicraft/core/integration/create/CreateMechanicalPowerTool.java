@@ -19,7 +19,8 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 /** Hidden semantic-runtime bridge; concrete route cells remain inside the Mod. */
 public final class CreateMechanicalPowerTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
-    private static final long DEADLINE_TICKS = 30L * 60L * 20L;
+    /** Initial liveness lease; verified survey, supply, travel and placement progress renew it. */
+    private static final long INITIAL_LIVENESS_LEASE_TICKS = 2L * 60L * 20L;
 
     private record Args(
             String source_name, int source_x, int source_y, int source_z, Integer source_radius,
@@ -94,7 +95,7 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
                 throw new IllegalArgumentException("invalid internal mechanical continuation receipt");
             }
         }
-        long deadline = ctx(toolCallId, player).deadline(DEADLINE_TICKS);
+        long deadline = ctx(toolCallId, player).deadline(INITIAL_LIVENESS_LEASE_TICKS);
         var task = continuation == null
                 ? CreateMechanicalPower.task(
                         toolCallId, deadline, request, policy, sources,

@@ -35,7 +35,6 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
-import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
@@ -49,8 +48,22 @@ final class CreateMechanicalPowerTask
     private static final int READY_TICKS = 2;
     private static final float LOOK_EPSILON = 1.5f;
     private static final float MIN_VERTICAL_PITCH = 48.0f;
+    /** Renewable liveness window; this is deliberately not a maximum task duration. */
+    private static final long PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
+    private static final int PROGRESS_GRACE_TICKS = 100;
 
-    private enum Phase { PROGRESSIVE, RESUME_AUDIT, SUPPLY, PREPARE, NAVIGATE, ALIGN, WAIT_PLACEMENT, VERIFY, RESTORE }
+    private enum Phase {
+        PROGRESSIVE,
+        RESUME_AUDIT,
+        SUPPLY,
+        RESTOCK_RESTORE,
+        PREPARE,
+        NAVIGATE,
+        ALIGN,
+        WAIT_PLACEMENT,
+        VERIFY,
+        RESTORE
+    }
 
     private final Map<String, Object> data = new LinkedHashMap<>();
     private final SemanticMaterialSupplyCoordinator supply =
@@ -58,6 +71,7 @@ final class CreateMechanicalPowerTask
     private final List<Map<String, Object>> supplyReceipts = new ArrayList<>();
     private Map<String, Object> supplyFailure = Map.of();
     private int supplyRounds;
+    private int materialBatches;
     private CreateMechanicalPlan plan;
     private CreateMechanicalStager stager;
     private CreateProgressiveSurvey progressiveSurvey;
@@ -68,12 +82,15 @@ final class CreateMechanicalPowerTask
     private Phase phase = Phase.PREPARE;
     private int cursor;
     private int resumeAuditIndex = -1;
+    private int invocationStartCursor;
     private int startCursor;
     private int initialInventoryCount;
+    private boolean continuingAfterRestock;
+    private boolean restoreRetryBlocked;
+    private long progressiveProgressRevision;
+    private long constructionProgressRevision;
     private int readyTicks;
     private int networkWaitTicks;
-    private long progressiveStartedGameTime = -1L;
-    private long progressiveActiveTicks;
     private NativeActionReceipt placementReceipt;
     private BlockPos activeStand;
     private long bodyEpoch;
@@ -119,11 +136,9 @@ final class CreateMechanicalPowerTask
             if (planned.plan() == null) {
                 if (progressiveEligible(planned.failureCode())) {
                     progressiveSurvey = new CreateProgressiveSurvey(r.request);
+                    progressiveProgressRevision = progressiveSurvey.progressRevision();
                     phase = Phase.PROGRESSIVE;
-                    // Same bounded wall as the source implementation's progressive action: at
-                    // normal tick rate this is thirty minutes, and preemption still freezes it.
-                    progressiveStartedGameTime = player.level().getGameTime();
-                    r.extendDeadlineTo(progressiveStartedGameTime + 36_000L);
+                    renewProgressLease();
                     data.put("progressive_survey", true);
                     return;
                 }
@@ -173,8 +188,7 @@ final class CreateMechanicalPowerTask
             if (plan.progressive()) {
                 resumeAuditIndex = 0;
                 phase = Phase.RESUME_AUDIT;
-                progressiveStartedGameTime = player.level().getGameTime();
-                r.extendDeadlineTo(progressiveStartedGameTime + 36_000L);
+                renewProgressLease();
             } else {
                 Validation validation = validateWholeRoute(context.level());
                 if (validation != null) {
@@ -183,6 +197,7 @@ final class CreateMechanicalPowerTask
                 }
             }
         }
+        invocationStartCursor = cursor;
         initializeApprovedPlan(false);
     }
 
@@ -195,13 +210,6 @@ final class CreateMechanicalPowerTask
                     "the local player body or dimension changed during construction",
                     FailureType.TARGET_LOST, List.of("inspect_partial_route", "cancel"), true);
         }
-        if (progressiveStartedGameTime >= 0 && phase != Phase.RESTORE
-                && ++progressiveActiveTicks >= 36_000L) {
-            beginFailure("progressive_timeout",
-                    "the bounded thirty-minute progressive survey/construction window elapsed",
-                    FailureType.TIMED_OUT,
-                    List.of("resume_if_token_present", "choose_closer_endpoint", "cancel"), false);
-        }
         if (placementReceipt != null || stager != null && stager.hasPendingReceipt()
                 || phase == Phase.RESTORE) {
             r.extendDeadlineTo(Math.max(r.getDeadlineGameTime(), player.level().getGameTime() + 2));
@@ -210,6 +218,7 @@ final class CreateMechanicalPowerTask
             case PROGRESSIVE -> progressSurvey(context);
             case RESUME_AUDIT -> auditProgressiveContinuation(context);
             case SUPPLY -> tickSupply(context);
+            case RESTOCK_RESTORE -> restoreForNextBatch(context);
             case PREPARE -> prepare(context);
             case NAVIGATE -> navigate(context);
             case ALIGN -> alignAndPlace(context);
@@ -231,6 +240,7 @@ final class CreateMechanicalPowerTask
             if (!context.level().isLoaded(source.position())) {
                 CreateProgressiveSurvey.Travel.Status travel = constructionTravel.tick(
                         player, plan.cells().get(0).stand(), 1);
+                observeConstructionTravelProgress();
                 if (travel == CreateProgressiveSurvey.Travel.Status.RUNNING) return TaskState.RUNNING;
                 if (travel == CreateProgressiveSurvey.Travel.Status.FAILED) {
                     beginFailure("continuation_source_unreachable",
@@ -259,6 +269,7 @@ final class CreateMechanicalPowerTask
             if (!context.level().isLoaded(cell.position())) {
                 CreateProgressiveSurvey.Travel.Status travel = constructionTravel.tick(
                         player, cell.stand(), 1);
+                observeConstructionTravelProgress();
                 if (travel == CreateProgressiveSurvey.Travel.Status.RUNNING) return TaskState.RUNNING;
                 if (travel == CreateProgressiveSurvey.Travel.Status.FAILED) {
                     beginFailure("continuation_prefix_unreachable",
@@ -279,12 +290,14 @@ final class CreateMechanicalPowerTask
                 return TaskState.RUNNING;
             }
             resumeAuditIndex++;
+            renewProgressLease();
         }
         return TaskState.RUNNING;
     }
 
     private TaskState progressSurvey(LocalPlayerContext context) {
         CreateProgressiveSurvey.Status status = progressiveSurvey.tick(context);
+        observeProgressiveSurveyProgress();
         if (status == CreateProgressiveSurvey.Status.RUNNING) return TaskState.RUNNING;
         if (status == CreateProgressiveSurvey.Status.FAILED) {
             CreateProgressiveSurvey.Failure failure = progressiveSurvey.failure();
@@ -292,6 +305,7 @@ final class CreateMechanicalPowerTask
             return TaskState.RUNNING;
         }
         plan = progressiveSurvey.plan();
+        renewProgressLease();
         data.put("progressive_survey", true);
         data.put("progressive_travel_segments", progressiveSurvey.travelSegments());
         data.put("progressive_rejected_route_candidates",
@@ -318,36 +332,34 @@ final class CreateMechanicalPowerTask
     private boolean initializeApprovedPlan(boolean duringTick) {
         startCursor = cursor;
         initialInventoryCount = inventoryCount(player, chainItem);
-        int required = plan.cells().size() - cursor;
-        data.put("required_chain_drives_this_attempt", required);
+        int remaining = plan.cells().size() - cursor;
+        int carryingCapacity = carryingCapacity(player, chainItem);
+        int desiredBatch = Math.min(remaining, carryingCapacity);
+        data.put("total_route_chain_drives", plan.cells().size());
+        data.put("remaining_route_chain_drives", remaining);
+        data.put("required_chain_drives_this_attempt", desiredBatch);
         data.put("available_chain_drives", initialInventoryCount);
         data.put("route_hash", plan.routeHash());
-        if (required > SemanticAcquireTaskRecord.MAX_FINAL_COUNT) {
-            String detail = "the investigated route needs " + required
-                    + " material items, beyond the bounded main-inventory supply ceiling of "
-                    + SemanticAcquireTaskRecord.MAX_FINAL_COUNT;
-            List<String> recovery = List.of(
-                    "shorten_route", "choose_closer_endpoint", "cancel");
+        if (remaining <= 0) return true;
+        if (desiredBatch <= 0) {
+            String detail = "the route still needs " + remaining
+                    + " chain drives, but the main inventory has no capacity for one batch";
+            List<String> recovery = List.of("make_inventory_space", "resume", "cancel");
             if (duringTick) {
-                beginFailure("material_ledger_exceeds_inventory", detail,
+                beginFailure("material_inventory_full", detail,
                         FailureType.NO_SPACE, recovery, false);
             } else {
-                failNow("material_ledger_exceeds_inventory", detail,
+                failNow("material_inventory_full", detail,
                         FailureType.NO_SPACE, recovery);
             }
             return false;
         }
-        if (initialInventoryCount < required) {
-            if (r.continuationToken == null && cursor == 0) {
-                startMaterialSupply(required);
-                return false;
-            }
-            String detail = "need " + required + " default-component encased chain drives but only "
-                    + initialInventoryCount + " are available";
-            List<String> recovery = List.of(
-                    "acquire_items", "shorten_route", "choose_closer_endpoint", "cancel");
-            if (duringTick) {
-                beginFailure("missing_material", detail, FailureType.NO_MATERIAL, recovery, false);
+
+        if (initialInventoryCount <= 0) {
+            // A resumed/partially built route may have a staged hotbar transaction. Restore that
+            // exact transaction before acquisition, then continue the same confirmed prefix.
+            if (cursor > 0 || r.continuationToken != null) {
+                phase = Phase.RESTOCK_RESTORE;
             } else {
                 startMaterialSupply(Math.max(1, desiredBatch), false);
             }

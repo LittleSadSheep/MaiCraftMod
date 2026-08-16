@@ -147,20 +147,97 @@ final class CreateProgressiveSurvey {
                 "could not reach a loaded observation position for the destination region");
     }
 
-    private Status beginCorridor(ClientLevel level) {
+    private Status beginEndpointPair(ClientLevel level) {
         travel.stop();
-        routeCandidates = CreateMechanicalPlanner.tentativeRoutes(
-                level, source, destination, receiver);
-        if (routeCandidates.isEmpty()) {
-            return fail("progressive_route_unbounded",
-                    "no bounded at-most-five-run geometry connects the surveyed endpoints",
+        transitionTo(Phase.ENDPOINT_PAIRS);
+        if (!endpointPairAvailable()) {
+            if (sawRouteCandidate) {
+                return fail("progressive_corridor_rejected",
+                        exhaustedSurveyDetail(),
+                        FailureType.NO_PATH,
+                        List.of("move_obstruction", "choose_other_endpoint", "cancel"));
+            }
+            return fail("mechanical_route_search_exhausted",
+                    "the bounded 3D chain-drive state graph exhausted every surveyed endpoint pair without a preserving, mechanically continuous route",
                     FailureType.NO_PATH,
-                    List.of("choose_closer_endpoint", "choose_other_endpoint", "cancel"));
+                    List.of("move_obstruction", "choose_other_endpoint", "cancel"));
         }
-        routeCandidateIndex = 0;
-        selectRoute(routeCandidates.get(routeCandidateIndex));
-        phase = Phase.CORRIDOR;
-        return Status.RUNNING;
+        source = sourceCandidates.get(endpointSourceIndex);
+        if (!destinationCandidates.isEmpty()) {
+            destination = destinationCandidates.get(endpointTargetIndex);
+            receiver = destination.position().relative(destination.shaftFace());
+        } else {
+            destination = null;
+            receiver = receiverCandidates.get(endpointTargetIndex);
+        }
+        markProgress();
+        obstacleRouteSearch = CreateMechanicalPlanner.obstacleAwareRouteSearch(
+                level, request, source, destination, receiver, rejectedRouteCells);
+        absorbedRouteSearchRevision = 0L;
+        transitionTo(Phase.ROUTE_SEARCH);
+        return tickObstacleRouteSearch();
+    }
+
+    private Status tickObstacleRouteSearch() {
+        CreateMechanicalPlanner.ObstacleRouteStatus status = obstacleRouteSearch.tick(
+                ROUTE_EXPANSIONS_PER_TICK);
+        long revision = obstacleRouteSearch.progressRevision();
+        if (revision > absorbedRouteSearchRevision) {
+            progressRevision += revision - absorbedRouteSearchRevision;
+            absorbedRouteSearchRevision = revision;
+        }
+        if (status == CreateMechanicalPlanner.ObstacleRouteStatus.RUNNING) {
+            return Status.RUNNING;
+        }
+        if (status == CreateMechanicalPlanner.ObstacleRouteStatus.FOUND) {
+            sawRouteCandidate = true;
+            selectRoute(obstacleRouteSearch.route());
+            obstacleRouteSearch = null;
+            transitionTo(Phase.CORRIDOR);
+            return Status.RUNNING;
+        }
+        obstacleRouteSearch = null;
+        if (advanceEndpointPair()) {
+            transitionTo(Phase.ENDPOINT_PAIRS);
+            return Status.RUNNING;
+        }
+        if (sawRouteCandidate) {
+            return fail("progressive_corridor_rejected",
+                    exhaustedSurveyDetail(),
+                    FailureType.NO_PATH,
+                    List.of("move_obstruction", "choose_other_endpoint", "cancel"));
+        }
+        return fail("mechanical_route_search_exhausted",
+                "the bounded 3D chain-drive state graph exhausted every surveyed endpoint pair without a preserving, mechanically continuous route",
+                FailureType.NO_PATH,
+                List.of("move_obstruction", "choose_other_endpoint", "cancel"));
+    }
+
+    private String exhaustedSurveyDetail() {
+        return "all bounded 3D mechanically continuous endpoint-pair routes were exhausted after preserving first-person corridor survey rejection"
+                + (lastCorridorRejectionDetail == null
+                        ? ""
+                        : "; last rejection: " + lastCorridorRejectionDetail);
+    }
+
+    private boolean endpointPairAvailable() {
+        return endpointSourceIndex < sourceCandidates.size()
+                && endpointTargetIndex < endpointTargetCount();
+    }
+
+    private int endpointTargetCount() {
+        return destinationCandidates.isEmpty()
+                ? receiverCandidates.size() : destinationCandidates.size();
+    }
+
+    private boolean advanceEndpointPair() {
+        endpointTargetIndex++;
+        if (endpointTargetIndex >= endpointTargetCount()) {
+            endpointTargetIndex = 0;
+            endpointSourceIndex++;
+        }
+        markProgress();
+        return endpointPairAvailable();
     }
 
     private void selectRoute(CreateMechanicalPlanner.TentativeRoute selected) {
@@ -168,6 +245,7 @@ final class CreateProgressiveSurvey {
         surveyed = new ArrayList<>(java.util.Collections.nCopies(route.positions().size(), null));
         routeSet = Set.copyOf(new HashSet<>(route.positions()));
         corridorIndex = route.positions().size() - 1;
+        markProgress();
     }
 
     private Status surveyCorridor(LocalPlayerContext context) {
@@ -191,22 +269,23 @@ final class CreateProgressiveSurvey {
                 String detail = CreateMechanicalPlanner.isEmptyRouteCell(level, position)
                         ? "a proposed route cell has no loaded safe first-person placement stance"
                         : "a proposed route cell is occupied, hazardous, protected, or outside the preserving route contract";
-                if (routeCandidateIndex + 1 < routeCandidates.size()) {
-                    routeCandidateIndex++;
-                    travel.stop();
-                    selectRoute(routeCandidates.get(routeCandidateIndex));
-                    return Status.RUNNING;
-                }
-                return fail("progressive_corridor_rejected", detail,
-                        FailureType.NO_PATH,
-                        List.of("move_obstruction", "choose_other_endpoint", "cancel"));
+                rejectedRouteCandidates++;
+                lastCorridorRejectionDetail = detail;
+                if (rejectedRouteCells.add(position.asLong())) markProgress();
+                travel.stop();
+                obstacleRouteSearch = CreateMechanicalPlanner.obstacleAwareRouteSearch(
+                        level, request, source, destination, receiver, rejectedRouteCells);
+                absorbedRouteSearchRevision = 0L;
+                transitionTo(Phase.ROUTE_SEARCH);
+                return Status.RUNNING;
             }
             surveyed.set(corridorIndex, cell);
             corridorIndex--;
+            markProgress();
         }
         if (corridorIndex >= 0) return Status.RUNNING;
         travel.stop();
-        phase = Phase.RETURN_SOURCE;
+        transitionTo(Phase.RETURN_SOURCE);
         return Status.RUNNING;
     }
 
@@ -278,7 +357,7 @@ final class CreateProgressiveSurvey {
         String digest = surveyDigest(route, surveyed);
         plan = new CreateMechanicalPlan(source, destination, receiver, List.copyOf(surveyed),
                 route.geometry(), route.routeHash(), true, live.speed(), false);
-        phase = Phase.READY;
+        transitionTo(Phase.READY);
         // The digest is private execution evidence reported separately; the semantic caller never
         // receives individual route cells.
         surveyDigest = digest;
@@ -298,6 +377,7 @@ final class CreateProgressiveSurvey {
         if (status == Travel.Status.RUNNING) return Status.RUNNING;
         if (status == Travel.Status.ARRIVED) {
             travelSegments++;
+            markProgress();
             return Status.RUNNING;
         }
         return fail(code, detail + ": " + travel.failure(), FailureType.NO_PATH,
@@ -307,8 +387,23 @@ final class CreateProgressiveSurvey {
     private Status fail(String code, String detail, FailureType type, List<String> recovery) {
         travel.stop();
         failure = new Failure(code, detail, type, List.copyOf(recovery));
-        phase = Phase.FAILED;
+        transitionTo(Phase.FAILED);
         return Status.FAILED;
+    }
+
+    private int recordObservedCells(int highWater, int current) {
+        if (current > highWater) progressRevision += current - highWater;
+        return Math.max(highWater, current);
+    }
+
+    private void markProgress() {
+        progressRevision++;
+    }
+
+    private void transitionTo(Phase next) {
+        if (phase == next) return;
+        phase = next;
+        markProgress();
     }
 
     private static String surveyDigest(
@@ -334,25 +429,36 @@ final class CreateProgressiveSurvey {
         private PlayerNav nav;
         private BlockPos semanticTarget;
         private BlockPos waypoint;
-        private int failures;
         private final Set<Long> deniedWaypoints = new HashSet<>();
         private String failure = "no loaded waypoint was found";
+        private BlockPos lastPlayerPosition;
+        private long observedGameTime = Long.MIN_VALUE;
+        private long lastPhysicalProgressGameTime = Long.MIN_VALUE;
+        private long progressRevision;
 
         Status tick(LocalPlayer player, BlockPos target, int radius) {
+            long gameTime = player.level().getGameTime();
+            observedGameTime = gameTime;
+            recordPlayerMovement(player.blockPosition(), gameTime);
             if (semanticTarget == null || !semanticTarget.equals(target)) {
                 stop();
                 semanticTarget = target.immutable();
-                failures = 0;
+                lastPlayerPosition = player.blockPosition().immutable();
             }
             if (horizontalDistanceSq(player.blockPosition(), target) <= radius * radius
                     && player.level().isLoaded(target)) {
+                markPhysicalProgress(gameTime);
                 stop();
                 return Status.ARRIVED;
             }
             if (nav == null) {
                 waypoint = chooseWaypoint(player, target);
                 if (waypoint == null) {
-                    failure = "the loaded frontier has no standable position toward the current semantic target";
+                    failure = "the current loaded-frontier waypoint generator exhausted its distinct standable candidates toward the semantic target"
+                            + (deniedWaypoints.isEmpty()
+                                    ? ""
+                                    : "; rejected_waypoints=" + deniedWaypoints.size()
+                                            + ", last_navigation_failure=" + failure);
                     return Status.FAILED;
                 }
                 BlockPos frozen = waypoint;
@@ -362,19 +468,39 @@ final class CreateProgressiveSurvey {
             PlayerNav.Status status = nav.tick();
             if (status == PlayerNav.Status.RUNNING) return Status.RUNNING;
             if (status == PlayerNav.Status.ARRIVED) {
+                markPhysicalProgress(gameTime);
                 nav.stop();
                 nav = null;
                 return Status.RUNNING;
             }
             failure = nav.failReason();
-            if (waypoint != null) deniedWaypoints.add(waypoint.asLong());
+            if (waypoint != null && deniedWaypoints.add(waypoint.asLong())) {
+                // Rejecting one concrete waypoint advances the finite candidate search. It is
+                // semantic progress, but deliberately not reported as physical movement.
+                progressRevision++;
+            }
             nav.stop();
             nav = null;
-            if (++failures >= MAX_TRAVEL_FAILURES) return Status.FAILED;
             return Status.RUNNING;
         }
 
         String failure() { return failure; }
+
+        boolean hasRecentPhysicalProgress(int graceTicks) {
+            if (nav != null && nav.hasRecentPhysicalProgress(graceTicks)) return true;
+            if (observedGameTime == Long.MIN_VALUE
+                    || lastPhysicalProgressGameTime == Long.MIN_VALUE) return false;
+            long age = observedGameTime - lastPhysicalProgressGameTime;
+            return age >= 0 && age <= Math.max(0, graceTicks);
+        }
+
+        boolean planningInFlight() { return nav != null && nav.planningInFlight(); }
+
+        long progressRevision() { return progressRevision; }
+
+        void observeGameTime(long gameTime) {
+            observedGameTime = gameTime;
+        }
 
         void pause() {
             if (nav != null) nav.pause();
@@ -388,6 +514,7 @@ final class CreateProgressiveSurvey {
             waypoint = null;
             semanticTarget = null;
             deniedWaypoints.clear();
+            lastPlayerPosition = null;
         }
 
         private BlockPos chooseWaypoint(LocalPlayer player, BlockPos target) {
@@ -397,7 +524,9 @@ final class CreateProgressiveSurvey {
             double dz = target.getZ() - from.getZ();
             double length = Math.sqrt(dx * dx + dz * dz);
             if (length < 1.0) {
-                return CreateMechanicalPlanner.findTravelStand(level, target, 6, 16);
+                BlockPos stand = CreateMechanicalPlanner.findTravelStand(level, target, 6, 16);
+                return stand != null && !deniedWaypoints.contains(stand.asLong())
+                        ? stand : null;
             }
             double nx = dx / length;
             double nz = dz / length;
@@ -415,6 +544,19 @@ final class CreateProgressiveSurvey {
                 }
             }
             return null;
+        }
+
+        private void recordPlayerMovement(BlockPos current, long gameTime) {
+            BlockPos frozen = current.immutable();
+            if (lastPlayerPosition != null && !lastPlayerPosition.equals(frozen)) {
+                markPhysicalProgress(gameTime);
+            }
+            lastPlayerPosition = frozen;
+        }
+
+        private void markPhysicalProgress(long gameTime) {
+            progressRevision++;
+            lastPhysicalProgressGameTime = gameTime;
         }
 
         private static int MthFloor(double value) {
