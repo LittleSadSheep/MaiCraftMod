@@ -298,3 +298,10 @@ public final class CraftingWorkstationCoordinator {
                 || !player.level().getBlockState(cell).canBeReplaced()
                 || player.getBoundingBox().intersects(new AABB(cell))) {
             return false;
+        }
+        BlockPos support = cell.below();
+        return player.level().isLoaded(support)
+                && player.level().getBlockState(support)
+                        .isFaceSturdy(player.level(), support, Direction.UP);
+    }
+}
