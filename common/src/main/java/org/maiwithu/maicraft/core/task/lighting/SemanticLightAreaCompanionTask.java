@@ -44,6 +44,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
@@ -84,6 +85,7 @@ public final class SemanticLightAreaCompanionTask
     private final Map<Long, Sample> samples = new LinkedHashMap<>();
     private final Map<String, Integer> protectedFacts = new LinkedHashMap<>();
     private final List<BlockPos> protectedAnchors = new ArrayList<>();
+    private final Set<BlockPos> protectedMutationCells = new LinkedHashSet<>();
     private final Set<BlockPos> protectedNavigationCells = new LinkedHashSet<>();
     /** Seed discovery visits every currently loaded column reachable from the landmark column. */
     private final ArrayDeque<Long> seedColumns = new ArrayDeque<>();
@@ -263,6 +265,7 @@ public final class SemanticLightAreaCompanionTask
         }
         evaluateCurrentLight(level);
         areaBoundaryVerified = true;
+        retainAreaProtectionReceipt();
         if (meetsRequirement()) return TaskState.SUCCESS;
         stage = Stage.PLAN;
         return TaskState.RUNNING;
@@ -496,9 +499,20 @@ public final class SemanticLightAreaCompanionTask
         BlockState support = level.getBlockState(sample.below());
         String stateReason = sensitiveReason(level, sample, state);
         String supportReason = sensitiveReason(level, sample.below(), support);
-        if (stateReason != null) protectedFacts.merge(stateReason, 1, Integer::sum);
-        if (supportReason != null) protectedFacts.merge(supportReason, 1, Integer::sum);
-        if (isGrowthCell(state) || support.getBlock() instanceof FarmBlock) {
+        if (stateReason != null) {
+            protectedFacts.merge(stateReason, 1, Integer::sum);
+            protectedMutationCells.add(sample.immutable());
+        }
+        if (supportReason != null) {
+            protectedFacts.merge(supportReason, 1, Integer::sum);
+            protectedMutationCells.add(sample.below().immutable());
+        }
+        if (isGrowthCell(state)) {
+            protectedMutationCells.add(sample.immutable());
+            protectedNavigationCells.add(sample.immutable());
+        }
+        if (support.getBlock() instanceof FarmBlock) {
+            protectedMutationCells.add(sample.below().immutable());
             protectedNavigationCells.add(sample.immutable());
         }
     }
@@ -584,6 +598,7 @@ public final class SemanticLightAreaCompanionTask
             }
         }
         areaBoundaryVerified = true;
+        retainAreaProtectionReceipt();
         evaluateCurrentLight(level);
         if (meetsRequirement()) return TaskState.SUCCESS;
         stage = Stage.PLAN;
@@ -726,14 +741,19 @@ public final class SemanticLightAreaCompanionTask
             BlockPos pos = new BlockPos(x, y, z);
             BlockState state = level.getBlockState(pos);
             String sensitive = sensitiveReason(level, pos, state);
-            if (sensitive != null) protectedFacts.merge(sensitive, 1, Integer::sum);
+            if (sensitive != null) {
+                protectedFacts.merge(sensitive, 1, Integer::sum);
+                protectedMutationCells.add(pos.immutable());
+            }
             if (isGrowthCell(state)) {
                 // A build approach with terrain permission must not clear or enter a crop cell.
+                protectedMutationCells.add(pos.immutable());
                 protectedNavigationCells.add(pos.immutable());
             } else if (state.getBlock() instanceof FarmBlock) {
                 // Deny the body cell above every observed farmland block, including unplanted
                 // cells that remain valid adjacent placement targets. Construction can click a
                 // target without ever using it as a walking or jumping landing cell.
+                protectedMutationCells.add(pos.immutable());
                 protectedNavigationCells.add(pos.above().immutable());
             }
             if (r.coverage == SemanticLightAreaTaskRecord.Coverage.CROP_GROWTH) {
@@ -1037,6 +1057,7 @@ public final class SemanticLightAreaCompanionTask
         loadedColumns = 0;
         samples.clear();
         protectedFacts.clear();
+        protectedMutationCells.clear();
         protectedNavigationCells.clear();
         seedColumns.clear();
         queuedSeedColumns.clear();
@@ -1065,6 +1086,20 @@ public final class SemanticLightAreaCompanionTask
         verifyDark.clear();
         source = null;
         stage = Stage.OBSERVE;
+    }
+
+    private void retainAreaProtectionReceipt() {
+        if (r.semanticTarget == null) return;
+        List<Long> mutation = protectedMutationCells.stream()
+                .map(BlockPos::asLong).sorted().toList();
+        List<Long> body = protectedNavigationCells.stream()
+                .map(BlockPos::asLong).sorted().toList();
+        if (mutation.isEmpty() && body.isEmpty()) return;
+        r.retainInternalAreaProtection(new InternalAreaProtectionReceipt.Footprint(
+                r.semanticTarget,
+                player.level().dimension().location().toString(),
+                mutation,
+                body));
     }
 
     private List<Candidate> candidates(ClientLevel level, LightSource light) {

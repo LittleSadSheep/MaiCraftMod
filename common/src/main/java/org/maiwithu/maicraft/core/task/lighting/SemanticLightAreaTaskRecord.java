@@ -7,10 +7,12 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /** A semantic lighting outcome; placement cells are deliberately absent. */
-public final class SemanticLightAreaTaskRecord extends TaskRecord {
+public final class SemanticLightAreaTaskRecord extends TaskRecord
+        implements InternalAreaProtectionReceipt {
     public static final String TOOL_NAME = "light_area";
     public static final int MIN_RADIUS = 1;
     /** Minecraft's practical world border, not a work or exploration budget. */
@@ -108,6 +110,8 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord {
     public final boolean allowHarm;
     /** Zero means no user-authored total placement budget. */
     public final int maxPlacements;
+    /** Exact live-world protection retained only for the semantic parent. */
+    private List<Footprint> internalAreaProtections = List.of();
 
     public SemanticLightAreaTaskRecord(
             String toolCallId,
@@ -159,6 +163,15 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord {
 
     public boolean hasExplicitRadius() {
         return radius > 0;
+    }
+
+    void retainInternalAreaProtection(Footprint footprint) {
+        internalAreaProtections = footprint == null ? List.of() : List.of(footprint);
+    }
+
+    @Override
+    public List<Footprint> internalAreaProtections() {
+        return internalAreaProtections;
     }
 
     private static List<String> clean(List<String> values) {
