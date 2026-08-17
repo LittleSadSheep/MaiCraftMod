@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 
 import org.maiwithu.maicraft.entity.InputDriver;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
@@ -106,6 +107,10 @@ public final class BlockDigger {
         }
         InputDriver.halt(player);
         BlockPos effective = crosshairHit.getBlockPos();
+        if (NavigationSafetyContext.protectsMutation(effective)) {
+            cancel();
+            return DigResult.NO_SHOT;
+        }
         if (pos == null || !pos.equals(effective)) {
             // 工具由外层(移动原语按意图格)选择,这里不按命中格改选
             if (!start(effective, false)) {
@@ -124,6 +129,11 @@ public final class BlockDigger {
 
     public DigResult digStep(BlockPos target) {
         Level level = player.level();
+        if (NavigationSafetyContext.protectsMutation(target)) {
+            cancel();
+            InputDriver.halt(player);
+            return DigResult.NO_SHOT;
+        }
         if (blockHitDelay > 0) {                    // let the previous break land first
             blockHitDelay--;
             InputDriver.halt(player);
@@ -140,7 +150,8 @@ public final class BlockDigger {
         if (hit == null) {
             BlockHitResult center = centerRaycast(target);
             if (center != null && !center.getBlockPos().equals(target)
-                    && !BlockHelper.shouldAvoidBreaking(level, center.getBlockPos())) {
+                    && !BlockHelper.shouldAvoidBreaking(level, center.getBlockPos())
+                    && !NavigationSafetyContext.protectsMutation(center.getBlockPos())) {
                 hit = center;
                 effective = center.getBlockPos();
             }
@@ -162,6 +173,11 @@ public final class BlockDigger {
 
 
     public DigResult digTargetStep(BlockPos target) {
+        if (NavigationSafetyContext.protectsMutation(target)) {
+            cancel();
+            InputDriver.halt(player);
+            return DigResult.NO_SHOT;
+        }
         if (blockHitDelay > 0) {
             blockHitDelay--;
             InputDriver.halt(player);
@@ -181,6 +197,11 @@ public final class BlockDigger {
     }
     /** Shared per-tick dig advance against a resolved hit (face + aim point). */
     private DigResult advance(BlockHitResult hit, boolean targetBreak) {
+        if (NavigationSafetyContext.protectsMutation(hit.getBlockPos())) {
+            cancel();
+            InputDriver.halt(player);
+            return DigResult.NO_SHOT;
+        }
         LocalPlayerContext toolContext = ClientRuntime.requireContext(player);
         if (toolCloseReceipt != null) {
             if (!toolCloseReceipt.terminal()) {
