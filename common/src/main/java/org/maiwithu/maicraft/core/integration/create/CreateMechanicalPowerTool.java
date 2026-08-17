@@ -23,9 +23,9 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
     private static final long INITIAL_LIVENESS_LEASE_TICKS = 2L * 60L * 20L;
 
     private record Args(
-            String source_name, int source_x, int source_y, int source_z, Integer source_radius,
+            String source_name, int source_x, int source_y, int source_z,
             String destination_name, int destination_x, int destination_y, int destination_z,
-            Integer destination_radius, String transmission, Boolean allow_free_receiver,
+            String transmission, Boolean allow_free_receiver,
             String material_policy, List<String> allowed_sources, Boolean allow_harm,
             List<String> protected_labels, String continuation_token) {}
 
@@ -45,14 +45,12 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
                 .integer("source_x", "Internally resolved source X.")
                 .integer("source_y", "Internally resolved source Y.")
                 .integer("source_z", "Internally resolved source Z.")
-                .optionalInteger("source_radius", "Bounded loaded-region source search radius.", 1, 32)
                 .string("destination_name", "Semantic destination endpoint label.")
                 .integer("destination_x", "Internally resolved destination X.")
                 .integer("destination_y", "Internally resolved destination Y.")
                 .integer("destination_z", "Internally resolved destination Z.")
-                .optionalInteger("destination_radius", "Bounded loaded-region destination search radius.", 1, 32)
                 .optionalEnum("transmission", "Automatic or encased chain drive.", "auto", "encased_chain_drive")
-                .optionalBool("allow_free_receiver", "Allow a verified empty receiver cell at the destination.")
+                .optionalBool("allow_free_receiver", "Allow nearest authoritative destination evidence to be a verified empty receiver.")
                 .optionalEnum("material_policy", "Material source policy after route investigation.",
                         "ordinary", "storage_available", "inventory_only")
                 .optionalStringArray("allowed_sources", "Permitted semantic acquisition sources; storage is tried before crafting.")
@@ -75,11 +73,9 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
         };
         var request = new CreateMechanicalPower.Request(
                 new CreateMechanicalPower.Endpoint(parsed.source_name(),
-                        new BlockPos(parsed.source_x(), parsed.source_y(), parsed.source_z()),
-                        parsed.source_radius() == null ? 12 : parsed.source_radius()),
+                        new BlockPos(parsed.source_x(), parsed.source_y(), parsed.source_z())),
                 new CreateMechanicalPower.Endpoint(parsed.destination_name(),
-                        new BlockPos(parsed.destination_x(), parsed.destination_y(), parsed.destination_z()),
-                        parsed.destination_radius() == null ? 12 : parsed.destination_radius()),
+                        new BlockPos(parsed.destination_x(), parsed.destination_y(), parsed.destination_z())),
                 transmission,
                 true,
                 Boolean.TRUE.equals(parsed.allow_free_receiver()));

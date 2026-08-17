@@ -23,22 +23,19 @@ public final class CreateMechanicalPower {
 
     public enum Transmission { AUTO, ENCASED_CHAIN_DRIVE }
 
-    /** A bounded, semantic endpoint survey region. */
-    public record Endpoint(String name, BlockPos center, int searchRadius) {
+    /** A semantic endpoint anchor; physical discovery expands from it inside the Mod. */
+    public record Endpoint(String name, BlockPos center) {
         public Endpoint {
             name = Objects.requireNonNull(name, "name").trim();
             center = Objects.requireNonNull(center, "center").immutable();
             if (name.isEmpty()) throw new IllegalArgumentException("endpoint name is blank");
-            if (searchRadius < 1 || searchRadius > 32) {
-                throw new IllegalArgumentException("endpoint searchRadius must be in 1..32");
-            }
         }
     }
 
     /**
-     * Semantic request.  {@code allowFreeReceiver} permits delivery to a verified empty receiver
-     * inside the destination region when no kinetic block entity is there yet; false requires a
-     * real, visible kinetic destination.  Existing blocks are never replaced in either mode.
+     * Semantic request. {@code allowFreeReceiver} lets nearest authoritative destination evidence
+     * be either a compatible machine or a verified empty receiver; false requires a real, visible
+     * kinetic destination. Existing blocks are never replaced in either mode.
      */
     public record Request(
             Endpoint source,
@@ -70,6 +67,13 @@ public final class CreateMechanicalPower {
 
     public static Availability availability() {
         return CreateKineticsBridge.availability();
+    }
+
+    /** Release an opaque paused-search or confirmed-prefix receipt that will not be resumed. */
+    public static void discardContinuation(UUID token) {
+        if (token == null) return;
+        CreateEndpointContinuations.discard(token);
+        CreateMechanicalContinuations.discard(token);
     }
 
     /** Create a fresh semantic connection task. */

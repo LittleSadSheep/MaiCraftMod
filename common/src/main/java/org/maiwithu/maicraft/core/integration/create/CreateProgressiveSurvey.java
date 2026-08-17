@@ -116,14 +116,16 @@ final class CreateProgressiveSurvey {
                     ? request.source().center() : survey.nextObservation();
             return travelToward(context, observation, 2,
                     "source_unreachable",
-                    "could not reach a loaded observation position for the source region");
+                    "could not reach the next evidence frontier for the semantic source");
         }
-        if (survey.endpoints().isEmpty()) {
+        activeEndpointObservation = null;
+        if (searchStatus == CreateEndpointEvidenceSearch.Status.EXHAUSTED) {
             return fail("powered_source_not_found",
-                    "the fully observed source region contains no live non-zero-speed vertical-shaft endpoint",
+                    "world-border endpoint evidence was exhausted without a live non-zero-speed vertical-shaft source",
                     FailureType.TARGET_LOST,
                     List.of("restore_source_power", "choose_other_source", "cancel"));
         }
+        if (searchStatus != CreateEndpointEvidenceSearch.Status.READY) return Status.RUNNING;
         sourceCandidates = List.copyOf(survey.endpoints());
         markProgress();
         travel.stop();
@@ -132,18 +134,39 @@ final class CreateProgressiveSurvey {
     }
 
     private Status surveyDestination(LocalPlayerContext context) {
-        CreateMechanicalPlanner.EndpointSurvey survey = CreateMechanicalPlanner.surveyEndpoint(
-                context.level(), request.destination(), false);
-        destinationObservedHighWater = recordObservedCells(
-                destinationObservedHighWater, survey.loadedCells());
-        destinationLoadedCells = survey.loadedCells();
-        destinationUnloadedCells = survey.unloadedCells();
-        if (survey.unloadedCells() > 0) {
+        if (context.level().isOutsideBuildHeight(request.destination().center())
+                || !context.level().getWorldBorder().isWithinBounds(request.destination().center())) {
+            return fail("destination_anchor_outside_world",
+                    "the remembered semantic destination anchor is outside the current world boundary",
+                    FailureType.TARGET_LOST,
+                    List.of("remember_destination_again", "choose_other_endpoint", "cancel"));
+        }
+        CreateEndpointEvidenceSearch.Status searchStatus = destinationSearch.tick(context.level());
+        CreateEndpointEvidenceSearch.Snapshot survey = destinationSearch.snapshot();
+        destinationLoadedCells = survey.observedChunks();
+        destinationUnloadedCells = survey.missingChunks();
+        if (searchStatus == CreateEndpointEvidenceSearch.Status.NEEDS_OBSERVATION) {
             BlockPos observation = survey.nextObservation() == null
                     ? request.destination().center() : survey.nextObservation();
+            if (context.level().isLoaded(request.destination().center())) {
+                if (!observation.equals(activeEndpointObservation)) {
+                    if (authorizedEndpointFrontiers <= 0) {
+                        return pauseForEndpointEvidence(
+                                "destination_needs_exploration",
+                                "the currently loaded destination evidence contains no authoritative compatible endpoint; further first-person exploration needs an explicit continue decision");
+                    }
+                    authorizedEndpointFrontiers--;
+                    activeEndpointObservation = observation.immutable();
+                }
+            }
             return travelToward(context, observation, 2,
                     "destination_unreachable",
-                    "could not reach a loaded observation position for the destination region");
+                    "could not reach the next evidence frontier for the semantic destination");
+        }
+        activeEndpointObservation = null;
+        if (searchStatus != CreateEndpointEvidenceSearch.Status.READY
+                && searchStatus != CreateEndpointEvidenceSearch.Status.EXHAUSTED) {
+            return Status.RUNNING;
         }
         List<CreateMechanicalPlan.KineticEndpoint> unpowered = survey.endpoints().stream()
                 .filter(endpoint -> !endpoint.network() || Math.abs(endpoint.speed()) <= 0.0001f)
@@ -157,8 +180,7 @@ final class CreateProgressiveSurvey {
             return startCorridorSearch(context.level());
         }
         if (request.allowFreeReceiver()) {
-            List<BlockPos> free = CreateMechanicalPlanner.surveyFreeReceivers(
-                    context.level(), request.destination());
+            List<BlockPos> free = survey.freeReceivers();
             if (!free.isEmpty()) {
                 destinationCandidates = List.of();
                 receiverCandidates = List.copyOf(free);
@@ -168,12 +190,12 @@ final class CreateProgressiveSurvey {
         }
         if (survey.poweredEndpoints() > 0) {
             return fail("destination_already_powered",
-                    "the fully observed destination region has only already-powered endpoints, so requested source membership is not provable",
+                    "the closest fully observed destination evidence has only already-powered endpoints, so requested source membership is not provable",
                     FailureType.TARGET_LOST,
                     List.of("inspect_existing_network", "choose_unpowered_destination", "cancel"));
         }
         return fail("kinetic_destination_not_found",
-                "the fully observed destination region contains no compatible unpowered endpoint or approved free receiver",
+                "world-border endpoint evidence was exhausted without a compatible unpowered endpoint or approved free receiver",
                 FailureType.TARGET_LOST,
                 List.of("place_destination_machine", "allow_verified_free_receiver", "cancel"));
     }
@@ -199,7 +221,7 @@ final class CreateProgressiveSurvey {
                         List.of("move_obstruction", "choose_other_endpoint", "cancel"));
             }
             return fail("mechanical_route_search_exhausted",
-                    "the bounded 3D chain-drive state graph exhausted every surveyed endpoint pair without a preserving, mechanically continuous route",
+                    "the world-bounded 3D chain-drive state graph exhausted every surveyed endpoint pair without a preserving, mechanically continuous route",
                     FailureType.NO_PATH,
                     List.of("move_obstruction", "choose_other_endpoint", "cancel"));
         }
@@ -211,15 +233,17 @@ final class CreateProgressiveSurvey {
             destination = null;
             receiver = receiverCandidates.get(endpointTargetIndex);
         }
+        routeEnvelopePadding = INITIAL_ROUTE_ENVELOPE_PADDING;
         markProgress();
         obstacleRouteSearch = CreateMechanicalPlanner.obstacleAwareRouteSearch(
-                level, request, source, destination, receiver, rejectedRouteCells);
+                level, source, destination, receiver, rejectedRouteCells,
+                routeEnvelopePadding);
         absorbedRouteSearchRevision = 0L;
         transitionTo(Phase.ROUTE_SEARCH);
-        return tickObstacleRouteSearch();
+        return tickObstacleRouteSearch(level);
     }
 
-    private Status tickObstacleRouteSearch() {
+    private Status tickObstacleRouteSearch(ClientLevel level) {
         CreateMechanicalPlanner.ObstacleRouteStatus status = obstacleRouteSearch.tick(
                 ROUTE_EXPANSIONS_PER_TICK);
         long revision = obstacleRouteSearch.progressRevision();
@@ -237,7 +261,18 @@ final class CreateProgressiveSurvey {
             transitionTo(Phase.CORRIDOR);
             return Status.RUNNING;
         }
+        boolean envelopeExpansionMayHelp = obstacleRouteSearch.envelopeExpansionMayHelp();
         obstacleRouteSearch = null;
+        if (envelopeExpansionMayHelp) {
+            routeEnvelopePadding = routeEnvelopePadding >= Integer.MAX_VALUE / 2
+                    ? Integer.MAX_VALUE : routeEnvelopePadding * 2;
+            obstacleRouteSearch = CreateMechanicalPlanner.obstacleAwareRouteSearch(
+                    level, source, destination, receiver, rejectedRouteCells,
+                    routeEnvelopePadding);
+            absorbedRouteSearchRevision = 0L;
+            markProgress();
+            return Status.RUNNING;
+        }
         if (advanceEndpointPair()) {
             transitionTo(Phase.ENDPOINT_PAIRS);
             return Status.RUNNING;
@@ -249,13 +284,13 @@ final class CreateProgressiveSurvey {
                     List.of("move_obstruction", "choose_other_endpoint", "cancel"));
         }
         return fail("mechanical_route_search_exhausted",
-                "the bounded 3D chain-drive state graph exhausted every surveyed endpoint pair without a preserving, mechanically continuous route",
+                "the world-bounded 3D chain-drive state graph exhausted every surveyed endpoint pair without a preserving, mechanically continuous route",
                 FailureType.NO_PATH,
                 List.of("move_obstruction", "choose_other_endpoint", "cancel"));
     }
 
     private String exhaustedSurveyDetail() {
-        return "all bounded 3D mechanically continuous endpoint-pair routes were exhausted after preserving first-person corridor survey rejection"
+        return "all world-bounded 3D mechanically continuous endpoint-pair routes were exhausted after preserving first-person corridor survey rejection"
                 + (lastCorridorRejectionDetail == null
                         ? ""
                         : "; last rejection: " + lastCorridorRejectionDetail);
@@ -315,7 +350,8 @@ final class CreateProgressiveSurvey {
                 if (rejectedRouteCells.add(position.asLong())) markProgress();
                 travel.stop();
                 obstacleRouteSearch = CreateMechanicalPlanner.obstacleAwareRouteSearch(
-                        level, request, source, destination, receiver, rejectedRouteCells);
+                        level, source, destination, receiver, rejectedRouteCells,
+                        routeEnvelopePadding);
                 absorbedRouteSearchRevision = 0L;
                 transitionTo(Phase.ROUTE_SEARCH);
                 return Status.RUNNING;
@@ -432,9 +468,12 @@ final class CreateProgressiveSurvey {
         return Status.FAILED;
     }
 
-    private int recordObservedCells(int highWater, int current) {
-        if (current > highWater) progressRevision += current - highWater;
-        return Math.max(highWater, current);
+    private Status pauseForEndpointEvidence(String code, String detail) {
+        travel.stop();
+        failure = new Failure(code, detail, FailureType.TARGET_LOST,
+                List.of("continue_endpoint_exploration", "choose_other_endpoint", "cancel"));
+        markProgress();
+        return Status.FAILED;
     }
 
     private void markProgress() {

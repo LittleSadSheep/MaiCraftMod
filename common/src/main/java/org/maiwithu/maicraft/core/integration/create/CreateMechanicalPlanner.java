@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -23,12 +22,11 @@ import net.minecraft.world.level.block.StemBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Endpoint survey plus tick-sliced, preserve-existing mechanical route planning. */
+/** Tick-sliced, preserve-existing mechanical route planning. */
 final class CreateMechanicalPlanner {
     private static final Direction[] VERTICAL = {Direction.UP, Direction.DOWN};
-
-    private record Candidate(CreateMechanicalPlan.KineticEndpoint endpoint, double hintDistance) {}
 
     private CreateMechanicalPlanner() {}
 
@@ -48,130 +46,17 @@ final class CreateMechanicalPlanner {
             facts.put("recovery_options", List.of("retry_with_preserve_existing", "cancel"));
             return CreateMechanicalPlan.Result.fail("preserve_existing_required", facts);
         }
-        ClientLevel level = player.clientLevel;
-        Scan sourceScan = scanKinetics(level, request.source(), true);
-        facts.put("source_loaded_cells", sourceScan.loadedCells);
-        facts.put("source_unloaded_cells", sourceScan.unloadedCells);
-        if (sourceScan.candidates.isEmpty()) {
-            String code = sourceScan.unloadedCells > 0
-                    ? "source_needs_exploration" : "powered_source_not_found";
-            facts.put("failure_code", code);
-            facts.put("detail", "no loaded kinetic endpoint with a live non-zero network and vertical shaft was observed");
-            facts.put("recovery_options", List.of("travel_near_source", "inspect_source", "cancel"));
-            return CreateMechanicalPlan.Result.fail(code, facts);
-        }
-
-        Scan destinationScan = scanKinetics(level, request.destination(), false);
-        facts.put("destination_loaded_cells", destinationScan.loadedCells);
-        facts.put("destination_unloaded_cells", destinationScan.unloadedCells);
-        List<Candidate> destinationCandidates = destinationScan.candidates.stream()
-                .filter(candidate -> !candidate.endpoint().network()
-                        || Math.abs(candidate.endpoint().speed()) <= 0.0001f)
-                .toList();
-        long poweredDestinations = destinationScan.candidates.size() - destinationCandidates.size();
-        if (destinationCandidates.isEmpty() && destinationScan.unloadedCells > 0) {
-            facts.put("failure_code", "destination_needs_exploration");
-            facts.put("detail", "part of the destination endpoint region is still unloaded, so visible powered endpoints cannot prove that no compatible destination exists");
-            facts.put("recovery_options", List.of("travel_near_destination", "cancel"));
-            return CreateMechanicalPlan.Result.fail("destination_needs_exploration", facts);
-        }
-        if (destinationCandidates.isEmpty() && poweredDestinations > 0 && !request.allowFreeReceiver()) {
-            facts.put("failure_code", "destination_already_powered");
-            facts.put("detail", "the visible destination is already on a live kinetic network; public facts cannot prove it is the requested source network");
-            facts.put("recovery_options", List.of("inspect_existing_network", "choose_unpowered_destination", "cancel"));
-            return CreateMechanicalPlan.Result.fail("destination_already_powered", facts);
-        }
-        if (destinationCandidates.isEmpty() && !request.allowFreeReceiver()) {
-            facts.put("failure_code", "kinetic_destination_not_found");
-            facts.put("detail", "no loaded unpowered kinetic endpoint with a vertical shaft was observed");
-            facts.put("recovery_options", List.of("travel_near_destination", "inspect_destination", "allow_verified_free_receiver", "cancel"));
-            return CreateMechanicalPlan.Result.fail("kinetic_destination_not_found", facts);
-        }
-
-        // Route planning is intentionally delegated to the progressive, tick-sliced search. A
-        // synchronous exhaustive endpoint-pair/A* pass here would freeze the client precisely on
-        // the large but legitimate jobs this integration is meant to support.
+        // Endpoint discovery and route planning are intentionally delegated to progressive,
+        // tick-sliced searches. A synchronous expanding scan would freeze the client precisely on
+        // the large but legitimate jobs this integration is meant to support, while any finite
+        // synchronous radius would turn absence inside an arbitrary circle into false evidence.
         facts.put("failure_code", "route_needs_exploration");
-        facts.put("detail", "compatible endpoint facts are available; the preserving route now requires tick-sliced obstacle-aware investigation");
-        facts.put("source_endpoint_candidates", sourceScan.candidates.size());
-        facts.put("destination_endpoint_candidates", destinationCandidates.size());
-        facts.put("route_search", "bounded_3d_chain_drive_state_a_star");
+        facts.put("detail", "semantic endpoint anchors require progressive live-world evidence before preserving route construction");
+        facts.put("endpoint_search", "progressive_nearest_evidence");
+        facts.put("route_search", "world_bounded_3d_chain_drive_state_a_star");
         facts.put("recovery_options", List.of(
-                "continue_progressive_route_search", "choose_other_endpoint", "cancel"));
+                "continue_progressive_endpoint_and_route_search", "choose_other_endpoint", "cancel"));
         return CreateMechanicalPlan.Result.fail("route_needs_exploration", facts);
-    }
-
-    private record Scan(
-            List<Candidate> candidates,
-            int loadedCells,
-            int unloadedCells,
-            BlockPos nextObservation) {}
-
-    private static Scan scanKinetics(
-            ClientLevel level, CreateMechanicalPower.Endpoint region, boolean poweredOnly) {
-        List<Candidate> candidates = new ArrayList<>();
-        int loaded = 0;
-        int unloaded = 0;
-        BlockPos nextObservation = null;
-        BlockPos center = region.center();
-        int radius = region.searchRadius();
-        int radiusSq = radius * radius;
-        for (int dy = -radius; dy <= radius; dy++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    if (dx * dx + dy * dy + dz * dz > radiusSq) continue;
-                    BlockPos position = center.offset(dx, dy, dz);
-                    if (level.isOutsideBuildHeight(position)
-                            || !level.getWorldBorder().isWithinBounds(position)) continue;
-                    if (!level.isLoaded(position)) {
-                        unloaded++;
-                        nextObservation = nearerObservation(nextObservation, position, center);
-                        continue;
-                    }
-                    loaded++;
-                    CreateKineticsBridge.Facts kinetic = CreateKineticsBridge.inspect(level, position);
-                    if (kinetic == null || poweredOnly && !kinetic.powered()) continue;
-                    BlockState state = level.getBlockState(position);
-                    for (Direction face : VERTICAL) {
-                        if (!CreateKineticsBridge.hasShaftTowards(level, position, state, face)) continue;
-                        BlockPos adjacent = position.relative(face);
-                        if (level.isOutsideBuildHeight(adjacent)
-                                || !level.getWorldBorder().isWithinBounds(adjacent)) continue;
-                        if (!level.isLoaded(adjacent)) {
-                            unloaded++;
-                            nextObservation = nearerObservation(nextObservation, adjacent, center);
-                            continue;
-                        }
-                        if (!isEmptyRouteCell(level, adjacent)) continue;
-                        candidates.add(new Candidate(new CreateMechanicalPlan.KineticEndpoint(
-                                position, state, face, kinetic.speed(), kinetic.hasNetwork()),
-                                position.distSqr(center)));
-                    }
-                }
-            }
-        }
-        candidates.sort(Comparator.comparingDouble(Candidate::hintDistance)
-                .thenComparingLong(c -> c.endpoint().position().asLong())
-                .thenComparingInt(c -> c.endpoint().shaftFace().ordinal()));
-        return new Scan(List.copyOf(candidates), loaded, unloaded, nextObservation);
-    }
-
-    private static BlockPos nearerObservation(BlockPos current, BlockPos candidate, BlockPos center) {
-        BlockPos frozen = candidate.immutable();
-        if (current == null) return frozen;
-        double candidateDistance = horizontalDistanceSq(candidate, center);
-        double currentDistance = horizontalDistanceSq(current, center);
-        if (candidateDistance < currentDistance
-                || candidateDistance == currentDistance && candidate.asLong() < current.asLong()) {
-            return frozen;
-        }
-        return current;
-    }
-
-    private static double horizontalDistanceSq(BlockPos left, BlockPos right) {
-        double dx = left.getX() - right.getX();
-        double dz = left.getZ() - right.getZ();
-        return dx * dx + dz * dz;
     }
 
     private static BlockPos findStand(ClientLevel level, BlockPos target, Set<BlockPos> route) {

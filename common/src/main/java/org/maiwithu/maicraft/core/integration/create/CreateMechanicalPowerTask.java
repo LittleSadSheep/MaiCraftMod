@@ -102,6 +102,7 @@ final class CreateMechanicalPowerTask
     private boolean desiredSuccess;
     private boolean nativeOutcomeUncertain;
     private boolean continuationIssued;
+    private boolean resumedConstructionPrefix;
     private Task.StopReason forcedStop;
 
     CreateMechanicalPowerTask(LocalPlayer player, CreateMechanicalPowerTaskRecord record) {
@@ -151,6 +152,28 @@ final class CreateMechanicalPowerTask
             stager = new CreateMechanicalStager(player);
             cursor = 0;
         } else {
+            CreateEndpointContinuations.Entry endpointContinuation =
+                    CreateEndpointContinuations.take(r.continuationToken);
+            if (endpointContinuation != null) {
+                if (!endpointContinuation.request().equals(r.request)
+                        || endpointContinuation.bodyEpoch() != bodyEpoch
+                        || !endpointContinuation.dimension().equals(dimension)) {
+                    failNow("continuation_context_changed",
+                            "the endpoint evidence continuation is bound to a different request, body, or dimension",
+                            FailureType.TARGET_LOST,
+                            List.of("restart_endpoint_investigation", "cancel"));
+                    return;
+                }
+                progressiveSurvey = endpointContinuation.survey();
+                progressiveSurvey.authorizeNextEndpointFrontier();
+                progressiveProgressRevision = progressiveSurvey.progressRevision();
+                data.put("resumed_from", r.continuationToken.toString());
+                data.put("progressive_survey", true);
+                data.put("endpoint_frontier_authorized", true);
+                phase = Phase.PROGRESSIVE;
+                renewProgressLease();
+                return;
+            }
             CreateMechanicalContinuations.Entry continuation =
                     CreateMechanicalContinuations.take(r.continuationToken);
             if (continuation == null) {
@@ -159,6 +182,7 @@ final class CreateMechanicalPowerTask
                         FailureType.TARGET_LOST, List.of("inspect_partial_route", "cancel"));
                 return;
             }
+            resumedConstructionPrefix = true;
             if (!continuation.request().equals(r.request)
                     || continuation.bodyEpoch() != bodyEpoch
                     || !continuation.dimension().equals(dimension)) {
@@ -301,6 +325,16 @@ final class CreateMechanicalPowerTask
         if (status == CreateProgressiveSurvey.Status.RUNNING) return TaskState.RUNNING;
         if (status == CreateProgressiveSurvey.Status.FAILED) {
             CreateProgressiveSurvey.Failure failure = progressiveSurvey.failure();
+            if ("source_needs_exploration".equals(failure.code())
+                    || "destination_needs_exploration".equals(failure.code())) {
+                CreateEndpointContinuations.Entry continuation =
+                        CreateEndpointContinuations.issue(
+                                r.request, progressiveSurvey, bodyEpoch, dimension);
+                data.put("continuation_token", continuation.token().toString());
+                data.put("continuation_policy",
+                        "continue one additional first-person endpoint evidence frontier after explicit recovery choice");
+                progressiveSurvey = null;
+            }
             beginFailure(failure.code(), failure.detail(), failure.type(), failure.recovery(), false);
             return TaskState.RUNNING;
         }
@@ -358,7 +392,7 @@ final class CreateMechanicalPowerTask
         if (initialInventoryCount <= 0) {
             // A resumed/partially built route may have a staged hotbar transaction. Restore that
             // exact transaction before acquisition, then continue the same confirmed prefix.
-            if (cursor > 0 || r.continuationToken != null) {
+            if (cursor > 0 || resumedConstructionPrefix) {
                 phase = Phase.RESTOCK_RESTORE;
             } else {
                 startMaterialSupply(Math.max(1, desiredBatch), false);
@@ -370,7 +404,7 @@ final class CreateMechanicalPowerTask
         // investigate again. After a confirmed prefix exists, use what is already carried and
         // restock at the exact batch boundary; requiring the entire route in one inventory would
         // be an arbitrary 36-slot gate on otherwise valid long construction.
-        if (cursor == 0 && r.continuationToken == null
+        if (cursor == 0 && !resumedConstructionPrefix
                 && initialInventoryCount < desiredBatch) {
             startMaterialSupply(desiredBatch, false);
             return false;
