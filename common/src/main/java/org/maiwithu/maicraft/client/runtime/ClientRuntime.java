@@ -98,6 +98,14 @@ public final class ClientRuntime {
                 GameplayAttentionMonitor.afterSemanticBind(context.player());
                 return;
             }
+            // A task-boundary cleanup may have used this actor tick to physically release an
+            // ownerless native action.  Keep the semantic task intact and resume next tick; trying
+            // to advance a new child now would violate the one-native-mutation boundary.
+            if (!context.mutationAvailable()) {
+                intents.tickPersistence(minecraft, context.player());
+                GameplayAttentionMonitor.afterSemanticBind(context.player());
+                return;
+            }
             intents.controlAvailable();
             CompanionTickDispatcher.tick(context.player());
             intents.tickPersistence(minecraft, context.player());
