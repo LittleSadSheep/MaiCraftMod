@@ -116,11 +116,8 @@ public final class GoalCompiler {
      * target on the way past. A stance often sits inside the target's own column
      * (a tree trunk: "feet at/under the log" IS a log cell), so forbidding the
      * path from breaking targets makes every stance of an untouched trunk
-     * unsatisfiable and the search burns its whole budget on a goal it can never
-     * reach — then blacklists a perfectly minable block as "no path". An en-route
-     * break loses nothing: the cell leaves knownOres on the next prune, its drop
-     * is collected by the drop members, and progress counts inventory, not dig
-     * events.
+     * unsatisfiable. An en-route break loses nothing: the cell leaves the live
+     * target index and its native drop is collected as the body traverses the path.
      */
     public static Compiled mineField(List<BlockPos> ores, List<BlockPos> drops) {
         List<NavGoal> members = new ArrayList<>(ores.size() + drops.size());
