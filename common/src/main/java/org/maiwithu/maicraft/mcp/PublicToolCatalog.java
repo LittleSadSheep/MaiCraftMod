@@ -298,8 +298,18 @@ final class PublicToolCatalog {
         boolean sequence = "maicraft:sequence".equals(ability);
         if (sequence && children.isEmpty()) throw bad("maicraft:sequence requires at least one child");
         if (!sequence && !children.isEmpty()) throw bad("only maicraft:sequence may contain children");
-        if (sequence && !goal.getAsJsonObject("parameters").entrySet().isEmpty()) {
-            throw bad("maicraft:sequence does not accept parameters");
+        if (sequence) {
+            JsonObject parameters = goal.getAsJsonObject("parameters");
+            only(parameters, "protected_labels");
+            if (present(parameters, "protected_labels")) {
+                JsonArray labels = array(parameters, "protected_labels", 64);
+                for (JsonElement label : labels) {
+                    if (!label.isJsonPrimitive() || !label.getAsJsonPrimitive().isString()
+                            || label.getAsString().isBlank() || label.getAsString().length() > 160) {
+                        throw bad("protected_labels must contain non-empty semantic labels");
+                    }
+                }
+            }
         }
     }
 
