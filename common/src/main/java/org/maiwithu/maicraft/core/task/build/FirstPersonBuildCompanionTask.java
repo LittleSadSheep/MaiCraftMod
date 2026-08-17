@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.pathing.bridge.ContextFactory;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
@@ -75,6 +76,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final Map<Long, BuildTaskRecord.Target> targets = new LinkedHashMap<>();
     private final LongOpenHashSet protectedCells = new LongOpenHashSet();
     private final LongOpenHashSet forbiddenBodyCells = new LongOpenHashSet();
+    /** Area cells inherited from earlier semantic steps; unlike blueprint sacred cells, mutable targets here are rejected. */
+    private final LongOpenHashSet inheritedProtectedMutationCells = new LongOpenHashSet();
     private final LongOpenHashSet completed = new LongOpenHashSet();
     private final List<BuildTaskRecord.Target> preflightOrder = new ArrayList<>();
     private final List<CellPlan> plans = new ArrayList<>();
@@ -120,6 +123,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             protectedCells.add(target.pos().asLong());
             preflightOrder.add(target);
         }
+        inheritedProtectedMutationCells.addAll(
+                NavigationSafetyContext.protectedMutationCells());
+        protectedCells.addAll(inheritedProtectedMutationCells);
+        forbiddenBodyCells.addAll(NavigationSafetyContext.forbiddenBodyCells());
         preflightOrder.sort(BuildOrder.BUILD_ORDER);
     }
 
@@ -227,6 +234,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private void inspectPrimary(BuildTaskRecord.Target target) {
         BlockState live = player.level().getBlockState(target.pos());
         List<BuildPlacementGeometry.GeneratedCell> generated = BuildPlacementGeometry.generatedBy(target);
+        if (!target.matches(live)
+                && inheritedProtectedMutationCells.contains(target.pos().asLong())) {
+            addBlocked("inherited_semantic_area_protection", target.pos(),
+                    "a previously observed protected semantic area occupies this cell");
+        }
         if (!target.matches(live)) {
             if (rules.blockedByMode(target)) addBlocked("replacement_policy", target.pos(),
                     "existing block is protected by replacement policy");
@@ -267,6 +279,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         List.of("load_whole_site", "shrink_build", "cancel")); continue;
             }
             BlockState live = player.level().getBlockState(effect.pos());
+            if (!BuildValidity.valid(live, effect.expected(), false)
+                    && inheritedProtectedMutationCells.contains(effect.pos().asLong())) {
+                addBlocked("inherited_semantic_area_protection", effect.pos(),
+                        "a generated placement would alter a previously observed protected semantic area");
+                continue;
+            }
             if (live.isAir() || BuildValidity.valid(live, effect.expected(), false)) continue;
             if (!r.replaceMode.allows(live, effect.expected()))
                 addBlocked("generated_cell_occupied", effect.pos(), "protected secondary cell is occupied");
