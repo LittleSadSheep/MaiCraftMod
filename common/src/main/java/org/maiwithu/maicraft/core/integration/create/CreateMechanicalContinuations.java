@@ -56,6 +56,10 @@ final class CreateMechanicalContinuations {
         return ENTRIES.remove(token);
     }
 
+    static synchronized void discard(UUID token) {
+        ENTRIES.remove(token);
+    }
+
     private static void purgeExpired() {
         long now = System.nanoTime();
         ENTRIES.values().removeIf(entry -> now - entry.expiresAtNanos() >= 0);

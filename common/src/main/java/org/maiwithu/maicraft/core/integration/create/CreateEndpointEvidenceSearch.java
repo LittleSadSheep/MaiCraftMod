@@ -298,3 +298,134 @@ final class CreateEndpointEvidenceSearch {
         int minimumZ = (int) Math.ceil(border.getMinZ());
         int maximumZ = (int) Math.floor(Math.nextDown(border.getMaxZ()));
         BlockPos center = endpoint.center();
+        return Math.max(
+                Math.max(Math.abs(center.getX() - minimumX),
+                        Math.abs(maximumX - center.getX())),
+                Math.max(
+                        Math.max(Math.abs(center.getZ() - minimumZ),
+                                Math.abs(maximumZ - center.getZ())),
+                        Math.max(Math.abs(center.getY() - level.getMinBuildHeight()),
+                                Math.abs(level.getMaxBuildHeight() - 1 - center.getY()))));
+    }
+
+    private void scanKineticEvidence(ClientLevel level, LevelChunk chunk) {
+        for (var entry : chunk.getBlockEntities().entrySet()) {
+            BlockPos position = entry.getKey();
+            CreateKineticsBridge.Facts kinetic = CreateKineticsBridge.inspect(level, position);
+            if (kinetic == null || poweredOnly && !kinetic.powered()) continue;
+            BlockState state = level.getBlockState(position);
+            for (Direction face : new Direction[]{Direction.UP, Direction.DOWN}) {
+                if (!CreateKineticsBridge.hasShaftTowards(level, position, state, face)) continue;
+                BlockPos adjacent = position.relative(face);
+                if (level.isOutsideBuildHeight(adjacent)
+                        || !level.getWorldBorder().isWithinBounds(adjacent)) continue;
+                // An unloaded adjacent cell is provisional evidence. The corridor survey must
+                // load and prove it empty before the first placement, so this never authorizes a
+                // blind mutation at a chunk boundary.
+                if (level.isLoaded(adjacent)
+                        && !CreateMechanicalPlanner.isEmptyRouteCell(level, adjacent)) continue;
+                CreateMechanicalPlan.KineticEndpoint candidate =
+                        new CreateMechanicalPlan.KineticEndpoint(position.immutable(), state, face,
+                                kinetic.speed(), kinetic.hasNetwork());
+                endpoints.putIfAbsent(new EndpointKey(position.asLong(), face), candidate);
+            }
+        }
+    }
+
+    private boolean evidenceProvenAgainst(double unseenLowerBound) {
+        double bestDistanceSq = bestAdmissibleEvidenceDistanceSq();
+        if (!Double.isFinite(bestDistanceSq)) return false;
+        return !Double.isFinite(unseenLowerBound) || unseenLowerBound > bestDistanceSq;
+    }
+
+    private double bestAdmissibleEvidenceDistanceSq() {
+        double bestDistanceSq = Double.POSITIVE_INFINITY;
+        for (CreateMechanicalPlan.KineticEndpoint candidate : endpoints.values()) {
+            if (!admissibleKineticEndpoint(candidate)) continue;
+            bestDistanceSq = Math.min(bestDistanceSq,
+                    candidate.position().distSqr(endpoint.center()));
+        }
+        if (allowFreeReceiver && freeReceiverProven && freeReceiver != null) {
+            bestDistanceSq = Math.min(bestDistanceSq,
+                    freeReceiver.distSqr(endpoint.center()));
+        }
+        return bestDistanceSq;
+    }
+
+    private boolean admissibleKineticEndpoint(
+            CreateMechanicalPlan.KineticEndpoint candidate) {
+        return poweredOnly || !candidate.network() || Math.abs(candidate.speed()) <= 0.0001f;
+    }
+
+    private double ringMinimumHorizontalDistanceSq(ClientLevel level, int ring) {
+        double minimum = Double.POSITIVE_INFINITY;
+        BlockPos center = endpoint.center();
+        int centerX = center.getX() >> 4;
+        int centerZ = center.getZ() >> 4;
+        for (ChunkPos chunk : List.of(
+                new ChunkPos(centerX - ring, centerZ),
+                new ChunkPos(centerX + ring, centerZ),
+                new ChunkPos(centerX, centerZ - ring),
+                new ChunkPos(centerX, centerZ + ring))) {
+            if (!intersectsWorldBorder(level, chunk)) continue;
+            minimum = Math.min(minimum,
+                    chunkMinimumHorizontalDistanceSq(center, chunk));
+        }
+        return minimum;
+    }
+
+    private static ChunkPos chunkAt(BlockPos center, int radius, long index) {
+        int centerX = center.getX() >> 4;
+        int centerZ = center.getZ() >> 4;
+        if (radius == 0) return new ChunkPos(centerX, centerZ);
+        long horizontalEntries = 2L * (2L * radius + 1L);
+        if (index < horizontalEntries) {
+            int dx = (int) (index / 2L) - radius;
+            int dz = index % 2L == 0L ? -radius : radius;
+            return new ChunkPos(centerX + dx, centerZ + dz);
+        }
+        long sideIndex = index - horizontalEntries;
+        int dz = (int) (sideIndex / 2L) - radius + 1;
+        int dx = sideIndex % 2L == 0L ? -radius : radius;
+        return new ChunkPos(centerX + dx, centerZ + dz);
+    }
+
+    private static double chunkMinimumHorizontalDistanceSq(BlockPos center, ChunkPos chunk) {
+        int minX = chunk.getMinBlockX();
+        int maxX = chunk.getMaxBlockX();
+        int minZ = chunk.getMinBlockZ();
+        int maxZ = chunk.getMaxBlockZ();
+        long dx = center.getX() < minX ? (long) minX - center.getX()
+                : center.getX() > maxX ? (long) center.getX() - maxX : 0L;
+        long dz = center.getZ() < minZ ? (long) minZ - center.getZ()
+                : center.getZ() > maxZ ? (long) center.getZ() - maxZ : 0L;
+        return (double) dx * dx + (double) dz * dz;
+    }
+
+    private static boolean intersectsWorldBorder(ClientLevel level, ChunkPos chunk) {
+        int minX = chunk.getMinBlockX();
+        int maxX = chunk.getMaxBlockX();
+        int minZ = chunk.getMinBlockZ();
+        int maxZ = chunk.getMaxBlockZ();
+        var border = level.getWorldBorder();
+        return maxX + 1.0 > border.getMinX() && minX < border.getMaxX()
+                && maxZ + 1.0 > border.getMinZ() && minZ < border.getMaxZ();
+    }
+
+    private BlockPos observationTarget(ClientLevel level, ChunkPos chunk) {
+        int y = Math.max(level.getMinBuildHeight() + 1,
+                Math.min(level.getMaxBuildHeight() - 2, endpoint.center().getY()));
+        var border = level.getWorldBorder();
+        int minimumX = (int) Math.ceil(border.getMinX());
+        int maximumX = (int) Math.floor(Math.nextDown(border.getMaxX()));
+        int minimumZ = (int) Math.ceil(border.getMinZ());
+        int maximumZ = (int) Math.floor(Math.nextDown(border.getMaxZ()));
+        int x = Math.max(minimumX, Math.min(maximumX, chunk.getMinBlockX() + 8));
+        int z = Math.max(minimumZ, Math.min(maximumZ, chunk.getMinBlockZ() + 8));
+        return new BlockPos(x, y, z);
+    }
+
+    private void markProgress() {
+        progressRevision++;
+    }
+}

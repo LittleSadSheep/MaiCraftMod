@@ -198,6 +198,9 @@ final class CreateMechanicalPlanner {
         BlockPos head = feet.above();
         BlockPos floor = feet.below();
         if (!level.isLoaded(feet) || !level.isLoaded(head) || !level.isLoaded(floor)) return false;
+        if (NavigationSafetyContext.forbidsBody(feet)
+                || NavigationSafetyContext.protectsMutation(feet)
+                || NavigationSafetyContext.protectsMutation(head)) return false;
         BlockState feetState = level.getBlockState(feet);
         BlockState headState = level.getBlockState(head);
         if (!feetState.getFluidState().isEmpty() || !headState.getFluidState().isEmpty()) return false;
@@ -233,36 +236,21 @@ final class CreateMechanicalPlanner {
         return Math.toDegrees(Math.atan2(Math.abs(dy), Math.sqrt(dx * dx + dz * dz))) >= 48.0;
     }
 
-    private static List<BlockPos> freeReceivers(
-            ClientLevel level, CreateMechanicalPower.Endpoint destination) {
-        List<BlockPos> result = new ArrayList<>();
-        BlockPos center = destination.center();
-        int radius = destination.searchRadius();
-        int radiusSq = radius * radius;
-        for (int dy = -radius; dy <= radius; dy++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    if (dx * dx + dy * dy + dz * dz > radiusSq) continue;
-                    BlockPos position = center.offset(dx, dy, dz);
-                    if (!level.isLoaded(position) || !isEmptyRouteCell(level, position)) continue;
-                    if (level.getBlockEntity(position.below()) != null) continue;
-                    if (protectedTerrain(level, position.below())) continue;
-                    result.add(position.immutable());
-                }
-            }
-        }
-        result.sort(Comparator.comparingDouble((BlockPos position) -> position.distSqr(center))
-                .thenComparingLong(BlockPos::asLong));
-        return List.copyOf(result);
-    }
-
     static boolean isEmptyRouteCell(ClientLevel level, BlockPos position) {
         if (!level.isLoaded(position) || level.isOutsideBuildHeight(position)
                 || !level.getWorldBorder().isWithinBounds(position)) return false;
+        if (NavigationSafetyContext.protectsMutation(position)
+                || NavigationSafetyContext.forbidsBody(position)) return false;
         BlockState state = level.getBlockState(position);
         if (!state.isAir() || !state.getFluidState().isEmpty()
                 || level.getBlockEntity(position) != null) return false;
         return !protectedTerrain(level, position.below());
+    }
+
+    static boolean isFreeReceiverCell(ClientLevel level, BlockPos position) {
+        return isEmptyRouteCell(level, position)
+                && level.getBlockEntity(position.below()) == null
+                && !protectedTerrain(level, position.below());
     }
 
     private static boolean protectedTerrain(ClientLevel level, BlockPos position) {
@@ -278,33 +266,6 @@ final class CreateMechanicalPlanner {
         return new HashSet<>(route).size() != route.size();
     }
 
-    // ---------------------------------------------------------------------
-    // Progressive loaded-world survey seam
-    // ---------------------------------------------------------------------
-
-    record EndpointSurvey(
-            List<CreateMechanicalPlan.KineticEndpoint> endpoints,
-            int loadedCells,
-            int unloadedCells,
-            int poweredEndpoints,
-            BlockPos nextObservation) {}
-
-    static EndpointSurvey surveyEndpoint(
-            ClientLevel level, CreateMechanicalPower.Endpoint region, boolean poweredOnly) {
-        Scan scan = scanKinetics(level, region, poweredOnly);
-        List<CreateMechanicalPlan.KineticEndpoint> endpoints = scan.candidates().stream()
-                .map(Candidate::endpoint).toList();
-        int powered = (int) endpoints.stream().filter(endpoint -> endpoint.network()
-                && Math.abs(endpoint.speed()) > 0.0001f).count();
-        return new EndpointSurvey(endpoints, scan.loadedCells(), scan.unloadedCells(), powered,
-                scan.nextObservation());
-    }
-
-    static List<BlockPos> surveyFreeReceivers(
-            ClientLevel level, CreateMechanicalPower.Endpoint destination) {
-        return freeReceivers(level, destination);
-    }
-
     enum ObstacleRouteStatus { RUNNING, FOUND, EXHAUSTED }
 
     /**
@@ -315,17 +276,18 @@ final class CreateMechanicalPlanner {
      * stepping vertically and selecting the other horizontal connection axis, not by pretending a
      * single drive can bend an X chain into Z.
      *
-     * <p>The graph is finite from the two user-supplied endpoint regions in X/Y/Z, additionally
-     * bounded by build height and the world border. Loaded transitions verify target emptiness,
-     * support continuity, and at least one first-person placement stance. Unloaded transitions are
-     * provisional and must pass the progressive physical survey. There is no wall-clock,
-     * attempt-count, or total-expansion cutoff.</p>
+     * <p>Each graph instance is one finite physical envelope around the two endpoints. Its owner
+     * discards an exhausted instance and expands the envelope, without a total-distance cutoff,
+     * until Minecraft's build height and world border are covered. Loaded transitions verify
+     * target emptiness, support continuity, and at least one first-person placement stance;
+     * unloaded transitions remain provisional until progressive physical survey.</p>
      */
     static final class ObstacleAwareRouteSearch {
         private enum SearchStep { RUNNING, FOUND, EXHAUSTED }
 
         private record Bounds(
-                int minX, int maxX, int minY, int maxY, int minZ, int maxZ) {
+                int minX, int maxX, int minY, int maxY, int minZ, int maxZ,
+                boolean worldExhausted) {
             boolean contains(BlockPos position) {
                 return position.getX() >= minX && position.getX() <= maxX
                         && position.getY() >= minY && position.getY() <= maxY
@@ -345,6 +307,7 @@ final class CreateMechanicalPlanner {
         private final BlockPos start;
         private final Set<Long> rejectedCells;
         private final Bounds bounds;
+        private final boolean startAllowed;
         private final PriorityQueue<OpenNode> open = new PriorityQueue<>(
                 Comparator.comparingLong(OpenNode::estimate)
                         .thenComparingLong(OpenNode::cost)
@@ -361,19 +324,20 @@ final class CreateMechanicalPlanner {
 
         private ObstacleAwareRouteSearch(
                 ClientLevel level,
-                CreateMechanicalPower.Request request,
                 CreateMechanicalPlan.KineticEndpoint source,
                 CreateMechanicalPlan.KineticEndpoint destination,
                 BlockPos receiver,
-                Set<Long> rejectedCells) {
+                Set<Long> rejectedCells,
+                int envelopePadding) {
             this.level = level;
             this.source = source;
             this.destination = destination;
             this.receiver = receiver.immutable();
             this.start = source.position().relative(source.shaftFace()).immutable();
             this.rejectedCells = Set.copyOf(rejectedCells);
-            this.bounds = bounds(request, start, receiver);
-            if (startPlacementAllowed()) {
+            this.bounds = bounds(level, start, receiver, envelopePadding);
+            this.startAllowed = startPlacementAllowed();
+            if (startAllowed) {
                 addRoot(Direction.Axis.X);
                 addRoot(Direction.Axis.Z);
             }
@@ -393,6 +357,8 @@ final class CreateMechanicalPlanner {
 
         TentativeRoute route() { return route; }
         long progressRevision() { return progressRevision; }
+        boolean worldEnvelopeExhausted() { return bounds.worldExhausted(); }
+        boolean envelopeExpansionMayHelp() { return startAllowed && !bounds.worldExhausted(); }
 
         private void addRoot(Direction.Axis axis) {
             RouteState root = new RouteState(start, axis, null);
@@ -520,40 +486,48 @@ final class CreateMechanicalPlanner {
         }
 
         private static Bounds bounds(
-                CreateMechanicalPower.Request request, BlockPos start, BlockPos receiver) {
-            CreateMechanicalPower.Endpoint source = request.source();
-            CreateMechanicalPower.Endpoint destination = request.destination();
-            int minX = Math.min(Math.min(source.center().getX() - source.searchRadius(),
-                            destination.center().getX() - destination.searchRadius()),
-                    Math.min(start.getX(), receiver.getX()));
-            int maxX = Math.max(Math.max(source.center().getX() + source.searchRadius(),
-                            destination.center().getX() + destination.searchRadius()),
-                    Math.max(start.getX(), receiver.getX()));
-            int minY = Math.min(Math.min(source.center().getY() - source.searchRadius(),
-                            destination.center().getY() - destination.searchRadius()),
-                    Math.min(start.getY(), receiver.getY()));
-            int maxY = Math.max(Math.max(source.center().getY() + source.searchRadius(),
-                            destination.center().getY() + destination.searchRadius()),
-                    Math.max(start.getY(), receiver.getY()));
-            int minZ = Math.min(Math.min(source.center().getZ() - source.searchRadius(),
-                            destination.center().getZ() - destination.searchRadius()),
-                    Math.min(start.getZ(), receiver.getZ()));
-            int maxZ = Math.max(Math.max(source.center().getZ() + source.searchRadius(),
-                            destination.center().getZ() + destination.searchRadius()),
-                    Math.max(start.getZ(), receiver.getZ()));
-            return new Bounds(minX, maxX, minY, maxY, minZ, maxZ);
+                ClientLevel level, BlockPos start, BlockPos receiver, int padding) {
+            int safePadding = Math.max(1, padding);
+            var border = level.getWorldBorder();
+            int worldMinX = (int) Math.ceil(border.getMinX());
+            int worldMaxX = (int) Math.floor(Math.nextDown(border.getMaxX()));
+            int worldMinZ = (int) Math.ceil(border.getMinZ());
+            int worldMaxZ = (int) Math.floor(Math.nextDown(border.getMaxZ()));
+            int worldMinY = level.getMinBuildHeight();
+            int worldMaxY = level.getMaxBuildHeight() - 1;
+            int minX = clampToWorld((long) Math.min(start.getX(), receiver.getX()) - safePadding,
+                    worldMinX, worldMaxX);
+            int maxX = clampToWorld((long) Math.max(start.getX(), receiver.getX()) + safePadding,
+                    worldMinX, worldMaxX);
+            int minY = clampToWorld((long) Math.min(start.getY(), receiver.getY()) - safePadding,
+                    worldMinY, worldMaxY);
+            int maxY = clampToWorld((long) Math.max(start.getY(), receiver.getY()) + safePadding,
+                    worldMinY, worldMaxY);
+            int minZ = clampToWorld((long) Math.min(start.getZ(), receiver.getZ()) - safePadding,
+                    worldMinZ, worldMaxZ);
+            int maxZ = clampToWorld((long) Math.max(start.getZ(), receiver.getZ()) + safePadding,
+                    worldMinZ, worldMaxZ);
+            boolean exhausted = minX == worldMinX && maxX == worldMaxX
+                    && minY == worldMinY && maxY == worldMaxY
+                    && minZ == worldMinZ && maxZ == worldMaxZ;
+            return new Bounds(minX, maxX, minY, maxY, minZ, maxZ, exhausted);
         }
+
+        private static int clampToWorld(long value, int minimum, int maximum) {
+            return (int) Math.max(minimum, Math.min((long) maximum, value));
+        }
+
     }
 
     static ObstacleAwareRouteSearch obstacleAwareRouteSearch(
             ClientLevel level,
-            CreateMechanicalPower.Request request,
             CreateMechanicalPlan.KineticEndpoint source,
             CreateMechanicalPlan.KineticEndpoint destination,
             BlockPos receiver,
-            Set<Long> rejectedCells) {
+            Set<Long> rejectedCells,
+            int envelopePadding) {
         return new ObstacleAwareRouteSearch(
-                level, request, source, destination, receiver, rejectedCells);
+                level, source, destination, receiver, rejectedCells, envelopePadding);
     }
 
     record TentativeRoute(
