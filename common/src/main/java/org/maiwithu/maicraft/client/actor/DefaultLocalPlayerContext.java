@@ -55,6 +55,7 @@ public final class DefaultLocalPlayerContext implements LocalPlayerContext {
     @Override public long controlRevision() { return controlRevision; }
     @Override public long tickRevision() { return tickRevision; }
     @Override public boolean permitsNativeActions() { return permitsNativeActions && isCurrent(); }
+    @Override public boolean mutationAvailable() { return owner.mutationAvailable(this); }
     @Override public boolean isCurrent() { return owner.isCurrent(this); }
 
     void requireSubmissionAuthority() {

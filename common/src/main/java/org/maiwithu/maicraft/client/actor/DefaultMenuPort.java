@@ -102,6 +102,21 @@ public final class DefaultMenuPort implements MenuPort {
     }
 
     @Override
+    public MenuReceipt closeForTaskBoundary(
+            LocalPlayerContext context, int timeoutTicks, String boundaryReason) {
+        requireSubmission(context);
+        if (active != null && !active.terminal()) {
+            active.finish(MenuReceipt.Status.UNCERTAIN,
+                    boundaryReason == null || boundaryReason.isBlank()
+                            ? "the owning task ended before menu confirmation"
+                            : boundaryReason);
+        }
+        // close() intentionally installs a new active receipt. The task may discard its reference,
+        // but ClientActorBoundary.advance() still confirms that close on following ticks.
+        return close(context, timeoutTicks);
+    }
+
+    @Override
     public MenuReceipt poll(LocalPlayerContext context, MenuReceipt receipt) {
         context.requireCurrent();
         requireActive(receipt);
@@ -121,28 +136,66 @@ public final class DefaultMenuPort implements MenuPort {
                     "the active container changed before the submitted click was confirmed");
             return receipt;
         }
-        if (stateChanged || (containerChanged && receipt.allowContainerChange())) {
-            MenuConfirmation.Verdict verdict;
-            try {
-                verdict = receipt.confirmation().observe(context, receipt);
-            } catch (RuntimeException observationFailure) {
-                verdict = MenuConfirmation.Verdict.PENDING;
+        MenuConfirmation.Verdict verdict;
+        try {
+            // Exact postconditions (notably inventory-to-hotbar swaps) can become observable even
+            // when this client menu's stateId does not advance. Always permit positive evidence to
+            // settle the receipt. Negative/divergent evidence remains gated by an observed menu
+            // synchronization below, so an unchanged pre-state during packet latency is not failure.
+            verdict = receipt.confirmation().observe(context, receipt);
+        } catch (RuntimeException observationFailure) {
+            verdict = MenuConfirmation.Verdict.PENDING;
+        }
+        boolean synchronizationObserved = stateChanged
+                || (containerChanged && receipt.allowContainerChange());
+        switch (verdict) {
+            case APPLIED -> {
+                if (synchronizationObserved) {
+                    receipt.finish(MenuReceipt.Status.CONFIRMED_APPLIED,
+                            "the exact synchronized menu postcondition confirmed the transaction");
+                } else if (receipt.appliedStableWithoutRevision(
+                        context.tickRevision(), unacknowledgedStabilityTicks(context))) {
+                    // MultiPlayerGameMode applies menu clicks optimistically before the server can
+                    // correct them. When an accepted click produces no stateId update, absence of
+                    // a correction beyond one observed RTT plus a small tick margin is the only
+                    // available acknowledgement. A transient optimistic frame cannot pass this.
+                    receipt.finish(MenuReceipt.Status.CONFIRMED_APPLIED,
+                            "the exact menu postcondition remained stable beyond the server round-trip window");
+                }
             }
-            switch (verdict) {
-                case APPLIED -> receipt.finish(MenuReceipt.Status.CONFIRMED_APPLIED,
-                        "server-synchronized menu facts confirmed the transaction");
-                case NOT_APPLIED -> receipt.finish(MenuReceipt.Status.CONFIRMED_NOT_APPLIED,
-                        "server-synchronized menu facts confirmed that the transaction was rejected");
-                case DIVERGED -> receipt.finish(MenuReceipt.Status.DIVERGED,
-                        "menu slots diverged from both the exact before and expected after state");
-                case PENDING -> { }
+            case NOT_APPLIED -> {
+                receipt.clearUnacknowledgedApplied();
+                if (synchronizationObserved) {
+                    receipt.finish(MenuReceipt.Status.CONFIRMED_NOT_APPLIED,
+                            "server-synchronized menu facts confirmed that the transaction was rejected");
+                }
             }
+            case DIVERGED -> {
+                receipt.clearUnacknowledgedApplied();
+                if (synchronizationObserved) {
+                    receipt.finish(MenuReceipt.Status.DIVERGED,
+                            "menu slots diverged from both the exact before and expected after state");
+                }
+            }
+            case PENDING -> receipt.clearUnacknowledgedApplied();
         }
         if (!receipt.terminal() && context.tickRevision() >= receipt.deadlineTick()) {
             receipt.finish(MenuReceipt.Status.UNCERTAIN,
                     "the bounded menu confirmation window expired");
         }
         return receipt;
+    }
+
+    /**
+     * Stable positive evidence substitutes for an omitted server slot echo only after enough time
+     * for a rejection/correction to make a round trip. The two-tick margin covers server tick and
+     * client packet scheduling; bounds keep stale/unknown latency data within the receipt window.
+     */
+    private static int unacknowledgedStabilityTicks(LocalPlayerContext context) {
+        var info = context.connection().getPlayerInfo(context.player().getUUID());
+        long latencyMillis = info == null ? 0L : Math.max(0, info.getLatency());
+        int roundTripTicks = (int) Math.min(8L, (latencyMillis + 49L) / 50L);
+        return Math.max(3, Math.min(10, roundTripTicks + 2));
     }
 
     void revokeForBoundary(String reason) {

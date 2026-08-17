@@ -39,8 +39,14 @@ public interface LocalPlayerContext {
     /** True only while this is still the current context on the client thread. */
     boolean isCurrent();
 
-    /** True when automation owns the body and this tick may submit one native mutation. */
+    /** True while automation owns this current body/control epoch. */
     boolean permitsNativeActions();
+
+    /**
+     * True while this actor tick's single native-mutation slot has not been consumed.  Read-only
+     * receipt polling still uses {@link #permitsNativeActions()} after a submission.
+     */
+    boolean mutationAvailable();
 
     default void requireCurrent() {
         if (!isCurrent()) {

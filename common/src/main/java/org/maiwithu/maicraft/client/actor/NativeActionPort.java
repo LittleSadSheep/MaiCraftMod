@@ -12,6 +12,16 @@ public interface NativeActionPort {
 
     NativeActionReceipt cancelBreaking(LocalPlayerContext context, NativeActionReceipt receipt);
 
+    /**
+     * Request cancellation of a break whose task owner is about to disappear.  The actor boundary
+     * performs the physical stop no later than its next tick, before another task may mutate the
+     * body, so cancellation remains safe even when this tick's one mutation was already submitted.
+     */
+    NativeActionReceipt cancelBreakingForTaskBoundary(
+            LocalPlayerContext context,
+            NativeActionReceipt receipt,
+            String boundaryReason);
+
     NativeActionReceipt continueBreaking(LocalPlayerContext context, NativeActionReceipt receipt);
 
     NativeActionReceipt useBlock(
@@ -54,6 +64,21 @@ public interface NativeActionPort {
             InteractionHand hand,
             NativeConfirmation confirmation,
             int timeoutTicks);
+
+    /**
+     * Retire a submitted one-shot effect when its owning task ends before confirmation.
+     *
+     * <p>This does not pretend that the effect was rolled back: the returned receipt is marked
+     * uncertain when its postcondition has not settled yet.  It only releases the serialized
+     * actor slot so a discarded task-local receipt cannot block the next task.  Continuous native
+     * actions ({@link NativeActionReceipt.Kind#BREAK_BLOCK BREAK_BLOCK} and
+     * {@link NativeActionReceipt.Kind#USE_ITEM USE_ITEM}) must be physically stopped through their
+     * dedicated APIs instead.
+     */
+    NativeActionReceipt retireOneShotForTaskBoundary(
+            LocalPlayerContext context,
+            NativeActionReceipt receipt,
+            String boundaryReason);
 
     NativeActionReceipt poll(LocalPlayerContext context, NativeActionReceipt receipt);
 }

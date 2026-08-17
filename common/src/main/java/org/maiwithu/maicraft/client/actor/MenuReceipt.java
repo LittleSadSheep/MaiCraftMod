@@ -20,6 +20,8 @@ public final class MenuReceipt {
     private final MenuConfirmation confirmation;
     private Status status = Status.PENDING;
     private String detail = "awaiting the server-synchronized menu state";
+    /** First tick of an exact positive postcondition not accompanied by menu revision evidence. */
+    private long unacknowledgedAppliedSince = Long.MIN_VALUE;
 
     MenuReceipt(Kind kind, LocalPlayerContext context, int containerId, int beforeStateId,
                 int timeoutTicks, boolean allowContainerChange, MenuConfirmation confirmation) {
@@ -49,6 +51,16 @@ public final class MenuReceipt {
 
     boolean allowContainerChange() { return allowContainerChange; }
     MenuConfirmation confirmation() { return confirmation; }
+    boolean appliedStableWithoutRevision(long tickRevision, int requiredStableTicks) {
+        if (unacknowledgedAppliedSince == Long.MIN_VALUE) {
+            unacknowledgedAppliedSince = tickRevision;
+            return false;
+        }
+        return tickRevision - unacknowledgedAppliedSince >= requiredStableTicks;
+    }
+    void clearUnacknowledgedApplied() {
+        unacknowledgedAppliedSince = Long.MIN_VALUE;
+    }
     void finish(Status status, String detail) {
         if (terminal()) return;
         this.status = status;

@@ -171,6 +171,16 @@ public final class ClientActorBoundary {
                 minecraft.getConnection() == context.connection();
     }
 
+    /**
+     * Whether the active tick still has its single mutation slot. Actor-boundary settlement can
+     * consume it before task dispatch; the dispatcher then waits one tick instead of letting a new
+     * owner discover the consumed slot by exception.
+     */
+    boolean mutationAvailable(DefaultLocalPlayerContext context) {
+        return isCurrent(context)
+                && mutationClaimedTick != tickRevision;
+    }
+
     void claimMutation(DefaultLocalPlayerContext context) {
         if (!isCurrent(context)) throw new IllegalStateException("cannot mutate from a stale context");
         if (mutationClaimedTick == tickRevision) {

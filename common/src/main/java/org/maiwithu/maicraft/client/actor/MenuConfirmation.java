@@ -11,7 +11,12 @@ public interface MenuConfirmation {
     Verdict observe(LocalPlayerContext context, MenuReceipt receipt);
 
     static MenuConfirmation stateChanged() {
-        return (context, receipt) -> Verdict.APPLIED;
+        return (context, receipt) -> {
+            var menu = context.player().containerMenu;
+            return menu.containerId == receipt.containerId()
+                    && menu.getStateId() != receipt.beforeStateId()
+                    ? Verdict.APPLIED : Verdict.PENDING;
+        };
     }
 
     static MenuConfirmation inventorySwap(

@@ -11,6 +11,8 @@ import net.minecraft.world.phys.BlockHitResult;
 /** Default MultiPlayerGameMode action port. Immediate return values are never treated as success. */
 public final class DefaultNativeActionPort implements NativeActionPort {
     private NativeActionReceipt active;
+    /** Non-null while an ownerless break must be physically stopped by {@link #advance}. */
+    private String pendingBreakCancellationReason;
 
     @Override
     public NativeActionReceipt startBreaking(LocalPlayerContext context, BlockHitResult hit, int timeoutTicks) {
@@ -26,7 +28,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                         hit.getBlockPos(), current.level().getBlockState(hit.getBlockPos())),
                 hit.getBlockPos(),
                 hit.getDirection());
-        active = receipt;
+        install(receipt);
         try {
             current.gameMode().startDestroyBlock(hit.getBlockPos(), hit.getDirection());
             current.player().swing(InteractionHand.MAIN_HAND);
@@ -42,7 +44,10 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireActive(receipt, NativeActionReceipt.Kind.BREAK_BLOCK);
         poll(current, receipt);
-        if (receipt.terminal()) return receipt;
+        if (receipt.terminal()) {
+            pendingBreakCancellationReason = null;
+            return receipt;
+        }
         current.claimMutation();
         try {
             current.gameMode().stopDestroyBlock();
@@ -52,6 +57,39 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
                     "native mining cancellation could not be confirmed");
         }
+        pendingBreakCancellationReason = null;
+        return receipt;
+    }
+
+    @Override
+    public NativeActionReceipt cancelBreakingForTaskBoundary(
+            LocalPlayerContext context,
+            NativeActionReceipt receipt,
+            String boundaryReason) {
+        context.requireCurrent();
+        requireActive(receipt, NativeActionReceipt.Kind.BREAK_BLOCK);
+        poll(context, receipt);
+        if (receipt.terminal()) {
+            pendingBreakCancellationReason = null;
+            return receipt;
+        }
+        String reason = boundaryReason == null || boundaryReason.isBlank()
+                ? "the owning task ended before native mining confirmation"
+                : boundaryReason;
+        if (context.mutationAvailable()
+                && context instanceof DefaultLocalPlayerContext current) {
+            current.claimMutation();
+            try {
+                current.gameMode().stopDestroyBlock();
+                receipt.finish(NativeActionReceipt.Status.CANCELLED, reason);
+            } catch (RuntimeException failure) {
+                receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
+                        reason + "; native mining cancellation could not be confirmed");
+            }
+            pendingBreakCancellationReason = null;
+            return receipt;
+        }
+        pendingBreakCancellationReason = reason;
         return receipt;
     }
 
@@ -244,6 +282,30 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     @Override
+    public NativeActionReceipt retireOneShotForTaskBoundary(
+            LocalPlayerContext context,
+            NativeActionReceipt receipt,
+            String boundaryReason) {
+        context.requireCurrent();
+        if (receipt == null) throw new IllegalArgumentException("receipt is required");
+        requireActive(receipt, receipt.kind());
+        if (receipt.kind() == NativeActionReceipt.Kind.BREAK_BLOCK
+                || receipt.kind() == NativeActionReceipt.Kind.USE_ITEM) {
+            throw new IllegalArgumentException(
+                    "continuous native actions require their dedicated physical stop operation");
+        }
+        poll(context, receipt);
+        if (!receipt.terminal()) {
+            String reason = boundaryReason == null || boundaryReason.isBlank()
+                    ? "the owning task ended before native confirmation"
+                    : boundaryReason;
+            receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
+                    reason + "; the submitted one-shot effect may already have applied");
+        }
+        return receipt;
+    }
+
+    @Override
     public NativeActionReceipt poll(LocalPlayerContext context, NativeActionReceipt receipt) {
         context.requireCurrent();
         requireActive(receipt, receipt.kind());
@@ -286,14 +348,20 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         if (active != null && !active.terminal()) {
             active.finish(NativeActionReceipt.Status.UNCERTAIN, reason);
         }
+        pendingBreakCancellationReason = null;
     }
 
     private NativeActionReceipt oneShot(NativeActionReceipt.Kind kind, LocalPlayerContext context,
                                         NativeConfirmation confirmation, int timeoutTicks) {
         NativeActionReceipt receipt = new NativeActionReceipt(
                 kind, context, timeoutTicks, 2, confirmation, null, null);
-        active = receipt;
+        install(receipt);
         return receipt;
+    }
+
+    private void install(NativeActionReceipt receipt) {
+        active = receipt;
+        pendingBreakCancellationReason = null;
     }
 
     private static DefaultLocalPlayerContext requireSubmission(LocalPlayerContext context) {
@@ -306,7 +374,13 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     private void requireIdle() {
         if (active != null && !active.terminal()) {
-            throw new IllegalStateException("a native action is already awaiting confirmation");
+            throw new IllegalStateException(
+                    "a native action is already awaiting confirmation"
+                            + " (kind=" + active.kind()
+                            + ", id=" + active.id()
+                            + ", status=" + active.status()
+                            + ", submitted_tick=" + active.submittedTick()
+                            + ", deadline_tick=" + active.deadlineTick() + ")");
         }
     }
 
@@ -317,8 +391,45 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
     void advance(LocalPlayerContext context) {
         NativeActionReceipt receipt = active;
-        if (receipt != null && !receipt.terminal()) {
+        if (receipt == null || receipt.terminal()) {
+            pendingBreakCancellationReason = null;
+            return;
+        }
+        if (pendingBreakCancellationReason == null) {
             poll(context, receipt);
+            return;
+        }
+
+        poll(context, receipt);
+        if (receipt.terminal()) {
+            pendingBreakCancellationReason = null;
+            return;
+        }
+        if (receipt.kind() != NativeActionReceipt.Kind.BREAK_BLOCK) {
+            receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
+                    "a task-boundary break cancellation no longer owned the active break receipt");
+            pendingBreakCancellationReason = null;
+            return;
+        }
+        if (!(context instanceof DefaultLocalPlayerContext current)
+                || !context.permitsNativeActions()) {
+            receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
+                    pendingBreakCancellationReason
+                            + "; control changed before the physical stop could be submitted");
+            pendingBreakCancellationReason = null;
+            return;
+        }
+        current.claimMutation();
+        try {
+            current.gameMode().stopDestroyBlock();
+            receipt.finish(NativeActionReceipt.Status.CANCELLED,
+                    pendingBreakCancellationReason);
+        } catch (RuntimeException failure) {
+            receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
+                    pendingBreakCancellationReason
+                            + "; native mining cancellation could not be confirmed");
+        } finally {
+            pendingBreakCancellationReason = null;
         }
     }
 }

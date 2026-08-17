@@ -20,5 +20,13 @@ public interface MenuPort {
 
     MenuReceipt close(LocalPlayerContext context, int timeoutTicks);
 
+    /**
+     * End a menu owned by a terminating task. Any older pending menu receipt is first retired so
+     * it cannot prevent the close submission; the returned close receipt remains owned by this
+     * port and will continue to be advanced at the actor boundary even after the task is gone.
+     */
+    MenuReceipt closeForTaskBoundary(
+            LocalPlayerContext context, int timeoutTicks, String boundaryReason);
+
     MenuReceipt poll(LocalPlayerContext context, MenuReceipt receipt);
 }
