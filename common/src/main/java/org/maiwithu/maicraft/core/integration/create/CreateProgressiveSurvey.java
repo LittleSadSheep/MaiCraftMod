@@ -18,8 +18,9 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
 /**
- * Bounded progressive observation: load source, load destination, walk the proposed corridor from
- * destination back to source, and approve it only after every cell and placement stance was seen.
+ * Progressive observation: discover both semantic endpoints from live evidence, walk the proposed
+ * corridor from destination back to source, and approve it only after every cell and placement
+ * stance was seen.
  */
 final class CreateProgressiveSurvey {
     enum Status { RUNNING, READY, FAILED }
@@ -32,8 +33,11 @@ final class CreateProgressiveSurvey {
 
     private static final int CELLS_PER_TICK = 48;
     private static final int ROUTE_EXPANSIONS_PER_TICK = 64;
+    private static final int INITIAL_ROUTE_ENVELOPE_PADDING = 16;
 
     private final CreateMechanicalPower.Request request;
+    private final CreateEndpointEvidenceSearch sourceSearch;
+    private final CreateEndpointEvidenceSearch destinationSearch;
     private final Travel travel = new Travel();
     private Phase phase = Phase.SOURCE;
     private List<CreateMechanicalPlan.KineticEndpoint> sourceCandidates = List.of();
@@ -47,6 +51,7 @@ final class CreateProgressiveSurvey {
     private CreateMechanicalPlanner.TentativeRoute route;
     private CreateMechanicalPlanner.ObstacleAwareRouteSearch obstacleRouteSearch;
     private long absorbedRouteSearchRevision;
+    private int routeEnvelopePadding = INITIAL_ROUTE_ENVELOPE_PADDING;
     private final Set<Long> rejectedRouteCells = new HashSet<>();
     private List<CreateMechanicalPlan.RouteCell> surveyed;
     private Set<BlockPos> routeSet;
@@ -55,18 +60,21 @@ final class CreateProgressiveSurvey {
     private Failure failure;
     private int sourceLoadedCells;
     private int sourceUnloadedCells;
-    private int sourceObservedHighWater;
     private int destinationLoadedCells;
     private int destinationUnloadedCells;
-    private int destinationObservedHighWater;
     private int travelSegments;
     private int rejectedRouteCandidates;
     private boolean sawRouteCandidate;
     private String lastCorridorRejectionDetail;
     private long progressRevision;
+    private int authorizedEndpointFrontiers;
+    private BlockPos activeEndpointObservation;
 
     CreateProgressiveSurvey(CreateMechanicalPower.Request request) {
         this.request = request;
+        sourceSearch = new CreateEndpointEvidenceSearch(request.source(), true, false);
+        destinationSearch = new CreateEndpointEvidenceSearch(
+                request.destination(), false, request.allowFreeReceiver());
     }
 
     Status tick(LocalPlayerContext context) {
@@ -77,7 +85,7 @@ final class CreateProgressiveSurvey {
             case SOURCE -> surveySource(context);
             case DESTINATION -> surveyDestination(context);
             case ENDPOINT_PAIRS -> beginEndpointPair(context.level());
-            case ROUTE_SEARCH -> tickObstacleRouteSearch();
+            case ROUTE_SEARCH -> tickObstacleRouteSearch(context.level());
             case CORRIDOR -> surveyCorridor(context);
             case RETURN_SOURCE -> returnSource(context);
             default -> Status.FAILED;
@@ -96,24 +104,48 @@ final class CreateProgressiveSurvey {
         return travel.hasRecentPhysicalProgress(graceTicks);
     }
     boolean planningInFlight() { return travel.planningInFlight(); }
-    long progressRevision() { return progressRevision + travel.progressRevision(); }
+    long progressRevision() {
+        return progressRevision + travel.progressRevision()
+                + sourceSearch.progressRevision() + destinationSearch.progressRevision();
+    }
 
     void pause() { travel.pause(); }
+    void authorizeNextEndpointFrontier() {
+        authorizedEndpointFrontiers++;
+        failure = null;
+        markProgress();
+    }
     void stop() {
         travel.stop();
         obstacleRouteSearch = null;
     }
 
     private Status surveySource(LocalPlayerContext context) {
-        CreateMechanicalPlanner.EndpointSurvey survey = CreateMechanicalPlanner.surveyEndpoint(
-                context.level(), request.source(), true);
-        sourceObservedHighWater = recordObservedCells(
-                sourceObservedHighWater, survey.loadedCells());
-        sourceLoadedCells = survey.loadedCells();
-        sourceUnloadedCells = survey.unloadedCells();
-        if (survey.unloadedCells() > 0) {
+        if (context.level().isOutsideBuildHeight(request.source().center())
+                || !context.level().getWorldBorder().isWithinBounds(request.source().center())) {
+            return fail("source_anchor_outside_world",
+                    "the remembered semantic source anchor is outside the current world boundary",
+                    FailureType.TARGET_LOST,
+                    List.of("remember_source_again", "choose_other_source", "cancel"));
+        }
+        CreateEndpointEvidenceSearch.Status searchStatus = sourceSearch.tick(context.level());
+        CreateEndpointEvidenceSearch.Snapshot survey = sourceSearch.snapshot();
+        sourceLoadedCells = survey.observedChunks();
+        sourceUnloadedCells = survey.missingChunks();
+        if (searchStatus == CreateEndpointEvidenceSearch.Status.NEEDS_OBSERVATION) {
             BlockPos observation = survey.nextObservation() == null
                     ? request.source().center() : survey.nextObservation();
+            if (context.level().isLoaded(request.source().center())) {
+                if (!observation.equals(activeEndpointObservation)) {
+                    if (authorizedEndpointFrontiers <= 0) {
+                        return pauseForEndpointEvidence(
+                                "source_needs_exploration",
+                                "the currently loaded source evidence contains no compatible powered endpoint; further first-person exploration needs an explicit continue decision");
+                    }
+                    authorizedEndpointFrontiers--;
+                    activeEndpointObservation = observation.immutable();
+                }
+            }
             return travelToward(context, observation, 2,
                     "source_unreachable",
                     "could not reach the next evidence frontier for the semantic source");
