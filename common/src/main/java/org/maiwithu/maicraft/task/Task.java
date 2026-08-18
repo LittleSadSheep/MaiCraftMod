@@ -56,6 +56,20 @@ public interface Task {
     void stop(LocalPlayer companion, StopReason why);
 
     /**
+     * Whether this task has already submitted a native effect whose receipt and physical cleanup
+     * must be driven to a terminal state before a semantic parent may cancel it merely because the
+     * parent's final fact became true.
+     *
+     * <p>This is deliberately a narrow terminal barrier, not permission to finish arbitrary extra
+     * work. A task returns {@code true} only after the effect is committed/in flight (for example,
+     * a crafting-result click followed by closing its menu). Parents may then keep ticking that
+     * same child; ordinary replacement and survival preemption still use {@link #stop}.
+     */
+    default boolean mustSettleBeforeSatisfiedCancellation() {
+        return false;
+    }
+
+    /**
      * 交回给模型的结果信封。只有走到终态才有意义——常驻任务永远不会被调到。
      *
      * <p>任务必须有返回值。没有的话,超时兜底就得每一层自己发明一套,同一个问题
