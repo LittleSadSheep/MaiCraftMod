@@ -7,7 +7,9 @@
     "FishingHookAccessor",
     "MenuDataSlotsAccessor"
   ],
-  "client": [],
+  "client": [
+    "ClientLevelBlockChangeMixin"
+  ],
   "server": [],
   "injectors": {
     "defaultRequire": 1
