@@ -19,8 +19,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CraftingTableBlock;
+import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
+import org.maiwithu.maicraft.core.task.build.FirstPersonPlacementProbe;
 
 /**
  * Resolves the physical 3x3 crafting prerequisite without exposing body details to the LLM.
@@ -105,18 +107,14 @@ public final class CraftingWorkstationCoordinator {
         } finally {
             TargetIndex.unregister(player.clientLevel, tables);
         }
-        if (station != null) {
-            if (withinReach(player, station)) {
-                return new PlanningSnapshot(
-                        CraftPlanCost.Surface.READY, station,
-                        "a loaded crafting table is within first-person reach");
-            }
+        if (station != null && withinReach(player, station)) {
             return new PlanningSnapshot(
-                    CraftPlanCost.Surface.PREPARABLE, station,
-                    "an existing loaded crafting table can be approached");
+                    CraftPlanCost.Surface.READY, station,
+                    "a loaded crafting table is within first-person reach");
         }
-        if (carriedTable(player) != null) {
-            BlockPos site = placementSite(player, Set.of());
+        Block carried = carriedTable(player);
+        if (carried != null) {
+            BlockPos site = placementSite(player, Set.of(), carried);
             if (site != null) {
                 return new PlanningSnapshot(
                         CraftPlanCost.Surface.PREPARABLE, null,
@@ -126,7 +124,12 @@ public final class CraftingWorkstationCoordinator {
                     CraftPlanCost.Surface.UNAVAILABLE, null,
                     "a crafting table is carried, but no verified nearby placement cell is available");
         }
-        BlockPos site = placementSite(player, Set.of());
+        if (station != null) {
+            return new PlanningSnapshot(
+                    CraftPlanCost.Surface.PREPARABLE, station,
+                    "an existing loaded crafting table can be approached");
+        }
+        BlockPos site = placementSite(player, Set.of(), Blocks.CRAFTING_TABLE);
         if (site == null) {
             return new PlanningSnapshot(
                     CraftPlanCost.Surface.UNAVAILABLE, null,
@@ -142,39 +145,51 @@ public final class CraftingWorkstationCoordinator {
     /** Resolve the next bounded physical step from fresh client facts. */
     public Directive next(LocalPlayer player, BlockPos preferredStation) {
         start(player);
-        if (usableTable(player, preferredStation)
-                && !rejectedStations.contains(preferredStation.asLong())) {
-            Block preferred = player.level().getBlockState(preferredStation).getBlock();
-            return withinReach(player, preferredStation)
-                    ? new Directive(Action.READY, preferredStation, preferred,
-                            "the selected crafting table is within reach")
-                    : new Directive(Action.MOVE_TO_EXISTING, preferredStation, preferred,
-                            "approach the selected loaded crafting table");
+        BlockPos preferred = usableTable(player, preferredStation)
+                        && !rejectedStations.contains(preferredStation.asLong())
+                ? preferredStation : null;
+        BlockPos existing = nearestIndexedTable(player, rejectedStations, indexedTables);
+
+        // Conserve a carried table when a live station is already at hand.
+        if (preferred != null && withinReach(player, preferred)) {
+            Block preferredBlock = player.level().getBlockState(preferred).getBlock();
+            return new Directive(Action.READY, preferred, preferredBlock,
+                    "the selected crafting table is within reach");
+        }
+        if (existing != null && withinReach(player, existing)) {
+            Block existingBlock = player.level().getBlockState(existing).getBlock();
+            return new Directive(Action.READY, existing, existingBlock,
+                    "a loaded crafting table is within reach");
         }
 
-        BlockPos existing = nearestIndexedTable(player, rejectedStations, indexedTables);
+        // If the nearest known table needs a non-trivial journey, a table already carried is the
+        // safer and cheaper physical surface. Placement remains fully first-person and verified.
+        Block carried = carriedTable(player);
+        if (carried != null) {
+            BlockPos site = placementSite(player, rejectedSites, carried);
+            if (site != null) {
+                return new Directive(Action.PLACE_CARRIED, site, carried,
+                        "place the carried crafting table through first-person building");
+            }
+        }
+
+        if (preferred != null) {
+            Block preferredBlock = player.level().getBlockState(preferred).getBlock();
+            return new Directive(Action.MOVE_TO_EXISTING, preferred, preferredBlock,
+                    "approach the selected loaded crafting table");
+        }
         if (existing != null) {
             Block existingBlock = player.level().getBlockState(existing).getBlock();
-            return withinReach(player, existing)
-                    ? new Directive(Action.READY, existing, existingBlock,
-                            "a loaded crafting table is within reach")
-                    : new Directive(Action.MOVE_TO_EXISTING, existing, existingBlock,
-                            "approach the nearest loaded crafting table");
+            return new Directive(Action.MOVE_TO_EXISTING, existing, existingBlock,
+                    "approach the nearest loaded crafting table");
         }
-
-        Block carried = carriedTable(player);
         if (carried == null) {
             return new Directive(Action.UNAVAILABLE, null,
                     "no loaded or carried crafting table is available; semantic acquisition must "
                             + "materialize one before physical placement");
         }
-        BlockPos site = placementSite(player, rejectedSites);
-        if (site == null) {
-            return new Directive(Action.UNAVAILABLE, null,
-                    "no verified nearby cell can receive the carried crafting table");
-        }
-        return new Directive(Action.PLACE_CARRIED, site, carried,
-                "place the carried crafting table through first-person building");
+        return new Directive(Action.UNAVAILABLE, null,
+                "no verified nearby cell can receive the carried crafting table");
     }
 
     /** Reject only the failed physical route; another table or placement site may still work. */
@@ -269,22 +284,30 @@ public final class CraftingWorkstationCoordinator {
                 .toList();
     }
 
-    private static BlockPos placementSite(LocalPlayer player, Set<Long> rejected) {
-        BlockPos origin = player.blockPosition();
+    /** Semantic item alternatives that can materialize an ordinary 3x3 crafting surface. */
+    public static List<ResourceLocation> prerequisiteItemIds() {
+        return craftingTableItemIds();
+    }
+
+    private static BlockPos placementSite(
+            LocalPlayer player, Set<Long> rejected, Block workstation) {
+        BlockPos origin = PathExecutor.playerFeet(player);
         for (int radius = 1; radius <= PLACEMENT_RADIUS; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
                     if (Math.abs(dx) != radius && Math.abs(dz) != radius) continue;
                     for (int dy = -2; dy <= 2; dy++) {
                         BlockPos cell = origin.offset(dx, dy, dz);
-                        if (!rejected.contains(cell.asLong()) && validSite(player, cell)) return cell;
+                        if (!rejected.contains(cell.asLong())
+                                && validSite(player, cell, workstation)) return cell;
                     }
                     int surfaceY = ClientSurfaceHeight.motionBlockingNoLeaves(
                             player.clientLevel,
                             origin.getX() + dx, origin.getZ() + dz);
                     BlockPos surface = new BlockPos(
                             origin.getX() + dx, surfaceY, origin.getZ() + dz);
-                    if (!rejected.contains(surface.asLong()) && validSite(player, surface)) {
+                    if (!rejected.contains(surface.asLong())
+                            && validSite(player, surface, workstation)) {
                         return surface;
                     }
                 }
@@ -293,15 +316,31 @@ public final class CraftingWorkstationCoordinator {
         return null;
     }
 
-    private static boolean validSite(LocalPlayer player, BlockPos cell) {
+    private static boolean validSite(
+            LocalPlayer player, BlockPos cell, Block workstation) {
+        BlockPos feet = PathExecutor.playerFeet(player);
         if (!player.level().isLoaded(cell)
                 || !player.level().getBlockState(cell).canBeReplaced()
+                || !player.level().getFluidState(cell).isEmpty()
+                || cell.equals(feet)
+                || cell.equals(feet.above())
                 || player.getBoundingBox().intersects(new AABB(cell))) {
+            return false;
+        }
+        // A workstation is not merely a placeable cube: the player must be able to look down at
+        // and use it after placement. Avoid wedging temporary stations directly under leaves,
+        // logs, ceilings or fluid while still allowing ordinary cave-floor placement.
+        BlockPos clearance = cell.above();
+        if (!player.level().isLoaded(clearance)
+                || !player.level().getBlockState(clearance)
+                        .getCollisionShape(player.level(), clearance).isEmpty()
+                || !player.level().getFluidState(clearance).isEmpty()) {
             return false;
         }
         BlockPos support = cell.below();
         return player.level().isLoaded(support)
                 && player.level().getBlockState(support)
-                        .isFaceSturdy(player.level(), support, Direction.UP);
+                        .isFaceSturdy(player.level(), support, Direction.UP)
+                && FirstPersonPlacementProbe.hasExistingStance(player, workstation, cell);
     }
 }

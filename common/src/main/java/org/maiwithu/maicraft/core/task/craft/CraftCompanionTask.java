@@ -1,11 +1,14 @@
 package org.maiwithu.maicraft.core.task.craft;
 
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.CraftingContainer;
@@ -26,10 +29,14 @@ import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.act.Interaction;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
@@ -62,6 +69,12 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private CraftingWorkstationCoordinator.Directive surfaceDirective;
     private int surfaceChildSerial;
     private boolean stationPlaced;
+    private Vec3 stationAimPoint;
+    private BlockPos stanceStation;
+    private BlockPos surfaceMoveStance;
+    private final Set<Long> rejectedStationStances = new LinkedHashSet<>();
+    private String surfaceFailureCode;
+    private String surfaceFailureDetail;
 
     public CraftCompanionTask(LocalPlayer player, CraftTaskRecord record) { super(player, record); }
 
