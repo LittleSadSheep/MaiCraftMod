@@ -44,6 +44,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             new org.maiwithu.maicraft.core.task.FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private boolean itemSelected;
+    /** Stable visible point selected from the target outline; avoids centre-only false occlusion. */
+    private Vec3 aimPoint;
     /** 按键前的世界快照,收尾时对账出"真发生了什么"(见 {@link PressReceipt})。 */
     private PressReceipt receipt;
     private java.util.List<String> changes = List.of();
@@ -103,12 +105,21 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 itemSelected = true;
             }
             if (r.aim != null) {
-                Vec3 aim = Vec3.atCenterOf(r.aim);
-                InputDriver.lookAt(player, aim);
+                if (aimPoint == null) {
+                    var state = player.level().getBlockState(r.aim);
+                    var visible = state.isAir()
+                            ? null
+                            : FirstPersonInteractionTargeting.visibleBlockHit(
+                                    player.level(), player, player.getEyePosition(), r.aim, REACH);
+                    aimPoint = visible == null ? Vec3.atCenterOf(r.aim) : visible.getLocation();
+                }
+                // A use interaction must not inherit placement sneak from the preceding task.
+                InputDriver.halt(player);
+                InputDriver.lookAt(player, aimPoint);
                 // requestLook is applied/rate-limited at endTick. Always cross that boundary and
                 // wait for the actual camera vector to converge before trusting nativeRaytrace;
                 // otherwise the old view can turn ordinary camera lag into a false obstruction.
-                if (!aimConvergence.ready(player, aim.subtract(player.getEyePosition()))) {
+                if (!aimConvergence.ready(player, aimPoint.subtract(player.getEyePosition()))) {
                     return TaskState.RUNNING;
                 }
             }
@@ -226,6 +237,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         if (interaction != null) interaction.stop();
         selection.reset();
         aimConvergence.reset();
+        aimPoint = null;
         super.cleanup();
     }
 
