@@ -279,11 +279,22 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
         Level level = player.level();
 
-        // 一次破坏的战果必须先收口，才允许挑下一颗目标。这样掉落实体差集、
-        // 背包增量与破坏回执始终一一对应，Silk Touch/Fortune/模组掉落也由
-        // 真实结果自然决定，而不是由方块物品名猜。
-        if (collectingDrops) {
-            return collectConfirmedBreakDrops();
+        // Pickup owns the body even if a second target has just started breaking.
+        // This matters for first-person execution: an en-route target can disappear,
+        // its item can synchronize one tick later, and a new reachable target may
+        // already have latched the digger. Cancel that partial swing and collect the
+        // completed physical result before doing more destructive work.
+        observeNavigationBreakOrigins();
+        long tDrops = NavProfiler.begin();
+        drops = droppedItems();
+        NavProfiler.end("mine.drops", tDrops);
+        if (!drops.isEmpty()) {
+            if (activeTarget != null) {
+                digger.cancel();
+                activeTarget = null;
+                clearNoShot();
+            }
+            return collectDrops();
         }
 
         // Maintain the ore list every tick — INCLUDING while a dig below is latched:
@@ -296,36 +307,27 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         maybeQuery();
         NavProfiler.end("mine.upkeep", tUpkeep);
 
-        // 0) Continue an in-progress dig, locked onto its block (no re-selection)
-        //    until it breaks or drifts out of reach.
-        BlockPos digging = digger.current();
-        if (digging != null) {
-            if (level.getBlockState(digging).isAir()) {
-                // Once air, BlockDigger's ordinary BlockPos entry cannot raycast the
-                // vanished block to poll its now-terminal receipt. ClientActorBoundary
-                // advances that receipt before this task tick; wait the same two stable
-                // revisions, then deliver it here only if native destruction was truly
-                // observed (not while a tool-selection receipt was still pending).
-                if (nativeBreakObserved && evidencePos != null && evidencePos.equals(digging)
-                        && ++confirmedAirTicks >= 2) {
-                    digger.cancel();
-                    finishConfirmedTargetBreak(digging);
-                } else if (!nativeBreakObserved) {
-                    digger.cancel();
-                    clearBreakEvidence();
-                }
+        // 0) Continue one requested target until it breaks or becomes unworkable.
+        // BlockDigger.current() is the effective cell and may temporarily be an
+        // occluder, so never replace the semantic target with that implementation detail.
+        if (activeTarget != null) {
+            if (nav != null) {
+                nav.pause();
+            }
+            BlockPos effective = digger.current();
+            if (effective != null && level.getBlockState(effective).isAir()) {
+                acceptDigResult(activeTarget,
+                        digger.settleGone(effective.equals(activeTarget)));
                 return TaskState.RUNNING;
             }
-            if (!reachable(digging)) {
+            if (level.getBlockState(activeTarget).isAir()) {
                 digger.cancel();
-                clearBreakEvidence();
-            } else {
-                if (nav != null) {
-                    nav.pause();   // stand still for the dig; goal/path/in-flight search stay warm
-                }
-                mineProgress(digging);
+                knownOres.remove(activeTarget);
+                activeTarget = null;
                 return TaskState.RUNNING;
             }
+            mineProgress(activeTarget);
+            return TaskState.RUNNING;
         }
 
         // 1) Mine any target we can already reach + see from here (no pathing) —
@@ -340,24 +342,25 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (nav != null) {
                 nav.pause();
             }
+            activeTarget = reachable.immutable();
             mineProgress(reachable);
             return TaskState.RUNNING;
         }
 
-        // 2) Head for the ore field, arriving when a shaft opens up. The target set is
-        //    sacred to navigation: only this task's BlockDigger may break a requested
-        //    target, otherwise there is no receipt/evidence boundary for its loot.
+        // 2) Head for the ore field. Navigation may break target cells while executing
+        //    a safe terrain-modifying movement; any resulting matching entity is found
+        //    next tick and takes the exclusive pickup branch above.
         if (!knownOres.isEmpty()) {
             branchTicks = 0;
             TaskState stalled = stalledOut();
             if (stalled != null) {
                 return stalled;
             }
-            if (nav == null || navIsBranch) {
+            if (nav == null || navIsBranch || navIsDrop) {
                 stopNav();
-                // Compiled front door: one composite over every known target, with those target
-                // cells sacred. Navigation can terraform its approach, but requested targets are
-                // broken only by mineProgress so every drop has a receipt-bound evidence round.
+                // Compiled front door: one composite over every known target stance.
+                // A route may chop a target on the way past; its matching native result
+                // is detected next tick and moved into the exclusive pickup branch.
                 // Revalidating: the ore field changes every few ticks (mined cells pruned,
                 // rescans merging, unworkable cells trimming), so hand the freshly compiled goal to
                 // the engine EVERY tick — the current segment is kept unless its destination
@@ -367,6 +370,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 nav = PlayerNav.toRevalidating(player, this::oreFieldCompiled, MINE_SPEED,
                         () -> reachableTarget() != null, PlayerNav.ContextProvider.TERRAFORM);
                 navIsBranch = false;
+                navIsDrop = false;
             }
             switch (nav.tick()) {
                 case RUNNING -> { return TaskState.RUNNING; }
@@ -385,7 +389,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     if (reachableTarget() == null && !knownOres.isEmpty()) {
                         org.maiwithu.maicraft.core.Constants.LOG.debug(
                                 "[maicraft-task] mine ARRIVED 但够不到 feet={} nearestOre={} —— 重规划",
-                                player.blockPosition().toShortString(), nearestOreInfo());
+                                feet().toShortString(), nearestOreInfo());
                         stopNav();
                     }
                     return TaskState.RUNNING;   // a reachable shaft is handled next tick
@@ -437,9 +441,10 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         //    Default: stop here — only the
         //    opt-in explore mode branch-mines outward for more. So
-        //    finish with whatever we gathered (the tool's contract: "fewer than count
-        //    in range still succeeds"), rather than running off across the world.
+        //    report the verified partial inventory fact rather than running off
+        //    across the world or claiming a vanished block as gathered output.
         if (!EXPLORE_FOR_BLOCKS) {
+            if (unreachableDropCount > 0) return unreachableDropFailure();
             if (r.getMined() > 0) {
                 progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
                 fail(progressNote, FailureType.MINED_OUT);
@@ -450,10 +455,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
         // 3b) Opt-in explore — branch-mine outward (bounded) to dig fresh tunnel and expose more.
         if (branchPoint == null) {
-            branchPoint = player.blockPosition();
+            branchPoint = feet();
             branchY = branchPoint.getY();
         }
         if (++branchTicks > MAX_BRANCH_TICKS) {
+            if (unreachableDropCount > 0) return unreachableDropFailure();
             if (r.getMined() > 0) {
                 progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
                 fail(progressNote, FailureType.MINED_OUT);
@@ -476,16 +482,21 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     // ---- goals ----
 
-    /** The whole mining objective, compiled as a sacred get-to-block composite.
-     *  Navigation may terraform unrelated terrain, but it may not consume a listed
-     *  target behind this task's back: target breaks need the BlockDigger receipt and
-     *  per-break drop snapshot below. */
+    /** The ore-only objective. Loose results are deliberately excluded: once an
+     *  item exists, {@link #collectDrops()} owns movement until that result settles. */
     private GoalCompiler.Compiled oreFieldCompiled() {
         if (knownOres.isEmpty()) {
             // Degenerate frame (targets vanished between ticks): stand where we are.
-            return GoalCompiler.standOn(player.blockPosition());
+            return GoalCompiler.standOn(feet());
         }
-        return GoalCompiler.anyOf(new ArrayList<>(knownOres));
+        return GoalCompiler.mineField(
+                new ArrayList<>(knownOres), List.of());
+    }
+
+    /** Exact walk-over cells for loose items only. */
+    private GoalCompiler.Compiled dropFieldCompiled() {
+        if (drops.isEmpty()) return GoalCompiler.standOn(feet());
+        return GoalCompiler.mineField(List.of(), new ArrayList<>(drops));
     }
 
 
@@ -521,6 +532,197 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                         == net.minecraft.world.level.block.Blocks.BEDROCK
                 && ctx.get(pos.getX(), pos.getY() - 1, pos.getZ()).getBlock()
                         == net.minecraft.world.level.block.Blocks.BEDROCK);
+    }
+
+    /** Matching loose items worth walking over for native pickup. A freshly
+     *  broken target cell remains a temporary member while the server creates its
+     *  item entity. Raw mine learns result types only from an item or inventory
+     *  increase observed during one of those direct-break windows. */
+    private List<BlockPos> droppedItems() {
+        Level level = player.level();
+        long now = level.getGameTime();
+        anticipatedDrops.values().removeIf(expiry -> expiry < now);
+        pendingPathBreaks.values().removeIf(expiry -> expiry < now);
+
+        if (r.progressItems.isEmpty() && !anticipatedDrops.isEmpty()) {
+            learnRawInventoryResults();
+        }
+
+        AABB box = new AABB(feet()).inflate(128);
+        Set<BlockPos> out = new LinkedHashSet<>();
+        Set<BlockPos> materializedOrigins = new HashSet<>();
+        Set<Integer> liveIds = new HashSet<>();
+        for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class, box)) {
+            int id = entity.getId();
+            liveIds.add(id);
+            BlockPos p = entity.blockPosition();
+            Item item = entity.getItem().getItem();
+
+            if (attributedDropIds.contains(id)) {
+                if (!unreachableDropIds.contains(id) && dropItems.contains(item)) out.add(p);
+                continue;
+            }
+
+            boolean nearConfirmedOrigin = nearAnticipatedDrop(p);
+            boolean nearPendingPathOrigin = nearPendingPathBreak(p);
+            Integer oldCount = preexistingDropCounts.get(id);
+            if (nearConfirmedOrigin) {
+                if (oldCount == null) {
+                    // Ordinary block loot has no thrower. A resolved owner proves this is a
+                    // player/entity-thrown stack that merely entered the break window, so it
+                    // cannot be claimed as this mining task's result.
+                    if (entity.getOwner() != null) {
+                        preexistingDropCounts.put(id, entity.getItem().getCount());
+                        continue;
+                    }
+                    if (r.progressItems.isEmpty()) dropItems.add(item);
+                    if (dropItems.contains(item)) {
+                        attributedDropIds.add(id);
+                        if (!unreachableDropIds.contains(id)) out.add(p);
+                        collectNearbyOrigins(p, materializedOrigins);
+                        continue;
+                    }
+                } else if (entity.getItem().getCount() > oldCount) {
+                    // A new block drop merged into a stack that predates this task. Walking
+                    // over it would also take the old/player-owned portion, so do not collect.
+                    if (ambiguousMergedDropIds.add(id)) ambiguousMergedDropCount++;
+                    preexistingDropCounts.put(id, entity.getItem().getCount());
+                    collectNearbyOrigins(p, materializedOrigins);
+                }
+            }
+
+            // While a path break is awaiting its native ledger, leave nearby new ids
+            // unclassified. Once confirmed they become attributed; if confirmation
+            // never arrives, the bounded pending origin expires and they become baseline.
+            if (!nearPendingPathOrigin) {
+                preexistingDropCounts.put(id, entity.getItem().getCount());
+            }
+        }
+        attributedDropIds.removeIf(id -> !liveIds.contains(id));
+        anticipatedDrops.keySet().removeAll(materializedOrigins);
+        for (BlockPos p : anticipatedDrops.keySet()) {
+            out.add(p);
+        }
+        return new ArrayList<>(out);
+    }
+
+    /**
+     * Walk over matching loose results before selecting another block. Arrival alone
+     * is not success: the enclosing task still reads its final count exclusively from
+     * the synchronized main inventory. A truly unreachable entity is skipped by id so
+     * another source can satisfy the request instead of being starved forever.
+     */
+    private TaskState collectDrops() {
+        ItemEntity close = nearestLiveDrop();
+        if (close != null && insideNativePickupEnvelope(close)) {
+            if (nav != null) nav.pause();
+            if (close.hasPickUpDelay()) {
+                dropCloseTicks = 0;
+                return TaskState.RUNNING;
+            }
+            if (++dropCloseTicks >= DROP_CLOSE_WAIT_TICKS) {
+                fail("reached the mined drop, but the authoritative inventory never accepted it; "
+                                + "the main inventory may be full",
+                        FailureType.NO_SPACE);
+                return TaskState.FAILED;
+            }
+            return TaskState.RUNNING;
+        }
+        dropCloseTicks = 0;
+
+        if (nav == null || !navIsDrop) {
+            stopNav();
+            nav = PlayerNav.toRevalidating(player, this::dropFieldCompiled, MINE_SPEED,
+                    () -> drops.isEmpty(), PlayerNav.ContextProvider.TERRAFORM);
+            navIsDrop = true;
+        }
+        return switch (nav.tick()) {
+            case RUNNING -> TaskState.RUNNING;
+            case ARRIVED -> {
+                nav.pause();
+                yield TaskState.RUNNING;
+            }
+            case FAILED -> {
+                ItemEntity unreachable = nearestLiveDrop();
+                if (unreachable != null && unreachableDropIds.add(unreachable.getId())) {
+                    unreachableDropCount++;
+                    progressNote = "left " + unreachableDropCount
+                            + " mined drop(s) unreachable and continued with another source";
+                }
+                // If only an anticipated cell exists, there is no entity to condemn:
+                // release this route and let the bounded synchronization window expire.
+                stopNav();
+                yield TaskState.RUNNING;
+            }
+        };
+    }
+
+    private ItemEntity nearestLiveDrop() {
+        if (dropItems.isEmpty() || attributedDropIds.isEmpty()) return null;
+        AABB box = new AABB(feet()).inflate(128);
+        return player.level().getEntitiesOfClass(ItemEntity.class, box).stream()
+                .filter(entity -> !entity.isRemoved())
+                .filter(entity -> attributedDropIds.contains(entity.getId()))
+                .filter(entity -> !unreachableDropIds.contains(entity.getId()))
+                .filter(entity -> dropItems.contains(entity.getItem().getItem()))
+                .min(Comparator.comparingDouble(player::distanceToSqr))
+                .orElse(null);
+    }
+
+    /** Mirror the broad collision envelope in which vanilla invokes item pickup,
+     *  rather than treating an arbitrary radial distance as "close enough". */
+    private boolean insideNativePickupEnvelope(ItemEntity item) {
+        return player.getBoundingBox().inflate(1.0).intersects(item.getBoundingBox());
+    }
+
+    /** A direct block drop spawns at its broken cell and may drift a little before
+     *  the client observes it. This is only a raw-mine type-discovery fallback. */
+    private boolean nearAnticipatedDrop(BlockPos p) {
+        return anticipatedDrops.keySet().stream()
+                .anyMatch(origin -> origin.distSqr(p) <= 9);
+    }
+
+    private boolean nearPendingPathBreak(BlockPos p) {
+        return pendingPathBreaks.keySet().stream()
+                .anyMatch(origin -> origin.distSqr(p) <= 9);
+    }
+
+    private void collectNearbyOrigins(BlockPos p, Set<BlockPos> output) {
+        for (BlockPos origin : anticipatedDrops.keySet()) {
+            if (origin.distSqr(p) <= 9) output.add(origin);
+        }
+    }
+
+    private void snapshotPreexistingDrops() {
+        AABB box = new AABB(feet()).inflate(128);
+        for (ItemEntity entity : player.level().getEntitiesOfClass(ItemEntity.class, box)) {
+            preexistingDropCounts.put(entity.getId(), entity.getItem().getCount());
+        }
+    }
+
+    /** Bind target air transitions to confirmed native breaks made by the active
+     *  path executor. A vanished target without a corresponding ledger increment
+     *  expires as unowned evidence and never authorizes pickup. */
+    private void observeNavigationBreakOrigins() {
+        long now = player.level().getGameTime();
+        for (var it = watchedTargetCells.iterator(); it.hasNext();) {
+            BlockPos target = it.next();
+            if (!player.level().getBlockState(target).isAir()) continue;
+            if (target.equals(activeTarget)) continue;
+            it.remove();
+            if (!anticipatedDrops.containsKey(target) && nav != null) {
+                pendingPathBreaks.putIfAbsent(target.immutable(), now + DROP_LOITER_TICKS);
+            }
+        }
+
+        if (nav == null) return;
+        var iterator = pendingPathBreaks.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<BlockPos, Long> entry = iterator.next();
+            if (!nav.ledger().broke(entry.getKey())) continue;
+            anticipatedDrops.put(entry.getKey(), Math.max(entry.getValue(), now + DROP_LOITER_TICKS));
+            iterator.remove();
+        }
     }
 
     /**
