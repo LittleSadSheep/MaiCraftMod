@@ -535,14 +535,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      * The in-place mining pick: the nearest known target the eyes can ACTUALLY hit from where the body
      * stands right now ({@link #reachable}: centre + exposed face points, within block reach, nothing
      * solid in the way) — mined on the spot, no pathing. Column and height don't matter; hittability
-     * does. The one hard exception is the support cell directly under the feet — never dig out our own
-     * floor. Anything the eyes can't hit from here is left to the navigator (walk to a stance, pillar
-     * up, etc.).
+     * does. The support cell directly under the body is also eligible when the cell below it is a
+     * loaded, dry, standable floor: breaking it is then the same safe one-block descent used by the
+     * movement graph. If the landing floor is liquid, empty, unloaded, or otherwise unwalkable, the
+     * support target stays with navigation/side mining instead.
      */
     private BlockPos reachableTarget() {
         if (!player.onGround()) return null;
         Level level = player.level();
-        BlockPos feet = player.blockPosition();
+        BlockPos feet = feet();
         BlockPos support = feet.below();
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
@@ -550,7 +551,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (ore.distSqr(feet) > IN_PLACE_FILTER_SQR) {
                 break;   // sorted nearest-first — everything after this is farther still
             }
-            if (ore.equals(support) || level.getBlockState(ore).isAir()) {
+            if ((ore.equals(support) && !safeSupportDescent(level, support))
+                    || level.getBlockState(ore).isAir()) {
                 continue;
             }
             double d = ore.distSqr(feet.above());
@@ -561,6 +563,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             best = ore;
         }
         return best;
+    }
+
+    /** Live-world counterpart of {@code MovementDownward}'s landing-floor guard. */
+    private static boolean safeSupportDescent(Level level, BlockPos support) {
+        BlockPos landingFloor = support.below();
+        if (!level.isLoaded(landingFloor)) return false;
+        BlockState floor = level.getBlockState(landingFloor);
+        return floor.getFluidState().isEmpty()
+                && MovementHelper.canWalkOn(level, landingFloor);
     }
 
     /** Face points of a block (each face centre, from its collision shape), tried when the block's own
@@ -618,134 +629,58 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     /** Advance the shared dig one tick (it switches to the best tool itself); on the tick the TARGET
      *  breaks, drop it from the ore list. A {@link BlockDigger.DigResult#BROKE_OCCLUDER} (a leaf cleared
-     *  to open the line of sight) is NOT the target, so the ore stays. Survival progress is committed
-     *  later by the isolated drop collector after a real main-inventory gain — one block can yield
-     *  several items, and the drops take a moment to be picked up.
+     *  to open the line of sight) is NOT the target, so the ore stays. Progress is read from the task's
+     *  inventory baseline, because one block can yield several items and pickup happens later.
      *
      *  <p>Recovery: 连续的 {@code NO_SHOT}(够到测试过了,可挖掘始终成不了射线)记数,满
      *  {@link #MAX_NO_SHOT_TICKS} 就把<b>那一格</b>记进 {@link #unworkable} 继续往下走,
      *  而不是永远等一个不会来的射线。<b>记的是这一格,不是猜一格</b> —— 这是唯一一处
      *  按格记账的地方,因为它是唯一一件关于那一格的可复现事实。 */
     private void mineProgress(BlockPos pos) {
-        prepareBreakEvidence(pos);
-        // The target may have changed between selection and this client tick. Never
-        // let the generic digger consume the replacement without a matching target
-        // state/evidence round.
-        if (evidencePos == null || !evidencePos.equals(pos) || evidenceState == null) {
-            digger.cancel();
-            return;
+        if (activeTarget == null) {
+            activeTarget = pos.immutable();
         }
-        if (provenanceAmbiguous && !nativeBreakObserved) {
-            // This is knowable before any destructive action. Pause rather than break
-            // a source whose loose result cannot be distinguished from a nearby
-            // player's newly thrown item on the client.
-            digger.cancel();
-            fail("another player is too close to isolate this block's future loose drop; "
-                            + "move apart briefly and retry",
-                    FailureType.UNKNOWN);
-            return;
-        }
-        // Same block with a live property update (for example redstone ore lighting
-        // on attack) remains the same loot source; a different replacement does not.
-        if (player.level().getBlockState(pos).getBlock() != evidenceState.getBlock()) {
-            digger.cancel();
-            clearBreakEvidence();
-            return;
-        }
-        // ToolSelect inside BlockDigger may finish a tick after the evidence snapshot.
-        // Refresh while the target still exists so the retained tool is the one that
-        // actually drove the native break (including Silk Touch/Fortune components).
-        if (evidencePos != null && evidencePos.equals(pos)
-                && evidenceState != null
-                && player.level().getBlockState(pos).getBlock() == evidenceState.getBlock()) {
-            evidenceTool = player.getMainHandItem().copy();
-        }
-        BlockState beforeStep = player.level().getBlockState(pos);
-        BlockDigger.DigResult result = digger.digStep(pos);
-        var gameMode = net.minecraft.client.Minecraft.getInstance().gameMode;
-        if ((gameMode != null && gameMode.isDestroying())
-                || (!beforeStep.isAir() && player.level().getBlockState(pos).isAir())) {
-            nativeBreakObserved = true;
-        }
+        acceptDigResult(activeTarget, digger.digStep(activeTarget));
+    }
+
+    private void acceptDigResult(BlockPos target, BlockDigger.DigResult result) {
         switch (result) {
-            case BROKE_TARGET -> finishConfirmedTargetBreak(pos);
+            case BROKE_TARGET -> {
+                knownOres.remove(target);
+                watchedTargetCells.remove(target);
+                pendingPathBreaks.remove(target);
+                brokenTargets++;
+                noteProgress();
+                // 地形变了 —— 挡住射线的那个檐口可能正好就是这一格。旧的结论全部作废。
+                unworkable.clear();
+                if (WorkProfile.of(player).dropsLoot()) {
+                    anticipatedDrops.put(target.immutable(),
+                            player.level().getGameTime() + DROP_LOITER_TICKS);
+                }
+                activeTarget = null;
+                clearNoShot();
+            }
             case NO_SHOT -> {
-                if (pos.equals(noShotPos)) {
+                if (target.equals(noShotPos)) {
                     if (++noShotTicks >= MAX_NO_SHOT_TICKS) {
-                        unworkable.add(pos.immutable());
-                        knownOres.remove(pos);
+                        unworkable.add(target.immutable());
+                        knownOres.remove(target);
                         digger.cancel();   // release the in-progress-dig latch on this ore
+                        activeTarget = null;
                         clearNoShot();
                     }
                 } else {
-                    noShotPos = pos.immutable();
+                    noShotPos = target.immutable();
                     noShotTicks = 1;
                 }
             }
-            // PROGRESSING / BROKE_OCCLUDER — real progress; reset the stall counter.
-            default -> clearNoShot();
+            case BROKE_OCCLUDER -> {
+                noteProgress();
+                unworkable.clear();
+                clearNoShot();
+            }
+            case PROGRESSING -> clearNoShot();
         }
-    }
-
-    private void finishConfirmedTargetBreak(BlockPos pos) {
-        // DefaultNativeActionPort confirms BREAK_BLOCK only after this exact cell
-        // has been authoritative air for two client revisions. Keep the explicit
-        // frozen-state binding so a stale/mismatched round cannot become loot progress.
-        if (evidencePos == null || !evidencePos.equals(pos)
-                || evidenceState == null
-                || !r.targets.contains(evidenceState.getBlock())
-                || !player.level().getBlockState(pos).isAir()) {
-            fail("a target break was reported, but its frozen pre-break state and "
-                            + "authoritative world change could not be bound to one drop round",
-                    FailureType.UNKNOWN);
-            clearBreakEvidence();
-            return;
-        }
-        knownOres.remove(pos);
-        brokenTargets++;
-        if (!WorkProfile.of(player).dropsLoot()) r.setMined(brokenTargets);
-        noteProgress();
-        // 地形变了 —— 挡住射线的那个檐口可能正好就是这一格。旧的"挖不动"结论全部作废。
-        unworkable.clear();
-        if (WorkProfile.of(player).dropsLoot()) beginDropCollection();
-        else clearBreakEvidence();
-        clearNoShot();
-    }
-
-    /** Freeze exactly one target's pre-break facts before BlockDigger submits its
-     *  native receipt. Existing item entities are snapshotted both through the shared
-     *  DropTracker and locally, because an old stack growing by merge must NOT make us
-     *  walk over and collect the old portion. */
-    private void prepareBreakEvidence(BlockPos pos) {
-        if (evidencePos != null && evidencePos.equals(pos)) return;
-        clearBreakEvidence();
-        BlockState state = player.level().getBlockState(pos);
-        if (!r.targets.contains(state.getBlock())) return;
-
-        evidencePos = pos.immutable();
-        evidenceState = state;
-        evidenceTool = player.getMainHandItem().copy();
-        inventoryBeforeBreak = inventoryCounts();
-        AABB localBox = dropEvidenceBox();
-        AABB guardBox = new AABB(evidencePos).inflate(PREEXISTING_DROP_GUARD_RADIUS);
-        breakDrops.rememberExisting(player.level(), guardBox);
-        for (ItemEntity item : player.level().getEntitiesOfClass(ItemEntity.class, guardBox)) {
-            preexistingDropIds.add(item.getId());
-            preexistingDropStacks.put(item.getId(), item.getItem().copy());
-            if (localBox.contains(item.position())) relevantPreexistingDropIds.add(item.getId());
-        }
-        provenanceAmbiguous = anotherPlayerCouldSupplyDrop();
-    }
-
-    /** Enter the bounded settle/collect phase only after the target break receipt and
-     *  air transition have both been confirmed. */
-    private void beginDropCollection() {
-        collectingDrops = true;
-        dropPhaseTicks = 0;
-        dropCloseTicks = 0;
-        dropTarget = null;
-        stopNav();
-        discoverAttributedDrops();
     }
 
     private void clearNoShot() {
