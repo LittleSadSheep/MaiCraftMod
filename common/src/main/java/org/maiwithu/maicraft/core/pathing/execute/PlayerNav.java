@@ -357,22 +357,25 @@ public final class PlayerNav {
         sacred = compiled.sacred();
         NavGoal navGoal = compiled.goal();
 
-        // 目标中心移动 >2 格:重根(进度量尺随之复位,状态机自会软取消旧段)
+        // 目标中心移动 >2 格:重根(进度量尺随之复位,状态机自会软取消真失效的旧段)。
+        // 若新目标仍接受当前段终点,目标中心的变化本身不应打断身体输入。
         if (plannedCenter != null && navGoal.center().distSqr(plannedCenter) > GOAL_MOVED_SQR) {
             searchSatisfied = false;
             bestGoalH = Double.MAX_VALUE;
             ticksSincePlan = 0;
             plannedCenter = navGoal.center();
             withSprintGate(() -> core.setGoalAndPath(compiled.engineGoal()));
-            return Status.RUNNING;
         }
         // 活目标:到点就重取一次。进度量尺不复位——那是给"卡住了"用的,不该被节拍抹平。
+        // 刷新目标不是一个身体动作:当新目标仍认可当前段时,本 tick 必须继续
+        // core.tick(),续上只有一刻租约的前进/疾跑输入。旧的无条件 return 会每五刻
+        // 制造一个与地形、障碍或真实重规划无关的停顿。若目标真失效,
+        // setGoalAndPath 仍会按原有语义软取消并在下面的 core.tick() 中处理重算。
         if (revalidateGoalEachTick && ++ticksSincePlan >= LIVE_GOAL_REPLAN_TICKS) {
             ticksSincePlan = 0;
             searchSatisfied = false;
             plannedCenter = navGoal.center();
             withSprintGate(() -> core.setGoalAndPath(compiled.engineGoal()));
-            return Status.RUNNING;
         }
         if (plannedCenter == null) {
             plannedCenter = navGoal.center();

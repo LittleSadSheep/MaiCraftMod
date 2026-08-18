@@ -642,6 +642,10 @@ public final class PathExecutor {
             ret.costEstimateIndex = costEstimateIndex;
             ret.ticksOnCurrent = ticksOnCurrent;
             ret.ticksSinceProgress = ticksSinceProgress;
+            // Splicing replaces only the path representation. Preserve the decision already made
+            // for this physical tick; otherwise the fresh executor's default false briefly drops
+            // sprint exactly when a plan-ahead segment is attached to an otherwise continuous run.
+            ret.sprintNextTick = sprintNextTick;
             return ret;
         }).orElseGet(this::cutIfTooLong);
     }
@@ -662,6 +666,8 @@ public final class PathExecutor {
             }
             ret.ticksOnCurrent = ticksOnCurrent;
             ret.ticksSinceProgress = ticksSinceProgress;
+            // History trimming is likewise not a body transition. Keep this tick's sprint lease.
+            ret.sprintNextTick = sprintNextTick;
             return ret;
         }
         return this;

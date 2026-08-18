@@ -499,7 +499,6 @@ public final class PathingCore {
         current = null;
         next = null;
         goal = null;
-        harness.clearAllKeys();
-        harness.stopBreaking();
+        harness.stopForTaskBoundary();
     }
 }

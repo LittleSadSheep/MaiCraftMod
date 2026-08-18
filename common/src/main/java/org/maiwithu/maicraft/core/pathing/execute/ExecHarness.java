@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 import org.maiwithu.maicraft.core.pathing.moves.MovementState;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
+import org.maiwithu.maicraft.core.act.ToolSelect;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
@@ -83,6 +84,8 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
 
     /** 本 tick 是否有任何记录待落地。 */
     private boolean dirty;
+    /** forceCancel is a terminal owner boundary; cleanup may invoke it again in the same tick. */
+    private boolean taskBoundaryStopped;
 
     public ExecHarness(LocalPlayer player, TerrainPermit permit) {
         this.player = player;
@@ -111,6 +114,24 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
     @Override
     public void beginBreaking(MovementState state, BlockPos pos) {
         dirty = true;
+        // A route may have to clear terrain before the mining task reaches its
+        // own target.  Stage/select the best carried implement through the same
+        // receipt-backed boundary before the first native break tick.  Once a
+        // break receipt is live, keep advancing it without trying to transact
+        // inventory every tick.
+        if (breakingReceipt == null || breakingReceipt.terminal()) {
+            settleBreakingReceipt(ClientRuntime.requireContext(player));
+            int bestSlot = ToolSelect.bestSlot(player, player.level().getBlockState(pos));
+            if (bestSlot >= 0) {
+                ItemStack best = player.getInventory().getItem(bestSlot).copy();
+                Movement.ItemSelection selection = ensureItem(
+                        stack -> ItemStack.isSameItemSameComponents(stack, best), true, false);
+                if (selection == Movement.ItemSelection.WAITING) {
+                    state.setInput(Input.CLICK_LEFT, false);
+                    return;
+                }
+            }
+        }
         Vec3 eye = player.getEyePosition();
         Vec3 aimPoint = reachableAimPoint(pos);
         if (aimPoint != null) {
@@ -186,6 +207,66 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
             }
         }
         clearBreakingReceipt();
+    }
+
+    /**
+     * Release every actor/menu receipt owned by a navigation that is being discarded.
+     *
+     * <p>Route execution can be between motions while a hotbar selection, placement use, or
+     * inventory staging transaction is still waiting for synchronized facts.  A terminal
+     * {@code PlayerNav.stop()} must not drop those Java references while the actor boundary keeps
+     * the receipt active: the next semantic child legitimately needs the same serialized slot.
+     */
+    public void stopForTaskBoundary() {
+        clearAllKeys();
+        if (taskBoundaryStopped) return;
+        taskBoundaryStopped = true;
+
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (breakingReceipt != null) {
+            if (!breakingReceipt.terminal()) {
+                context.actions().cancelBreakingForTaskBoundary(
+                        context,
+                        breakingReceipt,
+                        "navigation ended before its native break was confirmed");
+            } else if (breakingReceipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED
+                    && breakingTarget != null && breakingBefore != null) {
+                ledger.addBreak(breakingTarget, breakingBefore);
+            }
+            clearBreakingReceipt();
+        }
+
+        if (useReceipt != null && !useReceipt.terminal()) {
+            useReceipt = context.actions().retireOneShotForTaskBoundary(
+                    context,
+                    useReceipt,
+                    "navigation ended while a block-use effect was awaiting confirmation");
+        }
+        settleUseReceipt(context);
+
+        if (hotbarReceipt != null && !hotbarReceipt.terminal()) {
+            hotbarReceipt = context.actions().retireOneShotForTaskBoundary(
+                    context,
+                    hotbarReceipt,
+                    "navigation ended while hotbar selection was awaiting confirmation");
+        }
+        settleHotbarReceipt(context);
+
+        if (stagingReceipt != null && !stagingReceipt.terminal()) {
+            context.menus().closeForTaskBoundary(
+                    context,
+                    20,
+                    "navigation ended while inventory staging was awaiting confirmation");
+        }
+        stagingReceipt = null;
+        stagingHotbar = -1;
+
+        // A confirmed block use may have opened a container.  The navigation owns that UI and
+        // cannot leave it in front of the next task after its own terminal boundary.
+        if (player.containerMenu != player.inventoryMenu && context.mutationAvailable()) {
+            context.menus().closeForTaskBoundary(
+                    context, 20, "navigation ended with a container menu still open");
+        }
     }
 
     /** 是否有进行中的挖掘(liveness 记账:挖硬方块也是真实推进)。 */
@@ -481,6 +562,12 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
 
     private Movement.ItemSelection ensureItem(
             java.util.function.Predicate<ItemStack> desired, boolean select) {
+        return ensureItem(desired, select, true);
+    }
+
+    private Movement.ItemSelection ensureItem(
+            java.util.function.Predicate<ItemStack> desired, boolean select,
+            boolean allowOffhand) {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         settleUseReceipt(context);
         settleBreakingReceipt(context);
@@ -503,7 +590,7 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
             }
         }
 
-        if (desired.test(player.getOffhandItem())) {
+        if (allowOffhand && desired.test(player.getOffhandItem())) {
             if (!select || safeForOffhand(inv.getSelected())) {
                 return Movement.ItemSelection.READY;
             }

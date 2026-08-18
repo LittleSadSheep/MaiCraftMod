@@ -65,6 +65,15 @@ public final class TerrainBill {
         return breaks.values().stream().mapToInt(List::size).sum();
     }
 
+    /** Whether execution has recorded a native break at this exact world cell. */
+    public boolean broke(BlockPos pos) {
+        if (pos == null) return false;
+        for (List<BlockPos> cells : breaks.values()) {
+            if (cells.contains(pos)) return true;
+        }
+        return false;
+    }
+
     public int placeCount() {
         return places.values().stream().mapToInt(List::size).sum();
     }
