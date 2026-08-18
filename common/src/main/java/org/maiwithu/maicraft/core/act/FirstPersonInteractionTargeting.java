@@ -2,6 +2,9 @@
 package org.maiwithu.maicraft.core.act;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -10,10 +13,17 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
+
+import java.util.Comparator;
+import java.util.Set;
+import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
 
 /** Shared block-aim policy for semantic preflight and the eventual first-person interaction. */
 public final class FirstPersonInteractionTargeting {
     private static final double EPSILON = 1.0e-6D;
+    private static final double FACE_INSET = 1.0e-3D;
 
     private FirstPersonInteractionTargeting() {}
 
@@ -30,6 +40,11 @@ public final class FirstPersonInteractionTargeting {
                 || !level.isLoaded(target)) {
             return false;
         }
+        var targetState = level.getBlockState(target);
+        if (!targetState.isAir() && !(targetState.getBlock() instanceof LiquidBlock)) {
+            return visibleBlockHit(level, observer, eye, target, reach) != null;
+        }
+
         Vec3 targetCenter = Vec3.atCenterOf(target);
         Vec3 delta = targetCenter.subtract(eye);
         double distanceSqr = delta.lengthSqr();
@@ -41,6 +56,124 @@ public final class FirstPersonInteractionTargeting {
         BlockHitResult hit = level.clip(new ClipContext(
                 eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, observer));
         return !blockedByWorld(level, eye, target, end, hit);
+    }
+
+    /**
+     * Resolve a concrete first-person hit on any visible part of a loaded block.
+     *
+     * <p>A centre-only ray is not enough: a workstation below a leaf canopy, a chest below a
+     * shelf, or a partially exposed machine can have its centre ray blocked while an ordinary
+     * player can still click a side. Try the outline centre and then all six face centres, keeping
+     * the point slightly inside the outline so an exact boundary never aliases to a neighbour.
+     * The returned hit is proof that the target itself is the first block on that native-reach
+     * line; callers still converge the real camera and perform a final native ray before use.</p>
+     */
+    public static BlockHitResult visibleBlockHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target, double reach) {
+        if (!Double.isFinite(reach) || reach <= 0.0D
+                || !level.isLoaded(BlockPos.containing(eye))
+                || !level.isLoaded(target)) {
+            return null;
+        }
+        var state = level.getBlockState(target);
+        if (state.isAir() || state.getBlock() instanceof LiquidBlock) return null;
+
+        VoxelShape shape = state.getShape(level, target);
+        if (shape.isEmpty()) shape = Shapes.block();
+        double minX = shape.min(Direction.Axis.X);
+        double minY = shape.min(Direction.Axis.Y);
+        double minZ = shape.min(Direction.Axis.Z);
+        double maxX = shape.max(Direction.Axis.X);
+        double maxY = shape.max(Direction.Axis.Y);
+        double maxZ = shape.max(Direction.Axis.Z);
+        double midX = (minX + maxX) * 0.5D;
+        double midY = (minY + maxY) * 0.5D;
+        double midZ = (minZ + maxZ) * 0.5D;
+        double lowX = insetMin(minX, maxX);
+        double lowY = insetMin(minY, maxY);
+        double lowZ = insetMin(minZ, maxZ);
+        double highX = insetMax(minX, maxX);
+        double highY = insetMax(minY, maxY);
+        double highZ = insetMax(minZ, maxZ);
+        Vec3[] aims = {
+                offset(target, midX, midY, midZ),
+                offset(target, midX, lowY, midZ),
+                offset(target, midX, highY, midZ),
+                offset(target, midX, midY, lowZ),
+                offset(target, midX, midY, highZ),
+                offset(target, lowX, midY, midZ),
+                offset(target, highX, midY, midZ)
+        };
+        for (Vec3 aim : aims) {
+            Vec3 direction = aim.subtract(eye);
+            if (direction.lengthSqr() < EPSILON) continue;
+            Vec3 end = eye.add(direction.normalize().scale(reach));
+            BlockHitResult hit = level.clip(new ClipContext(
+                    eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, observer));
+            if (hit.getType() == HitResult.Type.BLOCK
+                    && hit.getBlockPos().equals(target)
+                    && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON) {
+                return hit;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Pick the nearest loaded, standable feet cell from which some face of {@code target} is
+     * genuinely clickable. This is shared physical interaction geometry, not a workstation rule.
+     */
+    public static BlockPos nearestVisibleStand(
+            LocalPlayer player, BlockPos target, double reach, Set<Long> excluded) {
+        if (target == null || !player.level().isLoaded(target)) return null;
+        BlockPos current = PathExecutor.playerFeet(player);
+        java.util.ArrayList<BlockPos> candidates = new java.util.ArrayList<>();
+        for (int radius = 1; radius <= 3; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    for (int dy = -2; dy <= 1; dy++) {
+                        BlockPos feet = target.offset(dx, dy, dz);
+                        if ((excluded == null || !excluded.contains(feet.asLong()))
+                                && standable(player.level(), feet)
+                                && visibleBlockHit(
+                                        player.level(), player,
+                                        Vec3.atBottomCenterOf(feet)
+                                                .add(0.0D, player.getEyeHeight(Pose.STANDING), 0.0D),
+                                        target, reach) != null) {
+                            candidates.add(feet.immutable());
+                        }
+                    }
+                }
+            }
+        }
+        return candidates.stream()
+                .min(Comparator.comparingDouble(candidate -> candidate.distSqr(current)))
+                .orElse(null);
+    }
+
+    private static boolean standable(Level level, BlockPos feet) {
+        if (!level.isLoaded(feet) || !level.isLoaded(feet.above())
+                || !level.isLoaded(feet.below())) return false;
+        if (!level.getFluidState(feet).isEmpty()
+                || !level.getFluidState(feet.above()).isEmpty()) return false;
+        if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
+                || !level.getBlockState(feet.above())
+                        .getCollisionShape(level, feet.above()).isEmpty()) return false;
+        BlockPos support = feet.below();
+        return level.getBlockState(support).isFaceSturdy(level, support, Direction.UP);
+    }
+
+    private static Vec3 offset(BlockPos pos, double x, double y, double z) {
+        return new Vec3(pos.getX() + x, pos.getY() + y, pos.getZ() + z);
+    }
+
+    private static double insetMin(double min, double max) {
+        return Math.min(max, min + Math.min(FACE_INSET, (max - min) * 0.25D));
+    }
+
+    private static double insetMax(double min, double max) {
+        return Math.max(min, max - Math.min(FACE_INSET, (max - min) * 0.25D));
     }
 
     /**

@@ -127,6 +127,33 @@ public final class BlockDigger {
         }
     }
 
+    /**
+     * Finish a native break after the client world has already synchronized the
+     * effective cell to air. At that point no raycast can hit the vanished block,
+     * so callers must poll the existing receipt instead of submitting another
+     * {@link #digStep(BlockPos)}.
+     */
+    public DigResult settleGone(boolean targetBreak) {
+        if (receipt == null) {
+            reset();
+            return DigResult.NO_SHOT;
+        }
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (!receipt.terminal()) {
+            receipt = context.actions().poll(context, receipt);
+        }
+        if (!receipt.terminal()) {
+            return DigResult.PROGRESSING;
+        }
+        NativeActionReceipt.Status status = receipt.status();
+        reset();
+        if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            blockHitDelay = postBreakDelay();
+            return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
+        }
+        return DigResult.NO_SHOT;
+    }
+
     public DigResult digStep(BlockPos target) {
         Level level = player.level();
         if (NavigationSafetyContext.protectsMutation(target)) {
@@ -310,11 +337,40 @@ public final class BlockDigger {
                     context, bestSlot, selected, TOOL_TIMEOUT_TICKS);
         }
     }
-    /** Abandon an in-progress native break and release its serialized action slot. */
+    /**
+     * End every actor transaction owned by this digger.
+     *
+     * <p>A digger may be cancelled before the first swing while it is still selecting/staging a
+     * tool.  Those receipts occupy the same serialized actor/menu slots as the eventual break;
+     * merely nulling the local fields strands the actor slot and makes the next task fail with
+     * "already awaiting confirmation".  Breaks are physically stopped, submitted one-shot hotbar
+     * selections are retired as uncertain, and pending menu staging is closed at the task boundary.
+     */
     public void cancel() {
-        if (receipt != null && !receipt.terminal()) {
-            LocalPlayerContext context = ClientRuntime.requireContext(player);
-            context.actions().cancelBreaking(context, receipt);
+        boolean pendingBreak = receipt != null && !receipt.terminal();
+        boolean pendingSelection = toolSelectReceipt != null && !toolSelectReceipt.terminal();
+        boolean pendingMenu = (toolCloseReceipt != null && !toolCloseReceipt.terminal())
+                || (toolStageReceipt != null && !toolStageReceipt.terminal());
+        LocalPlayerContext context = pendingBreak || pendingSelection || pendingMenu
+                ? ClientRuntime.requireContext(player)
+                : null;
+        if (pendingBreak) {
+            context.actions().cancelBreakingForTaskBoundary(
+                    context,
+                    receipt,
+                    "the block-digging task ended before its native break was confirmed");
+        }
+        if (pendingSelection) {
+            context.actions().retireOneShotForTaskBoundary(
+                    context,
+                    toolSelectReceipt,
+                    "the block-digging task ended while tool selection was awaiting confirmation");
+        }
+        if (pendingMenu) {
+            context.menus().closeForTaskBoundary(
+                    context,
+                    TOOL_TIMEOUT_TICKS,
+                    "the block-digging task ended while tool staging was awaiting confirmation");
         }
         reset();
     }
