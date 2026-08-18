@@ -29,6 +29,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 /**
  * Pure, read-only placement geometry shared by build preflight and live execution.
@@ -114,17 +115,25 @@ final class BuildPlacementGeometry {
      */
     static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
                               Map<Long, BuildTaskRecord.Target> targets) {
-        return plan(player, target, targets, false);
+        return plan(player, target, targets, false, ignored -> true);
     }
 
     /** Cheap preflight proof; a negative result still exhausts the complete finite search. */
     static boolean hasAnyGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                  Map<Long, BuildTaskRecord.Target> targets) {
-        return !plan(player, target, targets, true).isEmpty();
+        return !plan(player, target, targets, true, ignored -> true).isEmpty();
+    }
+
+    /** Same placement proof, restricted to caller-approved physical stance cells. */
+    static boolean hasAnyGesture(LocalPlayer player, BuildTaskRecord.Target target,
+                                 Map<Long, BuildTaskRecord.Target> targets,
+                                 Predicate<BlockPos> stanceAllowed) {
+        return !plan(player, target, targets, true, stanceAllowed).isEmpty();
     }
 
     private static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
-                                      Map<Long, BuildTaskRecord.Target> targets, boolean firstOnly) {
+                                      Map<Long, BuildTaskRecord.Target> targets, boolean firstOnly,
+                                      Predicate<BlockPos> stanceAllowed) {
         if (!(target.item() instanceof BlockItem)) {
             return List.of();
         }
@@ -139,7 +148,7 @@ final class BuildPlacementGeometry {
                 && (live.canBeReplaced()
                 || (live.is(target.block()) && maximumUses(target) > 1))) {
             enumerateForClicked(player, target, targets, placeAt, Direction.UP, true,
-                    firstOnly, out);
+                    firstOnly, stanceAllowed, out);
             if (firstOnly && !out.isEmpty()) return List.copyOf(out);
         }
         for (Direction towardSupport : SUPPORT_ORDER) {
@@ -147,7 +156,7 @@ final class BuildPlacementGeometry {
             Direction face = towardSupport.getOpposite();
             if (!hasPlannedSupport(player, clicked, face, targets)) continue;
             enumerateForClicked(player, target, targets, clicked, face, false,
-                    firstOnly, out);
+                    firstOnly, stanceAllowed, out);
             if (firstOnly && !out.isEmpty()) break;
         }
         return List.copyOf(out);
@@ -202,11 +211,14 @@ final class BuildPlacementGeometry {
     private static void enumerateForClicked(LocalPlayer player, BuildTaskRecord.Target target,
                                              Map<Long, BuildTaskRecord.Target> targets,
                                              BlockPos clicked, Direction face, boolean direct,
-                                             boolean firstOnly, List<Gesture> out) {
+                                             boolean firstOnly,
+                                             Predicate<BlockPos> stanceAllowed,
+                                             List<Gesture> out) {
         BlockPos placeAt = target.pos();
         for (BlockPos stance : candidateStances(placeAt)) {
             if (firstOnly && !out.isEmpty()) return;
-            if (!bodyCellAvailable(player, stance, targets, placeAt)) continue;
+            if (!stanceAllowed.test(stance)
+                    || !bodyCellAvailable(player, stance, targets, placeAt)) continue;
             Vec3 eye = new Vec3(stance.getX() + 0.5, stance.getY() + CROUCH_EYE_HEIGHT,
                     stance.getZ() + 0.5);
             for (double a : FACE_SAMPLES) {

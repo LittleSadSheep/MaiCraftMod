@@ -499,11 +499,48 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!cell.target().itemPlace() && (predicted == null
                 || (!cell.target().acceptsPlacedState(predicted)
                 && !BuildPlacementGeometry.isProgress(cell.target(), before, predicted)))) return rejectGesture();
+        BlockState placedPrimary = predicted == null ? cell.target().desiredState() : predicted;
+        if (placementBlockedByPlayer(placedPrimary)) return rejectPlayerOccupiedGesture();
+        if (placementBlockedByEntity(placedPrimary)) {
+            InputDriver.halt(player);
+            failAt(cell.target().pos(),
+                    "a living or building-blocking entity occupies the placement effect",
+                    FailureType.ENTITY_BLOCKED, "placement_entity_blocked", false);
+            return TaskState.FAILED;
+        }
         Map<Long, BlockState> frozen = freeze(cell);
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
         useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
                 confirmation(cell, frozen), USE_TIMEOUT);
         phase = Phase.WAIT_USE; return TaskState.RUNNING;
+    }
+
+    private boolean placementBlockedByPlayer(BlockState primary) {
+        if (rules.blockedByPlayer(cell.target().pos(), primary)) return true;
+        for (BuildPlacementGeometry.GeneratedCell generated : cell.generated()) {
+            if (rules.blockedByPlayer(generated.pos(), generated.expected())) return true;
+        }
+        return false;
+    }
+
+    private boolean placementBlockedByEntity(BlockState primary) {
+        if (rules.blockedByEntity(cell.target().pos(), primary)) return true;
+        for (BuildPlacementGeometry.GeneratedCell generated : cell.generated()) {
+            if (rules.blockedByEntity(generated.pos(), generated.expected())) return true;
+        }
+        return false;
+    }
+
+    private TaskState rejectPlayerOccupiedGesture() {
+        BlockPos occupiedFeet = PathExecutor.playerFeet(player);
+        InputDriver.halt(player); stopNav(); selection.reset(); aimConvergence.reset();
+        gesture = null;
+        do {
+            gestureAt++;
+        } while (gestureAt < liveGestures.size()
+                && liveGestures.get(gestureAt).stance().equals(occupiedFeet));
+        phase = Phase.PLACE_NAV;
+        return TaskState.RUNNING;
     }
 
     private TaskState rejectGesture() {

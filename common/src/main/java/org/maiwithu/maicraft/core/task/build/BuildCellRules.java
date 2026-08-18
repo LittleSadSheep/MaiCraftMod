@@ -145,12 +145,26 @@ final class BuildCellRules {
             return false;
         }
         VoxelShape placed = shape.move(pos.getX(), pos.getY(), pos.getZ());
+        if (intersectsPlayer(placed)) {
+            return true;
+        }
+        return !player.level().isUnobstructed(player, placed);
+    }
+
+    /** Distinguish self-occupation, which construction can solve by choosing another stance. */
+    boolean blockedByPlayer(BlockPos pos, BlockState state) {
+        VoxelShape shape = state.getCollisionShape(player.level(), pos, CollisionContext.of(player));
+        return !shape.isEmpty() && intersectsPlayer(
+                shape.move(pos.getX(), pos.getY(), pos.getZ()));
+    }
+
+    private boolean intersectsPlayer(VoxelShape placed) {
         AABB body = player.getBoundingBox();
         for (AABB piece : placed.toAabbs()) {
             if (piece.intersects(body)) {
                 return true;
             }
         }
-        return !player.level().isUnobstructed(player, placed);
+        return false;
     }
 }
