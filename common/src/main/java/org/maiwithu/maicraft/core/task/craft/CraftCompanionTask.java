@@ -118,25 +118,18 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState prepareSurface() {
+        // Keep one exact station identity for the lifetime of its active route. Re-running the
+        // coordinator mid-route could switch to a newly carried/nearer table while the old nav
+        // still owns the body.
+        if (nav != null && CraftingWorkstationCoordinator.usableTable(player, station)) {
+            var block = player.level().getBlockState(station).getBlock();
+            return prepareExistingStation(new CraftingWorkstationCoordinator.Directive(
+                    CraftingWorkstationCoordinator.Action.MOVE_TO_EXISTING,
+                    station, block, "continue approaching the selected crafting table"));
+        }
         CraftingWorkstationCoordinator.Directive directive = workstation.next(player, station);
         return switch (directive.action()) {
-            case READY -> {
-                station = directive.position();
-                stationAimRequestedRevision = Long.MIN_VALUE;
-                stage = Stage.OPEN;
-                yield TaskState.RUNNING;
-            }
-            case MOVE_TO_EXISTING -> {
-                if (directive.workstationBlock() == null) {
-                    workstation.reject(directive);
-                    yield TaskState.RUNNING;
-                }
-                String blockId = BuiltInRegistries.BLOCK.getKey(
-                        directive.workstationBlock()).toString();
-                yield startSurfaceChild(new MoveToTaskRecord(
-                        childId("move"), childDeadline(),
-                        null, null, null, blockId, false), directive);
-            }
+            case READY, MOVE_TO_EXISTING -> prepareExistingStation(directive);
             case PLACE_CARRIED -> {
                 BlockPos site = directive.position();
                 var table = directive.workstationBlock();
@@ -153,6 +146,10 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                         List.of(target), false, true, false), directive);
             }
             case UNAVAILABLE -> {
+                if (surfaceFailureCode == null) {
+                    surfaceFailureCode = "crafting_surface_unavailable";
+                    surfaceFailureDetail = directive.detail();
+                }
                 fail("recipe " + r.recipeId + " needs a 3x3 crafting surface, but "
                         + directive.detail(), FailureType.NO_SUPPORT);
                 yield TaskState.FAILED;
@@ -160,8 +157,76 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         };
     }
 
+    /**
+     * Approach the exact station selected by the coordinator. A block-id FIND child may silently
+     * walk to a different table when several exist, so the physical route is compiled against this
+     * concrete target and keeps that cell sacred. If its nearest interaction goal lands at a bad
+     * first-person stance, finite visible stance candidates are tried without condemning the table.
+     */
+    private TaskState prepareExistingStation(
+            CraftingWorkstationCoordinator.Directive directive) {
+        BlockPos target = directive.position();
+        if (!CraftingWorkstationCoordinator.usableTable(player, target)) {
+            workstation.reject(directive);
+            abandonStation();
+            return TaskState.RUNNING;
+        }
+        bindStation(target);
+
+        BlockHitResult visible = visibleStationHit();
+        if (visible != null && !currentStanceRejected()) {
+            stopNav();
+            stationAimPoint = visible.getLocation();
+            stationAimRequestedRevision = Long.MIN_VALUE;
+            stage = Stage.OPEN;
+            return TaskState.RUNNING;
+        }
+
+        if (nav == null) {
+            BlockPos exact = station;
+            nav = PlayerNav.to(player, () -> GoalCompiler.interact(exact), 1.0D,
+                    () -> visibleStationHit() != null && !currentStanceRejected())
+                    .withTerrainProbe();
+        }
+        return switch (nav.tick()) {
+            case RUNNING -> TaskState.RUNNING;
+            case ARRIVED -> {
+                stopNav();
+                yield startAlternativeStationStance(directive);
+            }
+            case FAILED -> {
+                surfaceFailureCode = "crafting_surface_route_exhausted";
+                surfaceFailureDetail = nav.failReason();
+                stopNav();
+                workstation.reject(directive);
+                abandonStation();
+                yield TaskState.RUNNING;
+            }
+        };
+    }
+
+    private TaskState startAlternativeStationStance(
+            CraftingWorkstationCoordinator.Directive directive) {
+        rejectedStationStances.add(PathExecutor.playerFeet(player).asLong());
+        BlockPos stance = FirstPersonInteractionTargeting.nearestVisibleStand(
+                player, directive.position(), 4.5D, rejectedStationStances);
+        if (stance == null) {
+            surfaceFailureCode = "crafting_surface_stances_exhausted";
+            surfaceFailureDetail = "no remaining loaded standable cell has a visible workstation face";
+            workstation.reject(directive);
+            abandonStation();
+            return TaskState.RUNNING;
+        }
+        surfaceMoveStance = stance;
+        return startSurfaceChild(new MoveToTaskRecord(
+                childId("move"), childDeadline(),
+                (double) stance.getX(), (double) stance.getY(), (double) stance.getZ(),
+                null, false), directive);
+    }
+
     private TaskState startSurfaceChild(
             TaskRecord record, CraftingWorkstationCoordinator.Directive directive) {
+        stopNav();
         surfaceDirective = directive;
         surfaceRecord = record;
         surfaceChild = TaskFactory.create(player, record);
@@ -183,8 +248,30 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         surfaceDirective = null;
 
         if (terminal != TaskState.SUCCESS || result == null || !result.success()) {
+            // A native effect can commit immediately before a child receipt times out. World fact
+            // outranks the failed wrapper: never consume a table and then pretend it was absent.
+            if (completed.action() == CraftingWorkstationCoordinator.Action.PLACE_CARRIED
+                    && CraftingWorkstationCoordinator.usableTable(
+                            player, completed.position())) {
+                stationPlaced = true;
+                bindStation(completed.position());
+                renewProgressLease();
+                stage = Stage.PREPARE_SURFACE;
+                return TaskState.RUNNING;
+            }
+            if (surfaceMoveStance != null
+                    && completed.action() != CraftingWorkstationCoordinator.Action.PLACE_CARRIED) {
+                rejectedStationStances.add(surfaceMoveStance.asLong());
+                surfaceFailureCode = "crafting_surface_stance_unreachable";
+                surfaceFailureDetail = result == null
+                        ? "the exact interaction stance ended without a result" : result.message();
+                surfaceMoveStance = null;
+                bindStation(completed.position());
+                stage = Stage.PREPARE_SURFACE;
+                return TaskState.RUNNING;
+            }
             workstation.reject(completed);
-            station = null;
+            abandonStation();
             stage = Stage.PREPARE_SURFACE;
             return TaskState.RUNNING;
         }
@@ -197,47 +284,68 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                 return TaskState.RUNNING;
             }
             stationPlaced = true;
-            station = completed.position();
+            bindStation(completed.position());
             renewProgressLease();
-            stage = Stage.OPEN;
+            stage = Stage.PREPARE_SURFACE;
             return TaskState.RUNNING;
         }
-
-        CraftingWorkstationCoordinator.Directive afterMove =
-                workstation.next(player, completed.position());
-        if (afterMove.action() == CraftingWorkstationCoordinator.Action.READY) {
-            station = afterMove.position();
-            stationAimRequestedRevision = Long.MIN_VALUE;
-            renewProgressLease();
-            stage = Stage.OPEN;
-        } else {
-            workstation.reject(completed);
-            station = null;
-            stage = Stage.PREPARE_SURFACE;
-        }
+        surfaceMoveStance = null;
+        bindStation(completed.position());
+        renewProgressLease();
+        stage = Stage.PREPARE_SURFACE;
         return TaskState.RUNNING;
     }
 
     private TaskState openStation() {
         var context = ClientRuntime.requireContext(player);
+        // Building deliberately sneaks while clicking support. Opening a station must explicitly
+        // release that one-tick posture or vanilla treats right-click as bypass-use.
+        InputDriver.halt(player);
+        if (player.isCrouching()) {
+            if (standingPoseFits()) {
+                return TaskState.RUNNING;
+            }
+            rejectCurrentStance();
+            stage = Stage.PREPARE_SURFACE;
+            return TaskState.RUNNING;
+        }
+        if (hasCraftGrid(3, 3)) {
+            openReceipt = null;
+            surfaceFailureCode = null;
+            surfaceFailureDetail = null;
+            renewProgressLease();
+            stage = Stage.PLACE;
+            return TaskState.RUNNING;
+        }
+        if (player.containerMenu != player.inventoryMenu) {
+            openReceipt = null;
+            workstation.reject(new CraftingWorkstationCoordinator.Directive(
+                    CraftingWorkstationCoordinator.Action.READY, station,
+                    "the selected block opened a menu without a compatible 3x3 crafting grid"));
+            abandonStation();
+            stage = Stage.CLOSE_WRONG_MENU;
+            return TaskState.RUNNING;
+        }
         if (!CraftingWorkstationCoordinator.usableTable(player, station)) {
-            station = null;
+            abandonStation();
             stage = Stage.PREPARE_SURFACE;
             return TaskState.RUNNING;
         }
         if (openReceipt == null) {
-            if (!CraftingWorkstationCoordinator.withinReach(player, station)) {
+            BlockHitResult visible = visibleStationHit();
+            if (visible == null || currentStanceRejected()) {
+                rejectCurrentStance();
                 stage = Stage.PREPARE_SURFACE;
                 return TaskState.RUNNING;
             }
-            Vec3 aimPoint = Vec3.atCenterOf(station);
-            InputDriver.lookAt(player, aimPoint);
+            if (stationAimPoint == null) stationAimPoint = visible.getLocation();
+            InputDriver.lookAt(player, stationAimPoint);
             long revision = context.tickRevision();
             if (stationAimRequestedRevision == Long.MIN_VALUE) {
                 stationAimRequestedRevision = revision;
                 return TaskState.RUNNING;
             }
-            Vec3 desired = aimPoint.subtract(player.getEyePosition());
+            Vec3 desired = stationAimPoint.subtract(player.getEyePosition());
             if (revision <= stationAimRequestedRevision
                     || (desired.lengthSqr() > 1.0e-8D
                             && player.getLookAngle().normalize().dot(desired.normalize())
@@ -246,11 +354,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             }
             HitResult aimed = Interaction.nativeRaytrace(player, 4.5);
             if (!(aimed instanceof BlockHitResult hit) || !hit.getBlockPos().equals(station)) {
-                workstation.reject(new CraftingWorkstationCoordinator.Directive(
-                        CraftingWorkstationCoordinator.Action.READY, station,
-                        "the converged crosshair proves this crafting table is occluded from the stance"));
-                station = null;
-                stationAimRequestedRevision = Long.MIN_VALUE;
+                rejectCurrentStance();
                 stage = Stage.PREPARE_SURFACE;
                 return TaskState.RUNNING;
             }
@@ -262,18 +366,86 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         openReceipt = context.actions().poll(context, openReceipt);
         if (!openReceipt.terminal()) return TaskState.RUNNING;
         if (openReceipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-            workstation.reject(new CraftingWorkstationCoordinator.Directive(
-                    CraftingWorkstationCoordinator.Action.READY, station,
-                    "the selected crafting table did not open"));
             openReceipt = null;
-            station = null;
+            if (hasCraftGrid(3, 3)) {
+                surfaceFailureCode = null;
+                surfaceFailureDetail = null;
+                renewProgressLease();
+                stage = Stage.PLACE;
+                return TaskState.RUNNING;
+            }
+            if (player.containerMenu != player.inventoryMenu) {
+                workstation.reject(new CraftingWorkstationCoordinator.Directive(
+                        CraftingWorkstationCoordinator.Action.READY, station,
+                        "the selected block opened an incompatible menu"));
+                abandonStation();
+                stage = Stage.CLOSE_WRONG_MENU;
+                return TaskState.RUNNING;
+            }
+            rejectCurrentStance();
             stage = Stage.PREPARE_SURFACE;
             return TaskState.RUNNING;
         }
         openReceipt = null;
+        if (!hasCraftGrid(3, 3)) {
+            workstation.reject(new CraftingWorkstationCoordinator.Directive(
+                    CraftingWorkstationCoordinator.Action.READY, station,
+                    "the selected block opened a menu without a compatible 3x3 crafting grid"));
+            abandonStation();
+            stage = Stage.CLOSE_WRONG_MENU;
+            return TaskState.RUNNING;
+        }
+        surfaceFailureCode = null;
+        surfaceFailureDetail = null;
         renewProgressLease();
         stage = Stage.PLACE;
         return TaskState.RUNNING;
+    }
+
+    private BlockHitResult visibleStationHit() {
+        if (!CraftingWorkstationCoordinator.usableTable(player, station)
+                || !CraftingWorkstationCoordinator.withinReach(player, station)) return null;
+        return FirstPersonInteractionTargeting.visibleBlockHit(
+                player.level(), player, player.getEyePosition(), station, 4.5D);
+    }
+
+    private boolean standingPoseFits() {
+        return player.level().noCollision(
+                player, player.getDimensions(Pose.STANDING).makeBoundingBox(player.position()));
+    }
+
+    private boolean currentStanceRejected() {
+        return rejectedStationStances.contains(PathExecutor.playerFeet(player).asLong());
+    }
+
+    private void rejectCurrentStance() {
+        rejectedStationStances.add(PathExecutor.playerFeet(player).asLong());
+        stationAimPoint = null;
+        stationAimRequestedRevision = Long.MIN_VALUE;
+    }
+
+    private void bindStation(BlockPos next) {
+        if (next == null) {
+            abandonStation();
+            return;
+        }
+        if (stanceStation == null || !stanceStation.equals(next)) {
+            rejectedStationStances.clear();
+            stanceStation = next.immutable();
+        }
+        station = next.immutable();
+        stationAimPoint = null;
+        stationAimRequestedRevision = Long.MIN_VALUE;
+    }
+
+    private void abandonStation() {
+        stopNav();
+        station = null;
+        stanceStation = null;
+        surfaceMoveStance = null;
+        rejectedStationStances.clear();
+        stationAimPoint = null;
+        stationAimRequestedRevision = Long.MIN_VALUE;
     }
 
     private TaskState placeRecipe() {
@@ -344,6 +516,14 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         return TaskState.FAILED;
     }
 
+    @Override
+    public boolean mustSettleBeforeSatisfiedCancellation() {
+        // Before the result click there is no committed craft to finish: an externally satisfied
+        // parent may cancel and cleanup will simply return the grid. Once the click is submitted,
+        // however, its receipt and the subsequent menu close form one indivisible terminal tail.
+        return stage == Stage.CLOSE || (stage == Stage.TAKE && menuReceipt != null);
+    }
+
     private int findResultSlot() {
         for (int i = 0; i < player.containerMenu.slots.size(); i++) {
             if (player.containerMenu.getSlot(i) instanceof ResultSlot) return i;
@@ -375,6 +555,21 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         surfaceRecord = null;
         surfaceDirective = null;
         openReceipt = null;
+        if (player.containerMenu != player.inventoryMenu) {
+            try {
+                var context = ClientRuntime.requireContext(player);
+                menuReceipt = context.menus().closeForTaskBoundary(
+                        context, 20,
+                        "the crafting task ended before its active menu transaction settled");
+            } catch (RuntimeException closeFailure) {
+                // The task is already terminal, so there is no later task tick to retry from. The
+                // vanilla close path is the final safety net: it returns grid/cursor contents and
+                // sends the normal close-container packet instead of leaving movement under a GUI.
+                try {
+                    player.closeContainer();
+                } catch (RuntimeException ignored) { }
+            }
+        }
         menuReceipt = null;
         workstation.close();
         super.cleanup();
@@ -384,6 +579,13 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         data.put("recipe", r.recipeId.toString());
         data.put("crafted", crafted);
         data.put("crafting_table_placed", stationPlaced);
+        if (surfaceFailureCode != null) {
+            data.put("failure_code", surfaceFailureCode);
+            data.put("failure_detail", surfaceFailureDetail == null ? "" : surfaceFailureDetail);
+            data.put("crafting_surface_prerequisite_item_ids",
+                    CraftingWorkstationCoordinator.prerequisiteItemIds().stream()
+                            .map(Object::toString).toList());
+        }
         if (station != null) {
             data.put("crafting_station", Map.of(
                     "x", station.getX(), "y", station.getY(), "z", station.getZ()));
