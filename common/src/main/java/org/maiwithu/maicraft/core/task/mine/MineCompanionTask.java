@@ -753,194 +753,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         noShotTicks = 0;
     }
 
-    // ---- confirmed drop discovery / pickup / inventory settlement ----
-
-    /** Finish one break before mining another. New ItemEntity ids are accepted only
-     *  inside the short spawn window around the receipt-bound target, then followed
-     *  by identity wherever they move. Completion requires the entities to disappear
-     *  through native pickup and the main inventory to show the corresponding gain. */
-    private TaskState collectConfirmedBreakDrops() {
-        dropPhaseTicks++;
-        if (dropPhaseTicks <= DROP_DISCOVERY_TICKS) discoverAttributedDrops();
-
-        if (dropPhaseTicks >= DROP_COLLECTION_TIMEOUT_TICKS) {
-            fail("the target was confirmed broken, but its attributable drop could not be "
-                            + "retrieved before the bounded pickup window expired",
-                    FailureType.NO_PATH);
-            return TaskState.FAILED;
-        }
-
-        if (dropTarget != null) {
-            if (dropTarget.isRemoved() || !attributedDropIds.contains(dropTarget.getId())) {
-                dropTarget = null;
-                dropCloseTicks = 0;
-                stopNav();
-            } else if (player.distanceToSqr(dropTarget) <= DROP_PICKUP_REACH_SQR) {
-                stopNav();
-                if (++dropCloseTicks >= DROP_CLOSE_WAIT_TICKS) {
-                    fail("reached the confirmed block drop, but native pickup did not move it "
-                                    + "into the main inventory (the inventory may be full)",
-                            FailureType.NO_SPACE);
-                    return TaskState.FAILED;
-                }
-                return TaskState.RUNNING;
-            } else {
-                dropCloseTicks = 0;
-                if (nav == null) {
-                    nav = new PlayerNav(player, dropTarget::blockPosition, MINE_SPEED,
-                            () -> dropTarget == null || dropTarget.isRemoved()
-                                    || player.distanceToSqr(dropTarget) <= DROP_PICKUP_REACH_SQR);
-                }
-                switch (nav.tick()) {
-                    case RUNNING, ARRIVED -> { return TaskState.RUNNING; }
-                    case FAILED -> {
-                        fail("the target was confirmed broken, but its attributable drop was "
-                                        + "not reachable for native pickup",
-                                FailureType.NO_PATH);
-                        return TaskState.FAILED;
-                    }
-                }
-            }
-        }
-
-        breakDrops.prune(player.clientLevel);
-        dropTarget = liveAttributedDrops().stream()
-                .min(Comparator.comparingDouble(player::distanceToSqr))
-                .orElse(null);
-        if (dropTarget != null) {
-            stopNav();
-            return TaskState.RUNNING;
-        }
-
-        // An entity can be absorbed on its spawn tick, so wait out the complete
-        // discovery window before treating "no live entity" as settled.
-        if (dropPhaseTicks < DROP_DISCOVERY_TICKS) return TaskState.RUNNING;
-
-        // Ambiguity wins over an inventory increase: otherwise somebody dropping
-        // the same item during this window could satisfy the request by coincidence.
-        // Likewise, an old entity disappearing makes the delta contaminated even if
-        // subtracting its count would leave a positive remainder.
-        if (provenanceAmbiguous || preexistingLooseItemChanged()) {
-            fail("the target was confirmed broken, but another nearby source made the new "
-                            + "loose-item provenance ambiguous; I did not credit the inventory change",
-                    FailureType.UNKNOWN);
-            return TaskState.FAILED;
-        }
-
-        int credited = attributableInventoryGain();
-        if (credited > 0) {
-            gatheredItems += credited;
-            r.setMined(gatheredItems);
-            progressNote = "confirmed break drops entered inventory";
-            clearBreakEvidence();
-            stopNav();
-            return TaskState.RUNNING;
-        }
-        if (!observedDropItems.isEmpty()) {
-            fail("the target was confirmed broken and its new drop was observed, but no "
-                            + "matching gain reached the main inventory",
-                    FailureType.UNKNOWN);
-            return TaskState.FAILED;
-        }
-
-        // Some valid breaks yield nothing (chance-based leaves/gravel paths, or a
-        // modded no-drop state). That is a real zero-result round, not success and not
-        // a guessed block-item fallback; continue to another target if one exists.
-        clearBreakEvidence();
-        stopNav();
-        return TaskState.RUNNING;
-    }
-
-    /** Feed the shared差集 tracker, then bind only genuinely new, just-spawned,
-     *  unowned entities to this receipt-bound target. Old ids (including an old
-     *  stack that grew by merge) are never walked over. */
-    private void discoverAttributedDrops() {
-        if (evidencePos == null) return;
-        provenanceAmbiguous |= anotherPlayerCouldSupplyDrop();
-        AABB localBox = dropEvidenceBox();
-        for (ItemEntity item : player.level().getEntitiesOfClass(ItemEntity.class, localBox)) {
-            if (preexistingDropIds.contains(item.getId())) {
-                relevantPreexistingDropIds.add(item.getId());
-            }
-        }
-        breakDrops.discover(player.level(), localBox);
-        Vec3 origin = Vec3.atCenterOf(evidencePos);
-        for (ItemEntity item : breakDrops.live(player.clientLevel, rejectedDropIds)) {
-            int id = item.getId();
-            if (attributedDropIds.contains(id)) continue;
-            if (preexistingDropIds.contains(id)
-                    || item.position().distanceToSqr(origin)
-                            > DROP_EVIDENCE_RADIUS * DROP_EVIDENCE_RADIUS) {
-                rejectedDropIds.add(id);
-                continue;
-            }
-            Entity owner = item.getOwner();
-            // Block.popResource has no thrower. A non-null owner proves this is a
-            // thrown item, not this block's loot; a null owner is accepted only when
-            // no other player is close enough to have supplied an unprovable throw.
-            if (owner != null || provenanceAmbiguous) {
-                rejectedDropIds.add(id);
-                provenanceAmbiguous = true;
-                continue;
-            }
-            attributedDropIds.add(id);
-            observedDropItems.add(item.getItem().getItem());
-        }
-    }
-
-    private List<ItemEntity> liveAttributedDrops() {
-        List<ItemEntity> out = new ArrayList<>();
-        for (ItemEntity item : breakDrops.live(player.clientLevel, rejectedDropIds)) {
-            if (attributedDropIds.contains(item.getId())) out.add(item);
-        }
-        return out;
-    }
-
-    /** Count only positive main-inventory deltas from this isolated break round.
-     *  If a preexisting entity disappeared or shrank during the round, its possible
-     *  contribution is subtracted first, so walking past old/other loot cannot satisfy
-     *  the mining request. Observed new drop types are always compatible by actual
-     *  spawn evidence; an entity picked up before first observation is accepted only
-     *  when provenance remained unambiguous. */
-    private int attributableInventoryGain() {
-        Map<Item, Integer> after = inventoryCounts();
-        Map<Item, Integer> oldLooseConsumed = preexistingLooseItemsConsumed();
-        int total = 0;
-        for (Map.Entry<Item, Integer> entry : after.entrySet()) {
-            Item item = entry.getKey();
-            int positive = entry.getValue() - inventoryBeforeBreak.getOrDefault(item, 0);
-            positive -= oldLooseConsumed.getOrDefault(item, 0);
-            if (positive <= 0) continue;
-            if (observedDropItems.contains(item) || !provenanceAmbiguous) total += positive;
-        }
-        return total;
-    }
-
-    /** Conservative upper bound on old loose items that may have entered the body.
-     *  Missing/unloaded old entities are treated as consumed and subtracted too; that
-     *  can under-credit a real drop, but can never turn somebody else's item into our
-     *  success. */
-    private Map<Item, Integer> preexistingLooseItemsConsumed() {
-        Map<Item, Integer> consumed = new HashMap<>();
-        for (int id : relevantPreexistingDropIds) {
-            ItemStack before = preexistingDropStacks.get(id);
-            if (before == null) continue;
-            int liveCount = 0;
-            Entity live = player.clientLevel.getEntity(id);
-            if (live instanceof ItemEntity item && !item.isRemoved()
-                    && item.getItem().getItem() == before.getItem()) {
-                liveCount = item.getItem().getCount();
-            }
-            int missing = Math.max(0, before.getCount() - liveCount);
-            if (missing > 0) consumed.merge(before.getItem(), missing, Integer::sum);
-        }
-        return consumed;
-    }
-
-    private boolean preexistingLooseItemChanged() {
-        return preexistingLooseItemsConsumed().values().stream().anyMatch(count -> count > 0);
-    }
-
     private Map<Item, Integer> inventoryCounts() {
         Map<Item, Integer> counts = new HashMap<>();
         Inventory inv = player.getInventory();
@@ -951,41 +763,38 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return counts;
     }
 
-    private AABB dropEvidenceBox() {
-        return new AABB(evidencePos).inflate(DROP_EVIDENCE_RADIUS);
-    }
-
-    private boolean anotherPlayerCouldSupplyDrop() {
-        if (evidencePos == null) return false;
-        Vec3 origin = Vec3.atCenterOf(evidencePos);
-        for (Player other : player.level().players()) {
-            if (other != player && !other.isRemoved()
-                    && other.position().distanceToSqr(origin) <= OTHER_PLAYER_AMBIGUITY_SQR) {
-                return true;
+    /** Aggregate the exact acceptable products supplied by the semantic planner. */
+    private int progressItemCount() {
+        if (r.progressItems.isEmpty()) return 0;
+        int total = 0;
+        for (ItemStack stack : player.getInventory().items) {
+            if (!stack.isEmpty() && r.progressItems.contains(stack.getItem())) {
+                total += stack.getCount();
             }
         }
-        return false;
+        return total;
     }
 
-    private void clearBreakEvidence() {
-        breakDrops.clear();
-        preexistingDropIds.clear();
-        preexistingDropStacks.clear();
-        relevantPreexistingDropIds.clear();
-        attributedDropIds.clear();
-        rejectedDropIds.clear();
-        observedDropItems.clear();
-        inventoryBeforeBreak = Map.of();
-        evidencePos = null;
-        evidenceState = null;
-        evidenceTool = ItemStack.EMPTY;
-        collectingDrops = false;
-        provenanceAmbiguous = false;
-        nativeBreakObserved = false;
-        confirmedAirTicks = 0;
-        dropPhaseTicks = 0;
-        dropCloseTicks = 0;
-        dropTarget = null;
+    /** Learn an immediately picked-up raw result without guessing a block-to-item
+     *  mapping. This fallback is active only while a direct break window is live. */
+    private void learnRawInventoryResults() {
+        for (Map.Entry<Item, Integer> entry : inventoryCounts().entrySet()) {
+            if (entry.getValue() > rawInventoryBaseline.getOrDefault(entry.getKey(), 0)) {
+                dropItems.add(entry.getKey());
+            }
+        }
+    }
+
+    /** Positive task-start inventory deltas for raw result types that have actually
+     *  been observed after a direct target break. */
+    private int rawItemProgress() {
+        Map<Item, Integer> current = inventoryCounts();
+        int total = 0;
+        for (Item item : dropItems) {
+            total += Math.max(0,
+                    current.getOrDefault(item, 0) - rawInventoryBaseline.getOrDefault(item, 0));
+        }
+        return total;
     }
 
     // ---- ore list maintenance ----
@@ -998,7 +807,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return;
         }
         if (knownOres.size() < QUERY_LOW_WATER
-                || ChunkPos.asLong(player.blockPosition()) != lastQueryChunk
+                || ChunkPos.asLong(feet()) != lastQueryChunk
                 || heartbeatTimer <= 0
                 || !lastQueryComplete) {
             runQuery();
@@ -1008,10 +817,10 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 查一次共享索引,把最近的目标并进名单。 */
     private void runQuery() {
         var sl = player.clientLevel;
-        lastQueryChunk = ChunkPos.asLong(player.blockPosition());
+        lastQueryChunk = ChunkPos.asLong(feet());
         heartbeatTimer = QUERY_HEARTBEAT_TICKS;
         queryCooldown = QUERY_MIN_GAP_TICKS;
-        TargetIndex.Result res = TargetIndex.query(sl, player.blockPosition(), r.targets,
+        TargetIndex.Result res = TargetIndex.query(sl, feet(), r.targets,
                 MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET);
         lastQueryComplete = res.complete();
         if (lastQueryComplete) {
@@ -1019,7 +828,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         org.maiwithu.maicraft.core.Constants.LOG.debug(
                 "[maicraft-task] mine query feet={} raw={} complete={} known(before merge)={}",
-                player.blockPosition().toShortString(), res.hits().size(), res.complete(),
+                feet().toShortString(), res.hits().size(), res.complete(),
                 knownOres.size());
         mergeHits(res.hits());
     }
@@ -1035,13 +844,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             BlockPos p = hit.immutable();
             if (unworkable.contains(p) || !seen.add(p)) continue;
             knownOres.add(p);
+            watchedTargetCells.add(p);
         }
         prune();
     }
 
     private void prune() {
         Level level = player.level();
-        BlockPos feet = player.blockPosition();
+        BlockPos feet = feet();
         // 问的是"挖不挖得成",按可改地形算——这是挖矿任务,许可本来就是 TERRAFORM
         CalculationContext ctx = ContextFactory.forExecution(player,
                 org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.TERRAFORM);
@@ -1070,7 +880,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     /** Nearest known ore to the feet, or null — for the "near ore exists but heading far" diagnostics. */
     private BlockPos nearestOre() {
-        BlockPos feet = player.blockPosition();
+        BlockPos feet = feet();
         return knownOres.stream().min(Comparator.comparingDouble(feet::distSqr)).orElse(null);
     }
 
@@ -1082,7 +892,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (n == null) {
             return "none";
         }
-        BlockPos feet = player.blockPosition();
+        BlockPos feet = feet();
         String block = net.minecraft.core.registries.BuiltInRegistries.BLOCK
                 .getKey(player.level().getBlockState(n).getBlock()).toString();
         int dy = n.getY() - feet.getY();
@@ -1095,7 +905,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 挖掉了一格,或者明显挪了窝 —— 两者都算进展,卡死计时重新起算。 */
     private void noteProgress() {
         lastProgressTick = player.level().getGameTime();
-        lastProgressPos = player.blockPosition();
+        lastProgressPos = feet();
         r.extendDeadlineTo(lastProgressTick + PROGRESS_LEASE_TICKS);
     }
 
@@ -1108,7 +918,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private TaskState stalledOut() {
         long now = player.level().getGameTime();
         if (lastProgressPos == null
-                || player.blockPosition().distSqr(lastProgressPos) > STALL_MOVE * STALL_MOVE) {
+                || feet().distSqr(lastProgressPos) > STALL_MOVE * STALL_MOVE) {
             noteProgress();
             return null;
         }
@@ -1134,7 +944,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         org.maiwithu.maicraft.core.Constants.LOG.info(
                 "[maicraft-task] mine 卡住 {} 刻:没挖掉任何一格、也没挪窝 | feet={} 名单 {} 个",
-                now - lastProgressTick, player.blockPosition().toShortString(), knownOres.size());
+                now - lastProgressTick, feet().toShortString(), knownOres.size());
         if (r.getMined() > 0) {
             progressNote = "gathered " + r.getMined() + "/" + r.count
                     + ", then could not reach the remaining " + knownOres.size() + " " + r.label;
@@ -1174,11 +984,25 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.FAILED;
     }
 
+    private TaskState unreachableDropFailure() {
+        fail("mined the requested source, but " + unreachableDropCount
+                        + " resulting drop(s) could not be reached for native pickup; gathered "
+                        + r.getMined() + "/" + r.count,
+                FailureType.NO_PATH);
+        return TaskState.FAILED;
+    }
+
+    /** Use the same authoritative feet cell as path planning/execution. */
+    private BlockPos feet() {
+        return PathExecutor.playerFeet(player);
+    }
+
     /** Stop the nav AND clear the branch-mode flag (extends the base's nav release). */
     @Override
     protected void stopNav() {
         super.stopNav();
         navIsBranch = false;
+        navIsDrop = false;
     }
 
     @Override
@@ -1188,7 +1012,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // clears its lingering goal boxes. Then release the dig + the index registration.
         super.cleanup();
         digger.cancel();
-        clearBreakEvidence();
+        activeTarget = null;
         TargetIndex.unregister(player.clientLevel, r.targets);
     }
 
@@ -1198,7 +1022,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
-        data.put("confirmed_target_breaks", brokenTargets);
+        data.put("unreachable_drop_count", unreachableDropCount);
         return data;
     }
 

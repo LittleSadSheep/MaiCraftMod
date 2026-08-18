@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.mine;
 
 import org.maiwithu.maicraft.task.TaskRecord;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 
 import java.util.Set;
@@ -27,6 +28,10 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public final int count;
     /** Human-readable target label for messages / debug overlay (e.g. "iron_ore"). */
     public final String label;
+    /** Exact acceptable inventory products when the semantic caller already knows them.
+     *  This lets terrain movements that mine a target contribute without exposing paths
+     *  or individual blocks to the LLM. Empty keeps the generic direct-mine behavior. */
+    public final Set<Item> progressItems;
 
     /** Live progress = matching ITEMS gathered since the task started (counted in the inventory,
      *  not blocks broken — multi-drop ores like redstone yield several items per block). Set each tick
@@ -35,10 +40,17 @@ public final class MineBlockTaskRecord extends TaskRecord {
 
     public MineBlockTaskRecord(String toolCallId, long deadlineGameTime,
                                Set<Block> targets, int count, String label) {
+        this(toolCallId, deadlineGameTime, targets, count, label, Set.of());
+    }
+
+    public MineBlockTaskRecord(String toolCallId, long deadlineGameTime,
+                               Set<Block> targets, int count, String label,
+                               Set<Item> progressItems) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.targets = Set.copyOf(targets);
         this.count = count;
         this.label = label;
+        this.progressItems = Set.copyOf(progressItems);
     }
 
     public int getMined() {
