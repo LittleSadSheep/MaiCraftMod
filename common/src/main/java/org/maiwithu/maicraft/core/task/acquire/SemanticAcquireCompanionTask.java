@@ -79,9 +79,12 @@ public final class SemanticAcquireCompanionTask
         final int depth;
         final Set<ResourceLocation> lineageItems;
         final Set<String> lineageRecipes;
-        final String parentRecipeId;
+        /** Every parent recipe that this one-unit alternative frontier can unlock. */
+        final Set<String> parentRecipeIds;
         final List<SemanticAcquireTaskRecord.Source> allowedSources;
         final Set<String> rejectedRecipes = new LinkedHashSet<>();
+        /** Recipes for which one concrete local crafting-surface recovery was already inserted. */
+        final Set<String> surfaceRecoveryRecipes = new LinkedHashSet<>();
         final Map<SemanticAcquireTaskRecord.Source, Integer> sourceAttempts =
                 new LinkedHashMap<>();
         final Set<ResourceLocation> rejectedTradeOutputs = new LinkedHashSet<>();
@@ -99,14 +102,15 @@ public final class SemanticAcquireCompanionTask
                 int depth,
                 Set<ResourceLocation> lineageItems,
                 Set<String> lineageRecipes,
-                String parentRecipeId,
+                Set<String> parentRecipeIds,
                 List<SemanticAcquireTaskRecord.Source> allowedSources) {
             this.itemIds = List.copyOf(itemIds);
             this.requiredFinalCount = requiredFinalCount;
             this.depth = depth;
             this.lineageItems = Set.copyOf(lineageItems);
             this.lineageRecipes = Set.copyOf(lineageRecipes);
-            this.parentRecipeId = parentRecipeId;
+            this.parentRecipeIds = parentRecipeIds == null
+                    ? Set.of() : Set.copyOf(parentRecipeIds);
             this.allowedSources = List.copyOf(allowedSources);
         }
 
@@ -132,6 +136,11 @@ public final class SemanticAcquireCompanionTask
 
     private record IngredientNeed(
             List<ResourceLocation> itemIds, int missing, Map<String, Object> fact) {}
+
+    private record CraftFrontier(
+            IngredientNeed ingredient,
+            Set<String> recipeIds,
+            List<ResourceLocation> outputItemIds) {}
 
     private record NearbySurvey(
             int safeCount,
@@ -187,7 +196,7 @@ public final class SemanticAcquireCompanionTask
                 0,
                 new LinkedHashSet<>(r.itemIds),
                 Set.of(),
-                null,
+                Set.of(),
                 r.allowedSources);
         rootNeed.lastObservedCount = count(rootNeed.itemIds);
         needs.push(rootNeed);
@@ -198,8 +207,14 @@ public final class SemanticAcquireCompanionTask
         plannerStepsThisTick = 0;
         // This check deliberately precedes child advancement. A child may have made the semantic
         // fact true on the previous tick; no menu cleanup, recipe branch or mining swing is allowed
-        // to continue merely because its internal task has not yet declared terminal success.
+        // to continue merely because its internal task has not yet declared terminal success. The
+        // sole exception is an effect already in flight behind a terminal barrier: that exact child
+        // is allowed to settle its receipt and close its menu, but not to start another effect.
         if (count(r.itemIds) >= r.count) {
+            if (activeChild != null
+                    && activeChild.mustSettleBeforeSatisfiedCancellation()) {
+                return tickActiveChild();
+            }
             cancelActiveBecauseSatisfied();
             return TaskState.SUCCESS;
         }
@@ -368,13 +383,15 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
 
-        CraftCandidate chosen = candidates.stream()
+        List<CraftCandidate> viableCandidates = candidates.stream()
                 .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
                 .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
                 .filter(CraftCandidate::surfaceSupported)
                 .filter(candidate -> candidate.cost().missingMaterials() > 0)
                 .sorted(Comparator.comparing(CraftCandidate::cost, CraftPlanCost.ORDER))
-                .findFirst().orElse(null);
+                .toList();
+        CraftCandidate chosen = viableCandidates.isEmpty()
+                ? null : viableCandidates.getFirst();
         if (chosen == null) {
             boolean surfaceMissing = candidates.stream().anyMatch(candidate ->
                     candidate.cost().missingMaterials() == 0
@@ -391,8 +408,8 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
 
-        IngredientNeed ingredient = chooseIngredient(chosen, need);
-        if (ingredient == null) {
+        CraftFrontier frontier = chooseCraftFrontier(chosen, viableCandidates, need);
+        if (frontier == null) {
             need.rejectedRecipes.add(chosen.recipeId());
             addIssue("craft", "recipe_cycle_or_missing_evidence",
                     "the closest recipe's missing ingredients were cyclical or did not expose "
@@ -400,18 +417,21 @@ public final class SemanticAcquireCompanionTask
                     Map.of("recipe_id", chosen.recipeId()));
             return TaskState.RUNNING;
         }
+        IngredientNeed ingredient = frontier.ingredient();
         Set<ResourceLocation> lineageItems = new LinkedHashSet<>(need.lineageItems);
         lineageItems.addAll(ingredient.itemIds());
         Set<String> lineageRecipes = new LinkedHashSet<>(need.lineageRecipes);
-        lineageRecipes.add(chosen.recipeId());
+        lineageRecipes.addAll(frontier.recipeIds());
         int ingredientFinal = count(ingredient.itemIds()) + ingredient.missing();
         Need childNeed = new Need(
                 ingredient.itemIds(), ingredientFinal, need.depth + 1,
-                lineageItems, lineageRecipes, chosen.recipeId(), need.allowedSources);
+                lineageItems, lineageRecipes, frontier.recipeIds(), need.allowedSources);
         childNeed.lastObservedCount = count(childNeed.itemIds);
         recipeTrace.add(Map.of(
                 "recipe_id", chosen.recipeId(),
                 "output_item_id", chosen.outputItem().toString(),
+                "alternative_recipe_ids", List.copyOf(frontier.recipeIds()),
+                "alternative_output_item_ids", itemStrings(frontier.outputItemIds()),
                 "depth", need.depth,
                 "missing_item_ids", itemStrings(ingredient.itemIds()),
                 "missing_count", ingredient.missing()));
@@ -469,7 +489,7 @@ public final class SemanticAcquireCompanionTask
             lineage.addAll(toolItems);
             Need toolNeed = new Need(
                     toolItems, count(toolItems) + 1,
-                    need.depth + 1, lineage, need.lineageRecipes, null,
+                    need.depth + 1, lineage, need.lineageRecipes, Set.of(),
                     need.allowedSources);
             toolNeed.lastObservedCount = count(toolNeed.itemIds);
             need.miningToolPrerequisitePushed = true;
@@ -498,8 +518,12 @@ public final class SemanticAcquireCompanionTask
         int deficit = Math.min(256, missing(need));
         long now = player.level().getGameTime();
         long budget = Math.max(MINE_MIN_TICKS, deficit * MINE_PER_UNIT_TICKS);
+        Set<Item> progressItems = need.itemIds.stream()
+                .map(BuiltInRegistries.ITEM::get)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         MineBlockTaskRecord record = new MineBlockTaskRecord(
-                childId("mine"), now + budget, blocks, deficit, blockLabel(blocks));
+                childId("mine"), now + budget, blocks, deficit, blockLabel(blocks),
+                progressItems);
         return startChild(need, SemanticAcquireTaskRecord.Source.MINE,
                 record, "mine BlockItem-derived or semantic source blocks");
     }
@@ -712,7 +736,8 @@ public final class SemanticAcquireCompanionTask
         activeNeed.lastObservedCount = liveCount;
         // The root fact is checked by onTick before this method. Check the active recursive need too:
         // an external pickup or the child's previous effect may have completed it already.
-        if (liveCount >= activeNeed.requiredFinalCount) {
+        if (liveCount >= activeNeed.requiredFinalCount
+                && !activeChild.mustSettleBeforeSatisfiedCancellation()) {
             Need satisfiedNeed = activeNeed;
             cancelActiveBecauseSatisfied();
             if (!needs.isEmpty() && needs.peek() == satisfiedNeed) needs.pop();
@@ -813,6 +838,9 @@ public final class SemanticAcquireCompanionTask
             case CRAFT -> {
                 if (progress == 0 || structuredFailure) {
                     if (completedRecord instanceof CraftTaskRecord craft) {
+                        if (recoverCraftingSurface(completedNeed, craft, result)) {
+                            return TaskState.RUNNING;
+                        }
                         // Retry the semantic craft source, but never the same proven-failed recipe.
                         // This allows a 2x2 alternative after every concrete 3x3 station/site route
                         // failed, without blindly repeating the failed physical effect.
@@ -1032,10 +1060,13 @@ public final class SemanticAcquireCompanionTask
                     "a recursive recipe need ended without its parent",
                     FailureType.INTERNAL);
         }
-        if (need.parentRecipeId != null) parent.rejectedRecipes.add(need.parentRecipeId);
+        parent.rejectedRecipes.addAll(need.parentRecipeIds);
+        List<String> parentRecipeIds = need.parentRecipeIds.isEmpty()
+                ? List.of("unknown") : List.copyOf(need.parentRecipeIds);
         addIssue("craft", "recursive_ingredient_unmet",
-                "one recipe branch was abandoned after its ingredient need exhausted allowed sources",
-                Map.of("recipe_id", need.parentRecipeId == null ? "unknown" : need.parentRecipeId,
+                "one recipe frontier was abandoned after its ingredient alternatives exhausted allowed sources",
+                Map.of("recipe_id", parentRecipeIds.getFirst(),
+                        "recipe_ids", parentRecipeIds,
                         "ingredient_item_ids", itemStrings(need.itemIds),
                         "required_final_count", need.requiredFinalCount,
                         "observed_final_count", count(need.itemIds)));
@@ -1098,34 +1129,70 @@ public final class SemanticAcquireCompanionTask
 
     /**
      * Insert one finite-lineage, Mod-owned workstation item prerequisite ahead of an unchanged recipe.
-     * Only already-authorized non-destructive material sources are inherited: inventory, storage
-     * and ordinary crafting. It may turn carried/stored logs into planks and then a table, but
-     * cannot silently mine, take a world drop, trade or harm for this physical prerequisite.
+     * The prerequisite inherits exactly the source families already authorized for its parent;
+     * adding a workstation must not silently narrow the user's original acquisition policy.
      */
     private boolean pushCraftingSurfacePrerequisite(
             Need parent, CraftCandidate blockedRecipe) {
-        List<ResourceLocation> itemIds = blockedRecipe.surfacePrerequisiteItems().stream()
+        return pushCraftingSurfacePrerequisite(
+                parent, blockedRecipe.recipeId(), blockedRecipe.outputItem().toString(),
+                blockedRecipe.surfacePrerequisiteItems());
+    }
+
+    /**
+     * A physical craft can discover that every route to an observed station is unusable only after
+     * execution. Insert the same semantic workstation need used by planning, then leave the parent
+     * recipe untouched so it resumes after the carried surface exists.
+     */
+    private boolean recoverCraftingSurface(
+            Need parent, CraftTaskRecord craft, TaskResult result) {
+        if (result == null || result.data() == null) return false;
+        String code = string(result.data().get("failure_code"));
+        if (code == null || !code.startsWith("crafting_surface_")) return false;
+
+        List<ResourceLocation> itemIds = new ArrayList<>();
+        Object raw = result.data().get("crafting_surface_prerequisite_item_ids");
+        if (raw instanceof List<?> values) {
+            for (Object value : values) {
+                ResourceLocation id = ResourceLocation.tryParse(String.valueOf(value));
+                if (id != null && BuiltInRegistries.ITEM.containsKey(id)) itemIds.add(id);
+            }
+        }
+        if (itemIds.isEmpty()) {
+            itemIds.addAll(CraftingWorkstationCoordinator.prerequisiteItemIds());
+        }
+        // If a table is still carried, another item cannot repair a placement-site failure.
+        if (count(itemIds) > 0) return false;
+        return pushCraftingSurfacePrerequisite(
+                parent, craft.recipeId.toString(), parent.itemIds.getFirst().toString(), itemIds);
+    }
+
+    private boolean pushCraftingSurfacePrerequisite(
+            Need parent, String blockedRecipeId, String outputItemId,
+            List<ResourceLocation> candidates) {
+        List<ResourceLocation> itemIds = candidates.stream()
                 .filter(id -> !parent.lineageItems.contains(id))
                 .toList();
-        if (itemIds.isEmpty()) return false;
+        if (itemIds.isEmpty() || blockedRecipeId == null || blockedRecipeId.isBlank()) return false;
 
         Set<ResourceLocation> lineageItems = new LinkedHashSet<>(parent.lineageItems);
         lineageItems.addAll(itemIds);
         Set<String> lineageRecipes = new LinkedHashSet<>(parent.lineageRecipes);
-        lineageRecipes.add(blockedRecipe.recipeId());
-        List<SemanticAcquireTaskRecord.Source> prerequisiteSources = parent.allowedSources.stream()
-                .filter(source -> source == SemanticAcquireTaskRecord.Source.INVENTORY
-                        || source == SemanticAcquireTaskRecord.Source.STORAGE
-                        || source == SemanticAcquireTaskRecord.Source.CRAFT)
-                .toList();
+        lineageRecipes.add(blockedRecipeId);
+        // This prerequisite is still part of the user's original acquisition. Preserve every
+        // source family the parent explicitly authorized instead of inventing a narrower gate.
+        List<SemanticAcquireTaskRecord.Source> prerequisiteSources =
+                List.copyOf(parent.allowedSources);
+        if (prerequisiteSources.isEmpty()) return false;
+        if (!parent.surfaceRecoveryRecipes.add(blockedRecipeId)) return false;
         Need prerequisite = new Need(
                 itemIds, count(itemIds) + 1, parent.depth + 1,
-                lineageItems, lineageRecipes, blockedRecipe.recipeId(),
+                lineageItems, lineageRecipes, Set.of(blockedRecipeId),
                 prerequisiteSources);
         prerequisite.lastObservedCount = count(prerequisite.itemIds);
         recipeTrace.add(Map.of(
-                "recipe_id", blockedRecipe.recipeId(),
-                "output_item_id", blockedRecipe.outputItem().toString(),
+                "recipe_id", blockedRecipeId,
+                "output_item_id", outputItemId,
                 "depth", parent.depth,
                 "internal_prerequisite", "crafting_surface",
                 "prerequisite_item_ids", itemStrings(itemIds),
@@ -1137,10 +1204,71 @@ public final class SemanticAcquireCompanionTask
         return true;
     }
 
+    /**
+     * Build the next material frontier without leaking registry order into physical behavior.
+     *
+     * <p>When several acceptable outputs each have a recipe that is exactly one material short,
+     * acquiring one item from any of those recipes makes one complete recipe executable. Their
+     * acceptable inputs therefore form one real semantic alternative set. Nearby collection and
+     * mining can then choose the closest reachable member of that set instead of trying recipe IDs
+     * alphabetically. More complicated frontiers stay on one recipe because mixing partial inputs
+     * from unrelated recipes would not prove either recipe satisfiable.</p>
+     */
+    private CraftFrontier chooseCraftFrontier(
+            CraftCandidate chosen,
+            List<CraftCandidate> viableCandidates,
+            Need parent) {
+        IngredientNeed primary = chooseIngredient(chosen, parent);
+        if (primary == null) return null;
+
+        LinkedHashSet<ResourceLocation> itemIds = new LinkedHashSet<>(primary.itemIds());
+        LinkedHashSet<String> recipeIds = new LinkedHashSet<>();
+        LinkedHashSet<ResourceLocation> outputItemIds = new LinkedHashSet<>();
+        recipeIds.add(chosen.recipeId());
+        outputItemIds.add(chosen.outputItem());
+
+        if (chosen.cost().missingMaterials() == 1 && primary.missing() == 1) {
+            for (CraftCandidate candidate : viableCandidates) {
+                if (candidate == chosen
+                        || candidate.cost().missingMaterials() != 1
+                        || candidate.cost().surface() != chosen.cost().surface()) {
+                    continue;
+                }
+                IngredientNeed alternative = chooseIngredient(candidate, parent);
+                if (alternative == null || alternative.missing() != 1) continue;
+                itemIds.addAll(alternative.itemIds());
+                recipeIds.add(candidate.recipeId());
+                outputItemIds.add(candidate.outputItem());
+            }
+        }
+
+        IngredientNeed frontier = primary;
+        if (recipeIds.size() > 1) {
+            frontier = new IngredientNeed(
+                    List.copyOf(itemIds),
+                    1,
+                    Map.of(
+                            "kind", "one_unit_recipe_alternatives",
+                            "alternative_recipe_count", recipeIds.size(),
+                            "acceptable_item_count", itemIds.size()));
+        }
+        return new CraftFrontier(
+                frontier,
+                java.util.Collections.unmodifiableSet(recipeIds),
+                List.copyOf(outputItemIds));
+    }
+
+    /**
+     * Collapse repeated recipe slots with the exact same acceptable-item set into one quantity.
+     * A three-slot stone-material row is one need for three interchangeable materials, not three
+     * separate planner branches.
+     */
     private IngredientNeed chooseIngredient(CraftCandidate candidate, Need parent) {
         Object raw = candidate.data().get("ingredients");
         if (!(raw instanceof List<?> values)) return null;
-        List<IngredientNeed> choices = new ArrayList<>();
+        Map<List<ResourceLocation>, Integer> missingByItems = new LinkedHashMap<>();
+        Map<List<ResourceLocation>, List<Map<String, Object>>> factsByItems =
+                new LinkedHashMap<>();
         for (Object value : values) {
             if (!(value instanceof Map<?, ?> map)) continue;
             Map<String, Object> fact = stringKeyMap(map);
@@ -1156,10 +1284,24 @@ public final class SemanticAcquireCompanionTask
                 }
             }
             ids = ids.stream().distinct().toList();
-            if (!ids.isEmpty()) choices.add(new IngredientNeed(ids, missing, fact));
+            if (ids.isEmpty()) continue;
+            List<ResourceLocation> key = List.copyOf(ids);
+            missingByItems.merge(key, missing, Integer::sum);
+            factsByItems.computeIfAbsent(key, ignored -> new ArrayList<>()).add(fact);
+        }
+        List<IngredientNeed> choices = new ArrayList<>();
+        for (Map.Entry<List<ResourceLocation>, Integer> entry : missingByItems.entrySet()) {
+            Map<String, Object> combinedFact = new LinkedHashMap<>();
+            combinedFact.put("missing", entry.getValue());
+            combinedFact.put("ingredient_groups",
+                    List.copyOf(factsByItems.getOrDefault(entry.getKey(), List.of())));
+            choices.add(new IngredientNeed(
+                    entry.getKey(), entry.getValue(), Map.copyOf(combinedFact)));
         }
         return choices.stream()
-                .sorted(Comparator.comparingInt(IngredientNeed::missing))
+                .sorted(Comparator.comparingInt(IngredientNeed::missing)
+                        .thenComparing(ingredient -> String.join(",",
+                                itemStrings(ingredient.itemIds()))))
                 .findFirst().orElse(null);
     }
 
