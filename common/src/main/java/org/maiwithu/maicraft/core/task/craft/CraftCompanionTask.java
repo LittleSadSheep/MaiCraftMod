@@ -8,6 +8,7 @@ import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ClickType;
@@ -19,6 +20,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.ShapedRecipe;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -29,8 +32,10 @@ import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.base.DropTracker;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.act.Interaction;
@@ -47,10 +52,17 @@ import org.maiwithu.maicraft.task.TaskState;
 /** Receipt-driven recipe placement, result take, and menu close. */
 public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRecord> {
     private static final double AIM_CONVERGENCE_DOT = Math.cos(Math.toRadians(1.0D));
+    /** Network synchronization windows, not total task caps. */
+    private static final int STATION_DROP_SYNC_TICKS = 12;
+    private static final int STATION_PICKUP_SYNC_TICKS = 20;
+    private static final double STATION_DROP_SCAN_RADIUS = 4.0D;
     /** Renewed only after concrete state progress; this is a no-progress lease, not a total cap. */
     private static final long PROGRESS_LEASE_TICKS = 60L * 20L;
 
-    private enum Stage { CLOSE_WRONG_MENU, PREPARE_SURFACE, OPEN, PLACE, TAKE, CLOSE }
+    private enum Stage {
+        CLOSE_WRONG_MENU, PREPARE_SURFACE, OPEN, PLACE, TAKE, CLOSE,
+        RECLAIM_STATION, COLLECT_STATION
+    }
     private Stage stage;
     private RecipeHolder<?> recipe;
     private NativeActionReceipt openReceipt;
@@ -75,8 +87,25 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private final Set<Long> rejectedStationStances = new LinkedHashSet<>();
     private String surfaceFailureCode;
     private String surfaceFailureDetail;
+    private final BlockDigger stationDigger;
+    private final DropTracker stationDrops = new DropTracker();
+    private BlockPos temporaryStation;
+    private Block temporaryStationBlock;
+    private Item temporaryStationItem;
+    private int stationItemBeforeRecovery;
+    private long stationBreakTick = Long.MIN_VALUE;
+    private long stationDropMissingSince = Long.MIN_VALUE;
+    private int stationPickupTicks;
+    private boolean stationRecoveryAttempted;
+    private boolean stationRecovered;
+    private boolean stationDropObserved;
+    private ItemEntity stationDropTarget;
+    private String stationRecoveryDetail;
 
-    public CraftCompanionTask(LocalPlayer player, CraftTaskRecord record) { super(player, record); }
+    public CraftCompanionTask(LocalPlayer player, CraftTaskRecord record) {
+        super(player, record);
+        stationDigger = new BlockDigger(player);
+    }
 
     @Override protected void onStart() {
         var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();

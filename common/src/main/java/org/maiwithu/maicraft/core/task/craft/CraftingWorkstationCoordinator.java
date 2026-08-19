@@ -3,7 +3,10 @@ package org.maiwithu.maicraft.core.task.craft;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -39,6 +42,17 @@ public final class CraftingWorkstationCoordinator {
     private static final int SEARCH_HORIZONTAL = 32;
     private static final int SEARCH_VERTICAL = 16;
     private static final int PLACEMENT_RADIUS = 5;
+
+    /**
+     * Tables placed by the companion as temporary crafting surfaces in this live client world.
+     *
+     * <p>This is deliberately a physical-asset ledger rather than task-local state. A craft may be
+     * preempted after placement, and the next craft must still know that this particular table is
+     * safe to reclaim. The weak level key prevents coordinates leaking into another save/session;
+     * every lookup also re-reads the loaded world cell before returning ownership.</p>
+     */
+    private static final Map<ClientLevel, Map<Long, Block>> TEMPORARY_TABLES =
+            new WeakHashMap<>();
 
     public enum Action {
         READY,
@@ -95,6 +109,44 @@ public final class CraftingWorkstationCoordinator {
         TargetIndex.unregister(indexedLevel, indexedTables);
         indexedLevel = null;
         indexedTables = List.of();
+    }
+
+    /** Remember a table only after its placed block has been observed in the synchronized world. */
+    public static synchronized void rememberTemporaryTable(
+            LocalPlayer player, BlockPos pos) {
+        if (!usableTable(player, pos)) return;
+        Block live = player.level().getBlockState(pos).getBlock();
+        TEMPORARY_TABLES.computeIfAbsent(player.clientLevel, ignored -> new LinkedHashMap<>())
+                .put(pos.asLong(), live);
+    }
+
+    /**
+     * Return the exact temporary table block at {@code pos}, or {@code null} when it is not ours.
+     * A loaded mismatch retires stale ownership rather than authorizing a later task to break a
+     * player's replacement block at the same coordinates.
+     */
+    public static synchronized Block temporaryTable(LocalPlayer player, BlockPos pos) {
+        if (pos == null) return null;
+        Map<Long, Block> entries = TEMPORARY_TABLES.get(player.clientLevel);
+        if (entries == null) return null;
+        Block expected = entries.get(pos.asLong());
+        if (expected == null) return null;
+        if (!player.level().isLoaded(pos)) return expected;
+        Block live = player.level().getBlockState(pos).getBlock();
+        if (live == expected && live instanceof CraftingTableBlock) return live;
+        entries.remove(pos.asLong());
+        if (entries.isEmpty()) TEMPORARY_TABLES.remove(player.clientLevel);
+        return null;
+    }
+
+    /** Retire ownership after the table disappeared and its item was recovered (or was lost). */
+    public static synchronized void forgetTemporaryTable(
+            LocalPlayer player, BlockPos pos) {
+        if (pos == null) return;
+        Map<Long, Block> entries = TEMPORARY_TABLES.get(player.clientLevel);
+        if (entries == null) return;
+        entries.remove(pos.asLong());
+        if (entries.isEmpty()) TEMPORARY_TABLES.remove(player.clientLevel);
     }
 
     /** Read-only feasibility snapshot shared by recipe ranking. */
