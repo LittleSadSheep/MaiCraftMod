@@ -12,20 +12,18 @@ import org.maiwithu.maicraft.core.pathing.moves.ActionCosts;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 import org.maiwithu.maicraft.core.act.BlockDigger;
+import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.NavProfiler;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
-import org.maiwithu.maicraft.core.task.base.DropTracker;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
@@ -43,6 +41,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -123,23 +123,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 挪出这么远就算"她在动",进度计时重新起算。 */
     private static final double STALL_MOVE = 2.0;
 
-    /** 服务端方块掉落实体可能比破块回执晚几刻同步到客户端。这个短窗只在
-     *  已确认破坏的目标格周围找“快照之后的新实体”，绝不扫描全场同类物品。 */
-    private static final int DROP_DISCOVERY_TICKS = 12;
-    /** 一次真实掉落从生成到走过去拾取的总上限（十秒）。 */
-    private static final int DROP_COLLECTION_TIMEOUT_TICKS = 200;
-    /** 已经贴近物品仍未被原版碰撞拾取时，给同步/拾取延迟留一秒。 */
+    /** Keep a freshly broken target cell as the exclusive pickup goal while its
+     *  server-spawned item synchronizes to the first-person client. */
+    private static final int DROP_LOITER_TICKS = 12;
+    /** Once the body occupies an eligible loose item's cell and its pickup delay
+     *  has elapsed, this is ample time for the authoritative inventory update. */
     private static final int DROP_CLOSE_WAIT_TICKS = 20;
-    private static final double DROP_PICKUP_REACH_SQR = 1.75 * 1.75;
-    /** 原版 Block.popResource 在目标格中心 ±0.25 生成。这里多留同步移动余量，
-     *  仍远小于旧实现 128 格的“见到同类就捡”，以绑定到本次破坏事实。 */
-    private static final double DROP_EVIDENCE_RADIUS = 1.75;
-    /** Snapshot old loose items farther out as well, so one rolling into the small
-     *  evidence box during the discovery window still keeps its old identity. */
-    private static final double PREEXISTING_DROP_GUARD_RADIUS = 8.0;
-    /** 另一个玩家若正贴着破坏格，客户端又无法证明新 ItemEntity 的 thrower，
-     *  null-owner 新物品就不能安全归因；宁可停下来，也不捡对方刚丢的东西。 */
-    private static final double OTHER_PLAYER_AMBIGUITY_SQR = 8.0 * 8.0;
 
     private final List<BlockPos> knownOres = new ArrayList<>();
     /**
@@ -156,42 +145,45 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** Targets pruned because no carried tool harvests them (force=false only) — kept so the
      *  terminal failure can name the tool problem instead of reporting an empty field. */
     private final Set<BlockPos> unharvestable = new HashSet<>();
-    /** 本次明确破坏的目标所产生的差集追踪器。每挖一格清空重建，避免把前一轮
-     *  或路边同类物品混进来。DropTracker 负责新实体差集；本类再排除旧 id、
-     *  他人 owner 与不在破坏格生成窗内的实体。 */
-    private final DropTracker breakDrops = new DropTracker();
-    private final Set<Integer> preexistingDropIds = new HashSet<>();
-    private final Map<Integer, ItemStack> preexistingDropStacks = new HashMap<>();
-    private final Set<Integer> relevantPreexistingDropIds = new HashSet<>();
+    /** Items that satisfy this mining request. Semantic acquire supplies the exact
+     *  family up front; raw mine learns only types actually observed after a direct break. */
+    private Set<Item> dropItems = Set.of();
+    /** Semantic callers provide the exact acceptable final item family. Its task-start
+     *  baseline makes path-executor breaks and direct BlockDigger breaks share one tally. */
+    private int progressItemBaseline;
+    /** Raw mine has no semantic output family. Snapshot every item once, then count
+     *  only positive deltas for types learned from a direct break's live result. */
+    private Map<Item, Integer> rawInventoryBaseline = Map.of();
+    /** Matching loose items to walk over, refreshed every tick. */
+    private List<BlockPos> drops = List.of();
+    /** Recently broken target cells retained as temporary walk-over members. */
+    private final Map<BlockPos, Long> anticipatedDrops = new HashMap<>();
+    /** Target cells that vanished during navigation, retained only until the
+     *  navigation's native terrain ledger confirms a corresponding break. */
+    private final Map<BlockPos, Long> pendingPathBreaks = new LinkedHashMap<>();
+    /** Loose entities present before a break cannot become this task's loot merely
+     *  because they share an item id. Counts also detect a new drop merging into an old stack. */
+    private final Map<Integer, Integer> preexistingDropCounts = new HashMap<>();
+    /** Only new entity identities born beside a receipt/ledger-bound break origin
+     *  may own pickup movement. */
     private final Set<Integer> attributedDropIds = new HashSet<>();
-    private final Set<Integer> rejectedDropIds = new HashSet<>();
-    private final Set<Item> observedDropItems = new HashSet<>();
-    /** 破坏前主背包按物品计数；组件/耐久变化不伪装成新物品。 */
-    private Map<Item, Integer> inventoryBeforeBreak = Map.of();
-    /** 已确认由本任务破坏且最终真实进入主背包的物品数。 */
-    private int gatheredItems;
-    /** 当前目标在破坏前的真实状态与实际破坏工具快照；它们是本轮掉落证据的
-     *  来源上下文，不拿 block.asItem() 猜产物。 */
-    private BlockPos evidencePos;
-    private BlockState evidenceState;
-    private ItemStack evidenceTool = ItemStack.EMPTY;
-    private boolean collectingDrops;
-    private boolean provenanceAmbiguous;
-    /** Mine owns the native break only after client destroy progression was observed,
-     *  or the target became air during our digStep prediction. This distinguishes an
-     *  external target disappearance while BlockDigger was merely selecting a tool. */
-    private boolean nativeBreakObserved;
-    /** Mirror the action port's two-revision stable-air confirmation so Mine can
-     *  deliver the terminal break after the target is already no longer raycastable. */
-    private int confirmedAirTicks;
-    private int dropPhaseTicks;
+    private final Set<Integer> ambiguousMergedDropIds = new HashSet<>();
+    /** Loaded target cells watched for path-executor air transitions. */
+    private final Set<BlockPos> watchedTargetCells = new HashSet<>();
+    /** A fully searched, unreachable loose entity must not starve every later
+     *  target. Its identity remains excluded for this finite mining task. */
+    private final Set<Integer> unreachableDropIds = new HashSet<>();
+    private int unreachableDropCount;
+    private int ambiguousMergedDropCount;
+    /** Close-but-not-absorbed settle counter; reset by every verified inventory gain. */
     private int dropCloseTicks;
-    private ItemEntity dropTarget;
+    private int lastVerifiedGathered;
     /** 无掉落画像(创造)下的进度计数:破坏的目标方块数——背包增量在
      *  这种画像下恒为 0,数拾取物会让任务铲平半径 32 chunk 后报败。 */
     private int brokenTargets;
 
     private boolean navIsBranch;
+    private boolean navIsDrop;
     private BlockPos branchPoint;
     private int branchY;
     /** 距下一次允许查询的冷却(tick)。 */
@@ -218,6 +210,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     // Progressive dig (blocks break tick-by-tick at legitimate player speed, not
     // instabreak) — shared with the path executor so all breaking reads the same.
     private final BlockDigger digger;
+    /** Requested target stays distinct from BlockDigger.current(), which may be
+     *  a temporary occluder selected to open the target's line of sight. */
+    private BlockPos activeTarget;
 
     public MineCompanionTask(LocalPlayer player, MineBlockTaskRecord record) {
         super(player, record);
@@ -249,29 +244,51 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     @Override
     protected void onStart() {
-        // Survival progress is credited only after a confirmed target break and a real
-        // main-inventory gain during that break's isolated drop round. Creative has no
-        // block drops, so it deliberately retains the verified-broken-block count.
-        gatheredItems = 0;
+        // Semantic acquire already knows the acceptable final item family. Keep that
+        // set fixed for the whole task so every native pickup, including a target
+        // broken by path execution, contributes through one task-start baseline.
+        // Raw mine has no such fact: it starts empty and learns only an actually
+        // observed result type after its own BlockDigger breaks a target.
+        dropItems = r.progressItems.isEmpty()
+                ? new HashSet<>()
+                : r.progressItems;
+        progressItemBaseline = progressItemCount();
+        rawInventoryBaseline = r.progressItems.isEmpty()
+                ? inventoryCounts()
+                : Map.of();
+        lastVerifiedGathered = 0;
+        snapshotPreexistingDrops();
         // 登记目标进共享索引并立即首查;冷区域的索引构建由每次查询的预算分摊,
         // 覆盖完整前 onTick 的终局判定会等着(lastQueryComplete)。
         TargetIndex.register(player.clientLevel, r.targets);
         runQuery();
         lastProgressTick = player.level().getGameTime();
-        lastProgressPos = player.blockPosition();
+        lastProgressPos = feet();
         // 与 goto 的 start 日志对称:一任务一条,让日志里能看到任务确实启动了
         org.maiwithu.maicraft.core.Constants.LOG.info(
                 "[maicraft-task] mine start targets={} count={} feet={} firstQuery={} hit(s) mapComplete={}",
-                r.label, r.count, player.blockPosition().toShortString(),
+                r.label, r.count, feet().toShortString(),
                 knownOres.size(), lastQueryComplete);
     }
 
     @Override
     protected TaskState onTick() {
-        // 进度口径随画像:生存数“本次确认破坏后真实进背包”的物品；无掉落
-        // 画像(创造)才数确认破坏的目标格。不能在掉落实体还躺在地上时先报成功。
-        int gathered = WorkProfile.of(player).dropsLoot() ? gatheredItems : brokenTargets;
+        // 有掉落画像看任务开始后的最终库存增量；路径执行器和直接挖掘
+        // 走的是同一把尺。无掉落画像（创造）才数目标方块破坏数。
+        int gathered = WorkProfile.of(player).dropsLoot()
+                ? (r.progressItems.isEmpty()
+                        ? rawItemProgress()
+                        : Math.max(0, progressItemCount() - progressItemBaseline))
+                : brokenTargets;
         r.setMined(gathered);
+        if (gathered > lastVerifiedGathered) {
+            lastVerifiedGathered = gathered;
+            dropCloseTicks = 0;
+            // The inventory fact proves at least one anticipated round settled. Any
+            // still-live remainder is rediscovered below by entity identity.
+            anticipatedDrops.clear();
+            noteProgress();
+        }
         if (gathered >= r.count) {
             progressNote = "gathered all requested";
             return TaskState.SUCCESS;
