@@ -135,7 +135,10 @@ public final class BlockDigger {
      */
     public DigResult settleGone(boolean targetBreak) {
         if (receipt == null) {
-            reset();
+            // The target can disappear while this digger is still selecting/staging its tool.
+            // reset() would orphan that actor/menu receipt; cancel() retires every transaction
+            // owned by this digger before clearing the local state.
+            cancel();
             return DigResult.NO_SHOT;
         }
         LocalPlayerContext context = ClientRuntime.requireContext(player);
