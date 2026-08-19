@@ -328,8 +328,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // BlockDigger.current() is the effective cell and may temporarily be an
         // occluder, so never replace the semantic target with that implementation detail.
         if (activeTarget != null) {
-            if (nav != null) {
-                nav.pause();
+            if (nav != null && !nav.yieldForExternalAction()) {
+                return TaskState.RUNNING;
             }
             BlockPos effective = digger.current();
             if (effective != null && level.getBlockState(effective).isAir()) {
@@ -351,13 +351,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         //    a tree gets mined from beside, never by digging under it.
         BlockPos reachable = reachableTarget();
         if (reachable != null) {
-            // Mine in place with the nav merely PAUSED (inputs cleared each tick), never torn down:
-            // the goal, current path segment, and any in-flight search stay warm, so when this dig
-            // ends navigation resumes where it left off instead of cold-starting a fresh A* — that
-            // cold start used to surface as a visible stall after every in-place dig. The goal-box
-            // overlay also survives for free (nothing clears it anymore).
-            if (nav != null) {
-                nav.pause();
+            // Preserve the warm route, but explicitly hand off every native/menu receipt before
+            // the independent BlockDigger takes the same serialized actor slot.  A plain pause
+            // clears only locomotion and can leave the route's final BREAK_BLOCK receipt pending.
+            if (nav != null && !nav.yieldForExternalAction()) {
+                return TaskState.RUNNING;
             }
             activeTarget = reachable.immutable();
             mineProgress(reachable);
