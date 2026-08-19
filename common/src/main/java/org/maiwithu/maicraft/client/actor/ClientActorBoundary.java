@@ -110,6 +110,12 @@ public final class ClientActorBoundary {
     public DefaultNativeActionPort actions() { return actions; }
     public DefaultMenuPort menus() { return menus; }
 
+    /** Render-cadence camera integration; no task or native mutation is advanced here. */
+    public void renderFrame() {
+        requireClientThread();
+        body.renderFrame(minecraft.player);
+    }
+
     /**
      * Request takeover for the next actor tick. This is client-thread-only and deliberately does
      * not replace Input immediately, so MCP request handling cannot mutate a half-open tick.

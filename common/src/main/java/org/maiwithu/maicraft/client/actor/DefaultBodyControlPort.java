@@ -22,6 +22,12 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     private Movement movement = Movement.STOPPED;
     private Float targetYaw;
     private Float targetPitch;
+    private float cameraYaw;
+    private float cameraPitch;
+    private float yawVelocity;
+    private float pitchVelocity;
+    private long lastLookUpdateNanos;
+    private boolean cameraInitialized;
 
     @Override
     public boolean automationOwnsControls() {
@@ -52,6 +58,9 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         targetYaw = null;
         targetPitch = null;
         lookLease = Long.MIN_VALUE;
+        yawVelocity = 0.0f;
+        pitchVelocity = 0.0f;
+        lastLookUpdateNanos = 0L;
     }
 
     @Override
@@ -164,13 +173,22 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         player.setSprinting(command.sprinting());
 
         if (lookLease == context.tickRevision() && targetYaw != null && targetPitch != null) {
-            float yaw = Mth.approachDegrees(player.getYRot(), targetYaw, MAX_YAW_PER_TICK);
-            float pitch = Mth.approach(player.getXRot(), targetPitch, MAX_PITCH_PER_TICK);
-            player.setYRot(yaw);
-            player.setYHeadRot(yaw);
-            player.setYBodyRot(yaw);
-            player.setXRot(pitch);
+            advanceLook(player, System.nanoTime());
+        } else {
+            synchronizeCamera(player);
+            yawVelocity = 0.0f;
+            pitchVelocity = 0.0f;
+            lastLookUpdateNanos = 0L;
         }
+    }
+
+    /** Advance the same physical first-person camera once per rendered frame. */
+    void renderFrame(LocalPlayer player) {
+        if (!automationOwnsControls() || player == null || player != controlledPlayer
+                || targetYaw == null || targetPitch == null) {
+            return;
+        }
+        advanceLook(player, System.nanoTime());
     }
 
     void shutdown() {
@@ -205,6 +223,10 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         controlledPlayer = player;
         requestedPlayer = player;
         player.input = botInput;
+        synchronizeCamera(player);
+        yawVelocity = 0.0f;
+        pitchVelocity = 0.0f;
+        lastLookUpdateNanos = 0L;
         writeStoppedInput();
     }
 
@@ -224,6 +246,85 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         if (controlledPlayer != null) controlledPlayer.setSprinting(false);
     }
 
+    private void advanceLook(LocalPlayer player, long nowNanos) {
+        if (!cameraInitialized) synchronizeCamera(player);
+        float dt;
+        if (lastLookUpdateNanos == 0L) {
+            // A first sample still makes visible progress even at a very low render rate.
+            dt = 1.0f / 60.0f;
+        } else {
+            dt = (float) ((nowNanos - lastLookUpdateNanos) * 1.0e-9);
+            dt = Mth.clamp(dt, 0.0f, MAX_LOOK_DELTA_SECONDS);
+        }
+        lastLookUpdateNanos = nowNanos;
+        if (dt <= 0.0f) return;
+
+        AxisStep yaw = smoothDampAngle(
+                cameraYaw, targetYaw, yawVelocity, YAW_SMOOTH_TIME, MAX_YAW_SPEED, dt);
+        AxisStep pitch = smoothDamp(
+                cameraPitch, targetPitch, pitchVelocity,
+                PITCH_SMOOTH_TIME, MAX_PITCH_SPEED, dt);
+        cameraYaw = yaw.value();
+        cameraPitch = Mth.clamp(pitch.value(), -90.0f, 90.0f);
+        yawVelocity = yaw.velocity();
+        pitchVelocity = pitch.velocity();
+        applyCamera(player, cameraYaw, cameraPitch);
+    }
+
+    private void synchronizeCamera(LocalPlayer player) {
+        cameraYaw = player.getYRot();
+        cameraPitch = player.getXRot();
+        cameraInitialized = true;
+    }
+
+    /**
+     * Critically damped second-order response. It preserves angular velocity across frames,
+     * eases both acceleration and arrival, and explicitly clamps at the target on any numerical
+     * crossing, so a moving target cannot make the camera ring or overshoot.
+     */
+    private static AxisStep smoothDampAngle(
+            float current, float target, float velocity,
+            float smoothTime, float maxSpeed, float dt) {
+        float unwrappedTarget = current + Mth.wrapDegrees(target - current);
+        return smoothDamp(current, unwrappedTarget, velocity, smoothTime, maxSpeed, dt);
+    }
+
+    private static AxisStep smoothDamp(
+            float current, float target, float velocity,
+            float smoothTime, float maxSpeed, float dt) {
+        float omega = 2.0f / Math.max(0.0001f, smoothTime);
+        float x = omega * dt;
+        float decay = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
+        float change = current - target;
+        float maxChange = maxSpeed * smoothTime;
+        change = Mth.clamp(change, -maxChange, maxChange);
+        float adjustedTarget = current - change;
+        float temporary = (velocity + omega * change) * dt;
+        float nextVelocity = (velocity - omega * temporary) * decay;
+        float output = adjustedTarget + (change + temporary) * decay;
+
+        float desiredDirection = adjustedTarget - current;
+        if ((desiredDirection > 0.0f && output > adjustedTarget)
+                || (desiredDirection < 0.0f && output < adjustedTarget)) {
+            output = adjustedTarget;
+            nextVelocity = 0.0f;
+        }
+        return new AxisStep(output, nextVelocity);
+    }
+
+    private static void applyCamera(LocalPlayer player, float yaw, float pitch) {
+        // Disable vanilla's second, linear tick interpolation: this method already runs at render
+        // cadence and supplies the curved sample that both the visible camera and native ray use.
+        player.setYRot(yaw);
+        player.setYHeadRot(yaw);
+        player.setYBodyRot(yaw);
+        player.setXRot(pitch);
+        player.yRotO = yaw;
+        player.xRotO = pitch;
+        player.yHeadRotO = yaw;
+        player.yBodyRotO = yaw;
+    }
+
     private static long nextRequestRevision(long value) {
         if (value == Long.MAX_VALUE) {
             throw new IllegalStateException("automation request revision exhausted");
@@ -241,6 +342,11 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         }
     }
 
-    private static final float MAX_YAW_PER_TICK = 9.0f;
-    private static final float MAX_PITCH_PER_TICK = 5.0f;
+    private record AxisStep(float value, float velocity) {}
+
+    private static final float YAW_SMOOTH_TIME = 0.11f;
+    private static final float PITCH_SMOOTH_TIME = 0.10f;
+    private static final float MAX_YAW_SPEED = 240.0f;
+    private static final float MAX_PITCH_SPEED = 180.0f;
+    private static final float MAX_LOOK_DELTA_SECONDS = 0.05f;
 }
