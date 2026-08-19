@@ -135,6 +135,12 @@ public final class ClientRuntime {
         return ACTOR;
     }
 
+    /** Advance only the leased first-person camera at render cadence. */
+    public static void renderFrame(Minecraft minecraft) {
+        requireClientThread(minecraft);
+        ACTOR.renderFrame();
+    }
+
     /** Register explicit MCP authority for takeover at the next actor tick. */
     public static ClientActorBoundary.AutomationRequest requestAutomationControl(
             LocalPlayer player) {

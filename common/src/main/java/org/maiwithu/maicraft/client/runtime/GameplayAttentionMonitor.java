@@ -16,6 +16,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
@@ -58,7 +59,7 @@ public final class GameplayAttentionMonitor {
     public static void tick(LocalPlayer player) {
         ClientLevel level = player.clientLevel;
         String dimension = level.dimension().location().toString();
-        String phase = timePhase(level.getDayTime());
+        String phase = WorldTimeSemantics.phase(level).id();
         String weather = weather(level);
         float effectiveHealth = player.getHealth() + player.getAbsorptionAmount();
         int hurtByMobTimestamp = player.getLastHurtByMobTimestamp();
@@ -99,8 +100,8 @@ public final class GameplayAttentionMonitor {
         if (!phase.equals(previousTimePhase)) {
             JsonObject data = new JsonObject();
             data.addProperty("phase", phase);
-            data.addProperty("day", Math.floorDiv(level.getDayTime(), 24_000L));
-            data.addProperty("time_of_day", Math.floorMod(level.getDayTime(), 24_000L));
+            data.addProperty("day", WorldTimeSemantics.dayIndex(level));
+            data.addProperty("time_of_day", WorldTimeSemantics.timeOfDay(level));
             publish("world.time_phase_changed", "Time phase changed to " + phase, data);
         }
         if (!weather.equals(previousWeather)) {
@@ -610,11 +611,4 @@ public final class GameplayAttentionMonitor {
         return "clear";
     }
 
-    private static String timePhase(long dayTime) {
-        long time = Math.floorMod(dayTime, 24_000L);
-        if (time <= 999L || time >= 23_000L) return "dawn";
-        if (time <= 11_999L) return "day";
-        if (time <= 12_999L) return "dusk";
-        return "night";
-    }
 }
