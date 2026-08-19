@@ -279,6 +279,8 @@ public final class CraftOps {
                 toolContext.deadline(timeout),
                 chosen.id(),
                 deficit,
+                chosen.batches(),
+                chosen.outputCount(),
                 chosen.station()), null, chosen.cost());
     }
 

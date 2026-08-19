@@ -37,7 +37,8 @@ public final class SemanticEntitySearchTool implements MaiCraftTool {
                 + "currently loaded client evidence first, then walks bounded first-person frontiers "
                 + "and rescans. It never accepts runtime entity IDs or coordinates, queries a seed or "
                 + "server locate authority, forces chunks, or treats named/tamed/owned/leashed, "
-                + "persistent, enclosed or protected entities as wild/unowned.";
+                + "vehicle-held or explicitly protected entities as wild/unowned. Physical enclosure "
+                + "counts only together with an explicitly protected semantic-area context.";
     }
 
     @Override

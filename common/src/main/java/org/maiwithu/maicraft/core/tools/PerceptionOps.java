@@ -4,6 +4,7 @@ import net.minecraft.client.player.LocalPlayer;
 import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -130,8 +131,11 @@ public final class PerceptionOps {
         JsonObject root = new JsonObject();
         root.addProperty("dimension", level.dimension().location().toString());
         root.addProperty("game_time", level.getLevelData().getGameTime());
-        root.addProperty("is_bright_outside", level.isDay());
-        root.addProperty("is_dark_outside", level.isNight());
+        root.addProperty("day_index", WorldTimeSemantics.dayIndex(level));
+        root.addProperty("time_of_day", WorldTimeSemantics.timeOfDay(level));
+        root.addProperty("time_phase", WorldTimeSemantics.phase(level).id());
+        root.addProperty("is_bright_outside", WorldTimeSemantics.isDaytime(level));
+        root.addProperty("is_dark_outside", WorldTimeSemantics.isNighttime(level));
 
         String weather;
         if (level.isThundering()) weather = "thunder";
