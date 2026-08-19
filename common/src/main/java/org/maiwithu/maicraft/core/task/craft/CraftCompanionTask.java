@@ -89,11 +89,14 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         }
         requiresTable = requiresThreeByThree(recipe);
         station = r.station;
-        if (hasCraftGrid(requiresTable ? 3 : 2, requiresTable ? 3 : 2)) {
+        boolean compatibleMenu = hasCraftGrid(
+                requiresTable ? 3 : 2, requiresTable ? 3 : 2);
+        if (compatibleMenu) {
             stage = Stage.PLACE;
         } else if (player.containerMenu != player.inventoryMenu) {
             stage = Stage.CLOSE_WRONG_MENU;
         } else {
+            if (r.station != null) bindStation(r.station);
             stage = requiresTable ? Stage.PREPARE_SURFACE : Stage.PLACE;
         }
     }
@@ -107,6 +110,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             case PLACE -> placeRecipe();
             case TAKE -> takeResult();
             case CLOSE -> closeMenu();
+            case RECLAIM_STATION -> reclaimTemporaryStation();
+            case COLLECT_STATION -> collectTemporaryStation();
         };
     }
 
@@ -163,8 +168,10 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                     surfaceFailureCode = "crafting_surface_unavailable";
                     surfaceFailureDetail = directive.detail();
                 }
+                String detail = surfaceFailureDetail == null
+                        ? directive.detail() : surfaceFailureDetail;
                 fail("recipe " + r.recipeId + " needs a 3x3 crafting surface, but "
-                        + directive.detail(), FailureType.NO_SUPPORT);
+                        + detail, FailureType.NO_SUPPORT);
                 yield TaskState.FAILED;
             }
         };
@@ -208,8 +215,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                 yield startAlternativeStationStance(directive);
             }
             case FAILED -> {
-                surfaceFailureCode = "crafting_surface_route_exhausted";
-                surfaceFailureDetail = nav.failReason();
+                recordSurfaceRouteFailure(directive, "route_exhausted", nav.failReason());
                 stopNav();
                 workstation.reject(directive);
                 abandonStation();
@@ -224,8 +230,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         BlockPos stance = FirstPersonInteractionTargeting.nearestVisibleStand(
                 player, directive.position(), 4.5D, rejectedStationStances);
         if (stance == null) {
-            surfaceFailureCode = "crafting_surface_stances_exhausted";
-            surfaceFailureDetail = "no remaining loaded standable cell has a visible workstation face";
+            recordSurfaceRouteFailure(directive, "stances_exhausted",
+                    "no remaining loaded standable cell has a visible workstation face");
             workstation.reject(directive);
             abandonStation();
             return TaskState.RUNNING;
@@ -266,7 +272,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             if (completed.action() == CraftingWorkstationCoordinator.Action.PLACE_CARRIED
                     && CraftingWorkstationCoordinator.usableTable(
                             player, completed.position())) {
-                stationPlaced = true;
+                rememberTemporaryStation(completed.position());
                 bindStation(completed.position());
                 renewProgressLease();
                 stage = Stage.PREPARE_SURFACE;
@@ -275,9 +281,9 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             if (surfaceMoveStance != null
                     && completed.action() != CraftingWorkstationCoordinator.Action.PLACE_CARRIED) {
                 rejectedStationStances.add(surfaceMoveStance.asLong());
-                surfaceFailureCode = "crafting_surface_stance_unreachable";
-                surfaceFailureDetail = result == null
-                        ? "the exact interaction stance ended without a result" : result.message();
+                recordSurfaceRouteFailure(completed, "stance_unreachable",
+                        result == null ? "the exact interaction stance ended without a result"
+                                : result.message());
                 surfaceMoveStance = null;
                 bindStation(completed.position());
                 stage = Stage.PREPARE_SURFACE;
@@ -296,7 +302,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                 stage = Stage.PREPARE_SURFACE;
                 return TaskState.RUNNING;
             }
-            stationPlaced = true;
+            rememberTemporaryStation(completed.position());
             bindStation(completed.position());
             renewProgressLease();
             stage = Stage.PREPARE_SURFACE;
@@ -307,6 +313,21 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         renewProgressLease();
         stage = Stage.PREPARE_SURFACE;
         return TaskState.RUNNING;
+    }
+
+    private void recordSurfaceRouteFailure(
+            CraftingWorkstationCoordinator.Directive directive,
+            String suffix,
+            String detail) {
+        boolean temporary = directive != null && directive.position() != null
+                && CraftingWorkstationCoordinator.temporaryTable(
+                        player, directive.position()) != null;
+        surfaceFailureCode = (temporary
+                ? "temporary_workstation_" : "crafting_surface_") + suffix;
+        surfaceFailureDetail = temporary
+                ? "the companion-owned temporary crafting table still exists, but " + detail
+                        + "; another table will not be manufactured to replace it"
+                : detail;
     }
 
     private TaskState openStation() {
@@ -447,8 +468,23 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             stanceStation = next.immutable();
         }
         station = next.immutable();
+        Block temporary = CraftingWorkstationCoordinator.temporaryTable(player, next);
+        if (temporary != null) {
+            temporaryStation = next.immutable();
+            temporaryStationBlock = temporary;
+        }
         stationAimPoint = null;
         stationAimRequestedRevision = Long.MIN_VALUE;
+    }
+
+    private void rememberTemporaryStation(BlockPos pos) {
+        stationPlaced = true;
+        CraftingWorkstationCoordinator.rememberTemporaryTable(player, pos);
+        Block temporary = CraftingWorkstationCoordinator.temporaryTable(player, pos);
+        if (temporary != null) {
+            temporaryStation = pos.immutable();
+            temporaryStationBlock = temporary;
+        }
     }
 
     private void abandonStation() {
@@ -523,18 +559,230 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         }
         menuReceipt = context.menus().poll(context, menuReceipt);
         if (!menuReceipt.terminal()) return TaskState.RUNNING;
-        if (menuReceipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED) return TaskState.SUCCESS;
+        if (menuReceipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED) {
+            menuReceipt = null;
+            return beginTemporaryStationRecovery();
+        }
         fail("craft completed but menu close was not confirmed: " + menuReceipt.detail(),
                 FailureType.UNKNOWN);
         return TaskState.FAILED;
+    }
+
+    /**
+     * A table placed by this client is travelling equipment, not a disposable build. Reclaim it
+     * while the body is still at the verified interaction stance, before a following gather task
+     * can descend or cross terrain that makes the old station expensive to reach again.
+     */
+    private TaskState beginTemporaryStationRecovery() {
+        if (!requiresTable || temporaryStation == null || temporaryStationBlock == null) {
+            return TaskState.SUCCESS;
+        }
+        Block owned = CraftingWorkstationCoordinator.temporaryTable(player, temporaryStation);
+        if (owned == null) {
+            stationRecoveryDetail = "the temporary crafting table was no longer present";
+            return TaskState.SUCCESS;
+        }
+        if (!player.level().isLoaded(temporaryStation)) {
+            // Ownership stays in the live-level ledger. A later craft can reuse it after the chunk
+            // is loaded; an unloaded cell is never guessed at or broken speculatively.
+            stationRecoveryDetail = "the temporary crafting table left the loaded client world";
+            return TaskState.SUCCESS;
+        }
+        temporaryStationBlock = owned;
+        temporaryStationItem = owned.asItem();
+        if (temporaryStationItem == null
+                || temporaryStationItem == net.minecraft.world.item.Items.AIR) {
+            stationRecoveryDetail = "the temporary crafting surface has no recoverable item form";
+            return TaskState.SUCCESS;
+        }
+        if (!canAcceptRecoveredStation()) {
+            stationRecoveryDetail = "the temporary crafting table was left in place because the "
+                    + "main inventory has no slot that can accept it";
+            return TaskState.SUCCESS;
+        }
+
+        stationRecoveryAttempted = true;
+        stationItemBeforeRecovery = PlayerInv.carriedCount(
+                player.getInventory(), temporaryStationItem);
+        stationDrops.clear();
+        stationDrops.rememberExisting(player.level(), stationRecoveryBox());
+        stationBreakTick = Long.MIN_VALUE;
+        stationDropMissingSince = Long.MIN_VALUE;
+        stationPickupTicks = 0;
+        stationDropObserved = false;
+        stationDropTarget = null;
+        stage = Stage.RECLAIM_STATION;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState reclaimTemporaryStation() {
+        if (temporaryStation == null || temporaryStationBlock == null) {
+            return finishStationRecovery(false,
+                    "the temporary crafting table identity was lost before recovery");
+        }
+
+        boolean exactTableStillPresent = player.level().isLoaded(temporaryStation)
+                && player.level().getBlockState(temporaryStation).getBlock()
+                        == temporaryStationBlock;
+        BlockDigger.DigResult dig;
+        if (!exactTableStillPresent) {
+            // Once the synchronized block cell changes, the ray can no longer hit it. Settle the
+            // already-submitted native break receipt instead of starting or abandoning an action.
+            if (stationDigger.current() != null
+                    && stationDigger.current().equals(temporaryStation)) {
+                dig = stationDigger.settleGone(true);
+            } else {
+                CraftingWorkstationCoordinator.forgetTemporaryTable(player, temporaryStation);
+                return finishStationRecovery(false,
+                        "the temporary crafting table changed before our break was confirmed");
+            }
+        } else {
+            dig = stationDigger.digTargetStep(temporaryStation);
+        }
+
+        return switch (dig) {
+            case PROGRESSING -> TaskState.RUNNING;
+            case BROKE_TARGET -> beginStationDropCollection();
+            case BROKE_OCCLUDER -> finishStationRecovery(false,
+                    "temporary workstation recovery changed an unexpected block");
+            case NO_SHOT -> finishStationRecovery(false,
+                    "the temporary crafting table was left in place because no verified "
+                            + "first-person breaking ray was available");
+        };
+    }
+
+    private TaskState beginStationDropCollection() {
+        CraftingWorkstationCoordinator.forgetTemporaryTable(player, temporaryStation);
+        stationBreakTick = player.level().getGameTime();
+        stationDrops.discover(player.level(), stationRecoveryBox());
+        renewProgressLease();
+        stage = Stage.COLLECT_STATION;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState collectTemporaryStation() {
+        if (recoveredStationInInventory()) {
+            return finishStationRecovery(true,
+                    "the temporary crafting table was broken and returned to the main inventory");
+        }
+
+        stationDrops.discover(player.level(), stationRecoveryBox());
+        stationDrops.prune(player.clientLevel);
+        ItemEntity nearest = stationDrops.live(player.clientLevel, Set.of()).stream()
+                .filter(item -> item.getItem().is(temporaryStationItem))
+                .min(java.util.Comparator.comparingDouble(player::distanceToSqr))
+                .orElse(null);
+
+        long now = player.level().getGameTime();
+        if (nearest == null) {
+            stopNav();
+            stationDropTarget = null;
+            if (stationDropObserved) {
+                if (stationDropMissingSince == Long.MIN_VALUE) stationDropMissingSince = now;
+                if (now - stationDropMissingSince <= STATION_PICKUP_SYNC_TICKS) {
+                    return TaskState.RUNNING;
+                }
+                return finishStationRecovery(false,
+                        "the table drop disappeared without a synchronized inventory increase");
+            }
+            if (stationBreakTick != Long.MIN_VALUE
+                    && now - stationBreakTick <= STATION_DROP_SYNC_TICKS) {
+                return TaskState.RUNNING;
+            }
+            return finishStationRecovery(false,
+                    "the confirmed table break produced no attributable loaded drop");
+        }
+
+        stationDropObserved = true;
+        stationDropMissingSince = Long.MIN_VALUE;
+        if (stationDropTarget == null || stationDropTarget.getId() != nearest.getId()) {
+            stopNav();
+            stationDropTarget = nearest;
+        }
+
+        if (insideNativePickupEnvelope(nearest)) {
+            if (nav != null) nav.pause();
+            if (nearest.hasPickUpDelay()) {
+                stationPickupTicks = 0;
+                return TaskState.RUNNING;
+            }
+            if (++stationPickupTicks <= STATION_PICKUP_SYNC_TICKS) {
+                return TaskState.RUNNING;
+            }
+            return finishStationRecovery(false,
+                    "the body reached the table drop, but the authoritative inventory did not "
+                            + "accept it");
+        }
+        stationPickupTicks = 0;
+
+        if (nav == null) {
+            nav = PlayerNav.toRevalidating(player, this::stationDropGoal, 1.0D,
+                    this::recoveredStationInInventory, PlayerNav.ContextProvider.DEFAULT);
+        }
+        return switch (nav.tick()) {
+            case RUNNING -> TaskState.RUNNING;
+            case ARRIVED -> {
+                nav.pause();
+                yield TaskState.RUNNING;
+            }
+            case FAILED -> finishStationRecovery(false,
+                    "the attributable table drop could not be reached without altering terrain: "
+                            + nav.failReason());
+        };
+    }
+
+    private GoalCompiler.Compiled stationDropGoal() {
+        ItemEntity drop = stationDropTarget;
+        return drop == null || drop.isRemoved()
+                ? null : GoalCompiler.standOn(drop.blockPosition());
+    }
+
+    private boolean recoveredStationInInventory() {
+        return temporaryStationItem != null
+                && PlayerInv.carriedCount(player.getInventory(), temporaryStationItem)
+                        > stationItemBeforeRecovery;
+    }
+
+    private boolean insideNativePickupEnvelope(ItemEntity item) {
+        return player.getBoundingBox().inflate(1.0D).intersects(item.getBoundingBox());
+    }
+
+    private AABB stationRecoveryBox() {
+        return new AABB(temporaryStation).inflate(STATION_DROP_SCAN_RADIUS);
+    }
+
+    private boolean canAcceptRecoveredStation() {
+        ItemStack wanted = new ItemStack(temporaryStationItem);
+        int limit = Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size());
+        for (int slot = 0; slot < limit; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty()) return true;
+            if (ItemStack.isSameItemSameComponents(stack, wanted)
+                    && stack.getCount() < stack.getMaxStackSize()) return true;
+        }
+        return false;
+    }
+
+    private TaskState finishStationRecovery(boolean recovered, String detail) {
+        stationRecovered = recovered;
+        stationRecoveryDetail = detail;
+        stopNav();
+        stationDropTarget = null;
+        if (stationDigger.current() != null) stationDigger.cancel();
+        return TaskState.SUCCESS;
     }
 
     @Override
     public boolean mustSettleBeforeSatisfiedCancellation() {
         // Before the result click there is no committed craft to finish: an externally satisfied
         // parent may cancel and cleanup will simply return the grid. Once the click is submitted,
-        // however, its receipt and the subsequent menu close form one indivisible terminal tail.
-        return stage == Stage.CLOSE || (stage == Stage.TAKE && menuReceipt != null);
+        // however, its receipt, menu close, and recovery of a self-placed temporary workstation
+        // form one indivisible terminal tail. Otherwise the inventory fact becomes true first and
+        // the semantic parent can strand the table immediately before a gathering child departs.
+        return stage == Stage.CLOSE
+                || stage == Stage.RECLAIM_STATION
+                || stage == Stage.COLLECT_STATION
+                || (stage == Stage.TAKE && menuReceipt != null);
     }
 
     private int findResultSlot() {
@@ -568,6 +816,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         surfaceRecord = null;
         surfaceDirective = null;
         openReceipt = null;
+        if (stationDigger.current() != null) stationDigger.cancel();
+        stationDrops.clear();
         if (player.containerMenu != player.inventoryMenu) {
             try {
                 var context = ClientRuntime.requireContext(player);
@@ -592,12 +842,19 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         data.put("recipe", r.recipeId.toString());
         data.put("crafted", crafted);
         data.put("crafting_table_placed", stationPlaced);
+        data.put("crafting_table_recovery_attempted", stationRecoveryAttempted);
+        data.put("crafting_table_recovered", stationRecovered);
+        if (stationRecoveryDetail != null) {
+            data.put("crafting_table_recovery_detail", stationRecoveryDetail);
+        }
         if (surfaceFailureCode != null) {
             data.put("failure_code", surfaceFailureCode);
             data.put("failure_detail", surfaceFailureDetail == null ? "" : surfaceFailureDetail);
-            data.put("crafting_surface_prerequisite_item_ids",
-                    CraftingWorkstationCoordinator.prerequisiteItemIds().stream()
-                            .map(Object::toString).toList());
+            if (surfaceFailureCode.startsWith("crafting_surface_")) {
+                data.put("crafting_surface_prerequisite_item_ids",
+                        CraftingWorkstationCoordinator.prerequisiteItemIds().stream()
+                                .map(Object::toString).toList());
+            }
         }
         if (station != null) {
             data.put("crafting_station", Map.of(
