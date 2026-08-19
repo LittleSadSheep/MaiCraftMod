@@ -162,6 +162,11 @@ public final class PathingCore {
         return harness.ledger();
     }
 
+    /** Preserve the warm route while releasing actor receipts before an external body action. */
+    public boolean yieldNativeActions() {
+        return harness.yieldForExternalAction();
+    }
+
     /** 上一 tick 是否有一次首段计算以失败告终。 */
     public boolean calcFailedLastTick() {
         return calcFailedLastTick;

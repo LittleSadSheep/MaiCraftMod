@@ -210,6 +210,20 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
     }
 
     /**
+     * Hand native-action ownership to another first-person primitive without discarding the route.
+     *
+     * <p>A navigator can make its goal reachable while its final terrain-clearing break receipt is
+     * still waiting for synchronized world facts.  Clearing movement keys alone does not release
+     * that serialized actor slot.  This method settles or retires every native/menu receipt owned
+     * by the harness, while leaving {@code PathingCore}'s current path, next path and searches
+     * untouched.  The caller may submit another mutation only when the returned value is true.
+     */
+    public boolean yieldForExternalAction() {
+        clearAllKeys();
+        return releaseOwnedReceipts("navigation yielded to another first-person action");
+    }
+
+    /**
      * Release every actor/menu receipt owned by a navigation that is being discarded.
      *
      * <p>Route execution can be between motions while a hotbar selection, placement use, or
@@ -222,13 +236,19 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
         if (taskBoundaryStopped) return;
         taskBoundaryStopped = true;
 
+        releaseOwnedReceipts("navigation ended");
+    }
+
+    /** Settle all task-local actor/menu references and report whether this tick may mutate again. */
+    private boolean releaseOwnedReceipts(String boundary) {
+
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (breakingReceipt != null) {
             if (!breakingReceipt.terminal()) {
                 context.actions().cancelBreakingForTaskBoundary(
                         context,
                         breakingReceipt,
-                        "navigation ended before its native break was confirmed");
+                        boundary + " before its native break was confirmed");
             } else if (breakingReceipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED
                     && breakingTarget != null && breakingBefore != null) {
                 ledger.addBreak(breakingTarget, breakingBefore);
@@ -240,7 +260,7 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
             useReceipt = context.actions().retireOneShotForTaskBoundary(
                     context,
                     useReceipt,
-                    "navigation ended while a block-use effect was awaiting confirmation");
+                    boundary + " while a block-use effect was awaiting confirmation");
         }
         settleUseReceipt(context);
 
@@ -248,7 +268,7 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
             hotbarReceipt = context.actions().retireOneShotForTaskBoundary(
                     context,
                     hotbarReceipt,
-                    "navigation ended while hotbar selection was awaiting confirmation");
+                    boundary + " while hotbar selection was awaiting confirmation");
         }
         settleHotbarReceipt(context);
 
@@ -256,7 +276,7 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
             context.menus().closeForTaskBoundary(
                     context,
                     20,
-                    "navigation ended while inventory staging was awaiting confirmation");
+                    boundary + " while inventory staging was awaiting confirmation");
         }
         stagingReceipt = null;
         stagingHotbar = -1;
@@ -265,8 +285,9 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
         // cannot leave it in front of the next task after its own terminal boundary.
         if (player.containerMenu != player.inventoryMenu && context.mutationAvailable()) {
             context.menus().closeForTaskBoundary(
-                    context, 20, "navigation ended with a container menu still open");
+                    context, 20, boundary + " with a container menu still open");
         }
+        return context.mutationAvailable();
     }
 
     /** 是否有进行中的挖掘(liveness 记账:挖硬方块也是真实推进)。 */

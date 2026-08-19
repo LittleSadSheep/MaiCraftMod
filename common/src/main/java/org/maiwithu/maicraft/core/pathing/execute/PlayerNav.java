@@ -679,4 +679,15 @@ public final class PlayerNav {
     public void pause() {
         InputDriver.halt(player);
     }
+
+    /**
+     * Pause movement and hand any in-flight navigation mutation to another first-person action,
+     * retaining the current route/search state for a warm resume.
+     *
+     * @return true only when the actor's native slot and this tick's mutation lease are both ready
+     */
+    public boolean yieldForExternalAction() {
+        InputDriver.halt(player);
+        return core.yieldNativeActions();
+    }
 }
