@@ -257,18 +257,204 @@ public final class SemanticCookCompanionTask
         return item == Items.STICK ? 5 : 6;
     }
 
-    private int fuelMissing(Item item, int raw) {
+    private FuelChoice fuelChoice(Candidate cooking, Item item, int raw) {
         int burn = AbstractFurnaceBlockEntity.getFuel().getOrDefault(item, 0);
-        if (burn <= 0) return Integer.MAX_VALUE;
-        int needed = ceilDiv((long) raw * candidate.recipe.getCookingTime(), burn);
-        return Math.max(0, needed - PlayerInv.buildableCount(player.getInventory(), item));
+        if (burn <= 0) return null;
+        long neededTicks = (long) raw * cooking.recipe.getCookingTime();
+        int needed = ceilDiv(neededTicks, burn);
+        long cost = acquisitionCost(item, needed, Set.of(), 0);
+        long waste = (long) needed * burn - neededTicks;
+        return new FuelChoice(item, burn, needed, waste, cost);
     }
 
-    private int fuelWaste(Item item, int raw) {
-        int burn = AbstractFurnaceBlockEntity.getFuel().getOrDefault(item, 0);
-        if (burn <= 0) return Integer.MAX_VALUE;
-        int needed = ceilDiv((long) raw * candidate.recipe.getCookingTime(), burn);
-        return needed * burn - raw * candidate.recipe.getCookingTime();
+    /** Build a compact ordinary-crafting graph once; it is evidence, never an executor. */
+    private Map<Item, List<CraftRoute>> indexCraftRoutes() {
+        Map<Item, List<CraftRoute>> indexed = new HashMap<>();
+        var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
+        for (RecipeHolder<?> holder : manager.getRecipes()) {
+            try {
+                if (!(holder.value() instanceof CraftingRecipe recipe)
+                        || recipe.isSpecial()
+                        || !RecipeProbe.usableIngredients(recipe)) {
+                    continue;
+                }
+                ItemStack output = RecipeProbe.resultOf(
+                        recipe, player.level().registryAccess());
+                if (output.isEmpty()) continue;
+                List<IngredientGroup> groups = ingredientGroups(recipe);
+                if (groups.isEmpty()) continue;
+                int ingredientUses = recipe.getIngredients().stream()
+                        .mapToInt(ingredient -> ingredient == null || ingredient.isEmpty() ? 0 : 1)
+                        .sum();
+                boolean workstation = recipe instanceof ShapedRecipe shaped
+                        ? shaped.getWidth() > 2 || shaped.getHeight() > 2
+                        : ingredientUses > 4;
+                indexed.computeIfAbsent(output.getItem(), ignored -> new ArrayList<>())
+                        .add(new CraftRoute(
+                                holder.id(), Math.max(1, output.getCount()),
+                                groups, workstation));
+            } catch (RuntimeException brokenRecipe) {
+                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                        "[maicraft-cook] skipped unusable acquisition-cost recipe {}: {}",
+                        holder.id(), brokenRecipe.toString());
+            }
+        }
+        indexed.replaceAll((item, routes) -> routes.stream()
+                .sorted(Comparator.comparing(route -> route.recipeId().toString()))
+                .toList());
+        craftRoutesIndexed = true;
+        return Map.copyOf(indexed);
+    }
+
+    private static List<IngredientGroup> ingredientGroups(CraftingRecipe recipe) {
+        Map<List<Item>, Integer> uses = new LinkedHashMap<>();
+        for (Ingredient ingredient : recipe.getIngredients()) {
+            if (ingredient == null || ingredient.isEmpty()) continue;
+            List<Item> alternatives = java.util.Arrays.stream(ingredient.getItems())
+                    .filter(stack -> stack != null && !stack.isEmpty())
+                    .map(ItemStack::getItem)
+                    .distinct()
+                    .sorted(Comparator.comparing(item ->
+                            BuiltInRegistries.ITEM.getKey(item).toString()))
+                    .toList();
+            if (alternatives.isEmpty()) return List.of();
+            uses.merge(alternatives, 1, Integer::sum);
+        }
+        return uses.entrySet().stream()
+                .map(entry -> new IngredientGroup(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    /**
+     * Estimate only routes the semantic acquisition child can actually execute. The result is a
+     * relative preparation cost, not a promise: live child receipts remain authoritative and can
+     * reject a candidate so RESOLVE tries the next finite plan.
+     */
+    private long acquisitionCost(
+            Item item, int required, Set<Item> lineage, int depth) {
+        if (required <= 0) return 0L;
+        if (item == null || item == Items.AIR) return UNAVAILABLE_COST;
+        int carried = PlayerInv.buildableCount(player.getInventory(), item);
+        int missing = Math.max(0, required - carried);
+        if (missing == 0) return 0L;
+
+        long best = directSourceCost(item, missing);
+        if (r.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)
+                && Ae2ResourceSupply.available()) {
+            best = Math.min(best, addCost(
+                    STORAGE_FALLBACK_COST, (long) missing * DIRECT_SOURCE_UNIT_COST));
+        }
+        if (depth >= MAX_ACQUISITION_DEPTH
+                || !r.allowedSources.contains(SemanticAcquireTaskRecord.Source.CRAFT)
+                || lineage.contains(item)) {
+            return best;
+        }
+
+        List<CraftRoute> routes = craftRoutes.getOrDefault(item, List.of());
+        if (routes.isEmpty()) return best;
+        Set<Item> nextLineage = new LinkedHashSet<>(lineage);
+        nextLineage.add(item);
+        for (CraftRoute route : routes) {
+            int batches = ceilDiv(missing, route.outputCount());
+            long routeCost = addCost(
+                    (long) batches * CRAFT_ROUTE_COST,
+                    route.requiresWorkstation() ? CRAFTING_SURFACE_COST : 0L);
+            for (IngredientGroup group : route.ingredients()) {
+                int groupRequired = Math.max(1, batches * group.uses());
+                long alternativeCost = UNAVAILABLE_COST;
+                for (Item alternative : group.alternatives()) {
+                    alternativeCost = Math.min(alternativeCost,
+                            acquisitionCost(
+                                    alternative, groupRequired, nextLineage, depth + 1));
+                }
+                routeCost = addCost(routeCost, alternativeCost);
+                if (routeCost >= UNAVAILABLE_COST) break;
+            }
+            best = Math.min(best, routeCost);
+        }
+        return best;
+    }
+
+    private long directSourceCost(Item item, int missing) {
+        ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(item);
+        if (itemId == null) return UNAVAILABLE_COST;
+        SemanticSourceKnowledge.SourcePlan plan =
+                SemanticSourceKnowledge.inferPlan(List.of(itemId));
+        long best = UNAVAILABLE_COST;
+
+        if (r.allowedSources.contains(SemanticAcquireTaskRecord.Source.MINE)
+                && dimensionAllowed(plan, SemanticAcquireTaskRecord.Source.MINE)) {
+            Set<Block> sourceBlocks = new LinkedHashSet<>(
+                    ToolParse.parseBlocks(plan.hint().blockRefs()));
+            boolean originalSource = !sourceBlocks.isEmpty();
+            Long observedDistance = item instanceof BlockItem blockItem
+                    && !blockItem.getBlock().defaultBlockState().requiresCorrectToolForDrops()
+                    ? nearbyBlockDistances.get(blockItem.getBlock()) : null;
+            if (item instanceof BlockItem blockItem && observedDistance != null) {
+                sourceBlocks.add(blockItem.getBlock());
+            }
+            if (!sourceBlocks.isEmpty()) {
+                long unit = originalSource
+                        ? DIRECT_SOURCE_UNIT_COST : OBSERVED_BLOCK_UNIT_COST;
+                long tool = SemanticSourceKnowledge.missingTool(player, sourceBlocks) == null
+                        ? 0L : TOOL_PREREQUISITE_COST;
+                long distance = observedDistance == null ? 0L : observedDistance;
+                best = Math.min(best, addCost((long) missing * unit, tool, distance));
+            }
+        }
+        if (r.allowHarm
+                && r.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT)
+                && dimensionAllowed(plan, SemanticAcquireTaskRecord.Source.HUNT)
+                && !plan.hint().entityTypeIds().isEmpty()) {
+            best = Math.min(best, 10_000L + (long) missing * DIRECT_SOURCE_UNIT_COST);
+        }
+        if (r.allowedSources.contains(SemanticAcquireTaskRecord.Source.TRADE)
+                && !plan.hint().tradeProfessionIds().isEmpty()) {
+            best = Math.min(best, 20_000L + (long) missing * DIRECT_SOURCE_UNIT_COST);
+        }
+        return best;
+    }
+
+    private boolean dimensionAllowed(
+            SemanticSourceKnowledge.SourcePlan plan,
+            SemanticAcquireTaskRecord.Source source) {
+        List<ResourceLocation> dimensions = plan.allowedDimensions(source);
+        return dimensions.isEmpty()
+                || dimensions.contains(player.level().dimension().location());
+    }
+
+    private Map<Block, Long> snapshotNearbyBlocks() {
+        Map<Block, Long> distances = new HashMap<>();
+        BlockPos origin = player.blockPosition();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dx = -16; dx <= 16; dx++) {
+            for (int dz = -16; dz <= 16; dz++) {
+                for (int dy = -8; dy <= 8; dy++) {
+                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    if (!player.level().isLoaded(cursor)) continue;
+                    Block block = player.level().getBlockState(cursor).getBlock();
+                    if (block != Blocks.AIR) {
+                        long dxDistance = cursor.getX() - origin.getX();
+                        long dyDistance = cursor.getY() - origin.getY();
+                        long dzDistance = cursor.getZ() - origin.getZ();
+                        long distanceSquared = dxDistance * dxDistance
+                                + dyDistance * dyDistance + dzDistance * dzDistance;
+                        distances.merge(block, distanceSquared, Math::min);
+                    }
+                }
+            }
+        }
+        return Map.copyOf(distances);
+    }
+
+    private static long addCost(long... values) {
+        long total = 0L;
+        for (long value : values) {
+            if (value >= UNAVAILABLE_COST || value < 0L) return UNAVAILABLE_COST;
+            if (total > UNAVAILABLE_COST - value) return UNAVAILABLE_COST;
+            total += value;
+        }
+        return total;
     }
 
     private TaskState prepare() {
@@ -594,6 +780,9 @@ public final class SemanticCookCompanionTask
             if (purpose == Purpose.ACQUIRE_INPUT || purpose == Purpose.ACQUIRE_FUEL
                     || purpose == Purpose.ACQUIRE_STATION) {
                 prerequisiteFailure = semanticPrerequisiteFailure(result);
+                if (retryAnotherPreparationPlan(purpose, result)) {
+                    return TaskState.RUNNING;
+                }
             }
             if (purpose == Purpose.LOAD_INPUT || purpose == Purpose.LOAD_FUEL
                     || purpose == Purpose.TAKE_OUTPUT || purpose == Purpose.CLEAN_RESULT
@@ -655,11 +844,72 @@ public final class SemanticCookCompanionTask
         Map<String, Object> safe = new LinkedHashMap<>();
         for (String key : List.of(
                 "failure_type", "failure_code", "requires_decision",
-                "requires_narration", "recovery_options", "issues")) {
+                "requires_narration", "outcome_uncertain", "status",
+                "recovery_options", "issues")) {
             Object value = result.data().get(key);
             if (value != null) safe.put(key, value);
         }
         return Map.copyOf(safe);
+    }
+
+    /** A pre-effect prerequisite failure rejects only that finite plan and re-runs cost selection. */
+    private boolean retryAnotherPreparationPlan(Purpose purpose, TaskResult result) {
+        if (effectsStarted || openedMenu || uncertain(result)) return false;
+        switch (purpose) {
+            case ACQUIRE_INPUT -> {
+                if (candidate == null) return false;
+                rejectedInputCandidates.add(candidateKey(candidate));
+            }
+            case ACQUIRE_FUEL -> {
+                if (fuel == null) return false;
+                rejectedFuelItems.add(fuel);
+            }
+            case ACQUIRE_STATION -> {
+                if (candidate == null) return false;
+                rejectedDevices.add(candidate.device());
+            }
+            default -> {
+                return false;
+            }
+        }
+        if (planningAttempts.size() < 32) {
+            Map<String, Object> attempt = new LinkedHashMap<>();
+            attempt.put("failed_prerequisite", purpose.name().toLowerCase());
+            if (candidate != null) {
+                attempt.put("recipe_id", candidate.recipeId().toString());
+                attempt.put("input_item_id", BuiltInRegistries.ITEM.getKey(
+                        candidate.input()).toString());
+                attempt.put("device", BuiltInRegistries.BLOCK.getKey(
+                        candidate.device().block).toString());
+            }
+            if (fuel != null) {
+                attempt.put("fuel_item_id", BuiltInRegistries.ITEM.getKey(fuel).toString());
+            }
+            if (result != null && result.message() != null) {
+                attempt.put("child_message", result.message());
+            }
+            planningAttempts.add(Map.copyOf(attempt));
+        }
+        candidate = null;
+        fuel = null;
+        fuelBurnTicks = 0;
+        batchRaw = 0;
+        batchFuel = 0;
+        stationPos = null;
+        phase = Phase.RESOLVE;
+        return true;
+    }
+
+    private static boolean uncertain(TaskResult result) {
+        if (result == null || result.data() == null) return false;
+        Object uncertain = result.data().get("outcome_uncertain");
+        return Boolean.TRUE.equals(uncertain)
+                || "uncertain".equals(String.valueOf(result.data().get("status")));
+    }
+
+    private static String candidateKey(Candidate candidate) {
+        return candidate.recipeId() + "|" + candidate.device().name()
+                + "|" + BuiltInRegistries.ITEM.getKey(candidate.input());
     }
 
     private TaskState start(TaskRecord record, Purpose purpose) {
@@ -760,7 +1010,7 @@ public final class SemanticCookCompanionTask
     }
 
     private boolean stationReady(Device device) {
-        return nearest(device.block, 16, 8) != null
+        return nearbyBlockDistances.containsKey(device.block)
                 || PlayerInv.buildableCount(
                         player.getInventory(), device.block.asItem()) > 0;
     }
@@ -823,8 +1073,12 @@ public final class SemanticCookCompanionTask
     }
 
     private int rawRemaining() {
+        return rawRemaining(candidate);
+    }
+
+    private int rawRemaining(Candidate cooking) {
         int missing = Math.max(0, r.count - outputCount());
-        return Math.max(1, ceilDiv(missing, candidate.outputCount));
+        return Math.max(1, ceilDiv(missing, cooking.outputCount));
     }
 
     private int outputCount() {
@@ -905,6 +1159,9 @@ public final class SemanticCookCompanionTask
         data.put("outcome_uncertain", outcomeUncertain);
         if (!prerequisiteFailure.isEmpty()) {
             data.put("prerequisite_failure", prerequisiteFailure);
+        }
+        if (!planningAttempts.isEmpty()) {
+            data.put("preparation_plan_failures", List.copyOf(planningAttempts));
         }
         if (failureCode != null) {
             data.put("decision", Map.of(
