@@ -388,6 +388,10 @@ public final class SemanticAcquireCompanionTask
                 .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
                 .filter(CraftCandidate::surfaceSupported)
                 .filter(candidate -> candidate.cost().missingMaterials() > 0)
+                // A conversion whose only missing inputs are already members of this need's
+                // ancestry cannot advance the inventory fact. Skip the dominated/cyclical route
+                // as a set instead of reporting every stripped-log/wood recipe one by one.
+                .filter(candidate -> chooseIngredient(candidate, need) != null)
                 .sorted(Comparator.comparing(CraftCandidate::cost, CraftPlanCost.ORDER))
                 .toList();
         CraftCandidate chosen = viableCandidates.isEmpty()
@@ -423,9 +427,13 @@ public final class SemanticAcquireCompanionTask
         Set<String> lineageRecipes = new LinkedHashSet<>(need.lineageRecipes);
         lineageRecipes.addAll(frontier.recipeIds());
         int ingredientFinal = count(ingredient.itemIds()) + ingredient.missing();
+        boolean mergedAlternativeFrontier = frontier.recipeIds().size() > 1;
+        List<SemanticAcquireTaskRecord.Source> childSources = mergedAlternativeFrontier
+                ? prioritizeDirectAlternativeSources(need.allowedSources)
+                : need.allowedSources;
         Need childNeed = new Need(
                 ingredient.itemIds(), ingredientFinal, need.depth + 1,
-                lineageItems, lineageRecipes, frontier.recipeIds(), need.allowedSources);
+                lineageItems, lineageRecipes, frontier.recipeIds(), childSources);
         childNeed.lastObservedCount = count(childNeed.itemIds);
         recipeTrace.add(Map.of(
                 "recipe_id", chosen.recipeId(),
@@ -434,7 +442,10 @@ public final class SemanticAcquireCompanionTask
                 "alternative_output_item_ids", itemStrings(frontier.outputItemIds()),
                 "depth", need.depth,
                 "missing_item_ids", itemStrings(ingredient.itemIds()),
-                "missing_count", ingredient.missing()));
+                "missing_count", ingredient.missing(),
+                "source_order", childSources.stream()
+                        .map(source -> source.name().toLowerCase(java.util.Locale.ROOT))
+                        .toList()));
         needs.push(childNeed);
         renewProgressLease();
         return TaskState.RUNNING;
@@ -1256,6 +1267,47 @@ public final class SemanticAcquireCompanionTask
                 frontier,
                 java.util.Collections.unmodifiableSet(recipeIds),
                 List.copyOf(outputItemIds));
+    }
+
+    /**
+     * A merged one-unit frontier means every listed item is already a complete way to unlock one
+     * parent recipe. Inspect the permitted direct world source before recursively manufacturing
+     * whichever member happened to sort first. This is a stable reordering of permissions, not a
+     * new permission: inventory, loose-item, storage and direct-mine sources form a stable prefix
+     * ahead of craft/cook, while trade/hunt keep their existing side-effect order.
+     */
+    private static List<SemanticAcquireTaskRecord.Source> prioritizeDirectAlternativeSources(
+            List<SemanticAcquireTaskRecord.Source> sources) {
+        int craft = sources.indexOf(SemanticAcquireTaskRecord.Source.CRAFT);
+        int cook = sources.indexOf(SemanticAcquireTaskRecord.Source.COOK);
+        int firstTransformation;
+        if (craft < 0) firstTransformation = cook;
+        else if (cook < 0) firstTransformation = craft;
+        else firstTransformation = Math.min(craft, cook);
+        if (firstTransformation < 0) return sources;
+
+        List<SemanticAcquireTaskRecord.Source> ordered = new ArrayList<>(sources);
+        List<SemanticAcquireTaskRecord.Source> lateDirect = sources.subList(
+                        firstTransformation + 1, sources.size()).stream()
+                .filter(SemanticAcquireCompanionTask::isDirectAlternativeSource)
+                .toList();
+        if (lateDirect.isEmpty()) return sources;
+        ordered.removeAll(lateDirect);
+        craft = ordered.indexOf(SemanticAcquireTaskRecord.Source.CRAFT);
+        cook = ordered.indexOf(SemanticAcquireTaskRecord.Source.COOK);
+        if (craft < 0) firstTransformation = cook;
+        else if (cook < 0) firstTransformation = craft;
+        else firstTransformation = Math.min(craft, cook);
+        ordered.addAll(firstTransformation, lateDirect);
+        return List.copyOf(ordered);
+    }
+
+    private static boolean isDirectAlternativeSource(
+            SemanticAcquireTaskRecord.Source source) {
+        return source == SemanticAcquireTaskRecord.Source.INVENTORY
+                || source == SemanticAcquireTaskRecord.Source.NEARBY
+                || source == SemanticAcquireTaskRecord.Source.STORAGE
+                || source == SemanticAcquireTaskRecord.Source.MINE;
     }
 
     /**
