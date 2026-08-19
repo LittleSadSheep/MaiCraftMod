@@ -3,10 +3,12 @@ package org.maiwithu.maicraft.core.task.cook;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -17,12 +19,16 @@ import net.minecraft.world.inventory.AbstractFurnaceMenu;
 import net.minecraft.world.inventory.BlastFurnaceMenu;
 import net.minecraft.world.inventory.FurnaceMenu;
 import net.minecraft.world.inventory.SmokerMenu;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
@@ -35,12 +41,16 @@ import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.task.menu.CloseMenuTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
+import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import org.maiwithu.maicraft.core.tools.RecipeProbe;
+import org.maiwithu.maicraft.core.tools.ToolParse;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -50,6 +60,14 @@ import org.maiwithu.maicraft.task.TaskState;
 /** Receipt-driven furnace-family executor; all concrete operations stay internal. */
 public final class SemanticCookCompanionTask
         extends AbstractCompanionTask<SemanticCookTaskRecord> {
+    private static final long UNAVAILABLE_COST = 1_000_000_000_000L;
+    private static final int MAX_ACQUISITION_DEPTH = 4;
+    private static final long DIRECT_SOURCE_UNIT_COST = 1_000L;
+    private static final long OBSERVED_BLOCK_UNIT_COST = 500L;
+    private static final long CRAFT_ROUTE_COST = 250L;
+    private static final long CRAFTING_SURFACE_COST = 500L;
+    private static final long TOOL_PREREQUISITE_COST = 1_500L;
+    private static final long STORAGE_FALLBACK_COST = 50_000L;
     /**
      * Furnace progress is live server evidence, so each observed change renews a
      * no-progress lease instead of spending one fixed wall-clock budget for the
@@ -70,6 +88,20 @@ public final class SemanticCookCompanionTask
     private record Candidate(
             ResourceLocation recipeId, AbstractCookingRecipe recipe, Device device,
             Item input, int outputCount) {}
+    private record IngredientGroup(List<Item> alternatives, int uses) {}
+    private record CraftRoute(
+            ResourceLocation recipeId,
+            int outputCount,
+            List<IngredientGroup> ingredients,
+            boolean requiresWorkstation) {}
+    private record FuelChoice(
+            Item item, int burnTicks, int count, long waste, long acquisitionCost) {}
+    private record ResolvedCandidate(
+            Candidate candidate,
+            FuelChoice fuel,
+            long inputCost,
+            long stationCost,
+            long preparationCost) {}
 
     private Phase phase = Phase.RESOLVE;
     private Candidate candidate;
@@ -99,6 +131,14 @@ public final class SemanticCookCompanionTask
     private FailureType failureType = FailureType.UNKNOWN;
     private boolean outcomeUncertain;
     private Map<String, Object> prerequisiteFailure = Map.of();
+    private Map<Item, List<CraftRoute>> craftRoutes = Map.of();
+    private boolean craftRoutesIndexed;
+    /** Minimum squared loaded-world distance for each observed block type. */
+    private Map<Block, Long> nearbyBlockDistances = Map.of();
+    private final Set<String> rejectedInputCandidates = new LinkedHashSet<>();
+    private final Set<Item> rejectedFuelItems = new LinkedHashSet<>();
+    private final Set<Device> rejectedDevices = new LinkedHashSet<>();
+    private final List<Map<String, Object>> planningAttempts = new ArrayList<>();
 
     public SemanticCookCompanionTask(LocalPlayer player, SemanticCookTaskRecord record) {
         super(player, record);
@@ -152,20 +192,51 @@ public final class SemanticCookCompanionTask
                             : "No campfire recipe produces " + r.itemId + ".",
                     FailureType.UNKNOWN);
         }
-        candidates.removeIf(c -> c.device == Device.CAMPFIRE || !preferred(c.device));
+        candidates.removeIf(c -> c.device == Device.CAMPFIRE || !preferred(c.device)
+                || rejectedDevices.contains(c.device)
+                || rejectedInputCandidates.contains(candidateKey(c)));
         if (candidates.isEmpty()) {
             return failOrClean("no_preferred_recipe",
-                    "No recipe matching recipe_preference produces " + r.itemId + ".",
+                    "No untried recipe matching recipe_preference can produce " + r.itemId + ".",
                     FailureType.NO_MATERIAL);
         }
-        candidate = candidates.stream().min(candidateComparator()).orElseThrow();
-        fuel = chooseFuel();
-        fuelBurnTicks = fuel == null ? 0
-                : AbstractFurnaceBlockEntity.getFuel().getOrDefault(fuel, 0);
-        if (fuelBurnTicks <= 0) {
+        if (!craftRoutesIndexed) craftRoutes = indexCraftRoutes();
+        nearbyBlockDistances = snapshotNearbyBlocks();
+
+        List<ResolvedCandidate> plans = new ArrayList<>();
+        for (Candidate option : candidates) {
+            int raw = rawRemaining(option);
+            long inputCost = acquisitionCost(
+                    option.input, raw, Set.of(), 0);
+            boolean ready = stationReady(option.device);
+            long stationCost = ready ? 0L : acquisitionCost(
+                    option.device.block.asItem(), 1, Set.of(), 0);
+            FuelChoice fuelChoice = chooseFuel(option);
+            if (fuelChoice == null) continue;
+            long preparationCost = addCost(
+                    inputCost, stationCost, fuelChoice.acquisitionCost());
+            plans.add(new ResolvedCandidate(
+                    option, fuelChoice, inputCost, stationCost,
+                    preparationCost));
+        }
+        if (plans.isEmpty()) {
             return failOrClean("no_allowed_fuel",
                     "No allowed ordinary furnace fuel can be selected.", FailureType.NO_MATERIAL);
         }
+        ResolvedCandidate selected = plans.stream()
+                .filter(plan -> plan.preparationCost() < UNAVAILABLE_COST)
+                .min(candidateComparator())
+                .orElse(null);
+        if (selected == null) {
+            return failOrClean("no_reachable_cooking_plan",
+                    "Cooking recipes exist, but none has a supported path to its input, fuel and workstation.",
+                    FailureType.NO_MATERIAL);
+        }
+        candidate = selected.candidate();
+        FuelChoice selectedFuel = selected.fuel();
+        fuel = selectedFuel.item();
+        fuelBurnTicks = selectedFuel.burnTicks();
+        prerequisiteFailure = Map.of();
         phase = Phase.PREPARE;
         return TaskState.RUNNING;
     }
@@ -174,36 +245,46 @@ public final class SemanticCookCompanionTask
         List<Candidate> result = new ArrayList<>();
         var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
         for (RecipeHolder<?> holder : manager.getRecipes()) {
-            if (!(holder.value() instanceof AbstractCookingRecipe cooking)) continue;
-            ItemStack output = cooking.getResultItem(player.level().registryAccess());
-            if (output.isEmpty() || !output.is(BuiltInRegistries.ITEM.get(r.itemId))) continue;
-            Device device = device(cooking.getType());
-            if (device == null || cooking.getIngredients().isEmpty()) continue;
-            LinkedHashSet<Item> inputs = new LinkedHashSet<>();
-            for (ItemStack stack : cooking.getIngredients().getFirst().getItems()) {
-                if (!stack.isEmpty()) inputs.add(stack.getItem());
+            try {
+                if (!(holder.value() instanceof AbstractCookingRecipe cooking)
+                        || !RecipeProbe.usableIngredients(cooking)) continue;
+                ItemStack output = RecipeProbe.resultOf(
+                        cooking, player.level().registryAccess());
+                if (output.isEmpty() || !output.is(BuiltInRegistries.ITEM.get(r.itemId))) {
+                    continue;
+                }
+                Device device = device(cooking.getType());
+                if (device == null || cooking.getIngredients().isEmpty()) continue;
+                LinkedHashSet<Item> inputs = new LinkedHashSet<>();
+                for (ItemStack stack : cooking.getIngredients().getFirst().getItems()) {
+                    if (stack != null && !stack.isEmpty()) inputs.add(stack.getItem());
+                }
+                for (Item input : inputs) result.add(new Candidate(
+                        holder.id(), cooking, device, input, Math.max(1, output.getCount())));
+            } catch (RuntimeException brokenRecipe) {
+                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                        "[maicraft-cook] skipped unusable cooking recipe {}: {}",
+                        holder.id(), brokenRecipe.toString());
             }
-            for (Item input : inputs) result.add(new Candidate(
-                    holder.id(), cooking, device, input, Math.max(1, output.getCount())));
         }
         return result;
     }
 
-    private Comparator<Candidate> candidateComparator() {
-        Comparator<Candidate> ready = Comparator
-                .comparingInt((Candidate c) -> stationReady(c.device) ? 0 : 1)
-                .thenComparingInt(c -> PlayerInv.buildableCount(
-                        player.getInventory(), c.input) > 0 ? 0 : 1)
-                .thenComparing(Comparator.comparingInt((Candidate c) ->
-                        PlayerInv.buildableCount(player.getInventory(), c.input)).reversed());
-        Comparator<Candidate> speed = Comparator.comparingInt(c -> c.recipe.getCookingTime());
-        Comparator<Candidate> stable = Comparator
-                .comparing((Candidate c) -> c.device.ordinal())
-                .thenComparing(c -> BuiltInRegistries.ITEM.getKey(c.input).toString())
-                .thenComparing(c -> c.recipeId.toString());
+    private Comparator<ResolvedCandidate> candidateComparator() {
+        Comparator<ResolvedCandidate> preparation = Comparator
+                .comparingLong(ResolvedCandidate::preparationCost)
+                .thenComparingLong(ResolvedCandidate::inputCost)
+                .thenComparingLong(ResolvedCandidate::stationCost);
+        Comparator<ResolvedCandidate> speed = Comparator.comparingInt(
+                plan -> plan.candidate().recipe().getCookingTime());
+        Comparator<ResolvedCandidate> stable = Comparator
+                .comparingInt((ResolvedCandidate plan) -> plan.candidate().device().ordinal())
+                .thenComparing(plan -> BuiltInRegistries.ITEM.getKey(
+                        plan.candidate().input()).toString())
+                .thenComparing(plan -> plan.candidate().recipeId().toString());
         return r.preference == SemanticCookTaskRecord.Preference.FASTEST
-                ? speed.thenComparing(ready).thenComparing(stable)
-                : ready.thenComparing(speed).thenComparing(stable);
+                ? speed.thenComparing(preparation).thenComparing(stable)
+                : preparation.thenComparing(speed).thenComparing(stable);
     }
 
     private boolean preferred(Device device) {
@@ -223,7 +304,7 @@ public final class SemanticCookCompanionTask
         return null;
     }
 
-    private Item chooseFuel() {
+    private FuelChoice chooseFuel(Candidate cooking) {
         List<Item> choices = new ArrayList<>();
         if (!r.allowedFuelIds.isEmpty()) {
             r.allowedFuelIds.forEach(id -> choices.add(BuiltInRegistries.ITEM.get(id)));
@@ -232,13 +313,29 @@ public final class SemanticCookCompanionTask
                 if (safeDefaultFuel(item)) choices.add(item);
             }
         }
-        int raw = Math.min(rawRemaining(), Math.max(1, 64 / candidate.outputCount));
-        return choices.stream().distinct().min(Comparator
-                .comparingInt((Item item) -> fuelMissing(item, raw))
-                .thenComparingInt(this::fuelPriority)
-                .thenComparingInt(item -> fuelWaste(item, raw))
-                .thenComparing(item -> BuiltInRegistries.ITEM.getKey(item).toString()))
-                .orElse(null);
+        int raw = Math.min(rawRemaining(cooking), Math.max(1, 64 / cooking.outputCount));
+        List<FuelChoice> fuels = choices.stream().distinct()
+                .filter(item -> !rejectedFuelItems.contains(item))
+                .map(item -> fuelChoice(cooking, item, raw))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        Comparator<FuelChoice> economical = Comparator
+                .comparingLong(FuelChoice::acquisitionCost)
+                .thenComparingLong(FuelChoice::waste)
+                .thenComparingInt(FuelChoice::count)
+                .thenComparingInt(choice -> fuelPriority(choice.item()))
+                .thenComparing(choice -> BuiltInRegistries.ITEM.getKey(
+                        choice.item()).toString());
+        if (r.preference == SemanticCookTaskRecord.Preference.PRESERVE_RARE) {
+            economical = Comparator
+                    .comparingLong(FuelChoice::acquisitionCost)
+                    .thenComparingInt(choice -> fuelPriority(choice.item()))
+                    .thenComparingLong(FuelChoice::waste)
+                    .thenComparingInt(FuelChoice::count)
+                    .thenComparing(choice -> BuiltInRegistries.ITEM.getKey(
+                            choice.item()).toString());
+        }
+        return fuels.stream().min(economical).orElse(null);
     }
 
     private static boolean safeDefaultFuel(Item item) {
