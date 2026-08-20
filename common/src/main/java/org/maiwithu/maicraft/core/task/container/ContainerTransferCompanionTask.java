@@ -162,11 +162,23 @@ public final class ContainerTransferCompanionTask
         receipt = context.menus().click(
                 context, move.to(), 0, ClickType.PICKUP,
                 (c, ignored) -> {
+                    ItemStack source = c.player().containerMenu.getSlot(move.from()).getItem();
                     ItemStack destination = c.player().containerMenu.getSlot(move.to()).getItem();
                     ItemStack carried = c.player().containerMenu.getCarried();
-                    boolean placed = carried.isEmpty()
-                            && ItemStack.isSameItemSameComponents(destination, sourceKind)
+                    boolean exactDestination = ItemStack.isSameItemSameComponents(
+                                    destination, sourceKind)
                             && destination.getCount() == destinationBefore.getCount() + requested;
+                    // Some synchronized workstations consume or transform a deposited stack in
+                    // the same server tick. Furnace fuel is the common case: one fuel item can
+                    // leave the destination slot as burn time before the placement echo arrives.
+                    // The exact source debit plus an empty cursor still proves that the explicit
+                    // destination click settled; a rejected click restores the source/cursor and
+                    // therefore cannot satisfy this postcondition.
+                    boolean consumedAfterDeposit = move.destinationMode()
+                                    == ContainerTransferTaskRecord.DestinationMode.MAY_MUTATE_AFTER_DEPOSIT
+                            && sourceDebitConfirmed(source);
+                    boolean placed = carried.isEmpty()
+                            && (exactDestination || consumedAfterDeposit);
                     if (placed) return MenuConfirmation.Verdict.APPLIED;
                     boolean pending = same(destination, destinationBefore)
                             && ItemStack.isSameItemSameComponents(carried, sourceKind)
@@ -175,6 +187,14 @@ public final class ContainerTransferCompanionTask
                             : MenuConfirmation.Verdict.DIVERGED;
                 }, 20);
         return TaskState.RUNNING;
+    }
+
+    private boolean sourceDebitConfirmed(ItemStack source) {
+        int expectedRemaining = sourceBefore.getCount() - requested;
+        if (expectedRemaining == 0) return source.isEmpty();
+        return expectedRemaining > 0
+                && ItemStack.isSameItemSameComponents(source, sourceBefore)
+                && source.getCount() == expectedRemaining;
     }
 
     private TaskState submitSwap(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {

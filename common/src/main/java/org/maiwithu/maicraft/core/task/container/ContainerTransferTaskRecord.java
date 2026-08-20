@@ -10,9 +10,20 @@ import org.maiwithu.maicraft.task.TaskRecord;
  */
 public final class ContainerTransferTaskRecord extends TaskRecord {
     static { TaskFactory.register(ContainerTransferTaskRecord.class, ContainerTransferCompanionTask::new); }
-    public record Move(int from, int to, int count) {
+    public enum DestinationMode {
+        /** The destination stack itself must show the exact deposited amount. */
+        EXACT,
+        /** A synchronized machine may consume or transform the deposit immediately. */
+        MAY_MUTATE_AFTER_DEPOSIT
+    }
+    public record Move(int from, int to, int count, DestinationMode destinationMode) {
+        public Move(int from, int to, int count) {
+            this(from, to, count, DestinationMode.EXACT);
+        }
         public Move {
-            if (from < 0 || to < -1 || count < 0) throw new IllegalArgumentException("invalid transfer move");
+            if (from < 0 || to < -1 || count < 0 || destinationMode == null) {
+                throw new IllegalArgumentException("invalid transfer move");
+            }
         }
     }
     public final int expectedContainerId;
