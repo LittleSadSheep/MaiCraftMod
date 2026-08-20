@@ -178,6 +178,10 @@ public class MovementAscend extends Movement {
             }
             return state;
         }
+        if (player.isInWater()) {
+            swimTowards(state, dest);
+            return state;
+        }
         AimGeometry.moveTowards(player, state, dest);
         if (MovementHelper.isBottomSlab(jumpingOnto)
                 && !MovementHelper.isBottomSlab(level.getBlockState(src.below()))) {

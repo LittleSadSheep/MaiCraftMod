@@ -25,7 +25,7 @@ import net.minecraft.world.phys.HitResult;
  * 自带成本计算(规划期)与逐 tick 状态机(执行期)。
  *
  * <p>执行侧通用框架在 {@link #update()}:先由子类推进状态机,再叠加
- * 水中上浮强跳与卡墙自救,最后把本 tick 的按键表交给执行层钩子。
+ * 水中上升动作的强跳与卡墙自救,最后把本 tick 的按键表交给执行层钩子。
  * 准备阶段({@link #prepared}):等待落沙实体落定、把仍挡路的
  * toBreak 逐个交给 {@link #beginBreaking} 钩子挖掉。
  */
@@ -222,7 +222,7 @@ public abstract class Movement {
 
     /**
      * 每 tick 推进一次。通用框架:强制关闭飞行能力(走地面物理)→
-     * 子类状态机 → 水中且低于目标高度时强按跳(上浮)→ 卡墙时先换上
+     * 子类状态机 → 水中上升动作且低于目标高度时强按跳(上浮)→ 卡墙时先换上
      * 对该方块最优工具再按左键 → 视角与按键交执行层钩子,按键先清
      * 后设、终态清空。
      */
@@ -230,6 +230,7 @@ public abstract class Movement {
         currentState = updateState(currentState);
         BlockPos feet = feet(player);
         if (MovementHelper.isLiquid(player.level().getBlockState(feet))
+                && dest.getY() > src.getY()
                 && player.getY() < dest.getY() + 0.6) {
             currentState.setInput(Input.JUMP, true);
         }
@@ -255,6 +256,50 @@ public abstract class Movement {
             clearInputs();
         }
         return currentState.getStatus();
+    }
+
+    /**
+     * Drive a real first-person swim stroke toward one path cell. Horizontal water traversal
+     * deliberately dips the view until vanilla enters the swimming pose, then levels out and
+     * keeps sprint-swimming. Vertical water edges use pitch plus the matching descend/surface
+     * input. The abstract path can remain on the safe water-surface lattice while the physical
+     * body travels just below it instead of repeatedly bobbing and wading.
+     */
+    protected final void swimTowards(MovementState state, BlockPos target) {
+        // Use the planned edge's vertical intent, not the live feet cell. Entering the real
+        // swimming pose puts the feet one cell below the abstract surface node; comparing to
+        // that live cell would misread every horizontal swim as an ascent and instantly bob
+        // back to the surface.
+        int vertical = Integer.compare(target.getY(), src.getY());
+        float yaw = AimGeometry.yawTo(player.getEyePosition(), AimGeometry.blockCenter(target));
+        // BreathChain owns the emergency ascent. Once the eyes clear the surface, keep that
+        // surface stroke until vanilla has replenished the authoritative air value; immediately
+        // sneaking under again would make navigation and the breath reflex alternate every tick.
+        if (!player.isUnderWater() && player.getAirSupply() < player.getMaxAirSupply()) {
+            state.setTarget(new MovementState.MovementTarget(yaw, -28.0f, false))
+                    .setInput(Input.MOVE_FORWARD, true)
+                    .setInput(Input.JUMP, true);
+            return;
+        }
+        boolean enteringSwim = vertical <= 0 && !player.isUnderWater() && !player.isSwimming();
+        float pitch = vertical < 0
+                ? 28.0f
+                : vertical > 0
+                        ? -28.0f
+                        : player.isSwimming() ? 0.0f : 12.0f;
+        state.setTarget(new MovementState.MovementTarget(yaw, pitch, false))
+                .setInput(Input.MOVE_FORWARD, true);
+        if (enteringSwim || vertical < 0) {
+            // Vanilla cancels sprint while the eyes are at the surface. Sink first; on the tick
+            // isUnderWater becomes true this releases shift and the sprint request below starts
+            // the real horizontal swimming pose.
+            state.setInput(Input.SNEAK, true);
+        } else {
+            state.setInput(Input.SPRINT, true);
+        }
+        if (vertical > 0) {
+            state.setInput(Input.JUMP, true);
+        }
     }
 
     /** 玩家准星当前命中的方块状态;未命中返回 null。 */

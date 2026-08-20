@@ -218,6 +218,10 @@ public class MovementDiagonal extends Movement {
         if (dest.getY() > src.getY()) {
             return Set.of(src, src.above(), diagA, diagB, dest, diagA.above(), diagB.above());
         }
+        if (player != null && waterRoute(player.level())) {
+            return Set.of(src, dest, diagA, diagB,
+                    src.below(), dest.below(), diagA.below(), diagB.below());
+        }
         return Set.of(src, dest, diagA, diagB);
     }
 
@@ -229,7 +233,10 @@ public class MovementDiagonal extends Movement {
         }
 
         BlockPos feet = feet(player);
-        if (feet.equals(dest)) {
+        boolean arrivedInSwimLane = player.isInWater()
+                && waterRoute(player.level())
+                && feet.above().equals(dest);
+        if (feet.equals(dest) || arrivedInSwimLane) {
             return state.setStatus(MovementStatus.SUCCESS);
         } else if (!playerInValidPosition()
                 && !(MovementHelper.isLiquid(player.level().getBlockState(src))
@@ -242,8 +249,17 @@ public class MovementDiagonal extends Movement {
         if (sprint()) {
             state.setInput(Input.SPRINT, true);
         }
+        if (player.isInWater()) {
+            swimTowards(state, dest);
+            return state;
+        }
         AimGeometry.moveTowards(player, state, dest);
         return state;
+    }
+
+    private boolean waterRoute(Level level) {
+        return MovementHelper.isWater(level.getBlockState(src))
+                || MovementHelper.isWater(level.getBlockState(dest));
     }
 
     /** 四个角柱全通透(且不在禁疾跑的水里)才可疾跑斜穿。 */

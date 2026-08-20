@@ -304,9 +304,13 @@ public class CalculationContext {
         return level;
     }
 
-    /** 按装备的水下移动效率附魔,把水中步速在水速与平走速之间插值。 */
+    /**
+     * 按装备的水下移动效率附魔,把水中步速在水速与平走速之间插值。
+     * 无附魔时效率是 0；此前从 1 起算会让普通水路被错误地按陆地速度估价，
+     * A* 因而几乎不为水付代价，实体搜索也就会横穿大片水面。
+     */
     private static double computeWaterWalkSpeed(LocalPlayer player) {
-        float waterSpeedMultiplier = 1.0f;
+        float waterSpeedMultiplier = 0.0f;
         OUTER:
         for (EquipmentSlot slot : EquipmentSlot.values()) {
             ItemEnchantments itemEnchantments = player.getItemBySlot(slot).getEnchantments();
@@ -315,7 +319,9 @@ public class CalculationContext {
                         enchant.value().getEffects(EnchantmentEffectComponents.ATTRIBUTES);
                 for (EnchantmentAttributeEffect effect : effects) {
                     if (effect.attribute().is(Attributes.WATER_MOVEMENT_EFFICIENCY.unwrapKey().orElseThrow())) {
-                        waterSpeedMultiplier = effect.amount().calculate(itemEnchantments.getLevel(enchant));
+                        waterSpeedMultiplier = Math.clamp(
+                                effect.amount().calculate(itemEnchantments.getLevel(enchant)),
+                                0.0f, 1.0f);
                         break OUTER;
                     }
                 }

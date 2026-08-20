@@ -229,6 +229,11 @@ public class MovementDescend extends Movement {
             // 等真正落地再报成功,否则下一动作接飞
             return state.setStatus(MovementStatus.SUCCESS);
         }
+        if (player.isInWater()
+                && MovementHelper.isWater(player.level().getBlockState(dest))) {
+            swimTowards(state, dest);
+            return state;
+        }
         if (safeMode()) {
             // 稳走:瞄 src→dest 的 0.83 处,不看满 dest,防冲过
             double aimX = (src.getX() + 0.5) * 0.17 + (dest.getX() + 0.5) * 0.83;

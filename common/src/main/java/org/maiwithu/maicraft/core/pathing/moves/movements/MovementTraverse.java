@@ -164,6 +164,11 @@ public class MovementTraverse extends Movement {
 
     @Override
     protected Set<BlockPos> calculateValidPositions() {
+        if (player != null && waterRoute(player.level())) {
+            // Sprint-swimming puts the physical feet one cell below the planner's safe
+            // surface lattice. Both representations belong to this same horizontal edge.
+            return Set.of(src, dest, src.below(), dest.below());
+        }
         return Set.of(src, dest);
     }
 
@@ -251,7 +256,10 @@ public class MovementTraverse extends Movement {
                 || ladder
                 || MovementPlacement.canUseFrostWalker(player, level.getBlockState(positionToPlace));
         BlockPos feet = feet(player);
-        if (feet.getY() != dest.getY() && !ladder) {
+        boolean inSwimLane = player.isInWater()
+                && waterRoute(level)
+                && feet.getY() + 1 == dest.getY();
+        if (feet.getY() != dest.getY() && !ladder && !inSwimLane) {
             // 高度不对:低了跳一下,高了等下落
             if (feet.getY() < dest.getY()) {
                 return state.setInput(Input.JUMP, true);
@@ -260,7 +268,8 @@ public class MovementTraverse extends Movement {
         }
 
         if (isTheBridgeBlockThere) {
-            if (feet.equals(dest)) {
+            if (feet.equals(dest) || (inSwimLane
+                    && feet.getX() == dest.getX() && feet.getZ() == dest.getZ())) {
                 return state.setStatus(MovementStatus.SUCCESS);
             }
             BlockPos dir = getDirection();
@@ -285,6 +294,11 @@ public class MovementTraverse extends Movement {
                     && (!MovementHelper.avoidWalkingInto(intoBelow) || MovementHelper.isWater(intoBelow))
                     && !MovementHelper.avoidWalkingInto(intoAbove)) {
                 state.setInput(Input.SPRINT, true);
+            }
+
+            if (player.isInWater()) {
+                swimTowards(state, dest);
+                return state;
             }
 
             BlockState destDown = level.getBlockState(dest.below());
@@ -380,6 +394,11 @@ public class MovementTraverse extends Movement {
             AimGeometry.moveTowards(player, state, positionsToBreak[0]);
             return state;
         }
+    }
+
+    private boolean waterRoute(Level level) {
+        return MovementHelper.isWater(level.getBlockState(src))
+                || MovementHelper.isWater(level.getBlockState(dest));
     }
 
     /** 正在潜行悬空放置时不可中断,其余时刻可。 */
