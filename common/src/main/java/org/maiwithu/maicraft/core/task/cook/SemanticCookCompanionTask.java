@@ -75,10 +75,12 @@ public final class SemanticCookCompanionTask
      */
     private static final long COOK_PROGRESS_LEASE_TICKS = 30L * 20L;
     private enum Phase { RESOLVE, PREPARE, OPEN, WAIT_MENU, VALIDATE, LOAD_INPUT,
-        LOAD_FUEL, WAIT_COOK, CLEANUP, COMPLETE }
+        LOAD_FUEL, CONFIRM_START, CLOSE_WAIT, WAIT_CLOSED, RECONCILE,
+        VERIFY_OUTPUT, VERIFY_CLEAN_INPUT, CLEANUP, COMPLETE }
+    private enum OpenMode { NEW_BATCH, RESUME_BATCH }
     private enum Purpose { ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION, PLACE_STATION,
         MOVE_STATION, OPEN_STATION, LOAD_INPUT, LOAD_FUEL, TAKE_OUTPUT,
-        CLEAN_RESULT, CLEAN_INPUT, CLEAN_FUEL, CLOSE }
+        CLOSE_WAIT, CLEAN_INPUT, CLOSE, ABANDON_CLOSE }
     private enum Device {
         FURNACE(Blocks.FURNACE), BLAST_FURNACE(Blocks.BLAST_FURNACE),
         SMOKER(Blocks.SMOKER), CAMPFIRE(Blocks.CAMPFIRE);
@@ -116,6 +118,18 @@ public final class SemanticCookCompanionTask
     private boolean effectsStarted;
     private boolean finishRequested;
     private boolean replenishAfterClose;
+    private OpenMode openMode = OpenMode.NEW_BATCH;
+    private BlockPos stationReturnStance;
+    private long nextCookCheckTick;
+    private long closedWaitStartedTick;
+    private int ownedInputLoaded;
+    private int ownedOutputTaken;
+    private int takeInventoryBefore;
+    private int takeSlotCount;
+    private int cleanupInventoryBefore;
+    private int cleanupTransferCount;
+    private boolean cleanupSnapshotReady;
+    private ItemStack cleanupInputExpected = ItemStack.EMPTY;
     private long waitMenuSince;
     private long lastCookEvidenceTick;
     private String lastCookEvidence = "";
@@ -129,6 +143,8 @@ public final class SemanticCookCompanionTask
     private String failureCode;
     private String failureMessage;
     private FailureType failureType = FailureType.UNKNOWN;
+    private String failedChildStage;
+    private String failedChildMessage;
     private boolean outcomeUncertain;
     private Map<String, Object> prerequisiteFailure = Map.of();
     private Map<Item, List<CraftRoute>> craftRoutes = Map.of();
@@ -148,9 +164,12 @@ public final class SemanticCookCompanionTask
 
     @Override
     protected TaskState onTick() {
-        if (outputCount() >= r.count && !finishRequested) {
+        boolean outputTransferSettling = phase == Phase.VERIFY_OUTPUT
+                || phase == Phase.VERIFY_CLEAN_INPUT
+                || activePurpose == Purpose.TAKE_OUTPUT
+                || activePurpose == Purpose.CLEAN_INPUT;
+        if (outputCount() >= r.count && !finishRequested && !outputTransferSettling) {
             finishRequested = true;
-            if (activeChild == null) phase = Phase.CLEANUP;
         }
         if (activeChild != null) return tickChild();
         if (phase == Phase.COMPLETE) {
@@ -160,7 +179,7 @@ public final class SemanticCookCompanionTask
             }
             return TaskState.SUCCESS;
         }
-        if (finishRequested && phase != Phase.CLEANUP) phase = Phase.CLEANUP;
+        routeFinishRequest();
         return switch (phase) {
             case RESOLVE -> resolve();
             case PREPARE -> prepare();
@@ -169,10 +188,66 @@ public final class SemanticCookCompanionTask
             case VALIDATE -> validateMenu();
             case LOAD_INPUT -> loadInput();
             case LOAD_FUEL -> loadFuel();
-            case WAIT_COOK -> waitCook();
+            case CONFIRM_START -> confirmStart();
+            case CLOSE_WAIT -> closeForCookWait();
+            case WAIT_CLOSED -> waitClosed();
+            case RECONCILE -> reconcileBatch();
+            case VERIFY_OUTPUT -> verifyOutputTake();
+            case VERIFY_CLEAN_INPUT -> verifyCleanupInput();
             case CLEANUP -> cleanupMachine();
             case COMPLETE -> TaskState.SUCCESS;
         };
+    }
+
+    /**
+     * A satisfied inventory fact does not erase a batch already committed to a closed machine.
+     * Reopen and reconcile that exact batch before normal cleanup; only an uncommitted cook may
+     * jump directly to the terminal cleanup phase.
+     */
+    private void routeFinishRequest() {
+        if (!finishRequested || phase == Phase.CLEANUP || phase == Phase.COMPLETE
+                || phase == Phase.VERIFY_OUTPUT || phase == Phase.VERIFY_CLEAN_INPUT) {
+            return;
+        }
+        if (!stationClaimed || ownedInputLoaded <= 0) {
+            phase = Phase.CLEANUP;
+            return;
+        }
+        if (player.containerMenu instanceof AbstractFurnaceMenu && menuMatches()) {
+            openedMenu = true;
+            phase = Phase.RECONCILE;
+            return;
+        }
+        if (phase == Phase.WAIT_CLOSED) {
+            nextCookCheckTick = player.level().getGameTime();
+            return;
+        }
+        if (phase == Phase.OPEN || phase == Phase.WAIT_MENU) {
+            return;
+        }
+        openMode = OpenMode.RESUME_BATCH;
+        nextCookCheckTick = player.level().getGameTime();
+        phase = Phase.WAIT_CLOSED;
+    }
+
+    @Override
+    public boolean canRun(LocalPlayer companion) {
+        return phase != Phase.WAIT_CLOSED || closedWaitDue(companion);
+    }
+
+    private boolean closedWaitDue(LocalPlayer companion) {
+        long now = companion.level().getGameTime();
+        if (now >= nextCookCheckTick) return true;
+        if (stationPos == null || !companion.level().isLoaded(stationPos)) return false;
+        var state = companion.level().getBlockState(stationPos);
+        if (candidate == null || !state.is(candidate.device.block)) return true;
+        // Once the close has had a couple of server ticks to settle, an extinguished loaded
+        // furnace is useful early evidence: either the batch completed or it needs attention.
+        return now > closedWaitStartedTick + 2L
+                && state.hasProperty(
+                        net.minecraft.world.level.block.state.properties.BlockStateProperties.LIT)
+                && !state.getValue(
+                        net.minecraft.world.level.block.state.properties.BlockStateProperties.LIT);
     }
 
     private TaskState resolve() {
@@ -555,6 +630,23 @@ public final class SemanticCookCompanionTask
     }
 
     private TaskState prepare() {
+        if (stationClaimed && ownedInputLoaded > 0) {
+            if (stationPos == null) {
+                return closeWithoutClaimingContents("station_target_lost",
+                        "The exact claimed workstation position was lost while its batch was outstanding.",
+                        FailureType.TARGET_LOST);
+            }
+            if (player.level().isLoaded(stationPos)
+                    && !player.level().getBlockState(stationPos).is(candidate.device.block)) {
+                return closeWithoutClaimingContents("station_replaced_while_cooking",
+                        "The exact claimed workstation disappeared while its batch was outstanding.",
+                        FailureType.TARGET_LOST);
+            }
+            openMode = OpenMode.RESUME_BATCH;
+            nextCookCheckTick = player.level().getGameTime();
+            phase = Phase.WAIT_CLOSED;
+            return TaskState.RUNNING;
+        }
         if (finishRequested) {
             phase = Phase.CLEANUP;
             return TaskState.RUNNING;
@@ -639,8 +731,13 @@ public final class SemanticCookCompanionTask
     }
 
     private TaskState openStation() {
-        if (stationPos == null
-                || !player.level().getBlockState(stationPos).is(candidate.device.block)) {
+        if (stationPos == null || (player.level().isLoaded(stationPos)
+                && !player.level().getBlockState(stationPos).is(candidate.device.block))) {
+            if (stationClaimed && ownedInputLoaded > 0) {
+                return closeWithoutClaimingContents("station_replaced_while_cooking",
+                        "The exact claimed workstation was removed or replaced before it could be reopened.",
+                        FailureType.TARGET_LOST);
+            }
             stationPos = null;
             openAttemptStation = null;
             openAttempts = 0;
@@ -648,7 +745,13 @@ public final class SemanticCookCompanionTask
             return TaskState.RUNNING;
         }
         if (!withinReach(stationPos)) {
-            phase = Phase.PREPARE;
+            if (stationClaimed && ownedInputLoaded > 0) {
+                nextCookCheckTick = player.level().getGameTime();
+                openMode = OpenMode.RESUME_BATCH;
+                phase = Phase.WAIT_CLOSED;
+            } else {
+                phase = Phase.PREPARE;
+            }
             return TaskState.RUNNING;
         }
         if (!stationPos.equals(openAttemptStation)) {
@@ -664,21 +767,36 @@ public final class SemanticCookCompanionTask
     private TaskState waitMenu() {
         if (player.containerMenu instanceof AbstractFurnaceMenu) {
             if (!menuMatches()) {
-                return failOrClean("wrong_station_menu",
+                rememberFailure("wrong_station_menu",
                         "The opened workstation does not match the selected cooking recipe.",
                         FailureType.TARGET_LOST);
+                outcomeUncertain |= effectsStarted;
+                openedMenu = true;
+                return start(new CloseMenuTaskRecord(
+                        childId("wrong-menu-close"), childDeadline(30L * 20L)),
+                        Purpose.ABANDON_CLOSE);
             }
             // This counter is a consecutive confirmation retry budget for one
             // open operation, not a lifetime cap across later cooking batches.
             openAttempts = 0;
             openedMenu = true;
-            phase = Phase.VALIDATE;
+            phase = openMode == OpenMode.RESUME_BATCH
+                    ? Phase.RECONCILE : Phase.VALIDATE;
             return TaskState.RUNNING;
         }
         if (player.level().getGameTime() - waitMenuSince > 60L) {
             if (openAttempts < 2) {
                 phase = Phase.OPEN;
                 return TaskState.RUNNING;
+            }
+            if (player.containerMenu != player.inventoryMenu) {
+                rememberFailure("station_open_unconfirmed",
+                        "The selected workstation opened an unexpected synchronized menu.",
+                        FailureType.TARGET_LOST);
+                openedMenu = true;
+                return start(new CloseMenuTaskRecord(
+                        childId("unexpected-menu-close"), childDeadline(30L * 20L)),
+                        Purpose.ABANDON_CLOSE);
             }
             return failOrClean("station_open_unconfirmed",
                     "The selected workstation did not open a synchronized furnace-family menu.",
@@ -711,6 +829,11 @@ public final class SemanticCookCompanionTask
                     FailureType.UNKNOWN);
         }
         stationClaimed = true;
+        // Ownership begins only after LOAD_INPUT's native receipt confirms the deposit.
+        ownedInputLoaded = 0;
+        ownedOutputTaken = 0;
+        takeInventoryBefore = 0;
+        takeSlotCount = 0;
         phase = Phase.LOAD_INPUT;
         return TaskState.RUNNING;
     }
@@ -733,27 +856,33 @@ public final class SemanticCookCompanionTask
         int toLoad = ceilDiv(
                 Math.max(0L, (long) neededTicks - availableBurn), fuelBurnTicks);
         if (toLoad <= 0) {
-            phase = Phase.WAIT_COOK;
+            phase = Phase.CONFIRM_START;
             markCookEvidence();
             return TaskState.RUNNING;
         }
         return transferTo(fuel, toLoad, 1, Purpose.LOAD_FUEL);
     }
 
-    private TaskState waitCook() {
+    /** Loading a slot is not proof that the server accepted and started the recipe. */
+    private TaskState confirmStart() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null) return menuLost();
         ItemStack result = menu.getSlot(2).getItem();
         if (!result.isEmpty() && !result.is(BuiltInRegistries.ITEM.get(r.itemId))) {
-            return failOrClean("cooking_output_diverged",
+            return closeWithoutClaimingContents("cooking_output_diverged",
                     "The synchronized workstation output no longer matches the selected recipe.",
                     FailureType.UNKNOWN);
         }
         ItemStack input = menu.getSlot(0).getItem();
-        if ((!result.isEmpty() && input.isEmpty())
-                || (!result.isEmpty() && outputCount() + result.getCount() >= r.count)) {
-            return startTransfer(List.of(
-                    new ContainerTransferTaskRecord.Move(2, -1, 0)), Purpose.TAKE_OUTPUT);
+        if (!input.isEmpty() && !input.is(candidate.input)) {
+            return closeWithoutClaimingContents("cooking_input_diverged",
+                    "The synchronized workstation input changed after MaiCraft loaded the batch.",
+                    FailureType.UNKNOWN);
+        }
+        // Very short or already-hot recipes can finish before the first progress sample.
+        if (!result.isEmpty() || input.getCount() < ownedInputLoaded) {
+            phase = Phase.RECONCILE;
+            return TaskState.RUNNING;
         }
         String evidence = data(menu, 0) + ":" + data(menu, 2) + ":" + data(menu, 3)
                 + ":" + input.getCount() + ":" + result.getCount();
@@ -762,16 +891,91 @@ public final class SemanticCookCompanionTask
             lastCookEvidenceTick = player.level().getGameTime();
             renewCookProgressLease();
         }
+        if (!input.isEmpty() && data(menu, 0) > 0
+                && data(menu, 2) > 0 && data(menu, 3) > 0) {
+            stationReturnStance = player.blockPosition();
+            scheduleClosedCheck(menu);
+            phase = Phase.CLOSE_WAIT;
+            return TaskState.RUNNING;
+        }
+        long quietLimit = Math.max(200L, candidate.recipe.getCookingTime() + 100L);
+        if (player.level().getGameTime() - lastCookEvidenceTick <= quietLimit) {
+            return TaskState.RUNNING;
+        }
         if (!input.isEmpty() && data(menu, 0) <= 0
                 && menu.getSlot(1).getItem().isEmpty()) {
             return failOrClean("fuel_exhausted",
-                    "The workstation has recipe input but no synchronized burn time or fuel remaining.",
+                    "The workstation never confirmed ignition and has no fuel remaining.",
                     FailureType.NO_MATERIAL);
         }
-        long quietLimit = Math.max(200L, candidate.recipe.getCookingTime() + 100L);
-        if (player.level().getGameTime() - lastCookEvidenceTick > quietLimit) {
-            return failOrClean("cooking_stalled",
-                    "Synchronized furnace data and output stopped advancing.",
+        return failOrClean("cooking_start_unconfirmed",
+                "The loaded workstation did not produce synchronized ignition or progress evidence.",
+                FailureType.UNKNOWN);
+    }
+
+    private TaskState closeForCookWait() {
+        if (!(player.containerMenu instanceof AbstractFurnaceMenu) || !menuMatches()) {
+            return menuLost();
+        }
+        return start(new CloseMenuTaskRecord(
+                childId("wait-close"), childDeadline(30L * 20L)), Purpose.CLOSE_WAIT);
+    }
+
+    private void scheduleClosedCheck(AbstractFurnaceMenu menu) {
+        int total = Math.max(1, data(menu, 3) > 0
+                ? data(menu, 3) : candidate.recipe.getCookingTime());
+        int progress = Math.max(0, Math.min(total - 1, data(menu, 2)));
+        int remainingInputs = Math.max(1, menu.getSlot(0).getItem().getCount());
+        long remaining = (long) total - progress
+                + (long) (remainingInputs - 1) * total;
+        nextCookCheckTick = player.level().getGameTime() + Math.max(2L, remaining + 2L);
+        r.extendDeadlineTo(nextCookCheckTick + COOK_PROGRESS_LEASE_TICKS);
+    }
+
+    private TaskState waitClosed() {
+        openedMenu = false;
+        if (!closedWaitDue(player)) return TaskState.RUNNING;
+        if (player.containerMenu != player.inventoryMenu) {
+            // A human or another higher-level action currently owns a GUI. Never close it here.
+            return TaskState.RUNNING;
+        }
+        if (stationPos == null) {
+            return closeWithoutClaimingContents("station_target_lost",
+                    "The exact workstation position was lost while its batch was cooking.",
+                    FailureType.TARGET_LOST);
+        }
+        if (player.level().isLoaded(stationPos)
+                && !player.level().getBlockState(stationPos).is(candidate.device.block)) {
+            return closeWithoutClaimingContents("station_replaced_while_cooking",
+                    "The claimed workstation was removed or replaced while its batch was cooking.",
+                    FailureType.TARGET_LOST);
+        }
+        openMode = OpenMode.RESUME_BATCH;
+        if (!withinReach(stationPos)) {
+            BlockPos stance = stationReturnStance;
+            if (stance == null) {
+                return closeWithoutClaimingContents("station_return_stance_lost",
+                        "No verified first-person stance was retained for the claimed workstation.",
+                        FailureType.TARGET_LOST);
+            }
+            return start(new MoveToTaskRecord(
+                    childId("return"), childDeadline(3L * 60L * 20L),
+                    (double) stance.getX(), (double) stance.getY(), (double) stance.getZ(),
+                    null, false), Purpose.MOVE_STATION);
+        }
+        phase = Phase.OPEN;
+        return TaskState.RUNNING;
+    }
+
+    /** Reconcile only quantities this task can prove it put into an initially empty machine. */
+    private TaskState reconcileBatch() {
+        AbstractFurnaceMenu menu = furnaceMenu();
+        if (menu == null || !menuMatches()) return menuLost();
+        ItemStack input = menu.getSlot(0).getItem();
+        ItemStack result = menu.getSlot(2).getItem();
+        if (!input.isEmpty() && !input.is(candidate.input)) {
+            return closeWithoutClaimingContents("workstation_input_interference",
+                    "The claimed workstation now contains another input; MaiCraft left it untouched.",
                     FailureType.UNKNOWN);
         }
         if (!result.isEmpty() && !result.is(BuiltInRegistries.ITEM.get(r.itemId))) {
