@@ -22,6 +22,8 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
@@ -42,6 +44,7 @@ import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
 import org.maiwithu.maicraft.core.task.trade.SemanticTradeTaskRecord;
 import org.maiwithu.maicraft.core.tools.CraftOps;
+import org.maiwithu.maicraft.core.tools.RecipeProbe;
 import org.maiwithu.maicraft.core.tools.ToolParse;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
@@ -70,6 +73,8 @@ public final class SemanticAcquireCompanionTask
     private static final long STORAGE_TICKS = 10L * 60L * 20L;
     private static final long HUNT_TICKS = 120L * 20L;
     private static final int HUNT_SEARCH_DISTANCE = 512;
+    private static final int STRUCTURAL_RECIPE_DEPTH = 6;
+    private static final int UNREACHABLE_STRUCTURE_COST = 1_000_000;
 
     private enum HuntChildStage { NONE, SEARCH, ATTACK }
 
@@ -89,10 +94,16 @@ public final class SemanticAcquireCompanionTask
                 new LinkedHashMap<>();
         final Set<ResourceLocation> rejectedTradeOutputs = new LinkedHashSet<>();
         final Set<String> exhaustedHuntSearchStates = new LinkedHashSet<>();
-        int sourceCursor;
+        final Set<SemanticAcquireTaskRecord.Source> exhaustedSources = new LinkedHashSet<>();
+        /** Once prerequisite work starts, execution stays on this recipe identity. */
+        final Set<String> committedRecipeIds = new LinkedHashSet<>();
+        boolean committedRecipeEffectsObserved;
+        List<SemanticAcquireTaskRecord.Source> plannedSourceOrder;
         int huntSearchAttempts;
         boolean huntSearchExpandedView;
         boolean miningToolPrerequisitePushed;
+        boolean effectsObserved;
+        boolean decisionRequired;
         ResourceLocation preferredTradeOutput;
         int lastObservedCount = -1;
 
@@ -142,6 +153,18 @@ public final class SemanticAcquireCompanionTask
             Set<String> recipeIds,
             List<ResourceLocation> outputItemIds) {}
 
+    private record RankedIngredient(
+            IngredientNeed ingredient, boolean decisionRequired, int structureCost) {}
+
+    private record StructureKey(
+            ResourceLocation itemId,
+            int remainingDepth,
+            Set<ResourceLocation> blocked) {
+        private StructureKey {
+            blocked = Set.copyOf(blocked);
+        }
+    }
+
     private record NearbySurvey(
             int safeCount,
             int protectedCount,
@@ -164,6 +187,7 @@ public final class SemanticAcquireCompanionTask
     private final List<Map<String, Object>> issues = new ArrayList<>();
     private final List<Map<String, Object>> recipeTrace = new ArrayList<>();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
+    private Map<ResourceLocation, List<CraftingRecipe>> structuralCraftRecipes;
     private Map<ResourceLocation, Integer> initialCounts = Map.of();
     private Need rootNeed;
     private Task activeChild;
@@ -173,12 +197,14 @@ public final class SemanticAcquireCompanionTask
     private String activeDetail;
     private int activeBeforeCount;
     private int activeLastObservedCount;
+    private Map<ResourceLocation, Integer> activeBeforeInventory = Map.of();
     private HuntChildStage activeHuntStage = HuntChildStage.NONE;
     private UUID activeHuntTarget;
     private final Set<UUID> rejectedHuntTargets = new LinkedHashSet<>();
     private int childSerial;
     private int plannerStepsThisTick;
     private String failureCode;
+    private Need failureNeed;
     private DimensionBarrier failureDimension;
     private boolean outcomeUncertain;
 
@@ -233,19 +259,31 @@ public final class SemanticAcquireCompanionTask
         Need need = needs.peek();
         int observedNeedCount = count(need.itemIds);
         if (need.lastObservedCount >= 0 && observedNeedCount > need.lastObservedCount) {
+            need.plannedSourceOrder = null;
             renewProgressLease();
         }
         need.lastObservedCount = observedNeedCount;
         if (observedNeedCount >= need.requiredFinalCount) {
-            needs.pop();
+            Need satisfied = needs.pop();
+            propagateSatisfiedNeed(satisfied);
             renewProgressLease();
             return TaskState.RUNNING;
         }
-        if (need.sourceCursor >= need.allowedSources.size()) {
+        if (need.decisionRequired) {
+            if (need.depth > 0) return exhaustNeed(need);
+            failureNeed = need;
+            return failAcquisition(
+                    "acquisition_decision_required",
+                    "the remaining direct source reached a permission or protection boundary; "
+                            + "MaiCraft stopped for narration before trying another effectful route",
+                    FailureType.NO_MATERIAL);
+        }
+        List<SemanticAcquireTaskRecord.Source> sourceOrder = executionSourceOrder(need);
+        if (sourceOrder.isEmpty()) {
             return exhaustNeed(need);
         }
 
-        SemanticAcquireTaskRecord.Source source = need.allowedSources.get(need.sourceCursor);
+        SemanticAcquireTaskRecord.Source source = sourceOrder.getFirst();
         return switch (source) {
             case INVENTORY -> observeInventorySource(need);
             case NEARBY -> attemptNearby(need);
@@ -338,6 +376,9 @@ public final class SemanticAcquireCompanionTask
                         ? CraftingWorkstationCoordinator.inspect(player) : null;
         Set<String> excludedRecipes = new LinkedHashSet<>(need.lineageRecipes);
         excludedRecipes.addAll(need.rejectedRecipes);
+        if (!need.committedRecipeIds.isEmpty()) {
+            excludedRecipes.addAll(nonCommittedCraftRecipes(need));
+        }
         // One comparison round is one planner unit. Charging once per tag member made the result
         // depend on registry order and could stop before the cheapest satisfiable alternative.
         if (!takePlannerStep()) return TaskState.RUNNING;
@@ -357,11 +398,14 @@ public final class SemanticAcquireCompanionTask
         }
 
         ExecutableCraft selected = executable.stream()
+                .filter(candidate -> recipeAllowedByCommit(
+                        need, candidate.plan().task()))
                 .filter(candidate -> candidate.plan().cost() != null)
                 .min(Comparator.comparing(
                         candidate -> candidate.plan().cost(), CraftPlanCost.ORDER))
                 .orElse(null);
         if (selected != null) {
+            commitRecipe(need, Set.of(selected.plan().task().recipeId.toString()));
             need.attempted(SemanticAcquireTaskRecord.Source.CRAFT);
             return startChild(need, SemanticAcquireTaskRecord.Source.CRAFT,
                     selected.plan().task(),
@@ -369,6 +413,7 @@ public final class SemanticAcquireCompanionTask
         }
 
         CraftCandidate surfacePrerequisite = candidates.stream()
+                .filter(candidate -> recipeAllowedByCommit(need, candidate.recipeId()))
                 .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
                 .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
                 .filter(CraftCandidate::surfaceSupported)
@@ -384,6 +429,7 @@ public final class SemanticAcquireCompanionTask
         }
 
         List<CraftCandidate> viableCandidates = candidates.stream()
+                .filter(candidate -> recipeAllowedByCommit(need, candidate.recipeId()))
                 .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
                 .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
                 .filter(CraftCandidate::surfaceSupported)
@@ -392,11 +438,37 @@ public final class SemanticAcquireCompanionTask
                 // ancestry cannot advance the inventory fact. Skip the dominated/cyclical route
                 // as a set instead of reporting every stripped-log/wood recipe one by one.
                 .filter(candidate -> chooseIngredient(candidate, need) != null)
-                .sorted(Comparator.comparing(CraftCandidate::cost, CraftPlanCost.ORDER))
+                .sorted(Comparator
+                        .comparingInt((CraftCandidate candidate) ->
+                                candidate.cost().surface().ordinal())
+                        .thenComparingInt(candidate ->
+                                recursiveCandidateStructureCost(candidate, need))
+                        .thenComparing(CraftCandidate::cost, CraftPlanCost.ORDER))
                 .toList();
         CraftCandidate chosen = viableCandidates.isEmpty()
                 ? null : viableCandidates.getFirst();
         if (chosen == null) {
+            if (!need.committedRecipeIds.isEmpty()) {
+                if (need.committedRecipeEffectsObserved) {
+                    addIssue("craft", "committed_recipe_unavailable",
+                            "the selected recipe stopped exposing a complete frontier after "
+                                    + "inventory or world effects were observed",
+                            Map.of("recipe_ids", List.copyOf(need.committedRecipeIds),
+                                    "requires_narration", true,
+                                    "partial_effects", true));
+                    failureNeed = need;
+                    return failAcquisition(
+                            "committed_recipe_unavailable",
+                            "the committed recipe stopped exposing a complete cycle-free prerequisite "
+                                    + "frontier after effects were observed; MaiCraft stopped instead of "
+                                    + "silently switching routes",
+                            FailureType.NO_MATERIAL);
+                }
+                need.rejectedRecipes.addAll(need.committedRecipeIds);
+                need.committedRecipeIds.clear();
+                need.committedRecipeEffectsObserved = false;
+                return TaskState.RUNNING;
+            }
             boolean surfaceMissing = candidates.stream().anyMatch(candidate ->
                     candidate.cost().missingMaterials() == 0
                             && candidate.surfaceSupported() && !candidate.surfaceReady());
@@ -422,6 +494,7 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
         IngredientNeed ingredient = frontier.ingredient();
+        commitRecipe(need, frontier.recipeIds());
         Set<ResourceLocation> lineageItems = new LinkedHashSet<>(need.lineageItems);
         lineageItems.addAll(ingredient.itemIds());
         Set<String> lineageRecipes = new LinkedHashSet<>(need.lineageRecipes);
@@ -574,7 +647,8 @@ public final class SemanticAcquireCompanionTask
         for (var holder : ClientRuntime.requireContext(player)
                 .connection().getRecipeManager().getRecipes()) {
             if (!(holder.value() instanceof AbstractCookingRecipe cooking)) continue;
-            ItemStack result = cooking.getResultItem(player.level().registryAccess());
+            ItemStack result = RecipeProbe.resultOf(
+                    cooking, player.level().registryAccess());
             if (!result.isEmpty() && result.is(output)) return true;
         }
         return false;
@@ -620,9 +694,16 @@ public final class SemanticAcquireCompanionTask
 
     private TaskState reviewHunt(Need need) {
         if (!r.allowHarm) {
+            SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
             addIssue("hunt", "harm_permission_required",
                     "hunt was allowed as a source family, but allow_harm is false; no entity was attacked",
-                    Map.of("requires_narration", true));
+                    Map.of("requires_narration", true,
+                            "ingredient_item_ids", itemStrings(need.itemIds),
+                            "entity_type_ids", stringIds(hint.entityTypeIds()),
+                            "expected_item_ids", stringIds(hint.expectedItemIds()),
+                            "description", hint.description() == null
+                                    ? "semantic entity source" : hint.description()));
+            need.decisionRequired = true;
             advanceSource(need);
             return TaskState.RUNNING;
         }
@@ -680,10 +761,11 @@ public final class SemanticAcquireCompanionTask
         facts.put("searched_loaded_radius", loadedRadius);
         if (safe.isEmpty()) {
             if (!protectedCandidates.isEmpty()) {
-                addIssue("hunt", "protected_hunt_target_requires_decision",
-                        "every matching loaded entity is named, tamed, owned, leashed, persistent, "
-                                + "near another player, inside protected/remembered terrain, "
-                                + "enclosed, or not fully observable",
+                addIssue("hunt", "protected_hunt_targets_skipped",
+                        "loaded matching entities were excluded because they have explicit "
+                                + "protection evidence: they are "
+                                + "named, tamed, owned, leashed, in a vehicle, carrying a passenger, near "
+                                + "another player, or inside an explicitly protected enclosed area",
                         facts);
             }
             String searchState = huntSearchState(need, hint, relation);
