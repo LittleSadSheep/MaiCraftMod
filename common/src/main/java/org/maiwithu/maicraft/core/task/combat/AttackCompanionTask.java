@@ -127,6 +127,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private Phase phase = Phase.COMBAT;
     private Entity target;
     private Vec3 lastTargetPosition;
+    /** Last synchronized position per authorized target, used to bind a loot sweep to its kill. */
+    private final Map<Integer, Vec3> lastTargetPositions = new HashMap<>();
     /**
      * 这一刻 {@link #FIELD_RADIUS} 内活着的敌对生物——<b>一刻只扫一次</b>,在 {@link #surveyField}
      * 里;举盾、走位的躲避场都读这一份。"场上有哪些怪"各算各的,就会出现判据说打、腿说没人的局面。
@@ -202,6 +204,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
         }
         settleFinishedTargets();
+        // A confirmed death changes ownership of the body from combat to loot collection.
+        // Do not continue through DONE in this same tick: that used to report success before the
+        // freshly-created item entities had even been observed, leaving every drop behind.
+        if (phase == Phase.LOOT) {
+            return tickLoot();
+        }
         AttackPlan.Move move = AttackPlan.decide(field, lastMove);
         lastMove = move;
         logMove(move, field);
@@ -214,6 +222,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         if (target != null) {
             lastTargetPosition = target.position();
+            lastTargetPositions.put(target.getId(), lastTargetPosition);
             loot.rememberPreexisting(BlockPos.containing(lastTargetPosition));
         }
         // 攻击与移动<b>正交</b>:每刻先问一次"冷却好了吗、够得着谁吗",够得着就打 ——
@@ -312,18 +321,21 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 continue;
             }
             Entity e = player.clientLevel.getEntity(id);
+            if (e != null && !e.isRemoved()) {
+                lastTargetPositions.put(id, e.position());
+            }
             if (e == null || e.isRemoved()) {
                 if (r.strikes(id) > 0) {
                     r.defeated(id);
                     renewCombatProgress();
-                    beginLoot(lastTargetPosition);
+                    beginLoot(lastTargetPositions.getOrDefault(id, lastTargetPosition));
                 } else {
                     r.lost(id);
                 }
             } else if (e instanceof LivingEntity living && living.isDeadOrDying()) {
                 r.defeated(id);
                 renewCombatProgress();
-                beginLoot(lastTargetPosition);
+                beginLoot(lastTargetPositions.getOrDefault(id, e.position()));
             } else if (e instanceof LivingEntity living) {
                 float current = living.getHealth();
                 Float previous = observedHealth.put(id, current);
@@ -535,7 +547,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return;
         }
         if (r.strictAuthorized && !strictMeleeClear(victim)) return;
-        InputDriver.lookAt(player, victim.getEyePosition());
         // 疾跑会让原版取消暴击判定(Player.attack 里 flag1 带 !isSprinting)。
         meleeVictimId = victim.getId();
         meleeAction = Interaction.attackEntity(player, victim);
@@ -911,7 +922,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         stopNav();
         abortShot();
         InputDriver.halt(player);
-        loot.begin(BlockPos.containing(where != null ? where : player.position()));
+        BlockPos death = BlockPos.containing(where != null ? where : player.position());
+        if (phase == Phase.LOOT) {
+            loot.addDeath(death);
+        } else {
+            loot.begin(death);
+        }
         target = null;
         lastMove = null;   // 目标没了,承诺一并作废
         phase = Phase.LOOT;
@@ -924,6 +940,17 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return TaskState.RUNNING;
         }
         loot.prune();
+        if (loot.waitingInsidePickupEnvelope()) {
+            stopNav();
+            InputDriver.halt(player);
+            if (loot.pickupBlocked()) {
+                fail("reached a drop from the defeated target, but the inventory never accepted it; "
+                                + "the main inventory may be full",
+                        FailureType.NO_SPACE);
+                return TaskState.FAILED;
+            }
+            return TaskState.RUNNING;
+        }
         if (loot.live().isEmpty()) {
             stopNav();
             loot.finish();
@@ -931,11 +958,16 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return TaskState.RUNNING;
         }
         if (nav == null) {
-            nav = PlayerNav.toGoal(player, loot::goal, 1.0, () -> loot.live().isEmpty());
+            nav = PlayerNav.trackGoal(player, loot::goal, 1.0, () -> loot.live().isEmpty());
         }
         switch (nav.tick()) {
             case RUNNING -> { }
-            case ARRIVED, FAILED -> {
+            case ARRIVED -> {
+                // The exact item cell should put the vanilla pickup envelopes in contact on the
+                // following tick. Re-root once if the item slid while the last segment arrived.
+                stopNav();
+            }
+            case FAILED -> {
                 loot.noteApproachFailure();
                 stopNav();
             }
@@ -998,7 +1030,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         data.put("strikes", r.strikes());
         data.put("loot_gained", lootGained());
         data.put("unreachable_drop_count", loot.unreachableCount());
+        data.put("ambiguous_merged_drop_count", loot.ambiguousMergedCount());
         return data;
+    }
+
+    @Override
+    public boolean mustSettleBeforeSatisfiedCancellation() {
+        return phase == Phase.LOOT && loot.mustSettle();
     }
 
     private String tally() {

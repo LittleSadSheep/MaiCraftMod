@@ -1,115 +1,225 @@
 package org.maiwithu.maicraft.core.task.combat;
 
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
-import org.maiwithu.maicraft.core.task.base.DropTracker;
 import net.minecraft.client.player.LocalPlayer;
-
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * 打倒一个目标之后走过去把掉落物捡了。
+ * Causally bounded collection of drops created by targets defeated in one combat beat.
  *
- * <h2>为什么要先等一会儿</h2>
- * 死亡与掉落物落地之间隔着几刻。立刻去看会看见空地,于是她转身找下一个目标,
- * 战利品留在原地——{@link #DROP_LOITER_TICKS} 就是等这几刻。
- *
- * <h2>捡不到的要认账</h2>
- * 掉进岩浆、卡在墙里、落在够不着的悬崖下,都会让寻路反复失败。连续失败两次就把那一件
- * 拉黑并计数,回执里报给模型——她说"捡完了"和"有三件够不着"是两回事。
+ * <p>The client is not told a mob-drop parent id. The strongest evidence it can actually prove
+ * is therefore a conjunction: the item id did not exist before the hit, it has no thrower/owner,
+ * it first appeared inside the short death synchronization window, and it appeared close to the
+ * recorded corpse position. A merely nearby old stack is never collected. If a new drop merges
+ * into such a stack, the causal portion cannot be separated from somebody else's items, so the
+ * merge is reported as ambiguous and left alone.</p>
  */
 final class LootSweep {
 
-    /** 战果落地要几刻,这期间原地等。 */
-    private static final int DROP_LOITER_TICKS = 5;
-    /** 以尸体为心,这个半径内的掉落物算这一次的战利品。 */
-    private static final double LOOT_RADIUS = 8.0;
-    /** 同一件东西连续够不到几次就放弃它。 */
+    /** Allow death and item-spawn packets to settle before deciding that no loot exists. */
+    private static final int DROP_SETTLE_TICKS = 10;
+    /** Vanilla mob drops spawn at the corpse and drift only a short distance in this window. */
+    private static final double ATTRIBUTION_RADIUS = 4.5;
+    private static final double ATTRIBUTION_RADIUS_SQR =
+            ATTRIBUTION_RADIUS * ATTRIBUTION_RADIUS;
+    /** Repeated proven no-path results make a drop unreachable, not silently collected. */
     private static final int MAX_APPROACH_FAILURES = 2;
+    /** At collision range, absence of pickup this long is authoritative evidence of no capacity. */
+    private static final int PICKUP_SETTLE_TICKS = 40;
 
     private final LocalPlayer player;
-    private final DropTracker drops = new DropTracker();
+    private final Map<Integer, Integer> preexistingCounts = new HashMap<>();
+    private final Map<Integer, Integer> trackedCounts = new HashMap<>();
+    private final Set<Integer> tracked = new LinkedHashSet<>();
     private final Set<Integer> skipped = new HashSet<>();
+    private final List<BlockPos> deathPositions = new ArrayList<>();
 
-    private BlockPos deathPosition;
     private long settleUntil;
     private int approachFailures;
+    private int pickupWaitTicks;
     private int unreachableCount;
+    private int ambiguousMergedCount;
+    private boolean active;
 
     LootSweep(LocalPlayer player) {
         this.player = player;
     }
 
-    /** 战斗途中持续记住"这些掉落物在我打之前就在地上了",免得把别人的东西算成战利品。 */
+    /** Snapshot everything already at the prospective kill site before a lethal hit lands. */
     void rememberPreexisting(BlockPos around) {
-        drops.rememberExisting(player.level(),
-                new AABB(around).inflate(LOOT_RADIUS));
+        AABB box = new AABB(around).inflate(ATTRIBUTION_RADIUS);
+        for (ItemEntity item : player.level().getEntitiesOfClass(ItemEntity.class, box)) {
+            preexistingCounts.put(item.getId(), item.getItem().getCount());
+        }
     }
 
-    /** 目标倒下了,从这一刻起开始收。 */
+    /** Begin a new post-kill synchronization window. */
     void begin(BlockPos where) {
-        deathPosition = where;
-        settleUntil = player.level().getGameTime() + DROP_LOITER_TICKS;
-        drops.resetTracking();
+        preexistingCounts.keySet().removeIf(id ->
+                !(player.clientLevel.getEntity(id) instanceof ItemEntity));
+        active = true;
+        deathPositions.clear();
+        tracked.clear();
+        trackedCounts.clear();
         skipped.clear();
         approachFailures = 0;
+        pickupWaitTicks = 0;
+        addDeath(where);
     }
 
-    /** 还在等掉落物落地。 */
+    /** Sweeping/ranged damage can settle more than one target in the same tick. */
+    void addDeath(BlockPos where) {
+        if (!deathPositions.contains(where)) deathPositions.add(where.immutable());
+        settleUntil = Math.max(settleUntil,
+                player.level().getGameTime() + DROP_SETTLE_TICKS);
+    }
+
     boolean settling() {
         return player.level().getGameTime() <= settleUntil;
     }
 
-    /** 把这一刻新出现的掉落物纳入视野。 */
+    /**
+     * Admit only new, ownerless item entities observed inside the death window. Owner-bearing
+     * entities are thrown/assigned items, not ordinary mob loot. Count growth on an old id is an
+     * inseparable merge and deliberately remains untouched.
+     */
     void discover() {
-        if (deathPosition != null) {
-            drops.discover(player.clientLevel,
-                    new AABB(deathPosition).inflate(LOOT_RADIUS));
+        if (!active) return;
+        boolean admissionOpen = player.level().getGameTime() <= settleUntil;
+        for (BlockPos death : deathPositions) {
+            AABB box = new AABB(death).inflate(ATTRIBUTION_RADIUS);
+            for (ItemEntity item : player.level().getEntitiesOfClass(ItemEntity.class, box)) {
+                if (!nearAnyDeath(item)) continue;
+                int id = item.getId();
+                if (tracked.contains(id)) {
+                    int trackedBefore = trackedCounts.getOrDefault(id, item.getItem().getCount());
+                    if (!admissionOpen && item.getItem().getCount() > trackedBefore) {
+                        ambiguousMergedCount++;
+                        skipped.add(id);
+                    }
+                    trackedCounts.put(id, item.getItem().getCount());
+                    continue;
+                }
+                Integer before = preexistingCounts.get(id);
+                if (before == null) {
+                    if (admissionOpen && item.getOwner() == null) {
+                        tracked.add(id);
+                        trackedCounts.put(id, item.getItem().getCount());
+                    } else if (item.getOwner() != null) {
+                        preexistingCounts.put(id, item.getItem().getCount());
+                    }
+                } else if (!tracked.contains(id) && item.getItem().getCount() > before) {
+                    ambiguousMergedCount++;
+                    preexistingCounts.put(id, item.getItem().getCount());
+                }
+            }
         }
     }
 
-    /** 还够得着、还没被拉黑的掉落物。 */
+    private boolean nearAnyDeath(ItemEntity item) {
+        for (BlockPos death : deathPositions) {
+            if (item.position().distanceToSqr(
+                    death.getX() + 0.5, death.getY() + 0.5, death.getZ() + 0.5)
+                    <= ATTRIBUTION_RADIUS_SQR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     List<ItemEntity> live() {
-        return drops.live(player.clientLevel, skipped);
+        List<ItemEntity> out = new ArrayList<>();
+        for (int id : tracked) {
+            Entity entity = player.clientLevel.getEntity(id);
+            if (entity instanceof ItemEntity item && !item.isRemoved() && !skipped.contains(id)) {
+                out.add(item);
+            }
+        }
+        return out;
     }
 
     void prune() {
-        drops.prune(player.clientLevel);
+        tracked.removeIf(id -> {
+            Entity entity = player.clientLevel.getEntity(id);
+            boolean gone = !(entity instanceof ItemEntity) || entity.isRemoved();
+            if (gone) trackedCounts.remove(id);
+            return gone;
+        });
     }
 
-    /** 走向所有还剩的掉落物(哪个先到算哪个)。 */
+    /** Aim for the exact live item cells; item motion is revalidated by trackGoal. */
     NavGoal goal() {
         List<NavGoal> goals = live().stream()
-                .map(item -> NavGoal.near(item.blockPosition(), 1.0))
+                .map(item -> NavGoal.exact(item.blockPosition()))
                 .toList();
         return goals.isEmpty() ? NavGoal.exact(player.blockPosition()) : NavGoal.composite(goals);
     }
 
-    /** 又一次没走到。连续够了次数就把最近那件拉黑,否则下一轮再试。 */
-    void noteApproachFailure() {
-        if (++approachFailures < MAX_APPROACH_FAILURES) {
-            return;
+    /**
+     * Once vanilla pickup envelopes overlap, stop walking and let server inventory sync settle.
+     * Returning true does not mean success: the item must actually disappear from the tracked set.
+     */
+    boolean waitingInsidePickupEnvelope() {
+        boolean touching = nearest().map(this::insideNativePickupEnvelope).orElse(false);
+        if (touching) {
+            pickupWaitTicks++;
+        } else {
+            pickupWaitTicks = 0;
         }
+        return touching;
+    }
+
+    boolean pickupBlocked() {
+        return pickupWaitTicks >= PICKUP_SETTLE_TICKS;
+    }
+
+    private boolean insideNativePickupEnvelope(ItemEntity item) {
+        return player.getBoundingBox().inflate(1.0).intersects(item.getBoundingBox());
+    }
+
+    void noteApproachFailure() {
+        if (++approachFailures < MAX_APPROACH_FAILURES) return;
         approachFailures = 0;
-        drops.nearest(player.clientLevel, player, skipped).ifPresent(item -> {
-            if (skipped.add(item.getId())) {
-                unreachableCount++;
-            }
+        nearest().ifPresent(item -> {
+            if (skipped.add(item.getId())) unreachableCount++;
         });
     }
 
-    /** 这一趟收完了,回到战斗。 */
+    private java.util.Optional<ItemEntity> nearest() {
+        return live().stream().min(Comparator.comparingDouble(player::distanceToSqr));
+    }
+
     void finish() {
-        drops.clear();
-        deathPosition = null;
+        // Keep the baseline: an unreachable/ambiguous stack remains pre-existing for later kills.
+        tracked.clear();
+        trackedCounts.clear();
+        skipped.clear();
+        deathPositions.clear();
+        active = false;
+        pickupWaitTicks = 0;
     }
 
     int unreachableCount() {
         return unreachableCount;
+    }
+
+    int ambiguousMergedCount() {
+        return ambiguousMergedCount;
+    }
+
+    boolean mustSettle() {
+        return active && (settling() || !live().isEmpty());
     }
 }
