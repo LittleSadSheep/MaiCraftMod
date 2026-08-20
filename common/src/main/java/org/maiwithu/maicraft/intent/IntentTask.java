@@ -11,6 +11,7 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
@@ -392,8 +393,8 @@ final class IntentTask implements Task {
         if (player.level().getGameTime() < wait.notBeforeGameTime()) return TaskState.RUNNING;
         boolean satisfied = switch (wait.condition()) {
             case "elapsed" -> true;
-            case "day" -> player.level().isDay();
-            case "night" -> !player.level().isDay();
+            case "day" -> WorldTimeSemantics.isDaytime(player.level());
+            case "night" -> WorldTimeSemantics.isNighttime(player.level());
             case "health_full" -> player.getHealth() >= player.getMaxHealth();
             case "not_hungry" -> player.getFoodData().getFoodLevel() >= 18;
             default -> false;

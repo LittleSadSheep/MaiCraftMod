@@ -13,6 +13,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 
 import java.util.List;
@@ -121,7 +122,7 @@ final class AbilityAdapter {
                 TargetIndex.unregister(player.clientLevel, bedBlocks);
             }
             if (!beds.hits().isEmpty()) {
-                if (player.level().isDay() && !player.level().isThundering()) {
+                if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
                     return waitForNightDecision(goal);
                 }
                 Block bed = player.clientLevel.getBlockState(beds.hits().getFirst()).getBlock();
@@ -136,7 +137,7 @@ final class AbilityAdapter {
 
         String carriedBed = inventoryBed(player);
         if (carriedBed != null) {
-            if (player.level().isDay() && !player.level().isThundering()) {
+            if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
                 return waitForNightDecision(goal);
             }
             BedSite site = nearbyBedSite(player);

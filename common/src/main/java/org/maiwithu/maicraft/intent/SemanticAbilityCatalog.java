@@ -20,7 +20,7 @@ public final class SemanticAbilityCatalog {
                     fields(
                             field("entity_type_id", "resource_id", "One acceptable registered entity type; never a runtime entity ID."),
                             field("entity_type_ids", "array<resource_id>", "Acceptable registered entity types; never runtime entity IDs."),
-                            field("relation", "string", "Wild, hostile, unowned or any. Wild/unowned fail closed on ownership and enclosure ambiguity."),
+                            field("relation", "string", "Wild, hostile, unowned or any. Wild/unowned preserve named, tame, owned, leashed or vehicle-held entities; enclosure counts only inside an explicitly protected semantic area."),
                             field("count", "integer", "Required distinct observed count; a partial count is not success."),
                             field("max_distance", "integer", "Bounded physical search distance from start; default 512, maximum 2048."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false."),
