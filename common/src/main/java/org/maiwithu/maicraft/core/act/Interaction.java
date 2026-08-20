@@ -16,6 +16,7 @@ import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -128,6 +129,8 @@ public final class Interaction {
     private String failReason = "interaction failed";
     private FailureType failType = FailureType.UNKNOWN;
     private String lastUseOutcome = "not fired";
+    /** Low-pass aim point retained only by one entity interaction instance. */
+    private Vec3 trackedEntityAim;
 
     private Interaction(LocalPlayer player, Button button, BlockPos block, Entity entity,
                         InteractionHand hand, Timing timing) {
@@ -421,8 +424,9 @@ public final class Interaction {
             return false;
         }
         InputDriver.halt(player);
-        InputDriver.lookAt(player, entity.getEyePosition());
-        if (!aimReady(entity.getEyePosition())) {
+        Vec3 aimPoint = stableEntityAimPoint(entity);
+        InputDriver.lookAt(player, aimPoint);
+        if (!aimReady(aimPoint)) {
             return false;
         }
         HitResult aimed = nativeRaytrace(player, REACH);
@@ -607,6 +611,39 @@ public final class Interaction {
         }
         return player.getViewVector(1.0f).normalize().dot(direction.normalize())
                 >= Math.cos(Math.toRadians(7.0));
+    }
+
+    /**
+     * Aim inside the target's current hit box, slightly toward its measured motion. The retained
+     * point damps packet-to-packet velocity noise; clamping it back into an inset box guarantees
+     * that prediction can never lead so far that the native crosshair intentionally misses.
+     */
+    private Vec3 stableEntityAimPoint(Entity target) {
+        AABB box = target.getBoundingBox();
+        Vec3 center = box.getCenter();
+        Vec3 motion = target.getDeltaMovement();
+        double leadTicks = Mth.clamp(player.distanceTo(target) * 0.35, 0.6, 1.5);
+        Vec3 wanted = center.add(
+                motion.x * leadTicks,
+                motion.y * Math.min(leadTicks, 0.75),
+                motion.z * leadTicks);
+        wanted = insetClamp(wanted, box);
+        if (trackedEntityAim == null || trackedEntityAim.distanceToSqr(wanted) > 4.0) {
+            trackedEntityAim = wanted;
+        } else {
+            trackedEntityAim = insetClamp(trackedEntityAim.lerp(wanted, 0.55), box);
+        }
+        return trackedEntityAim;
+    }
+
+    private static Vec3 insetClamp(Vec3 point, AABB box) {
+        double insetX = Math.min(0.12, box.getXsize() * 0.18);
+        double insetY = Math.min(0.16, box.getYsize() * 0.18);
+        double insetZ = Math.min(0.12, box.getZsize() * 0.18);
+        return new Vec3(
+                Mth.clamp(point.x, box.minX + insetX, box.maxX - insetX),
+                Mth.clamp(point.y, box.minY + insetY, box.maxY - insetY),
+                Mth.clamp(point.z, box.minZ + insetZ, box.maxZ - insetZ));
     }
 
     /** Raycast from the eyes along the current look; the hit must be the target block. */
