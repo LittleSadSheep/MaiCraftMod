@@ -571,12 +571,75 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         }
         menuReceipt = null;
         renewProgressLease();
-        crafted += PlayerInv.count(player.getInventory(), output) - beforeCount;
-        if (crafted >= r.count) {
-            stage = Stage.CLOSE;
-        } else {
-            stage = Stage.PLACE;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState returnCraftingGrid() {
+        var context = ClientRuntime.requireContext(player);
+        if (menuReceipt != null) {
+            menuReceipt = context.menus().poll(context, menuReceipt);
+            if (!menuReceipt.terminal()) return TaskState.RUNNING;
+            String detail = menuReceipt.detail();
+            MenuReceipt.Status status = menuReceipt.status();
+            menuReceipt = null;
+            if (!cleanupMoveApplied(player)) {
+                terminalGridCleanupUnconfirmed = true;
+                fail("crafting-grid return could not be verified: " + detail,
+                        status == MenuReceipt.Status.CONFIRMED_APPLIED
+                                ? FailureType.INTERNAL : FailureType.NO_SPACE);
+                return TaskState.FAILED;
+            }
+            clearCleanupMove();
+            renewProgressLease();
         }
+
+        if (!player.containerMenu.getCarried().isEmpty()) {
+            terminalGridCleanupUnconfirmed = true;
+            fail("crafting-grid cleanup found an unexpected non-empty cursor",
+                    FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
+        if (player.containerMenu.containerId != committedContainerId
+                || committedGrid == null || !menuContainsGrid(committedGrid)) {
+            terminalGridCleanupUnconfirmed = true;
+            fail("the crafting menu changed before its committed grid could be reconciled",
+                    FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
+        Slot source = firstNonEmptyGridSlot(committedGrid);
+        if (source == null) {
+            gridCleanupVerified = true;
+            gridCommitmentStarted = false;
+            committedGrid = null;
+            committedContainerId = -1;
+            if (pendingFailureMessage != null) {
+                String message = pendingFailureMessage;
+                FailureType type = pendingFailureType == null
+                        ? FailureType.UNKNOWN : pendingFailureType;
+                pendingFailureMessage = null;
+                pendingFailureType = null;
+                fail(message, type);
+                return TaskState.FAILED;
+            }
+            Stage next = afterGridReturn == null ? Stage.CLOSE : afterGridReturn;
+            afterGridReturn = null;
+            stage = next;
+            return TaskState.RUNNING;
+        }
+
+        cleanupGridSlot = player.containerMenu.slots.indexOf(source);
+        cleanupGridBefore = source.getItem().copy();
+        cleanupInventoryBefore = componentInventoryCount(player, cleanupGridBefore);
+        if (cleanupGridSlot < 0 || inventoryCapacity(cleanupGridBefore)
+                < cleanupGridBefore.getCount()) {
+            terminalGridCleanupUnconfirmed = true;
+            fail("the main inventory cannot safely accept all remaining crafting-grid items",
+                    FailureType.NO_SPACE);
+            return TaskState.FAILED;
+        }
+        menuReceipt = context.menus().click(
+                context, cleanupGridSlot, 0, ClickType.QUICK_MOVE,
+                (fresh, ignored) -> cleanupMoveVerdict(fresh.player()), 40);
         return TaskState.RUNNING;
     }
 
@@ -808,10 +871,203 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         // however, its receipt, menu close, and recovery of a self-placed temporary workstation
         // form one indivisible terminal tail. Otherwise the inventory fact becomes true first and
         // the semantic parent can strand the table immediately before a gathering child departs.
-        return stage == Stage.CLOSE
+        return gridCommitmentStarted
+                || stage == Stage.STOW_RESULT
+                || stage == Stage.RETURN_GRID
+                || stage == Stage.CLOSE
                 || stage == Stage.RECLAIM_STATION
                 || stage == Stage.COLLECT_STATION
                 || (stage == Stage.TAKE && menuReceipt != null);
+    }
+
+    private TaskState failBeforeOrAfterGridReturn(String message, FailureType type) {
+        if (gridCommitmentStarted) return beginGridReturnFailure(message, type);
+        fail(message, type);
+        return TaskState.FAILED;
+    }
+
+    private TaskState beginGridReturnFailure(String message, FailureType type) {
+        pendingFailureMessage = message;
+        pendingFailureType = type;
+        afterGridReturn = null;
+        stage = Stage.RETURN_GRID;
+        return TaskState.RUNNING;
+    }
+
+    private Slot firstNonEmptyGridSlot(CraftingContainer grid) {
+        for (Slot slot : player.containerMenu.slots) {
+            if (slot.container == grid && !slot.getItem().isEmpty()) {
+                return slot;
+            }
+        }
+        return null;
+    }
+
+    private boolean menuContainsGrid(CraftingContainer grid) {
+        for (Slot slot : player.containerMenu.slots) {
+            if (slot.container == grid) return true;
+        }
+        return false;
+    }
+
+    private int findStowDestination(ItemStack cursor) {
+        for (int pass = 0; pass < 2; pass++) {
+            for (int inventorySlot = 0; inventorySlot < PlayerInv.BUILDABLE_SLOTS;
+                    inventorySlot++) {
+                int menuSlot = menuSlotForInventory(inventorySlot);
+                if (menuSlot < 0) continue;
+                Slot destination = player.containerMenu.getSlot(menuSlot);
+                ItemStack existing = destination.getItem();
+                boolean matching = !existing.isEmpty()
+                        && ItemStack.isSameItemSameComponents(existing, cursor);
+                if ((pass == 0) != matching) continue;
+                if (destinationCapacity(destination, cursor) > 0) return menuSlot;
+            }
+        }
+        return -1;
+    }
+
+    private int menuSlotForInventory(int inventorySlot) {
+        for (int menuSlot = 0; menuSlot < player.containerMenu.slots.size(); menuSlot++) {
+            Slot slot = player.containerMenu.getSlot(menuSlot);
+            if (slot.container == player.getInventory()
+                    && slot.getContainerSlot() == inventorySlot) return menuSlot;
+        }
+        return -1;
+    }
+
+    private int destinationCapacity(Slot destination, ItemStack sample) {
+        if (destination.container != player.getInventory() || !destination.mayPlace(sample)) {
+            return 0;
+        }
+        ItemStack existing = destination.getItem();
+        if (!existing.isEmpty() && !ItemStack.isSameItemSameComponents(existing, sample)) {
+            return 0;
+        }
+        int limit = Math.min(sample.getMaxStackSize(), destination.getMaxStackSize(sample));
+        return Math.max(0, limit - (existing.isEmpty() ? 0 : existing.getCount()));
+    }
+
+    private int inventoryCapacity(ItemStack sample) {
+        int capacity = 0;
+        for (int inventorySlot = 0; inventorySlot < PlayerInv.BUILDABLE_SLOTS;
+                inventorySlot++) {
+            int menuSlot = menuSlotForInventory(inventorySlot);
+            if (menuSlot >= 0) {
+                capacity += destinationCapacity(player.containerMenu.getSlot(menuSlot), sample);
+            }
+        }
+        return capacity;
+    }
+
+    private MenuConfirmation.Verdict stowMoveVerdict(LocalPlayer observedPlayer) {
+        return stowMoveApplied(observedPlayer)
+                ? MenuConfirmation.Verdict.APPLIED
+                : stowMoveStillBefore(observedPlayer)
+                        ? MenuConfirmation.Verdict.PENDING
+                        : MenuConfirmation.Verdict.DIVERGED;
+    }
+
+    private boolean stowMoveApplied(LocalPlayer observedPlayer) {
+        if (stowDestinationSlot < 0
+                || stowDestinationSlot >= observedPlayer.containerMenu.slots.size()) return false;
+        int expectedCursor = stowCursorBefore - stowExpectedMove;
+        ItemStack cursor = observedPlayer.containerMenu.getCarried();
+        int inventoryDelta = componentInventoryCount(observedPlayer, plannedOutput)
+                - stowInventoryBefore;
+        ItemStack destination = observedPlayer.containerMenu
+                .getSlot(stowDestinationSlot).getItem();
+        return cursorMatches(cursor, expectedCursor)
+                && inventoryDelta == stowExpectedMove
+                && destinationMatchesAfterMove(destination, stowDestinationBefore,
+                        plannedOutput, stowExpectedMove);
+    }
+
+    private boolean stowMoveStillBefore(LocalPlayer observedPlayer) {
+        if (stowDestinationSlot < 0
+                || stowDestinationSlot >= observedPlayer.containerMenu.slots.size()) return false;
+        return cursorMatches(observedPlayer.containerMenu.getCarried(), stowCursorBefore)
+                && componentInventoryCount(observedPlayer, plannedOutput) == stowInventoryBefore
+                && sameStack(observedPlayer.containerMenu.getSlot(stowDestinationSlot).getItem(),
+                        stowDestinationBefore);
+    }
+
+    private boolean cursorMatches(ItemStack cursor, int expectedCount) {
+        return expectedCount == 0 ? cursor.isEmpty()
+                : exactStack(cursor, plannedOutput, expectedCount);
+    }
+
+    private static boolean destinationMatchesAfterMove(
+            ItemStack actual, ItemStack before, ItemStack sample, int moved) {
+        int expectedCount = (before.isEmpty() ? 0 : before.getCount()) + moved;
+        return exactStack(actual, sample, expectedCount);
+    }
+
+    private void clearStowMove() {
+        stowDestinationSlot = -1;
+        stowDestinationBefore = ItemStack.EMPTY;
+        stowCursorBefore = 0;
+        stowExpectedMove = 0;
+        stowInventoryBefore = 0;
+    }
+
+    private MenuConfirmation.Verdict cleanupMoveVerdict(LocalPlayer observedPlayer) {
+        return cleanupMoveApplied(observedPlayer)
+                ? MenuConfirmation.Verdict.APPLIED
+                : cleanupMoveStillBefore(observedPlayer)
+                        ? MenuConfirmation.Verdict.PENDING
+                        : MenuConfirmation.Verdict.DIVERGED;
+    }
+
+    private boolean cleanupMoveApplied(LocalPlayer observedPlayer) {
+        if (cleanupGridSlot < 0
+                || cleanupGridSlot >= observedPlayer.containerMenu.slots.size()) return false;
+        return observedPlayer.containerMenu.getSlot(cleanupGridSlot).getItem().isEmpty()
+                && componentInventoryCount(observedPlayer, cleanupGridBefore)
+                        - cleanupInventoryBefore == cleanupGridBefore.getCount();
+    }
+
+    private boolean cleanupMoveStillBefore(LocalPlayer observedPlayer) {
+        if (cleanupGridSlot < 0
+                || cleanupGridSlot >= observedPlayer.containerMenu.slots.size()) return false;
+        return sameStack(observedPlayer.containerMenu.getSlot(cleanupGridSlot).getItem(),
+                        cleanupGridBefore)
+                && componentInventoryCount(observedPlayer, cleanupGridBefore)
+                        == cleanupInventoryBefore;
+    }
+
+    private void clearCleanupMove() {
+        cleanupGridSlot = -1;
+        cleanupGridBefore = ItemStack.EMPTY;
+        cleanupInventoryBefore = 0;
+    }
+
+    private static int componentInventoryCount(LocalPlayer observedPlayer, ItemStack sample) {
+        int count = 0;
+        int limit = Math.min(
+                PlayerInv.BUILDABLE_SLOTS, observedPlayer.getInventory().items.size());
+        for (int slot = 0; slot < limit; slot++) {
+            ItemStack stack = observedPlayer.getInventory().getItem(slot);
+            if (!stack.isEmpty() && ItemStack.isSameItemSameComponents(stack, sample)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    private static boolean exactStack(ItemStack actual, ItemStack sample, int count) {
+        return count > 0 && !actual.isEmpty() && actual.getCount() == count
+                && ItemStack.isSameItemSameComponents(actual, sample);
+    }
+
+    private static boolean sameStack(ItemStack left, ItemStack right) {
+        if (left.isEmpty() || right.isEmpty()) return left.isEmpty() && right.isEmpty();
+        return left.getCount() == right.getCount()
+                && ItemStack.isSameItemSameComponents(left, right);
+    }
+
+    private static int divideRoundUp(int numerator, int denominator) {
+        return Math.max(1, (numerator + denominator - 1) / denominator);
     }
 
     private int findResultSlot() {
@@ -822,11 +1078,15 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private boolean hasCraftGrid(int width, int height) {
+        return activeCraftingGrid(width, height) != null;
+    }
+
+    private CraftingContainer activeCraftingGrid(int width, int height) {
         for (Slot slot : player.containerMenu.slots) {
             if (slot.container instanceof CraftingContainer grid
-                    && grid.getWidth() >= width && grid.getHeight() >= height) return true;
+                    && grid.getWidth() >= width && grid.getHeight() >= height) return grid;
         }
-        return false;
+        return null;
     }
 
     private static boolean requiresThreeByThree(RecipeHolder<?> holder) {
@@ -847,12 +1107,20 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         openReceipt = null;
         if (stationDigger.current() != null) stationDigger.cancel();
         stationDrops.clear();
-        if (player.containerMenu != player.inventoryMenu) {
+        boolean ownsUnsettledGrid = gridCommitmentStarted;
+        if (ownsUnsettledGrid) terminalGridCleanupUnconfirmed = true;
+        if (player.containerMenu != player.inventoryMenu || ownsUnsettledGrid) {
             try {
                 var context = ClientRuntime.requireContext(player);
                 menuReceipt = context.menus().closeForTaskBoundary(
                         context, 20,
                         "the crafting task ended before its active menu transaction settled");
+                // DefaultMenuPort.close intentionally treats InventoryMenu as already closed. A
+                // terminal task that still owns its 2x2 grid must nevertheless send vanilla's
+                // close-container path so InventoryMenu.removed returns grid/cursor contents.
+                if (ownsUnsettledGrid && player.containerMenu == player.inventoryMenu) {
+                    player.closeContainer();
+                }
             } catch (RuntimeException closeFailure) {
                 // The task is already terminal, so there is no later task tick to retry from. The
                 // vanilla close path is the final safety net: it returns grid/cursor contents and
@@ -870,6 +1138,13 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         Map<String, Object> data = new HashMap<>();
         data.put("recipe", r.recipeId.toString());
         data.put("crafted", crafted);
+        data.put("planned_batches", plannedBatches);
+        data.put("completed_batches", completedBatches);
+        data.put("output_per_batch", outputPerBatch);
+        data.put("crafting_grid_cleanup_verified", gridCleanupVerified);
+        if (terminalGridCleanupUnconfirmed) {
+            data.put("crafting_grid_cleanup_unconfirmed_on_terminal", true);
+        }
         data.put("crafting_table_placed", stationPlaced);
         data.put("crafting_table_recovery_attempted", stationRecoveryAttempted);
         data.put("crafting_table_recovered", stationRecovered);
