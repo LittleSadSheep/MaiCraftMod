@@ -685,8 +685,6 @@ public final class SemanticAcquireCompanionTask
                                 + "near another player, inside protected/remembered terrain, "
                                 + "enclosed, or not fully observable",
                         facts);
-                advanceSource(need);
-                return TaskState.RUNNING;
             }
             String searchState = huntSearchState(need, hint, relation);
             if (!need.exhaustedHuntSearchStates.add(searchState)) {
@@ -721,6 +719,7 @@ public final class SemanticAcquireCompanionTask
                     Map.of("entity_type", BuiltInRegistries.ENTITY_TYPE.getKey(
                                     safe.getFirst().getType()).toString(),
                             "requires_narration", true));
+            need.decisionRequired = true;
             advanceSource(need);
             return TaskState.RUNNING;
         }
@@ -751,7 +750,10 @@ public final class SemanticAcquireCompanionTask
                 && !activeChild.mustSettleBeforeSatisfiedCancellation()) {
             Need satisfiedNeed = activeNeed;
             cancelActiveBecauseSatisfied();
-            if (!needs.isEmpty() && needs.peek() == satisfiedNeed) needs.pop();
+            if (!needs.isEmpty() && needs.peek() == satisfiedNeed) {
+                Need satisfied = needs.pop();
+                propagateSatisfiedNeed(satisfied);
+            }
             return TaskState.RUNNING;
         }
         if (activeSource == SemanticAcquireTaskRecord.Source.HUNT
@@ -765,8 +767,10 @@ public final class SemanticAcquireCompanionTask
                 TaskResult stopped = activeChild.result(TaskState.CANCELLED);
                 int after = count(activeNeed.itemIds);
                 int progress = Math.max(0, after - activeBeforeCount);
+                markActiveEffectsIfObserved(TaskState.CANCELLED, stopped, progress);
                 recordAttempt(TaskState.CANCELLED, stopped, after, progress, false);
                 Need interruptedNeed = activeNeed;
+                interruptedNeed.decisionRequired = true;
                 clearActive();
                 addIssue("hunt", "other_player_entered_hunt_area",
                         "another player entered the target area; the strict attack was stopped",
@@ -789,6 +793,7 @@ public final class SemanticAcquireCompanionTask
         TaskResult result = activeChild.result(terminal);
         int after = count(activeNeed.itemIds);
         int progress = Math.max(0, after - activeBeforeCount);
+        markActiveEffectsIfObserved(terminal, result, progress);
         if (progress > 0) renewProgressLease();
         activeNeed.lastObservedCount = after;
         recordAttempt(terminal, result, after, progress, false);
@@ -802,7 +807,10 @@ public final class SemanticAcquireCompanionTask
 
         if (count(r.itemIds) >= r.count) return TaskState.SUCCESS;
         if (after >= completedNeed.requiredFinalCount) {
-            if (!needs.isEmpty() && needs.peek() == completedNeed) needs.pop();
+            if (!needs.isEmpty() && needs.peek() == completedNeed) {
+                Need satisfied = needs.pop();
+                propagateSatisfiedNeed(satisfied);
+            }
             renewProgressLease();
             return TaskState.RUNNING;
         }
@@ -852,10 +860,29 @@ public final class SemanticAcquireCompanionTask
                         if (recoverCraftingSurface(completedNeed, craft, result)) {
                             return TaskState.RUNNING;
                         }
+                        if (completedNeed.committedRecipeIds.contains(
+                                craft.recipeId.toString())
+                                && completedNeed.committedRecipeEffectsObserved) {
+                            addIssue("craft", "committed_recipe_failed_after_effects",
+                                    "the selected recipe failed after inventory or world effects were observed; "
+                                            + "automatic recipe switching was stopped",
+                                    Map.of("recipe_id", craft.recipeId.toString(),
+                                            "requires_narration", true,
+                                            "partial_effects", true));
+                            return failAcquisition(
+                                    "committed_recipe_failed_after_effects",
+                                    "the committed crafting route changed inventory or the world before it failed; "
+                                            + "review the receipt before choosing another route",
+                                    FailureType.NO_MATERIAL);
+                        }
                         // Retry the semantic craft source, but never the same proven-failed recipe.
                         // This allows a 2x2 alternative after every concrete 3x3 station/site route
                         // failed, without blindly repeating the failed physical effect.
                         completedNeed.rejectedRecipes.add(craft.recipeId.toString());
+                        completedNeed.committedRecipeIds.remove(craft.recipeId.toString());
+                        if (completedNeed.committedRecipeIds.isEmpty()) {
+                            completedNeed.committedRecipeEffectsObserved = false;
+                        }
                     } else {
                         advanceSource(completedNeed);
                     }
@@ -974,6 +1001,7 @@ public final class SemanticAcquireCompanionTask
         activeDetail = detail;
         activeBeforeCount = count(need.itemIds);
         activeLastObservedCount = activeBeforeCount;
+        activeBeforeInventory = inventorySnapshot();
         r.extendDeadlineTo(record.getDeadlineGameTime());
         return TaskState.RUNNING;
     }
@@ -996,8 +1024,9 @@ public final class SemanticAcquireCompanionTask
         activeChild.stop(player, Task.StopReason.REPLACED);
         TaskResult result = activeChild.result(TaskState.CANCELLED);
         int after = count(activeNeed.itemIds);
-        recordAttempt(TaskState.CANCELLED, result, after,
-                Math.max(0, after - activeBeforeCount), true);
+        int progress = Math.max(0, after - activeBeforeCount);
+        markActiveEffectsIfObserved(TaskState.CANCELLED, result, progress);
+        recordAttempt(TaskState.CANCELLED, result, after, progress, true);
         clearActive();
     }
 
@@ -1009,8 +1038,61 @@ public final class SemanticAcquireCompanionTask
         activeDetail = null;
         activeBeforeCount = 0;
         activeLastObservedCount = 0;
+        activeBeforeInventory = Map.of();
         activeHuntStage = HuntChildStage.NONE;
         activeHuntTarget = null;
+    }
+
+    /**
+     * Route commitment is based on observed effects, never on mere dispatch. A failed search or
+     * menu-open attempt may be replaced safely; an inventory delta, a placed station, mining,
+     * crafting, transfer or attack receipt must be narrated before another route is chosen.
+     */
+    private void markActiveEffectsIfObserved(
+            TaskState terminal, TaskResult result, int targetProgress) {
+        if (activeNeed == null || !activeChildEffectsObserved(
+                terminal, result, targetProgress)) return;
+        activeNeed.effectsObserved = true;
+        if (activeRecord instanceof CraftTaskRecord craft
+                && activeNeed.committedRecipeIds.contains(craft.recipeId.toString())) {
+            activeNeed.committedRecipeEffectsObserved = true;
+        }
+    }
+
+    private boolean activeChildEffectsObserved(
+            TaskState terminal, TaskResult result, int targetProgress) {
+        if (targetProgress > 0 || !activeBeforeInventory.equals(inventorySnapshot())) return true;
+        Map<String, Object> data = result == null || result.data() == null
+                ? Map.of() : result.data();
+        for (String key : List.of(
+                "effects_started", "outcome_uncertain", "crafting_table_placed",
+                "station_placed")) {
+            if (bool(data.get(key))) return true;
+        }
+        for (String key : List.of(
+                "crafted", "gathered", "collected", "mined", "broken", "placed",
+                "strikes", "defeated_targets", "inventory_progress", "withdrawn",
+                "deposited", "transferred")) {
+            if (positiveNumber(data.get(key))) return true;
+        }
+        // A terminal attack can have damaged a living target without producing loot yet. Treat
+        // that physical authorization as consequential even if an older receipt lacks counters.
+        return activeSource == SemanticAcquireTaskRecord.Source.HUNT
+                && activeHuntStage == HuntChildStage.ATTACK
+                && terminal != TaskState.PENDING;
+    }
+
+    private Map<ResourceLocation, Integer> inventorySnapshot() {
+        Map<ResourceLocation, Integer> snapshot = new LinkedHashMap<>();
+        int slots = Math.min(
+                PlayerInv.BUILDABLE_SLOTS, player.getInventory().getContainerSize());
+        for (int slot = 0; slot < slots; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty()) continue;
+            snapshot.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()),
+                    stack.getCount(), Integer::sum);
+        }
+        return Map.copyOf(snapshot);
     }
 
     private static boolean huntDefeated(TaskResult result) {
@@ -1071,6 +1153,43 @@ public final class SemanticAcquireCompanionTask
                     "a recursive recipe need ended without its parent",
                     FailureType.INTERNAL);
         }
+        if (need.decisionRequired) {
+            addIssue("planner", "prerequisite_decision_required",
+                    "a recursive prerequisite exhausted every non-decision source and reached a "
+                            + "player-facing permission or protection boundary",
+                    Map.of("ingredient_item_ids", itemStrings(need.itemIds),
+                            "requires_narration", true,
+                            "partial_effects", need.effectsObserved));
+            failureNeed = need;
+            return failAcquisition(
+                    "prerequisite_decision_required",
+                    "a prerequisite now needs a narrated player decision; MaiCraft stopped instead "
+                            + "of silently changing the recipe",
+                    FailureType.NO_MATERIAL);
+        }
+        boolean committedFrontier = need.parentRecipeIds.stream()
+                .anyMatch(parent.committedRecipeIds::contains);
+        if (committedFrontier
+                && (need.effectsObserved || parent.committedRecipeEffectsObserved)) {
+            addIssue("craft", "committed_prerequisite_unmet",
+                    "the committed recipe's prerequisite exhausted allowed sources after child "
+                            + "work began; automatic recipe switching was stopped",
+                    Map.of("recipe_ids", List.copyOf(need.parentRecipeIds),
+                            "ingredient_item_ids", itemStrings(need.itemIds),
+                            "partial_effects", true,
+                            "requires_narration", true));
+            failureNeed = need;
+            return failAcquisition(
+                    "committed_prerequisite_unmet",
+                    "a committed recipe prerequisite could not be completed after work began; "
+                            + "review the partial effects and choose a recovery before trying another route",
+                    FailureType.NO_MATERIAL);
+        }
+        if (committedFrontier) {
+            parent.committedRecipeIds.clear();
+            parent.committedRecipeEffectsObserved = false;
+        }
+        parent.effectsObserved |= need.effectsObserved;
         parent.rejectedRecipes.addAll(need.parentRecipeIds);
         List<String> parentRecipeIds = need.parentRecipeIds.isEmpty()
                 ? List.of("unknown") : List.copyOf(need.parentRecipeIds);
@@ -1082,6 +1201,16 @@ public final class SemanticAcquireCompanionTask
                         "required_final_count", need.requiredFinalCount,
                         "observed_final_count", count(need.itemIds)));
         return TaskState.RUNNING;
+    }
+
+    private void propagateSatisfiedNeed(Need satisfied) {
+        if (needs.isEmpty()) return;
+        Need parent = needs.peek();
+        parent.effectsObserved |= satisfied.effectsObserved;
+        if (satisfied.effectsObserved && satisfied.parentRecipeIds.stream()
+                .anyMatch(parent.committedRecipeIds::contains)) {
+            parent.committedRecipeEffectsObserved = true;
+        }
     }
 
     private void collectCraftCandidates(
@@ -1195,7 +1324,10 @@ public final class SemanticAcquireCompanionTask
         List<SemanticAcquireTaskRecord.Source> prerequisiteSources =
                 List.copyOf(parent.allowedSources);
         if (prerequisiteSources.isEmpty()) return false;
+        if (!parent.committedRecipeIds.isEmpty()
+                && !parent.committedRecipeIds.contains(blockedRecipeId)) return false;
         if (!parent.surfaceRecoveryRecipes.add(blockedRecipeId)) return false;
+        commitRecipe(parent, Set.of(blockedRecipeId));
         Need prerequisite = new Need(
                 itemIds, count(itemIds) + 1, parent.depth + 1,
                 lineageItems, lineageRecipes, Set.of(blockedRecipeId),
@@ -1213,6 +1345,155 @@ public final class SemanticAcquireCompanionTask
         needs.push(prerequisite);
         renewProgressLease();
         return true;
+    }
+
+    private boolean recipeAllowedByCommit(Need need, TaskRecord record) {
+        if (need.committedRecipeIds.isEmpty()) return true;
+        return record instanceof CraftTaskRecord craft
+                && need.committedRecipeIds.contains(craft.recipeId.toString());
+    }
+
+    private static boolean recipeAllowedByCommit(Need need, String recipeId) {
+        return need.committedRecipeIds.isEmpty()
+                || need.committedRecipeIds.contains(recipeId);
+    }
+
+    private static void commitRecipe(Need need, Set<String> recipeIds) {
+        if (need.committedRecipeIds.isEmpty()) {
+            need.committedRecipeIds.addAll(recipeIds);
+            need.committedRecipeEffectsObserved = false;
+        }
+    }
+
+    /** Exclude competing identities so CraftOps can expose the already selected recipe itself. */
+    private Set<String> nonCommittedCraftRecipes(Need need) {
+        if (need.committedRecipeIds.isEmpty()) return Set.of();
+        Set<ResourceLocation> outputs = Set.copyOf(need.itemIds);
+        Set<String> excluded = new LinkedHashSet<>();
+        for (var holder : ClientRuntime.requireContext(player)
+                .connection().getRecipeManager().getRecipes()) {
+            try {
+                if (!(holder.value() instanceof CraftingRecipe recipe)) continue;
+                ItemStack output = RecipeProbe.resultOf(
+                        recipe, player.level().registryAccess());
+                if (output.isEmpty()
+                        || !outputs.contains(BuiltInRegistries.ITEM.getKey(output.getItem()))) {
+                    continue;
+                }
+                String recipeId = holder.id().toString();
+                if (!need.committedRecipeIds.contains(recipeId)) excluded.add(recipeId);
+            } catch (RuntimeException unusableRecipe) {
+                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                        "[maicraft-acquire] skipped unusable committed-recipe probe {}: {}",
+                        holder.id(), unusableRecipe.toString());
+            }
+        }
+        return Set.copyOf(excluded);
+    }
+
+    /**
+     * Side-effect-free structural lookahead used only as a tie-break between missing-material
+     * candidates. It is not a claim that world resources exist; it measures how many ordinary
+     * crafting layers stand between each missing group and a non-crafting leaf. Thus direct wool
+     * is preferred to wool-plus-dye conversion without encoding any particular item or recipe.
+     */
+    private int recursiveCandidateStructureCost(CraftCandidate candidate, Need parent) {
+        Object raw = candidate.data().get("ingredients");
+        if (!(raw instanceof List<?> values)) return UNREACHABLE_STRUCTURE_COST;
+        Map<StructureKey, Integer> memo = new HashMap<>();
+        int total = 0;
+        for (Object value : values) {
+            if (!(value instanceof Map<?, ?> map)) continue;
+            Map<String, Object> fact = stringKeyMap(map);
+            int missing = integer(fact.get("missing"), 0);
+            if (missing <= 0) continue;
+            int best = UNREACHABLE_STRUCTURE_COST;
+            Object acceptable = fact.get("acceptable_item_ids");
+            if (acceptable instanceof List<?> ids) {
+                for (Object rawId : ids) {
+                    ResourceLocation id = ResourceLocation.tryParse(String.valueOf(rawId));
+                    if (id == null || !BuiltInRegistries.ITEM.containsKey(id)
+                            || parent.lineageItems.contains(id)) continue;
+                    best = Math.min(best, recursiveCraftDepth(
+                            id, parent.lineageItems, new LinkedHashSet<>(), memo,
+                            STRUCTURAL_RECIPE_DEPTH));
+                }
+            }
+            if (best >= UNREACHABLE_STRUCTURE_COST) return UNREACHABLE_STRUCTURE_COST;
+            total = Math.min(UNREACHABLE_STRUCTURE_COST,
+                    total + missing * Math.max(1, best + 1));
+        }
+        return total;
+    }
+
+    private int recursiveCraftDepth(
+            ResourceLocation itemId,
+            Set<ResourceLocation> forbidden,
+            Set<ResourceLocation> visiting,
+            Map<StructureKey, Integer> memo,
+            int remainingDepth) {
+        if (forbidden.contains(itemId) || visiting.contains(itemId)) {
+            return UNREACHABLE_STRUCTURE_COST;
+        }
+        Item item = BuiltInRegistries.ITEM.get(itemId);
+        if (PlayerInv.buildableCount(player.getInventory(), item) > 0) return 0;
+        List<CraftingRecipe> recipes = structuralCraftRecipes().getOrDefault(
+                itemId, List.of());
+        if (recipes.isEmpty()) return 0;
+        if (remainingDepth <= 0) return UNREACHABLE_STRUCTURE_COST;
+        Set<ResourceLocation> blocked = new LinkedHashSet<>(forbidden);
+        blocked.addAll(visiting);
+        StructureKey key = new StructureKey(itemId, remainingDepth, blocked);
+        Integer remembered = memo.get(key);
+        if (remembered != null) return remembered;
+
+        visiting.add(itemId);
+        int bestRecipe = UNREACHABLE_STRUCTURE_COST;
+        for (CraftingRecipe recipe : recipes) {
+            int criticalDepth = 0;
+            boolean valid = true;
+            for (Ingredient ingredient : recipe.getIngredients()) {
+                if (ingredient == null || ingredient.isEmpty()) continue;
+                int ingredientDepth = UNREACHABLE_STRUCTURE_COST;
+                for (ItemStack accepted : ingredient.getItems()) {
+                    if (accepted == null || accepted.isEmpty()) continue;
+                    ResourceLocation acceptedId = BuiltInRegistries.ITEM.getKey(
+                            accepted.getItem());
+                    ingredientDepth = Math.min(ingredientDepth, recursiveCraftDepth(
+                            acceptedId, forbidden, visiting, memo, remainingDepth - 1));
+                }
+                if (ingredientDepth >= UNREACHABLE_STRUCTURE_COST) {
+                    valid = false;
+                    break;
+                }
+                criticalDepth = Math.max(criticalDepth, ingredientDepth);
+            }
+            if (valid) bestRecipe = Math.min(bestRecipe, 1 + criticalDepth);
+        }
+        visiting.remove(itemId);
+        // A real leaf has no crafting recipes. Recipes that all re-enter the lineage are a cycle,
+        // not a magically free source.
+        memo.put(key, bestRecipe);
+        return bestRecipe;
+    }
+
+    private Map<ResourceLocation, List<CraftingRecipe>> structuralCraftRecipes() {
+        if (structuralCraftRecipes != null) return structuralCraftRecipes;
+        Map<ResourceLocation, List<CraftingRecipe>> indexed = new LinkedHashMap<>();
+        for (var holder : ClientRuntime.requireContext(player)
+                .connection().getRecipeManager().getRecipes()) {
+            if (!(holder.value() instanceof CraftingRecipe recipe)) continue;
+            if (!RecipeProbe.usableIngredients(recipe)) continue;
+            ItemStack output = RecipeProbe.resultOf(
+                    recipe, player.level().registryAccess());
+            if (output.isEmpty()) continue;
+            ResourceLocation outputId = BuiltInRegistries.ITEM.getKey(output.getItem());
+            indexed.computeIfAbsent(outputId, ignored -> new ArrayList<>()).add(recipe);
+        }
+        Map<ResourceLocation, List<CraftingRecipe>> frozen = new LinkedHashMap<>();
+        indexed.forEach((id, recipes) -> frozen.put(id, List.copyOf(recipes)));
+        structuralCraftRecipes = Map.copyOf(frozen);
+        return structuralCraftRecipes;
     }
 
     /**
