@@ -8,7 +8,8 @@
     "MenuDataSlotsAccessor"
   ],
   "client": [
-    "ClientLevelBlockChangeMixin"
+    "ClientLevelBlockChangeMixin",
+    "GameRendererCameraMixin"
   ],
   "server": [],
   "injectors": {
