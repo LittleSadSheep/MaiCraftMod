@@ -42,6 +42,7 @@ import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import org.maiwithu.maicraft.core.tools.RecipeProbe;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
@@ -60,7 +61,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private static final long PROGRESS_LEASE_TICKS = 60L * 20L;
 
     private enum Stage {
-        CLOSE_WRONG_MENU, PREPARE_SURFACE, OPEN, PLACE, TAKE, CLOSE,
+        CLOSE_WRONG_MENU, PREPARE_SURFACE, OPEN, PLACE, TAKE, STOW_RESULT,
+        RETURN_GRID, CLOSE,
         RECLAIM_STATION, COLLECT_STATION
     }
     private Stage stage;
@@ -68,9 +70,29 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private NativeActionReceipt openReceipt;
     private MenuReceipt menuReceipt;
     private int resultSlot = -1;
-    private Item output;
-    private int beforeCount;
+    private ItemStack plannedOutput = ItemStack.EMPTY;
+    private int outputPerBatch;
+    private int plannedBatches;
+    private int completedBatches;
+    private int batchInventoryBefore;
+    private int stowInventoryBefore;
+    private int stowCursorBefore;
+    private int stowExpectedMove;
+    private int stowDestinationSlot = -1;
+    private ItemStack stowDestinationBefore = ItemStack.EMPTY;
     private int crafted;
+    private boolean initialGridVerified;
+    private boolean gridCommitmentStarted;
+    private boolean gridCleanupVerified;
+    private CraftingContainer committedGrid;
+    private int committedContainerId = -1;
+    private int cleanupGridSlot = -1;
+    private ItemStack cleanupGridBefore = ItemStack.EMPTY;
+    private int cleanupInventoryBefore;
+    private Stage afterGridReturn;
+    private String pendingFailureMessage;
+    private FailureType pendingFailureType;
+    private boolean terminalGridCleanupUnconfirmed;
     private long stationAimRequestedRevision = Long.MIN_VALUE;
     private boolean requiresTable;
     private final CraftingWorkstationCoordinator workstation =
@@ -116,6 +138,35 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             fail("recipe is not known to this client: " + r.recipeId, FailureType.NO_MATERIAL);
             return;
         }
+        if (!(recipe.value() instanceof CraftingRecipe crafting)) {
+            fail("recipe is not an ordinary crafting recipe: " + r.recipeId,
+                    FailureType.UNSUPPORTED);
+            return;
+        }
+        plannedOutput = RecipeProbe.resultOf(
+                crafting, ClientRuntime.requireContext(player).level().registryAccess());
+        if (plannedOutput.isEmpty()) {
+            fail("recipe has no usable result: " + r.recipeId, FailureType.NO_MATERIAL);
+            return;
+        }
+        int liveOutputPerBatch = plannedOutput.getCount();
+        boolean legacyBoundary = r.plannedBatches == 0 && r.outputPerBatch == 0;
+        if (!legacyBoundary && (r.plannedBatches <= 0 || r.outputPerBatch <= 0)) {
+            fail("craft plan has a partial batch boundary for " + r.recipeId,
+                    FailureType.INTERNAL);
+            return;
+        }
+        outputPerBatch = legacyBoundary ? liveOutputPerBatch : r.outputPerBatch;
+        plannedBatches = legacyBoundary
+                ? divideRoundUp(r.count, liveOutputPerBatch) : r.plannedBatches;
+        int minimalBatches = divideRoundUp(r.count, liveOutputPerBatch);
+        if (outputPerBatch != liveOutputPerBatch || plannedBatches != minimalBatches) {
+            fail("craft plan no longer matches the exact recipe batch boundary for " + r.recipeId
+                    + ": planned " + plannedBatches + "x" + outputPerBatch
+                    + ", recipe now requires " + minimalBatches + "x" + liveOutputPerBatch,
+                    FailureType.NO_MATERIAL);
+            return;
+        }
         requiresTable = requiresThreeByThree(recipe);
         station = r.station;
         boolean compatibleMenu = hasCraftGrid(
@@ -138,6 +189,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             case OPEN -> openStation();
             case PLACE -> placeRecipe();
             case TAKE -> takeResult();
+            case STOW_RESULT -> stowResult();
+            case RETURN_GRID -> returnCraftingGrid();
             case CLOSE -> closeMenu();
             case RECLAIM_STATION -> reclaimTemporaryStation();
             case COLLECT_STATION -> collectTemporaryStation();
@@ -529,6 +582,36 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private TaskState placeRecipe() {
         var context = ClientRuntime.requireContext(player);
         if (menuReceipt == null) {
+            if (completedBatches >= plannedBatches) {
+                afterGridReturn = Stage.CLOSE;
+                stage = Stage.RETURN_GRID;
+                return TaskState.RUNNING;
+            }
+            int requiredGrid = requiresTable ? 3 : 2;
+            CraftingContainer activeGrid = activeCraftingGrid(requiredGrid, requiredGrid);
+            if (activeGrid == null) {
+                return failBeforeOrAfterGridReturn(
+                        "the crafting surface changed before recipe placement",
+                        FailureType.NO_SUPPORT);
+            }
+            if (!player.containerMenu.getCarried().isEmpty()) {
+                surfaceFailureCode = "crafting_cursor_not_empty";
+                surfaceFailureDetail = "recipe placement requires an empty cursor";
+                return failBeforeOrAfterGridReturn(surfaceFailureDetail, FailureType.NO_SPACE);
+            }
+            Slot dirty = firstNonEmptyGridSlot(activeGrid);
+            if (dirty != null) {
+                surfaceFailureCode = "crafting_grid_not_empty";
+                surfaceFailureDetail = initialGridVerified
+                        ? "the crafting grid changed between planned batches"
+                        : "the active crafting grid already contains items not owned by this task";
+                return failBeforeOrAfterGridReturn(surfaceFailureDetail, FailureType.NO_SPACE);
+            }
+            initialGridVerified = true;
+            gridCommitmentStarted = true;
+            gridCleanupVerified = false;
+            committedGrid = activeGrid;
+            committedContainerId = player.containerMenu.containerId;
             menuReceipt = context.menus().placeRecipe(
                     context, recipe, false, MenuConfirmation.stateChanged(), 30);
             return TaskState.RUNNING;
@@ -536,20 +619,23 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         menuReceipt = context.menus().poll(context, menuReceipt);
         if (!menuReceipt.terminal()) return TaskState.RUNNING;
         if (menuReceipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-            fail("recipe placement was not confirmed: " + menuReceipt.detail(), FailureType.NO_MATERIAL);
-            return TaskState.FAILED;
+            String detail = menuReceipt.detail();
+            menuReceipt = null;
+            return beginGridReturnFailure(
+                    "recipe placement was not confirmed: " + detail, FailureType.NO_MATERIAL);
         }
         menuReceipt = null;
         renewProgressLease();
         resultSlot = findResultSlot();
-        if (resultSlot < 0 || player.containerMenu.getSlot(resultSlot).getItem().isEmpty()) {
-            fail("the current menu cannot form recipe " + r.recipeId
+        if (resultSlot < 0 || !exactStack(
+                player.containerMenu.getSlot(resultSlot).getItem(), plannedOutput,
+                outputPerBatch)) {
+            return beginGridReturnFailure("the current menu cannot form the exact "
+                    + outputPerBatch + "-item result for recipe " + r.recipeId
                     + "; open the required crafting surface and ensure its materials are present",
                     FailureType.NO_MATERIAL);
-            return TaskState.FAILED;
         }
-        output = player.containerMenu.getSlot(resultSlot).getItem().getItem();
-        beforeCount = PlayerInv.count(player.getInventory(), output);
+        batchInventoryBefore = componentInventoryCount(player, plannedOutput);
         stage = Stage.TAKE;
         return TaskState.RUNNING;
     }
@@ -557,19 +643,120 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private TaskState takeResult() {
         var context = ClientRuntime.requireContext(player);
         if (menuReceipt == null) {
-            menuReceipt = context.menus().click(context, resultSlot, 0, ClickType.QUICK_MOVE,
-                    (c, ignored) -> PlayerInv.count(c.player().getInventory(), output) > beforeCount
-                            ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
-                    40);
+            if (!player.containerMenu.getCarried().isEmpty()) {
+                return beginGridReturnFailure(
+                        "the cursor changed before the exact crafting result could be taken",
+                        FailureType.UNKNOWN);
+            }
+            if (resultSlot < 0 || resultSlot >= player.containerMenu.slots.size()
+                    || !exactStack(player.containerMenu.getSlot(resultSlot).getItem(),
+                            plannedOutput, outputPerBatch)) {
+                return beginGridReturnFailure(
+                        "the exact crafting result changed before it could be taken",
+                        FailureType.NO_MATERIAL);
+            }
+            if (inventoryCapacity(plannedOutput) < outputPerBatch) {
+                return beginGridReturnFailure(
+                        "the main inventory cannot safely accept one exact recipe batch",
+                        FailureType.NO_SPACE);
+            }
+            // ResultSlot QUICK_MOVE repeatedly consumes every recipe still represented by the
+            // grid. PICKUP authorizes exactly one result-slot take, which is this task's batch
+            // boundary; the cursor is then stowed through exact inventory destinations below.
+            menuReceipt = context.menus().click(context, resultSlot, 0, ClickType.PICKUP,
+                    (fresh, ignored) -> {
+                        ItemStack cursor = fresh.player().containerMenu.getCarried();
+                        int delta = componentInventoryCount(fresh.player(), plannedOutput)
+                                - batchInventoryBefore;
+                        if (exactStack(cursor, plannedOutput, outputPerBatch) && delta == 0) {
+                            return MenuConfirmation.Verdict.APPLIED;
+                        }
+                        if (cursor.isEmpty() && delta == 0) {
+                            return MenuConfirmation.Verdict.PENDING;
+                        }
+                        return MenuConfirmation.Verdict.DIVERGED;
+                    }, 40);
             return TaskState.RUNNING;
         }
         menuReceipt = context.menus().poll(context, menuReceipt);
         if (!menuReceipt.terminal()) return TaskState.RUNNING;
-        if (menuReceipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-            fail("crafted result was not received: " + menuReceipt.detail(), FailureType.NO_SPACE);
+        String detail = menuReceipt.detail();
+        MenuReceipt.Status status = menuReceipt.status();
+        menuReceipt = null;
+        boolean exactCursor = exactStack(
+                player.containerMenu.getCarried(), plannedOutput, outputPerBatch);
+        boolean inventoryUntouched = componentInventoryCount(player, plannedOutput)
+                == batchInventoryBefore;
+        // Exact live facts outrank a receipt timeout: continuing stows the one already-taken batch
+        // and never submits a second result click.
+        if (!exactCursor || !inventoryUntouched) {
+            return beginGridReturnFailure(
+                    "crafted result was not received as one exact batch: " + detail,
+                    status == MenuReceipt.Status.CONFIRMED_APPLIED
+                            ? FailureType.INTERNAL : FailureType.NO_SPACE);
+        }
+        renewProgressLease();
+        stage = Stage.STOW_RESULT;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState stowResult() {
+        var context = ClientRuntime.requireContext(player);
+        if (menuReceipt == null) {
+            ItemStack cursor = player.containerMenu.getCarried();
+            if (cursor.isEmpty()) {
+                int delta = componentInventoryCount(player, plannedOutput) - batchInventoryBefore;
+                if (delta != outputPerBatch) {
+                    return beginGridReturnFailure(
+                            "the result cursor emptied without the exact planned inventory delta",
+                            FailureType.INTERNAL);
+                }
+                completedBatches++;
+                crafted += outputPerBatch;
+                renewProgressLease();
+                afterGridReturn = completedBatches >= plannedBatches
+                        ? Stage.CLOSE : Stage.PLACE;
+                stage = Stage.RETURN_GRID;
+                return TaskState.RUNNING;
+            }
+            if (!ItemStack.isSameItemSameComponents(cursor, plannedOutput)
+                    || cursor.getCount() > outputPerBatch) {
+                terminalGridCleanupUnconfirmed = true;
+                fail("the crafting cursor no longer contains the bounded recipe result",
+                        FailureType.UNKNOWN);
+                return TaskState.FAILED;
+            }
+            stowDestinationSlot = findStowDestination(cursor);
+            if (stowDestinationSlot < 0) {
+                terminalGridCleanupUnconfirmed = true;
+                fail("the exact crafting result has no safe main-inventory destination",
+                        FailureType.NO_SPACE);
+                return TaskState.FAILED;
+            }
+            Slot destination = player.containerMenu.getSlot(stowDestinationSlot);
+            stowDestinationBefore = destination.getItem().copy();
+            stowCursorBefore = cursor.getCount();
+            stowExpectedMove = Math.min(
+                    stowCursorBefore, destinationCapacity(destination, cursor));
+            stowInventoryBefore = componentInventoryCount(player, plannedOutput);
+            menuReceipt = context.menus().click(
+                    context, stowDestinationSlot, 0, ClickType.PICKUP,
+                    (fresh, ignored) -> stowMoveVerdict(fresh.player()), 40);
+            return TaskState.RUNNING;
+        }
+        menuReceipt = context.menus().poll(context, menuReceipt);
+        if (!menuReceipt.terminal()) return TaskState.RUNNING;
+        String detail = menuReceipt.detail();
+        MenuReceipt.Status status = menuReceipt.status();
+        menuReceipt = null;
+        if (!stowMoveApplied(player)) {
+            terminalGridCleanupUnconfirmed = true;
+            fail("the exact crafting result could not be stowed safely: " + detail,
+                    status == MenuReceipt.Status.CONFIRMED_APPLIED
+                            ? FailureType.INTERNAL : FailureType.NO_SPACE);
             return TaskState.FAILED;
         }
-        menuReceipt = null;
+        clearStowMove();
         renewProgressLease();
         return TaskState.RUNNING;
     }
