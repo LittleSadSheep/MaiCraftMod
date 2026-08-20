@@ -1326,17 +1326,32 @@ public final class SemanticAcquireCompanionTask
             Map<String, Object> fact = stringKeyMap(map);
             int missing = integer(fact.get("missing"), 0);
             if (missing <= 0) continue;
-            List<ResourceLocation> ids = new ArrayList<>();
+            List<ResourceLocation> declaredIds = new ArrayList<>();
             Object acceptable = fact.get("acceptable_item_ids");
             if (acceptable instanceof List<?> list) {
                 for (Object element : list) {
                     ResourceLocation id = ResourceLocation.tryParse(String.valueOf(element));
-                    if (id != null && BuiltInRegistries.ITEM.containsKey(id)
-                            && !parent.lineageItems.contains(id)) ids.add(id);
+                    if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
+                        declaredIds.add(id);
+                    }
                 }
             }
-            ids = ids.stream().distinct().toList();
-            if (ids.isEmpty()) continue;
+            declaredIds = declaredIds.stream().distinct().toList();
+            boolean truncated = bool(fact.get("acceptable_item_ids_truncated"));
+            if (declaredIds.isEmpty()) return null;
+            List<ResourceLocation> ids = declaredIds.stream()
+                    .filter(id -> !parent.lineageItems.contains(id))
+                    .toList();
+            // One blocked required group invalidates the entire recipe. Silently dropping it and
+            // acquiring a different group first is how "any bed" devolved into making every dye:
+            // the recipe still needed an ancestor bed, even though the dye itself was acyclic.
+            if (ids.isEmpty()) {
+                // A truncated report cannot prove that an unseen alternative is or is not in the
+                // lineage. Conservative rejection keeps this recipe side-effect free; it never
+                // permits the remaining groups to run as though this required group did not exist.
+                if (truncated) return null;
+                return null;
+            }
             List<ResourceLocation> key = List.copyOf(ids);
             missingByItems.merge(key, missing, Integer::sum);
             factsByItems.computeIfAbsent(key, ignored -> new ArrayList<>()).add(fact);
@@ -1350,11 +1365,52 @@ public final class SemanticAcquireCompanionTask
             choices.add(new IngredientNeed(
                     entry.getKey(), entry.getValue(), Map.copyOf(combinedFact)));
         }
-        return choices.stream()
-                .sorted(Comparator.comparingInt(IngredientNeed::missing)
-                        .thenComparing(ingredient -> String.join(",",
-                                itemStrings(ingredient.itemIds()))))
+        List<RankedIngredient> ranked = new ArrayList<>();
+        for (IngredientNeed choice : choices) {
+            ranked.add(new RankedIngredient(
+                    choice,
+                    ingredientRequiresDecision(choice.itemIds(), parent),
+                    recursiveIngredientStructureCost(choice.itemIds(), parent)));
+        }
+        return ranked.stream()
+                // Verify the route's real bottleneck before manufacturing easy accessories. A
+                // permission boundary is harder than a transformation; among transformations the
+                // deeper frontier is checked first, then the larger material bundle.
+                .sorted(Comparator
+                        .comparing(RankedIngredient::decisionRequired).reversed()
+                        .thenComparing(Comparator.comparingInt(
+                                RankedIngredient::structureCost).reversed())
+                        .thenComparing(Comparator.comparingInt(
+                                (RankedIngredient rankedIngredient) ->
+                                        rankedIngredient.ingredient().missing())
+                                .reversed())
+                        .thenComparing(rankedIngredient -> String.join(",",
+                                itemStrings(rankedIngredient.ingredient().itemIds()))))
+                .map(RankedIngredient::ingredient)
                 .findFirst().orElse(null);
+    }
+
+    private boolean ingredientRequiresDecision(
+            List<ResourceLocation> itemIds, Need parent) {
+        if (r.allowHarm
+                || !parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT)) {
+            return false;
+        }
+        SemanticAcquireTaskRecord.SourceHint hint = SemanticSourceKnowledge.infer(itemIds);
+        return !hint.entityTypeIds().isEmpty() && hint.blockRefs().isEmpty();
+    }
+
+    private int recursiveIngredientStructureCost(
+            List<ResourceLocation> itemIds, Need parent) {
+        Map<StructureKey, Integer> memo = new HashMap<>();
+        int best = UNREACHABLE_STRUCTURE_COST;
+        for (ResourceLocation itemId : itemIds) {
+            if (parent.lineageItems.contains(itemId)) continue;
+            best = Math.min(best, recursiveCraftDepth(
+                    itemId, parent.lineageItems, new LinkedHashSet<>(), memo,
+                    STRUCTURAL_RECIPE_DEPTH));
+        }
+        return best;
     }
 
     private NearbySurvey surveyNearby(List<ResourceLocation> ids) {
@@ -1474,6 +1530,86 @@ public final class SemanticAcquireCompanionTask
     }
 
     /**
+     * {@code allowed_sources} is a permission set. Rank sources once for this Need from live,
+     * side-effect-free readiness facts. Exhausted sources are tracked by identity, so re-ranking
+     * after a live fact changes cannot skip or repeat a source by numeric cursor. In particular, a
+     * live raw cooking input may outrank recursive crafting, while a
+     * hypothetical tool/armour smelt may not outrank an executable ordinary recipe.
+     */
+    private List<SemanticAcquireTaskRecord.Source> executionSourceOrder(Need need) {
+        if (need.plannedSourceOrder != null) return need.plannedSourceOrder;
+        SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
+        boolean naturalMine = !hint.blockRefs().isEmpty();
+        boolean directHunt = r.allowHarm && !hint.entityTypeIds().isEmpty();
+        boolean craftReady = craftExecutableNow(need);
+        boolean cookReady = cookInputReadyNow(need);
+        need.plannedSourceOrder = need.allowedSources.stream()
+                .filter(source -> !need.exhaustedSources.contains(source))
+                .sorted(Comparator.comparingInt(source -> switch (source) {
+                    case INVENTORY -> 0;
+                    case NEARBY -> 10;
+                    case STORAGE -> 20;
+                    case CRAFT -> craftReady ? 25 : 50;
+                    case COOK -> cookReady ? 26 : 55;
+                    case MINE -> naturalMine ? 30 : 60;
+                    case HUNT -> directHunt ? 35 : 80;
+                    case TRADE -> 70;
+                }))
+                .toList();
+        return need.plannedSourceOrder;
+    }
+
+    private boolean craftExecutableNow(Need need) {
+        Set<String> excluded = new LinkedHashSet<>(need.lineageRecipes);
+        excluded.addAll(need.rejectedRecipes);
+        excluded.addAll(nonCommittedCraftRecipes(need));
+        CraftingWorkstationCoordinator.PlanningSnapshot workstation =
+                CraftOps.requiresWorkstationForAny(need.itemIds, player)
+                        ? CraftingWorkstationCoordinator.inspect(player) : null;
+        int deficit = missing(need);
+        for (ResourceLocation output : need.itemIds) {
+            int requested = PlayerInv.buildableCount(
+                    player.getInventory(), BuiltInRegistries.ITEM.get(output)) + deficit;
+            ToolContext context = new ToolContext(
+                    (r.getToolCallId() == null ? "acquire" : r.getToolCallId())
+                            + "-source-rank",
+                    player.level().getGameTime());
+            if (craftOps.plan(output.toString(), requested, player, context,
+                    workstation, excluded).executable()) return true;
+        }
+        return false;
+    }
+
+    private boolean cookInputReadyNow(Need need) {
+        Set<Item> outputs = need.itemIds.stream()
+                .map(BuiltInRegistries.ITEM::get)
+                .collect(java.util.stream.Collectors.toSet());
+        int deficit = missing(need);
+        for (var holder : ClientRuntime.requireContext(player)
+                .connection().getRecipeManager().getRecipes()) {
+            if (!(holder.value() instanceof AbstractCookingRecipe cooking)) continue;
+            if (!RecipeProbe.usableIngredients(cooking)) continue;
+            ItemStack result = RecipeProbe.resultOf(
+                    cooking, player.level().registryAccess());
+            if (result.isEmpty() || !outputs.contains(result.getItem())) continue;
+            int batches = Math.max(1,
+                    (deficit + Math.max(1, result.getCount()) - 1)
+                            / Math.max(1, result.getCount()));
+            if (cooking.getIngredients().isEmpty()) continue;
+            Ingredient input = cooking.getIngredients().getFirst();
+            int available = 0;
+            int slots = Math.min(
+                    PlayerInv.BUILDABLE_SLOTS, player.getInventory().getContainerSize());
+            for (int slot = 0; slot < slots; slot++) {
+                ItemStack stack = player.getInventory().getItem(slot);
+                if (!stack.isEmpty() && input.test(stack)) available += stack.getCount();
+            }
+            if (available >= batches) return true;
+        }
+        return false;
+    }
+
+    /**
      * Gate only the physical source currently under consideration. Inventory, storage, recipes,
      * cooking and trade have already had (or will still receive) their own independent chance.
      * A failed gate advances this one source without spending work or constructing a child.
@@ -1539,7 +1675,9 @@ public final class SemanticAcquireCompanionTask
     }
 
     private void advanceSource(Need need) {
-        need.sourceCursor++;
+        List<SemanticAcquireTaskRecord.Source> remaining = executionSourceOrder(need);
+        if (!remaining.isEmpty()) need.exhaustedSources.add(remaining.getFirst());
+        need.plannedSourceOrder = null;
     }
 
     private String childId(String kind) {
@@ -1549,6 +1687,7 @@ public final class SemanticAcquireCompanionTask
 
     private TaskState failAcquisition(String code, String message, FailureType type) {
         failureCode = code;
+        if (failureNeed == null) failureNeed = needs.peek();
         fail(message, type);
         return TaskState.FAILED;
     }
@@ -1579,6 +1718,8 @@ public final class SemanticAcquireCompanionTask
         attempt.put("inventory_before", activeBeforeCount);
         attempt.put("inventory_after", after);
         attempt.put("inventory_progress", progress);
+        attempt.put("effects_observed",
+                activeChildEffectsObserved(state, result, progress));
         attempt.put("stopped_because_final_fact_satisfied", stoppedBecauseSatisfied);
         if (result != null) {
             attempt.put("child_success", result.success());
@@ -1736,23 +1877,53 @@ public final class SemanticAcquireCompanionTask
         data.put("recipe_trace", List.copyOf(recipeTrace));
         data.put("issues", List.copyOf(issues));
         data.put("outcome_uncertain", outcomeUncertain);
+        boolean effectsObserved =
+                (rootNeed != null && rootNeed.effectsObserved)
+                        || (failureNeed != null && failureNeed.effectsObserved)
+                        || attempts.stream().anyMatch(
+                                attempt -> bool(attempt.get("effects_observed")));
+        data.put("effects_observed", effectsObserved);
+        data.put("partial_effects_observed", observed < r.count && effectsObserved);
         if (failureCode != null) {
             data.put("failure_code", failureCode);
             data.put("requires_decision", true);
-            data.put("requires_narration", issues.stream().anyMatch(issue -> {
-                Object code = issue.get("code");
-                return "harm_permission_required".equals(code)
-                        || "protected_hunt_target_requires_decision".equals(code)
-                        || "other_player_near_hunt_target".equals(code)
-                        || "other_player_entered_hunt_area".equals(code)
-                        || "hunt_entity_search_exhausted".equals(code)
-                        || "hunt_entity_search_incomplete".equals(code)
-                        || "expected_hunt_drop_not_observed".equals(code)
-                        || "drop_ownership_ambiguous".equals(code);
-            }));
+            data.put("requires_narration",
+                    failureRequiresNarration(failureCode)
+                            || issues.stream().anyMatch(
+                                    SemanticAcquireCompanionTask::issueRequiresNarration));
+            Need blocked = failureNeed == null ? needs.peek() : failureNeed;
+            if (blocked != null) {
+                data.put("blocked_need", needFacts(blocked));
+                Set<String> routeIds = !blocked.parentRecipeIds.isEmpty()
+                        ? blocked.parentRecipeIds : blocked.committedRecipeIds;
+                if (!routeIds.isEmpty()) {
+                    data.put("route_recipe_ids", List.copyOf(routeIds));
+                }
+            }
             data.put("recovery_options", recoveryOptions());
         }
         return data;
+    }
+
+    private static boolean failureRequiresNarration(String code) {
+        return code != null && (code.contains("decision_required")
+                || code.startsWith("committed_recipe_"));
+    }
+
+    private static boolean issueRequiresNarration(Map<String, Object> issue) {
+        if (bool(issue.get("requires_narration"))) return true;
+        Object rawFacts = issue.get("facts");
+        if (rawFacts instanceof Map<?, ?> facts
+                && bool(facts.get("requires_narration"))) return true;
+        Object code = issue.get("code");
+        return "harm_permission_required".equals(code)
+                || "protected_hunt_target_requires_decision".equals(code)
+                || "other_player_near_hunt_target".equals(code)
+                || "other_player_entered_hunt_area".equals(code)
+                || "hunt_entity_search_exhausted".equals(code)
+                || "hunt_entity_search_incomplete".equals(code)
+                || "expected_hunt_drop_not_observed".equals(code)
+                || "drop_ownership_ambiguous".equals(code);
     }
 
     private Map<String, Object> dimensionFailureData() {
@@ -1807,12 +1978,15 @@ public final class SemanticAcquireCompanionTask
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
             TaskResult childResult = activeChild.result(TaskState.CANCELLED);
+            int progress = Math.max(
+                    0, count(activeNeed.itemIds) - activeBeforeCount);
+            markActiveEffectsIfObserved(TaskState.CANCELLED, childResult, progress);
             if (childResult != null && childResult.data() != null
                     && bool(childResult.data().get("outcome_uncertain"))) {
                 outcomeUncertain = true;
             }
-            recordAttempt(TaskState.CANCELLED, childResult, count(activeNeed.itemIds),
-                    Math.max(0, count(activeNeed.itemIds) - activeBeforeCount), false);
+            recordAttempt(TaskState.CANCELLED, childResult,
+                    count(activeNeed.itemIds), progress, false);
             clearActive();
         }
         super.cleanup();
