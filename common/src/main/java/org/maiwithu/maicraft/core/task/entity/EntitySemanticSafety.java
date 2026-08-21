@@ -31,6 +31,15 @@ public final class EntitySemanticSafety {
 
     private enum ManagedArea { OPEN, ENCLOSED, UNKNOWN }
 
+    private record ProtectedAreaEvidence(
+            List<String> directProtectionReasons,
+            List<String> containingAreaLabels) {
+        private ProtectedAreaEvidence {
+            directProtectionReasons = List.copyOf(directProtectionReasons);
+            containingAreaLabels = List.copyOf(containingAreaLabels);
+        }
+    }
+
     private EntitySemanticSafety() {}
 
     /** Whether this live entity satisfies the requested relationship before protection checks. */
@@ -44,7 +53,7 @@ public final class EntitySemanticSafety {
         };
     }
 
-    /** An empty list is the only authorization to use the entity. Unknown evidence fails closed. */
+    /** An empty list is the only authorization to use the entity. */
     public static List<String> protectionReasons(
             LocalPlayer player,
             Entity entity,
@@ -66,16 +75,20 @@ public final class EntitySemanticSafety {
             if (entity instanceof OwnableEntity ownable && ownable.getOwnerUUID() != null) {
                 reasons.add("owned");
             }
-            if (entity instanceof Mob mob && mob.isPersistenceRequired()) {
-                reasons.add("persistent_or_managed");
-            }
+            if (entity.getVehicle() != null) reasons.add("in_vehicle");
+            if (!entity.getPassengers().isEmpty()) reasons.add("carrying_passenger");
         }
 
-        reasons.addAll(landmarkReasons(player, entity.blockPosition(), protectedLabels));
-        if (unownedEvidenceRequired) {
+        ProtectedAreaEvidence areaEvidence = protectedAreaEvidence(
+                player, entity.blockPosition(), protectedLabels);
+        reasons.addAll(areaEvidence.directProtectionReasons());
+        if (unownedEvidenceRequired && !areaEvidence.containingAreaLabels().isEmpty()) {
             ManagedArea managed = enclosureAt(player.clientLevel, entity.blockPosition());
-            if (managed == ManagedArea.ENCLOSED) reasons.add("enclosed_or_managed");
-            if (managed == ManagedArea.UNKNOWN) reasons.add("loaded_area_incomplete");
+            if (managed == ManagedArea.ENCLOSED) {
+                for (String label : areaEvidence.containingAreaLabels()) {
+                    reasons.add("enclosed_in_protected_area:" + label);
+                }
+            }
         }
         if (harmIntent && otherPlayerNearby(player, entity)) {
             reasons.add("other_player_nearby");
@@ -95,25 +108,29 @@ public final class EntitySemanticSafety {
                 || entity.getType().getCategory() == MobCategory.MONSTER;
     }
 
-    private static List<String> landmarkReasons(
+    private static ProtectedAreaEvidence protectedAreaEvidence(
             LocalPlayer player, BlockPos position, List<String> protectedLabels) {
-        LinkedHashSet<String> result = new LinkedHashSet<>();
+        LinkedHashSet<String> directReasons = new LinkedHashSet<>();
+        LinkedHashSet<String> containingAreas = new LinkedHashSet<>();
         IntentRuntime runtime = IntentRuntime.get();
         String dimension = player.level().dimension().location().toString();
         for (String label : protectedLabels == null ? List.<String>of() : protectedLabels) {
             IntentRuntime.Landmark landmark = runtime.landmark(label);
             if (landmark == null) {
-                result.add("unknown_protected_label:" + label);
+                directReasons.add("unknown_protected_label:" + label);
             } else if (insideLandmark(position, landmark, dimension)) {
-                result.add("protected_landmark:" + landmark.label());
+                directReasons.add("protected_landmark:" + landmark.label());
+                containingAreas.add(landmark.label());
             }
         }
-        for (IntentRuntime.Landmark landmark : runtime.landmarks()) {
-            if (insideLandmark(position, landmark, dimension)) {
-                result.add("remembered_landmark:" + landmark.label());
-            }
-        }
-        return List.copyOf(result);
+        /*
+         * A remembered Landmark currently carries only a point, not an area kind or measured
+         * boundary.  Treating every remembered point as managed terrain caused arbitrary wild
+         * entities nearby to be protected.  Until semantic area metadata is persisted, only the
+         * caller's explicit protected_labels can establish this area context.
+         */
+        return new ProtectedAreaEvidence(
+                List.copyOf(directReasons), List.copyOf(containingAreas));
     }
 
     private static boolean insideLandmark(
@@ -126,11 +143,14 @@ public final class EntitySemanticSafety {
                 <= (long) LANDMARK_PROTECTION_RADIUS * LANDMARK_PROTECTION_RADIUS;
     }
 
-    /** Conservative loaded-only flood: a closed or incomplete local cell is never called wild. */
+    /**
+     * Loaded-only physical enclosure evidence.  Callers must additionally prove that the entity is
+     * inside a known semantic area; an arbitrary local terrain pocket is never protection by itself.
+     */
     private static ManagedArea enclosureAt(ClientLevel level, BlockPos origin) {
         int y = origin.getY();
         BlockPos start = new BlockPos(origin.getX(), y, origin.getZ());
-        if (!openBodyCell(level, start)) return ManagedArea.ENCLOSED;
+        if (!openBodyCell(level, start)) return ManagedArea.UNKNOWN;
         Deque<BlockPos> queue = new ArrayDeque<>();
         Set<Long> visited = new java.util.HashSet<>();
         queue.add(start);

@@ -15,8 +15,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.SpawnPlacementTypes;
+import net.minecraft.world.entity.SpawnPlacements;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
@@ -29,6 +34,11 @@ public final class GenericEntitySearchCompanionTask
     public static final int LOADED_EVIDENCE_RADIUS = 112;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
+    /** A frontier should expose another chunk-width of terrain, not circle in place. */
+    private static final int MIN_FRONTIER_PROGRESS = 16;
+    /** Look beside the geometric ray for a dry observation post before accepting water. */
+    private static final int LAND_FRONTIER_PROBE_RADIUS = WAYPOINT_GRID / 2;
+    private static final int LAND_FRONTIER_PROBE_STRIDE = 4;
     /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
     private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
@@ -47,9 +57,11 @@ public final class GenericEntitySearchCompanionTask
     private int frontierFailed;
     private double farthestBodyDistance;
     private String failureCode;
+    private boolean preferLandFrontiers;
 
     private final Set<Long> attemptedFrontiers = new LinkedHashSet<>();
     private final Map<UUID, ResourceLocation> observedSafe = new LinkedHashMap<>();
+    private final Set<UUID> observedProtected = new LinkedHashSet<>();
     private final Map<String, Integer> protectedReasonCounts = new LinkedHashMap<>();
     private int protectedOrAmbiguousSeen;
     private int lastLoadedMatching;
@@ -69,6 +81,7 @@ public final class GenericEntitySearchCompanionTask
     @Override
     protected void onStart() {
         origin = player.blockPosition().immutable();
+        preferLandFrontiers = targetsUseGroundSpawnPlacement();
         stage = Stage.OBSERVE;
     }
 
@@ -116,15 +129,17 @@ public final class GenericEntitySearchCompanionTask
             if (!EntitySemanticSafety.matchesRelation(entity, r.relation)) continue;
             loadedMatching++;
             if (r.harmIntent && !entity.isAttackable()) {
-                protectedOrAmbiguousSeen++;
-                protectedReasonCounts.merge("not_attackable", 1, Integer::sum);
+                if (observedProtected.add(entity.getUUID())) {
+                    protectedOrAmbiguousSeen++;
+                    protectedReasonCounts.merge("not_attackable", 1, Integer::sum);
+                }
                 continue;
             }
             List<String> reasons = EntitySemanticSafety.protectionReasons(
                     player, entity, r.relation, r.protectedLabels, r.harmIntent);
             if (reasons.isEmpty()) {
                 observedSafe.putIfAbsent(entity.getUUID(), type);
-            } else {
+            } else if (observedProtected.add(entity.getUUID())) {
                 protectedOrAmbiguousSeen++;
                 for (String reason : reasons) protectedReasonCounts.merge(reason, 1, Integer::sum);
             }
@@ -144,6 +159,16 @@ public final class GenericEntitySearchCompanionTask
     }
 
     private TaskState tickFrontierTravel() {
+        // A frontier leg exists only to load more evidence. Newly loaded acceptable evidence
+        // therefore invalidates the leg immediately; waiting until the waypoint was reached made
+        // the body visibly walk past the very entity it was searching for.
+        scanCycles++;
+        scanLoadedEntities();
+        if (observedSafe.size() >= r.count) {
+            stopMove(TaskState.CANCELLED);
+            return TaskState.SUCCESS;
+        }
+
         TaskState terminal;
         if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
             moveChild.stop(player, Task.StopReason.REPLACED);
@@ -210,9 +235,108 @@ public final class GenericEntitySearchCompanionTask
             int x = (int) Math.round(current.getX() + dx / distance * leg);
             int z = (int) Math.round(current.getZ() + dz / distance * leg);
             if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
+            if (preferLandFrontiers) {
+                BlockPos land = nearestDryLandFrontier(level, current, x, z);
+                if (land != null) return land;
+            }
+            // Water is still a valid way to reveal new terrain. It is a fallback after the
+            // target type's vanilla spawn semantics told us that dry ground is better evidence.
             return new BlockPos(x, current.getY(), z);
         }
         return null;
+    }
+
+    /**
+     * Resolve a geometric frontier to nearby dry, standable loaded terrain. The preference is
+     * enabled only when every requested entity type uses vanilla's ON_GROUND spawn placement;
+     * aquatic or unrestricted types retain the ordinary terrain-neutral frontier search.
+     */
+    private BlockPos nearestDryLandFrontier(
+            ClientLevel level, BlockPos current, int projectedX, int projectedZ) {
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (int dx = -LAND_FRONTIER_PROBE_RADIUS;
+                dx <= LAND_FRONTIER_PROBE_RADIUS;
+                dx += LAND_FRONTIER_PROBE_STRIDE) {
+            for (int dz = -LAND_FRONTIER_PROBE_RADIUS;
+                    dz <= LAND_FRONTIER_PROBE_RADIUS;
+                    dz += LAND_FRONTIER_PROBE_STRIDE) {
+                int x = projectedX + dx;
+                int z = projectedZ + dz;
+                if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
+                double progress = horizontalDistance(current, new BlockPos(x, current.getY(), z));
+                if (progress < MIN_FRONTIER_PROGRESS) continue;
+                BlockPos candidate = drySurface(level, x, z);
+                if (candidate == null) continue;
+                double score = (double) dx * dx + (double) dz * dz;
+                if (score < bestScore) {
+                    best = candidate;
+                    bestScore = score;
+                }
+            }
+        }
+        if (best == null) return null;
+
+        // Coarse sampling finds the land mass cheaply; refine within its four-block sample cell
+        // so the child receives a real standable column rather than an arbitrary grid point.
+        BlockPos refined = best;
+        double refinedScore = distanceSqr(best.getX(), best.getZ(), projectedX, projectedZ);
+        for (int dx = -LAND_FRONTIER_PROBE_STRIDE + 1;
+                dx < LAND_FRONTIER_PROBE_STRIDE;
+                dx++) {
+            for (int dz = -LAND_FRONTIER_PROBE_STRIDE + 1;
+                    dz < LAND_FRONTIER_PROBE_STRIDE;
+                    dz++) {
+                int x = best.getX() + dx;
+                int z = best.getZ() + dz;
+                if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
+                BlockPos candidate = drySurface(level, x, z);
+                if (candidate == null) continue;
+                double score = distanceSqr(x, z, projectedX, projectedZ);
+                if (score < refinedScore) {
+                    refined = candidate;
+                    refinedScore = score;
+                }
+            }
+        }
+        return refined;
+    }
+
+    private BlockPos drySurface(ClientLevel level, int x, int z) {
+        int estimate = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
+        int upper = Math.min(level.getMaxBuildHeight() - 2, estimate + 1);
+        int lower = Math.max(level.getMinBuildHeight() + 1, estimate - 2);
+        for (int y = upper; y >= lower; y--) {
+            BlockPos feet = new BlockPos(x, y, z);
+            if (!level.getFluidState(feet.below()).isEmpty()
+                    || !level.getFluidState(feet).isEmpty()
+                    || !level.getFluidState(feet.above()).isEmpty()) {
+                continue;
+            }
+            if (MovementHelper.canWalkOn(level, feet.below())
+                    && MovementHelper.canWalkThrough(level, feet)
+                    && MovementHelper.canWalkThrough(level, feet.above())) {
+                return feet;
+            }
+        }
+        return null;
+    }
+
+    private boolean targetsUseGroundSpawnPlacement() {
+        for (ResourceLocation id : r.entityTypeIds) {
+            EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(id);
+            if (type == null
+                    || SpawnPlacements.getPlacementType(type) != SpawnPlacementTypes.ON_GROUND) {
+                return false;
+            }
+        }
+        return !r.entityTypeIds.isEmpty();
+    }
+
+    private static double distanceSqr(int x, int z, int otherX, int otherZ) {
+        double dx = x - otherX;
+        double dz = z - otherZ;
+        return dx * dx + dz * dz;
     }
 
     private TaskState exhausted() {
@@ -289,6 +413,8 @@ public final class GenericEntitySearchCompanionTask
         data.put("observed_acceptable_by_type", Map.copyOf(observedByType));
         data.put("verified", observedSafe.size() >= r.count);
         data.put("scope", "loaded_client_entities_and_first_person_loaded_frontiers");
+        data.put("frontier_surface_preference",
+                preferLandFrontiers ? "vanilla_on_ground_spawn_evidence" : "terrain_neutral");
         data.put("max_distance", r.maxDistance);
         data.put("scan_cycles", scanCycles);
         data.put("last_loaded_relation_match_count", lastLoadedMatching);
