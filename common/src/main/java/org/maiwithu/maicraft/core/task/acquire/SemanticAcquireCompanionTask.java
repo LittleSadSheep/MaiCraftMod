@@ -887,6 +887,33 @@ public final class SemanticAcquireCompanionTask
         UUID completedHuntTarget = activeHuntTarget;
         clearActive();
 
+        // Defeating the source entity is not the whole harmful acquisition transaction.  The
+        // attack child also owns every attributable, reachable drop from that kill.  If that
+        // settlement failed, requested-item progress must not launder the incomplete loot sweep
+        // into semantic success (for example: wool entered inventory while mutton remained).
+        if (completedSource == SemanticAcquireTaskRecord.Source.HUNT
+                && completedHuntStage == HuntChildStage.ATTACK
+                && terminal != TaskState.SUCCESS
+                && huntDefeated(result)) {
+            addIssue("hunt", "hunt_loot_settlement_incomplete",
+                    "the target was defeated, but collection of all attributable reachable "
+                            + "drops did not settle; requested-item progress is retained but the "
+                            + "acquisition is not reported as complete",
+                    Map.of("terminal_state", terminal.name().toLowerCase(),
+                            "child_message", result == null || result.message() == null
+                                    ? "" : result.message(),
+                            "inventory_progress", progress,
+                            "requires_narration", true,
+                            "loot_receipt", result == null || result.data() == null
+                                    ? Map.of() : result.data()));
+            failureNeed = completedNeed;
+            return failAcquisition(
+                    "hunt_loot_settlement_incomplete",
+                    "a defeated source left attributable reachable loot unsettled; stopped before "
+                            + "pretending the acquisition transaction was complete",
+                    childFailureType(terminal, result));
+        }
+
         if (count(r.itemIds) >= r.count) return TaskState.SUCCESS;
         if (after >= completedNeed.requiredFinalCount) {
             if (!needs.isEmpty() && needs.peek() == completedNeed) {
@@ -898,7 +925,7 @@ public final class SemanticAcquireCompanionTask
         }
         if (completedSource == SemanticAcquireTaskRecord.Source.HUNT) {
             return finishHuntChild(
-                    completedNeed, completedHuntStage, completedHuntTarget,
+                    completedNeed, completedRecord, completedHuntStage, completedHuntTarget,
                     terminal, result, progress);
         }
         if (completedSource == SemanticAcquireTaskRecord.Source.MINE
@@ -998,8 +1025,162 @@ public final class SemanticAcquireCompanionTask
         return TaskState.RUNNING;
     }
 
+    private TaskState revalidateActiveHuntAuthorization() {
+        if (activeSource != SemanticAcquireTaskRecord.Source.HUNT
+                || activeHuntStage != HuntChildStage.ATTACK
+                || !(activeRecord instanceof AttackTaskRecord attack)
+                || attack.entityIds.isEmpty()) {
+            return null;
+        }
+        Entity live = player.clientLevel.getEntity(attack.entityIds.getFirst());
+        // Once the exact entity is dead/unloaded, AttackCompanionTask owns attribution and loot
+        // settlement. Interrupting that stage here would strand the very drops it must collect.
+        if (live == null || live.isRemoved() || !live.isAlive()) return null;
+
+        SemanticAcquireTaskRecord.SourceHint hint = sourceHint(activeNeed);
+        GenericEntitySearchTaskRecord.Relation relation =
+                SemanticSourceKnowledge.huntRelation(hint.entityTypeIds());
+        boolean sameIdentity = activeHuntTarget != null
+                && activeHuntTarget.equals(live.getUUID());
+        boolean sameType = hint.entityTypeIds().contains(
+                BuiltInRegistries.ENTITY_TYPE.getKey(live.getType()));
+        boolean sameRelation = EntitySemanticSafety.matchesRelation(live, relation);
+        if (!sameIdentity || !sameType || !sameRelation) {
+            return stopActiveHuntAfterAuthorizationChange(
+                    List.of(), "hunt_target_identity_or_relation_changed", false);
+        }
+
+        List<String> protectionReasons = EntitySemanticSafety.protectionReasons(
+                player, live, relation, r.protectedLabels, true);
+        if (protectionReasons.isEmpty()) return null;
+        return stopActiveHuntAfterAuthorizationChange(
+                protectionReasons, "hunt_target_became_protected", true);
+    }
+
+    /**
+     * A search receipt can select the nearest entity at that instant, then a much nearer member of
+     * the same population can enter loaded evidence while the body is still approaching. Before
+     * the first strike, changing that execution handle is harmless; after a strike, defeat or loot
+     * begins, the combat/drop transaction must remain committed to the original identity.
+     */
+    private TaskState retargetUncommittedHuntToCloserCandidate() {
+        if (activeSource != SemanticAcquireTaskRecord.Source.HUNT
+                || activeHuntStage != HuntChildStage.ATTACK
+                || !(activeRecord instanceof AttackTaskRecord attack)
+                || attack.entityIds.isEmpty()
+                || attack.strikes() > 0
+                || !attack.defeated().isEmpty()
+                || activeChild.mustSettleBeforeSatisfiedCancellation()) {
+            return null;
+        }
+        Entity current = player.clientLevel.getEntity(attack.entityIds.getFirst());
+        if (current == null || current.isRemoved() || !current.isAlive()) return null;
+
+        SemanticAcquireTaskRecord.SourceHint hint = sourceHint(activeNeed);
+        GenericEntitySearchTaskRecord.Relation relation =
+                SemanticSourceKnowledge.huntRelation(hint.entityTypeIds());
+        ResourceLocation currentType = BuiltInRegistries.ENTITY_TYPE.getKey(current.getType());
+        Entity replacement = safeLoadedHuntCandidates(
+                        hint,
+                        relation,
+                        GenericEntitySearchCompanionTask.LOADED_EVIDENCE_RADIUS,
+                        null)
+                .stream()
+                .filter(candidate -> currentType.equals(
+                        BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType())))
+                .findFirst()
+                .orElse(null);
+        if (replacement == null
+                || replacement.getUUID().equals(current.getUUID())
+                || !materiallyCloserForAttack(current, replacement)) {
+            return null;
+        }
+
+        // Recheck the barrier immediately before cancellation. No old target is rejected: it
+        // remains a valid future candidate; this is only a harmless nearest-target correction.
+        if (attack.strikes() > 0
+                || !attack.defeated().isEmpty()
+                || activeChild.mustSettleBeforeSatisfiedCancellation()) {
+            return null;
+        }
+        Need retargetedNeed = activeNeed;
+        double oldDistance = player.distanceTo(current);
+        double newDistance = player.distanceTo(replacement);
+        activeChild.stop(player, Task.StopReason.REPLACED);
+        activeChild.result(TaskState.CANCELLED);
+        clearActive();
+
+        harmlessHuntRetargets++;
+        org.maiwithu.maicraft.core.Constants.LOG.info(
+                "[maicraft-task] harmless pre-strike hunt retarget type={} distance={} -> {}",
+                currentType, oldDistance, newDistance);
+        long now = player.level().getGameTime();
+        AttackTaskRecord redirected = new AttackTaskRecord(
+                childId("hunt-attack"), now + HUNT_TICKS,
+                List.of(replacement.getId()), false, true);
+        return startHuntChild(
+                retargetedNeed,
+                redirected,
+                HuntChildStage.ATTACK,
+                replacement.getUUID(),
+                "retarget a substantially nearer loaded unprotected " + currentType
+                        + " before any combat effect");
+    }
+
+    /**
+     * Hysteresis is derived from the live vanilla/modded entity interaction reach rather than an
+     * arbitrary world-distance constant. Entering current strike reach is categorically better;
+     * otherwise the replacement must remove at least one whole strike-reach band of approach.
+     */
+    private boolean materiallyCloserForAttack(Entity current, Entity replacement) {
+        double nativeReach = player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
+        double currentReach = Swing.reachTo(nativeReach, current.getBbWidth());
+        double replacementReach = Swing.reachTo(nativeReach, replacement.getBbWidth());
+        double currentDistance = player.distanceTo(current);
+        double replacementDistance = player.distanceTo(replacement);
+        if (!(replacementDistance < currentDistance)) return false;
+
+        double currentApproach = Math.max(0.0, currentDistance - currentReach);
+        double replacementApproach = Math.max(0.0, replacementDistance - replacementReach);
+        if (replacementApproach == 0.0 && currentApproach > 0.0) return true;
+        double reachBand = Math.max(currentReach, replacementReach);
+        return replacementApproach + reachBand <= currentApproach;
+    }
+
+    private TaskState stopActiveHuntAfterAuthorizationChange(
+            List<String> protectionReasons, String issueCode, boolean requiresDecision) {
+        activeChild.stop(player, Task.StopReason.REPLACED);
+        TaskResult stopped = activeChild.result(TaskState.CANCELLED);
+        int after = count(activeNeed.itemIds);
+        int progress = Math.max(0, after - activeBeforeCount);
+        markActiveEffectsIfObserved(TaskState.CANCELLED, stopped, progress);
+        recordAttempt(TaskState.CANCELLED, stopped, after, progress, false);
+
+        Need interruptedNeed = activeNeed;
+        UUID interruptedTarget = activeHuntTarget;
+        clearActive();
+        if (interruptedTarget != null) rejectedHuntTargets.add(interruptedTarget);
+        interruptedNeed.huntSearchExpandedView = true;
+
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("protection_evidence", List.copyOf(protectionReasons));
+        facts.put("inventory_progress", progress);
+        facts.put("requires_narration", requiresDecision);
+        facts.put("child_receipt", stopped == null || stopped.data() == null
+                ? Map.of() : stopped.data());
+        addIssue("hunt", issueCode,
+                requiresDecision
+                        ? "the exact active target gained explicit protection evidence; the attack was stopped"
+                        : "the active runtime target no longer matched its retained identity, type or relation",
+                facts);
+        if (requiresDecision) interruptedNeed.decisionRequired = true;
+        renewProgressLease();
+        return TaskState.RUNNING;
+    }
+
     private TaskState finishHuntChild(
             Need need,
+            TaskRecord completedRecord,
             HuntChildStage stage,
             UUID targetUuid,
             TaskState terminal,
@@ -1009,19 +1190,44 @@ public final class SemanticAcquireCompanionTask
             if (terminal == TaskState.SUCCESS
                     && result != null && result.success()
                     && bool(result.data() == null ? null : result.data().get("verified"))) {
-                // The search receipt intentionally contains no runtime handle. Re-observe the live
-                // client world and authorize only a still-alive entity of the hinted type.
+                Entity retained = completedRecord instanceof GenericEntitySearchTaskRecord search
+                        ? revalidateInternalHuntTarget(need, search) : null;
+                if (retained != null) {
+                    if (takePlannerStep()) {
+                        need.attempted(SemanticAcquireTaskRecord.Source.HUNT);
+                        long now = player.level().getGameTime();
+                        AttackTaskRecord attack = new AttackTaskRecord(
+                                childId("hunt-attack"), now + HUNT_TICKS,
+                                List.of(retained.getId()), false, true);
+                        return startHuntChild(
+                                need, attack, HuntChildStage.ATTACK, retained.getUUID(),
+                                "hunt the still-live entity verified by the internal search receipt");
+                    }
+                }
+                // If the exact identity crossed a load boundary during child settlement, preserve
+                // the old broad re-observation fallback. No runtime identity enters public data.
                 need.huntSearchExpandedView = true;
                 renewProgressLease();
                 return TaskState.RUNNING;
             }
             need.huntSearchExpandedView = false;
+            Map<String, Object> searchReceipt = result == null || result.data() == null
+                    ? Map.of() : result.data();
+            boolean searchRequiresDecision = bool(searchReceipt.get("requires_decision"))
+                    || "only_protected_or_ambiguous_entity_evidence".equals(
+                            searchReceipt.get("failure_code"));
+            Map<String, Object> searchFacts = new LinkedHashMap<>();
+            searchFacts.put("terminal_state", terminal.name().toLowerCase());
+            searchFacts.put("search_attempts", need.huntSearchAttempts);
+            searchFacts.put("requires_narration", true);
+            searchFacts.put("search_receipt", searchReceipt);
             addIssue("hunt", "hunt_entity_search_incomplete",
                     "first-person search ended without a complete acceptable entity observation",
-                    Map.of("terminal_state", terminal.name().toLowerCase(),
-                            "search_attempts", need.huntSearchAttempts,
-                            "search_receipt", result == null || result.data() == null
-                                    ? Map.of() : result.data()));
+                    searchFacts);
+            if (searchRequiresDecision) {
+                need.decisionRequired = true;
+                return TaskState.RUNNING;
+            }
             advanceSource(need);
             return TaskState.RUNNING;
         }
@@ -1029,6 +1235,7 @@ public final class SemanticAcquireCompanionTask
         if (stage == HuntChildStage.ATTACK) {
             if (terminal == TaskState.SUCCESS || huntDefeated(result)) {
                 if (progress == 0) {
+                    if (targetUuid != null) rejectedHuntTargets.add(targetUuid);
                     addIssue("hunt", "expected_hunt_drop_not_observed",
                             "the authorized target was defeated and its own new-drop sweep finished, "
                                     + "but the requested live inventory fact did not increase",
@@ -1041,7 +1248,8 @@ public final class SemanticAcquireCompanionTask
                                     "unreachable_drop_count", result == null || result.data() == null
                                             ? 0
                                             : result.data().getOrDefault("unreachable_drop_count", 0)));
-                    advanceSource(need);
+                    need.huntSearchExpandedView = true;
+                    renewProgressLease();
                 } else {
                     renewProgressLease();
                 }
@@ -1060,7 +1268,8 @@ public final class SemanticAcquireCompanionTask
                             "inventory_progress", progress,
                             "attempted_targets", need.attempts(
                                     SemanticAcquireTaskRecord.Source.HUNT)));
-            advanceSource(need);
+            need.huntSearchExpandedView = true;
+            renewProgressLease();
             return TaskState.RUNNING;
         }
 
@@ -1069,6 +1278,33 @@ public final class SemanticAcquireCompanionTask
                 Map.of("terminal_state", terminal.name().toLowerCase()));
         advanceSource(need);
         return TaskState.RUNNING;
+    }
+
+    private Entity revalidateInternalHuntTarget(
+            Need need, GenericEntitySearchTaskRecord search) {
+        Set<UUID> retained = new LinkedHashSet<>(search.internalVerifiedEntityUuids());
+        if (retained.isEmpty()) return null;
+        SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
+        GenericEntitySearchTaskRecord.Relation relation =
+                SemanticSourceKnowledge.huntRelation(hint.entityTypeIds());
+        AABB box = player.getBoundingBox().inflate(
+                GenericEntitySearchCompanionTask.LOADED_EVIDENCE_RADIUS);
+        return player.clientLevel.getEntities(player, box, candidate ->
+                        candidate != player
+                                && retained.contains(candidate.getUUID())
+                                && !rejectedHuntTargets.contains(candidate.getUUID())
+                                && !candidate.isRemoved()
+                                && candidate.isAlive()
+                                && candidate.isAttackable()
+                                && hint.entityTypeIds().contains(
+                                        BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType())))
+                .stream()
+                .filter(entity -> EntitySemanticSafety.matchesRelation(entity, relation))
+                .filter(entity -> EntitySemanticSafety.protectionReasons(
+                                player, entity, relation, r.protectedLabels, true)
+                        .isEmpty())
+                .min(Comparator.comparingDouble(player::distanceToSqr))
+                .orElse(null);
     }
 
     private TaskState startChild(
@@ -1182,6 +1418,25 @@ public final class SemanticAcquireCompanionTask
                 && positiveNumber(result.data().get("defeated_targets"));
     }
 
+    private static FailureType childFailureType(TaskState terminal, TaskResult result) {
+        if (result != null && result.data() != null) {
+            Object raw = result.data().get("failure_type");
+            if (raw != null) {
+                try {
+                    return FailureType.valueOf(
+                            String.valueOf(raw).toUpperCase(java.util.Locale.ROOT));
+                } catch (IllegalArgumentException ignored) {
+                    // Fall through to the lifecycle-derived reason.
+                }
+            }
+        }
+        return switch (terminal) {
+            case TIMEOUT -> FailureType.TIMED_OUT;
+            case CANCELLED -> FailureType.INTERRUPTED;
+            default -> FailureType.UNKNOWN;
+        };
+    }
+
     private boolean structuredFailure(TaskState terminal, TaskResult result) {
         if (terminal == TaskState.SUCCESS && result != null && result.success()) return false;
         if (result != null && result.data() != null) {
@@ -1204,7 +1459,12 @@ public final class SemanticAcquireCompanionTask
                 + "|" + (position.getX() >> 4) + ',' + (position.getZ() >> 4)
                 + "|" + relation.name()
                 + "|" + String.join(",", stringIds(hint.entityTypeIds()))
-                + "|expanded=" + need.huntSearchExpandedView;
+                + "|expanded=" + need.huntSearchExpandedView
+                // A successful kill or a newly rejected identity changes the search facts even
+                // inside the same chunk. Omitting them made the repeated-state guard suppress the
+                // next required hunt after partial item progress.
+                + "|inventory=" + count(need.itemIds)
+                + "|rejected=" + rejectedHuntTargets.size();
     }
 
     private static boolean positiveNumber(Object value) {
@@ -2236,6 +2496,7 @@ public final class SemanticAcquireCompanionTask
         data.put("allowed_sources", r.allowedSources.stream()
                 .map(source -> source.name().toLowerCase()).toList());
         data.put("allow_harm", r.allowHarm);
+        data.put("harmless_hunt_retargets", harmlessHuntRetargets);
         data.put("attempts", List.copyOf(attempts));
         data.put("recipe_trace", List.copyOf(recipeTrace));
         data.put("issues", List.copyOf(issues));
@@ -2270,6 +2531,7 @@ public final class SemanticAcquireCompanionTask
 
     private static boolean failureRequiresNarration(String code) {
         return code != null && (code.contains("decision_required")
+                || "hunt_loot_settlement_incomplete".equals(code)
                 || code.startsWith("committed_recipe_"));
     }
 
@@ -2281,8 +2543,6 @@ public final class SemanticAcquireCompanionTask
         Object code = issue.get("code");
         return "harm_permission_required".equals(code)
                 || "protected_hunt_target_requires_decision".equals(code)
-                || "other_player_near_hunt_target".equals(code)
-                || "other_player_entered_hunt_area".equals(code)
                 || "hunt_entity_search_exhausted".equals(code)
                 || "hunt_entity_search_incomplete".equals(code)
                 || "expected_hunt_drop_not_observed".equals(code)
