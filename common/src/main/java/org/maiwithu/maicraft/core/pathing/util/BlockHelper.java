@@ -229,13 +229,14 @@ public final class BlockHelper {
     /**
      * The body's feet cell for pathing — the
      * position nudged up 0.1251 (so sinking on soul sand / farmland doesn't read a block
-     * low) and, when that cell is a SLAB, taken as the cell ABOVE it. The slab adjustment
-     * is what reconciles standing on a bottom slab (feet at slab.y+0.5) with the move graph,
-     * where a move onto a slab targets the cell ABOVE the slab.
+     * low) and, when that cell is a slab or stair, taken as the cell ABOVE it. This mirrors
+     * {@code Movement.feet}: both partial-height supports are represented by the move graph as
+     * standing in the cell above them.
      */
     public static BlockPos playerFeet(BlockGetter level, double x, double y, double z) {
         BlockPos f = BlockPos.containing(x, y + 0.1251, z);
-        if (level.getBlockState(f).getBlock() instanceof SlabBlock) {
+        Block block = level.getBlockState(f).getBlock();
+        if (block instanceof SlabBlock || block instanceof StairBlock) {
             return f.above();
         }
         return f;
@@ -259,6 +260,24 @@ public final class BlockHelper {
         return canWalkOn(level, feet.below())
                 && canWalkThrough(level, feet)
                 && canWalkThrough(level, feet.above());
+    }
+
+    /**
+     * A genuinely dry standing cell. Unlike {@link #isStandable}, this deliberately excludes
+     * the water-surface lattice used by ordinary navigation: the feet and head must be fluid-free
+     * and passable, and the support must be stable.
+     * Semantic destinations that promise a land stance (a coast approach, build survey point,
+     * fishing stance, and so on) should use this predicate instead of treating swimmable water as
+     * land.
+     */
+    public static boolean isDryStandable(BlockGetter level, BlockPos feet) {
+        BlockPos head = feet.above();
+        BlockPos support = feet.below();
+        return level.getFluidState(feet).isEmpty()
+                && level.getFluidState(head).isEmpty()
+                && canWalkThrough(level, feet)
+                && canWalkThrough(level, head)
+                && canWalkOn(level, support);
     }
 
     /**
