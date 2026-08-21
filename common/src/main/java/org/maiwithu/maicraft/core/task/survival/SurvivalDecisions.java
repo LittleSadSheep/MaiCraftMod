@@ -78,4 +78,28 @@ public final class SurvivalDecisions {
     public static boolean breathTriggered(boolean headUnderWater, int airSupply) {
         return headUnderWater && airSupply <= LOW_AIR_TICKS;
     }
+
+    /**
+     * Whether an already-running breath rescue still owns the body.
+     *
+     * <p>This is deliberately a hysteresis decision, not another invocation of
+     * {@link #breathTriggered(boolean, int)}.  Crossing the surface is only the
+     * beginning of recovery: vanilla restores air over several ticks.  Giving
+     * navigation the body at the first breathable tick lets a downward swim edge
+     * submerge the eyes again before that refill is complete, producing an endless
+     * surface/dive oscillation around the low-air threshold.
+     *
+     * <p>Leaving the water entirely is also a safe terminal condition.  Otherwise
+     * the rescue remains authoritative until the eyes are breathable and the
+     * server-synchronised air value reaches the player's current maximum.  Using
+     * {@code maxAirSupply} keeps the rule correct for bodies whose maximum is
+     * changed by another mod.
+     */
+    public static boolean breathRecoveryRequired(boolean bodyInWater,
+                                                 boolean headUnderWater,
+                                                 int airSupply,
+                                                 int maxAirSupply) {
+        if (!bodyInWater && !headUnderWater) return false;
+        return headUnderWater || airSupply < maxAirSupply;
+    }
 }
