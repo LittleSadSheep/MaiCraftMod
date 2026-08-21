@@ -36,6 +36,7 @@ import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.DropTracker;
+import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.act.Interaction;
@@ -979,7 +980,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             stationDropTarget = nearest;
         }
 
-        if (insideNativePickupEnvelope(nearest)) {
+        if (NativePickupReceipt.insideVanillaTouchEnvelope(player, nearest)) {
             if (nav != null) nav.pause();
             if (nearest.hasPickUpDelay()) {
                 stationPickupTicks = 0;
@@ -994,6 +995,12 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         }
         stationPickupTicks = 0;
 
+        if (player.blockPosition().equals(nearest.blockPosition())) {
+            stopNav();
+            InputDriver.stepToward(player, nearest.position(), false);
+            return TaskState.RUNNING;
+        }
+
         if (nav == null) {
             nav = PlayerNav.toRevalidating(player, this::stationDropGoal, 1.0D,
                     this::recoveredStationInInventory, PlayerNav.ContextProvider.DEFAULT);
@@ -1001,7 +1008,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
-                nav.pause();
+                stopNav();
+                InputDriver.stepToward(player, nearest.position(), false);
                 yield TaskState.RUNNING;
             }
             case FAILED -> finishStationRecovery(false,
@@ -1020,10 +1028,6 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         return temporaryStationItem != null
                 && PlayerInv.carriedCount(player.getInventory(), temporaryStationItem)
                         > stationItemBeforeRecovery;
-    }
-
-    private boolean insideNativePickupEnvelope(ItemEntity item) {
-        return player.getBoundingBox().inflate(1.0D).intersects(item.getBoundingBox());
     }
 
     private AABB stationRecoveryBox() {
@@ -1285,6 +1289,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     @Override protected void cleanup() {
+        InputDriver.halt(player);
         if (surfaceChild != null) {
             surfaceChild.stop(player, Task.StopReason.REPLACED);
             surfaceChild = null;
