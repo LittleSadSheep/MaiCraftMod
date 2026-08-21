@@ -17,6 +17,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -30,6 +31,7 @@ import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.combat.Swing;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
@@ -201,6 +203,7 @@ public final class SemanticAcquireCompanionTask
     private HuntChildStage activeHuntStage = HuntChildStage.NONE;
     private UUID activeHuntTarget;
     private final Set<UUID> rejectedHuntTargets = new LinkedHashSet<>();
+    private int harmlessHuntRetargets;
     private int childSerial;
     private int plannerStepsThisTick;
     private String failureCode;
@@ -731,27 +734,12 @@ public final class SemanticAcquireCompanionTask
 
         GenericEntitySearchTaskRecord.Relation relation =
                 SemanticSourceKnowledge.huntRelation(hint.entityTypeIds());
-        List<Entity> safe = new ArrayList<>();
         List<Map<String, Object>> protectedCandidates = new ArrayList<>();
         int loadedRadius = need.huntSearchExpandedView
                 ? GenericEntitySearchCompanionTask.LOADED_EVIDENCE_RADIUS
                 : r.searchRadius;
-        AABB box = player.getBoundingBox().inflate(loadedRadius);
-        for (Entity entity : player.clientLevel.getEntities(player, box, candidate ->
-                candidate != player && !candidate.isRemoved() && candidate.isAlive()
-                        && candidate.isAttackable()
-                        && !rejectedHuntTargets.contains(candidate.getUUID())
-                        && hint.entityTypeIds().contains(
-                                BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType())))) {
-            if (!EntitySemanticSafety.matchesRelation(entity, relation)) continue;
-            List<String> reasons = EntitySemanticSafety.protectionReasons(
-                    player, entity, relation, r.protectedLabels, true);
-            Map<String, Object> fact = Map.of(
-                    "entity_type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
-                    "protection_evidence", reasons);
-            if (reasons.isEmpty()) safe.add(entity); else protectedCandidates.add(fact);
-        }
-        safe.sort(Comparator.comparingDouble(player::distanceToSqr));
+        List<Entity> safe = safeLoadedHuntCandidates(
+                hint, relation, loadedRadius, protectedCandidates);
         Map<String, Object> facts = new LinkedHashMap<>();
         facts.put("safe_candidate_count", safe.size());
         facts.put("protected_or_ambiguous_candidate_count", protectedCandidates.size());
@@ -764,8 +752,8 @@ public final class SemanticAcquireCompanionTask
                 addIssue("hunt", "protected_hunt_targets_skipped",
                         "loaded matching entities were excluded because they have explicit "
                                 + "protection evidence: they are "
-                                + "named, tamed, owned, leashed, in a vehicle, carrying a passenger, near "
-                                + "another player, or inside an explicitly protected enclosed area",
+                                + "named, tamed, owned, leashed, in a vehicle, carrying a passenger, "
+                                + "or inside an explicitly protected enclosed area",
                         facts);
             }
             String searchState = huntSearchState(need, hint, relation);
@@ -790,20 +778,9 @@ public final class SemanticAcquireCompanionTask
                     childId("hunt-search"),
                     now + 10L * 60L * 20L,
                     hint.entityTypeIds(), relation, 1, HUNT_SEARCH_DISTANCE,
-                    false, r.protectedLabels, true);
+                    false, r.protectedLabels, true, rejectedHuntTargets);
             return startHuntChild(need, search, HuntChildStage.SEARCH, null,
                     "find an unprotected semantic hunt source through first-person exploration");
-        }
-
-        if (EntitySemanticSafety.otherPlayerNearby(player, safe.getFirst())) {
-            addIssue("hunt", "other_player_near_hunt_target",
-                    "another player entered the target area; no harm was initiated",
-                    Map.of("entity_type", BuiltInRegistries.ENTITY_TYPE.getKey(
-                                    safe.getFirst().getType()).toString(),
-                            "requires_narration", true));
-            need.decisionRequired = true;
-            advanceSource(need);
-            return TaskState.RUNNING;
         }
 
         if (!takePlannerStep()) return TaskState.RUNNING;
@@ -816,6 +793,39 @@ public final class SemanticAcquireCompanionTask
         return startHuntChild(need, attack, HuntChildStage.ATTACK, target.getUUID(),
                 "hunt one loaded unprotected "
                         + BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()));
+    }
+
+    /**
+     * One source of truth for both initial hunt selection and harmless pre-strike retargeting.
+     * The returned order is the same nearest-first loaded-evidence order used by reviewHunt.
+     */
+    private List<Entity> safeLoadedHuntCandidates(
+            SemanticAcquireTaskRecord.SourceHint hint,
+            GenericEntitySearchTaskRecord.Relation relation,
+            int loadedRadius,
+            List<Map<String, Object>> protectedCandidates) {
+        List<Entity> safe = new ArrayList<>();
+        AABB box = player.getBoundingBox().inflate(loadedRadius);
+        for (Entity entity : player.clientLevel.getEntities(player, box, candidate ->
+                candidate != player && !candidate.isRemoved() && candidate.isAlive()
+                        && candidate.isAttackable()
+                        && !rejectedHuntTargets.contains(candidate.getUUID())
+                        && hint.entityTypeIds().contains(
+                                BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType())))) {
+            if (!EntitySemanticSafety.matchesRelation(entity, relation)) continue;
+            List<String> reasons = EntitySemanticSafety.protectionReasons(
+                    player, entity, relation, r.protectedLabels, true);
+            if (reasons.isEmpty()) {
+                safe.add(entity);
+            } else if (protectedCandidates != null) {
+                protectedCandidates.add(Map.of(
+                        "entity_type",
+                        BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+                        "protection_evidence", reasons));
+            }
+        }
+        safe.sort(Comparator.comparingDouble(player::distanceToSqr));
+        return safe;
     }
 
     private TaskState tickActiveChild() {
@@ -838,31 +848,10 @@ public final class SemanticAcquireCompanionTask
             }
             return TaskState.RUNNING;
         }
-        if (activeSource == SemanticAcquireTaskRecord.Source.HUNT
-                && activeHuntStage == HuntChildStage.ATTACK
-                && activeRecord instanceof AttackTaskRecord attack
-                && !attack.entityIds.isEmpty()) {
-            Entity liveTarget = player.clientLevel.getEntity(attack.entityIds.getFirst());
-            if (liveTarget != null && !liveTarget.isRemoved()
-                    && EntitySemanticSafety.otherPlayerNearby(player, liveTarget)) {
-                activeChild.stop(player, Task.StopReason.REPLACED);
-                TaskResult stopped = activeChild.result(TaskState.CANCELLED);
-                int after = count(activeNeed.itemIds);
-                int progress = Math.max(0, after - activeBeforeCount);
-                markActiveEffectsIfObserved(TaskState.CANCELLED, stopped, progress);
-                recordAttempt(TaskState.CANCELLED, stopped, after, progress, false);
-                Need interruptedNeed = activeNeed;
-                interruptedNeed.decisionRequired = true;
-                clearActive();
-                addIssue("hunt", "other_player_entered_hunt_area",
-                        "another player entered the target area; the strict attack was stopped",
-                        Map.of("inventory_progress", progress,
-                                "requires_narration", true));
-                advanceSource(interruptedNeed);
-                return TaskState.RUNNING;
-            }
-        }
-
+        TaskState authorizationStop = revalidateActiveHuntAuthorization();
+        if (authorizationStop != null) return authorizationStop;
+        TaskState harmlessRetarget = retargetUncommittedHuntToCloserCandidate();
+        if (harmlessRetarget != null) return harmlessRetarget;
         TaskState terminal;
         if (player.level().getGameTime() >= activeRecord.getDeadlineGameTime()) {
             activeChild.stop(player, Task.StopReason.REPLACED);
