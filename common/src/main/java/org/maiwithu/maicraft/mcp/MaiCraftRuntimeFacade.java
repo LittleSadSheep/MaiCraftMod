@@ -17,6 +17,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
@@ -271,7 +272,12 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("max_health", player.getMaxHealth());
         result.addProperty("food", player.getFoodData().getFoodLevel());
         result.addProperty("air", player.getAirSupply());
-        result.addProperty("day", player.level().isDay());
+        WorldTimeSemantics.Phase timePhase = WorldTimeSemantics.phase(player.level());
+        result.addProperty("day", WorldTimeSemantics.isDaytime(player.level()));
+        result.addProperty("is_daytime", WorldTimeSemantics.isDaytime(player.level()));
+        result.addProperty("time_phase", timePhase.id());
+        result.addProperty("time_of_day", WorldTimeSemantics.timeOfDay(player.level()));
+        result.addProperty("day_index", WorldTimeSemantics.dayIndex(player.level()));
         result.addProperty("weather", player.level().isThundering()
                 ? "thunder" : player.level().isRaining() ? "rain" : "clear");
         result.addProperty("game_time", player.level().getGameTime());
