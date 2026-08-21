@@ -5,12 +5,17 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.UUID;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** One bounded semantic entity-evidence search. No runtime entity handle or position is input. */
+/**
+ * One bounded semantic entity-evidence search. Public semantic input contains no runtime handle or
+ * position; an internal parent may attach transient excluded identities for safe handoff.
+ */
 public final class GenericEntitySearchTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "find_entity";
     public static final int MIN_DISTANCE = 16;
@@ -49,6 +54,12 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
     /** Internal safety mode used when the observation will immediately authorize harm. */
     public final boolean harmIntent;
 
+    /** Runtime identities already rejected by the parent transaction; never public tool input. */
+    private final transient Set<UUID> excludedEntityUuids;
+
+    /** Exact identities behind a successful observation; retained only for Java-side handoff. */
+    private transient List<UUID> internalVerifiedEntityUuids = List.of();
+
     static {
         TaskFactory.register(GenericEntitySearchTaskRecord.class,
                 GenericEntitySearchCompanionTask::new);
@@ -64,7 +75,7 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
             boolean mayAlterTerrain,
             List<String> protectedLabels) {
         this(toolCallId, deadlineGameTime, entityTypeIds, relation, count, maxDistance,
-                mayAlterTerrain, protectedLabels, false);
+                mayAlterTerrain, protectedLabels, false, Set.of());
     }
 
     public GenericEntitySearchTaskRecord(
@@ -77,6 +88,21 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
             boolean mayAlterTerrain,
             List<String> protectedLabels,
             boolean harmIntent) {
+        this(toolCallId, deadlineGameTime, entityTypeIds, relation, count, maxDistance,
+                mayAlterTerrain, protectedLabels, harmIntent, Set.of());
+    }
+
+    public GenericEntitySearchTaskRecord(
+            String toolCallId,
+            long deadlineGameTime,
+            List<ResourceLocation> entityTypeIds,
+            Relation relation,
+            int count,
+            int maxDistance,
+            boolean mayAlterTerrain,
+            List<String> protectedLabels,
+            boolean harmIntent,
+            Set<UUID> excludedEntityUuids) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.entityTypeIds = validateTypes(entityTypeIds);
         this.relation = relation == null ? Relation.ANY : relation;
@@ -88,6 +114,32 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
         this.mayAlterTerrain = mayAlterTerrain;
         this.protectedLabels = normalizeStrings(protectedLabels, 64, "protected labels");
         this.harmIntent = harmIntent;
+        this.excludedEntityUuids = excludedEntityUuids == null
+                ? Set.of() : Set.copyOf(excludedEntityUuids);
+    }
+
+    boolean excludes(UUID uuid) {
+        return uuid != null
+                && excludedEntityUuids != null
+                && excludedEntityUuids.contains(uuid);
+    }
+
+    void retainInternalVerifiedEntityUuids(Iterable<UUID> uuids) {
+        LinkedHashSet<UUID> retained = new LinkedHashSet<>();
+        if (uuids != null) {
+            for (UUID uuid : uuids) {
+                if (uuid != null
+                        && (excludedEntityUuids == null || !excludedEntityUuids.contains(uuid))) {
+                    retained.add(uuid);
+                }
+            }
+        }
+        internalVerifiedEntityUuids = List.copyOf(retained);
+    }
+
+    /** Internal Java-only handoff; callers must revalidate the live entity before acting. */
+    public List<UUID> internalVerifiedEntityUuids() {
+        return internalVerifiedEntityUuids == null ? List.of() : internalVerifiedEntityUuids;
     }
 
     /** Calling this method forces static task registration during Mod initialization. */

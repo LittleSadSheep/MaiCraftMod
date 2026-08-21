@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.core.task.entity;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -14,14 +16,16 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.SpawnPlacementTypes;
 import net.minecraft.world.entity.SpawnPlacements;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
-import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
@@ -36,9 +40,19 @@ public final class GenericEntitySearchCompanionTask
     private static final int MAX_LEG_DISTANCE = 80;
     /** A frontier should expose another chunk-width of terrain, not circle in place. */
     private static final int MIN_FRONTIER_PROGRESS = 16;
-    /** Look beside the geometric ray for a dry observation post before accepting water. */
-    private static final int LAND_FRONTIER_PROBE_RADIUS = WAYPOINT_GRID / 2;
-    private static final int LAND_FRONTIER_PROBE_STRIDE = 4;
+    /** Hard synchronous-computation budget, not a task time/distance gate. */
+    private static final int MAX_SURFACE_PROBES_PER_SELECTION = 160;
+    private static final int MAX_SHORE_SURFACE_PROBES = 176;
+    private static final int FRONTIER_DIRECTION_PROBES = 16;
+    private static final int FRONTIER_RAY_STRIDE = 8;
+    private static final int GROUND_DIRECTION_PASSES = 2;
+    private static final int SURFACE_VERTICAL_PROBE = 20;
+    private static final int SHORE_DIRECTION_SAMPLES = 12;
+    private static final int[] SHORE_SAMPLE_RADII = {
+            1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 88, 112
+    };
+    private static final int SHORE_REFINE_RADIUS = 4;
+    private static final int SHORE_REFINE_STRIDE = 2;
     /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
     private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
@@ -46,20 +60,44 @@ public final class GenericEntitySearchCompanionTask
 
     private enum Stage { OBSERVE, TRAVEL_FRONTIER }
 
+    private enum SurfaceKind { LAND, WATER, OTHER, UNLOADED }
+
+    private record SurfaceEvidence(SurfaceKind kind, BlockPos feet) {}
+
+    private record FrontierChoice(BlockPos position, String evidence) {}
+
+    private static final class SurfaceProbeBudget {
+        private int remaining;
+        private final Map<Long, SurfaceEvidence> cache = new HashMap<>();
+
+        private SurfaceProbeBudget(int remaining) {
+            this.remaining = remaining;
+        }
+    }
+
     private BlockPos origin;
     private Stage stage;
     private MoveToCompanionTask moveChild;
     private MoveToTaskRecord moveRecord;
+    private BlockPos activeFrontierTarget;
+    private boolean activeFrontierShoreReturn;
+    private boolean selectedFrontierShoreReturn;
     private int legSerial;
     private int scanCycles;
     private int frontierAttempts;
     private int frontierReached;
     private int frontierFailed;
+    private int sampledDryLandFrontiers;
+    private int shoreReturnFrontiers;
+    private int verifiedWaterCrossings;
     private double farthestBodyDistance;
     private String failureCode;
     private boolean preferLandFrontiers;
+    private boolean frontierSelectionDeferred;
+    private int groundDirectionPass;
 
     private final Set<Long> attemptedFrontiers = new LinkedHashSet<>();
+    private final Set<Long> failedShoreFrontiers = new LinkedHashSet<>();
     private final Map<UUID, ResourceLocation> observedSafe = new LinkedHashMap<>();
     private final Set<UUID> observedProtected = new LinkedHashSet<>();
     private final Map<String, Integer> protectedReasonCounts = new LinkedHashMap<>();
@@ -105,10 +143,23 @@ public final class GenericEntitySearchCompanionTask
     private TaskState observeThenContinue() {
         scanCycles++;
         scanLoadedEntities();
-        if (observedSafe.size() >= r.count) return TaskState.SUCCESS;
-        if (frontierAttempts >= r.maxWaypoints) return exhausted();
+        if (observedSafe.size() >= r.count) {
+            retainInternalEntityReceipt();
+            return TaskState.SUCCESS;
+        }
+        if (frontierAttempts >= r.maxWaypoints) {
+            return failSearch(
+                    "entity_search_waypoint_budget_exhausted",
+                    "the bounded search used its configured frontier waypoint budget; "
+                            + "this is not evidence that no further viable frontier exists",
+                    FailureType.TARGET_LOST);
+        }
 
         BlockPos frontier = nextFrontier(player.clientLevel);
+        if (frontier == null && frontierSelectionDeferred) {
+            frontierSelectionDeferred = false;
+            return TaskState.RUNNING;
+        }
         if (frontier == null) return exhausted();
         frontierAttempts++;
         startMove(frontier);
@@ -120,12 +171,15 @@ public final class GenericEntitySearchCompanionTask
         ClientLevel level = player.clientLevel;
         AABB box = player.getBoundingBox().inflate(LOADED_EVIDENCE_RADIUS);
         int loadedMatching = 0;
+        Set<UUID> acceptedBefore = Set.copyOf(observedSafe.keySet());
+        List<Entity> currentlySafeEntities = new ArrayList<>();
         for (Entity entity : level.getEntities(player, box, candidate ->
                 candidate != player && !candidate.isRemoved() && candidate.isAlive())) {
             ResourceLocation type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
             if (!r.entityTypeIds.contains(type) || !insideScope(entity.getX(), entity.getZ())) {
                 continue;
             }
+            if (r.excludes(entity.getUUID())) continue;
             if (!EntitySemanticSafety.matchesRelation(entity, r.relation)) continue;
             loadedMatching++;
             if (r.harmIntent && !entity.isAttackable()) {
@@ -138,13 +192,29 @@ public final class GenericEntitySearchCompanionTask
             List<String> reasons = EntitySemanticSafety.protectionReasons(
                     player, entity, r.relation, r.protectedLabels, r.harmIntent);
             if (reasons.isEmpty()) {
-                observedSafe.putIfAbsent(entity.getUUID(), type);
+                currentlySafeEntities.add(entity);
             } else if (observedProtected.add(entity.getUUID())) {
                 protectedOrAmbiguousSeen++;
                 for (String reason : reasons) protectedReasonCounts.merge(reason, 1, Integer::sum);
             }
         }
+        currentlySafeEntities.sort(Comparator.comparingDouble(player::distanceToSqr));
+        Map<UUID, ResourceLocation> currentlySafe = new LinkedHashMap<>();
+        for (Entity entity : currentlySafeEntities) {
+            currentlySafe.putIfAbsent(
+                    entity.getUUID(), BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()));
+        }
+        observedSafe.clear();
+        observedSafe.putAll(currentlySafe);
         lastLoadedMatching = loadedMatching;
+        long newlyAccepted = observedSafe.keySet().stream()
+                .filter(uuid -> !acceptedBefore.contains(uuid))
+                .count();
+        if (newlyAccepted > 0) {
+            org.maiwithu.maicraft.core.Constants.LOG.info(
+                    "[maicraft-task] entity search absorbed {} new acceptable loaded observation(s); {}/{} verified",
+                    newlyAccepted, observedSafe.size(), r.count);
+        }
     }
 
     private void startMove(BlockPos target) {
@@ -156,6 +226,9 @@ public final class GenericEntitySearchCompanionTask
                 (double) target.getX(), null, (double) target.getZ(), null,
                 r.mayAlterTerrain);
         moveChild = new MoveToCompanionTask(player, moveRecord);
+        activeFrontierTarget = target.immutable();
+        activeFrontierShoreReturn = selectedFrontierShoreReturn;
+        selectedFrontierShoreReturn = false;
     }
 
     private TaskState tickFrontierTravel() {
@@ -165,6 +238,7 @@ public final class GenericEntitySearchCompanionTask
         scanCycles++;
         scanLoadedEntities();
         if (observedSafe.size() >= r.count) {
+            retainInternalEntityReceipt();
             stopMove(TaskState.CANCELLED);
             return TaskState.SUCCESS;
         }
@@ -183,14 +257,24 @@ public final class GenericEntitySearchCompanionTask
             }
         }
         moveChild.result(terminal);
+        if (terminal != TaskState.SUCCESS
+                && activeFrontierShoreReturn
+                && activeFrontierTarget != null) {
+            failedShoreFrontiers.add(BlockPos.asLong(
+                    activeFrontierTarget.getX(), 0, activeFrontierTarget.getZ()));
+        }
         moveChild = null;
         moveRecord = null;
+        activeFrontierTarget = null;
+        activeFrontierShoreReturn = false;
         if (terminal == TaskState.SUCCESS) frontierReached++; else frontierFailed++;
         stage = Stage.OBSERVE;
         return TaskState.RUNNING;
     }
 
     private BlockPos nextFrontier(ClientLevel level) {
+        selectedFrontierShoreReturn = false;
+        if (preferLandFrontiers) return nextGroundSpawnFrontier(level);
         for (int probe = 0; probe < MAX_SPIRAL_PROBES; probe++) {
             BlockPos desired = nextSpiralPoint();
             if (!insideScope(desired.getX(), desired.getZ())) continue;
@@ -218,10 +302,11 @@ public final class GenericEntitySearchCompanionTask
                 spiralSegmentLength++;
             }
         }
+        int grid = Math.min(WAYPOINT_GRID, Math.max(1, r.maxDistance / 2));
         return new BlockPos(
-                origin.getX() + spiralX * WAYPOINT_GRID,
+                origin.getX() + spiralX * grid,
                 player.blockPosition().getY(),
-                origin.getZ() + spiralZ * WAYPOINT_GRID);
+                origin.getZ() + spiralZ * grid);
     }
 
     private BlockPos loadedFrontierToward(ClientLevel level, BlockPos desired) {
@@ -235,21 +320,97 @@ public final class GenericEntitySearchCompanionTask
             int x = (int) Math.round(current.getX() + dx / distance * leg);
             int z = (int) Math.round(current.getZ() + dz / distance * leg);
             if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
-            if (preferLandFrontiers) {
-                BlockPos land = nearestDryLandFrontier(level, current, x, z);
-                if (land != null) return land;
-            }
-            // Water is still a valid way to reveal new terrain. It is a fallback after the
-            // target type's vanilla spawn semantics told us that dry ground is better evidence.
             return new BlockPos(x, current.getY(), z);
         }
         return null;
     }
 
+    /** Choose a dry sampled endpoint; actual reachability is proved by the navigation child. */
+    private BlockPos nextGroundSpawnFrontier(ClientLevel level) {
+        BlockPos current = player.blockPosition();
+        if (player.isInWater()) {
+            BlockPos shore = nearestLoadedDryLand(level, current, groundDirectionPass);
+            if (shore == null) return deferGroundDirectionPass();
+            // Returning from water is recovery, not exploration. The nearest observed shore must
+            // remain eligible even when it was the last frontier we left.
+            attemptedFrontiers.add(BlockPos.asLong(shore.getX(), 0, shore.getZ()));
+            shoreReturnFrontiers++;
+            logGroundFrontier("return_to_loaded_shore", shore);
+            groundDirectionPass = 0;
+            selectedFrontierShoreReturn = true;
+            return shore;
+        }
+
+        SurfaceProbeBudget budget = new SurfaceProbeBudget(MAX_SURFACE_PROBES_PER_SELECTION);
+        double headingRotation = groundDirectionPass * Math.PI / FRONTIER_DIRECTION_PROBES;
+        List<FrontierChoice> choices = new ArrayList<>();
+        for (int probe = 0;
+                probe < FRONTIER_DIRECTION_PROBES && budget.remaining > 0;
+                probe++) {
+            double angle = headingRotation + Math.PI * 2.0 * probe / FRONTIER_DIRECTION_PROBES;
+            BlockPos desired = new BlockPos(
+                    current.getX() + (int) Math.round(Math.cos(angle) * MAX_LEG_DISTANCE),
+                    current.getY(),
+                    current.getZ() + (int) Math.round(Math.sin(angle) * MAX_LEG_DISTANCE));
+            FrontierChoice choice = sampledGroundFrontierToward(
+                    level, current, desired, budget);
+            if (choice == null || !isNovelFrontier(choice.position())) continue;
+            choices.add(choice);
+        }
+        if (!choices.isEmpty()) return selectGroundFrontier(current, choices);
+        return deferGroundDirectionPass();
+    }
+
+    private BlockPos selectGroundFrontier(
+            BlockPos current, List<FrontierChoice> choices) {
+        boolean hasDryChoice = choices.stream()
+                .anyMatch(choice -> !"bounded_water_crossing".equals(choice.evidence()));
+        BlockPos desired = nextSpiralPoint();
+        FrontierChoice selected = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        double bestProgress = Double.NEGATIVE_INFINITY;
+        for (FrontierChoice choice : choices) {
+            if (hasDryChoice && "bounded_water_crossing".equals(choice.evidence())) continue;
+            double score = distanceSqr(
+                    choice.position().getX(), choice.position().getZ(),
+                    desired.getX(), desired.getZ());
+            double progress = distanceSqr(
+                    choice.position().getX(), choice.position().getZ(),
+                    current.getX(), current.getZ());
+            if (score < bestScore || (score == bestScore && progress > bestProgress)) {
+                selected = choice;
+                bestScore = score;
+                bestProgress = progress;
+            }
+        }
+        if (selected == null) return deferGroundDirectionPass();
+        attemptedFrontiers.add(BlockPos.asLong(
+                selected.position().getX(), 0, selected.position().getZ()));
+        if ("bounded_water_crossing".equals(selected.evidence())) {
+            verifiedWaterCrossings++;
+        } else {
+            sampledDryLandFrontiers++;
+        }
+        logGroundFrontier(selected.evidence(), selected.position());
+        groundDirectionPass = 0;
+        return selected.position();
+    }
+
+    private BlockPos deferGroundDirectionPass() {
+        groundDirectionPass++;
+        if (groundDirectionPass < GROUND_DIRECTION_PASSES) {
+            frontierSelectionDeferred = true;
+        } else {
+            groundDirectionPass = 0;
+        }
+        return null;
+    }
+
     /**
-     * Resolve a geometric frontier to nearby dry, standable loaded terrain. The preference is
-     * enabled only when every requested entity type uses vanilla's ON_GROUND spawn placement;
-     * aquatic or unrestricted types retain the ordinary terrain-neutral frontier search.
+     * Sample one bounded ray. Dry samples provide endpoint evidence; the real first-person
+     * navigator remains the authority on height, obstacles and route connectivity. Open water is
+     * never a fallback: only a fully observed water run followed by at least the same amount of
+     * sampled dry runway can produce a crossing endpoint.
      */
     private FrontierChoice sampledGroundFrontierToward(
             ClientLevel level,
