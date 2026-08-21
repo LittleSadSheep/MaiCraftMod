@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.SlabBlock;
@@ -275,7 +276,9 @@ public abstract class Movement {
         // BreathChain owns the emergency ascent. Once the eyes clear the surface, keep that
         // surface stroke until vanilla has replenished the authoritative air value; immediately
         // sneaking under again would make navigation and the breath reflex alternate every tick.
-        if (!player.isUnderWater() && player.getAirSupply() < player.getMaxAirSupply()) {
+        if (!player.isEyeInFluid(FluidTags.WATER)
+                && player.isInWater()
+                && player.getAirSupply() < player.getMaxAirSupply()) {
             state.setTarget(new MovementState.MovementTarget(yaw, -28.0f, false))
                     .setInput(Input.MOVE_FORWARD, true)
                     .setInput(Input.JUMP, true);
