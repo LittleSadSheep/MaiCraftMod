@@ -178,22 +178,81 @@ final class LootSweep {
         } else {
             pickupWaitTicks = 0;
         }
-        return touching;
+        noCapacityContactTicks = 0;
+        return ++capableContactTicks >= CAPABLE_CONTACT_SETTLE_TICKS
+                ? PickupContact.REFUSED_WITH_CAPACITY : PickupContact.WAITING;
     }
 
-    boolean pickupBlocked() {
-        return pickupWaitTicks >= PICKUP_SETTLE_TICKS;
+    private boolean insideServerTouchQuery(ItemEntity item) {
+        return NativePickupReceipt.insideVanillaTouchEnvelope(player, item);
     }
 
-    private boolean insideNativePickupEnvelope(ItemEntity item) {
-        return player.getBoundingBox().inflate(1.0).intersects(item.getBoundingBox());
+    private boolean inventoryCanAccept(ItemStack stack) {
+        return NativePickupReceipt.canAccept(player, stack);
+    }
+
+    private void resetContactEvidence() {
+        capableContactTicks = 0;
+        noCapacityContactTicks = 0;
+        contactItemId = -1;
+    }
+
+    String contactEvidence() {
+        ItemEntity item = nearest().orElse(null);
+        if (item == null) return "no live attributable item";
+        return itemName(item.getItem().getItem()) + " x" + item.getItem().getCount()
+                + " at " + item.blockPosition().toShortString()
+                + "; client_capacity=" + inventoryCanAccept(item.getItem())
+                + "; pickup_delay_visible=" + item.hasPickUpDelay()
+                + "; true_touch=" + insideServerTouchQuery(item)
+                + "; capable_contact_ticks=" + capableContactTicks
+                + "; no_capacity_contact_ticks=" + noCapacityContactTicks;
+    }
+
+    boolean needsFineApproach() {
+        ItemEntity item = nearest().orElse(null);
+        return item != null && !insideServerTouchQuery(item)
+                && player.blockPosition().equals(item.blockPosition());
+    }
+
+    net.minecraft.world.phys.Vec3 nearestPosition() {
+        return nearest().map(ItemEntity::position).orElse(player.position());
+    }
+
+    /**
+     * Do not treat a removed ItemEntity as collected until item conservation balances against
+     * synchronized inventory gain or another still-live attributed stack (the normal merge case).
+     */
+    VanishState vanishState() {
+        Map<Item, Integer> unaccounted = unaccountedByItem();
+        if (unaccounted.isEmpty()) {
+            unaccountedSince = Long.MIN_VALUE;
+            return VanishState.CLEAR;
+        }
+        long now = player.level().getGameTime();
+        if (unaccountedSince == Long.MIN_VALUE) unaccountedSince = now;
+        return now - unaccountedSince >= VANISH_RECONCILE_TICKS
+                ? VanishState.UNCONFIRMED : VanishState.WAITING_FOR_INVENTORY_SYNC;
+    }
+
+    String vanishEvidence() {
+        return "unconfirmed=" + named(unaccountedByItem())
+                + "; inventory_gain=" + named(currentSweepInventoryGain())
+                + "; live_attributed=" + named(reachableTrackedLiveCounts())
+                + "; ambiguous_merge=" + named(sweepAmbiguous);
     }
 
     void noteApproachFailure() {
         if (++approachFailures < MAX_APPROACH_FAILURES) return;
         approachFailures = 0;
         nearest().ifPresent(item -> {
-            if (skipped.add(item.getId())) unreachableCount++;
+            if (skipped.add(item.getId())) {
+                unreachableCount++;
+                account(unreachableByItem,
+                        item.getItem().getItem(), item.getItem().getCount());
+                account(sweepUnreachable,
+                        item.getItem().getItem(), item.getItem().getCount());
+            }
         });
     }
 
@@ -203,12 +262,15 @@ final class LootSweep {
 
     void finish() {
         // Keep the baseline: an unreachable/ambiguous stack remains pre-existing for later kills.
+        settleCurrentSweepCollection();
+        active = false;
+        Map<String, Object> receipt = report();
         tracked.clear();
         trackedCounts.clear();
         skipped.clear();
         deathPositions.clear();
-        active = false;
-        pickupWaitTicks = 0;
+        resetContactEvidence();
+        Constants.LOG.info("[maicraft-loot] completed causal sweep: {}", receipt);
     }
 
     int unreachableCount() {
@@ -220,6 +282,140 @@ final class LootSweep {
     }
 
     boolean mustSettle() {
-        return active && (settling() || !live().isEmpty());
+        return active && (settling()
+                || !live().isEmpty()
+                || !unaccountedByItem().isEmpty()
+                || hasUnreachableCurrentSweep()
+                || hasAmbiguousCurrentSweep());
+    }
+
+    boolean hasUnreachableCurrentSweep() {
+        return !sweepUnreachable.isEmpty();
+    }
+
+    boolean hasAmbiguousCurrentSweep() {
+        return !sweepAmbiguous.isEmpty();
+    }
+
+    String unreachableEvidence() {
+        return "unreachable=" + named(sweepUnreachable)
+                + "; confirmed_inventory_gain=" + named(currentSweepInventoryGain())
+                + "; remaining_reachable=" + named(reachableTrackedLiveCounts());
+    }
+
+    String ambiguousEvidence() {
+        return "inseparable_causal_units=" + named(sweepAmbiguous)
+                + "; preexisting_stack_disappeared=" + named(vanishedPreexistingByItem)
+                + "; confirmed_inventory_gain=" + named(currentSweepInventoryGain());
+    }
+
+    Map<String, Object> report() {
+        Map<Item, Integer> confirmed = new HashMap<>(collectedFromSettledSweeps);
+        if (active) {
+            for (var entry : sweepAttributed.entrySet()) {
+                int gain = Math.max(0, inventoryCount(entry.getKey())
+                        - inventoryAtSweepStart.getOrDefault(entry.getKey(), 0));
+                account(confirmed, entry.getKey(), Math.min(entry.getValue(), gain));
+            }
+        }
+        Map<Item, Integer> remaining = new HashMap<>();
+        for (int id : tracked) {
+            if (skipped.contains(id)) continue;
+            Entity entity = player.clientLevel.getEntity(id);
+            if (entity instanceof ItemEntity item && !item.isRemoved()) {
+                account(remaining, item.getItem().getItem(), item.getItem().getCount());
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("attributed_by_item", named(attributedTotal));
+        out.put("confirmed_inventory_gain_by_item", named(confirmed));
+        out.put("remaining_reachable_by_item", named(remaining));
+        out.put("unreachable_by_item", named(unreachableByItem));
+        out.put("ambiguous_merged_by_item", named(ambiguousByItem));
+        out.put("rejected_local_player_drops_by_item", named(rejectedLocalPlayerDrops));
+        out.put("preexisting_stack_disappeared_by_item", named(vanishedPreexistingByItem));
+        out.put("unconfirmed_vanished_by_item", named(unaccountedByItem()));
+        out.put("death_site_count", deathPositions.size());
+        out.put("active_sweep", active);
+        out.put("attribution_window_open", active && settling());
+        out.put("contact_evidence", contactEvidence());
+        return out;
+    }
+
+    private void settleCurrentSweepCollection() {
+        for (var entry : sweepAttributed.entrySet()) {
+            int gain = Math.max(0, inventoryCount(entry.getKey())
+                    - inventoryAtSweepStart.getOrDefault(entry.getKey(), 0));
+            account(collectedFromSettledSweeps,
+                    entry.getKey(), Math.min(entry.getValue(), gain));
+        }
+    }
+
+    private Map<Item, Integer> currentSweepInventoryGain() {
+        Map<Item, Integer> out = new HashMap<>();
+        for (Item item : sweepAttributed.keySet()) {
+            int gain = Math.max(0,
+                    inventoryCount(item) - inventoryAtSweepStart.getOrDefault(item, 0));
+            if (gain > 0) out.put(item, gain);
+        }
+        return out;
+    }
+
+    private Map<Item, Integer> reachableTrackedLiveCounts() {
+        Map<Item, Integer> out = new HashMap<>();
+        for (int id : tracked) {
+            if (skipped.contains(id)) continue;
+            Entity entity = player.clientLevel.getEntity(id);
+            if (entity instanceof ItemEntity item && !item.isRemoved()) {
+                account(out, item.getItem().getItem(), item.getItem().getCount());
+            }
+        }
+        return out;
+    }
+
+    private Map<Item, Integer> unaccountedByItem() {
+        Map<Item, Integer> gains = currentSweepInventoryGain();
+        Map<Item, Integer> liveCounts = reachableTrackedLiveCounts();
+        Map<Item, Integer> out = new HashMap<>();
+        for (var entry : sweepAttributed.entrySet()) {
+            int missing = entry.getValue()
+                    - gains.getOrDefault(entry.getKey(), 0)
+                    - liveCounts.getOrDefault(entry.getKey(), 0)
+                    - sweepAmbiguous.getOrDefault(entry.getKey(), 0)
+                    - sweepUnreachable.getOrDefault(entry.getKey(), 0);
+            if (missing > 0) out.put(entry.getKey(), missing);
+        }
+        return out;
+    }
+
+    private void snapshotInventory(Map<Item, Integer> out) {
+        out.clear();
+        for (ItemStack stack : player.getInventory().items) {
+            if (!stack.isEmpty()) account(out, stack.getItem(), stack.getCount());
+        }
+    }
+
+    private int inventoryCount(Item item) {
+        int count = 0;
+        for (ItemStack stack : player.getInventory().items) {
+            if (!stack.isEmpty() && stack.is(item)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private static void account(Map<Item, Integer> counts, Item item, int amount) {
+        if (amount > 0) counts.merge(item, amount, Integer::sum);
+    }
+
+    private static Map<String, Integer> named(Map<Item, Integer> counts) {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        counts.entrySet().stream()
+                .sorted(Comparator.comparing(entry -> itemName(entry.getKey())))
+                .forEach(entry -> out.put(itemName(entry.getKey()), entry.getValue()));
+        return out;
+    }
+
+    private static String itemName(Item item) {
+        return BuiltInRegistries.ITEM.getKey(item).toString();
     }
 }

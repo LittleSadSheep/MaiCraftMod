@@ -940,21 +940,67 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return TaskState.RUNNING;
         }
         loot.prune();
-        if (loot.waitingInsidePickupEnvelope()) {
-            stopNav();
-            InputDriver.halt(player);
-            if (loot.pickupBlocked()) {
-                fail("reached a drop from the defeated target, but the inventory never accepted it; "
-                                + "the main inventory may be full",
+        switch (loot.pickupContact()) {
+            case WAITING -> {
+                stopNav();
+                InputDriver.halt(player);
+                return TaskState.RUNNING;
+            }
+            case NO_CAPACITY -> {
+                fail("reached an attributable drop, and the synchronized main inventory has "
+                                + "neither a free slot nor compatible stack capacity: "
+                                + loot.contactEvidence(),
                         FailureType.NO_SPACE);
                 return TaskState.FAILED;
             }
-            return TaskState.RUNNING;
+            case REFUSED_WITH_CAPACITY -> {
+                fail("the server left an attributable drop in true pickup contact even though "
+                                + "the synchronized main inventory has capacity: "
+                                + loot.contactEvidence(),
+                        FailureType.UNKNOWN);
+                return TaskState.FAILED;
+            }
+            case NONE -> { }
         }
         if (loot.live().isEmpty()) {
+            switch (loot.vanishState()) {
+                case WAITING_FOR_INVENTORY_SYNC -> {
+                    stopNav();
+                    InputDriver.halt(player);
+                    return TaskState.RUNNING;
+                }
+                case UNCONFIRMED -> {
+                    fail("an attributable drop disappeared without a matching inventory gain, "
+                                    + "remaining live stack, or accounted merge: "
+                                    + loot.vanishEvidence(),
+                            FailureType.UNKNOWN);
+                    return TaskState.FAILED;
+                }
+                case CLEAR -> { }
+            }
+            if (loot.hasUnreachableCurrentSweep()) {
+                fail("not every attributable drop from the defeated target is reachable: "
+                                + loot.unreachableEvidence(),
+                        FailureType.NO_PATH);
+                return TaskState.FAILED;
+            }
+            if (loot.hasAmbiguousCurrentSweep()) {
+                fail("attributable loot merged with a pre-existing stack and cannot be collected "
+                                + "without taking older items: " + loot.ambiguousEvidence(),
+                        FailureType.UNKNOWN);
+                return TaskState.FAILED;
+            }
             stopNav();
             loot.finish();
             phase = Phase.COMBAT;
+            return TaskState.RUNNING;
+        }
+        if (loot.needsFineApproach()) {
+            stopNav();
+            // A* works in feet cells. Within the same cell the player and a sliding ItemEntity can
+            // still be on opposite edges, so finish the last fraction with ordinary first-person
+            // forward input instead of repeatedly accepting ARRIVED for the unchanged cell.
+            InputDriver.stepToward(player, loot.nearestPosition(), false);
             return TaskState.RUNNING;
         }
         if (nav == null) {
@@ -963,9 +1009,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         switch (nav.tick()) {
             case RUNNING -> { }
             case ARRIVED -> {
-                // The exact item cell should put the vanilla pickup envelopes in contact on the
-                // following tick. Re-root once if the item slid while the last segment arrived.
                 stopNav();
+                InputDriver.stepToward(player, loot.nearestPosition(), false);
             }
             case FAILED -> {
                 loot.noteApproachFailure();
@@ -1031,12 +1076,21 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         data.put("loot_gained", lootGained());
         data.put("unreachable_drop_count", loot.unreachableCount());
         data.put("ambiguous_merged_drop_count", loot.ambiguousMergedCount());
+        data.put("loot_receipt", loot.report());
         return data;
     }
 
     @Override
     public boolean mustSettleBeforeSatisfiedCancellation() {
-        return phase == Phase.LOOT && loot.mustSettle();
+        // A native attack/use packet can already be in flight while the confirmed strike ledger is
+        // still zero.  Treat the first concrete hand action as the transaction boundary; otherwise
+        // a parent could retarget/cancel in that acknowledgement gap even though the old target is
+        // about to take damage.  Once committed, combat + causal drop settlement remain one unit.
+        return meleeAction != null
+                || shot != null
+                || r.strikes() > 0
+                || !r.defeated().isEmpty()
+                || (phase == Phase.LOOT && loot.mustSettle());
     }
 
     private String tally() {
