@@ -261,18 +261,20 @@ final class SprintPolicy {
         if (!current.getDirection().equals(next.getDirection().below())) {
             return false;
         }
-        if (nextNext.getDirection().getX() != next.getDirection().getX()
-                || nextNext.getDirection().getZ() != next.getDirection().getZ()) {
+        if (!(nextNext instanceof MovementTraverse landing)
+                || landing.getDirection().getX() != next.getDirection().getX()
+                || landing.getDirection().getZ() != next.getDirection().getZ()) {
             return false;
         }
         var level = LoadedOnlyView.of(player.level());
-        if (!MovementHelper.canWalkOn(level, current.getDest().below())) {
+        if (!isSafeDryTraverse(current, level)
+                || !isSafeDryTraverse(landing, level)) {
             return false;
         }
-        if (!MovementHelper.canWalkOn(level, next.getDest().below())) {
-            return false;
-        }
-        if (!next.toBreak(level).isEmpty()) {
+        if (!next.toBreak(level).isEmpty()
+                || !next.toPlace(level).isEmpty()
+                || !next.toWalkInto(level).isEmpty()
+                || !isSafeDryCell(level, next.getDest())) {
             return false;
         }
         for (int x = 0; x < 2; x++) {
@@ -289,7 +291,8 @@ final class SprintPolicy {
         if (MovementHelper.avoidWalkingInto(level.getBlockState(current.getSrc().above(3)))) {
             return false;
         }
-        return !MovementHelper.avoidWalkingInto(level.getBlockState(next.getDest().above(2)));
+        return !MovementHelper.avoidWalkingInto(level.getBlockState(next.getDest().above(2)))
+                && MovementHelper.fullyPassable(level, landing.getDest().above(2));
     }
 
     /** 下降可否疾跑冲进下一步:同向下降恒可;落点前方可站时同向平走/对角亦可。 */

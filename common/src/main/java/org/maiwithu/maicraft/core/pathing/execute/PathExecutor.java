@@ -646,6 +646,7 @@ public final class PathExecutor {
             // for this physical tick; otherwise the fresh executor's default false briefly drops
             // sprint exactly when a plan-ahead segment is attached to an otherwise continuous run.
             ret.sprintNextTick = sprintNextTick;
+            ret.sprint.inheritTravelJumpEpisode(sprint);
             return ret;
         }).orElseGet(this::cutIfTooLong);
     }
@@ -668,6 +669,7 @@ public final class PathExecutor {
             ret.ticksSinceProgress = ticksSinceProgress;
             // History trimming is likewise not a body transition. Keep this tick's sprint lease.
             ret.sprintNextTick = sprintNextTick;
+            ret.sprint.inheritTravelJumpEpisode(sprint);
             return ret;
         }
         return this;
