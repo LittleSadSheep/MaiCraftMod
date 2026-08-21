@@ -19,7 +19,6 @@ import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 
@@ -27,7 +26,6 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 public final class EntitySemanticSafety {
     private static final int LANDMARK_PROTECTION_RADIUS = 12;
     private static final int ENCLOSURE_RADIUS = 8;
-    private static final double OTHER_PLAYER_RADIUS = 16.0;
 
     private enum ManagedArea { OPEN, ENCLOSED, UNKNOWN }
 
@@ -90,17 +88,7 @@ public final class EntitySemanticSafety {
                 }
             }
         }
-        if (harmIntent && otherPlayerNearby(player, entity)) {
-            reasons.add("other_player_nearby");
-        }
         return List.copyOf(reasons);
-    }
-
-    /** A harm task must not select an entity while another player is close enough to contest it. */
-    public static boolean otherPlayerNearby(LocalPlayer player, Entity entity) {
-        AABB area = entity.getBoundingBox().inflate(OTHER_PLAYER_RADIUS);
-        return !player.clientLevel.getEntitiesOfClass(Player.class, area, candidate ->
-                candidate != player && candidate.isAlive() && !candidate.isSpectator()).isEmpty();
     }
 
     private static boolean isHostile(Entity entity) {
@@ -110,16 +98,15 @@ public final class EntitySemanticSafety {
 
     private static ProtectedAreaEvidence protectedAreaEvidence(
             LocalPlayer player, BlockPos position, List<String> protectedLabels) {
-        LinkedHashSet<String> directReasons = new LinkedHashSet<>();
         LinkedHashSet<String> containingAreas = new LinkedHashSet<>();
         IntentRuntime runtime = IntentRuntime.get();
         String dimension = player.level().dimension().location().toString();
         for (String label : protectedLabels == null ? List.<String>of() : protectedLabels) {
             IntentRuntime.Landmark landmark = runtime.landmark(label);
-            if (landmark == null) {
-                directReasons.add("unknown_protected_label:" + label);
-            } else if (insideLandmark(position, landmark, dimension)) {
-                directReasons.add("protected_landmark:" + landmark.label());
+            // A label without a resolved location proves nothing about this entity. Likewise, a
+            // remembered landmark is only area context: the point/radius is not itself a fence.
+            // Physical enclosure evidence below is what turns that context into protection.
+            if (landmark != null && insideLandmark(position, landmark, dimension)) {
                 containingAreas.add(landmark.label());
             }
         }
@@ -130,7 +117,7 @@ public final class EntitySemanticSafety {
          * caller's explicit protected_labels can establish this area context.
          */
         return new ProtectedAreaEvidence(
-                List.copyOf(directReasons), List.copyOf(containingAreas));
+                List.of(), List.copyOf(containingAreas));
     }
 
     private static boolean insideLandmark(

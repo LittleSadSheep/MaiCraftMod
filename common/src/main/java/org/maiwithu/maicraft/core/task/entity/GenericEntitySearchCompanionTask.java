@@ -251,63 +251,203 @@ public final class GenericEntitySearchCompanionTask
      * enabled only when every requested entity type uses vanilla's ON_GROUND spawn placement;
      * aquatic or unrestricted types retain the ordinary terrain-neutral frontier search.
      */
-    private BlockPos nearestDryLandFrontier(
-            ClientLevel level, BlockPos current, int projectedX, int projectedZ) {
+    private FrontierChoice sampledGroundFrontierToward(
+            ClientLevel level,
+            BlockPos current,
+            BlockPos desired,
+            SurfaceProbeBudget budget) {
+        double dx = desired.getX() - current.getX();
+        double dz = desired.getZ() - current.getZ();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 1.0) return null;
+        double ux = dx / length;
+        double uz = dz / length;
+        double farthest = Math.min(MAX_LEG_DISTANCE, Math.max(length, minimumFrontierProgress()));
+        BlockPos lastDryBeforeWater = null;
+        BlockPos verifiedFarShore = null;
+        boolean enteredWater = false;
+        int waterSamples = 0;
+        int farShoreDrySamples = 0;
+        long previous = Long.MIN_VALUE;
+        for (int step = FRONTIER_RAY_STRIDE;
+                step <= farthest && budget.remaining > 0;
+                step += FRONTIER_RAY_STRIDE) {
+            int x = (int) Math.round(current.getX() + ux * step);
+            int z = (int) Math.round(current.getZ() + uz * step);
+            long key = BlockPos.asLong(x, 0, z);
+            if (key == previous) continue;
+            previous = key;
+            if (!insideScope(x, z)) break;
+            SurfaceEvidence evidence = surfaceEvidence(level, x, z, budget);
+            if (evidence == null) break;
+            if (evidence.kind() == SurfaceKind.UNLOADED
+                    || evidence.kind() == SurfaceKind.OTHER) {
+                break;
+            }
+            if (!enteredWater) {
+                if (evidence.kind() == SurfaceKind.WATER) {
+                    enteredWater = true;
+                    waterSamples = 1;
+                } else if (horizontalDistance(current, evidence.feet())
+                        >= minimumFrontierProgress()) {
+                    lastDryBeforeWater = evidence.feet();
+                }
+                continue;
+            }
+            if (evidence.kind() == SurfaceKind.WATER) {
+                if (farShoreDrySamples > 0) break;
+                waterSamples++;
+                continue;
+            }
+            farShoreDrySamples++;
+            if (farShoreDrySamples >= waterSamples
+                    && horizontalDistance(current, evidence.feet())
+                            >= minimumFrontierProgress()) {
+                verifiedFarShore = evidence.feet();
+            }
+        }
+        if (verifiedFarShore != null) {
+            return new FrontierChoice(verifiedFarShore, "bounded_water_crossing");
+        }
+        return lastDryBeforeWater == null ? null
+                : new FrontierChoice(lastDryBeforeWater, "sampled_dry_land");
+    }
+
+    private BlockPos nearestLoadedDryLand(
+            ClientLevel level, BlockPos current, int directionPass) {
+        SurfaceProbeBudget budget = new SurfaceProbeBudget(MAX_SHORE_SURFACE_PROBES);
         BlockPos best = null;
-        double bestScore = Double.POSITIVE_INFINITY;
-        for (int dx = -LAND_FRONTIER_PROBE_RADIUS;
-                dx <= LAND_FRONTIER_PROBE_RADIUS;
-                dx += LAND_FRONTIER_PROBE_STRIDE) {
-            for (int dz = -LAND_FRONTIER_PROBE_RADIUS;
-                    dz <= LAND_FRONTIER_PROBE_RADIUS;
-                    dz += LAND_FRONTIER_PROBE_STRIDE) {
-                int x = projectedX + dx;
-                int z = projectedZ + dz;
-                if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
-                double progress = horizontalDistance(current, new BlockPos(x, current.getY(), z));
-                if (progress < MIN_FRONTIER_PROGRESS) continue;
-                BlockPos candidate = drySurface(level, x, z);
-                if (candidate == null) continue;
-                double score = (double) dx * dx + (double) dz * dz;
-                if (score < bestScore) {
-                    best = candidate;
-                    bestScore = score;
+        double bestDistanceSqr = Double.POSITIVE_INFINITY;
+        for (int radius : SHORE_SAMPLE_RADII) {
+            for (int direction = 0;
+                    direction < SHORE_DIRECTION_SAMPLES && budget.remaining > 0;
+                    direction++) {
+                double angle = directionPass * Math.PI / SHORE_DIRECTION_SAMPLES
+                        + Math.PI * 2.0 * direction / SHORE_DIRECTION_SAMPLES;
+                int x = current.getX() + (int) Math.round(Math.cos(angle) * radius);
+                int z = current.getZ() + (int) Math.round(Math.sin(angle) * radius);
+                if (!insideScope(x, z)) continue;
+                SurfaceEvidence evidence = surfaceEvidence(level, x, z, budget);
+                if (evidence == null
+                        || evidence.kind() != SurfaceKind.LAND
+                        || isFailedShoreNeighborhood(evidence.feet())) {
+                    continue;
+                }
+                double distanceSqr = distanceSqr(
+                        evidence.feet().getX(), evidence.feet().getZ(),
+                        current.getX(), current.getZ());
+                if (distanceSqr < bestDistanceSqr) {
+                    best = evidence.feet();
+                    bestDistanceSqr = distanceSqr;
                 }
             }
+            if (best != null) break;
         }
         if (best == null) return null;
 
-        // Coarse sampling finds the land mass cheaply; refine within its four-block sample cell
-        // so the child receives a real standable column rather than an arbitrary grid point.
-        BlockPos refined = best;
-        double refinedScore = distanceSqr(best.getX(), best.getZ(), projectedX, projectedZ);
-        for (int dx = -LAND_FRONTIER_PROBE_STRIDE + 1;
-                dx < LAND_FRONTIER_PROBE_STRIDE;
-                dx++) {
-            for (int dz = -LAND_FRONTIER_PROBE_STRIDE + 1;
-                    dz < LAND_FRONTIER_PROBE_STRIDE;
-                    dz++) {
-                int x = best.getX() + dx;
-                int z = best.getZ() + dz;
-                if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
-                BlockPos candidate = drySurface(level, x, z);
-                if (candidate == null) continue;
-                double score = distanceSqr(x, z, projectedX, projectedZ);
-                if (score < refinedScore) {
-                    refined = candidate;
-                    refinedScore = score;
+        // A small fixed refinement improves the sampled shoreline point without turning shore
+        // recovery back into a radius-wide scan. Recovery deliberately ignores novelty.
+        BlockPos coarse = best;
+        for (int dx = -SHORE_REFINE_RADIUS;
+                dx <= SHORE_REFINE_RADIUS && budget.remaining > 0;
+                dx += SHORE_REFINE_STRIDE) {
+            for (int dz = -SHORE_REFINE_RADIUS;
+                    dz <= SHORE_REFINE_RADIUS && budget.remaining > 0;
+                    dz += SHORE_REFINE_STRIDE) {
+                int x = coarse.getX() + dx;
+                int z = coarse.getZ() + dz;
+                if (!insideScope(x, z)) continue;
+                SurfaceEvidence evidence = surfaceEvidence(level, x, z, budget);
+                if (evidence == null
+                        || evidence.kind() != SurfaceKind.LAND
+                        || isFailedShoreNeighborhood(evidence.feet())) {
+                    continue;
+                }
+                double distanceSqr = distanceSqr(
+                        evidence.feet().getX(), evidence.feet().getZ(),
+                        current.getX(), current.getZ());
+                if (distanceSqr < bestDistanceSqr) {
+                    best = evidence.feet();
+                    bestDistanceSqr = distanceSqr;
                 }
             }
         }
-        return refined;
+        return best;
+    }
+
+    private boolean isFailedShoreNeighborhood(BlockPos candidate) {
+        double separationSqr = (double) SHORE_REFINE_RADIUS * SHORE_REFINE_RADIUS;
+        for (long packed : failedShoreFrontiers) {
+            BlockPos failed = BlockPos.of(packed);
+            if (distanceSqr(candidate.getX(), candidate.getZ(),
+                    failed.getX(), failed.getZ()) <= separationSqr) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isNovelFrontier(BlockPos candidate) {
+        double separation = minimumFrontierProgress();
+        double separationSqr = separation * separation;
+        for (long packed : attemptedFrontiers) {
+            BlockPos prior = BlockPos.of(packed);
+            if (distanceSqr(candidate.getX(), candidate.getZ(),
+                    prior.getX(), prior.getZ()) < separationSqr) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private int minimumFrontierProgress() {
+        return Math.max(1, Math.min(MIN_FRONTIER_PROGRESS, r.maxDistance / 2));
+    }
+
+    private void logGroundFrontier(String evidence, BlockPos target) {
+        org.maiwithu.maicraft.core.Constants.LOG.info(
+                "[maicraft-task] entity search ON_GROUND frontier={} target={},{},{}",
+                evidence, target.getX(), target.getY(), target.getZ());
+    }
+
+    private SurfaceEvidence surfaceEvidence(
+            ClientLevel level,
+            int x,
+            int z,
+            SurfaceProbeBudget budget) {
+        long key = BlockPos.asLong(x, 0, z);
+        SurfaceEvidence cached = budget.cache.get(key);
+        if (cached != null) return cached;
+        if (budget.remaining <= 0) return null;
+        budget.remaining--;
+        SurfaceEvidence evidence;
+        if (!columnLoaded(level, x, z)) {
+            evidence = new SurfaceEvidence(SurfaceKind.UNLOADED, null);
+        } else {
+            BlockPos dry = drySurface(level, x, z);
+            if (dry != null) {
+                evidence = new SurfaceEvidence(SurfaceKind.LAND, dry);
+            } else if (boundedSurfaceWater(level, x, z)) {
+                evidence = new SurfaceEvidence(SurfaceKind.WATER, null);
+            } else {
+                evidence = new SurfaceEvidence(SurfaceKind.OTHER, null);
+            }
+        }
+        budget.cache.put(key, evidence);
+        return evidence;
     }
 
     private BlockPos drySurface(ClientLevel level, int x, int z) {
-        int estimate = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
-        int upper = Math.min(level.getMaxBuildHeight() - 2, estimate + 1);
-        int lower = Math.max(level.getMinBuildHeight() + 1, estimate - 2);
+        int synchronizedHeight = Math.clamp(
+                level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z),
+                level.getMinBuildHeight() + 1,
+                level.getMaxBuildHeight() - 1);
+        int upper = Math.min(level.getMaxBuildHeight() - 2, synchronizedHeight + 1);
+        int lower = Math.max(
+                level.getMinBuildHeight() + 1, upper - SURFACE_VERTICAL_PROBE);
         for (int y = upper; y >= lower; y--) {
             BlockPos feet = new BlockPos(x, y, z);
+            if (level.getBlockState(feet.below()).is(BlockTags.LEAVES)) continue;
             if (!level.getFluidState(feet.below()).isEmpty()
                     || !level.getFluidState(feet).isEmpty()
                     || !level.getFluidState(feet.above()).isEmpty()) {
@@ -320,6 +460,25 @@ public final class GenericEntitySearchCompanionTask
             }
         }
         return null;
+    }
+
+    private boolean boundedSurfaceWater(ClientLevel level, int x, int z) {
+        int synchronizedHeight = Math.clamp(
+                level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z),
+                level.getMinBuildHeight() + 1,
+                level.getMaxBuildHeight() - 1);
+        int upper = synchronizedHeight - 1;
+        int lower = Math.max(level.getMinBuildHeight(), upper - SURFACE_VERTICAL_PROBE);
+        for (int y = upper; y >= lower; y--) {
+            BlockPos at = new BlockPos(x, y, z);
+            if (level.getBlockState(at).is(BlockTags.LEAVES)) continue;
+            if (level.getFluidState(at).is(FluidTags.WATER)) return true;
+            if (!level.getFluidState(at).isEmpty()
+                    || !level.getBlockState(at).getCollisionShape(level, at).isEmpty()) {
+                return false;
+            }
+        }
+        return false;
     }
 
     private boolean targetsUseGroundSpawnPlacement() {
@@ -351,6 +510,14 @@ public final class GenericEntitySearchCompanionTask
             return failSearch(
                     "only_protected_or_ambiguous_entity_evidence",
                     "matching entities were observed, but none had sufficient unprotected semantic evidence",
+                    FailureType.TARGET_LOST);
+        }
+        if (preferLandFrontiers
+                && !(frontierAttempts > 0 && frontierFailed == frontierAttempts)) {
+            return failSearch(
+                    "no_sampled_ground_frontier_evidence",
+                    "the bounded directional sampler found no further dry or proportionally "
+                            + "verified crossing endpoint; this is not proof that no land exists",
                     FailureType.TARGET_LOST);
         }
         return failSearch(
@@ -391,6 +558,14 @@ public final class GenericEntitySearchCompanionTask
         moveChild.result(terminal);
         moveChild = null;
         moveRecord = null;
+        activeFrontierTarget = null;
+        activeFrontierShoreReturn = false;
+        selectedFrontierShoreReturn = false;
+    }
+
+    private void retainInternalEntityReceipt() {
+        r.retainInternalVerifiedEntityUuids(
+                observedSafe.keySet().stream().limit(r.count).toList());
     }
 
     @Override
@@ -414,13 +589,22 @@ public final class GenericEntitySearchCompanionTask
         data.put("verified", observedSafe.size() >= r.count);
         data.put("scope", "loaded_client_entities_and_first_person_loaded_frontiers");
         data.put("frontier_surface_preference",
-                preferLandFrontiers ? "vanilla_on_ground_spawn_evidence" : "terrain_neutral");
+                preferLandFrontiers
+                        ? "bounded_sampled_dry_land_then_verified_crossing"
+                        : "terrain_neutral");
         data.put("max_distance", r.maxDistance);
         data.put("scan_cycles", scanCycles);
         data.put("last_loaded_relation_match_count", lastLoadedMatching);
         data.put("frontier_legs_attempted", frontierAttempts);
         data.put("frontier_legs_reached", frontierReached);
         data.put("frontier_legs_failed", frontierFailed);
+        data.put("sampled_dry_land_frontiers", sampledDryLandFrontiers);
+        data.put("shore_return_frontiers", shoreReturnFrontiers);
+        data.put("failed_shore_frontiers", failedShoreFrontiers.size());
+        data.put("verified_water_crossings", verifiedWaterCrossings);
+        data.put("surface_probe_budget_per_pass", MAX_SURFACE_PROBES_PER_SELECTION);
+        data.put("shore_probe_budget_per_pass", MAX_SHORE_SURFACE_PROBES);
+        data.put("ground_direction_passes", GROUND_DIRECTION_PASSES);
         data.put("farthest_body_distance", farthestBodyDistance);
         data.put("protected_or_ambiguous_observations", protectedOrAmbiguousSeen);
         data.put("protection_reason_counts", Map.copyOf(protectedReasonCounts));
