@@ -5,8 +5,10 @@ import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.mixin.FishingHookAccessor;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.client.player.LocalPlayer;
@@ -62,7 +64,6 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
     /** Vanilla reels the loot toward the player, but terrain can stop it short. */
     private static final double LOOT_SEARCH_RADIUS = 18.0;
-    private static final double PICKUP_REACH_SQR = 1.5;
     private static final int LOOT_DISCOVERY_TICKS = 10;
     /** Let vanilla's reel impulse bring the catch back before chasing it. */
     private static final int LOOT_RETURN_GRACE_TICKS = 20;
@@ -88,12 +89,13 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private int failedCasts;
     private int positionFailures;
     private ItemEntity lootTarget;
+    private NativePickupReceipt lootReceipt;
     private int lootCloseTicks;
     private int unreachableLoot;
+    private int disappearedWithoutReceipt;
     private final FirstPersonActionGate rodSelection = new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private NativeActionReceipt rodReceipt;
-    private boolean catchCounted;
 
     public FishCompanionTask(LocalPlayer player, FishTaskRecord record) {
         super(player, record);
@@ -336,12 +338,6 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             }
             rodReceipt = null;
         }
-        if (!catchCounted) {
-            catchCounted = true;
-            r.caughtOne();
-            Constants.LOG.debug("[maicraft-fish] caught={}/{} casts={}",
-                    r.caught(), r.requested, r.casts());
-        }
         phaseTicks++;
         if (phaseTicks <= LOOT_DISCOVERY_TICKS) caught.discover(player.level(), lootBox());
 
@@ -361,27 +357,61 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             return TaskState.RUNNING;
         }
 
-        if (lootTarget != null) {
-            if (lootTarget.isRemoved()) {
-                lootTarget = null;
-                lootCloseTicks = 0;
-                stopNav();
-            } else if (player.distanceToSqr(lootTarget) <= PICKUP_REACH_SQR) {
-                // Give vanilla collision pickup a full second. This also produces
-                // a useful failure for a full inventory instead of looping forever.
-                stopNav();
-                if (++lootCloseTicks >= LOOT_CLOSE_WAIT_TICKS) abandonLootTarget();
+        if (lootTarget != null && lootReceipt != null) {
+            NativePickupReceipt.State receiptState = lootReceipt.poll(
+                    player, LOOT_CLOSE_WAIT_TICKS);
+            if (receiptState == NativePickupReceipt.State.RECEIVED) {
+                clearLootTarget();
+            } else if (receiptState == NativePickupReceipt.State.AWAITING_INVENTORY_SYNC) {
+                if (nav != null) nav.pause();
                 return TaskState.RUNNING;
+            } else if (receiptState
+                    == NativePickupReceipt.State.DISAPPEARED_WITHOUT_RECEIPT) {
+                disappearedWithoutReceipt++;
+                clearLootTarget();
             } else {
+                ItemEntity live = lootReceipt.liveEntity(player);
+                if (live == null) return TaskState.RUNNING;
+                lootTarget = live;
+                if (NativePickupReceipt.insideVanillaTouchEnvelope(player, live)) {
+                    if (nav != null) nav.pause();
+                    if (live.hasPickUpDelay()) {
+                        lootCloseTicks = 0;
+                        return TaskState.RUNNING;
+                    }
+                    if (!NativePickupReceipt.canAccept(player, live.getItem())) {
+                        fail("reached the caught loot, but no main-inventory slot can accept its "
+                                        + "remaining stack",
+                                FailureType.NO_SPACE);
+                        return TaskState.FAILED;
+                    }
+                    if (++lootCloseTicks >= LOOT_CLOSE_WAIT_TICKS) {
+                        fail("the body stayed inside vanilla's item-touch envelope with pickup "
+                                        + "delay cleared and inventory capacity available, but the "
+                                        + "server did not accept the caught loot",
+                                FailureType.UNKNOWN);
+                        return TaskState.FAILED;
+                    }
+                    return TaskState.RUNNING;
+                }
+
                 lootCloseTicks = 0;
+                if (player.blockPosition().equals(live.blockPosition())) {
+                    stopNav();
+                    InputDriver.stepToward(player, live.position(), false);
+                    return TaskState.RUNNING;
+                }
                 if (nav == null) {
-                    nav = new PlayerNav(player, lootTarget::blockPosition, NAV_SPEED,
-                            () -> lootTarget == null || lootTarget.isRemoved()
-                                    || player.distanceToSqr(lootTarget) <= PICKUP_REACH_SQR);
+                    nav = PlayerNav.toRevalidating(player, this::lootTargetGoal, NAV_SPEED,
+                            this::lootTargetReceived, PlayerNav.ContextProvider.DEFAULT);
                 }
                 switch (nav.tick()) {
                     case RUNNING -> { return TaskState.RUNNING; }
-                    case ARRIVED -> { return TaskState.RUNNING; }
+                    case ARRIVED -> {
+                        stopNav();
+                        InputDriver.stepToward(player, live.position(), false);
+                        return TaskState.RUNNING;
+                    }
                     case FAILED -> {
                         abandonLootTarget();
                         return TaskState.RUNNING;
@@ -395,6 +425,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         lootTarget = caught.nearest(level, player, abandonedLoot).orElse(null);
         if (lootTarget != null) {
             stopNav();
+            lootReceipt = NativePickupReceipt.begin(player, lootTarget);
             return TaskState.RUNNING;
         }
 
@@ -407,19 +438,46 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                     + " dropped loot item(s)", FailureType.NO_PATH);
             return TaskState.FAILED;
         }
+        int expectedUnits = caught.attributableUnits();
+        int receivedUnits = caught.receivedTrackedUnits(player);
+        boolean receivedBeforeVisible = expectedUnits == 0
+                && caught.totalInventoryUnitGain(player) > 0;
+        if ((expectedUnits > 0 && receivedUnits < expectedUnits)
+                || (expectedUnits == 0 && !receivedBeforeVisible)) {
+            fail("the fishing interaction completed, but the loot collection has no matching "
+                            + "inventory receipt: observed " + expectedUnits + " attributable unit(s), "
+                            + "received " + receivedUnits + ", disappeared without receipt "
+                            + disappearedWithoutReceipt,
+                    FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        r.caughtOne();
+        Constants.LOG.debug("[maicraft-fish] caught-and-received={}/{} casts={} lootUnits={}",
+                r.caught(), r.requested, r.casts(), Math.max(receivedUnits, 1));
         clearLootTracking();
         beginCooldown();
         return TaskState.RUNNING;
+    }
+
+    private GoalCompiler.Compiled lootTargetGoal() {
+        ItemEntity live = lootReceipt == null ? null : lootReceipt.liveEntity(player);
+        return live == null ? null : GoalCompiler.standOn(live.blockPosition());
+    }
+
+    private boolean lootTargetReceived() {
+        return lootReceipt != null && lootReceipt.received(player);
     }
 
     private void beginLootCollection() {
         caught.clear();
         abandonedLoot.clear();
         lootTarget = null;
+        lootReceipt = null;
         lootCloseTicks = 0;
         unreachableLoot = 0;
-        catchCounted = false;
+        disappearedWithoutReceipt = 0;
         caught.rememberExisting(player.level(), lootBox());
+        caught.rememberInventory(player);
 
         reelIn();
         phase = Phase.COLLECT;
@@ -441,7 +499,12 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private void abandonLootTarget() {
         if (lootTarget != null) abandonedLoot.add(lootTarget.getId());
         unreachableLoot++;
+        clearLootTarget();
+    }
+
+    private void clearLootTarget() {
         lootTarget = null;
+        lootReceipt = null;
         lootCloseTicks = 0;
         stopNav();
     }
@@ -450,8 +513,10 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         caught.clear();
         abandonedLoot.clear();
         lootTarget = null;
+        lootReceipt = null;
         lootCloseTicks = 0;
         unreachableLoot = 0;
+        disappearedWithoutReceipt = 0;
         stopNav();
     }
 
