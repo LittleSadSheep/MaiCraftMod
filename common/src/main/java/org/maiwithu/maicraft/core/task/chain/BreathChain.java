@@ -23,9 +23,10 @@ import net.minecraft.world.phys.Vec3;
  * executed, so a body left idle in deep water (a task that ended mid-swim, an
  * owner Stop, plain wandering) sinks, runs out of air, and drowns. This chain
  * polls head-submersion + air supply each tick; once air dips past
- * {@link SurvivalDecisions#LOW_AIR_TICKS} it takes the body, swims straight up
- * until the head clears the water, then goes dormant — the wake/refill band
- * gives an idle body in deep water a natural bob cycle instead of a grave.
+ * {@link SurvivalDecisions#LOW_AIR_TICKS} it takes the body, swims straight up,
+ * and keeps ownership after the head clears until the authoritative air value
+ * is full.  That recovery hysteresis prevents the interrupted navigation edge
+ * from immediately diving again on the first breathable tick.
  *
  * <p>Straight-up handles the open-water cases. Under a sealed ceiling (frozen
  * ocean, flooded cave — the terrain that actually drowned a body while it
@@ -73,20 +74,29 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         // 漂浮本能,不能跟着休眠(否则闲置沉底就永远留在水底)。改按
         // "眼在水下持续 N tick"触发,窗口对齐生存的低氧阈值。
         boolean triggered;
+        boolean headUnderWater = companion.isEyeInFluid(FluidTags.WATER);
         if (WorkProfile.of(companion).fearless()) {
-            if (companion.isEyeInFluid(FluidTags.WATER)) {
+            if (headUnderWater) {
                 submergedTicks++;
             } else {
                 submergedTicks = 0;
             }
-            triggered = submergedTicks > FEARLESS_FLOAT_DELAY_TICKS;
+            // Creative/fearless bodies do not consume air, so their episode ends
+            // at a genuinely breathable eye position rather than waiting for an
+            // air value which was full throughout.
+            triggered = episodeActive
+                    ? headUnderWater
+                    : submergedTicks > FEARLESS_FLOAT_DELAY_TICKS;
         } else {
             submergedTicks = 0;
-            triggered = SurvivalDecisions.breathTriggered(
-                    companion.isEyeInFluid(FluidTags.WATER), companion.getAirSupply());
+            triggered = episodeActive
+                    ? SurvivalDecisions.breathRecoveryRequired(
+                            companion.isInWater(), headUnderWater,
+                            companion.getAirSupply(), companion.getMaxAirSupply())
+                    : SurvivalDecisions.breathTriggered(headUnderWater, companion.getAirSupply());
         }
         if (!triggered && episodeActive) {
-            noteEpisode(companion);   // head just cleared the water — close the episode
+            noteEpisode(companion);
         }
         return triggered;
     }
@@ -122,7 +132,10 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
                 InputDriver.stepToward(companion, Vec3.atCenterOf(airColumn), false);
             }
         }
-        InputDriver.jump(companion);   // in water this is the per-tick swim-up stroke
+        // While the body is still touching water this both surfaces and holds the
+        // eyes above the interface during the refill phase.  Once fully ashore,
+        // canRun() releases immediately instead of making the player hop on land.
+        InputDriver.jump(companion);
         return TaskState.RUNNING;
     }
 
