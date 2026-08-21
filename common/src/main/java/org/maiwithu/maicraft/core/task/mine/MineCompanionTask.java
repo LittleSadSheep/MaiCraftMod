@@ -18,7 +18,9 @@ import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.NavProfiler;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
 import org.maiwithu.maicraft.core.task.base.Precondition;
+import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.ChunkPos;
@@ -284,16 +286,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (gathered > lastVerifiedGathered) {
             lastVerifiedGathered = gathered;
             dropCloseTicks = 0;
-            // The inventory fact proves at least one anticipated round settled. Any
-            // still-live remainder is rediscovered below by entity identity.
-            anticipatedDrops.clear();
+            // Do not clear causal break origins merely because one inventory packet arrived.
+            // A block may materialize multiple stacks/types over adjacent client packets. The
+            // origin is retired by droppedItems() after it observes the whole loaded batch, or by
+            // its existing bounded synchronization expiry when pickup happened before rendering.
             noteProgress();
         }
-        if (gathered >= r.count) {
-            progressNote = "gathered all requested";
-            return TaskState.SUCCESS;
-        }
-
         Level level = player.level();
 
         // Pickup owns the body even if a second target has just started breaking.
@@ -312,6 +310,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 clearNoShot();
             }
             return collectDrops();
+        }
+        // Reaching the requested inventory count does not abandon another physical result from
+        // this task. Keep the child alive through pending origin synchronization and every loaded,
+        // attributable matching drop before success is returned.
+        if (gathered >= r.count) {
+            if (unreachableDropCount > 0) return unreachableDropFailure();
+            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
+            progressNote = "gathered all requested and settled every loaded attributable matching drop";
+            return TaskState.SUCCESS;
         }
 
         // Maintain the ore list every tick — INCLUDING while a dig below is latched:
@@ -460,6 +467,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         //    across the world or claiming a vanished block as gathered output.
         if (!EXPLORE_FOR_BLOCKS) {
             if (unreachableDropCount > 0) return unreachableDropFailure();
+            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             if (r.getMined() > 0) {
                 progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
                 fail(progressNote, FailureType.MINED_OUT);
@@ -475,6 +483,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         if (++branchTicks > MAX_BRANCH_TICKS) {
             if (unreachableDropCount > 0) return unreachableDropFailure();
+            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             if (r.getMined() > 0) {
                 progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
                 fail(progressNote, FailureType.MINED_OUT);
@@ -614,9 +623,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             }
         }
         attributedDropIds.removeIf(id -> !liveIds.contains(id));
-        anticipatedDrops.keySet().removeAll(materializedOrigins);
         for (BlockPos p : anticipatedDrops.keySet()) {
-            out.add(p);
+            // A materialized live entity owns movement, but its break origin remains an open
+            // attribution window until the existing synchronization expiry. Different output
+            // stacks can arrive on adjacent client packets; retiring the origin on the first one
+            // made the later stack look pre-existing. When no live entity represents the origin,
+            // keep the origin as a short-lived wait goal so the task does not start another break.
+            if (!materializedOrigins.contains(p)) out.add(p);
         }
         return new ArrayList<>(out);
     }
@@ -629,21 +642,34 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      */
     private TaskState collectDrops() {
         ItemEntity close = nearestLiveDrop();
-        if (close != null && insideNativePickupEnvelope(close)) {
+        if (close != null && NativePickupReceipt.insideVanillaTouchEnvelope(player, close)) {
             if (nav != null) nav.pause();
             if (close.hasPickUpDelay()) {
                 dropCloseTicks = 0;
                 return TaskState.RUNNING;
             }
-            if (++dropCloseTicks >= DROP_CLOSE_WAIT_TICKS) {
-                fail("reached the mined drop, but the authoritative inventory never accepted it; "
-                                + "the main inventory may be full",
+            if (!NativePickupReceipt.canAccept(player, close.getItem())) {
+                fail("reached the mined drop, but no main-inventory slot can accept its "
+                                + "remaining stack",
                         FailureType.NO_SPACE);
+                return TaskState.FAILED;
+            }
+            if (++dropCloseTicks >= DROP_CLOSE_WAIT_TICKS) {
+                fail("the body stayed inside vanilla's item-touch envelope with pickup delay "
+                                + "cleared and inventory capacity available, but the authoritative "
+                                + "inventory never accepted the mined drop",
+                        FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
             return TaskState.RUNNING;
         }
         dropCloseTicks = 0;
+
+        if (close != null && player.blockPosition().equals(close.blockPosition())) {
+            stopNav();
+            InputDriver.stepToward(player, close.position(), false);
+            return TaskState.RUNNING;
+        }
 
         if (nav == null || !navIsDrop) {
             stopNav();
@@ -654,7 +680,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
-                nav.pause();
+                ItemEntity arrivedDrop = nearestLiveDrop();
+                if (arrivedDrop == null) {
+                    nav.pause();
+                } else {
+                    stopNav();
+                    InputDriver.stepToward(player, arrivedDrop.position(), false);
+                }
                 yield TaskState.RUNNING;
             }
             case FAILED -> {
@@ -682,12 +714,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 .filter(entity -> dropItems.contains(entity.getItem().getItem()))
                 .min(Comparator.comparingDouble(player::distanceToSqr))
                 .orElse(null);
-    }
-
-    /** Mirror the broad collision envelope in which vanilla invokes item pickup,
-     *  rather than treating an arbitrary radial distance as "close enough". */
-    private boolean insideNativePickupEnvelope(ItemEntity item) {
-        return player.getBoundingBox().inflate(1.0).intersects(item.getBoundingBox());
     }
 
     /** A direct block drop spawns at its broken cell and may drift a little before
@@ -1144,6 +1170,39 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.FAILED;
     }
 
+    private TaskState ambiguousDropFailure() {
+        fail("mined the requested source, but " + ambiguousMergedDropCount
+                        + " resulting drop(s) merged into stacks that existed before this task; "
+                        + "collecting them would also take unrelated items, so they were left in "
+                        + "place and not reported as gathered",
+                FailureType.UNKNOWN);
+        return TaskState.FAILED;
+    }
+
+    @Override
+    public boolean mustSettleBeforeSatisfiedCancellation() {
+        if (brokenTargets > 0
+                || !anticipatedDrops.isEmpty()
+                || !attributedDropIds.isEmpty()
+                || unreachableDropCount > 0
+                || ambiguousMergedDropCount > 0) {
+            return true;
+        }
+        // A terrain movement can break and immediately pick up the requested block between two
+        // parent ticks. Its execution ledger is the authoritative committed-effect receipt even
+        // before observeNavigationBreakOrigins() has promoted the cell into anticipatedDrops.
+        if (nav != null) {
+            for (BlockPos target : watchedTargetCells) {
+                if (player.level().isLoaded(target)
+                        && player.level().getBlockState(target).isAir()
+                        && nav.ledger().broke(target)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** Use the same authoritative feet cell as path planning/execution. */
     private BlockPos feet() {
         return PathExecutor.playerFeet(player);
@@ -1162,6 +1221,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // super.cleanup() = stopNav() (nav.stop clears the overlay when a nav exists) + an explicit
         // so a task that finished while shaft-mining (nav == null) still
         // clears its lingering goal boxes. Then release the dig + the index registration.
+        InputDriver.halt(player);
         super.cleanup();
         digger.cancel();
         activeTarget = null;
@@ -1175,6 +1235,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
         data.put("unreachable_drop_count", unreachableDropCount);
+        data.put("ambiguous_merged_drop_count", ambiguousMergedDropCount);
         return data;
     }
 
