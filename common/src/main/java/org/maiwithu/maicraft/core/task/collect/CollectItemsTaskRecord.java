@@ -39,8 +39,8 @@ public final class CollectItemsTaskRecord extends TaskRecord {
         return collected;
     }
 
-    public void incrementCollected() {
-        this.collected++;
+    public void addCollected(int count) {
+        this.collected += Math.max(0, count);
     }
 
     @Override
