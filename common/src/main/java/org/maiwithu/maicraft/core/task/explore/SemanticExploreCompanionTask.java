@@ -17,12 +17,15 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.CompassUtil;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
@@ -49,14 +52,32 @@ public final class SemanticExploreCompanionTask
             SurfaceKind kind, BlockPos approach, BlockPos evidence, int waterDepth) {}
     private record TargetCandidate(
             BlockPos approach, BlockPos evidence, String description) {}
+    private record WaterEvidence(
+            boolean oceanBiome, boolean largeConnectedWater,
+            int forwardRun, int lateralWidth, int deepestColumn, int score) {
+        boolean qualifiesAsCoast() {
+            // "Coast" means dry land adjoining a sea, not merely the edge of a large lake.
+            // The size evidence remains useful for ranking, but cannot replace observed ocean
+            // biome evidence from loaded client terrain.
+            return oceanBiome;
+        }
+    }
+    private record ScoredCoast(
+            TargetCandidate candidate, boolean preferredShore,
+            double travelDistance, int evidenceScore) {}
 
     private static final int OBSERVATION_RADIUS = 112;
     private static final int BIOME_OBSERVATION_STEP = 4;
     private static final int COAST_OBSERVATION_STEP = 8;
     private static final int BIOME_Y_STEP = 32;
     private static final int BIOME_SAMPLES_PER_TICK = 192;
-    private static final int COAST_COLUMNS_PER_TICK = 8;
+    private static final int COAST_COLUMNS_PER_TICK = 4;
     private static final int COAST_LOCAL_RADIUS = 4;
+    /** Bounded connected-water evidence measured away from a candidate dry bank. */
+    private static final int LARGE_WATER_FORWARD_PROBE = 12;
+    private static final int LARGE_WATER_SIDE_PROBE = 6;
+    private static final int LARGE_WATER_MIN_FORWARD_RUN = 8;
+    private static final int LARGE_WATER_MIN_LATERAL_WIDTH = 7;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
     /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
@@ -234,18 +255,26 @@ public final class SemanticExploreCompanionTask
                         horizontalDistance(origin, new BlockPos(x, origin.getY(), z)));
             }
 
-            TargetCandidate found;
             if (targetKind == TargetKind.COAST) {
-                found = findCoastNear(level, x, z, COAST_LOCAL_RADIUS);
+                ScoredCoast found = findScoredCoastNear(
+                        level, x, z, COAST_LOCAL_RADIUS);
                 advanceObservationColumn();
+                if (found != null
+                        && !rejectedTargets.contains(found.candidate().approach().asLong())) {
+                    // Offsets are ordered nearest-first. The local probe has already compared
+                    // nearby dry approaches (including shore-terrain preference), so leave now
+                    // instead of standing still to scan the entire loaded view for a prettier
+                    // but farther coast.
+                    return startTargetTravel(found.candidate());
+                }
             } else {
-                found = observeBiomeSample(level, x, z, biomeYIndex++);
+                TargetCandidate found = observeBiomeSample(level, x, z, biomeYIndex++);
                 if (biomeYIndex >= biomeSampleCount(level)) {
                     advanceObservationColumn();
                 }
-            }
-            if (found != null && !rejectedTargets.contains(found.approach().asLong())) {
-                return startTargetTravel(found);
+                if (found != null && !rejectedTargets.contains(found.approach().asLong())) {
+                    return startTargetTravel(found);
+                }
             }
         }
         if (observationColumn < offsets.size()) {
@@ -330,14 +359,18 @@ public final class SemanticExploreCompanionTask
     private void startMove(BlockPos target, boolean exact) {
         long now = player.level().getGameTime();
         String parentCall = r.getToolCallId() == null ? "explore" : r.getToolCallId();
-        moveRecord = new MoveToTaskRecord(
-                parentCall + "-internal-leg-" + (++legSerial),
-                now + INITIAL_LEG_LEASE_TICKS,
-                (double) target.getX(),
-                exact ? (double) target.getY() : null,
-                (double) target.getZ(),
-                null,
-                r.mayAlterTerrain);
+        String childCall = parentCall + "-internal-leg-" + (++legSerial);
+        // Coast promises an exact grounded dry stance to downstream tasks. Other biome targets
+        // deliberately retain the original stand-or-swim movement contract and are confirmed
+        // from the live body's biome in VERIFY_TARGET (an ocean cell cannot be onGround).
+        moveRecord = exact && targetKind == TargetKind.COAST
+                ? MoveToTaskRecord.strictStance(
+                        childCall, now + INITIAL_LEG_LEASE_TICKS, target, r.mayAlterTerrain)
+                : new MoveToTaskRecord(
+                        childCall, now + INITIAL_LEG_LEASE_TICKS,
+                        (double) target.getX(), exact ? (double) target.getY() : null,
+                        (double) target.getZ(), null,
+                        r.mayAlterTerrain);
         moveChild = new MoveToCompanionTask(player, moveRecord);
     }
 
@@ -394,15 +427,25 @@ public final class SemanticExploreCompanionTask
             }
         } else {
             surfaceCache.clear();
-            TargetCandidate coast = findCoastNear(
-                    level, player.getBlockX(), player.getBlockZ(), 7);
-            if (coast != null
-                    && horizontalDistance(player.blockPosition(), coast.approach()) <= 5.0) {
-                verified = coast;
+            BlockPos body = BlockHelper.playerFeet(
+                    level, player.getX(), player.getY(), player.getZ()).immutable();
+            // MoveTo may legitimately report a bounded near-success when the exact path is
+            // obstructed. That is useful for ordinary destinations, but a coast receipt promises
+            // a dry land approach: being in adjacent shallow water is evidence of seeing the
+            // coast, not evidence of having reached it.
+            if (player.onGround() && BlockHelper.isDryStandable(level, body)) {
+                TargetCandidate bodyCoast = findCoastNear(
+                        level, body.getX(), body.getZ(), 0);
+                if (bodyCoast != null && body.equals(bodyCoast.approach())) {
+                    verified = bodyCoast;
+                }
             }
         }
         if (verified != null) {
-            verifiedPosition = player.blockPosition().immutable();
+            verifiedPosition = targetKind == TargetKind.COAST
+                    ? BlockHelper.playerFeet(
+                            level, player.getX(), player.getY(), player.getZ()).immutable()
+                    : player.blockPosition().immutable();
             verifiedDescription = verified.description();
             r.retainVerifiedPosition(new InternalPositionReceipt.Position(
                     verifiedPosition.getX(), verifiedPosition.getY(), verifiedPosition.getZ(),
@@ -420,6 +463,13 @@ public final class SemanticExploreCompanionTask
 
     private TargetCandidate findCoastNear(
             ClientLevel level, int centerX, int centerZ, int radius) {
+        ScoredCoast best = findScoredCoastNear(level, centerX, centerZ, radius);
+        return best == null ? null : best.candidate();
+    }
+
+    private ScoredCoast findScoredCoastNear(
+            ClientLevel level, int centerX, int centerZ, int radius) {
+        ScoredCoast best = null;
         for (int ring = 0; ring <= radius; ring++) {
             for (int dx = -ring; dx <= ring; dx++) {
                 for (int dz = -ring; dz <= ring; dz++) {
@@ -429,47 +479,97 @@ public final class SemanticExploreCompanionTask
                     if (!insideScope(landX, landZ)) continue;
                     SurfaceInfo land = surfaceInfo(level, landX, landZ);
                     if (land.kind() != SurfaceKind.LAND || land.approach() == null) continue;
+                    if (rejectedTargets.contains(land.approach().asLong())) continue;
                     for (Direction direction : Direction.Plane.HORIZONTAL) {
                         int waterX = landX + direction.getStepX();
                         int waterZ = landZ + direction.getStepZ();
                         if (!insideScope(waterX, waterZ)) continue;
                         SurfaceInfo water = surfaceInfo(level, waterX, waterZ);
-                        if (water.kind() == SurfaceKind.WATER
-                                && water.waterDepth() >= 2
-                                && substantialWater(level, waterX, waterZ, direction)) {
-                            return new TargetCandidate(
-                                    land.approach(), water.evidence(),
-                                    "verified land-water boundary: land at "
-                                            + shortPos(land.approach()) + ", water at "
-                                            + shortPos(water.evidence()));
+                        if (water.kind() == SurfaceKind.WATER) {
+                            WaterEvidence evidence = waterEvidence(
+                                    level, waterX, waterZ, direction);
+                            if (!evidence.qualifiesAsCoast()) continue;
+                            boolean preferredShore = preferredCoastTerrain(level, land.approach());
+                            double travelDistance = horizontalDistance(
+                                    player.blockPosition(), land.approach());
+                            String description = "verified dry coast approach beside ocean-biome water";
+                            if (preferredShore) description += " with shore terrain preferred";
+                            ScoredCoast scored = new ScoredCoast(new TargetCandidate(
+                                    land.approach(), water.evidence(), description),
+                                    preferredShore, travelDistance, evidence.score());
+                            if (betterCoast(scored, best)) {
+                                best = scored;
+                            }
                         }
                     }
                 }
             }
         }
-        return null;
+        return best;
     }
 
-    private boolean substantialWater(
+    private static boolean betterCoast(ScoredCoast candidate, ScoredCoast incumbent) {
+        if (incumbent == null) return true;
+        if (candidate.preferredShore() != incumbent.preferredShore()) {
+            return candidate.preferredShore();
+        }
+        int travelOrder = Double.compare(candidate.travelDistance(), incumbent.travelDistance());
+        if (travelOrder != 0) return travelOrder < 0;
+        if (candidate.evidenceScore() != incumbent.evidenceScore()) {
+            return candidate.evidenceScore() > incumbent.evidenceScore();
+        }
+        return candidate.candidate().approach().asLong()
+                < incumbent.candidate().approach().asLong();
+    }
+
+    /**
+     * Bounded semantic evidence for a sea. A loaded water sample in an ocean biome is required;
+     * continuous outward run and lateral breadth increase confidence and ranking but never turn a
+     * plains lake or river into a coast. Every probe is a loaded client column and the fixed budget
+     * never discovers terrain.
+     */
+    private WaterEvidence waterEvidence(
             ClientLevel level, int waterX, int waterZ, Direction awayFromLand) {
         Direction side = awayFromLand.getClockWise();
-        int[][] probes = {
-                {waterX, waterZ},
-                {waterX + awayFromLand.getStepX() * 2,
-                        waterZ + awayFromLand.getStepZ() * 2},
-                {waterX + awayFromLand.getStepX() * 4,
-                        waterZ + awayFromLand.getStepZ() * 4},
-                {waterX + side.getStepX() * 2, waterZ + side.getStepZ() * 2},
-                {waterX - side.getStepX() * 2, waterZ - side.getStepZ() * 2}
-        };
-        int waterColumns = 0;
-        for (int[] probe : probes) {
-            if (!insideScope(probe[0], probe[1])) continue;
-            if (surfaceInfo(level, probe[0], probe[1]).kind() == SurfaceKind.WATER) {
-                waterColumns++;
+        int forwardRun = 0;
+        int deepest = 0;
+        boolean ocean = false;
+        for (int distance = 0; distance <= LARGE_WATER_FORWARD_PROBE; distance++) {
+            int x = waterX + awayFromLand.getStepX() * distance;
+            int z = waterZ + awayFromLand.getStepZ() * distance;
+            if (!insideScope(x, z)) break;
+            SurfaceInfo sample = surfaceInfo(level, x, z);
+            if (sample.kind() != SurfaceKind.WATER) break;
+            forwardRun++;
+            deepest = Math.max(deepest, sample.waterDepth());
+            ocean |= level.getBiome(sample.evidence()).is(BiomeTags.IS_OCEAN);
+        }
+
+        int crossDistance = Math.min(4, Math.max(0, forwardRun - 1));
+        int crossX = waterX + awayFromLand.getStepX() * crossDistance;
+        int crossZ = waterZ + awayFromLand.getStepZ() * crossDistance;
+        int lateralWidth = forwardRun == 0 ? 0 : 1;
+        for (int sign : new int[]{-1, 1}) {
+            for (int distance = 1; distance <= LARGE_WATER_SIDE_PROBE; distance++) {
+                int x = crossX + side.getStepX() * distance * sign;
+                int z = crossZ + side.getStepZ() * distance * sign;
+                if (!insideScope(x, z)) break;
+                SurfaceInfo sample = surfaceInfo(level, x, z);
+                if (sample.kind() != SurfaceKind.WATER) break;
+                lateralWidth++;
+                deepest = Math.max(deepest, sample.waterDepth());
             }
         }
-        return waterColumns >= 3;
+        boolean large = forwardRun >= LARGE_WATER_MIN_FORWARD_RUN
+                && lateralWidth >= LARGE_WATER_MIN_LATERAL_WIDTH;
+        int score = (ocean ? 320 : 0) + (large ? 256 : 0)
+                + forwardRun * 4 + lateralWidth * 3 + deepest * 2;
+        return new WaterEvidence(ocean, large, forwardRun, lateralWidth, deepest, score);
+    }
+
+    private static boolean preferredCoastTerrain(ClientLevel level, BlockPos approach) {
+        Holder<Biome> biome = level.getBiome(approach);
+        return biome.is(BiomeTags.IS_BEACH) || biome.is(Biomes.STONY_SHORE);
     }
 
     private SurfaceInfo surfaceInfo(ClientLevel level, int x, int z) {
@@ -495,7 +595,7 @@ public final class SemanticExploreCompanionTask
                 }
                 result = new SurfaceInfo(SurfaceKind.WATER, null, top, depth);
             } else {
-                BlockPos approach = travelCellNear(level, x, height, z, 3, null);
+                BlockPos approach = dryTravelCellNear(level, x, height, z, 3);
                 result = approach == null
                         ? new SurfaceInfo(SurfaceKind.UNKNOWN, null, top, 0)
                         : new SurfaceInfo(SurfaceKind.LAND, approach, top, 0);
@@ -526,6 +626,23 @@ public final class SemanticExploreCompanionTask
                 if (isTravelCell(level, candidate)
                         && (requiredBiome == null
                                 || requiredBiome.test(level.getBiome(candidate)))) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    private BlockPos dryTravelCellNear(
+            ClientLevel level, int x, int y, int z, int verticalRadius) {
+        for (int distance = 0; distance <= verticalRadius; distance++) {
+            int[] ys = distance == 0 ? new int[]{y} : new int[]{y + distance, y - distance};
+            for (int candidateY : ys) {
+                if (candidateY <= level.getMinBuildHeight()
+                        || candidateY >= level.getMaxBuildHeight() - 1) continue;
+                BlockPos candidate = new BlockPos(x, candidateY, z);
+                if (level.isLoaded(candidate.below()) && level.isLoaded(candidate.above())
+                        && BlockHelper.isDryStandable(level, candidate)) {
                     return candidate;
                 }
             }
