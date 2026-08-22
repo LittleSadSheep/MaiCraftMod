@@ -298,3 +298,5 @@ public final class CachedChunk {
         if (data.size() > size) {
             throw new IllegalArgumentException("BitSet of invalid length provided");
         }
+    }
+}
