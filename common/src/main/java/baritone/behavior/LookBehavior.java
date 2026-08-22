@@ -298,3 +298,74 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
             } else if (pitch > 10) {
                 return pitch - 1;
             }
+            return pitch;
+        }
+
+        private float calculateMouseMove(float current, float target) {
+            final float delta = target - current;
+            final double deltaPx = angleToMouse(delta); // yes, even the mouse movements use double
+            return current + mouseToAngle(deltaPx);
+        }
+
+        private double angleToMouse(float angleDelta) {
+            final float minAngleChange = mouseToAngle(1);
+            return Math.round(angleDelta / minAngleChange);
+        }
+
+        private float mouseToAngle(double mouseDelta) {
+            // casting float literals to double gets us the precise values used by mc
+            final double f = ctx.minecraft().options.sensitivity().get() * (double) 0.6f + (double) 0.2f;
+            return (float) (mouseDelta * f * f * f * 8.0d) * 0.15f; // yes, one double and one float scaling factor
+        }
+    }
+
+    private static class Target {
+
+        public final Rotation rotation;
+        public final Mode mode;
+
+        public Target(Rotation rotation, Mode mode) {
+            this.rotation = rotation;
+            this.mode = mode;
+        }
+
+        enum Mode {
+            /**
+             * Rotation will be set client-side and is visual to the player
+             */
+            CLIENT,
+
+            /**
+             * Rotation will be set server-side and is silent to the player
+             */
+            SERVER,
+
+            /**
+             * Rotation will remain unaffected on both the client and server
+             */
+            NONE;
+
+            static Mode resolve(IPlayerContext ctx, boolean blockInteract) {
+                final Settings settings = Baritone.settings();
+                final boolean antiCheat = settings.antiCheatCompatibility.value;
+                final boolean blockFreeLook = settings.blockFreeLook.value;
+
+                if (ctx.player().isFallFlying()) {
+                    // always need to set angles while flying
+                    return settings.elytraFreeLook.value ? SERVER : CLIENT;
+                } else if (settings.freeLook.value) {
+                    // Regardless of if antiCheatCompatibility is enabled, if a blockInteract is requested then the player
+                    // rotation needs to be set somehow, otherwise Baritone will halt since objectMouseOver() will just be
+                    // whatever the player is mousing over visually. Let's just settle for setting it silently.
+                    if (blockInteract) {
+                        return blockFreeLook ? SERVER : CLIENT;
+                    }
+                    return antiCheat ? SERVER : NONE;
+                }
+
+                // all freeLook settings are disabled so set the angles
+                return CLIENT;
+            }
+        }
+    }
+}
