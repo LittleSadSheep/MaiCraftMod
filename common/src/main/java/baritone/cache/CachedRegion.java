@@ -298,3 +298,64 @@ public final class CachedRegion implements ICachedRegion {
                     }
                 }
             }
+            removeExpired();
+            hasUnsavedChanges = false;
+            long end = System.nanoTime() / 1000000L;
+            System.out.println("Loaded region successfully in " + (end - start) + "ms");
+        } catch (Exception ex) { // corrupted files can cause NullPointerExceptions as well as IOExceptions
+            ex.printStackTrace();
+        }
+    }
+
+    public synchronized final void removeExpired() {
+        long expiry = Baritone.settings().cachedChunksExpirySeconds.value;
+        if (expiry < 0) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long oldestAcceptableAge = now - expiry * 1000L;
+        for (int x = 0; x < 32; x++) {
+            for (int z = 0; z < 32; z++) {
+                if (this.chunks[x][z] != null && this.chunks[x][z].cacheTimestamp < oldestAcceptableAge) {
+                    System.out.println("Removing chunk " + (x + 32 * this.x) + "," + (z + 32 * this.z) + " because it was cached " + (now - this.chunks[x][z].cacheTimestamp) / 1000L + " seconds ago, and max age is " + expiry);
+                    this.chunks[x][z] = null;
+                }
+            }
+        }
+    }
+
+    public synchronized final CachedChunk mostRecentlyModified() {
+        CachedChunk recent = null;
+        for (int x = 0; x < 32; x++) {
+            for (int z = 0; z < 32; z++) {
+                if (this.chunks[x][z] == null) {
+                    continue;
+                }
+                if (recent == null || this.chunks[x][z].cacheTimestamp > recent.cacheTimestamp) {
+                    recent = this.chunks[x][z];
+                }
+            }
+        }
+        return recent;
+    }
+
+    /**
+     * @return The region x coordinate
+     */
+    @Override
+    public final int getX() {
+        return this.x;
+    }
+
+    /**
+     * @return The region z coordinate
+     */
+    @Override
+    public final int getZ() {
+        return this.z;
+    }
+
+    private static Path getRegionFile(Path cacheDir, int regionX, int regionZ) {
+        return Paths.get(cacheDir.toString(), "r." + regionX + "." + regionZ + ".bcr");
+    }
+}
