@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "baritone.launch.mixins",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": [
+    "MixinChunkArray",
+    "MixinClientChunkProvider",
+    "MixinPlayerController"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
