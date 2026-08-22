@@ -4,3 +4,12 @@ plugins {
     // see https://projects.neoforged.net/neoforged/moddevgradle for new versions
     id 'net.neoforged.moddev' version '2.0.141' apply false
 }
+
+subprojects {
+    tasks.withType(Jar).configureEach {
+        // These classes are compile-only compatibility signatures copied from Baritone's
+        // schematica_api source set. Shipping them would impersonate optional third-party mods.
+        exclude 'fi/dy/**'
+        exclude 'com/github/lunatrius/**'
+    }
+}
