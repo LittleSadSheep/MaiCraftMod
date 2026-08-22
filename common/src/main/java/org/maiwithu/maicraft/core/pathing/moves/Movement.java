@@ -284,20 +284,60 @@ public abstract class Movement {
                     .setInput(Input.JUMP, true);
             return;
         }
-        boolean enteringSwim = vertical <= 0 && !player.isUnderWater() && !player.isSwimming();
+
+        BlockPos feet = feet(player);
+        boolean targetWater = MovementHelper.isWater(player.level().getBlockState(target));
+        boolean targetHasWaterBelow = targetWater
+                && MovementHelper.isWater(player.level().getBlockState(target.below()));
+
+        // A horizontal surface-lattice edge ending on land or one-block-deep water is a wade-out,
+        // not a request to dive.  If the physical body is already in the swimming pose, rise while
+        // advancing so it can regain standing height at the bank.  Every movement tick rebuilds
+        // its input map, and the explicit false below also makes the release visible within this
+        // tick if an earlier preparation branch requested sneak.
+        boolean surfaceOrWade = vertical > 0 || (vertical == 0 && !targetHasWaterBelow);
+        if (surfaceOrWade) {
+            boolean submerged = player.isUnderWater() || player.isSwimming()
+                    || player.isEyeInFluid(FluidTags.WATER);
+            state.setTarget(new MovementState.MovementTarget(
+                            yaw, submerged ? -28.0f : 0.0f, false))
+                    .setInput(Input.MOVE_FORWARD, true)
+                    .setInput(Input.SNEAK, false);
+            if (vertical > 0 || submerged || !targetWater) {
+                state.setInput(Input.JUMP, true);
+            }
+            return;
+        }
+
+        // Sneak can lower a body only when its current physical column contains at least two
+        // consecutive water cells.  In two-block-deep water an upright floating body may report
+        // its feet in either the upper or lower water cell, hence the symmetric above/below test.
+        // A one-block-deep column has water on neither side of the feet; holding sneak there while
+        // aiming at a deeper neighbour pins a crouching body at the lip (especially below a low
+        // ceiling). Wade forward first, then enter the swim pose after crossing into deep water.
+        boolean feetInWater = MovementHelper.isWater(player.level().getBlockState(feet));
+        boolean canDescendHere = feetInWater
+                && (MovementHelper.isWater(player.level().getBlockState(feet.below()))
+                        || MovementHelper.isWater(player.level().getBlockState(feet.above())));
+        boolean enteringSwim = targetWater
+                && vertical <= 0
+                && !player.isUnderWater()
+                && !player.isSwimming()
+                && canDescendHere;
         float pitch = vertical < 0
                 ? 28.0f
                 : vertical > 0
                         ? -28.0f
                         : player.isSwimming() ? 0.0f : 12.0f;
         state.setTarget(new MovementState.MovementTarget(yaw, pitch, false))
-                .setInput(Input.MOVE_FORWARD, true);
-        if (enteringSwim || vertical < 0) {
+                .setInput(Input.MOVE_FORWARD, true)
+                .setInput(Input.SNEAK, false);
+        if (enteringSwim || (vertical < 0 && targetWater && canDescendHere)) {
             // Vanilla cancels sprint while the eyes are at the surface. Sink first; on the tick
             // isUnderWater becomes true this releases shift and the sprint request below starts
             // the real horizontal swimming pose.
             state.setInput(Input.SNEAK, true);
-        } else {
+        } else if (player.isUnderWater() || player.isSwimming()) {
             state.setInput(Input.SPRINT, true);
         }
         if (vertical > 0) {
