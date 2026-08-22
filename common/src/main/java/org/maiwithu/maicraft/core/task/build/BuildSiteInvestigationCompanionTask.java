@@ -4,8 +4,8 @@ package org.maiwithu.maicraft.core.task.build;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -51,6 +51,13 @@ public final class BuildSiteInvestigationCompanionTask
     /** Reserve room for planner footprint/boundary scans beyond the body survey stance. */
     private static final int SEMANTIC_SCOPE_MARGIN = 48;
     private static final int WATER_SAMPLE_RADIUS = 20;
+    /**
+     * Frontier columns are sampled eight blocks apart below. Treat that sampling resolution as
+     * one observation neighbourhood as well: an unreachable x/z and x+1/z are not two new facts.
+     */
+    private static final int FRONTIER_SAMPLE_STEP = 8;
+    /** Keep the render-thread shore search incremental; this is a compute yield, not a task cap. */
+    private static final int DRY_SHORE_COLUMNS_PER_TICK = 192;
     private static final int[][] DIRECTIONS = {
             {1, 0}, {1, 1}, {0, 1}, {-1, 1},
             {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
@@ -58,7 +65,14 @@ public final class BuildSiteInvestigationCompanionTask
 
     private enum Stage { OBSERVE, TRAVEL_FRONTIER, BUILD }
 
-    private record Candidate(BlockPos feet, int score, boolean shorelineEvidence) {}
+    private enum CandidateKind { DRY_SHORE_RETURN, SURVEY_FRONTIER }
+
+    private record Candidate(
+            BlockPos feet, int score, boolean shorelineEvidence, CandidateKind kind) {}
+    private record ShoreOffset(int dx, int dz, int distanceSquared) {}
+
+    /** Every column within one movement leg, ordered by true horizontal distance. */
+    private static final List<ShoreOffset> DRY_SHORE_OFFSETS = dryShoreOffsets();
 
     private BlockPos origin;
     private Goal.WorldPosition focus;
@@ -70,13 +84,22 @@ public final class BuildSiteInvestigationCompanionTask
     private Task buildChild;
     private TaskRecord buildRecord;
     private TaskResult buildResult;
+    private Candidate activeMoveCandidate;
 
-    private final Set<Long> attemptedFrontiers = new LinkedHashSet<>();
+    /** Coarse observation neighbourhoods already tried by ordinary survey movement. */
+    private final List<BlockPos> attemptedFrontiers = new ArrayList<>();
+    /** Exact dry cells whose own egress move failed; adjacent shore cells remain eligible. */
+    private final Set<Long> failedDryShoreReturns = new HashSet<>();
+    private BlockPos dryShoreSearchCenter;
+    private int dryShoreSearchIndex;
     private int scanCycles;
     private int frontierAttempts;
     private int frontierReached;
     private int frontierFailed;
     private int shorelineWeightedCandidates;
+    private int dryShoreSearches;
+    private int dryShoreReturns;
+    private String lastDryShoreFailure;
     private int moveSerial;
     private double farthestBodyDistance;
     private boolean siteVerified;
@@ -115,12 +138,20 @@ public final class BuildSiteInvestigationCompanionTask
 
     private TaskState observeThenContinue() {
         scanCycles++;
-        if (!insideSemanticSurveyScope(player.blockPosition())) {
+        if (bodyInWater()) {
+            lastProbeMessage = "the first-person body is in water; returning to the nearest "
+                    + "loaded dry stance before surveying a construction site";
+            return continueToDryShore();
+        }
+        resetDryShoreSearch();
+        BlockPos surveyFeet = BlockHelper.playerFeet(
+                player.clientLevel, player.getX(), player.getY(), player.getZ());
+        if (!insideSemanticSurveyScope(surveyFeet)) {
             lastProbeMessage = "first-person survey has not yet reached the bounded semantic target area";
             return continueToFrontier();
         }
         SemanticBuildPlanner.LoadedBuildProbe probe = SemanticBuildPlanner.probeLoadedBuildAt(
-                r.goal, player, IntentRuntime.get(), player.blockPosition());
+                r.goal, player, IntentRuntime.get(), surveyFeet);
         lastProbeMessage = probe.message();
         if (probe.status() == SemanticBuildPlanner.LoadedBuildProbe.Status.INVALID) {
             return stopInvestigation(probe.failureCode(), probe.message(), FailureType.TARGET_LOST);
@@ -132,6 +163,55 @@ public final class BuildSiteInvestigationCompanionTask
         return continueToFrontier();
     }
 
+    /**
+     * A build survey never uses a water-surface path node as its observation stance. When travel
+     * hands us a body in water, inspect loaded columns in true nearest-first order and make one exact
+     * first-person move onto dry support. The scan is sliced across ticks so a wide open-water
+     * view cannot stall rendering.
+     */
+    private TaskState continueToDryShore() {
+        ClientLevel level = player.clientLevel;
+        BlockPos body = player.blockPosition();
+        if (dryShoreSearchCenter == null) {
+            dryShoreSearchCenter = body.immutable();
+            dryShoreSearchIndex = 0;
+            dryShoreSearches++;
+        }
+
+        int budget = DRY_SHORE_COLUMNS_PER_TICK;
+        while (budget-- > 0 && dryShoreSearchIndex < DRY_SHORE_OFFSETS.size()) {
+            ShoreOffset offset = DRY_SHORE_OFFSETS.get(dryShoreSearchIndex++);
+            int x = dryShoreSearchCenter.getX() + offset.dx();
+            int z = dryShoreSearchCenter.getZ() + offset.dz();
+            if (!insideScope(x, z)) continue;
+            BlockPos feet = safeDrySurfaceFeet(level, x, z);
+            if (feet == null || failedDryShoreReturns.contains(feet.asLong())) continue;
+            // The offset list is globally distance-sorted, so the first valid result is the
+            // nearest loaded dry column. Shoreline is a fact about that dry stance, never
+            // permission to substitute a water cell.
+            Candidate selected = new Candidate(feet, -offset.distanceSquared(),
+                    shorelineEvidence(level, feet), CandidateKind.DRY_SHORE_RETURN);
+            resetDryShoreSearch();
+            startMove(selected);
+            stage = Stage.TRAVEL_FRONTIER;
+            return TaskState.RUNNING;
+        }
+        if (dryShoreSearchIndex < DRY_SHORE_OFFSETS.size()) return TaskState.RUNNING;
+        resetDryShoreSearch();
+        boolean observedButUnreachable = !failedDryShoreReturns.isEmpty();
+        String message = observedButUnreachable
+                ? "loaded dry survey stances were observed, but first-person movement could not reach any of them"
+                        + (lastDryShoreFailure == null
+                                ? "" : "; last movement failure: " + lastDryShoreFailure)
+                : "the body is in water and no loaded dry survey stance was observed";
+        return stopInvestigation(
+                observedButUnreachable
+                        ? "loaded_dry_shore_stances_unreachable"
+                        : "no_loaded_dry_shore_stance",
+                message,
+                observedButUnreachable ? FailureType.NO_PATH : FailureType.TARGET_LOST);
+    }
+
     private TaskState continueToFrontier() {
         Candidate candidate = nextCandidate();
         if (candidate == null) return exhausted(
@@ -140,19 +220,19 @@ public final class BuildSiteInvestigationCompanionTask
                         : "no_loaded_safe_exploration_frontier");
         if (candidate.shorelineEvidence()) shorelineWeightedCandidates++;
         frontierAttempts++;
-        startMove(candidate.feet());
+        startMove(candidate);
         stage = Stage.TRAVEL_FRONTIER;
         return TaskState.RUNNING;
     }
 
-    private void startMove(BlockPos target) {
+    private void startMove(Candidate candidate) {
+        BlockPos target = candidate.feet();
+        activeMoveCandidate = candidate;
         long now = player.level().getGameTime();
         String parent = r.getToolCallId() == null ? "build-site" : r.getToolCallId();
-        moveRecord = new MoveToTaskRecord(
+        moveRecord = MoveToTaskRecord.strictStance(
                 parent + "-internal-site-frontier-" + (++moveSerial),
-                now + INITIAL_LEG_LEASE_TICKS,
-                (double) target.getX(), null, (double) target.getZ(), null,
-                false);
+                now + INITIAL_LEG_LEASE_TICKS, target, false);
         moveChild = new MoveToCompanionTask(player, moveRecord);
     }
 
@@ -169,12 +249,53 @@ public final class BuildSiteInvestigationCompanionTask
             }
         }
         // Consume the child receipt locally. Move positions are deliberately not propagated.
-        moveChild.result(terminal);
+        TaskResult moveResult = moveChild.result(terminal);
         moveChild = null;
         moveRecord = null;
-        if (terminal == TaskState.SUCCESS) frontierReached++; else frontierFailed++;
+        Candidate completedCandidate = activeMoveCandidate;
+        boolean verifiedArrival = terminal == TaskState.SUCCESS
+                && verifyMoveArrival(completedCandidate);
+        if (verifiedArrival) {
+            if (completedCandidate.kind() == CandidateKind.DRY_SHORE_RETURN) {
+                dryShoreReturns++;
+            } else {
+                frontierReached++;
+            }
+        } else {
+            if (completedCandidate != null
+                    && completedCandidate.kind() == CandidateKind.DRY_SHORE_RETURN) {
+                failedDryShoreReturns.add(completedCandidate.feet().asLong());
+                lastDryShoreFailure = moveResult == null || moveResult.message() == null
+                        ? terminal.name().toLowerCase()
+                        : moveResult.message();
+            } else {
+                frontierFailed++;
+            }
+            if (terminal == TaskState.SUCCESS) {
+                lastProbeMessage = "the movement child stopped near its survey target, but the "
+                        + "live body did not occupy the exact verified dry stance";
+            }
+        }
+        activeMoveCandidate = null;
         stage = Stage.OBSERVE;
         return TaskState.RUNNING;
+    }
+
+    private boolean verifyMoveArrival(Candidate candidate) {
+        if (candidate == null) return false;
+        ClientLevel level = player.clientLevel;
+        BlockPos actualFeet = BlockHelper.playerFeet(
+                level, player.getX(), player.getY(), player.getZ());
+        if (!actualFeet.equals(candidate.feet())
+                || !BlockHelper.isDryStandable(level, actualFeet)) {
+            return false;
+        }
+        // Returning from water promises only exact, dry occupancy. Shoreline evidence ranks the
+        // egress candidate but must never reject a successful landing. It is re-confirmed only
+        // when a waterfront survey frontier actually claimed that semantic property.
+        if (candidate.kind() == CandidateKind.DRY_SHORE_RETURN) return true;
+        return !waterfront || !candidate.shorelineEvidence()
+                || shorelineEvidence(level, actualFeet);
     }
 
     private TaskState startFrozenBuild(JsonObject arguments) {
@@ -254,10 +375,10 @@ public final class BuildSiteInvestigationCompanionTask
             addCandidateToward(level, current, direction[0], direction[1], 0, candidates);
         }
         return candidates.stream()
-                .filter(candidate -> !attemptedFrontiers.contains(columnKey(candidate.feet())))
+                .filter(candidate -> !alreadyAttempted(candidate.feet()))
                 .max(Comparator.comparingInt(Candidate::score))
                 .map(candidate -> {
-                    attemptedFrontiers.add(columnKey(candidate.feet()));
+                    rememberAttempt(candidate.feet());
                     return candidate;
                 })
                 .orElse(null);
@@ -276,7 +397,7 @@ public final class BuildSiteInvestigationCompanionTask
         int score = semanticBias + boundaryScore(level, frontier) * 30
                 + (int) horizontalDistance(current, frontier);
         if (waterfront) score += shore ? 1_200 : 0;
-        out.add(new Candidate(frontier, score, shore));
+        out.add(new Candidate(frontier, score, shore, CandidateKind.SURVEY_FRONTIER));
     }
 
     private BlockPos loadedFrontierToward(
@@ -285,17 +406,18 @@ public final class BuildSiteInvestigationCompanionTask
         double dz = desiredZ - current.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
         if (distance < 1.0) return null;
-        for (double leg = Math.min(MAX_LEG_DISTANCE, distance); leg >= 16.0; leg -= 8.0) {
+        for (double leg = Math.min(MAX_LEG_DISTANCE, distance);
+             leg >= 16.0; leg -= FRONTIER_SAMPLE_STEP) {
             int x = (int) Math.round(current.getX() + dx / distance * leg);
             int z = (int) Math.round(current.getZ() + dz / distance * leg);
             if (!insideScope(x, z)) continue;
-            BlockPos feet = safeSurfaceFeet(level, x, z);
+            BlockPos feet = safeDrySurfaceFeet(level, x, z);
             if (feet != null) return feet;
         }
         return null;
     }
 
-    private BlockPos safeSurfaceFeet(ClientLevel level, int x, int z) {
+    private BlockPos safeDrySurfaceFeet(ClientLevel level, int x, int z) {
         int aroundY = Math.clamp(player.getBlockY(),
                 level.getMinBuildHeight() + 2, level.getMaxBuildHeight() - 3);
         BlockPos column = new BlockPos(x, aroundY, z);
@@ -305,7 +427,7 @@ public final class BuildSiteInvestigationCompanionTask
              y >= Math.max(level.getMinBuildHeight() + 1, top - 8); y--) {
             BlockPos feet = new BlockPos(x, y, z);
             if (!level.isLoaded(feet.below()) || !level.isLoaded(feet.above())) continue;
-            if (!BlockHelper.isStandable(level, feet)
+            if (!BlockHelper.isDryStandable(level, feet)
                     || BlockHelper.isHazard(level, feet)
                     || BlockHelper.isHazard(level, feet.below())) continue;
             if (sensitiveForTravel(level, feet) || sensitiveForTravel(level, feet.below())) continue;
@@ -324,6 +446,7 @@ public final class BuildSiteInvestigationCompanionTask
     }
 
     private boolean shorelineEvidence(ClientLevel level, BlockPos landFeet) {
+        if (!BlockHelper.isDryStandable(level, landFeet)) return false;
         int water = 0;
         int land = 0;
         for (int dx = -WATER_SAMPLE_RADIUS; dx <= WATER_SAMPLE_RADIUS; dx += 5) {
@@ -334,10 +457,51 @@ public final class BuildSiteInvestigationCompanionTask
                 BlockPos column = new BlockPos(x, landFeet.getY(), z);
                 if (!level.hasChunkAt(column)) continue;
                 if (sourceWaterSurface(level, x, z, landFeet.getY())) water++;
-                else if (safeSurfaceFeet(level, x, z) != null) land++;
+                else if (safeDrySurfaceFeet(level, x, z) != null) land++;
             }
         }
         return water >= 3 && land >= 3;
+    }
+
+    private boolean bodyInWater() {
+        ClientLevel level = player.clientLevel;
+        BlockPos feet = BlockHelper.playerFeet(level, player.getX(), player.getY(), player.getZ());
+        return player.isInWater() || player.isEyeInFluid(FluidTags.WATER)
+                || level.getFluidState(feet).is(FluidTags.WATER)
+                || level.getFluidState(feet.above()).is(FluidTags.WATER);
+    }
+
+    private static List<ShoreOffset> dryShoreOffsets() {
+        List<ShoreOffset> offsets = new ArrayList<>();
+        int radiusSquared = MAX_LEG_DISTANCE * MAX_LEG_DISTANCE;
+        for (int dx = -MAX_LEG_DISTANCE; dx <= MAX_LEG_DISTANCE; dx++) {
+            for (int dz = -MAX_LEG_DISTANCE; dz <= MAX_LEG_DISTANCE; dz++) {
+                int distanceSquared = dx * dx + dz * dz;
+                if (distanceSquared == 0 || distanceSquared > radiusSquared) continue;
+                offsets.add(new ShoreOffset(dx, dz, distanceSquared));
+            }
+        }
+        offsets.sort(Comparator.comparingInt(ShoreOffset::distanceSquared));
+        return List.copyOf(offsets);
+    }
+
+    private boolean alreadyAttempted(BlockPos candidate) {
+        double radiusSquared = (double) FRONTIER_SAMPLE_STEP * FRONTIER_SAMPLE_STEP;
+        for (BlockPos attempted : attemptedFrontiers) {
+            double dx = candidate.getX() - attempted.getX();
+            double dz = candidate.getZ() - attempted.getZ();
+            if (dx * dx + dz * dz <= radiusSquared) return true;
+        }
+        return false;
+    }
+
+    private void rememberAttempt(BlockPos candidate) {
+        attemptedFrontiers.add(candidate.immutable());
+    }
+
+    private void resetDryShoreSearch() {
+        dryShoreSearchCenter = null;
+        dryShoreSearchIndex = 0;
     }
 
     private static boolean sourceWaterSurface(
@@ -392,10 +556,6 @@ public final class BuildSiteInvestigationCompanionTask
         return dx * dx + dz * dz <= radius * radius;
     }
 
-    private static long columnKey(BlockPos pos) {
-        return BlockPos.asLong(pos.getX(), 0, pos.getZ());
-    }
-
     private static double horizontalDistance(BlockPos first, BlockPos second) {
         double dx = first.getX() - second.getX();
         double dz = first.getZ() - second.getZ();
@@ -434,6 +594,7 @@ public final class BuildSiteInvestigationCompanionTask
         moveChild.result(terminal);
         moveChild = null;
         moveRecord = null;
+        activeMoveCandidate = null;
     }
 
     @Override
@@ -460,6 +621,12 @@ public final class BuildSiteInvestigationCompanionTask
         data.put("frontier_legs_reached", frontierReached);
         data.put("frontier_legs_failed", frontierFailed);
         data.put("shoreline_weighted_candidates_used", shorelineWeightedCandidates);
+        data.put("dry_shore_searches", dryShoreSearches);
+        data.put("dry_shore_returns", dryShoreReturns);
+        if ("loaded_dry_shore_stances_unreachable".equals(failureCode)
+                && lastDryShoreFailure != null) {
+            data.put("last_dry_shore_failure", lastDryShoreFailure);
+        }
         data.put("farthest_body_distance", farthestBodyDistance);
         if (lastProbeMessage != null) data.put("last_probe", lastProbeMessage);
         if (buildResult != null) {
