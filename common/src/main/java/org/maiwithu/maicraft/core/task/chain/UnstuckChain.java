@@ -42,11 +42,15 @@ public final class UnstuckChain implements Task, org.maiwithu.maicraft.task.refl
 
     @Override
     public boolean canRun(LocalPlayer companion) {
+        // Samples describe the body owner that we may have to rescue.  Once this reflex owns the
+        // body, its own forward burst is not evidence that the interrupted task is still stuck.
+        // Recording here before this guard used to fill 30/40 samples with the escape itself; an
+        // ineffective burst therefore retriggered after only a handful of resumed task ticks.
+        if (wanderTicksLeft > 0) return true;   // finish the burst without self-observation
+
         Vec3 pos = companion.position();
         boolean tryingToMove = companion.zza != 0.0f || companion.xxa != 0.0f;
         detector.record(pos.x, pos.z, tryingToMove);
-
-        if (wanderTicksLeft > 0) return true;   // finish the burst
         return detector.isStuck();
     }
 
@@ -69,7 +73,16 @@ public final class UnstuckChain implements Task, org.maiwithu.maicraft.task.refl
         driveWander(companion);
         if (--wanderTicksLeft <= 0) {
             InputDriver.halt(companion);
-            finishAttention(companion, "bounded escape burst completed", WANDER_TICKS);
+            double distance = horizontalDistanceFromAttentionStart(companion);
+            finishAttention(companion,
+                    distance >= MOVE_THRESHOLD
+                            ? "bounded escape burst made verified movement progress"
+                            : "bounded escape burst ended without verified movement progress",
+                    WANDER_TICKS);
+            // Resume observation from a clean task-owned window.  This is intentionally not a
+            // time cooldown: forty fresh locomotion samples may prove a new stall immediately,
+            // while idle, placement and this reflex's own movement never count toward it.
+            detector.reset();
         }
         return TaskState.RUNNING;
     }
@@ -90,14 +103,18 @@ public final class UnstuckChain implements Task, org.maiwithu.maicraft.task.refl
 
     private void finishAttention(LocalPlayer companion, String outcome, int actions) {
         if (!attentionActive) return;
-        double dx = companion.getX() - attentionStartX;
-        double dz = companion.getZ() - attentionStartZ;
-        double distance = Math.sqrt(dx * dx + dz * dz);
+        double distance = horizontalDistanceFromAttentionStart(companion);
         GameplayAttentionMonitor.reflexFinished(
                 id(), outcome, actions,
                 "no item consumption observed",
                 "horizontal displacement: " + Math.round(distance * 10.0) / 10.0 + " blocks; no coordinates exposed");
         attentionActive = false;
+    }
+
+    private double horizontalDistanceFromAttentionStart(LocalPlayer companion) {
+        double dx = companion.getX() - attentionStartX;
+        double dz = companion.getZ() - attentionStartZ;
+        return Math.sqrt(dx * dx + dz * dz);
     }
 
     @Override
