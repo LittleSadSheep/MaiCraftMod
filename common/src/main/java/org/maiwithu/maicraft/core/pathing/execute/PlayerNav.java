@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.pathing.astar.Favoring;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
 import org.maiwithu.maicraft.core.pathing.astar.NavPath;
 import org.maiwithu.maicraft.core.pathing.astar.PathCalcResult;
 import org.maiwithu.maicraft.core.pathing.bridge.ContextFactory;
@@ -95,6 +96,8 @@ public final class PlayerNav {
      * 的每个 tick 里禁疾跑(见 {@link #tick} 的 allowSprint 包夹)。
      */
     private final boolean sprintAllowed;
+    /** New full-engine backend behind the stable task-facing contract. */
+    private final EmbeddedBaritoneNavigator embedded;
 
     /** 段规划状态机:搜索派发、段执行、无缝接段、失败自动重搜全在其内。 */
     private final PathingCore core;
@@ -229,6 +232,7 @@ public final class PlayerNav {
      */
     public PlayerNav withTerrainProbe() {
         this.terrainProbe = true;
+        embedded.withTerrainProbe();
         return this;
     }
 
@@ -264,6 +268,9 @@ public final class PlayerNav {
         this.revalidateGoalEachTick = revalidateGoalEachTick;
         this.core = new PathingCore(player, PoolSearchDispatcher.INSTANCE,
                 this::searchContext, this::executionContext, this.contextProvider.permit());
+        this.embedded = new EmbeddedBaritoneNavigator(
+                player, compiledSupplier, reached, this.contextProvider.permit(),
+                sprintAllowed, revalidateGoalEachTick);
     }
 
     /** 搜索用冻结上下文:快照世界 + 快照背包,穿透三个语义开关。 */
@@ -325,6 +332,7 @@ public final class PlayerNav {
     private boolean arrivedInPlaceLogged;
 
     public Status tick() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.tick();
         NavProfiler.tickFrame();
         if (reached.getAsBoolean()) {
             return Status.ARRIVED;
@@ -598,10 +606,12 @@ public final class PlayerNav {
     }
 
     public boolean isSafeToCancel() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.isSafeToCancel();
         return core.isSafeToCancel();
     }
 
     public BlockPos pathStart() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.pathStart();
         return core.pathStart();
     }
 
@@ -611,16 +621,19 @@ public final class PlayerNav {
      * 的挖出算在内——那是反射,不是寻路决定,也该如实报。
      */
     public TerrainBill ledger() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.ledger();
         return core.ledger();
     }
 
     /** FAILED 后的人话验尸(直接喂 LLM)。 */
     public String failReason() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.failReason();
         return failReason;
     }
 
     /** FAILED 的结构化归因,任务层恢复梯按枚举分支。 */
     public FailureType failType() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.failType();
         return failType;
     }
 
@@ -630,6 +643,7 @@ public final class PlayerNav {
      * 的搜索本身就是进度,只是不是走路那种。
      */
     public int stallTicks() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.stallTicks();
         PathExecutor current = core.getCurrent();
         return current == null ? 0 : current.ticksSinceProgress();
     }
@@ -640,12 +654,16 @@ public final class PlayerNav {
      * renew a task lease without accidentally keeping an idle navigator alive forever.
      */
     public boolean hasRecentPhysicalProgress(int graceTicks) {
+        if (EmbeddedBaritoneNavigator.enabled()) {
+            return embedded.hasRecentPhysicalProgress(graceTicks);
+        }
         PathExecutor current = core.getCurrent();
         return current != null && current.ticksSinceProgress() <= Math.max(0, graceTicks);
     }
 
     /** 搜索结论分布摘要,转发自内核(排障日志用)。 */
     public String outcomeSummary() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.outcomeSummary();
         return core.outcomeSummary();
     }
 
@@ -656,11 +674,16 @@ public final class PlayerNav {
      * 测试服上足以在首次搜索返回前烧光整个预算)。
      */
     public boolean planningInFlight() {
+        if (EmbeddedBaritoneNavigator.enabled()) return embedded.planningInFlight();
         return core.hasInProgressSearch() && core.getCurrent() == null;
     }
 
     /** 停止导航:取消在飞搜索、丢段、清键停挖,并把身体停稳、松潜行。 */
     public void stop() {
+        if (EmbeddedBaritoneNavigator.enabled()) {
+            embedded.stop();
+            return;
+        }
         stopped = true;
         searchSatisfied = false;
         if (terraformProbe != null) {
@@ -677,6 +700,10 @@ public final class PlayerNav {
      * 就地作业(如站桩挖掘)期间逐 tick 调用;与 {@link #stop()}(终局释放)互不替代。
      */
     public void pause() {
+        if (EmbeddedBaritoneNavigator.enabled()) {
+            embedded.pause();
+            return;
+        }
         InputDriver.halt(player);
     }
 
@@ -687,6 +714,9 @@ public final class PlayerNav {
      * @return true only when the actor's native slot and this tick's mutation lease are both ready
      */
     public boolean yieldForExternalAction() {
+        if (EmbeddedBaritoneNavigator.enabled()) {
+            return embedded.yieldForExternalAction();
+        }
         InputDriver.halt(player);
         return core.yieldNativeActions();
     }
