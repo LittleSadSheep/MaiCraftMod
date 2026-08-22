@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.task.move;
 
+import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 
@@ -42,11 +43,24 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     public final Kind kind;
     /** Consent to dig / bridge / pillar en route. False = the walk leaves every block as it was. */
     public final boolean mayAlterTerrain;
+    /**
+     * Internal process contract: success requires the live body's supported feet stance to satisfy
+     * the exact BLOCK goal. This is deliberately absent from the tool input surface; semantic
+     * process tasks opt into it through {@link #strictStance} while public goto and every legacy
+     * constructor call retain the ordinary bounded near-success behaviour.
+     */
+    private final boolean strictStance;
     /** Successful live body receipt; never copied into the public TaskResult. */
     private Position verifiedPosition;
 
     public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
                             Double x, Double y, Double z, String block, boolean mayAlterTerrain) {
+        this(toolCallId, deadlineGameTime, x, y, z, block, mayAlterTerrain, false);
+    }
+
+    private MoveToTaskRecord(String toolCallId, long deadlineGameTime,
+                             Double x, Double y, Double z, String block,
+                             boolean mayAlterTerrain, boolean strictStance) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.x = x;
         this.y = y;
@@ -54,6 +68,26 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
         this.block = block == null || block.isBlank() ? null : block.trim();
         this.kind = resolveKind(x, y, z, this.block);
         this.mayAlterTerrain = mayAlterTerrain;
+        if (strictStance && this.kind != Kind.BLOCK) {
+            throw new IllegalArgumentException("strict stance movement requires one exact block cell");
+        }
+        this.strictStance = strictStance;
+    }
+
+    /**
+     * Build an internal exact-body movement contract without adding another LLM-visible field to
+     * {@code goto}. The supplied cell is already a process-owned, observed stance candidate.
+     */
+    public static MoveToTaskRecord strictStance(
+            String toolCallId, long deadlineGameTime, BlockPos target, boolean mayAlterTerrain) {
+        if (target == null) throw new IllegalArgumentException("strict stance target is required");
+        return new MoveToTaskRecord(toolCallId, deadlineGameTime,
+                (double) target.getX(), (double) target.getY(), (double) target.getZ(), null,
+                mayAlterTerrain, true);
+    }
+
+    boolean requiresStrictStance() {
+        return strictStance;
     }
 
     void retainVerifiedPosition(Position position) {

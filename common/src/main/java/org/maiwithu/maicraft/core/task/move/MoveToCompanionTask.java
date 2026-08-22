@@ -211,8 +211,45 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
      * "one block short, one step too far" fall.
      */
     private boolean reached() {
-        return inGoalCell(feet())
+        boolean supportedGoalMembership = inGoalCell(feet())
                 && inGoalCell(org.maiwithu.maicraft.core.pathing.moves.Movement.pathStart(player));
+        // A strict internal stance is a fact about the live body, not just two pathing cells.
+        // During a jump both cells can briefly name the destination before vanilla physics has
+        // actually put the player on its support. Public goto retains its historical semantics.
+        return supportedGoalMembership && (!r.requiresStrictStance() || player.onGround());
+    }
+
+    /**
+     * PlayerNav deliberately exposes search-goal satisfaction as ARRIVED even when the caller's
+     * stronger body predicate is still false. For a strict stance, one such state is healthy and
+     * transient: the feet have entered the exact goal cell and ordinary gravity is still settling
+     * the body onto an observed standable support. Keep observing that physical transition without
+     * a retry/tick counter. If the body leaves the cell, the stance stops being landable, or the
+     * body is held up by another locomotion medium, this returns false and the candidate is rejected
+     * normally; the semantic parent can then choose a different observed stance.
+     */
+    private boolean strictLandingInProgress() {
+        if (!r.requiresStrictStance() || player.onGround() || !inGoalCell(feet())) {
+            return false;
+        }
+        if (!strictTargetLandable()) {
+            return false;
+        }
+        return !player.isInWater()
+                && !player.isInLava()
+                && !player.isSwimming()
+                && !player.onClimbable()
+                && !player.isPassenger()
+                && !player.isFallFlying()
+                && !player.isNoGravity()
+                && !player.hasEffect(net.minecraft.world.effect.MobEffects.LEVITATION)
+                && !player.isSpectator()
+                && !player.getAbilities().flying;
+    }
+
+    private boolean strictTargetLandable() {
+        return org.maiwithu.maicraft.core.pathing.util.BlockHelper.isStandable(
+                player.level(), blockTarget);
     }
 
     /** ONE membership definition per kind, shared with the search:
@@ -245,14 +282,16 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             fail(blockedMessage("no path"), FailureType.NO_PATH);
             return TaskState.FAILED;
         }
-        // Progress lease: while the nav is consuming its plan (steps advancing / digging),
-        // keep the deadline PROGRESS_LEASE ahead. There is deliberately no wall-clock
-        // ceiling: a long route that is still making verified physical progress is healthy.
-        // Plan
-        // consumption, NOT goal distance, is the liveness signal: healthy routes routinely
-        // move away from the goal (skirting a lake, spiraling down), and the flat budget
-        // above can't price terrain (a dig-heavy route once died 1 block short).
-        if (nav.stallTicks() <= PROGRESS_GRACE_TICKS) {
+        // Progress lease: renew only for a real active segment with recent physical progress,
+        // or an asynchronous plan that is demonstrably still in flight. stallTicks() historically
+        // reads zero when there is no segment; using it alone made PlayerNav's latched ARRIVED
+        // state renew forever while a strict body merely waited for gravity. Plan consumption,
+        // NOT goal distance, remains the liveness signal: healthy routes routinely move away from
+        // the goal (skirting a lake, spiraling down), and the flat initial budget cannot price
+        // terrain (a dig-heavy route once died one block short).
+        boolean awaitingStrictLanding = strictLandingInProgress();
+        if (!awaitingStrictLanding && (nav.planningInFlight()
+                || nav.hasRecentPhysicalProgress(PROGRESS_GRACE_TICKS))) {
             long now = player.level().getGameTime();
             r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
         }
@@ -268,7 +307,25 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
-            case ARRIVED -> successAtBody();
+            case ARRIVED -> {
+                // PlayerNav also reports ARRIVED when its search goal is satisfied but the live
+                // supported-body predicate is not (a stable STANCE_DUD signal). Public goto keeps
+                // its historical teaching-success semantics; internal strict stance moves must
+                // reject that candidate rather than hand a nearby body position downstream.
+                if (r.requiresStrictStance()) {
+                    if (reached()) {
+                        yield successAtBody();
+                    }
+                    if (strictLandingInProgress()) {
+                        yield TaskState.RUNNING;
+                    }
+                    fail(blockedMessage(
+                                    "the route ended without occupying the exact grounded stance"),
+                            FailureType.NO_PATH);
+                    yield TaskState.FAILED;
+                }
+                yield successAtBody();
+            }
             case FAILED -> {
                 // FIND:打不通就近候选 -> 除名,朝余下候选重开导航
                 if (r.kind == MoveToTaskRecord.Kind.FIND && finder.rotateAfterFailure()) {
@@ -282,18 +339,21 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 // up only once it's stopped making progress (bobbing at the surface below an
                 // out-of-reach above-water target). So the body settles onto an underwater
                 // goal but bails under an unreachable air one. On land a failure is final.
-                if (player.isInWater() && settleTicks < MAX_SETTLE_TICKS) {
+                if (!r.requiresStrictStance()
+                        && player.isInWater() && settleTicks < MAX_SETTLE_TICKS) {
                     yield TaskState.RUNNING;
                 }
                 // Otherwise: as close as the terrain allows → (teaching) success or fail.
-                if (closeEnoughToSucceed()) yield successAtBody();
+                if (!r.requiresStrictStance() && closeEnoughToSucceed()) {
+                    yield successAtBody();
+                }
                 // Recovery ladder — ONE retry rung, land nav only: re-plan accepting
                 // anywhere within NEAR_SUCCESS_RADIUS of the destination. Goal-consistent,
                 // not scope creep: a stop within that radius already counts as arrival
                 // (closeEnoughToSucceed above), the retry just lets the SEARCH aim for it.
                 // YLEVEL has no looser near-equivalent (its goal is already any-x/z), and
                 // the water-settle path above is untouched.
-                if (!nearRetried && !player.isInWater()
+                if (!r.requiresStrictStance() && !nearRetried && !player.isInWater()
                         && r.kind != MoveToTaskRecord.Kind.YLEVEL
                         && r.kind != MoveToTaskRecord.Kind.FIND) {
                     nearRetried = true;
@@ -535,6 +595,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             }
         }
         return "blocked: got within " + String.format("%.1f", remaining) + " blocks of " + where
-                + " (now on the ground at y=" + gy + "). " + failReason + "." + advice;
+                + " (now " + (player.onGround() ? "grounded" : "not grounded")
+                + " at y=" + gy + "). " + failReason + "." + advice;
     }
 }
