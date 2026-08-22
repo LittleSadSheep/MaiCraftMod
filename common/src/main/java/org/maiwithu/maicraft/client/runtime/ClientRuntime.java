@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.pathing.cache.PathCaches;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.scan.BlockSearch;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.mcp.EmbeddedMcpService;
@@ -73,6 +74,7 @@ public final class ClientRuntime {
         }
 
         LocalPlayerContext context = opened.orElseThrow();
+        boolean pathingMayDrive = false;
         try {
             bodyPresent = true;
             BlockSearch.tick(context.level());
@@ -108,10 +110,15 @@ public final class ClientRuntime {
             }
             intents.controlAvailable();
             CompanionTickDispatcher.tick(context.player());
+            pathingMayDrive = true;
             intents.tickPersistence(minecraft, context.player());
             GameplayAttentionMonitor.afterSemanticBind(context.player());
         } finally {
-            ACTOR.endTick(context);
+            try {
+                EmbeddedBaritoneRuntime.tick(context, pathingMayDrive);
+            } finally {
+                ACTOR.endTick(context);
+            }
         }
     }
 
@@ -161,6 +168,7 @@ public final class ClientRuntime {
 
         Minecraft minecraft = Minecraft.getInstance();
         Runnable cleanup = () -> {
+            EmbeddedBaritoneRuntime.bodyGone();
             ACTOR.shutdown();
             IntentRuntime.get().shutdownPersistence();
             bodyGone(false);
@@ -195,6 +203,7 @@ public final class ClientRuntime {
     }
 
     private static void bodyGone(boolean saveSemanticState) {
+        EmbeddedBaritoneRuntime.bodyGone();
         if (saveSemanticState) IntentRuntime.get().bodyUnavailable();
         CompanionTickDispatcher.bodyGone();
         PathCaches.dropAll();
