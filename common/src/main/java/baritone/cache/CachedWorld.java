@@ -298,3 +298,28 @@ public final class CachedWorld implements ICachedWorld, Helper {
     private boolean isRegionInWorld(int regionX, int regionZ) {
         return regionX <= REGION_MAX && regionX >= -REGION_MAX && regionZ <= REGION_MAX && regionZ >= -REGION_MAX;
     }
+
+    private class PackerThread implements Runnable {
+
+        public void run() {
+            while (true) {
+                try {
+                    ChunkPos pos = toPackQueue.take();
+                    LevelChunk chunk = toPackMap.remove(pos);
+                    if (toPackQueue.size() > Baritone.settings().chunkPackerQueueMaxSize.value) {
+                        continue;
+                    }
+                    CachedChunk cached = ChunkPacker.pack(chunk);
+                    CachedWorld.this.updateCachedChunk(cached);
+                    //System.out.println("Processed chunk at " + chunk.x + "," + chunk.z);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    break;
+                } catch (Throwable th) {
+                    // in the case of an exception, keep consuming from the queue so as not to leak memory
+                    th.printStackTrace();
+                }
+            }
+        }
+    }
+}
