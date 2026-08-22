@@ -110,7 +110,7 @@ final class CompanionBrain {
             cancelled = current.cancel(player);
         }
         if (cancelled) {
-            holder = null;
+            stopNonSlotHolder(player, Task.StopReason.REPLACED);
             TaskSessionHooks.fireSessionEnd(player);
             shipResults();
         }
@@ -121,11 +121,31 @@ final class CompanionBrain {
         boolean hadWork = !sync.isEmpty() || !current.isEmpty();
         sync.cancel(player);
         current.cancel(player);
-        holder = null;
+        stopNonSlotHolder(player, Task.StopReason.REPLACED);
         if (hadWork) {
             TaskSessionHooks.fireSessionEnd(player);
         }
         shipResults();
+    }
+
+    /**
+     * Stop a reflex which currently owns the body before forgetting scheduler ownership.
+     * Slot tasks wind themselves down through {@link TaskSlot#cancel}; stopping either proxy
+     * here would double-stop the same task.  A reflex, however, may retain an episode or a
+     * bounded movement burst across ticks, so merely clearing {@link #holder} would let it
+     * reacquire the body after the semantic task had already been cancelled.
+     */
+    private void stopNonSlotHolder(LocalPlayer player, Task.StopReason reason) {
+        Task previousHolder = holder;
+        holder = null;
+        if (previousHolder == null || previousHolder == syncProxy || previousHolder == currentProxy) {
+            return;
+        }
+        try {
+            previousHolder.stop(player, reason);
+        } catch (RuntimeException ignored) {
+            // Cancellation and slot settlement remain authoritative even if reflex cleanup fails.
+        }
     }
 
     /**
