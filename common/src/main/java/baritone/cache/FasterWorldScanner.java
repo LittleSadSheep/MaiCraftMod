@@ -298,3 +298,6 @@ public enum FasterWorldScanner implements IWorldScanner {
                 states[i] = state;
             }
             return states;
+        }
+    }
+}
