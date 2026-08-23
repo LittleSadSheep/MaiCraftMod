@@ -298,3 +298,74 @@ public final class PathRenderer implements IRenderer {
                     RenderSystem.enableDepthTest();
                 }
                 return;
+            }
+
+            minX = goalPos.getX() + 0.002 - renderPosX;
+            maxX = goalPos.getX() + 1 - 0.002 - renderPosX;
+            minZ = goalPos.getZ() + 0.002 - renderPosZ;
+            maxZ = goalPos.getZ() + 1 - 0.002 - renderPosZ;
+
+            y1 = 0;
+            y2 = 0;
+            minY -= renderPosY;
+            maxY -= renderPosY;
+            drawDankLitGoalBox(bufferBuilder, stack, color, minX, maxX, minZ, maxZ, minY, maxY, y1, y2, setupRender);
+        } else if (goal instanceof GoalComposite) {
+            // Simple way to determine if goals can be batched, without having some sort of GoalRenderer
+            boolean batch = Arrays.stream(((GoalComposite) goal).goals()).allMatch(IGoalRenderPos.class::isInstance);
+            BufferBuilder buf = bufferBuilder;
+            if (batch) {
+                buf = IRenderer.startLines(color, settings.goalRenderLineWidthPixels.value, settings.renderGoalIgnoreDepth.value);
+            }
+            for (Goal g : ((GoalComposite) goal).goals()) {
+                drawGoal(buf, stack, ctx, g, partialTicks, color, !batch);
+            }
+            if (batch) {
+                IRenderer.endLines(buf, settings.renderGoalIgnoreDepth.value);
+            }
+        } else if (goal instanceof GoalInverted) {
+            drawGoal(stack, ctx, ((GoalInverted) goal).origin, partialTicks, settings.colorInvertedGoalBox.value);
+        } else if (goal instanceof GoalYLevel) {
+            GoalYLevel goalpos = (GoalYLevel) goal;
+            minX = ctx.player().position().x - settings.yLevelBoxSize.value - renderPosX;
+            minZ = ctx.player().position().z - settings.yLevelBoxSize.value - renderPosZ;
+            maxX = ctx.player().position().x + settings.yLevelBoxSize.value - renderPosX;
+            maxZ = ctx.player().position().z + settings.yLevelBoxSize.value - renderPosZ;
+            minY = ((GoalYLevel) goal).level - renderPosY;
+            maxY = minY + 2;
+            y1 = 1 + y + goalpos.level - renderPosY;
+            y2 = 1 - y + goalpos.level - renderPosY;
+            drawDankLitGoalBox(bufferBuilder, stack, color, minX, maxX, minZ, maxZ, minY, maxY, y1, y2, setupRender);
+        }
+    }
+
+    private static void drawDankLitGoalBox(BufferBuilder bufferBuilder, PoseStack stack, Color colorIn, double minX, double maxX, double minZ, double maxZ, double minY, double maxY, double y1, double y2, boolean setupRender) {
+        if (setupRender) {
+            bufferBuilder = IRenderer.startLines(colorIn, settings.goalRenderLineWidthPixels.value, settings.renderGoalIgnoreDepth.value);
+        }
+
+        renderHorizontalQuad(bufferBuilder, stack, minX, maxX, minZ, maxZ, y1);
+        renderHorizontalQuad(bufferBuilder, stack, minX, maxX, minZ, maxZ, y2);
+
+        for (double y = minY; y < maxY; y += 16) {
+            double max = Math.min(maxY, y + 16);
+            IRenderer.emitLine(bufferBuilder, stack, minX, y, minZ, minX, max, minZ, 0.0, 1.0, 0.0);
+            IRenderer.emitLine(bufferBuilder, stack, maxX, y, minZ, maxX, max, minZ, 0.0, 1.0, 0.0);
+            IRenderer.emitLine(bufferBuilder, stack, maxX, y, maxZ, maxX, max, maxZ, 0.0, 1.0, 0.0);
+            IRenderer.emitLine(bufferBuilder, stack, minX, y, maxZ, minX, max, maxZ, 0.0, 1.0, 0.0);
+        }
+
+        if (setupRender) {
+            IRenderer.endLines(bufferBuilder, settings.renderGoalIgnoreDepth.value);
+        }
+    }
+
+    private static void renderHorizontalQuad(BufferBuilder bufferBuilder, PoseStack stack, double minX, double maxX, double minZ, double maxZ, double y) {
+        if (y != 0) {
+            IRenderer.emitLine(bufferBuilder, stack, minX, y, minZ, maxX, y, minZ, 1.0, 0.0, 0.0);
+            IRenderer.emitLine(bufferBuilder, stack, maxX, y, minZ, maxX, y, maxZ, 0.0, 0.0, 1.0);
+            IRenderer.emitLine(bufferBuilder, stack, maxX, y, maxZ, minX, y, maxZ, -1.0, 0.0, 0.0);
+            IRenderer.emitLine(bufferBuilder, stack, minX, y, maxZ, minX, y, minZ, 0.0, 0.0, -1.0);
+        }
+    }
+}
