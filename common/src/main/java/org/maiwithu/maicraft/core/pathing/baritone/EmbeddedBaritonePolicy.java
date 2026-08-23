@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.core.pathing.baritone;
+
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
+import net.minecraft.core.BlockPos;
+
+/**
+ * Immutable task policy copied into each embedded Baritone calculation context.
+ *
+ * <p>The semantic task remains the authority for protected mutations and forbidden body cells.
+ * Worker threads never read MaiCraft's client-thread {@code ThreadLocal}; they receive this frozen
+ * snapshot when Baritone creates the calculation context.</p>
+ */
+public final class EmbeddedBaritonePolicy {
+    private static volatile Snapshot current = Snapshot.EMPTY;
+
+    private EmbeddedBaritonePolicy() {}
+
+    public static void install(
+            LongSet sacred,
+            LongSet protectedMutations,
+            LongSet forbiddenBodyCells) {
+        LongOpenHashSet protectedCells = new LongOpenHashSet();
+        if (sacred != null) protectedCells.addAll(sacred);
+        if (protectedMutations != null) protectedCells.addAll(protectedMutations);
+        if (forbiddenBodyCells != null) protectedCells.addAll(forbiddenBodyCells);
+
+        LongOpenHashSet forbidden = new LongOpenHashSet();
+        if (forbiddenBodyCells != null) forbidden.addAll(forbiddenBodyCells);
+        current = new Snapshot(
+                LongSets.unmodifiable(protectedCells),
+                LongSets.unmodifiable(forbidden));
+    }
+
+    public static Snapshot snapshot() {
+        return current;
+    }
+
+    public static void clear() {
+        current = Snapshot.EMPTY;
+    }
+
+    public record Snapshot(LongSet protectedCells, LongSet forbiddenBodyCells) {
+        private static final Snapshot EMPTY = new Snapshot(
+                LongSets.emptySet(), LongSets.emptySet());
+
+        public boolean protects(int x, int y, int z) {
+            return protectedCells.contains(BlockPos.asLong(x, y, z));
+        }
+
+        public boolean forbidsBody(int x, int y, int z) {
+            return forbiddenBodyCells.contains(BlockPos.asLong(x, y, z));
+        }
+    }
+}
