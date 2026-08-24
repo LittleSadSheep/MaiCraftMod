@@ -298,3 +298,34 @@ public class MovementDiagonal extends Movement {
     protected boolean prepared(MovementState state) {
         return true;
     }
+
+    @Override
+    public List<BlockPos> toBreak(BlockStateInterface bsi) {
+        if (toBreakCached != null) {
+            return toBreakCached;
+        }
+        List<BlockPos> result = new ArrayList<>();
+        for (int i = 4; i < 6; i++) {
+            if (!MovementHelper.canWalkThrough(bsi, positionsToBreak[i].x, positionsToBreak[i].y, positionsToBreak[i].z)) {
+                result.add(positionsToBreak[i]);
+            }
+        }
+        toBreakCached = result;
+        return result;
+    }
+
+    @Override
+    public List<BlockPos> toWalkInto(BlockStateInterface bsi) {
+        if (toWalkIntoCached == null) {
+            toWalkIntoCached = new ArrayList<>();
+        }
+        List<BlockPos> result = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            if (!MovementHelper.canWalkThrough(bsi, positionsToBreak[i].x, positionsToBreak[i].y, positionsToBreak[i].z)) {
+                result.add(positionsToBreak[i]);
+            }
+        }
+        toWalkIntoCached = result;
+        return toWalkIntoCached;
+    }
+}
