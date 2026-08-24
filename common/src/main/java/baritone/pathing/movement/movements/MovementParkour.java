@@ -298,3 +298,16 @@ public class MovementParkour extends Movement {
                     }
                 }
 
+                state.setInput(Input.JUMP, true);
+            } else if (!ctx.playerFeet().equals(dest.relative(direction, -1))) {
+                state.setInput(Input.SPRINT, false);
+                if (ctx.playerFeet().equals(src.relative(direction, -1))) {
+                    MovementHelper.moveTowards(ctx, state, src);
+                } else {
+                    MovementHelper.moveTowards(ctx, state, src.relative(direction, -1));
+                }
+            }
+        }
+        return state;
+    }
+}
