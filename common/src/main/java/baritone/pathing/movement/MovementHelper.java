@@ -298,3 +298,303 @@ public interface MovementHelper extends ActionCosts, Helper {
         // for MovementTraverse and MovementAscend
         // block double plant defaults to true when the block doesn't match, so don't need to check that case
         // all other overrides just return true or false
+        // the only case to deal with is snow
+        /*
+         *  public boolean isReplaceable(IBlockAccess worldIn, BlockPos pos)
+         *     {
+         *         return ((Integer)worldIn.getBlockState(pos).getValue(LAYERS)).intValue() == 1;
+         *     }
+         */
+        Block block = state.getBlock();
+        if (block instanceof AirBlock) {
+            // early return for common cases hehe
+            return true;
+        }
+        if (block instanceof SnowLayerBlock) {
+            // as before, default to true (mostly because it would otherwise make long distance pathing through snowy biomes impossible)
+            if (!bsi.worldContainsLoadedChunk(x, z)) {
+                return true;
+            }
+            return state.getValue(SnowLayerBlock.LAYERS) == 1;
+        }
+        if (block == Blocks.LARGE_FERN || block == Blocks.TALL_GRASS) {
+            return true;
+        }
+        return state.canBeReplaced();
+    }
+
+    static boolean isDoorPassable(IPlayerContext ctx, BlockPos doorPos, BlockPos playerPos) {
+        if (playerPos.equals(doorPos)) {
+            return false;
+        }
+
+        BlockState state = BlockStateInterface.get(ctx, doorPos);
+        if (!(state.getBlock() instanceof DoorBlock)) {
+            return true;
+        }
+
+        return isHorizontalBlockPassable(doorPos, state, playerPos, DoorBlock.OPEN);
+    }
+
+    static boolean isGatePassable(IPlayerContext ctx, BlockPos gatePos, BlockPos playerPos) {
+        if (playerPos.equals(gatePos)) {
+            return false;
+        }
+
+        BlockState state = BlockStateInterface.get(ctx, gatePos);
+        if (!(state.getBlock() instanceof FenceGateBlock)) {
+            return true;
+        }
+
+        return state.getValue(FenceGateBlock.OPEN);
+    }
+
+    static boolean isHorizontalBlockPassable(BlockPos blockPos, BlockState blockState, BlockPos playerPos, BooleanProperty propertyOpen) {
+        if (playerPos.equals(blockPos)) {
+            return false;
+        }
+
+        Direction.Axis facing = blockState.getValue(HorizontalDirectionalBlock.FACING).getAxis();
+        boolean open = blockState.getValue(propertyOpen);
+
+        Direction.Axis playerFacing;
+        if (playerPos.north().equals(blockPos) || playerPos.south().equals(blockPos)) {
+            playerFacing = Direction.Axis.Z;
+        } else if (playerPos.east().equals(blockPos) || playerPos.west().equals(blockPos)) {
+            playerFacing = Direction.Axis.X;
+        } else {
+            return true;
+        }
+
+        return (facing == playerFacing) == open;
+    }
+
+    static boolean avoidWalkingInto(BlockState state) {
+        Block block = state.getBlock();
+        return !state.getFluidState().isEmpty()
+                || (block == Blocks.MAGMA_BLOCK && !Baritone.settings().allowWalkOnMagmaBlocks.value)
+                || block == Blocks.CACTUS
+                || block == Blocks.SWEET_BERRY_BUSH
+                || block instanceof BaseFireBlock
+                || block == Blocks.END_PORTAL
+                || block == Blocks.COBWEB
+                || block == Blocks.BUBBLE_COLUMN;
+    }
+
+    /**
+     * Can I walk on this block without anything weird happening like me falling
+     * through? Includes water because we know that we automatically jump on
+     * water
+     * <p>
+     * If changing something in this function remember to also change it in precomputed data
+     *
+     * @param bsi   Block state provider
+     * @param x     The block's x position
+     * @param y     The block's y position
+     * @param z     The block's z position
+     * @param state The state of the block at the specified location
+     * @return Whether or not the specified block can be walked on
+     */
+    static boolean canWalkOn(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
+        Ternary canWalkOn = canWalkOnBlockState(state);
+        if (canWalkOn == YES) {
+            return true;
+        }
+        if (canWalkOn == NO) {
+            return false;
+        }
+        return canWalkOnPosition(bsi, x, y, z, state);
+    }
+
+    static Ternary canWalkOnBlockState(BlockState state) {
+        Block block = state.getBlock();
+        if (isBlockNormalCube(state) && (block != Blocks.MAGMA_BLOCK || Baritone.settings().allowWalkOnMagmaBlocks.value) && block != Blocks.BUBBLE_COLUMN && block != Blocks.HONEY_BLOCK) {
+            return YES;
+        }
+        if (block instanceof AzaleaBlock) {
+            return YES;
+        }
+        if (block == Blocks.LADDER || (isClimbable(block) && Baritone.settings().allowVines.value)) { // TODO reconsider this
+            return YES;
+        }
+        if (block == Blocks.FARMLAND || block == Blocks.DIRT_PATH || block == Blocks.SOUL_SAND) {
+            return YES;
+        }
+        if (block == Blocks.ENDER_CHEST || block == Blocks.CHEST || block == Blocks.TRAPPED_CHEST) {
+            return YES;
+        }
+        if (block == Blocks.GLASS || block instanceof StainedGlassBlock) {
+            return YES;
+        }
+        if (block instanceof StairBlock) {
+            return YES;
+        }
+        if (isWater(state)) {
+            return MAYBE;
+        }
+        if (MovementHelper.isLava(state) && Baritone.settings().assumeWalkOnLava.value) {
+            return MAYBE;
+        }
+        if (block instanceof SlabBlock) {
+            if (!Baritone.settings().allowWalkOnBottomSlab.value) {
+                if (state.getValue(SlabBlock.TYPE) != SlabType.BOTTOM) {
+                    return YES;
+                }
+                return NO;
+            }
+            return YES;
+        }
+        return NO;
+    }
+
+    static boolean canWalkOnPosition(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
+        Block block = state.getBlock();
+        if (isWater(state)) {
+            // since this is called literally millions of times per second, the benefit of not allocating millions of useless "pos.up()"
+            // BlockPos s that we'd just garbage collect immediately is actually noticeable. I don't even think its a decrease in readability
+            BlockState upState = bsi.get0(x, y + 1, z);
+            Block up = upState.getBlock();
+            if (up == Blocks.LILY_PAD || up instanceof CarpetBlock) {
+                return true;
+            }
+            if (MovementHelper.isFlowing(x, y, z, state, bsi) || upState.getFluidState().getType() == Fluids.FLOWING_WATER) {
+                // the only scenario in which we can walk on flowing water is if it's under still water with jesus off
+                return isWater(upState) && !Baritone.settings().assumeWalkOnWater.value;
+            }
+            // if assumeWalkOnWater is on, we can only walk on water if there isn't water above it
+            // if assumeWalkOnWater is off, we can only walk on water if there is water above it
+            return isWater(upState) ^ Baritone.settings().assumeWalkOnWater.value;
+        }
+
+        if (MovementHelper.isLava(state) && !MovementHelper.isFlowing(x, y, z, state, bsi) && Baritone.settings().assumeWalkOnLava.value) { // if we get here it means that assumeWalkOnLava must be true, so put it last
+            return true;
+        }
+
+        return false; // If we don't recognise it then we want to just return false to be safe.
+    }
+
+    static boolean canWalkOn(CalculationContext context, int x, int y, int z, BlockState state) {
+        return context.precomputedData.canWalkOn(context.bsi, x, y, z, state);
+    }
+
+    static boolean canWalkOn(CalculationContext context, int x, int y, int z) {
+        return canWalkOn(context, x, y, z, context.get(x, y, z));
+    }
+
+    static boolean canWalkOn(IPlayerContext ctx, BetterBlockPos pos, BlockState state) {
+        return canWalkOn(new BlockStateInterface(ctx), pos.x, pos.y, pos.z, state);
+    }
+
+    static boolean canWalkOn(IPlayerContext ctx, BlockPos pos) {
+        return canWalkOn(new BlockStateInterface(ctx), pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    static boolean canWalkOn(IPlayerContext ctx, BetterBlockPos pos) {
+        return canWalkOn(new BlockStateInterface(ctx), pos.x, pos.y, pos.z);
+    }
+
+    static boolean canWalkOn(BlockStateInterface bsi, int x, int y, int z) {
+        return canWalkOn(bsi, x, y, z, bsi.get0(x, y, z));
+    }
+
+    static boolean canUseFrostWalker(CalculationContext context, BlockState state) {
+        return context.frostWalker != 0
+                && state == FrostedIceBlock.meltsInto()
+                && state.getValue(LiquidBlock.LEVEL) == 0;
+    }
+
+    static boolean canUseFrostWalker(IPlayerContext ctx, BlockPos pos) {
+        boolean hasFrostWalker = false;
+        OUTER: for (EquipmentSlot slot : EquipmentSlot.values()) {
+            ItemEnchantments itemEnchantments = ctx
+                .player()
+                .getItemBySlot(slot)
+                .getEnchantments();
+            for (Holder<Enchantment> enchant : itemEnchantments.keySet()) {
+                if (enchant.is(Enchantments.FROST_WALKER)) {
+                    hasFrostWalker = true;
+                    break OUTER;
+                }
+            }
+        }
+        BlockState state = BlockStateInterface.get(ctx, pos);
+        return hasFrostWalker
+                && state == FrostedIceBlock.meltsInto()
+                && state.getValue(LiquidBlock.LEVEL) == 0;
+    }
+
+    /**
+     * If movements make us stand/walk on this block, will it have a top to walk on?
+     */
+    static boolean mustBeSolidToWalkOn(CalculationContext context, int x, int y, int z, BlockState state) {
+        Block block = state.getBlock();
+        if (isClimbable(block)) {
+            return false;
+        }
+        if (!state.getFluidState().isEmpty()) {
+            // used for frostwalker so only includes blocks where we are still on ground when leaving them to any side
+            if (block instanceof SlabBlock) {
+                if (state.getValue(SlabBlock.TYPE) != SlabType.BOTTOM) {
+                    return true;
+                }
+            } else if (block instanceof StairBlock) {
+                if (state.getValue(StairBlock.HALF) == Half.TOP) {
+                    return true;
+                }
+                StairsShape shape = state.getValue(StairBlock.SHAPE);
+                if (shape == StairsShape.INNER_LEFT || shape == StairsShape.INNER_RIGHT) {
+                    return true;
+                }
+            } else if (block instanceof TrapDoorBlock) {
+                if (!state.getValue(TrapDoorBlock.OPEN) && state.getValue(TrapDoorBlock.HALF) == Half.TOP) {
+                    return true;
+                }
+            } else if (block == Blocks.SCAFFOLDING) {
+                return true;
+            } else if (block instanceof LeavesBlock) {
+                return true;
+            }
+            if (context.assumeWalkOnWater) {
+                return false;
+            }
+            Block blockAbove = context.getBlock(x, y + 1, z);
+            if (blockAbove instanceof LiquidBlock) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean canPlaceAgainst(BlockStateInterface bsi, int x, int y, int z) {
+        return canPlaceAgainst(bsi, x, y, z, bsi.get0(x, y, z));
+    }
+
+    static boolean canPlaceAgainst(BlockStateInterface bsi, BlockPos pos) {
+        return canPlaceAgainst(bsi, pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    static boolean canPlaceAgainst(IPlayerContext ctx, BlockPos pos) {
+        return canPlaceAgainst(new BlockStateInterface(ctx), pos);
+    }
+
+    static boolean canPlaceAgainst(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
+        if (!bsi.worldBorder.canPlaceAt(x, z)) {
+            return false;
+        }
+        // can we look at the center of a side face of this block and likely be able to place?
+        // (thats how this check is used)
+        // therefore dont include weird things that we technically could place against (like carpet) but practically can't
+        return isBlockNormalCube(state) || state.getBlock() == Blocks.GLASS || state.getBlock() instanceof StainedGlassBlock;
+    }
+
+    /**
+     * Can we climb up this block by pressing space while inside it?
+     * Also doubles as "If I start a movement on this, can weird things happen?"
+     * because movements can end/start on these blocks despite them not being canWalkOn.
+     */
+    static boolean isClimbable(Block block) {
+        return block == Blocks.LADDER
+            || block == Blocks.VINE
+            || block == Blocks.WEEPING_VINES
+            || block == Blocks.WEEPING_VINES_PLANT
+            || block == Blocks.TWISTING_VINES
