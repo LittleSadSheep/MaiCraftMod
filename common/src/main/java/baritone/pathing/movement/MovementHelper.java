@@ -598,3 +598,276 @@ public interface MovementHelper extends ActionCosts, Helper {
             || block == Blocks.WEEPING_VINES
             || block == Blocks.WEEPING_VINES_PLANT
             || block == Blocks.TWISTING_VINES
+            || block == Blocks.TWISTING_VINES_PLANT;
+    }
+
+    static double getMiningDurationTicks(CalculationContext context, int x, int y, int z, boolean includeFalling) {
+        return getMiningDurationTicks(context, x, y, z, context.get(x, y, z), includeFalling);
+    }
+
+    static double getMiningDurationTicks(CalculationContext context, int x, int y, int z, BlockState state, boolean includeFalling) {
+        Block block = state.getBlock();
+        if (!canWalkThrough(context, x, y, z, state)) {
+            if (!state.getFluidState().isEmpty()) {
+                return COST_INF;
+            }
+            double mult = context.breakCostMultiplierAt(x, y, z, state);
+            if (mult >= COST_INF) {
+                return COST_INF;
+            }
+            if (avoidBreaking(context.bsi, x, y, z, state)) {
+                return COST_INF;
+            }
+            double strVsBlock = context.toolSet.getStrVsBlock(state);
+            if (strVsBlock <= 0) {
+                return COST_INF;
+            }
+            double result = 1 / strVsBlock;
+            result += context.breakBlockAdditionalCost;
+            result *= mult;
+            if (includeFalling) {
+                BlockState above = context.get(x, y + 1, z);
+                if (above.getBlock() instanceof FallingBlock) {
+                    result += getMiningDurationTicks(context, x, y + 1, z, above, true);
+                }
+            }
+            return result;
+        }
+        return 0; // we won't actually mine it, so don't check fallings above
+    }
+
+    static boolean isBottomSlab(BlockState state) {
+        return state.getBlock() instanceof SlabBlock
+                && state.getValue(SlabBlock.TYPE) == SlabType.BOTTOM;
+    }
+
+    /**
+     * AutoTool for a specific block
+     *
+     * @param ctx The player context
+     * @param b   the blockstate to mine
+     */
+    static void switchToBestToolFor(IPlayerContext ctx, BlockState b) {
+        switchToBestToolFor(ctx, b, new ToolSet(ctx.player()), BaritoneAPI.getSettings().preferSilkTouch.value);
+    }
+
+    /**
+     * AutoTool for a specific block with precomputed ToolSet data
+     *
+     * @param ctx The player context
+     * @param b   the blockstate to mine
+     * @param ts  previously calculated ToolSet
+     */
+    static void switchToBestToolFor(IPlayerContext ctx, BlockState b, ToolSet ts, boolean preferSilkTouch) {
+        if (Baritone.settings().autoTool.value && !Baritone.settings().assumeExternalAutoTool.value) {
+            ctx.player().getInventory().selected = ts.getBestSlot(b.getBlock(), preferSilkTouch);
+        }
+    }
+
+    static void moveTowards(IPlayerContext ctx, MovementState state, BlockPos pos) {
+        state.setTarget(new MovementTarget(
+                RotationUtils.calcRotationFromVec3d(ctx.playerHead(),
+                        VecUtils.getBlockPosCenter(pos),
+                        ctx.playerRotations()).withPitch(ctx.playerRotations().getPitch()),
+                false
+        )).setInput(Input.MOVE_FORWARD, true);
+    }
+
+    static void moveTowardsWithoutRotation(IPlayerContext ctx, MovementState state, float idealYaw) {
+        MovementOption.getOptions(
+                Mth.sin(ctx.playerRotations().getYaw() * DEG_TO_RAD_F),
+                Mth.cos(ctx.playerRotations().getYaw() * DEG_TO_RAD_F),
+                Baritone.settings().allowSprint.value
+        ).min(Comparator.comparing(option -> option.distanceToSq(
+                Mth.sin(idealYaw * DEG_TO_RAD_F),
+                Mth.cos(idealYaw * DEG_TO_RAD_F)
+        ))).ifPresent(selection -> selection.setInputs(state));
+    }
+
+    static void moveTowardsWithoutRotation(IPlayerContext ctx, MovementState state, BlockPos dest) {
+        float idealYaw = RotationUtils.calcRotationFromVec3d(
+                ctx.playerHead(),
+                VecUtils.getBlockPosCenter(dest),
+                ctx.playerRotations()
+        ).getYaw();
+        moveTowardsWithoutRotation(ctx, state, idealYaw);
+    }
+
+    static void moveTowardsWithSlightRotation(IPlayerContext ctx, MovementState state, BlockPos dest) {
+        float idealYaw = RotationUtils.calcRotationFromVec3d(
+                ctx.playerHead(),
+                VecUtils.getBlockPosCenter(dest),
+                ctx.playerRotations()
+        ).getYaw();
+        float distance = Rotation.yawDistanceFromOffset(ctx.playerRotations().getYaw(), idealYaw) % 45f;
+        float newYaw = distance > 0f ?
+                distance > 22.5f ? distance - 45f : distance :
+                distance < -22.5f ? distance + 45f : distance;
+        state.setTarget(new MovementTarget(new Rotation(
+                ctx.playerRotations().getYaw() - newYaw,
+                ctx.playerRotations().getPitch()
+        ), true));
+        moveTowardsWithoutRotation(ctx, state, idealYaw);
+    }
+
+    /**
+     * Returns whether or not the specified block is
+     * water, regardless of whether or not it is flowing.
+     *
+     * @param state The block state
+     * @return Whether or not the block is water
+     */
+    static boolean isWater(BlockState state) {
+        Fluid f = state.getFluidState().getType();
+        return f == Fluids.WATER || f == Fluids.FLOWING_WATER;
+    }
+
+    /**
+     * Returns whether or not the block at the specified pos is
+     * water, regardless of whether or not it is flowing.
+     *
+     * @param ctx The player context
+     * @param bp  The block pos
+     * @return Whether or not the block is water
+     */
+    static boolean isWater(IPlayerContext ctx, BlockPos bp) {
+        return isWater(BlockStateInterface.get(ctx, bp));
+    }
+
+    static boolean isLava(BlockState state) {
+        Fluid f = state.getFluidState().getType();
+        return f == Fluids.LAVA || f == Fluids.FLOWING_LAVA;
+    }
+
+    /**
+     * Returns whether or not the specified pos has a liquid
+     *
+     * @param ctx The player context
+     * @param p   The pos
+     * @return Whether or not the block is a liquid
+     */
+    static boolean isLiquid(IPlayerContext ctx, BlockPos p) {
+        return isLiquid(BlockStateInterface.get(ctx, p));
+    }
+
+    static boolean isLiquid(BlockState blockState) {
+        return !blockState.getFluidState().isEmpty();
+    }
+
+    static boolean possiblyFlowing(BlockState state) {
+        FluidState fluidState = state.getFluidState();
+        return fluidState.getType() instanceof FlowingFluid
+                && fluidState.getType().getAmount(fluidState) != 8;
+    }
+
+    static boolean isFlowing(int x, int y, int z, BlockState state, BlockStateInterface bsi) {
+        FluidState fluidState = state.getFluidState();
+        if (!(fluidState.getType() instanceof FlowingFluid)) {
+            return false;
+        }
+        if (fluidState.getType().getAmount(fluidState) != 8) {
+            return true;
+        }
+        return possiblyFlowing(bsi.get0(x + 1, y, z))
+                || possiblyFlowing(bsi.get0(x - 1, y, z))
+                || possiblyFlowing(bsi.get0(x, y, z + 1))
+                || possiblyFlowing(bsi.get0(x, y, z - 1));
+    }
+
+    static boolean isBlockNormalCube(BlockState state) {
+        Block block = state.getBlock();
+        if (block instanceof BambooStalkBlock
+                || block instanceof MovingPistonBlock
+                || block instanceof ScaffoldingBlock
+                || block instanceof ShulkerBoxBlock
+                || block instanceof PointedDripstoneBlock
+                || block instanceof AmethystClusterBlock) {
+            return false;
+        }
+        try {
+            return Block.isShapeFullBlock(state.getCollisionShape(null, null));
+        } catch (Exception ignored) {
+            // if we can't get the collision shape, assume it's bad and add to blocksToAvoid
+        }
+        return false;
+    }
+
+    static PlaceResult attemptToPlaceABlock(MovementState state, IBaritone baritone, BlockPos placeAt, boolean preferDown, boolean wouldSneak) {
+        IPlayerContext ctx = baritone.getPlayerContext();
+        Optional<Rotation> direct = RotationUtils.reachable(ctx, placeAt, wouldSneak); // we assume that if there is a block there, it must be replacable
+        boolean found = false;
+        if (direct.isPresent()) {
+            state.setTarget(new MovementTarget(direct.get(), true));
+            found = true;
+        }
+        for (int i = 0; i < 5; i++) {
+            BlockPos against1 = placeAt.relative(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
+            if (MovementHelper.canPlaceAgainst(ctx, against1)) {
+                if (!((Baritone) baritone).getInventoryBehavior().selectThrowawayForLocation(false, placeAt.getX(), placeAt.getY(), placeAt.getZ())) { // get ready to place a throwaway block
+                    Helper.HELPER.logDebug("bb pls get me some blocks. dirt, netherrack, cobble");
+                    state.setStatus(MovementStatus.UNREACHABLE);
+                    return PlaceResult.NO_OPTION;
+                }
+                double faceX = (placeAt.getX() + against1.getX() + 1.0D) * 0.5D;
+                double faceY = (placeAt.getY() + against1.getY() + 0.5D) * 0.5D;
+                double faceZ = (placeAt.getZ() + against1.getZ() + 1.0D) * 0.5D;
+                Rotation place = RotationUtils.calcRotationFromVec3d(wouldSneak ? RayTraceUtils.inferSneakingEyePosition(ctx.player()) : ctx.playerHead(), new Vec3(faceX, faceY, faceZ), ctx.playerRotations());
+                Rotation actual = baritone.getLookBehavior().getAimProcessor().peekRotation(place);
+                HitResult res = RayTraceUtils.rayTraceTowards(ctx.player(), actual, ctx.playerController().getBlockReachDistance(), wouldSneak);
+                if (res != null && res.getType() == HitResult.Type.BLOCK && ((BlockHitResult) res).getBlockPos().equals(against1) && ((BlockHitResult) res).getBlockPos().relative(((BlockHitResult) res).getDirection()).equals(placeAt)) {
+                    state.setTarget(new MovementTarget(place, true));
+                    found = true;
+
+                    if (!preferDown) {
+                        // if preferDown is true, we want the last option
+                        // if preferDown is false, we want the first
+                        break;
+                    }
+                }
+            }
+        }
+        if (ctx.getSelectedBlock().isPresent()) {
+            BlockPos selectedBlock = ctx.getSelectedBlock().get();
+            Direction side = ((BlockHitResult) ctx.objectMouseOver()).getDirection();
+            // only way for selectedBlock.equals(placeAt) to be true is if it's replaceable
+            if (selectedBlock.equals(placeAt) || (MovementHelper.canPlaceAgainst(ctx, selectedBlock) && selectedBlock.relative(side).equals(placeAt))) {
+                if (wouldSneak) {
+                    state.setInput(Input.SNEAK, true);
+                }
+                ((Baritone) baritone).getInventoryBehavior().selectThrowawayForLocation(true, placeAt.getX(), placeAt.getY(), placeAt.getZ());
+                return PlaceResult.READY_TO_PLACE;
+            }
+        }
+        if (found) {
+            if (wouldSneak) {
+                state.setInput(Input.SNEAK, true);
+            }
+            ((Baritone) baritone).getInventoryBehavior().selectThrowawayForLocation(true, placeAt.getX(), placeAt.getY(), placeAt.getZ());
+            return PlaceResult.ATTEMPTING;
+        }
+        return PlaceResult.NO_OPTION;
+    }
+
+    enum PlaceResult {
+        READY_TO_PLACE, ATTEMPTING, NO_OPTION;
+    }
+
+    static boolean isTransparent(Block b) {
+
+        return b instanceof AirBlock ||
+                b == Blocks.LAVA ||
+                b == Blocks.WATER;
+    }
+
+    static List<BetterBlockPos> steppingOnBlocks(IPlayerContext ctx) {
+        List<BetterBlockPos> blocks = new ArrayList<>();
+        for (byte x = -1; x <= 1; x++) {
+            for (byte z = -1; z <= 1; z++) {
+                if (ctx.player().getBoundingBox().intersects(Vec3.atLowerCornerOf(ctx.player().blockPosition()).add(x, 0, z), Vec3.atLowerCornerOf(ctx.player().blockPosition()).add(x + 1, 1, z + 1))) {
+                    blocks.add(new BetterBlockPos(ctx.player().getBlockX() + x, ctx.player().getBlockY() - 1, ctx.player().getBlockZ() + z));
+                }
+            }
+        }
+        return blocks;
+    }
+}
