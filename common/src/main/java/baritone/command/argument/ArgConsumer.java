@@ -298,3 +298,154 @@ public class ArgConsumer implements IArgConsumer {
 
     @Override
     public <T> T getAsOrDefault(Class<T> type, T def) throws CommandNotEnoughArgumentsException {
+        try {
+            T val = peek().getAs(type);
+            get();
+            return val;
+        } catch (CommandInvalidTypeException e) {
+            return def;
+        }
+    }
+
+    @Override
+    public <T> T getAsOrNull(Class<T> type) throws CommandNotEnoughArgumentsException {
+        return getAsOrDefault(type, null);
+    }
+
+    @Override
+    public <T, O, D extends IDatatypePost<T, O>> T getDatatypePost(D datatype, O original) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException {
+        try {
+            return datatype.apply(this.context, original);
+        } catch (Exception e) {
+            if (Baritone.settings().verboseCommandExceptions.value) {
+                e.printStackTrace();
+            }
+            throw new CommandInvalidTypeException(hasAny() ? peek() : consumed(), datatype.getClass().getSimpleName(), e);
+        }
+    }
+
+    @Override
+    public <T, O, D extends IDatatypePost<T, O>> T getDatatypePostOrDefault(D datatype, O original, T _default) {
+        final List<ICommandArgument> argsSnapshot = new ArrayList<>(this.args);
+        final List<ICommandArgument> consumedSnapshot = new ArrayList<>(this.consumed);
+        try {
+            return this.getDatatypePost(datatype, original);
+        } catch (Exception e) {
+            this.args.clear();
+            this.args.addAll(argsSnapshot);
+            this.consumed.clear();
+            this.consumed.addAll(consumedSnapshot);
+            return _default;
+        }
+    }
+
+    @Override
+    public <T, O, D extends IDatatypePost<T, O>> T getDatatypePostOrNull(D datatype, O original) {
+        return this.getDatatypePostOrDefault(datatype, original, null);
+    }
+
+    @Override
+    public <T, D extends IDatatypeFor<T>> T getDatatypeFor(D datatype) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException {
+        try {
+            return datatype.get(this.context);
+        } catch (Exception e) {
+            if (Baritone.settings().verboseCommandExceptions.value) {
+                e.printStackTrace();
+            }
+            throw new CommandInvalidTypeException(hasAny() ? peek() : consumed(), datatype.getClass().getSimpleName(), e);
+        }
+    }
+
+    @Override
+    public <T, D extends IDatatypeFor<T>> T getDatatypeForOrDefault(D datatype, T def) {
+        final List<ICommandArgument> argsSnapshot = new ArrayList<>(this.args);
+        final List<ICommandArgument> consumedSnapshot = new ArrayList<>(this.consumed);
+        try {
+            return this.getDatatypeFor(datatype);
+        } catch (Exception e) {
+            this.args.clear();
+            this.args.addAll(argsSnapshot);
+            this.consumed.clear();
+            this.consumed.addAll(consumedSnapshot);
+            return def;
+        }
+    }
+
+    @Override
+    public <T, D extends IDatatypeFor<T>> T getDatatypeForOrNull(D datatype) {
+        return this.getDatatypeForOrDefault(datatype, null);
+    }
+
+    @Override
+    public <T extends IDatatype> Stream<String> tabCompleteDatatype(T datatype) {
+        try {
+            return datatype.tabComplete(this.context);
+        } catch (CommandException ignored) {
+            // NOP
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return Stream.empty();
+    }
+
+    @Override
+    public String rawRest() {
+        return args.size() > 0 ? args.getFirst().getRawRest() : "";
+    }
+
+    @Override
+    public void requireMin(int min) throws CommandNotEnoughArgumentsException {
+        if (args.size() < min) {
+            throw new CommandNotEnoughArgumentsException(min + consumed.size());
+        }
+    }
+
+    @Override
+    public void requireMax(int max) throws CommandTooManyArgumentsException {
+        if (args.size() > max) {
+            throw new CommandTooManyArgumentsException(max + consumed.size());
+        }
+    }
+
+    @Override
+    public void requireExactly(int args) throws CommandException {
+        requireMin(args);
+        requireMax(args);
+    }
+
+    @Override
+    public boolean hasConsumed() {
+        return !consumed.isEmpty();
+    }
+
+    @Override
+    public ICommandArgument consumed() {
+        return consumed.size() > 0 ? consumed.getLast() : CommandArguments.unknown();
+    }
+
+    @Override
+    public String consumedString() {
+        return consumed().getValue();
+    }
+
+    @Override
+    public ArgConsumer copy() {
+        return new ArgConsumer(manager, args, consumed);
+    }
+
+    /**
+     * Implementation of {@link IDatatypeContext} which adapts to the parent {@link IArgConsumer}}
+     */
+    private final class Context implements IDatatypeContext {
+
+        @Override
+        public final IBaritone getBaritone() {
+            return ArgConsumer.this.manager.getBaritone();
+        }
+
+        @Override
+        public final ArgConsumer getConsumer() {
+            return ArgConsumer.this;
+        }
+    }
+}
