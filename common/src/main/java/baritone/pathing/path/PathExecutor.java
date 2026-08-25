@@ -598,3 +598,74 @@ public class PathExecutor implements IPathExecutor, Helper {
     public int getPosition() {
         return pathPosition;
     }
+
+    public PathExecutor trySplice(PathExecutor next) {
+        if (next == null) {
+            return cutIfTooLong();
+        }
+        return SplicedPath.trySplice(path, next.path, false).map(path -> {
+            if (!path.getDest().equals(next.getPath().getDest())) {
+                throw new IllegalStateException(String.format(
+                        "Path has end %s instead of %s after splicing",
+                        path.getDest(), next.getPath().getDest()));
+            }
+            PathExecutor ret = new PathExecutor(behavior, path);
+            ret.pathPosition = pathPosition;
+            ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
+            ret.costEstimateIndex = costEstimateIndex;
+            ret.ticksOnCurrent = ticksOnCurrent;
+            return ret;
+        }).orElseGet(this::cutIfTooLong); // dont actually call cutIfTooLong every tick if we won't actually use it, use a method reference
+    }
+
+    private PathExecutor cutIfTooLong() {
+        if (pathPosition > Baritone.settings().maxPathHistoryLength.value) {
+            int cutoffAmt = Baritone.settings().pathHistoryCutoffAmount.value;
+            CutoffPath newPath = new CutoffPath(path, cutoffAmt, path.length() - 1);
+            if (!newPath.getDest().equals(path.getDest())) {
+                throw new IllegalStateException(String.format(
+                        "Path has end %s instead of %s after trimming its start",
+                        newPath.getDest(), path.getDest()));
+            }
+            logDebug("Discarding earliest segment movements, length cut from " + path.length() + " to " + newPath.length());
+            PathExecutor ret = new PathExecutor(behavior, newPath);
+            ret.pathPosition = pathPosition - cutoffAmt;
+            ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
+            if (costEstimateIndex != null) {
+                ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
+            }
+            ret.ticksOnCurrent = ticksOnCurrent;
+            return ret;
+        }
+        return this;
+    }
+
+    @Override
+    public IPath getPath() {
+        return path;
+    }
+
+    public boolean failed() {
+        return failed;
+    }
+
+    public boolean finished() {
+        return pathPosition >= path.length();
+    }
+
+    public Set<BlockPos> toBreak() {
+        return Collections.unmodifiableSet(toBreak);
+    }
+
+    public Set<BlockPos> toPlace() {
+        return Collections.unmodifiableSet(toPlace);
+    }
+
+    public Set<BlockPos> toWalkInto() {
+        return Collections.unmodifiableSet(toWalkInto);
+    }
+
+    public boolean isSprinting() {
+        return sprintNextTick;
+    }
+}
