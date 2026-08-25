@@ -298,3 +298,64 @@ public enum Moves {
         public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
             MovementParkour.cost(context, x, y, z, Direction.SOUTH, result);
         }
+    },
+
+    PARKOUR_EAST(+4, 0, 0, true, true) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkour.cost(context, src, Direction.EAST);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkour.cost(context, x, y, z, Direction.EAST, result);
+        }
+    },
+
+    PARKOUR_WEST(-4, 0, 0, true, true) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementParkour.cost(context, src, Direction.WEST);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementParkour.cost(context, x, y, z, Direction.WEST, result);
+        }
+    };
+
+    public final boolean dynamicXZ;
+    public final boolean dynamicY;
+
+    public final int xOffset;
+    public final int yOffset;
+    public final int zOffset;
+
+    Moves(int x, int y, int z, boolean dynamicXZ, boolean dynamicY) {
+        this.xOffset = x;
+        this.yOffset = y;
+        this.zOffset = z;
+        this.dynamicXZ = dynamicXZ;
+        this.dynamicY = dynamicY;
+    }
+
+    Moves(int x, int y, int z) {
+        this(x, y, z, false, false);
+    }
+
+    public abstract Movement apply0(CalculationContext context, BetterBlockPos src);
+
+    public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+        if (dynamicXZ || dynamicY) {
+            throw new UnsupportedOperationException("Movements with dynamic offset must override `apply`");
+        }
+        result.x = x + xOffset;
+        result.y = y + yOffset;
+        result.z = z + zOffset;
+        result.cost = cost(context, x, y, z);
+    }
+
+    public double cost(CalculationContext context, int x, int y, int z) {
+        throw new UnsupportedOperationException("Movements must override `cost` or `apply`");
+    }
+}
