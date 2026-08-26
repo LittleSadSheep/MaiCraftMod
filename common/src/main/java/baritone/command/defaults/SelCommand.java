@@ -298,3 +298,151 @@ public class SelCommand extends Command {
                     if (args.hasExactlyOne()) {
                         return new TabCompleteHelper()
                                 .append(TransformTarget.getAllNames())
+                                .filterPrefix(args.getString())
+                                .sortAlphabetically()
+                                .stream();
+                    } else {
+                        TransformTarget target = TransformTarget.getByName(args.getString());
+                        if (target != null && args.hasExactlyOne()) {
+                            return args.tabCompleteDatatype(ForDirection.INSTANCE);
+                        }
+                    }
+                }
+            }
+        }
+        return Stream.empty();
+    }
+
+    @Override
+    public String getShortDesc() {
+        return "WorldEdit-like commands";
+    }
+
+    @Override
+    public List<String> getLongDesc() {
+        return Arrays.asList(
+                "The sel command allows you to manipulate Baritone's selections, similarly to WorldEdit.",
+                "",
+                "Using these selections, you can clear areas, fill them with blocks, or something else.",
+                "",
+                "The expand/contract/shift commands use a kind of selector to choose which selections to target. Supported ones are a/all, n/newest, and o/oldest.",
+                "",
+                "Usage:",
+                "> sel pos1/p1/1 - Set position 1 to your current position.",
+                "> sel pos1/p1/1 <x> <y> <z> - Set position 1 to a relative position.",
+                "> sel pos2/p2/2 - Set position 2 to your current position.",
+                "> sel pos2/p2/2 <x> <y> <z> - Set position 2 to a relative position.",
+                "",
+                "> sel clear/c - Clear the selection.",
+                "> sel undo/u - Undo the last action (setting positions, creating selections, etc.)",
+                "> sel set/fill/s/f [block] - Completely fill all selections with a block.",
+                "> sel walls/w [block] - Fill in the walls of the selection with a specified block.",
+                "> sel shell/shl [block] - The same as walls, but fills in a ceiling and floor too.",
+                "> sel sphere/sph [block] - Fills the selection with a sphere bounded by the sides.",
+                "> sel hsphere/hsph [block] - The same as sphere, but hollow.",
+                "> sel cylinder/cyl [block] <axis> - Fills the selection with a cylinder bounded by the sides, oriented about the given axis. (default=y)",
+                "> sel hcylinder/hcyl [block] <axis> - The same as cylinder, but hollow.",
+                "> sel cleararea/ca - Basically 'set air'.",
+                "> sel replace/r <blocks...> <with> - Replaces blocks with another block.",
+                "> sel copy/cp <x> <y> <z> - Copy the selected area relative to the specified or your position.",
+                "> sel paste/p <x> <y> <z> - Build the copied area relative to the specified or your position.",
+                "",
+                "> sel expand <target> <direction> <blocks> - Expand the targets.",
+                "> sel contract <target> <direction> <blocks> - Contract the targets.",
+                "> sel shift <target> <direction> <blocks> - Shift the targets (does not resize)."
+        );
+    }
+
+    enum Action {
+        POS1("pos1", "p1", "1"),
+        POS2("pos2", "p2", "2"),
+        CLEAR("clear", "c"),
+        UNDO("undo", "u"),
+        SET("set", "fill", "s", "f"),
+        WALLS("walls", "w"),
+        SHELL("shell", "shl"),
+        SPHERE("sphere", "sph"),
+        HSPHERE("hsphere", "hsph"),
+        CYLINDER("cylinder", "cyl"),
+        HCYLINDER("hcylinder", "hcyl"),
+        CLEARAREA("cleararea", "ca"),
+        REPLACE("replace", "r"),
+        EXPAND("expand", "ex"),
+        COPY("copy", "cp"),
+        PASTE("paste", "p"),
+        CONTRACT("contract", "ct"),
+        SHIFT("shift", "sh");
+        private final String[] names;
+
+        Action(String... names) {
+            this.names = names;
+        }
+
+        public static Action getByName(String name) {
+            for (Action action : Action.values()) {
+                for (String alias : action.names) {
+                    if (alias.equalsIgnoreCase(name)) {
+                        return action;
+                    }
+                }
+            }
+            return null;
+        }
+
+        public static String[] getAllNames() {
+            Set<String> names = new HashSet<>();
+            for (Action action : Action.values()) {
+                names.addAll(Arrays.asList(action.names));
+            }
+            return names.toArray(new String[0]);
+        }
+
+        public final boolean isFillAction() {
+            return this == SET
+                    || this == WALLS
+                    || this == SHELL
+                    || this == SPHERE
+                    || this == HSPHERE
+                    || this == CYLINDER
+                    || this == HCYLINDER
+                    || this == CLEARAREA
+                    || this == REPLACE;
+        }
+    }
+
+    enum TransformTarget {
+        ALL(sels -> sels, "all", "a"),
+        NEWEST(sels -> new ISelection[]{sels[sels.length - 1]}, "newest", "n"),
+        OLDEST(sels -> new ISelection[]{sels[0]}, "oldest", "o");
+        private final Function<ISelection[], ISelection[]> transform;
+        private final String[] names;
+
+        TransformTarget(Function<ISelection[], ISelection[]> transform, String... names) {
+            this.transform = transform;
+            this.names = names;
+        }
+
+        public ISelection[] transform(ISelection[] selections) {
+            return transform.apply(selections);
+        }
+
+        public static TransformTarget getByName(String name) {
+            for (TransformTarget target : TransformTarget.values()) {
+                for (String alias : target.names) {
+                    if (alias.equalsIgnoreCase(name)) {
+                        return target;
+                    }
+                }
+            }
+            return null;
+        }
+
+        public static String[] getAllNames() {
+            Set<String> names = new HashSet<>();
+            for (TransformTarget target : TransformTarget.values()) {
+                names.addAll(Arrays.asList(target.names));
+            }
+            return names.toArray(new String[0]);
+        }
+    }
+}
