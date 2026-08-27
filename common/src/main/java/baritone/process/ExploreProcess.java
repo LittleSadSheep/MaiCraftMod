@@ -298,3 +298,4 @@ public final class ExploreProcess extends BaritoneProcessHelper implements IExpl
     public String displayName0() {
         return "Exploring around " + explorationOrigin + ", distance completed " + distanceCompleted + ", currently going to " + new GoalComposite(closestUncachedChunks(explorationOrigin, calcFilter()));
     }
+}
