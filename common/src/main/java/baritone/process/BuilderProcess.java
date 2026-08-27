@@ -598,3 +598,303 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
                         }
                         break outer;
+                    }
+                }
+            }
+        }
+
+        Goal goal = assemble(bcc, approxPlaceable.subList(0, 9));
+        if (goal == null) {
+            goal = assemble(bcc, approxPlaceable, true); // we're far away, so assume that we have our whole inventory to recalculate placeable properly
+            if (goal == null) {
+                if (Baritone.settings().skipFailedLayers.value && Baritone.settings().buildInLayers.value && layer * Baritone.settings().layerHeight.value < realSchematic.heightY()) {
+                    logDirect("Skipping layer that I cannot construct! Layer #" + layer);
+                    layer++;
+                    return onTick(calcFailed, isSafeToCancel, recursions + 1);
+                }
+                logDirect("Unable to do it. Pausing. resume to resume, cancel to cancel");
+                paused = true;
+                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+            }
+        }
+        return new PathingCommandContext(goal, PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH, bcc);
+    }
+
+    private boolean recalc(BuilderCalculationContext bcc) {
+        if (incorrectPositions == null) {
+            incorrectPositions = new HashSet<>();
+            fullRecalc(bcc);
+            if (incorrectPositions.isEmpty()) {
+                return false;
+            }
+        }
+        recalcNearby(bcc);
+        if (incorrectPositions.isEmpty()) {
+            fullRecalc(bcc);
+        }
+        return !incorrectPositions.isEmpty();
+    }
+
+    private void trim() {
+        HashSet<BetterBlockPos> copy = new HashSet<>(incorrectPositions);
+        copy.removeIf(pos -> pos.distSqr(ctx.player().blockPosition()) > 200);
+        if (!copy.isEmpty()) {
+            incorrectPositions = copy;
+        }
+    }
+
+    private void recalcNearby(BuilderCalculationContext bcc) {
+        BetterBlockPos center = ctx.playerFeet();
+        int radius = Baritone.settings().builderTickScanRadius.value;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    int x = center.x + dx;
+                    int y = center.y + dy;
+                    int z = center.z + dz;
+                    BlockState desired = bcc.getSchematic(x, y, z, bcc.bsi.get0(x, y, z));
+                    if (desired != null) {
+                        // we care about this position
+                        BetterBlockPos pos = new BetterBlockPos(x, y, z);
+                        if (valid(bcc.bsi.get0(x, y, z), desired, false)) {
+                            incorrectPositions.remove(pos);
+                            observedCompleted.add(BetterBlockPos.longHash(pos));
+                        } else {
+                            incorrectPositions.add(pos);
+                            observedCompleted.remove(BetterBlockPos.longHash(pos));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void fullRecalc(BuilderCalculationContext bcc) {
+        incorrectPositions = new HashSet<>();
+        for (int y = 0; y < schematic.heightY(); y++) {
+            for (int z = 0; z < schematic.lengthZ(); z++) {
+                for (int x = 0; x < schematic.widthX(); x++) {
+                    int blockX = x + origin.getX();
+                    int blockY = y + origin.getY();
+                    int blockZ = z + origin.getZ();
+                    BlockState current = bcc.bsi.get0(blockX, blockY, blockZ);
+                    if (!schematic.inSchematic(x, y, z, current)) {
+                        continue;
+                    }
+                    if (bcc.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
+                        // we can directly observe this block, it is in render distance
+                        if (valid(bcc.bsi.get0(blockX, blockY, blockZ), schematic.desiredState(x, y, z, current, this.approxPlaceable), false)) {
+                            observedCompleted.add(BetterBlockPos.longHash(blockX, blockY, blockZ));
+                        } else {
+                            incorrectPositions.add(new BetterBlockPos(blockX, blockY, blockZ));
+                            observedCompleted.remove(BetterBlockPos.longHash(blockX, blockY, blockZ));
+                            if (incorrectPositions.size() > Baritone.settings().incorrectSize.value) {
+                                return;
+                            }
+                        }
+                        continue;
+                    }
+                    // this is not in render distance
+                    if (!observedCompleted.contains(BetterBlockPos.longHash(blockX, blockY, blockZ))) {
+                        // and we've never seen this position be correct
+                        // therefore mark as incorrect
+                        incorrectPositions.add(new BetterBlockPos(blockX, blockY, blockZ));
+                        if (incorrectPositions.size() > Baritone.settings().incorrectSize.value) {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private Goal assemble(BuilderCalculationContext bcc, List<BlockState> approxPlaceable) {
+        return assemble(bcc, approxPlaceable, false);
+    }
+
+    private Goal assemble(BuilderCalculationContext bcc, List<BlockState> approxPlaceable, boolean logMissing) {
+        List<BetterBlockPos> placeable = new ArrayList<>();
+        List<BetterBlockPos> breakable = new ArrayList<>();
+        List<BetterBlockPos> sourceLiquids = new ArrayList<>();
+        List<BetterBlockPos> flowingLiquids = new ArrayList<>();
+        Map<BlockState, Integer> missing = new HashMap<>();
+        List<BetterBlockPos> outOfBounds = new ArrayList<>();
+        incorrectPositions.forEach(pos -> {
+            BlockState state = bcc.bsi.get0(pos);
+            if (state.getBlock() instanceof AirBlock) {
+                BlockState desired = bcc.getSchematic(pos.x, pos.y, pos.z, state);
+                if (desired == null) {
+                    outOfBounds.add(pos);
+                } else if (containsBlockState(approxPlaceable, desired)) {
+                    placeable.add(pos);
+                } else {
+                    missing.put(desired, 1 + missing.getOrDefault(desired, 0));
+                }
+            } else {
+                if (state.getBlock() instanceof LiquidBlock) {
+                    // if the block itself is JUST a liquid (i.e. not just a waterlogged block), we CANNOT break it
+                    // TODO for 1.13 make sure that this only matches pure water, not waterlogged blocks
+                    if (!MovementHelper.possiblyFlowing(state)) {
+                        // if it's a source block then we want to replace it with a throwaway
+                        sourceLiquids.add(pos);
+                    } else {
+                        flowingLiquids.add(pos);
+                    }
+                } else {
+                    breakable.add(pos);
+                }
+            }
+        });
+        incorrectPositions.removeAll(outOfBounds);
+        List<Goal> toBreak = new ArrayList<>();
+        breakable.forEach(pos -> toBreak.add(breakGoal(pos, bcc)));
+        List<Goal> toPlace = new ArrayList<>();
+        placeable.forEach(pos -> {
+            if (!placeable.contains(pos.below()) && !placeable.contains(pos.below(2))) {
+                toPlace.add(placementGoal(pos, bcc));
+            }
+        });
+        sourceLiquids.forEach(pos -> toPlace.add(new GoalBlock(pos.above())));
+
+        if (!toPlace.isEmpty()) {
+            return new JankyGoalComposite(new GoalComposite(toPlace.toArray(new Goal[0])), new GoalComposite(toBreak.toArray(new Goal[0])));
+        }
+        if (toBreak.isEmpty()) {
+            if (logMissing && !missing.isEmpty()) {
+                logDirect("Missing materials for at least:");
+                logDirect(missing.entrySet().stream()
+                        .map(e -> String.format("%sx %s", e.getValue(), e.getKey()))
+                        .collect(Collectors.joining("\n")));
+            }
+            if (logMissing && !flowingLiquids.isEmpty()) {
+                logDirect("Unreplaceable liquids at at least:");
+                logDirect(flowingLiquids.stream()
+                        .map(p -> String.format("%s %s %s", p.x, p.y, p.z))
+                        .collect(Collectors.joining("\n")));
+            }
+            return null;
+        }
+        return new GoalComposite(toBreak.toArray(new Goal[0]));
+    }
+
+    public static class JankyGoalComposite implements Goal {
+
+        private final Goal primary;
+        private final Goal fallback;
+
+        public JankyGoalComposite(Goal primary, Goal fallback) {
+            this.primary = primary;
+            this.fallback = fallback;
+        }
+
+
+        @Override
+        public boolean isInGoal(int x, int y, int z) {
+            return primary.isInGoal(x, y, z) || fallback.isInGoal(x, y, z);
+        }
+
+        @Override
+        public double heuristic(int x, int y, int z) {
+            return primary.heuristic(x, y, z);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            JankyGoalComposite goal = (JankyGoalComposite) o;
+            return Objects.equals(primary, goal.primary)
+                    && Objects.equals(fallback, goal.fallback);
+        }
+
+        @Override
+        public int hashCode() {
+            int hash = -1701079641;
+            hash = hash * 1196141026 + primary.hashCode();
+            hash = hash * -80327868 + fallback.hashCode();
+            return hash;
+        }
+
+        @Override
+        public String toString() {
+            return "JankyComposite Primary: " + primary + " Fallback: " + fallback;
+        }
+    }
+
+    public static class GoalBreak extends GoalGetToBlock {
+
+        public GoalBreak(BlockPos pos) {
+            super(pos);
+        }
+
+        @Override
+        public boolean isInGoal(int x, int y, int z) {
+            // can't stand right on top of a block, that might not work (what if it's unsupported, can't break then)
+            if (y > this.y) {
+                return false;
+            }
+            // but any other adjacent works for breaking, including inside or below
+            return super.isInGoal(x, y, z);
+        }
+
+        @Override
+        public String toString() {
+            return String.format(
+                    "GoalBreak{x=%s,y=%s,z=%s}",
+                    SettingsUtil.maybeCensor(x),
+                    SettingsUtil.maybeCensor(y),
+                    SettingsUtil.maybeCensor(z)
+            );
+        }
+
+        @Override
+        public int hashCode() {
+            return super.hashCode() * 1636324008;
+        }
+    }
+
+    private Goal placementGoal(BlockPos pos, BuilderCalculationContext bcc) {
+        if (!(ctx.world().getBlockState(pos).getBlock() instanceof AirBlock)) {  // TODO can this even happen?
+            return new GoalPlace(pos);
+        }
+        boolean allowSameLevel = !(ctx.world().getBlockState(pos.above()).getBlock() instanceof AirBlock);
+        BlockState current = ctx.world().getBlockState(pos);
+        for (Direction facing : Movement.HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP) {
+            //noinspection ConstantConditions
+            if (MovementHelper.canPlaceAgainst(ctx, pos.relative(facing)) && placementPlausible(pos, bcc.getSchematic(pos.getX(), pos.getY(), pos.getZ(), current))) {
+                return new GoalAdjacent(pos, pos.relative(facing), allowSameLevel);
+            }
+        }
+        return new GoalPlace(pos);
+    }
+
+    private Goal breakGoal(BlockPos pos, BuilderCalculationContext bcc) {
+        if (Baritone.settings().goalBreakFromAbove.value && bcc.bsi.get0(pos.above()).getBlock() instanceof AirBlock && bcc.bsi.get0(pos.above(2)).getBlock() instanceof AirBlock) { // TODO maybe possible without the up(2) check?
+            return new JankyGoalComposite(new GoalBreak(pos), new GoalGetToBlock(pos.above()) {
+                @Override
+                public boolean isInGoal(int x, int y, int z) {
+                    if (y > this.y || (x == this.x && y == this.y && z == this.z)) {
+                        return false;
+                    }
+                    return super.isInGoal(x, y, z);
+                }
+            });
+        }
+        return new GoalBreak(pos);
+    }
+
+    public static class GoalAdjacent extends GoalGetToBlock {
+
+        private boolean allowSameLevel;
+        private BlockPos no;
+
+        public GoalAdjacent(BlockPos pos, BlockPos no, boolean allowSameLevel) {
+            super(pos);
+            this.no = no;
+            this.allowSameLevel = allowSameLevel;
+        }
