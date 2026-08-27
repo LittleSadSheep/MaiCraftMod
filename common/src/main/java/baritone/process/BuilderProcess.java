@@ -898,3 +898,296 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             this.no = no;
             this.allowSameLevel = allowSameLevel;
         }
+
+        @Override
+        public boolean isInGoal(int x, int y, int z) {
+            if (x == this.x && y == this.y && z == this.z) {
+                return false;
+            }
+            if (x == no.getX() && y == no.getY() && z == no.getZ()) {
+                return false;
+            }
+            if (!allowSameLevel && y == this.y - 1) {
+                return false;
+            }
+            if (y < this.y - 1) {
+                return false;
+            }
+            return super.isInGoal(x, y, z);
+        }
+
+        @Override
+        public double heuristic(int x, int y, int z) {
+            // prioritize lower y coordinates
+            return this.y * 100 + super.heuristic(x, y, z);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (!super.equals(o)) {
+                return false;
+            }
+
+            GoalAdjacent goal = (GoalAdjacent) o;
+            return allowSameLevel == goal.allowSameLevel
+                    && Objects.equals(no, goal.no);
+        }
+
+        @Override
+        public int hashCode() {
+            int hash = 806368046;
+            hash = hash * 1412661222 + super.hashCode();
+            hash = hash * 1730799370 + (int) BetterBlockPos.longHash(no.getX(), no.getY(), no.getZ());
+            hash = hash * 260592149 + (allowSameLevel ? -1314802005 : 1565710265);
+            return hash;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(
+                    "GoalAdjacent{x=%s,y=%s,z=%s}",
+                    SettingsUtil.maybeCensor(x),
+                    SettingsUtil.maybeCensor(y),
+                    SettingsUtil.maybeCensor(z)
+            );
+        }
+    }
+
+    public static class GoalPlace extends GoalBlock {
+
+        public GoalPlace(BlockPos placeAt) {
+            super(placeAt.above());
+        }
+
+        @Override
+        public double heuristic(int x, int y, int z) {
+            // prioritize lower y coordinates
+            return this.y * 100 + super.heuristic(x, y, z);
+        }
+
+        @Override
+        public int hashCode() {
+            return super.hashCode() * 1910811835;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(
+                    "GoalPlace{x=%s,y=%s,z=%s}",
+                    SettingsUtil.maybeCensor(x),
+                    SettingsUtil.maybeCensor(y),
+                    SettingsUtil.maybeCensor(z)
+            );
+        }
+    }
+
+    @Override
+    public void onLostControl() {
+        incorrectPositions = null;
+        name = null;
+        schematic = null;
+        realSchematic = null;
+        layer = Baritone.settings().startAtLayer.value;
+        numRepeats = 0;
+        paused = false;
+        observedCompleted = null;
+    }
+
+    @Override
+    public String displayName0() {
+        return paused ? "Builder Paused" : "Building " + name;
+    }
+
+    @Override
+    public Optional<Integer> getMinLayer() {
+        if (Baritone.settings().buildInLayers.value) {
+            return Optional.of(this.layer);
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<Integer> getMaxLayer() {
+        if (Baritone.settings().buildInLayers.value) {
+            return Optional.of(this.stopAtHeight);
+        }
+        return Optional.empty();
+    }
+
+    private List<BlockState> approxPlaceable(int size) {
+        List<BlockState> result = new ArrayList<>();
+        for (int i = 0; i < size; i++) {
+            ItemStack stack = ctx.player().getInventory().items.get(i);
+            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
+                result.add(Blocks.AIR.defaultBlockState());
+                continue;
+            }
+            // <toxic cloud>
+            BlockState itemState = ((BlockItem) stack.getItem())
+                .getBlock()
+                .getStateForPlacement(
+                    new BlockPlaceContext(
+                        new UseOnContext(ctx.world(), ctx.player(), InteractionHand.MAIN_HAND, stack, new BlockHitResult(new Vec3(ctx.player().position().x, ctx.player().position().y, ctx.player().position().z), Direction.UP, ctx.playerFeet(), false)) {}
+                    )
+                );
+            if (itemState != null) {
+                result.add(itemState);
+            } else {
+                result.add(Blocks.AIR.defaultBlockState());
+            }
+            // </toxic cloud>
+        }
+        return result;
+    }
+
+    private static boolean sameBlockstate(BlockState first, BlockState second) {
+        if (first.getBlock() != second.getBlock()) {
+            return false;
+        }
+        boolean ignoreDirection = Baritone.settings().buildIgnoreDirection.value;
+        List<String> ignoredProps = Baritone.settings().buildIgnoreProperties.value;
+        if (!ignoreDirection && ignoredProps.isEmpty()) {
+            return first.equals(second); // early return if no properties are being ignored
+        }
+        Map<Property<?>, Comparable<?>> map1 = first.getValues();
+        Map<Property<?>, Comparable<?>> map2 = second.getValues();
+        for (Property<?> prop : map1.keySet()) {
+            if (map1.get(prop) != map2.get(prop)
+                    && !(ignoreDirection && ORIENTATION_PROPS.contains(prop))
+                    && !ignoredProps.contains(prop.getName())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean containsBlockState(Collection<BlockState> states, BlockState state) {
+        for (BlockState testee : states) {
+            if (sameBlockstate(testee, state)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean valid(BlockState current, BlockState desired, boolean itemVerify) {
+        if (desired == null) {
+            return true;
+        }
+        if (current.getBlock() instanceof LiquidBlock && Baritone.settings().okIfWater.value) {
+            return true;
+        }
+        if (current.getBlock() instanceof AirBlock && desired.getBlock() instanceof AirBlock) {
+            return true;
+        }
+        if (current.getBlock() instanceof AirBlock && Baritone.settings().okIfAir.value.contains(desired.getBlock())) {
+            return true;
+        }
+        if (desired.getBlock() instanceof AirBlock && Baritone.settings().buildIgnoreBlocks.value.contains(current.getBlock())) {
+            return true;
+        }
+        if (!(current.getBlock() instanceof AirBlock) && Baritone.settings().buildIgnoreExisting.value && !itemVerify) {
+            return true;
+        }
+        if (Baritone.settings().buildValidSubstitutes.value.getOrDefault(desired.getBlock(), Collections.emptyList()).contains(current.getBlock()) && !itemVerify) {
+            return true;
+        }
+        if (current.equals(desired)) {
+            return true;
+        }
+        return sameBlockstate(current, desired);
+    }
+
+    public class BuilderCalculationContext extends CalculationContext {
+
+        private final List<BlockState> placeable;
+        private final ISchematic schematic;
+        private final int originX;
+        private final int originY;
+        private final int originZ;
+
+        public BuilderCalculationContext() {
+            super(BuilderProcess.this.baritone, true); // wew lad
+            this.placeable = approxPlaceable(9);
+            this.schematic = BuilderProcess.this.schematic;
+            this.originX = origin.getX();
+            this.originY = origin.getY();
+            this.originZ = origin.getZ();
+
+            this.jumpPenalty += 10;
+            this.backtrackCostFavoringCoefficient = 1;
+        }
+
+        private BlockState getSchematic(int x, int y, int z, BlockState current) {
+            if (schematic.inSchematic(x - originX, y - originY, z - originZ, current)) {
+                return schematic.desiredState(x - originX, y - originY, z - originZ, current, BuilderProcess.this.approxPlaceable);
+            } else {
+                return null;
+            }
+        }
+
+        @Override
+        public double costOfPlacingAt(int x, int y, int z, BlockState current) {
+            if (isPossiblyProtected(x, y, z) || !worldBorder.canPlaceAt(x, z)) { // make calculation fail properly if we can't build
+                return COST_INF;
+            }
+            BlockState sch = getSchematic(x, y, z, current);
+            if (sch != null) {
+                // TODO this can return true even when allowPlace is off.... is that an issue?
+                if (sch.getBlock() instanceof AirBlock) {
+                    // we want this to be air, but they're asking if they can place here
+                    // this won't be a schematic block, this will be a throwaway
+                    return placeBlockCost * Baritone.settings().placeIncorrectBlockPenaltyMultiplier.value; // we're going to have to break it eventually
+                }
+                if (placeable.contains(sch)) {
+                    return 0; // thats right we gonna make it FREE to place a block where it should go in a structure
+                    // no place block penalty at all 😎
+                    // i'm such an idiot that i just tried to copy and paste the epic gamer moment emoji too
+                    // get added to unicode when?
+                }
+                if (!hasThrowaway) {
+                    return COST_INF;
+                }
+                // we want it to be something that we don't have
+                // even more of a pain to place something wrong
+                return placeBlockCost * 1.5 * Baritone.settings().placeIncorrectBlockPenaltyMultiplier.value;
+            } else {
+                if (hasThrowaway) {
+                    return placeBlockCost;
+                } else {
+                    return COST_INF;
+                }
+            }
+        }
+
+        @Override
+        public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
+            if ((!allowBreak && !allowBreakAnyway.contains(current.getBlock())) || isPossiblyProtected(x, y, z)) {
+                return COST_INF;
+            }
+            BlockState sch = getSchematic(x, y, z, current);
+            if (sch != null) {
+                if (sch.getBlock() instanceof AirBlock) {
+                    // it should be air
+                    // regardless of current contents, we can break it
+                    return 1;
+                }
+                // it should be a real block
+                // is it already that block?
+                if (valid(bsi.get0(x, y, z), sch, false)) {
+                    return Baritone.settings().breakCorrectBlockPenaltyMultiplier.value;
+                } else {
+                    // can break if it's wrong
+                    // would be great to return less than 1 here, but that would actually make the cost calculation messed up
+                    // since we're breaking a block, if we underestimate the cost, then it'll fail when it really takes the correct amount of time
+                    return 1;
+
+                }
+                // TODO do blocks in render distace only?
+                // TODO allow breaking blocks that we have a tool to harvest and immediately place back?
+            } else {
+                return 1; // why not lol
+            }
+        }
+    }
+}
