@@ -298,3 +298,303 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA) && !valid(curr, desired, false)) {
                         BetterBlockPos pos = new BetterBlockPos(x, y, z);
                         Optional<Rotation> rot = RotationUtils.reachable(ctx, pos, ctx.playerController().getBlockReachDistance());
+                        if (rot.isPresent()) {
+                            return Optional.of(new Tuple<>(pos, rot.get()));
+                        }
+                    }
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    public static class Placement {
+
+        private final int hotbarSelection;
+        private final BlockPos placeAgainst;
+        private final Direction side;
+        private final Rotation rot;
+
+        public Placement(int hotbarSelection, BlockPos placeAgainst, Direction side, Rotation rot) {
+            this.hotbarSelection = hotbarSelection;
+            this.placeAgainst = placeAgainst;
+            this.side = side;
+            this.rot = rot;
+        }
+    }
+
+    private Optional<Placement> searchForPlacables(BuilderCalculationContext bcc, List<BlockState> desirableOnHotbar) {
+        BetterBlockPos center = ctx.playerFeet();
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dy = -5; dy <= 1; dy++) {
+                for (int dz = -5; dz <= 5; dz++) {
+                    int x = center.x + dx;
+                    int y = center.y + dy;
+                    int z = center.z + dz;
+                    BlockState desired = bcc.getSchematic(x, y, z, bcc.bsi.get0(x, y, z));
+                    if (desired == null) {
+                        continue; // irrelevant
+                    }
+                    BlockState curr = bcc.bsi.get0(x, y, z);
+                    if (MovementHelper.isReplaceable(x, y, z, curr, bcc.bsi) && !valid(curr, desired, false)) {
+                        if (dy == 1 && bcc.bsi.get0(x, y + 1, z).getBlock() instanceof AirBlock) {
+                            continue;
+                        }
+                        desirableOnHotbar.add(desired);
+                        Optional<Placement> opt = possibleToPlace(desired, x, y, z, bcc.bsi);
+                        if (opt.isPresent()) {
+                            return opt;
+                        }
+                    }
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    public boolean placementPlausible(BlockPos pos, BlockState state) {
+        VoxelShape voxelshape = state.getCollisionShape(ctx.world(), pos);
+        return voxelshape.isEmpty() || ctx.world().isUnobstructed(null, voxelshape.move(pos.getX(), pos.getY(), pos.getZ()));
+    }
+
+    private Optional<Placement> possibleToPlace(BlockState toPlace, int x, int y, int z, BlockStateInterface bsi) {
+        for (Direction against : Direction.values()) {
+            BetterBlockPos placeAgainstPos = new BetterBlockPos(x, y, z).relative(against);
+            BlockState placeAgainstState = bsi.get0(placeAgainstPos);
+            if (MovementHelper.isReplaceable(placeAgainstPos.x, placeAgainstPos.y, placeAgainstPos.z, placeAgainstState, bsi)) {
+                continue;
+            }
+            if (!toPlace.canSurvive(ctx.world(), new BetterBlockPos(x, y, z))) {
+                continue;
+            }
+            if (!placementPlausible(new BetterBlockPos(x, y, z), toPlace)) {
+                continue;
+            }
+            VoxelShape shape = placeAgainstState.getShape(ctx.world(), placeAgainstPos);
+            if (shape.isEmpty()) {
+                continue;
+            }
+            AABB aabb = shape.bounds();
+            for (Vec3 placementMultiplier : aabbSideMultipliers(against)) {
+                double placeX = placeAgainstPos.x + aabb.minX * placementMultiplier.x + aabb.maxX * (1 - placementMultiplier.x);
+                double placeY = placeAgainstPos.y + aabb.minY * placementMultiplier.y + aabb.maxY * (1 - placementMultiplier.y);
+                double placeZ = placeAgainstPos.z + aabb.minZ * placementMultiplier.z + aabb.maxZ * (1 - placementMultiplier.z);
+                Rotation rot = RotationUtils.calcRotationFromVec3d(RayTraceUtils.inferSneakingEyePosition(ctx.player()), new Vec3(placeX, placeY, placeZ), ctx.playerRotations());
+                Rotation actualRot = baritone.getLookBehavior().getAimProcessor().peekRotation(rot);
+                HitResult result = RayTraceUtils.rayTraceTowards(ctx.player(), actualRot, ctx.playerController().getBlockReachDistance(), true);
+                if (result != null && result.getType() == HitResult.Type.BLOCK && ((BlockHitResult) result).getBlockPos().equals(placeAgainstPos) && ((BlockHitResult) result).getDirection() == against.getOpposite()) {
+                    OptionalInt hotbar = hasAnyItemThatWouldPlace(toPlace, result, actualRot);
+                    if (hotbar.isPresent()) {
+                        return Optional.of(new Placement(hotbar.getAsInt(), placeAgainstPos, against.getOpposite(), rot));
+                    }
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private OptionalInt hasAnyItemThatWouldPlace(BlockState desired, HitResult result, Rotation rot) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = ctx.player().getInventory().items.get(i);
+            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
+                continue;
+            }
+            float originalYaw = ctx.player().getYRot();
+            float originalPitch = ctx.player().getXRot();
+            // the state depends on the facing of the player sometimes
+            ctx.player().setYRot(rot.getYaw());
+            ctx.player().setXRot(rot.getPitch());
+            BlockPlaceContext meme = new BlockPlaceContext(new UseOnContext(
+                    ctx.world(),
+                    ctx.player(),
+                    InteractionHand.MAIN_HAND,
+                    stack,
+                    (BlockHitResult) result
+            ) {}); // that {} gives us access to a protected constructor lmfao
+            BlockState wouldBePlaced = ((BlockItem) stack.getItem()).getBlock().getStateForPlacement(meme);
+            ctx.player().setYRot(originalYaw);
+            ctx.player().setXRot(originalPitch);
+            if (wouldBePlaced == null) {
+                continue;
+            }
+            if (!meme.canPlace()) {
+                continue;
+            }
+            if (valid(wouldBePlaced, desired, true)) {
+                return OptionalInt.of(i);
+            }
+        }
+        return OptionalInt.empty();
+    }
+
+    private static Vec3[] aabbSideMultipliers(Direction side) {
+        switch (side) {
+            case UP:
+                return new Vec3[]{new Vec3(0.5, 1, 0.5), new Vec3(0.1, 1, 0.5), new Vec3(0.9, 1, 0.5), new Vec3(0.5, 1, 0.1), new Vec3(0.5, 1, 0.9)};
+            case DOWN:
+                return new Vec3[]{new Vec3(0.5, 0, 0.5), new Vec3(0.1, 0, 0.5), new Vec3(0.9, 0, 0.5), new Vec3(0.5, 0, 0.1), new Vec3(0.5, 0, 0.9)};
+            case NORTH:
+            case SOUTH:
+            case EAST:
+            case WEST:
+                double x = side.getStepX() == 0 ? 0.5 : (1 + side.getStepX()) / 2D;
+                double z = side.getStepZ() == 0 ? 0.5 : (1 + side.getStepZ()) / 2D;
+                return new Vec3[]{new Vec3(x, 0.25, z), new Vec3(x, 0.75, z)};
+            default: // null
+                throw new IllegalStateException("Unexpected side " + side);
+        }
+    }
+
+    @Override
+    public PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel) {
+        return onTick(calcFailed, isSafeToCancel, 0);
+    }
+
+    private PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel, int recursions) {
+        if (recursions > 100) { // onTick calls itself, don't crash
+            return new PathingCommand(null, PathingCommandType.SET_GOAL_AND_PATH);
+        }
+        approxPlaceable = approxPlaceable(36);
+        if (baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_LEFT)) {
+            ticks = 5;
+        } else {
+            ticks--;
+        }
+        baritone.getInputOverrideHandler().clearAllKeys();
+        if (paused) {
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+        if (Baritone.settings().buildInLayers.value) {
+            if (realSchematic == null) {
+                realSchematic = schematic;
+            }
+            ISchematic realSchematic = this.realSchematic; // wrap this properly, dont just have the inner class refer to the builderprocess.this
+            int minYInclusive;
+            int maxYInclusive;
+            // layer = 0 should be nothing
+            // layer = realSchematic.heightY() should be everything
+            if (Baritone.settings().layerOrder.value) { // top to bottom
+                maxYInclusive = realSchematic.heightY() - 1;
+                minYInclusive = realSchematic.heightY() - layer * Baritone.settings().layerHeight.value;
+            } else {
+                maxYInclusive = layer * Baritone.settings().layerHeight.value - 1;
+                minYInclusive = 0;
+            }
+            schematic = new ISchematic() {
+                @Override
+                public BlockState desiredState(int x, int y, int z, BlockState current, List<BlockState> approxPlaceable) {
+                    return realSchematic.desiredState(x, y, z, current, BuilderProcess.this.approxPlaceable);
+                }
+
+                @Override
+                public boolean inSchematic(int x, int y, int z, BlockState currentState) {
+                    return ISchematic.super.inSchematic(x, y, z, currentState) && y >= minYInclusive && y <= maxYInclusive && realSchematic.inSchematic(x, y, z, currentState);
+                }
+
+                @Override
+                public void reset() {
+                    realSchematic.reset();
+                }
+
+                @Override
+                public int widthX() {
+                    return realSchematic.widthX();
+                }
+
+                @Override
+                public int heightY() {
+                    return realSchematic.heightY();
+                }
+
+                @Override
+                public int lengthZ() {
+                    return realSchematic.lengthZ();
+                }
+            };
+        }
+        BuilderCalculationContext bcc = new BuilderCalculationContext();
+        if (!recalc(bcc)) {
+            if (Baritone.settings().buildInLayers.value && layer * Baritone.settings().layerHeight.value < stopAtHeight) {
+                logDirect("Starting layer " + layer);
+                layer++;
+                return onTick(calcFailed, isSafeToCancel, recursions + 1);
+            }
+            Vec3i repeat = Baritone.settings().buildRepeat.value;
+            int max = Baritone.settings().buildRepeatCount.value;
+            numRepeats++;
+            if (repeat.equals(new Vec3i(0, 0, 0)) || (max != -1 && numRepeats >= max)) {
+                logDirect("Done building");
+                if (Baritone.settings().notificationOnBuildFinished.value) {
+                    logNotification("Done building", false);
+                }
+                onLostControl();
+                return null;
+            }
+            // build repeat time
+            layer = 0;
+            origin = new BlockPos(origin).offset(repeat);
+            if (!Baritone.settings().buildRepeatSneaky.value) {
+                schematic.reset();
+            }
+            logDirect("Repeating build in vector " + repeat + ", new origin is " + origin);
+            return onTick(calcFailed, isSafeToCancel, recursions + 1);
+        }
+        if (Baritone.settings().distanceTrim.value) {
+            trim();
+        }
+
+        Optional<Tuple<BetterBlockPos, Rotation>> toBreak = toBreakNearPlayer(bcc);
+        if (toBreak.isPresent() && isSafeToCancel && ctx.player().onGround()) {
+            // we'd like to pause to break this block
+            // only change look direction if it's safe (don't want to fuck up an in progress parkour for example
+            Rotation rot = toBreak.get().getB();
+            BetterBlockPos pos = toBreak.get().getA();
+            baritone.getLookBehavior().updateTarget(rot, true);
+            MovementHelper.switchToBestToolFor(ctx, bcc.get(pos));
+            if (ctx.player().isCrouching()) {
+                // really horrible bug where a block is visible for breaking while sneaking but not otherwise
+                // so you can't see it, it goes to place something else, sneaks, then the next tick it tries to break
+                // and is unable since it's unsneaked in the intermediary tick
+                baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+            }
+            if (ctx.isLookingAt(pos) || ctx.playerRotations().isReallyCloseTo(rot)) {
+                baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
+            }
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+        List<BlockState> desirableOnHotbar = new ArrayList<>();
+        Optional<Placement> toPlace = searchForPlacables(bcc, desirableOnHotbar);
+        if (toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
+            Rotation rot = toPlace.get().rot;
+            baritone.getLookBehavior().updateTarget(rot, true);
+            ctx.player().getInventory().selected = toPlace.get().hotbarSelection;
+            baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
+            if ((ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) || ctx.playerRotations().isReallyCloseTo(rot)) {
+                baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+            }
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+
+        if (Baritone.settings().allowInventory.value) {
+            ArrayList<Integer> usefulSlots = new ArrayList<>();
+            List<BlockState> noValidHotbarOption = new ArrayList<>();
+            outer:
+            for (BlockState desired : desirableOnHotbar) {
+                for (int i = 0; i < 9; i++) {
+                    if (valid(approxPlaceable.get(i), desired, true)) {
+                        usefulSlots.add(i);
+                        continue outer;
+                    }
+                }
+                noValidHotbarOption.add(desired);
+            }
+
+            outer:
+            for (int i = 9; i < 36; i++) {
+                for (BlockState desired : noValidHotbarOption) {
+                    if (valid(approxPlaceable.get(i), desired, true)) {
+                        if (!baritone.getInventoryBehavior().attemptToPutOnHotbar(i, usefulSlots::contains)) {
+                            // awaiting inventory move, so pause
+                            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                        }
+                        break outer;
