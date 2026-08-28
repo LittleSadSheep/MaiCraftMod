@@ -298,3 +298,296 @@ public interface IArgConsumer {
      * @see #peekAsOrNull(Class)
      * @see #peekAs(Class, int)
      * @see #peekAsOrDefault(Class, Object, int)
+     */
+    <T> T peekAsOrNull(Class<T> type, int index) throws CommandNotEnoughArgumentsException;
+
+    /**
+     * Tries to use a <b>stateless</b> {@link IArgParser} to parse the next argument into the specified class
+     * <p>
+     * A critical difference between {@link IDatatype}s and {@link IArgParser}s is how many arguments they can take.
+     * While {@link IArgParser}s always operate on a single argument's value, {@link IDatatype}s get access to the entire
+     * {@link IArgConsumer}}.
+     *
+     * @param type The type to peek as
+     * @return An instance of the specified type, or {@code null} if it couldn't be parsed
+     * @see IArgParser
+     * @see #peekAsOrNull(Class, int)
+     * @see #peekAs(Class)
+     * @see #peekAsOrDefault(Class, Object)
+     */
+    <T> T peekAsOrNull(Class<T> type) throws CommandNotEnoughArgumentsException;
+
+    <T> T peekDatatype(IDatatypeFor<T> datatype) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException;
+
+    <T, O> T peekDatatype(IDatatypePost<T, O> datatype) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException;
+
+    <T, O> T peekDatatype(IDatatypePost<T, O> datatype, O original) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException;
+
+    <T> T peekDatatypeOrNull(IDatatypeFor<T> datatype);
+
+    <T, O> T peekDatatypeOrNull(IDatatypePost<T, O> datatype);
+
+    <T, O, D extends IDatatypePost<T, O>> T peekDatatypePost(D datatype, O original) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException;
+
+    <T, O, D extends IDatatypePost<T, O>> T peekDatatypePostOrDefault(D datatype, O original, T def);
+
+    <T, O, D extends IDatatypePost<T, O>> T peekDatatypePostOrNull(D datatype, O original);
+
+    /**
+     * Attempts to get the specified {@link IDatatypeFor} from this ArgConsumer
+     * <p>
+     * A critical difference between {@link IDatatype}s and {@link IArgParser}s is how many arguments they can take.
+     * While {@link IArgParser}s always operate on a single argument's value, {@link IDatatype}s get access to the entire
+     * {@link IArgConsumer}}.
+     * <p>
+     * Since this is a peek operation, this ArgConsumer will not be mutated by any call to this method.
+     *
+     * @param datatype The datatype to get
+     * @return The datatype instance
+     * @see IDatatype
+     * @see IDatatypeFor
+     */
+    <T, D extends IDatatypeFor<T>> T peekDatatypeFor(Class<D> datatype);
+
+    /**
+     * Attempts to get the specified {@link IDatatypeFor} from this ArgConsumer
+     * <p>
+     * A critical difference between {@link IDatatype}s and {@link IArgParser}s is how many arguments they can take.
+     * While {@link IArgParser}s always operate on a single argument's value, {@link IDatatype}s get access to the entire
+     * {@link IArgConsumer}}.
+     * <p>
+     * Since this is a peek operation, this ArgConsumer will not be mutated by any call to this method.
+     *
+     * @param datatype The datatype to get
+     * @param def      The default value
+     * @return The datatype instance, or {@code def} if it throws an exception
+     * @see IDatatype
+     * @see IDatatypeFor
+     */
+    <T, D extends IDatatypeFor<T>> T peekDatatypeForOrDefault(Class<D> datatype, T def);
+
+    /**
+     * Attempts to get the specified {@link IDatatypeFor} from this ArgConsumer
+     * <p>
+     * A critical difference between {@link IDatatype}s and {@link IArgParser}s is how many arguments they can take.
+     * While {@link IArgParser}s always operate on a single argument's value, {@link IDatatype}s get access to the entire
+     * {@link IArgConsumer}}.
+     * <p>
+     * Since this is a peek operation, this ArgConsumer will not be mutated by any call to this method.
+     *
+     * @param datatype The datatype to get
+     * @return The datatype instance, or {@code null} if it throws an exception
+     * @see IDatatype
+     * @see IDatatypeFor
+     */
+    <T, D extends IDatatypeFor<T>> T peekDatatypeForOrNull(Class<D> datatype);
+
+    /**
+     * Gets the next argument and returns it. This consumes the first argument so that subsequent calls will return
+     * later arguments
+     *
+     * @return The next argument
+     * @throws CommandNotEnoughArgumentsException If there's less than one argument left
+     */
+    ICommandArgument get() throws CommandNotEnoughArgumentsException;
+
+    /**
+     * Gets the value of the next argument and returns it. This consumes the first argument so that subsequent calls
+     * will return later arguments
+     *
+     * @return The value of the next argument
+     * @throws CommandNotEnoughArgumentsException If there's less than one argument left
+     */
+    String getString() throws CommandNotEnoughArgumentsException;
+
+    /**
+     * Gets an enum value from the enum class with the same name as the next argument's value
+     * <p>
+     * For example if you getEnum as an {@link Direction}, and the next argument's value is "up", this will return
+     * {@link Direction#UP}
+     *
+     * @param enumClass The enum class to search
+     * @return An enum constant of that class with the same name as the next argument's value
+     * @throws CommandInvalidTypeException If the constant couldn't be found
+     * @see #peekEnum(Class)
+     * @see #getEnumOrNull(Class)
+     * @see ICommandArgument#getEnum(Class)
+     */
+    <E extends Enum<?>> E getEnum(Class<E> enumClass) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException;
+
+    /**
+     * Gets an enum value from the enum class with the same name as the next argument's value
+     * <p>
+     * For example if you getEnum as an {@link Direction}, and the next argument's value is "up", this will return
+     * {@link Direction#UP}
+     *
+     * @param enumClass The enum class to search
+     * @param def       The default value
+     * @return An enum constant of that class with the same name as the next argument's value, or {@code def} if it
+     * couldn't be found
+     * @see #getEnum(Class)
+     * @see #getEnumOrNull(Class)
+     * @see #peekEnumOrNull(Class)
+     * @see ICommandArgument#getEnum(Class)
+     */
+    <E extends Enum<?>> E getEnumOrDefault(Class<E> enumClass, E def) throws CommandNotEnoughArgumentsException;
+
+    /**
+     * Gets an enum value from the enum class with the same name as the next argument's value
+     * <p>
+     * For example if you getEnum as an {@link Direction}, and the next argument's value is "up", this will return
+     * {@link Direction#UP}
+     *
+     * @param enumClass The enum class to search
+     * @return An enum constant of that class with the same name as the next argument's value, or {@code null} if it
+     * couldn't be found
+     * @see #getEnum(Class)
+     * @see #getEnumOrDefault(Class, Enum)
+     * @see #peekEnumOrNull(Class)
+     * @see ICommandArgument#getEnum(Class)
+     */
+    <E extends Enum<?>> E getEnumOrNull(Class<E> enumClass) throws CommandNotEnoughArgumentsException;
+
+    /**
+     * Tries to use a <b>stateless</b> {@link IArgParser} to parse the next argument into the specified class
+     * <p>
+     * A critical difference between {@link IDatatype}s and {@link IArgParser}s is how many arguments they can take.
+     * While {@link IArgParser}s always operate on a single argument's value, {@link IDatatype}s get access to the entire
+     * {@link IArgConsumer}}.
+     *
+     * @param type The type to peek as
+     * @return An instance of the specified type
+     * @throws CommandInvalidTypeException If the parsing failed
+     * @see IArgParser
+     * @see #get()
+     * @see #getAsOrDefault(Class, Object)
+     * @see #getAsOrNull(Class)
+     * @see #peekAs(Class)
+     * @see #peekAsOrDefault(Class, Object, int)
+     * @see #peekAsOrNull(Class, int)
+     */
+    <T> T getAs(Class<T> type) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException;
+
+    /**
+     * Tries to use a <b>stateless</b> {@link IArgParser} to parse the next argument into the specified class
+     * <p>
+     * A critical difference between {@link IDatatype}s and {@link IArgParser}s is how many arguments they can take.
+     * While {@link IArgParser}s always operate on a single argument's value, {@link IDatatype}s get access to the entire
+     * {@link IArgConsumer}}.
+     *
+     * @param type The type to peek as
+     * @param def  The default value
+     * @return An instance of the specified type, or {@code def} if it couldn't be parsed
+     * @see IArgParser
+     * @see #get()
+     * @see #getAs(Class)
+     * @see #getAsOrNull(Class)
+     * @see #peekAs(Class)
+     * @see #peekAsOrDefault(Class, Object, int)
+     * @see #peekAsOrNull(Class, int)
+     */
+    <T> T getAsOrDefault(Class<T> type, T def) throws CommandNotEnoughArgumentsException;
+
+    /**
+     * Tries to use a <b>stateless</b> {@link IArgParser} to parse the next argument into the specified class
+     * <p>
+     * A critical difference between {@link IDatatype}s and {@link IArgParser}s is how many arguments they can take.
+     * While {@link IArgParser}s always operate on a single argument's value, {@link IDatatype}s get access to the entire
+     * {@link IArgConsumer}}.
+     *
+     * @param type The type to peek as
+     * @return An instance of the specified type, or {@code null} if it couldn't be parsed
+     * @see IArgParser
+     * @see #get()
+     * @see #getAs(Class)
+     * @see #getAsOrDefault(Class, Object)
+     * @see #peekAs(Class)
+     * @see #peekAsOrDefault(Class, Object, int)
+     * @see #peekAsOrNull(Class, int)
+     */
+    <T> T getAsOrNull(Class<T> type) throws CommandNotEnoughArgumentsException;
+
+    <T, O, D extends IDatatypePost<T, O>> T getDatatypePost(D datatype, O original) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException;
+
+    <T, O, D extends IDatatypePost<T, O>> T getDatatypePostOrDefault(D datatype, O original, T _default);
+
+    <T, O, D extends IDatatypePost<T, O>> T getDatatypePostOrNull(D datatype, O original);
+
+    <T, D extends IDatatypeFor<T>> T getDatatypeFor(D datatype) throws CommandInvalidTypeException, CommandNotEnoughArgumentsException;
+
+    <T, D extends IDatatypeFor<T>> T getDatatypeForOrDefault(D datatype, T def);
+
+    <T, D extends IDatatypeFor<T>> T getDatatypeForOrNull(D datatype);
+
+    <T extends IDatatype> Stream<String> tabCompleteDatatype(T datatype);
+
+    /**
+     * Returns the "raw rest" of the string. For example, from a string <code>arg1 arg2&nbsp;&nbsp;arg3</code>, split
+     * into three {@link ICommandArgument}s {@code "arg1"}, {@code "arg2"}, and {@code "arg3"}:
+     *
+     * <ul>
+     * <li>{@code rawRest()} would return <code>arg1 arg2&nbsp;&nbsp;arg3</code></li>
+     * <li>After calling {@link #get()}, {@code rawRest()} would return <code>arg2&nbsp;&nbsp;arg3</code> (note the
+     * double space - it is preserved!)</li>
+     * <li>After calling {@link #get()} again, {@code rawRest()} would return {@code "arg3"}</li>
+     * <li>After calling {@link #get()} one last time, {@code rawRest()} would return {@code ""}</li>
+     * </ul>
+     *
+     * @return The "raw rest" of the string.
+     */
+    String rawRest();
+
+    /**
+     * @param min The minimum amount of arguments to require.
+     * @throws CommandNotEnoughArgumentsException If there are less than {@code min} arguments left.
+     * @see #requireMax(int)
+     * @see #requireExactly(int)
+     */
+    void requireMin(int min) throws CommandNotEnoughArgumentsException;
+
+    /**
+     * @param max The maximum amount of arguments allowed.
+     * @throws CommandTooManyArgumentsException If there are more than {@code max} arguments left.
+     * @see #requireMin(int)
+     * @see #requireExactly(int)
+     */
+    void requireMax(int max) throws CommandTooManyArgumentsException;
+
+    /**
+     * @param args The exact amount of arguments to require.
+     * @throws CommandNotEnoughArgumentsException If there are less than {@code args} arguments left.
+     * @throws CommandTooManyArgumentsException   If there are more than {@code args} arguments left.
+     * @see #requireMin(int)
+     * @see #requireMax(int)
+     */
+    void requireExactly(int args) throws CommandException;
+
+    /**
+     * @return If this {@link IArgConsumer}} has consumed at least one argument.
+     * @see #consumed()
+     * @see #consumedString()
+     */
+    boolean hasConsumed();
+
+    /**
+     * @return The last argument this {@link IArgConsumer}} has consumed, or an "unknown" argument, indicated by a
+     * comamnd argument index that has a value of {@code -1}, if no arguments have been consumed yet.
+     * @see #consumedString()
+     * @see #hasConsumed()
+     */
+    ICommandArgument consumed();
+
+    /**
+     * @return The value of thelast argument this {@link IArgConsumer}} has consumed, or an empty string if no arguments
+     * have been consumed yet
+     * @see #consumed()
+     * @see #hasConsumed()
+     */
+    String consumedString();
+
+    /**
+     * @return A copy of this {@link IArgConsumer}}. It has the same arguments (both consumed and not), but does not
+     * affect or mutate this instance. Useful for the various {@code peek} functions
+     */
+    IArgConsumer copy();
+}
