@@ -298,3 +298,110 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
                     if (ctx.isLookingAt(pos)) {
                         baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
                     }
+                    return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                }
+            }
+        }
+        for (BlockPos pos : openLog) {
+            if (playerPos.distSqr(pos) > blockReachDistance * blockReachDistance) {
+                continue;
+            }
+            for (Direction dir : Direction.Plane.HORIZONTAL) {
+                if (!(ctx.world().getBlockState(pos.relative(dir)).getBlock() instanceof AirBlock)) {
+                    continue;
+                }
+                Vec3 faceCenter = Vec3.atCenterOf(pos).add(Vec3.atLowerCornerOf(dir.getNormal()).scale(0.5));
+                Optional<Rotation> rot = RotationUtils.reachableOffset(ctx, pos, faceCenter, blockReachDistance, false);
+                if (rot.isPresent() && isSafeToCancel && baritone.getInventoryBehavior().throwaway(true, this::isCocoa)) {
+                    HitResult result = RayTraceUtils.rayTraceTowards(ctx.player(), rot.get(), blockReachDistance);
+                    if (result instanceof BlockHitResult && ((BlockHitResult) result).getDirection() == dir) {
+                        baritone.getLookBehavior().updateTarget(rot.get(), true);
+                        if (ctx.isLookingAt(pos)) {
+                            baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+                        }
+                        return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+                    }
+                }
+            }
+        }
+        for (BlockPos pos : bonemealable) {
+            if (playerPos.distSqr(pos) > blockReachDistance * blockReachDistance) {
+                continue;
+            }
+            Optional<Rotation> rot = RotationUtils.reachable(ctx, pos);
+            if (rot.isPresent() && isSafeToCancel && baritone.getInventoryBehavior().throwaway(true, this::isBoneMeal)) {
+                baritone.getLookBehavior().updateTarget(rot.get(), true);
+                if (ctx.isLookingAt(pos)) {
+                    baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+                }
+                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+            }
+        }
+
+        if (calcFailed) {
+            logDirect("Farm failed");
+            if (Baritone.settings().notificationOnFarmFail.value) {
+                logNotification("Farm failed", true);
+            }
+            onLostControl();
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
+        List<Goal> goalz = new ArrayList<>();
+        for (BlockPos pos : toBreak) {
+            goalz.add(new BuilderProcess.GoalBreak(pos));
+        }
+        if (baritone.getInventoryBehavior().throwaway(false, this::isPlantable)) {
+            for (BlockPos pos : openFarmland) {
+                goalz.add(new GoalBlock(pos.above()));
+            }
+        }
+        if (baritone.getInventoryBehavior().throwaway(false, this::isNetherWart)) {
+            for (BlockPos pos : openSoulsand) {
+                goalz.add(new GoalBlock(pos.above()));
+            }
+        }
+        if (baritone.getInventoryBehavior().throwaway(false, this::isCocoa)) {
+            for (BlockPos pos : openLog) {
+                for (Direction direction : Direction.Plane.HORIZONTAL) {
+                    if (ctx.world().getBlockState(pos.relative(direction)).getBlock() instanceof AirBlock) {
+                        goalz.add(new GoalGetToBlock(pos.relative(direction)));
+                    }
+                }
+            }
+        }
+        if (baritone.getInventoryBehavior().throwaway(false, this::isBoneMeal)) {
+            for (BlockPos pos : bonemealable) {
+                goalz.add(new GoalBlock(pos));
+            }
+        }
+        for (Entity entity : ctx.entities()) {
+            if (entity instanceof ItemEntity && entity.onGround()) {
+                ItemEntity ei = (ItemEntity) entity;
+                if (PICKUP_DROPPED.contains(ei.getItem().getItem())) {
+                    // +0.1 because of farmland's 0.9375 dummy height lol
+                    goalz.add(new GoalBlock(new BetterBlockPos(entity.position().x, entity.position().y + 0.1, entity.position().z)));
+                }
+            }
+        }
+        if (goalz.isEmpty()) {
+            logDirect("Farm failed");
+            if (Baritone.settings().notificationOnFarmFail.value) {
+                logNotification("Farm failed", true);
+            }
+            onLostControl();
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+        return new PathingCommand(new GoalComposite(goalz.toArray(new Goal[0])), PathingCommandType.SET_GOAL_AND_PATH);
+    }
+
+    @Override
+    public void onLostControl() {
+        active = false;
+    }
+
+    @Override
+    public String displayName0() {
+        return "Farming";
+    }
+}
