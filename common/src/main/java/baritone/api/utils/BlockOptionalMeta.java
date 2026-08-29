@@ -298,3 +298,56 @@ public final class BlockOptionalMeta {
         public ReloadableServerRegistries.Holder holder() {
             return new ReloadableServerRegistries.Holder(registryAccess().freeze());
         }
+
+        public static Unsafe getUnsafe() {
+            try {
+                Field theUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
+                theUnsafe.setAccessible(true);
+                return (Unsafe) theUnsafe.get(null);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        public static CompletableFuture<RegistryAccess> load() {
+            PackRepository packRepository = Minecraft.getInstance().getResourcePackRepository();
+            CloseableResourceManager closeableResourceManager = new MultiPackResourceManager(
+                PackType.SERVER_DATA,
+                List.of(packRepository.getPack(BuiltInPackSource.VANILLA_ID).open())
+            );
+            LayeredRegistryAccess<RegistryLayer> layeredRegistryAccess = loadAndReplaceLayer(
+                closeableResourceManager, RegistryLayer.createRegistryAccess(), RegistryLayer.WORLDGEN, RegistryDataLoader.WORLDGEN_REGISTRIES
+            );
+            return ReloadableServerResources.loadResources(
+                closeableResourceManager,
+                layeredRegistryAccess,
+                FeatureFlags.VANILLA_SET,
+                Commands.CommandSelection.INTEGRATED,
+                2,
+                Runnable::run,
+                Minecraft.getInstance()
+            ).thenApply(reloadableServerResources -> reloadableServerResources.fullRegistries().get());
+        }
+
+        private static LayeredRegistryAccess<RegistryLayer> loadAndReplaceLayer(
+            ResourceManager resourceManager,
+            LayeredRegistryAccess<RegistryLayer> registryAccess,
+            RegistryLayer registryLayer,
+            List<RegistryDataLoader.RegistryData<?>> registryData
+        ) {
+            RegistryAccess.Frozen frozen = loadLayer(resourceManager, registryAccess, registryLayer, registryData);
+            return registryAccess.replaceFrom(registryLayer, frozen);
+        }
+
+        private static RegistryAccess.Frozen loadLayer(
+            ResourceManager resourceManager,
+            LayeredRegistryAccess<RegistryLayer> registryAccess,
+            RegistryLayer registryLayer,
+            List<RegistryDataLoader.RegistryData<?>> registryData
+        ) {
+            RegistryAccess.Frozen frozen = registryAccess.getAccessForLoading(registryLayer);
+            return RegistryDataLoader.load(resourceManager, frozen, registryData);
+        }
+
+    }
+}
