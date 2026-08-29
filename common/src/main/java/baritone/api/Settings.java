@@ -1198,3 +1198,303 @@ public final class Settings {
      * What Y level to go to for legit strip mining
      */
     public final Setting<Integer> legitMineYLevel = new Setting<>(-59);
+
+    /**
+     * Magically see ores that are separated diagonally from existing ores. Basically like mining around the ores that it finds
+     * in case there's one there touching it diagonally, except it checks it un-legit-ly without having the mine blocks to see it.
+     * You can decide whether this looks plausible or not.
+     * <p>
+     * This is disabled because it results in some weird behavior. For example, it can """see""" the top block of a vein of iron_ore
+     * through a lava lake. This isn't an issue normally since it won't consider anything touching lava, so it just ignores it.
+     * However, this setting expands that and allows it to see the entire vein so it'll mine under the lava lake to get the iron that
+     * it can reach without mining blocks adjacent to lava. This really defeats the purpose of legitMine since a player could never
+     * do that lol, so thats one reason why its disabled
+     */
+    public final Setting<Boolean> legitMineIncludeDiagonals = new Setting<>(false);
+
+    /**
+     * When mining block of a certain type, try to mine two at once instead of one.
+     * If the block above is also a goal block, set GoalBlock instead of GoalTwoBlocks
+     * If the block below is also a goal block, set GoalBlock to the position one down instead of GoalTwoBlocks
+     */
+    public final Setting<Boolean> forceInternalMining = new Setting<>(true);
+
+    /**
+     * Modification to the previous setting, only has effect if forceInternalMining is true
+     * If true, only apply the previous setting if the block adjacent to the goal isn't air.
+     */
+    public final Setting<Boolean> internalMiningAirException = new Setting<>(true);
+
+    /**
+     * The actual GoalNear is set this distance away from the entity you're following
+     * <p>
+     * For example, set followOffsetDistance to 5 and followRadius to 0 to always stay precisely 5 blocks north of your follow target.
+     */
+    public final Setting<Double> followOffsetDistance = new Setting<>(0D);
+
+    /**
+     * The actual GoalNear is set in this direction from the entity you're following. This value is in degrees.
+     */
+    public final Setting<Float> followOffsetDirection = new Setting<>(0F);
+
+    /**
+     * The radius (for the GoalNear) of how close to your target position you actually have to be
+     */
+    public final Setting<Integer> followRadius = new Setting<>(3);
+
+    /**
+     * The maximum distance to the entity you're following
+     */
+    public final Setting<Integer> followTargetMaxDistance = new Setting<>(0);
+
+    /**
+     * Turn this on if your exploration filter is enormous, you don't want it to check if it's done,
+     * and you are just fine with it just hanging on completion
+     */
+    public final Setting<Boolean> disableCompletionCheck = new Setting<>(false);
+
+    /**
+     * Cached chunks (regardless of if they're in RAM or saved to disk) expire and are deleted after this number of seconds
+     * -1 to disable
+     * <p>
+     * I would highly suggest leaving this setting disabled (-1).
+     * <p>
+     * The only valid reason I can think of enable this setting is if you are extremely low on disk space and you play on multiplayer,
+     * and can't take (average) 300kb saved for every 512x512 area. (note that more complicated terrain is less compressible and will take more space)
+     * <p>
+     * However, simply discarding old chunks because they are old is inadvisable. Baritone is extremely good at correcting
+     * itself and its paths as it learns new information, as new chunks load. There is no scenario in which having an
+     * incorrect cache can cause Baritone to get stuck, take damage, or perform any action it wouldn't otherwise, everything
+     * is rechecked once the real chunk is in range.
+     * <p>
+     * Having a robust cache greatly improves long distance pathfinding, as it's able to go around large scale obstacles
+     * before they're in render distance. In fact, when the chunkCaching setting is disabled and Baritone starts anew
+     * every time, or when you enter a completely new and very complicated area, it backtracks far more often because it
+     * has to build up that cache from scratch. But after it's gone through an area just once, the next time will have zero
+     * backtracking, since the entire area is now known and cached.
+     */
+    public final Setting<Long> cachedChunksExpirySeconds = new Setting<>(-1L);
+
+    /**
+     * The function that is called when Baritone will log to chat. This function can be added to
+     * via {@link Consumer#andThen(Consumer)} or it can completely be overriden via setting
+     * {@link Setting#value};
+     */
+    @JavaOnly
+    public final Setting<Consumer<Component>> logger = new Setting<>((msg) -> {
+        try {
+            final GuiMessageTag tag = useMessageTag.value ? Helper.MESSAGE_TAG : null;
+            Minecraft.getInstance().gui.getChat().addMessage(msg, null, tag);
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to log message to chat: " + msg.getString(), t);
+        }
+    });
+
+    /**
+     * The function that is called when Baritone will send a desktop notification. This function can be added to
+     * via {@link Consumer#andThen(Consumer)} or it can completely be overriden via setting
+     * {@link Setting#value};
+     */
+    @JavaOnly
+    public final Setting<BiConsumer<String, Boolean>> notifier = new Setting<>(NotificationHelper::notify);
+
+    /**
+     * The function that is called when Baritone will show a toast. This function can be added to
+     * via {@link Consumer#andThen(Consumer)} or it can completely be overriden via setting
+     * {@link Setting#value};
+     */
+    @JavaOnly
+    public final Setting<BiConsumer<Component, Component>> toaster = new Setting<>(BaritoneToast::addOrUpdate);
+
+    /**
+     * Print out ALL command exceptions as a stack trace to stdout, even simple syntax errors
+     */
+    public final Setting<Boolean> verboseCommandExceptions = new Setting<>(false);
+
+    /**
+     * The size of the box that is rendered when the current goal is a GoalYLevel
+     */
+    public final Setting<Double> yLevelBoxSize = new Setting<>(15D);
+
+    /**
+     * The color of the current path
+     */
+    public final Setting<Color> colorCurrentPath = new Setting<>(Color.RED);
+
+    /**
+     * The color of the next path
+     */
+    public final Setting<Color> colorNextPath = new Setting<>(Color.MAGENTA);
+
+    /**
+     * The color of the blocks to break
+     */
+    public final Setting<Color> colorBlocksToBreak = new Setting<>(Color.RED);
+
+    /**
+     * The color of the blocks to place
+     */
+    public final Setting<Color> colorBlocksToPlace = new Setting<>(Color.GREEN);
+
+    /**
+     * The color of the blocks to walk into
+     */
+    public final Setting<Color> colorBlocksToWalkInto = new Setting<>(Color.MAGENTA);
+
+    /**
+     * The color of the best path so far
+     */
+    public final Setting<Color> colorBestPathSoFar = new Setting<>(Color.BLUE);
+
+    /**
+     * The color of the path to the most recent considered node
+     */
+    public final Setting<Color> colorMostRecentConsidered = new Setting<>(Color.CYAN);
+
+    /**
+     * The color of the goal box
+     */
+    public final Setting<Color> colorGoalBox = new Setting<>(Color.GREEN);
+
+    /**
+     * The color of the goal box when it's inverted
+     */
+    public final Setting<Color> colorInvertedGoalBox = new Setting<>(Color.RED);
+
+    /**
+     * The color of all selections
+     */
+    public final Setting<Color> colorSelection = new Setting<>(Color.CYAN);
+
+    /**
+     * The color of the selection pos 1
+     */
+    public final Setting<Color> colorSelectionPos1 = new Setting<>(Color.BLACK);
+
+    /**
+     * The color of the selection pos 2
+     */
+    public final Setting<Color> colorSelectionPos2 = new Setting<>(Color.ORANGE);
+
+    /**
+     * The opacity of the selection. 0 is completely transparent, 1 is completely opaque
+     */
+    public final Setting<Float> selectionOpacity = new Setting<>(.5f);
+
+    /**
+     * Line width of the goal when rendered, in pixels
+     */
+    public final Setting<Float> selectionLineWidth = new Setting<>(2F);
+
+    /**
+     * Render selections
+     */
+    public final Setting<Boolean> renderSelection = new Setting<>(true);
+
+    /**
+     * Ignore depth when rendering selections
+     */
+    public final Setting<Boolean> renderSelectionIgnoreDepth = new Setting<>(true);
+
+    /**
+     * Render selection corners
+     */
+    public final Setting<Boolean> renderSelectionCorners = new Setting<>(true);
+
+    /**
+     * Use sword to mine.
+     */
+    public final Setting<Boolean> useSwordToMine = new Setting<>(true);
+
+    /**
+     * Desktop notifications
+     */
+    public final Setting<Boolean> desktopNotifications = new Setting<>(false);
+
+    /**
+     * Desktop notification on path complete
+     */
+    public final Setting<Boolean> notificationOnPathComplete = new Setting<>(true);
+
+    /**
+     * Desktop notification on farm fail
+     */
+    public final Setting<Boolean> notificationOnFarmFail = new Setting<>(true);
+
+    /**
+     * Desktop notification on build finished
+     */
+    public final Setting<Boolean> notificationOnBuildFinished = new Setting<>(true);
+
+    /**
+     * Desktop notification on explore finished
+     */
+    public final Setting<Boolean> notificationOnExploreFinished = new Setting<>(true);
+
+    /**
+     * Desktop notification on mine fail
+     */
+    public final Setting<Boolean> notificationOnMineFail = new Setting<>(true);
+
+    /**
+     * The number of ticks of elytra movement to simulate while firework boost is not active. Higher values are
+     * computationally more expensive.
+     */
+    public final Setting<Integer> elytraSimulationTicks = new Setting<>(20);
+
+    /**
+     * The maximum allowed deviation in pitch from a direct line-of-sight to the flight target. Higher values are
+     * computationally more expensive.
+     */
+    public final Setting<Integer> elytraPitchRange = new Setting<>(25);
+
+    /**
+     * The minimum speed that the player can drop to (in blocks/tick) before a firework is automatically deployed.
+     */
+    public final Setting<Double> elytraFireworkSpeed = new Setting<>(1.2);
+
+    /**
+     * The delay after the player's position is set-back by the server that a firework may be automatically deployed.
+     * Value is in ticks.
+     */
+    public final Setting<Integer> elytraFireworkSetbackUseDelay = new Setting<>(15);
+
+    /**
+     * The minimum padding value that is added to the player's hitbox when considering which point to fly to on the
+     * path. High values can result in points not being considered which are otherwise safe to fly to. Low values can
+     * result in flight paths which are extremely tight, and there's the possibility of crashing due to getting too low
+     * to the ground.
+     */
+    public final Setting<Double> elytraMinimumAvoidance = new Setting<>(0.2);
+
+    /**
+     * If enabled, avoids using fireworks when descending along the flight path.
+     */
+    public final Setting<Boolean> elytraConserveFireworks = new Setting<>(false);
+
+    /**
+     * Renders the raytraces that are performed by the elytra fly calculation.
+     */
+    public final Setting<Boolean> elytraRenderRaytraces = new Setting<>(false);
+
+    /**
+     * Renders the raytraces that are used in the hitbox part of the elytra fly calculation.
+     * Requires {@link #elytraRenderRaytraces}.
+     */
+    public final Setting<Boolean> elytraRenderHitboxRaytraces = new Setting<>(false);
+
+    /**
+     * Renders the best elytra flight path that was simulated each tick.
+     */
+    public final Setting<Boolean> elytraRenderSimulation = new Setting<>(true);
+
+    /**
+     * Automatically path to and jump off of ledges to initiate elytra flight when grounded.
+     */
+    public final Setting<Boolean> elytraAutoJump = new Setting<>(false);
+
+    /**
+     * The seed used to generate chunks for long distance elytra path-finding in the nether.
+     * Defaults to 2b2t's nether seed.
+     */
+    public final Setting<Long> elytraNetherSeed = new Setting<>(146008555100680L);
