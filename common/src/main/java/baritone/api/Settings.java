@@ -1498,3 +1498,216 @@ public final class Settings {
      * Defaults to 2b2t's nether seed.
      */
     public final Setting<Long> elytraNetherSeed = new Setting<>(146008555100680L);
+
+    /**
+     * Whether nether-pathfinder should generate terrain based on {@link #elytraNetherSeed}.
+     * If false all chunks that haven't been loaded are assumed to be air.
+     */
+    public final Setting<Boolean> elytraPredictTerrain = new Setting<>(false);
+
+    /**
+     * Automatically swap the current elytra with a new one when the durability gets too low
+     */
+    public final Setting<Boolean> elytraAutoSwap = new Setting<>(true);
+
+    /**
+     * The minimum durability an elytra can have before being swapped
+     */
+    public final Setting<Integer> elytraMinimumDurability = new Setting<>(5);
+
+    /**
+     * The minimum fireworks before landing early for safety
+     */
+    public final Setting<Integer> elytraMinFireworksBeforeLanding = new Setting<>(5);
+
+    /**
+     * Automatically land when elytra is almost out of durability, or almost out of fireworks
+     */
+    public final Setting<Boolean> elytraAllowEmergencyLand = new Setting<>(true);
+
+    /**
+     * Time between culling far away chunks from the nether pathfinder chunk cache
+     */
+    public final Setting<Long> elytraTimeBetweenCacheCullSecs = new Setting<>(TimeUnit.MINUTES.toSeconds(3));
+
+    /**
+     * Maximum distance chunks can be before being culled from the nether pathfinder chunk cache
+     */
+    public final Setting<Integer> elytraCacheCullDistance = new Setting<>(5000);
+
+    /**
+     * Should elytra consider nether brick a valid landing block
+     */
+    public final Setting<Boolean> elytraAllowLandOnNetherFortress = new Setting<>(false);
+
+    /**
+     * Has the user read and understood the elytra terms and conditions
+     */
+    public final Setting<Boolean> elytraTermsAccepted = new Setting<>(false);
+
+    /**
+     * Verbose chat logging in elytra mode
+     */
+    public final Setting<Boolean> elytraChatSpam = new Setting<>(false);
+
+    /**
+     * May reduce memory usage by using a custom allocator for pathfinding
+     */
+    public final Setting<Boolean> elytraCustomAllocator = new Setting<>(true);
+
+    /**
+     * Allow the pathfinder to attempt flight in tighter spaces, useful in caves but can be dangerous.
+     */
+    public final Setting<Boolean> elytraAllowTightSpaces = new Setting<>(false);
+
+    /**
+     * Allow the pathfinder to fly above y 128 in the nether.
+     */
+    public final Setting<Boolean> elytraAllowAboveRoof = new Setting<>(false);
+
+    /**
+     * Allow the pathfinder to access the baritone cache to improve pathing
+     */
+    public final Setting<Boolean> elytraUseCache = new Setting<>(true);
+
+    /**
+     * Allow the pathfinder to fly above the build limit in the overworld and end.
+     */
+    public final Setting<Boolean> elytraAllowAboveBuildLimit = new Setting<>(true);
+
+    /**
+     * Minimum distance in blocks of an elytra trip before the pathfinder will try to fly above build limit. (Minimum: 32). Requires {@link #elytraAllowAboveBuildLimit} to be enabled.
+     */
+    public final Setting<Integer> elytraLongDistanceThreshold = new Setting<>(500);
+
+    /**
+     * Sneak when magma blocks are under feet
+     */
+    public final Setting<Boolean> allowWalkOnMagmaBlocks = new Setting<>(false);
+
+    /**
+     * A map of lowercase setting field names to their respective setting
+     */
+    public final Map<String, Setting<?>> byLowerName;
+
+    /**
+     * A list of all settings
+     */
+    public final List<Setting<?>> allSettings;
+
+    public final Map<Setting<?>, Type> settingTypes;
+
+    public final class Setting<T> {
+
+        public T value;
+        public final T defaultValue;
+        private String name;
+        private boolean javaOnly;
+
+        @SuppressWarnings("unchecked")
+        private Setting(T value) {
+            if (value == null) {
+                throw new IllegalArgumentException("Cannot determine value type class from null");
+            }
+            this.value = value;
+            this.defaultValue = value;
+            this.javaOnly = false;
+        }
+
+        /**
+         * Deprecated! Please use .value directly instead
+         *
+         * @return the current setting value
+         */
+        @Deprecated
+        public final T get() {
+            return value;
+        }
+
+        public final String getName() {
+            return name;
+        }
+
+        public Class<T> getValueClass() {
+            // noinspection unchecked
+            return (Class<T>) TypeUtils.resolveBaseClass(getType());
+        }
+
+        @Override
+        public String toString() {
+            return SettingsUtil.settingToString(this);
+        }
+
+        /**
+         * Reset this setting to its default value
+         */
+        public void reset() {
+            value = defaultValue;
+        }
+
+        public final Type getType() {
+            return settingTypes.get(this);
+        }
+
+        /**
+         * This should always be the same as whether the setting can be parsed from or serialized to a string; in other
+         * words, the only way to modify it is by writing to {@link #value} programatically.
+         *
+         * @return {@code true} if the setting can not be set or read by the user
+         */
+        public boolean isJavaOnly() {
+            return javaOnly;
+        }
+    }
+
+    /**
+     * Marks a {@link Setting} field as being {@link Setting#isJavaOnly() Java-only}
+     */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target(ElementType.FIELD)
+    private @interface JavaOnly {}
+
+    // here be dragons
+
+    Settings() {
+        Field[] temp = getClass().getFields();
+
+        Map<String, Setting<?>> tmpByName = new HashMap<>();
+        List<Setting<?>> tmpAll = new ArrayList<>();
+        Map<Setting<?>, Type> tmpSettingTypes = new HashMap<>();
+
+        try {
+            for (Field field : temp) {
+                if (field.getType().equals(Setting.class)) {
+                    Setting<?> setting = (Setting<?>) field.get(this);
+                    String name = field.getName();
+                    setting.name = name;
+                    setting.javaOnly = field.isAnnotationPresent(JavaOnly.class);
+                    name = name.toLowerCase();
+                    if (tmpByName.containsKey(name)) {
+                        throw new IllegalStateException("Duplicate setting name");
+                    }
+                    tmpByName.put(name, setting);
+                    tmpAll.add(setting);
+                    tmpSettingTypes.put(setting, ((ParameterizedType) field.getGenericType()).getActualTypeArguments()[0]);
+                }
+            }
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
+        byLowerName = Collections.unmodifiableMap(tmpByName);
+        allSettings = Collections.unmodifiableList(tmpAll);
+        settingTypes = Collections.unmodifiableMap(tmpSettingTypes);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> List<Setting<T>> getAllValuesByType(Class<T> cla$$) {
+        List<Setting<T>> result = new ArrayList<>();
+        for (Setting<?> setting : allSettings) {
+            if (setting.getValueClass().equals(cla$$)) {
+                result.add((Setting<T>) setting);
+            }
+        }
+        return result;
+    }
+}
