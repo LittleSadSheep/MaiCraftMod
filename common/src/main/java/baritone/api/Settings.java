@@ -598,3 +598,303 @@ public final class Settings {
     public final Setting<Long> primaryTimeoutMS = new Setting<>(500L);
 
     /**
+     * Pathing can never take longer than this, even if that means failing to find any path at all
+     */
+    public final Setting<Long> failureTimeoutMS = new Setting<>(2000L);
+
+    /**
+     * Planning ahead while executing a segment ends after this amount of time, but only if a path has been found
+     * <p>
+     * If no valid path (length above the minimum) has been found, pathing continues up until the failure timeout
+     */
+    public final Setting<Long> planAheadPrimaryTimeoutMS = new Setting<>(4000L);
+
+    /**
+     * Planning ahead while executing a segment can never take longer than this, even if that means failing to find any path at all
+     */
+    public final Setting<Long> planAheadFailureTimeoutMS = new Setting<>(5000L);
+
+    /**
+     * For debugging, consider nodes much much slower
+     */
+    public final Setting<Boolean> slowPath = new Setting<>(false);
+
+    /**
+     * Milliseconds between each node
+     */
+    public final Setting<Long> slowPathTimeDelayMS = new Setting<>(100L);
+
+    /**
+     * The alternative timeout number when slowPath is on
+     */
+    public final Setting<Long> slowPathTimeoutMS = new Setting<>(40000L);
+
+
+    /**
+     * allows baritone to save bed waypoints when interacting with beds
+     */
+    public final Setting<Boolean> doBedWaypoints = new Setting<>(true);
+
+    /**
+     * allows baritone to save death waypoints
+     */
+    public final Setting<Boolean> doDeathWaypoints = new Setting<>(true);
+
+    /**
+     * The big one. Download all chunks in simplified 2-bit format and save them for better very-long-distance pathing.
+     */
+    public final Setting<Boolean> chunkCaching = new Setting<>(true);
+
+    /**
+     * On save, delete from RAM any cached regions that are more than 1024 blocks away from the player
+     * <p>
+     * Temporarily disabled
+     * <p>
+     * Temporarily reenabled
+     *
+     * @see <a href="https://github.com/cabaletta/baritone/issues/248">Issue #248</a>
+     */
+    public final Setting<Boolean> pruneRegionsFromRAM = new Setting<>(true);
+
+    /**
+     * The chunk packer queue can never grow to larger than this, if it does, the oldest chunks are discarded
+     * <p>
+     * The newest chunks are kept, so that if you're moving in a straight line quickly then stop, your immediate render distance is still included
+     */
+    public final Setting<Integer> chunkPackerQueueMaxSize = new Setting<>(2000);
+
+    /**
+     * Fill in blocks behind you
+     */
+    public final Setting<Boolean> backfill = new Setting<>(false);
+
+    /**
+     * Shows popup message in the upper right corner, similarly to when you make an advancement
+     */
+    public final Setting<Boolean> logAsToast = new Setting<>(false);
+
+    /**
+     * The time of how long the message in the pop-up will display
+     * <p>
+     * If below 1000L (1sec), it's better to disable this
+     */
+    public final Setting<Long> toastTimer = new Setting<>(5000L);
+
+    /**
+     * Print all the debug messages to chat
+     */
+    public final Setting<Boolean> chatDebug = new Setting<>(false);
+
+    /**
+     * Allow chat based control of Baritone. Most likely should be disabled when Baritone is imported for use in
+     * something else
+     */
+    public final Setting<Boolean> chatControl = new Setting<>(true);
+
+    /**
+     * Some clients like Impact try to force chatControl to off, so here's a second setting to do it anyway
+     */
+    public final Setting<Boolean> chatControlAnyway = new Setting<>(false);
+
+    /**
+     * Render the path
+     */
+    public final Setting<Boolean> renderPath = new Setting<>(true);
+
+    /**
+     * Render the path as a line instead of a frickin thingy
+     */
+    public final Setting<Boolean> renderPathAsLine = new Setting<>(false);
+
+    /**
+     * Render the goal
+     */
+    public final Setting<Boolean> renderGoal = new Setting<>(true);
+
+    /**
+     * Render the goal as a sick animated thingy instead of just a box
+     * (also controls animation of GoalXZ if {@link #renderGoalXZBeacon} is enabled)
+     */
+    public final Setting<Boolean> renderGoalAnimated = new Setting<>(true);
+
+    /**
+     * Render selection boxes
+     */
+    public final Setting<Boolean> renderSelectionBoxes = new Setting<>(true);
+
+    /**
+     * Ignore depth when rendering the goal
+     */
+    public final Setting<Boolean> renderGoalIgnoreDepth = new Setting<>(true);
+
+    /**
+     * Renders X/Z type Goals with the vanilla beacon beam effect. Combining this with
+     * {@link #renderGoalIgnoreDepth} will cause strange render clipping.
+     */
+    public final Setting<Boolean> renderGoalXZBeacon = new Setting<>(false);
+
+    /**
+     * Ignore depth when rendering the selection boxes (to break, to place, to walk into)
+     */
+    public final Setting<Boolean> renderSelectionBoxesIgnoreDepth = new Setting<>(true);
+
+    /**
+     * Ignore depth when rendering the path
+     */
+    public final Setting<Boolean> renderPathIgnoreDepth = new Setting<>(true);
+
+    /**
+     * Line width of the path when rendered, in pixels
+     */
+    public final Setting<Float> pathRenderLineWidthPixels = new Setting<>(5F);
+
+    /**
+     * Line width of the goal when rendered, in pixels
+     */
+    public final Setting<Float> goalRenderLineWidthPixels = new Setting<>(3F);
+
+    /**
+     * Start fading out the path at 20 movements ahead, and stop rendering it entirely 30 movements ahead.
+     * Improves FPS.
+     */
+    public final Setting<Boolean> fadePath = new Setting<>(false);
+
+    /**
+     * Move without having to force the client-sided rotations
+     */
+    public final Setting<Boolean> freeLook = new Setting<>(true);
+
+    /**
+     * Break and place blocks without having to force the client-sided rotations. Requires {@link #freeLook}.
+     */
+    public final Setting<Boolean> blockFreeLook = new Setting<>(false);
+
+    /**
+     * Automatically elytra fly without having to force the client-sided rotations.
+     */
+    public final Setting<Boolean> elytraFreeLook = new Setting<>(true);
+
+    /**
+     * Forces the client-sided yaw rotation to an average of the last {@link #smoothLookTicks} of server-sided rotations.
+     */
+    public final Setting<Boolean> smoothLook = new Setting<>(false);
+
+    /**
+     * Same as {@link #smoothLook} but for elytra flying.
+     */
+    public final Setting<Boolean> elytraSmoothLook = new Setting<>(false);
+
+    /**
+     * The number of ticks to average across for {@link #smoothLook};
+     */
+    public final Setting<Integer> smoothLookTicks = new Setting<>(5);
+
+    /**
+     * When true, the player will remain with its existing look direction as often as possible.
+     * Although, in some cases this can get it stuck, hence this setting to disable that behavior.
+     */
+    public final Setting<Boolean> remainWithExistingLookDirection = new Setting<>(true);
+
+    /**
+     * Will cause some minor behavioral differences to ensure that Baritone works on anticheats.
+     * <p>
+     * At the moment this will silently set the player's rotations when using freeLook so you're not sprinting in
+     * directions other than forward, which is picken up by more "advanced" anticheats like AAC, but not NCP.
+     */
+    public final Setting<Boolean> antiCheatCompatibility = new Setting<>(true);
+
+    /**
+     * Exclusively use cached chunks for pathing
+     * <p>
+     * Never turn this on
+     */
+    public final Setting<Boolean> pathThroughCachedOnly = new Setting<>(false);
+
+    /**
+     * Continue sprinting while in water
+     */
+    public final Setting<Boolean> sprintInWater = new Setting<>(true);
+
+    /**
+     * When GetToBlockProcess or MineProcess fails to calculate a path, instead of just giving up, mark the closest instance
+     * of that block as "unreachable" and go towards the next closest. GetToBlock expands this search to the whole "vein"; MineProcess does not.
+     * This is because MineProcess finds individual impossible blocks (like one block in a vein that has gravel on top then lava, so it can't break)
+     * Whereas GetToBlock should blacklist the whole "vein" if it can't get to any of them.
+     */
+    public final Setting<Boolean> blacklistClosestOnFailure = new Setting<>(true);
+
+    /**
+     * 😎 Render cached chunks as semitransparent. Doesn't work with OptiFine 😭 Rarely randomly crashes, see <a href="https://github.com/cabaletta/baritone/issues/327">this issue</a>.
+     * <p>
+     * Can be very useful on servers with low render distance. After enabling, you may need to reload the world in order for it to have an effect
+     * (e.g. disconnect and reconnect, enter then exit the nether, die and respawn, etc). This may literally kill your FPS and CPU because
+     * every chunk gets recompiled twice as much as normal, since the cached version comes into range, then the normal one comes from the server for real.
+     * <p>
+     * Note that flowing water is cached as AVOID, which is rendered as lava. As you get closer, you may therefore see lava falls being replaced with water falls.
+     * <p>
+     * SOLID is rendered as stone in the overworld, netherrack in the nether, and end stone in the end
+     */
+    public final Setting<Boolean> renderCachedChunks = new Setting<>(false);
+
+    /**
+     * 0.0f = not visible, fully transparent (instead of setting this to 0, turn off renderCachedChunks)
+     * 1.0f = fully opaque
+     */
+    public final Setting<Float> cachedChunksOpacity = new Setting<>(0.5f);
+
+    /**
+     * Whether or not to allow you to run Baritone commands with the prefix
+     */
+    public final Setting<Boolean> prefixControl = new Setting<>(true);
+
+    /**
+     * The command prefix for chat control
+     */
+    public final Setting<String> prefix = new Setting<>("#");
+
+    /**
+     * Use a short Baritone prefix [B] instead of [Baritone] when logging to chat
+     */
+    public final Setting<Boolean> shortBaritonePrefix = new Setting<>(false);
+
+    /**
+     * Use a modern message tag instead of a prefix when logging to chat
+     */
+    public final Setting<Boolean> useMessageTag = new Setting<>(false);
+
+    /**
+     * Echo commands to chat when they are run
+     */
+    public final Setting<Boolean> echoCommands = new Setting<>(true);
+
+    /**
+     * Censor coordinates in goals and block positions
+     */
+    public final Setting<Boolean> censorCoordinates = new Setting<>(false);
+
+    /**
+     * Censor arguments to ran commands, to hide, for example, coordinates to #goal
+     */
+    public final Setting<Boolean> censorRanCommands = new Setting<>(false);
+
+    /**
+     * Stop using tools just before they are going to break.
+     */
+    public final Setting<Boolean> itemSaver = new Setting<>(false);
+
+    /**
+     * Durability to leave on the tool when using itemSaver
+     */
+    public final Setting<Integer> itemSaverThreshold = new Setting<>(10);
+
+    /**
+     * Always prefer silk touch tools over regular tools. This will not sacrifice speed, but it will always prefer silk
+     * touch tools over other tools of the same speed. This includes always choosing ANY silk touch tool over your hand.
+     */
+    public final Setting<Boolean> preferSilkTouch = new Setting<>(false);
+
+    /**
+     * Don't stop walking forward when you need to break blocks in your way
+     */
+    public final Setting<Boolean> walkWhileBreaking = new Setting<>(true);
+
