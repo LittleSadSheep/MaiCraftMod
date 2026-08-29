@@ -898,3 +898,303 @@ public final class Settings {
      */
     public final Setting<Boolean> walkWhileBreaking = new Setting<>(true);
 
+    /**
+     * When a new segment is calculated that doesn't overlap with the current one, but simply begins where the current segment ends,
+     * splice it on and make a longer combined path. If this setting is off, any planned segment will not be spliced and will instead
+     * be the "next path" in PathingBehavior, and will only start after this one ends. Turning this off hurts planning ahead,
+     * because the next segment will exist even if it's very short.
+     *
+     * @see #planningTickLookahead
+     */
+    public final Setting<Boolean> splicePath = new Setting<>(true);
+
+    /**
+     * If we are more than 300 movements into the current path, discard the oldest segments, as they are no longer useful
+     */
+    public final Setting<Integer> maxPathHistoryLength = new Setting<>(300);
+
+    /**
+     * If the current path is too long, cut off this many movements from the beginning.
+     */
+    public final Setting<Integer> pathHistoryCutoffAmount = new Setting<>(50);
+
+    /**
+     * Rescan for the goal once every 5 ticks.
+     * Set to 0 to disable.
+     */
+    public final Setting<Integer> mineGoalUpdateInterval = new Setting<>(5);
+
+    /**
+     * After finding this many instances of the target block in the cache, it will stop expanding outward the chunk search.
+     */
+    public final Setting<Integer> maxCachedWorldScanCount = new Setting<>(10);
+
+    /**
+     * Mine will not scan for or remember more than this many target locations.
+     * Note that the number of locations retrieved from cache is additionaly
+     * limited by {@link #maxCachedWorldScanCount}.
+     */
+    public final Setting<Integer> mineMaxOreLocationsCount = new Setting<>(64);
+
+    /**
+     * Sets the minimum y level whilst mining - set to 0 to turn off.
+     * if world has negative y values, subtract the min world height to get the value to put here
+     */
+    public final Setting<Integer> minYLevelWhileMining = new Setting<>(0);
+
+    /**
+     * Sets the maximum y level to mine ores at.
+     */
+    public final Setting<Integer> maxYLevelWhileMining = new Setting<>(2031);
+
+    /**
+     * This will only allow baritone to mine exposed ores, can be used to stop ore obfuscators on servers that use them.
+     */
+    public final Setting<Boolean> allowOnlyExposedOres = new Setting<>(false);
+
+    /**
+     * When allowOnlyExposedOres is enabled this is the distance around to search.
+     * <p>
+     * It is recommended to keep this value low, as it dramatically increases calculation times.
+     */
+    public final Setting<Integer> allowOnlyExposedOresDistance = new Setting<>(1);
+
+    /**
+     * When GetToBlock or non-legit Mine doesn't know any locations for the desired block, explore randomly instead of giving up.
+     */
+    public final Setting<Boolean> exploreForBlocks = new Setting<>(true);
+
+    /**
+     * While exploring the world, offset the closest unloaded chunk by this much in both axes.
+     * <p>
+     * This can result in more efficient loading, if you set this to the render distance.
+     */
+    public final Setting<Integer> worldExploringChunkOffset = new Setting<>(0);
+
+    /**
+     * Take the 10 closest chunks, even if they aren't strictly tied for distance metric from origin.
+     */
+    public final Setting<Integer> exploreChunkSetMinimumSize = new Setting<>(10);
+
+    /**
+     * Attempt to maintain Y coordinate while exploring
+     * <p>
+     * -1 to disable
+     */
+    public final Setting<Integer> exploreMaintainY = new Setting<>(64);
+
+    /**
+     * Replant normal Crops while farming and leave cactus and sugarcane to regrow
+     */
+    public final Setting<Boolean> replantCrops = new Setting<>(true);
+
+    /**
+     * Replant nether wart while farming. This setting only has an effect when replantCrops is also enabled
+     */
+    public final Setting<Boolean> replantNetherWart = new Setting<>(false);
+
+    /**
+     * Farming will scan for at most this many blocks.
+     */
+    public final Setting<Integer> farmMaxScanSize = new Setting<>(256);
+
+    /**
+     * When the cache scan gives less blocks than the maximum threshold (but still above zero), scan the main world too.
+     * <p>
+     * Only if you have a beefy CPU and automatically mine blocks that are in cache
+     */
+    public final Setting<Boolean> extendCacheOnThreshold = new Setting<>(false);
+
+    /**
+     * Don't consider the next layer in builder until the current one is done
+     */
+    public final Setting<Boolean> buildInLayers = new Setting<>(false);
+
+    /**
+     * false = build from bottom to top
+     * <p>
+     * true = build from top to bottom
+     */
+    public final Setting<Boolean> layerOrder = new Setting<>(false);
+
+    /**
+     * How high should the individual layers be?
+     */
+    public final Setting<Integer> layerHeight = new Setting<>(1);
+
+    /**
+     * Start building the schematic at a specific layer.
+     * Can help on larger builds when schematic wants to break things its already built
+     */
+    public final Setting<Integer> startAtLayer = new Setting<>(0);
+
+    /**
+     * If a layer is unable to be constructed, just skip it.
+     */
+    public final Setting<Boolean> skipFailedLayers = new Setting<>(false);
+
+    /**
+     * Only build the selected part of schematics
+     */
+    public final Setting<Boolean> buildOnlySelection = new Setting<>(false);
+
+    /**
+     * How far to move before repeating the build. 0 to disable repeating on a certain axis, 0,0,0 to disable entirely
+     */
+    public final Setting<Vec3i> buildRepeat = new Setting<>(new Vec3i(0, 0, 0));
+
+    /**
+     * How many times to buildrepeat. -1 for infinite.
+     */
+    public final Setting<Integer> buildRepeatCount = new Setting<>(-1);
+
+    /**
+     * Don't notify schematics that they are moved.
+     * e.g. replacing will replace the same spots for every repetition
+     * Mainly for backward compatibility.
+     */
+    public final Setting<Boolean> buildRepeatSneaky = new Setting<>(true);
+
+    /**
+     * Allow standing above a block while mining it, in BuilderProcess
+     * <p>
+     * Experimental
+     */
+    public final Setting<Boolean> breakFromAbove = new Setting<>(false);
+
+    /**
+     * As well as breaking from above, set a goal to up and to the side of all blocks to break.
+     * <p>
+     * Never turn this on without also turning on breakFromAbove.
+     */
+    public final Setting<Boolean> goalBreakFromAbove = new Setting<>(false);
+
+    /**
+     * Build in map art mode, which makes baritone only care about the top block in each column
+     */
+    public final Setting<Boolean> mapArtMode = new Setting<>(false);
+
+    /**
+     * Override builder's behavior to not attempt to correct blocks that are currently water
+     */
+    public final Setting<Boolean> okIfWater = new Setting<>(false);
+
+    /**
+     * The set of incorrect blocks can never grow beyond this size
+     */
+    public final Setting<Integer> incorrectSize = new Setting<>(100);
+
+    /**
+     * Multiply the cost of breaking a block that's correct in the builder's schematic by this coefficient
+     */
+    public final Setting<Double> breakCorrectBlockPenaltyMultiplier = new Setting<>(10d);
+
+    /**
+     * Multiply the cost of placing a block that's incorrect in the builder's schematic by this coefficient
+     */
+    public final Setting<Double> placeIncorrectBlockPenaltyMultiplier = new Setting<>(2d);
+
+    /**
+     * When this setting is true, build a schematic with the highest X coordinate being the origin, instead of the lowest
+     */
+    public final Setting<Boolean> schematicOrientationX = new Setting<>(false);
+
+    /**
+     * When this setting is true, build a schematic with the highest Y coordinate being the origin, instead of the lowest
+     */
+    public final Setting<Boolean> schematicOrientationY = new Setting<>(false);
+
+    /**
+     * When this setting is true, build a schematic with the highest Z coordinate being the origin, instead of the lowest
+     */
+    public final Setting<Boolean> schematicOrientationZ = new Setting<>(false);
+
+    /**
+     * Rotates the schematic before building it.
+     * Possible values are
+     * <ul>
+     *  <li> NONE - No rotation </li>
+     *  <li> CLOCKWISE_90 - Rotate 90° clockwise </li>
+     *  <li> CLOCKWISE_180 - Rotate 180° clockwise </li>
+     *  <li> COUNTERCLOCKWISE_90 - Rotate 270° clockwise </li>
+     * </ul>
+     */
+    public final Setting<Rotation> buildSchematicRotation = new Setting<>(Rotation.NONE);
+
+    /**
+     * Mirrors the schematic before building it.
+     * Possible values are
+     * <ul>
+     *  <li> FRONT_BACK - mirror the schematic along its local x axis </li>
+     *  <li> LEFT_RIGHT - mirror the schematic along its local z axis </li>
+     * </ul>
+     */
+    public final Setting<Mirror> buildSchematicMirror = new Setting<>(Mirror.NONE);
+
+    /**
+     * The fallback used by the build command when no extension is specified. This may be useful if schematics of a
+     * particular format are used often, and the user does not wish to have to specify the extension with every usage.
+     */
+    public final Setting<String> schematicFallbackExtension = new Setting<>("schematic");
+
+    /**
+     * Distance to scan every tick for updates. Expanding this beyond player reach distance (i.e. setting it to 6 or above)
+     * is only necessary in very large schematics where rescanning the whole thing is costly.
+     */
+    public final Setting<Integer> builderTickScanRadius = new Setting<>(5);
+
+    /**
+     * While mining, should it also consider dropped items of the correct type as a pathing destination (as well as ore blocks)?
+     */
+    public final Setting<Boolean> mineScanDroppedItems = new Setting<>(true);
+
+    /**
+     * While mining, wait this number of milliseconds after mining an ore to see if it will drop an item
+     * instead of immediately going onto the next one
+     * <p>
+     * Thanks Louca
+     */
+    public final Setting<Long> mineDropLoiterDurationMSThanksLouca = new Setting<>(250L);
+
+    /**
+     * Trim incorrect positions too far away, helps performance but hurts reliability in very large schematics
+     */
+    public final Setting<Boolean> distanceTrim = new Setting<>(true);
+
+    /**
+     * Cancel the current path if the goal has changed, and the path originally ended in the goal but doesn't anymore.
+     * <p>
+     * Currently only runs when either MineBehavior or FollowBehavior is active.
+     * <p>
+     * For example, if Baritone is doing "mine iron_ore", the instant it breaks the ore (and it becomes air), that location
+     * is no longer a goal. This means that if this setting is true, it will stop there. If this setting were off, it would
+     * continue with its path, and walk into that location. The tradeoff is if this setting is true, it mines ores much faster
+     * since it doesn't waste any time getting into locations that no longer contain ores, but on the other hand, it misses
+     * some drops, and continues on without ever picking them up.
+     * <p>
+     * Also on cosmic prisons this should be set to true since you don't actually mine the ore it just gets replaced with stone.
+     */
+    public final Setting<Boolean> cancelOnGoalInvalidation = new Setting<>(true);
+
+    /**
+     * The "axis" command (aka GoalAxis) will go to a axis, or diagonal axis, at this Y level.
+     */
+    public final Setting<Integer> axisHeight = new Setting<>(120);
+
+    /**
+     * Disconnect from the server upon arriving at your goal
+     */
+    public final Setting<Boolean> disconnectOnArrival = new Setting<>(false);
+
+    /**
+     * Disallow MineBehavior from using X-Ray to see where the ores are. Turn this option on to force it to mine "legit"
+     * where it will only mine an ore once it can actually see it, so it won't do or know anything that a normal player
+     * couldn't. If you don't want it to look like you're X-Raying, turn this on
+     * This will always explore, regardless of exploreForBlocks
+     */
+    public final Setting<Boolean> legitMine = new Setting<>(false);
+
+    /**
+     * What Y level to go to for legit strip mining
+     */
+    public final Setting<Integer> legitMineYLevel = new Setting<>(-59);
