@@ -298,3 +298,303 @@ public final class Settings {
      * Usage Syntax:
      * <pre>
      *      sourceblockA->blockToSubstituteA1,blockToSubstituteA2,...blockToSubstituteAN,sourceBlockB->blockToSubstituteB1,blockToSubstituteB2,...blockToSubstituteBN,...sourceBlockX->blockToSubstituteX1,blockToSubstituteX2...blockToSubstituteXN
+     * </pre>
+     * Example:
+     * <pre>
+     *     stone->cobblestone,andesite,oak_planks->birch_planks,acacia_planks,glass
+     * </pre>
+     */
+    public final Setting<Map<Block, List<Block>>> buildSubstitutes = new Setting<>(new HashMap<>());
+
+    /**
+     * A list of blocks to become air
+     * <p>
+     * If a schematic asks for a block on this list, only air will be accepted at that location (and nothing on buildIgnoreBlocks)
+     */
+    public final Setting<List<Block>> okIfAir = new Setting<>(new ArrayList<>(Arrays.asList(
+
+    )));
+
+    /**
+     * If this is true, the builder will treat all non-air blocks as correct. It will only place new blocks.
+     */
+    public final Setting<Boolean> buildIgnoreExisting = new Setting<>(false);
+
+    /**
+     * If this is true, the builder will ignore directionality of certain blocks like glazed terracotta.
+     */
+    public final Setting<Boolean> buildIgnoreDirection = new Setting<>(false);
+
+    /**
+     * A list of names of block properties the builder will ignore.
+     */
+    public final Setting<List<String>> buildIgnoreProperties = new Setting<>(new ArrayList<>(Arrays.asList(
+    )));
+
+    /**
+     * If this setting is true, Baritone will never break a block that is adjacent to an unsupported falling block.
+     * <p>
+     * I.E. it will never trigger cascading sand / gravel falls
+     */
+    public final Setting<Boolean> avoidUpdatingFallingBlocks = new Setting<>(true);
+
+    /**
+     * Enables some more advanced vine features. They're honestly just gimmicks and won't ever be needed in real
+     * pathing scenarios. And they can cause Baritone to get trapped indefinitely in a strange scenario.
+     * <p>
+     * Almost never turn this on lol
+     */
+    public final Setting<Boolean> allowVines = new Setting<>(false);
+
+    /**
+     * Slab behavior is complicated, disable this for higher path reliability. Leave enabled if you have bottom slabs
+     * everywhere in your base.
+     */
+    public final Setting<Boolean> allowWalkOnBottomSlab = new Setting<>(true);
+
+    /**
+     * You know what it is
+     * <p>
+     * But it's very unreliable and falls off when cornering like all the time so.
+     * <p>
+     * It also overshoots the landing pretty much always (making contact with the next block over), so be careful
+     */
+    public final Setting<Boolean> allowParkour = new Setting<>(false);
+
+    /**
+     * Actually pretty reliable.
+     * <p>
+     * Doesn't make it any more dangerous compared to just normal allowParkour th
+     */
+    public final Setting<Boolean> allowParkourPlace = new Setting<>(false);
+
+    /**
+     * For example, if you have Mining Fatigue or Haste, adjust the costs of breaking blocks accordingly.
+     */
+    public final Setting<Boolean> considerPotionEffects = new Setting<>(true);
+
+    /**
+     * Sprint and jump a block early on ascends wherever possible
+     */
+    public final Setting<Boolean> sprintAscends = new Setting<>(true);
+
+    /**
+     * If we overshoot a traverse and end up one block beyond the destination, mark it as successful anyway.
+     * <p>
+     * This helps with speed exceeding 20m/s
+     */
+    public final Setting<Boolean> overshootTraverse = new Setting<>(true);
+
+    /**
+     * When breaking blocks for a movement, wait until all falling blocks have settled before continuing
+     */
+    public final Setting<Boolean> pauseMiningForFallingBlocks = new Setting<>(true);
+
+    /**
+     * How many ticks between right clicks are allowed. Default in game is 4
+     */
+    public final Setting<Integer> rightClickSpeed = new Setting<>(4);
+
+    /**
+     * How many degrees to randomize the yaw every tick. Set to 0 to disable
+     */
+    public final Setting<Double> randomLooking113 = new Setting<>(2d);
+
+    /**
+     * Block reach distance
+     */
+    public final Setting<Float> blockReachDistance = new Setting<>(4.5f);
+
+    /**
+     * How many ticks between breaking a block and starting to break the next block. Default in game is 6 ticks.
+     * Values under 1 will be clamped. The delay only applies to non-instant (1-tick) breaks.
+     */
+    public final Setting<Integer> blockBreakSpeed = new Setting<>(6);
+
+    /**
+     * How many degrees to randomize the pitch and yaw every tick. Set to 0 to disable
+     */
+    public final Setting<Double> randomLooking = new Setting<>(0.01d);
+
+    /**
+     * This is the big A* setting.
+     * As long as your cost heuristic is an *underestimate*, it's guaranteed to find you the best path.
+     * 3.5 is always an underestimate, even if you are sprinting.
+     * If you're walking only (with allowSprint off) 4.6 is safe.
+     * Any value below 3.5 is never worth it. It's just more computation to find the same path, guaranteed.
+     * (specifically, it needs to be strictly slightly less than ActionCosts.WALK_ONE_BLOCK_COST, which is about 3.56)
+     * <p>
+     * Setting it at 3.57 or above with sprinting, or to 4.64 or above without sprinting, will result in
+     * faster computation, at the cost of a suboptimal path. Any value above the walk / sprint cost will result
+     * in it going straight at its goal, and not investigating alternatives, because the combined cost / heuristic
+     * metric gets better and better with each block, instead of slightly worse.
+     * <p>
+     * Finding the optimal path is worth it, so it's the default.
+     */
+    public final Setting<Double> costHeuristic = new Setting<>(3.563);
+
+    // a bunch of obscure internal A* settings that you probably don't want to change
+    /**
+     * The maximum number of times it will fetch outside loaded or cached chunks before assuming that
+     * pathing has reached the end of the known area, and should therefore stop.
+     */
+    public final Setting<Integer> pathingMaxChunkBorderFetch = new Setting<>(50);
+
+    /**
+     * Set to 1.0 to effectively disable this feature
+     *
+     * @see <a href="https://github.com/cabaletta/baritone/issues/18">Issue #18</a>
+     */
+    public final Setting<Double> backtrackCostFavoringCoefficient = new Setting<>(0.5);
+
+    /**
+     * Toggle the following 4 settings
+     * <p>
+     * They have a noticeable performance impact, so they default off
+     * <p>
+     * Specifically, building up the avoidance map on the main thread before pathing starts actually takes a noticeable
+     * amount of time, especially when there are a lot of mobs around, and your game jitters for like 200ms while doing so
+     */
+    public final Setting<Boolean> avoidance = new Setting<>(false);
+
+    /**
+     * Set to 1.0 to effectively disable this feature
+     * <p>
+     * Set below 1.0 to go out of your way to walk near mob spawners
+     */
+    public final Setting<Double> mobSpawnerAvoidanceCoefficient = new Setting<>(2.0);
+
+    /**
+     * Distance to avoid mob spawners.
+     */
+    public final Setting<Integer> mobSpawnerAvoidanceRadius = new Setting<>(16);
+
+    /**
+     * Set to 1.0 to effectively disable this feature
+     * <p>
+     * Set below 1.0 to go out of your way to walk near mobs
+     */
+    public final Setting<Double> mobAvoidanceCoefficient = new Setting<>(1.5);
+
+    /**
+     * Distance to avoid mobs.
+     */
+    public final Setting<Integer> mobAvoidanceRadius = new Setting<>(8);
+
+    /**
+     * When running a goto towards a container block (chest, ender chest, furnace, etc),
+     * right click and open it once you arrive.
+     */
+    public final Setting<Boolean> rightClickContainerOnArrival = new Setting<>(true);
+
+    /**
+     * When running a goto towards a nether portal block, walk all the way into the portal
+     * instead of stopping one block before.
+     */
+    public final Setting<Boolean> enterPortal = new Setting<>(true);
+
+    /**
+     * Don't repropagate cost improvements below 0.01 ticks. They're all just floating point inaccuracies,
+     * and there's no point.
+     */
+    public final Setting<Boolean> minimumImprovementRepropagation = new Setting<>(true);
+
+    /**
+     * After calculating a path (potentially through cached chunks), artificially cut it off to just the part that is
+     * entirely within currently loaded chunks. Improves path safety because cached chunks are heavily simplified.
+     * <p>
+     * This is much safer to leave off now, and makes pathing more efficient. More explanation in the issue.
+     *
+     * @see <a href="https://github.com/cabaletta/baritone/issues/114">Issue #114</a>
+     */
+    public final Setting<Boolean> cutoffAtLoadBoundary = new Setting<>(false);
+
+    /**
+     * If a movement's cost increases by more than this amount between calculation and execution (due to changes
+     * in the environment / world), cancel and recalculate
+     */
+    public final Setting<Double> maxCostIncrease = new Setting<>(10D);
+
+    /**
+     * Stop 5 movements before anything that made the path COST_INF.
+     * For example, if lava has spread across the path, don't walk right up to it then recalculate, it might
+     * still be spreading lol
+     */
+    public final Setting<Integer> costVerificationLookahead = new Setting<>(5);
+
+    /**
+     * Static cutoff factor. 0.9 means cut off the last 10% of all paths, regardless of chunk load state
+     */
+    public final Setting<Double> pathCutoffFactor = new Setting<>(0.9);
+
+    /**
+     * Only apply static cutoff for paths of at least this length (in terms of number of movements)
+     */
+    public final Setting<Integer> pathCutoffMinimumLength = new Setting<>(30);
+
+    /**
+     * Start planning the next path once the remaining movements tick estimates sum up to less than this value
+     */
+    public final Setting<Integer> planningTickLookahead = new Setting<>(150);
+
+    /**
+     * Default size of the Long2ObjectOpenHashMap used in pathing
+     */
+    public final Setting<Integer> pathingMapDefaultSize = new Setting<>(1024);
+
+    /**
+     * Load factor coefficient for the Long2ObjectOpenHashMap used in pathing
+     * <p>
+     * Decrease for faster map operations, but higher memory usage
+     */
+    public final Setting<Float> pathingMapLoadFactor = new Setting<>(0.75f);
+
+    /**
+     * How far are you allowed to fall onto solid ground (without a water bucket)?
+     * 3 won't deal any damage. But if you just want to get down the mountain quickly and you have
+     * Feather Falling IV, you might set it a bit higher, like 4 or 5.
+     */
+    public final Setting<Integer> maxFallHeightNoWater = new Setting<>(3);
+
+    /**
+     * How far are you allowed to fall onto solid ground (with a water bucket)?
+     * It's not that reliable, so I've set it below what would kill an unarmored player (23)
+     */
+    public final Setting<Integer> maxFallHeightBucket = new Setting<>(20);
+
+    /**
+     * Is it okay to sprint through a descend followed by a diagonal?
+     * The player overshoots the landing, but not enough to fall off. And the diagonal ensures that there isn't
+     * lava or anything that's !canWalkInto in that space, so it's technically safe, just a little sketchy.
+     * <p>
+     * Note: this is *not* related to the allowDiagonalDescend setting, that is a completely different thing.
+     */
+    public final Setting<Boolean> allowOvershootDiagonalDescend = new Setting<>(true);
+
+    /**
+     * If your goal is a GoalBlock in an unloaded chunk, assume it's far enough away that the Y coord
+     * doesn't matter yet, and replace it with a GoalXZ to the same place before calculating a path.
+     * Once a segment ends within chunk load range of the GoalBlock, it will go back to normal behavior
+     * of considering the Y coord. The reasoning is that if your X and Z are 10,000 blocks away,
+     * your Y coordinate's accuracy doesn't matter at all until you get much much closer.
+     */
+    public final Setting<Boolean> simplifyUnloadedYCoord = new Setting<>(true);
+
+    /**
+     * Whenever a block changes, repack the whole chunk that it's in
+     */
+    public final Setting<Boolean> repackOnAnyBlockChange = new Setting<>(true);
+
+    /**
+     * If a movement takes this many ticks more than its initial cost estimate, cancel it
+     */
+    public final Setting<Integer> movementTimeoutTicks = new Setting<>(100);
+
+    /**
+     * Pathing ends after this amount of time, but only if a path has been found
+     * <p>
+     * If no valid path (length above the minimum) has been found, pathing continues up until the failure timeout
+     */
+    public final Setting<Long> primaryTimeoutMS = new Setting<>(500L);
+
+    /**
