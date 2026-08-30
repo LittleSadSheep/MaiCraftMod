@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.core.build.BuildPalette;
 import org.maiwithu.maicraft.core.build.BuildShapes;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityContract;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import net.minecraft.client.player.LocalPlayer;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -52,6 +53,8 @@ public final class BuildTool implements MaiCraftTool {
     }
 
     private record Args(List<OpSpec> ops, Boolean replace_existing, Boolean allow_partial,
+                        String material_policy, Boolean broaden_material_families,
+                        List<String> protected_labels,
                         Map<String, Object> semantic_contract,
                         BuildTraversabilityContract traversability_contract) {}
     private record OpSpec(String op, String block_id, Boolean hollow,
@@ -230,6 +233,20 @@ public final class BuildTool implements MaiCraftTool {
                 "description", "Internal batching boundary, default false. Set true only when an upper "
                         + "semantic task retains this complete plan and has already verified a recoverable "
                         + "resupply path; the task reports exact completed and missing-material evidence."));
+        rootProps.put("material_policy", Map.of(
+                "type", List.of("string", "null"),
+                "enum", valuesWithNull("ordinary", "storage_available", "inventory_only"),
+                "description", "Internal semantic supply policy. Storage access is attempted only when "
+                        + "the semantic parent explicitly selected storage_available."));
+        rootProps.put("broaden_material_families", Map.of(
+                "type", "boolean",
+                "description", "Internal semantic palette policy. False preserves explicitly specified "
+                        + "concrete materials; true lets MaiCraft bind equivalent registered families from live evidence."));
+        rootProps.put("protected_labels", Map.of(
+                "type", "array",
+                "items", Map.of("type", "string"),
+                "maxItems", 64,
+                "description", "Internal semantic labels that every nested material acquisition must preserve."));
         rootProps.put("semantic_contract", Map.of(
                 "type", List.of("object", "null"),
                 "description", "Internal planner-authored aggregate design facts. Never accepts or returns cells.",
@@ -278,6 +295,12 @@ public final class BuildTool implements MaiCraftTool {
         }
         boolean replaceExisting = parsed.replace_existing() == null || parsed.replace_existing();
         boolean allowPartial = parsed.allow_partial() != null && parsed.allow_partial();
+        SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy =
+                SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(parsed.material_policy());
+        boolean broadenMaterialFamilies = parsed.broaden_material_families() == null
+                || parsed.broaden_material_families();
+        List<String> protectedLabels = parsed.protected_labels() == null
+                ? List.of() : List.copyOf(parsed.protected_labels());
         // 材料记账随能力画像:免耗材(创造)想建就建;否则消耗背包,开工前
         // 由任务预检并逐项报缺(见 BuildCompanionTask 的 checkMaterials)。
         boolean consume = !org.maiwithu.maicraft.core.WorkProfile.of(companion).freeMaterials();
@@ -293,7 +316,9 @@ public final class BuildTool implements MaiCraftTool {
             long supplyTimeout = Math.max(timeout, 45L * 60L * 20L);
             setTask(companion,
                     new org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord(
-                            toolCallId, ctx(toolCallId, companion).deadline(supplyTimeout), plan),
+                            toolCallId, ctx(toolCallId, companion).deadline(supplyTimeout), plan,
+                            materialPolicy, List.of(), false, protectedLabels,
+                            broadenMaterialFamilies),
                     args, reply);
         } else {
             setTask(companion, plan, args, reply);

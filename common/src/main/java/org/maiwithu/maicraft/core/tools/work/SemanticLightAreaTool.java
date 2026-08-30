@@ -46,7 +46,7 @@ public final class SemanticLightAreaTool implements MaiCraftTool {
                 .optionalEnum("coverage", "Cells that define the verified denominator.",
                         "all", "most", "crop_growth", "player_visibility")
                 .optionalEnum("style", "Semantic placement preference.",
-                        "auto", "ground", "wall", "hanging", "unobtrusive")
+                        "auto", "ground", "unobtrusive")
                 .optionalEnum("placement_preference",
                         "Safe-candidate ranking after measured light-coverage gain; "
                                 + "central_unplanted requires crop_growth coverage.",
