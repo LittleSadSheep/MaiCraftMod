@@ -248,12 +248,16 @@ public class MovementTraverse extends Movement {
         boolean isTheBridgeBlockThere = MovementHelper.canWalkOn(ctx, positionToPlace) || ladder || MovementHelper.canUseFrostWalker(ctx, positionToPlace);
         BlockPos feet = ctx.playerFeet();
         if (feet.getY() != dest.getY() && !ladder) {
-            logDebug("Wrong Y coordinate");
-            if (feet.getY() < dest.getY()) {
-                System.out.println("In movement traverse");
-                return state.setInput(Input.JUMP, true);
+            // 赶路跑跳的飞行相位:脚位块恰好高出目标一格且离地,是这一跳的弧顶。
+            // 放行到正常行走逻辑保持前进输入与空中控制;真正的高度异常才纠偏等待。
+            if (feet.getY() != dest.getY() + 1 || ctx.player().onGround()) {
+                logDebug("Wrong Y coordinate");
+                if (feet.getY() < dest.getY()) {
+                    System.out.println("In movement traverse");
+                    return state.setInput(Input.JUMP, true);
+                }
+                return state;
             }
-            return state;
         }
 
         if (isTheBridgeBlockThere) {

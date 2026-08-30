@@ -378,8 +378,8 @@ public class PathExecutor implements IPathExecutor, Helper {
 
         // if the movement requested sprinting, then we're done
         if (requested) {
-            // 赶路跑跳:已经决定疾跑、且跑道/顶头走廊在物理上成立的平直段,按住跳跃把
-            // 疾跑换成跑跳;恰好经过的两格高顶头走廊自动获得更短的连跳加速。
+            // 赶路跑跳:已经决定疾跑,且跳跃可达走廊里任何落点都无摔伤(深洞/流体/立柱
+            // 会否决这一跳),按住跳跃把疾跑换成跑跳;顶头走廊自动获得更短的连跳节奏。
             if (TravelJumpPolicy.shouldTravelJump(behavior.baritone, path.movements(), pathPosition)) {
                 behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
             }
@@ -526,7 +526,9 @@ public class PathExecutor implements IPathExecutor, Helper {
 
     private static boolean skipNow(IPlayerContext ctx, IMovement current) {
         double offTarget = Math.abs(current.getDirection().getX() * (current.getSrc().z + 0.5D - ctx.player().position().z)) + Math.abs(current.getDirection().getZ() * (current.getSrc().x + 0.5D - ctx.player().position().x));
-        if (offTarget > 0.1) {
+        // 0.2: MaiCraft 的侧移转向是比例控制器,身体渐近贴合中线,比原版正对行走的
+        // 0.1 略松;平台半格 0.5 减身体半宽 0.3 仍有余量,落点安全。
+        if (offTarget > 0.2D) {
             return false;
         }
         // we are centered
