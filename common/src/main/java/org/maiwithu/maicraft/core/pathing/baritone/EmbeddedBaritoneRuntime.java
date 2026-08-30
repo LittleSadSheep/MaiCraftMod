@@ -211,6 +211,9 @@ public final class EmbeddedBaritoneRuntime {
         settings.allowPlace.value = permit.mayAlter();
         settings.allowParkourPlace.value = permit.mayAlter();
         settings.allowDownward.value = permit.mayAlter();
+        // A clutch is a block/fluid placement. Preserve navigation may swim or fall safely, but
+        // it must never turn an unapproved route into a water-placement route.
+        settings.allowWaterBucketFall.value = permit.mayAlter();
         settings.allowInventory.value = false;
         settings.acceptableThrowawayItems.value = ScaffoldMaterials.of(
                 baritone.getPlayerContext().player());

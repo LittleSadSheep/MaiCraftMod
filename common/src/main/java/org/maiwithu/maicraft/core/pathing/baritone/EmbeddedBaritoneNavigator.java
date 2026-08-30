@@ -111,7 +111,7 @@ public final class EmbeddedBaritoneNavigator {
         }
 
         updatePhysicalProgress();
-        if (reached.getAsBoolean() || goal.isAt(feet())) return arrive();
+        if (reached.getAsBoolean() || hasStableSearchMembership()) return arrive();
         if (calculationFailed) {
             String qualifier = permit == TerrainPermit.PRESERVE
                     ? " under the no-terrain-alteration policy" : "";
@@ -161,9 +161,23 @@ public final class EmbeddedBaritoneNavigator {
 
     void onPathEvent(PathEvent event) {
         events.merge(event, 1, Integer::sum);
-        if (event == PathEvent.CALC_FAILED || event == PathEvent.NEXT_CALC_FAILED) {
+        // A plan-ahead miss does not invalidate the segment currently carrying the body.
+        // Upstream will retry from its real end; treating it as terminal made healthy walks stop
+        // halfway whenever a speculative next segment encountered unloaded or changing terrain.
+        if (event == PathEvent.CALC_FAILED) {
             calculationFailed = true;
         }
+    }
+
+    /**
+     * Preserve PlayerNav's historical "search satisfied" handoff without accepting a transient
+     * mid-jump/mid-fall node. The caller's stronger predicate still wins whenever it is true.
+     */
+    private boolean hasStableSearchMembership() {
+        BlockPos now = feet();
+        return player.onGround()
+                && goal.isAt(now)
+                && goal.isAt(EmbeddedBaritoneRuntime.pathStart(this, now));
     }
 
     void preempted(String reason) {

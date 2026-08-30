@@ -19,6 +19,7 @@ package baritone.utils;
 
 import baritone.Baritone;
 import baritone.api.utils.IPlayerContext;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.phys.BlockHitResult;
@@ -44,9 +45,14 @@ public class BlockPlaceHelper {
         if (!rightClickRequested || ctx.player().isHandsBusy() || mouseOver == null || mouseOver.getType() != HitResult.Type.BLOCK) {
             return;
         }
+        BlockHitResult hit = (BlockHitResult) mouseOver;
+        // A stale execution segment must not turn a newly protected position into a scaffold.
+        if (EmbeddedBaritonePolicy.protects(hit.getBlockPos().relative(hit.getDirection()))) {
+            return;
+        }
         rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
         for (InteractionHand hand : InteractionHand.values()) {
-            if (ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), hand, (BlockHitResult) mouseOver) == InteractionResult.SUCCESS) {
+            if (ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), hand, hit) == InteractionResult.SUCCESS) {
                 ctx.player().swing(hand);
                 return;
             }

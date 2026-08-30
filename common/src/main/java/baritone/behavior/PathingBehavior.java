@@ -63,6 +63,12 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private boolean calcFailedLastTick;
 
     private volatile AbstractNodeCostSearch inProgress;
+    /**
+     * Monotonic ownership epoch for asynchronous calculations. A cancelled worker may complete
+     * after a semantic task has handed the physical body to another task; its result must never
+     * install a segment, emit a failure, or clear that newer calculation.
+     */
+    private volatile long pathCalculationGeneration;
     private final Object pathCalcLock = new Object();
 
     private final Object pathPlanLock = new Object();
@@ -372,6 +378,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         cancelEverything();
         secretInternalSegmentCancel();
         synchronized (pathCalcLock) {
+            pathCalculationGeneration++;
             inProgress = null;
         }
     }
@@ -496,14 +503,21 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (!Objects.equals(pathfinder.getGoal(), goal)) { // will return the exact same object if simplification didn't happen
             logDebug("Simplifying " + goal.getClass() + " to GoalXZ due to distance");
         }
+        final long generation = ++pathCalculationGeneration;
         inProgress = pathfinder;
         Baritone.getExecutor().execute(() -> {
             if (talkAboutIt) {
                 logDebug("Starting to search for path from " + start + " to " + goal);
             }
 
-            PathCalculationResult calcResult = pathfinder.calculate(primaryTimeout, failureTimeout);
-            synchronized (pathPlanLock) {
+            try {
+                PathCalculationResult calcResult = pathfinder.calculate(primaryTimeout, failureTimeout);
+                synchronized (pathPlanLock) {
+                    // The calculation may have been cancelled/replaced while it was running.
+                    // Only its still-current generation owns these shared path fields.
+                    if (generation != pathCalculationGeneration || inProgress != pathfinder) {
+                        return;
+                    }
                 Optional<PathExecutor> executor = calcResult.getPath().map(p -> new PathExecutor(PathingBehavior.this, p));
                 if (current == null) {
                     if (executor.isPresent()) {
@@ -545,8 +559,18 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                         logDebug("Found path segment from " + start + " towards " + goal + ". " + current.getPath().getNumNodesConsidered() + " nodes considered");
                     }
                 }
+                    synchronized (pathCalcLock) {
+                        if (inProgress == pathfinder) {
+                            inProgress = null;
+                        }
+                    }
+                }
+            } finally {
+                // A stale/cancelled worker is deliberately not allowed to clear a newer search.
                 synchronized (pathCalcLock) {
-                    inProgress = null;
+                    if (inProgress == pathfinder) {
+                        inProgress = null;
+                    }
                 }
             }
         });

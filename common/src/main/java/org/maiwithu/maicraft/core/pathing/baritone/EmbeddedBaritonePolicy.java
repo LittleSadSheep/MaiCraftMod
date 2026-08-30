@@ -38,6 +38,16 @@ public final class EmbeddedBaritonePolicy {
         return current;
     }
 
+    /** Live execution guard used after a worker's frozen calculation snapshot has aged. */
+    public static boolean protects(BlockPos pos) {
+        return pos != null && current.protects(pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    /** Live execution guard for first-person stance/movement code. */
+    public static boolean forbidsBody(BlockPos pos) {
+        return pos != null && current.forbidsBody(pos.getX(), pos.getY(), pos.getZ());
+    }
+
     public static void clear() {
         current = Snapshot.EMPTY;
     }

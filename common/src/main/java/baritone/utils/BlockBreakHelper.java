@@ -20,6 +20,7 @@ package baritone.utils;
 import baritone.api.BaritoneAPI;
 import baritone.api.utils.IPlayerContext;
 import baritone.utils.accessor.IPlayerControllerMP;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -57,7 +58,8 @@ public final class BlockBreakHelper {
         HitResult trace = ctx.objectMouseOver();
         boolean isBlockTrace = trace != null && trace.getType() == HitResult.Type.BLOCK;
 
-        if (isLeftClick && isBlockTrace) {
+        if (isLeftClick && isBlockTrace
+                && !EmbeddedBaritonePolicy.protects(((BlockHitResult) trace).getBlockPos())) {
             ctx.playerController().setHittingBlock(wasHitting);
             if (ctx.playerController().hasBrokenBlock()) {
                 ctx.playerController().syncHeldItem();
