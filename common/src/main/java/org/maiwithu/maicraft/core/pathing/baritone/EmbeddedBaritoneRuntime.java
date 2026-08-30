@@ -17,6 +17,7 @@ import java.util.function.BiFunction;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
@@ -51,6 +52,7 @@ public final class EmbeddedBaritoneRuntime {
             baritone.getPathingBehavior().forceCancel();
         }
         owner = navigator;
+        movementAimCommitted = false;
         configure(baritone, permit, sprintAllowed);
         refreshPolicy(navigator, compiled);
         baritone.getCustomGoalProcess().setGoalAndPath(
@@ -112,6 +114,7 @@ public final class EmbeddedBaritoneRuntime {
             ((LookBehavior) backend.getLookBehavior()).clearTarget();
         }
         EmbeddedBaritonePolicy.clear();
+        movementAimCommitted = false;
         owner = null;
     }
 
@@ -127,6 +130,7 @@ public final class EmbeddedBaritoneRuntime {
         owner = null;
         world = null;
         EmbeddedBaritonePolicy.clear();
+        movementAimCommitted = false;
     }
 
     static boolean hasConcretePath(EmbeddedBaritoneNavigator navigator) {
@@ -170,11 +174,47 @@ public final class EmbeddedBaritoneRuntime {
         InputDriver.applyMovement(player, forward, strafe, jump, sneak, sprint);
     }
 
-    /** Called by adapted LookBehavior; DefaultBodyControlPort remains the only camera owner. */
-    public static void requestLook(float yaw, float pitch) {
+    /** Called by adapted LookBehavior; DefaultBodyControlPort remains the only camera owner.
+     *
+     * <p>Movement aims pass through a commit deadband: Baritone re-aims every tick at the current
+     * movement's target cell, so the recomputed angle twitches as the body closes in and jumps a
+     * full cell at every movement handoff. Fed straight into the smooth camera, that stream reads
+     * as constant visible shaking. A movement aim only re-commits the camera target once it
+     * actually differs; the band is small enough that walking direction (which follows the camera)
+     * never lags the route by more than one movement. Precision block-interaction aims bypass the
+     * deadband entirely so digging and placing keep exact rotations.</p>
+     */
+    public static void requestLook(float yaw, float pitch, boolean precisionAim) {
         if (backend == null || owner == null || backend.getPlayerContext().player() == null) return;
+        if (!precisionAim) {
+            if (movementAimCommitted) {
+                float yawDelta = Math.abs(Mth.wrapDegrees(yaw - committedMovementYaw));
+                float pitchDelta = Math.abs(pitch - committedMovementPitch);
+                if (yawDelta < MOVEMENT_AIM_DEADBAND_DEGREES
+                        && pitchDelta < MOVEMENT_AIM_DEADBAND_DEGREES) {
+                    // Under the band the committed target stands (no churn), but it is still
+                    // re-issued: without a fresh look lease the camera would hold whatever the
+                    // last precision aim left it on — walking the body off the route while
+                    // every new movement aim keeps comparing against the old commit.
+                    InputDriver.look(backend.getPlayerContext().player(),
+                            committedMovementYaw, committedMovementPitch);
+                    return;
+                }
+            }
+            committedMovementYaw = Mth.wrapDegrees(yaw);
+            committedMovementPitch = Mth.clamp(pitch, -90.0f, 90.0f);
+            movementAimCommitted = true;
+            yaw = committedMovementYaw;
+            pitch = committedMovementPitch;
+        }
         InputDriver.look(backend.getPlayerContext().player(), yaw, pitch);
     }
+
+    /** Movement-aim deadband state; reset whenever navigation ownership changes. */
+    private static boolean movementAimCommitted;
+    private static float committedMovementYaw;
+    private static float committedMovementPitch;
+    private static final float MOVEMENT_AIM_DEADBAND_DEGREES = 5.0f;
 
     private static IBaritone backend() {
         if (backend != null) return backend;

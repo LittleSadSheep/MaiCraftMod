@@ -68,8 +68,9 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
     public void updateTarget(Rotation rotation, boolean blockInteract) {
         this.target = new Target(rotation, Target.Mode.resolve(ctx, blockInteract));
         // The target remains Baritone's pathing/ray contract, but the visible first-person camera
-        // is leased and curved by MaiCraft's render-cadence body port.
-        EmbeddedBaritoneRuntime.requestLook(rotation.getYaw(), rotation.getPitch());
+        // is leased and curved by MaiCraft's render-cadence body port. blockInteract marks
+        // precision block-interaction aims, which must bypass the movement-aim deadband there.
+        EmbeddedBaritoneRuntime.requestLook(rotation.getYaw(), rotation.getPitch(), blockInteract);
     }
 
     /** Release a stale movement target when MaiCraft ends the owning navigation. */

@@ -118,7 +118,10 @@ public final class EmbeddedBaritoneNavigator {
             String advice = terrainProbeRequested && permit == TerrainPermit.PRESERVE
                     ? "; a terrain-changing route has not been executed or assumed"
                     : "";
-            return fail(FailureType.NO_PATH,
+            // PRESERVE 下算不出路是地形策略挡的,不是几何上无路:类型必须如实报
+            // TERRAIN_BLOCKED,否则上游会把真实原因错包成 NO_PATH(旧验收点名过这个坑)。
+            return fail(permit == TerrainPermit.PRESERVE
+                            ? FailureType.TERRAIN_BLOCKED : FailureType.NO_PATH,
                     "Baritone found no path to " + plannedCenter.toShortString()
                             + qualifier + advice);
         }
