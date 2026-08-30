@@ -159,8 +159,8 @@ public final class ScaffoldMaterials {
         List<Item> accepted = of(player);
         if (accepted.isEmpty()) {
             return " Your scaffolding list is EMPTY, so pathfinding may not place a single block —"
-                    + " no pillaring, bridging or stepping up. That was your own call; put blocks"
-                    + " back with scaffold_materials if this route needs them.";
+                    + " no pillaring, bridging or stepping up. Carry blocks like dirt, cobblestone,"
+                    + " netherrack or stone if this route needs them.";
         }
         var inv = player.getInventory();
         Map<String, Integer> spare = new LinkedHashMap<>();
@@ -189,7 +189,7 @@ public final class ScaffoldMaterials {
             return out.append(" Mine some of those blocks first.").toString();
         }
         return out.append(" You ARE carrying: ").append(carrying)
-                .append(". Add what you are willing to spend with scaffold_materials, or go mine "
-                        + "something already on the list.").toString();
+                .append(". Carry some of the listed blocks (mine them nearby if needed),"
+                        + " or permit terrain alteration for this route.").toString();
     }
 }
