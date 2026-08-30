@@ -90,7 +90,16 @@ final class AbilityAdapter {
         JsonObject parameters = goal.parameters();
         String label = string(parameters, "label");
         if (label == null && goal.target() != null) label = goal.target().label();
-        if (label == null || label.isBlank()) label = goal.outcome();
+        if (label == null || label.isBlank()) {
+            // 标签是地标唯一的长期句柄;拿整句 outcome 顶替会造出一个又长又没法引用的
+            // "地标"(实测踩过这个坑)。缺标签就明说,让模型带 label 重发。
+            return decision(goal,
+                    "remember_place needs a short durable label (parameter \"label\"),"
+                            + " e.g. \"western shore camp\".",
+                    List.of(option("replace_goal",
+                                    "Provide details.goal with parameters.label set to a short name."),
+                            option("cancel", "Cancel the task.")));
+        }
         Goal.WorldPosition position = rememberPosition(goal, player, runtime);
         if (position == null) {
             return decision(goal,

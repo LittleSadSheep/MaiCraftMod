@@ -915,6 +915,20 @@ final class IntentTask implements Task {
     private static String sanitizeMessage(String raw) {
         if (raw == null) return "";
         return raw
+                // 教学消息的既定句式先整句归形,再做通用坐标清洗——否则
+                // "reached the exact cell -399,65,331." 会被洗成
+                // "reached the exact cell the internally verified location." 这样的病句
+                // (MoveTo 的成功文案 + 坐标隐私清洗叠加的实锅)。
+                .replaceFirst(
+                        "(?i)reached the exact cell -?\\d+\\s*,\\s*-?\\d+\\s*,\\s*-?\\d+\\.",
+                        "reached the exact target cell.")
+                .replaceFirst(
+                        "(?i)arrived at location x\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\s+z\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?,"
+                                + "\\s*standing on the ground at y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\.",
+                        "arrived at the target location, standing on solid ground.")
+                .replaceFirst(
+                        "(?i)The exact cell y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)? wasn't reachable",
+                        "The exact requested cell wasn't reachable")
                 .replaceAll("(?i)entity\\s*#?\\s*\\d+", "selected entity")
                 .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target")
                 .replaceAll(
