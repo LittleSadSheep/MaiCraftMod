@@ -122,7 +122,8 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                 if (actionCost >= ActionCosts.COST_INF) {
                     continue;
                 }
-                if (calcContext.isBodyCellForbidden(res.x, res.y, res.z)) {
+                if (crossesForbiddenBodyCell(currentNode.x, currentNode.y, currentNode.z,
+                        res.x, res.y, res.z)) {
                     continue;
                 }
                 if (actionCost <= 0 || Double.isNaN(actionCost)) {
@@ -201,5 +202,26 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
             logDebug("Took " + (System.currentTimeMillis() - startTime) + "ms, " + numMovementsConsidered + " movements considered");
         }
         return result;
+    }
+
+    /**
+     * Dynamic falls and parkour moves can traverse more than their terminal node in one
+     * expansion. A forbidden first-person body cell is a hard boundary, not merely a terminal
+     * preference, so sample the complete lattice segment conservatively.
+     */
+    private boolean crossesForbiddenBodyCell(
+            int fromX, int fromY, int fromZ, int toX, int toY, int toZ) {
+        int steps = Math.max(Math.abs(toX - fromX),
+                Math.max(Math.abs(toY - fromY), Math.abs(toZ - fromZ)));
+        for (int i = 0; i <= steps; i++) {
+            double ratio = steps == 0 ? 0.0D : (double) i / steps;
+            int x = (int) Math.round(fromX + (toX - fromX) * ratio);
+            int y = (int) Math.round(fromY + (toY - fromY) * ratio);
+            int z = (int) Math.round(fromZ + (toZ - fromZ) * ratio);
+            if (calcContext.isBodyCellForbidden(x, y, z)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

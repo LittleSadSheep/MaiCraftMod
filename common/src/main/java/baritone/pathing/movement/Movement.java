@@ -25,6 +25,7 @@ import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
 import baritone.utils.BlockStateInterface;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import java.util.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -127,8 +128,12 @@ public abstract class Movement implements IMovement, MovementHelper {
             currentState.setInput(Input.JUMP, true);
         }
         if (ctx.player().isInWall()) {
-            ctx.getSelectedBlock().ifPresent(pos -> MovementHelper.switchToBestToolFor(ctx, BlockStateInterface.get(ctx, pos)));
-            currentState.setInput(Input.CLICK_LEFT, true);
+            ctx.getSelectedBlock().ifPresent(pos -> {
+                if (!EmbeddedBaritonePolicy.protects(pos)) {
+                    MovementHelper.switchToBestToolFor(ctx, BlockStateInterface.get(ctx, pos));
+                    currentState.setInput(Input.CLICK_LEFT, true);
+                }
+            });
         }
 
         // If the movement target has to force the new rotations, or we aren't using silent move, then force the rotations
@@ -156,6 +161,11 @@ public abstract class Movement implements IMovement, MovementHelper {
         }
         boolean somethingInTheWay = false;
         for (BetterBlockPos blockPos : positionsToBreak) {
+            // The policy can change after planning; execution must always honour the live view.
+            if (EmbeddedBaritonePolicy.protects(blockPos)) {
+                state.setStatus(MovementStatus.UNREACHABLE);
+                return true;
+            }
             if (!ctx.world().getEntitiesOfClass(FallingBlockEntity.class, new AABB(0, 0, 0, 1, 1.1, 1).move(blockPos)).isEmpty() && Baritone.settings().pauseMiningForFallingBlocks.value) {
                 return false;
             }
@@ -171,16 +181,10 @@ public abstract class Movement implements IMovement, MovementHelper {
                     }
                     return false;
                 }
-                //get rekt minecraft
-                //i'm doing it anyway
-                //i dont care if theres snow in the way!!!!!!!
-                //you dont own me!!!!
-                state.setTarget(new MovementState.MovementTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(),
-                        VecUtils.getBlockPosCenter(blockPos), ctx.playerRotations()), true)
-                );
-                // don't check selectedblock on this one, this is a fallback when we can't see any face directly, it's intended to be breaking the "incorrect" block
-                state.setInput(Input.CLICK_LEFT, true);
-                return false;
+                // Do not deliberately mine an arbitrary occluding neighbour in first person.
+                // The route must be replanned from a stance with an observed reachable face.
+                state.setStatus(MovementStatus.UNREACHABLE);
+                return true;
             }
         }
         if (somethingInTheWay) {
