@@ -165,8 +165,9 @@ public final class TravelJumpPolicy {
         IPlayerContext ctx = baritone.getPlayerContext();
         LocalPlayer player = ctx.player();
         if (player == null
-                || !(nextNext instanceof MovementTraverse)
-                || !ctx.playerFeet().equals(current.getSrc())) {
+                || !player.onGround() || player.isInWater() || player.isPassenger()
+                || player.hasEffect(MobEffects.LEVITATION)
+                || player.hasEffect(MobEffects.SLOW_FALLING)) {
             return false;
         }
         Vec3i direction = current.getDirection();
@@ -187,10 +188,13 @@ public final class TravelJumpPolicy {
         double targetCenter = direction.getX() * (next.getDest().getX() + 0.5 - player.getX())
                 + direction.getZ() * (next.getDest().getZ() + 0.5 - player.getZ());
         double firstBodyOverlap = targetCenter - 0.5 - player.getBbWidth() * 0.5;
-        MovementTraverse landing = (MovementTraverse) nextNext;
+        // 落点跑道:上台后接平走则验证到平走终点;接上台(台阶连跳)或其它移动时
+        // 只验证当前平台格——足够裁决这一跳能不能落上去。
+        BlockPos landingEnd = nextNext instanceof MovementTraverse landing
+                ? landing.getDest() : next.getDest();
         double lastValidFeet = direction.getX()
-                * (landing.getDest().getX() + 0.5 - player.getX())
-                + direction.getZ() * (landing.getDest().getZ() + 0.5 - player.getZ())
+                * (landingEnd.getX() + 0.5 - player.getX())
+                + direction.getZ() * (landingEnd.getZ() + 0.5 - player.getZ())
                 + 0.5;
         if (firstBodyOverlap <= 0.0 || lastValidFeet <= firstBodyOverlap) {
             return false;
@@ -229,29 +233,47 @@ public final class TravelJumpPolicy {
         return false;
     }
 
-    /** 同向共线、无待挖/待放/待挤格、双端支撑干燥的平走。 */
-    private static boolean isSafeDryTraverse(Baritone baritone, MovementTraverse movement,
-                                             IPlayerContext ctx) {
-        if (movement.getSrc().getY() != movement.getDest().getY()) {
-            return false;
+    /**
+     * 这一列上是否存在无摔伤的落点。落点带是 [抬升一格, 平, 落一格]:坠落距离
+     * = 投影弧顶 - 落点高度,不得超过原版安全坠落距离。要求落点两格可穿行、
+     * 干燥、不是危险格(仙人掌/岩浆块/火/浆果)、支撑是实心整块。
+     */
+    private static boolean survivableColumn(IPlayerContext ctx, BlockPos column, double apexHeight) {
+        for (int landing = 1; landing >= -1; landing--) {
+            if (apexHeight - landing > SAFE_FALL_DISTANCE) {
+                continue;
+            }
+            BlockPos feetCell = column.above(landing);
+            if (!MovementHelper.fullyPassable(ctx, feetCell)
+                    || !MovementHelper.fullyPassable(ctx, feetCell.above())) {
+                continue;
+            }
+            if (MovementHelper.avoidWalkingInto(ctx.world().getBlockState(feetCell))
+                    || MovementHelper.avoidWalkingInto(ctx.world().getBlockState(feetCell.above()))
+                    || MovementHelper.avoidWalkingInto(ctx.world().getBlockState(feetCell.below()))) {
+                continue;
+            }
+            if (isSolidDrySupport(ctx, feetCell.below())) {
+                return true;
+            }
         }
-        if (!movement.toBreak(baritone.bsi).isEmpty()
-                || !movement.toPlace(baritone.bsi).isEmpty()
-                || !movement.toWalkInto(baritone.bsi).isEmpty()) {
-            return false;
-        }
-        return isSafeDryCell(ctx, movement.getSrc())
-                && isSafeDryCell(ctx, movement.getDest());
+        return false;
     }
 
-    private static boolean isSafeDryCell(IPlayerContext ctx, BlockPos feet) {
-        BlockPos support = feet.below();
-        BlockState supportState = ctx.world().getBlockState(support);
-        return supportState.getFluidState().isEmpty()
-                && supportState.isCollisionShapeFullBlock(ctx.world(), support)
-                && supportState.getBlock().getFriction() <= NORMAL_GROUND_FRICTION
+    /** 起跳格自身要站得稳:实心干燥支撑、普通摩擦、身体两格畅通。 */
+    private static boolean isStableTakeoff(IPlayerContext ctx, BlockPos feet) {
+        BlockState support = ctx.world().getBlockState(feet.below());
+        return support.getFluidState().isEmpty()
+                && support.isCollisionShapeFullBlock(ctx.world(), feet.below())
+                && support.getBlock().getFriction() <= NORMAL_GROUND_FRICTION
                 && MovementHelper.fullyPassable(ctx, feet)
                 && MovementHelper.fullyPassable(ctx, feet.above());
+    }
+
+    private static boolean isSolidDrySupport(IPlayerContext ctx, BlockPos support) {
+        BlockState state = ctx.world().getBlockState(support);
+        return state.getFluidState().isEmpty()
+                && state.isCollisionShapeFullBlock(ctx.world(), support);
     }
 
     /** 仅当这一路径格上方恰有两格高的实心顶盖。 */
@@ -262,49 +284,26 @@ public final class TravelJumpPolicy {
                 && state.isCollisionShapeFullBlock(ctx.world(), ceiling);
     }
 
-    private static boolean ceilingProfileMatches(
-            IPlayerContext ctx, List<IMovement> movements, int pathPosition,
-            int lastSafeMovement, Vec3i direction, double forwardDistance,
-            boolean headHit) {
-        LocalPlayer player = ctx.player();
-        double bodyHalf = player.getBbWidth() * 0.5;
-        double sweptUntil = forwardDistance + bodyHalf;
-        BlockPos first = movements.get(pathPosition).getSrc();
-        if (!ceilingCellMatches(ctx, first, headHit)) {
+    /** 从 feet 起连续 columns 格都有两格高实心顶盖(顶头短跳的走廊前提)。 */
+    private static boolean hasContinuousCeiling(IPlayerContext ctx, BlockPos src,
+                                                Vec3i direction, int columns) {
+        if (!hasFullTwoBlockCeiling(ctx, src)) {
             return false;
         }
-        for (int i = pathPosition; i <= lastSafeMovement; i++) {
-            BlockPos cell = movements.get(i).getDest();
-            double ahead = direction.getX() * (cell.getX() + 0.5 - player.getX())
-                    + direction.getZ() * (cell.getZ() + 0.5 - player.getZ());
-            if (ahead - bodyHalf > sweptUntil) {
-                return true;
-            }
-            if (!ceilingCellMatches(ctx, cell, headHit)) {
+        for (int d = 1; d <= columns; d++) {
+            BlockPos cell = src.offset(direction.getX() * d, 0, direction.getZ() * d);
+            if (!hasFullTwoBlockCeiling(ctx, cell)) {
                 return false;
             }
-            if (ahead >= sweptUntil) {
-                return true;
-            }
         }
-        return false;
-    }
-
-    private static boolean ceilingCellMatches(
-            IPlayerContext ctx, BlockPos feet, boolean requireFullCeiling) {
-        if (requireFullCeiling) {
-            return hasFullTwoBlockCeiling(ctx, feet);
-        }
-        BlockPos ceiling = feet.above(2);
-        var state = ctx.world().getBlockState(ceiling);
-        return state.getFluidState().isEmpty()
-                && state.getCollisionShape(ctx.world(), ceiling).isEmpty();
+        return true;
     }
 
     /**
      * 从当前路线对齐速度出发的保守原版跳跃投影。竖直飞行时间从玩家权威的
      * 跳跃/重力属性积分;水平距离含疾跑跳冲量与按住前进的空中控制。实心顶盖
-     * 截断第一次向上碰撞,自然缩短跳步。
+     * 截断第一次向上碰撞,自然缩短跳步。同时记录弧顶高度,用于落点带的
+     * 坠落距离裁决。
      */
     private static JumpProjection projectJump(LocalPlayer player, Vec3i direction, boolean headHit) {
         double gravity = player.getAttributeValue(Attributes.GRAVITY);
@@ -313,6 +312,7 @@ public final class TravelJumpPolicy {
             return null;
         }
         double height = 0.0;
+        double apex = 0.0;
         double headroom = Math.max(0.0, 2.0 - player.getBbHeight());
         Vec3 launchVelocity = sprintJumpLaunchVelocity(player);
         double forwardSpeed = Math.max(0.0,
@@ -324,7 +324,6 @@ public final class TravelJumpPolicy {
         int airborneTicks = 0;
         do {
             // 局部物理飞行窗防止极小的模组重力把一个客户端 tick 变成无界数值循环。
-            // 调用方把这个有界投影换算成需要检查的精确有限格数。
             if (airborneTicks >= MAX_PROJECTED_AIRBORNE_TICKS) {
                 return null;
             }
@@ -339,11 +338,12 @@ public final class TravelJumpPolicy {
                 verticalSpeed = 0.0;
             } else {
                 height = nextHeight;
+                apex = Math.max(apex, height);
                 verticalSpeed = (verticalSpeed - gravity) * 0.98;
             }
             airborneTicks++;
         } while (height > 0.0);
-        return new JumpProjection(forwardDistance, airDragSum);
+        return new JumpProjection(forwardDistance, airDragSum, apex);
     }
 
     /** LivingEntity#getJumpPower 同源的权威跳跃强度组成。 */
@@ -366,5 +366,5 @@ public final class TravelJumpPolicy {
         return velocity.add(-Math.sin(yaw) * 0.2, 0.0, Math.cos(yaw) * 0.2);
     }
 
-    private record JumpProjection(double forwardDistance, double airDragSum) {}
+    private record JumpProjection(double forwardDistance, double airDragSum, double apexHeight) {}
 }

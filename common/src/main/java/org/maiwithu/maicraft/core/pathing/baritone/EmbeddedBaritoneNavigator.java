@@ -30,6 +30,15 @@ import org.maiwithu.maicraft.entity.InputDriver;
 public final class EmbeddedBaritoneNavigator {
     private static final int LIVE_GOAL_REPLAN_TICKS = 5;
     private static final double GOAL_MOVED_SQR = 4.0D;
+    /** Baritone answers an unreachable goal with best-effort partial paths toward the
+     * closest reachable point and replans forever — the body circles without converging
+     * (CALC_FAILED never fires, and circling keeps the physical-progress lease alive).
+     * No net progress toward the goal for this many executing ticks is reported as the
+     * honest unreachable failure it is; self-developed pathing failed fast here. */
+    private static final int UNREACHABLE_GRIND_TICKS = 900;
+    /** Squared net improvement (3 blocks) that counts as real progress and resets the
+     * grind clock; anything smaller is path jitter around the same frontier. */
+    private static final double GOAL_PROGRESS_SQR = 9.0D;
 
     private final LocalPlayer player;
     private final Supplier<GoalCompiler.Compiled> compiledSupplier;
@@ -46,6 +55,8 @@ public final class EmbeddedBaritoneNavigator {
     private BlockPos lastFeet;
     private int ticksSinceGoalRead;
     private int ticksSincePhysicalProgress;
+    private int ticksWithoutGoalProgress;
+    private double bestGoalDistanceSqr = Double.MAX_VALUE;
     private boolean started;
     private boolean driveRequested;
     private boolean arrivedLatched;
@@ -96,6 +107,13 @@ public final class EmbeddedBaritoneNavigator {
         boolean periodic = revalidateGoalEachTick
                 && ++ticksSinceGoalRead >= LIVE_GOAL_REPLAN_TICKS;
         if (!started || moved || periodic || (arrivedLatched && !freshGoal.isAt(feet()))) {
+            // The grind clock follows the target, not the replan cadence: a periodic
+            // replan of an unmoved goal must not reset unreachability accounting, or
+            // live-goal navigations could circle forever.
+            if (moved || plannedCenter == null) {
+                ticksWithoutGoalProgress = 0;
+                bestGoalDistanceSqr = Double.MAX_VALUE;
+            }
             ticksSinceGoalRead = 0;
             compiled = fresh;
             goal = freshGoal;
@@ -113,21 +131,42 @@ public final class EmbeddedBaritoneNavigator {
         updatePhysicalProgress();
         if (reached.getAsBoolean() || hasStableSearchMembership()) return arrive();
         if (calculationFailed) {
-            String qualifier = permit == TerrainPermit.PRESERVE
-                    ? " under the no-terrain-alteration policy" : "";
-            String advice = terrainProbeRequested && permit == TerrainPermit.PRESERVE
-                    ? "; a terrain-changing route has not been executed or assumed"
-                    : "";
-            // PRESERVE 下算不出路是地形策略挡的,不是几何上无路:类型必须如实报
-            // TERRAIN_BLOCKED,否则上游会把真实原因错包成 NO_PATH(旧验收点名过这个坑)。
-            return fail(permit == TerrainPermit.PRESERVE
-                            ? FailureType.TERRAIN_BLOCKED : FailureType.NO_PATH,
-                    "Baritone found no path to " + plannedCenter.toShortString()
-                            + qualifier + advice);
+            return failNoPath("Baritone found no path to " + plannedCenter.toShortString());
+        }
+        if (EmbeddedBaritoneRuntime.hasConcretePath(this) && !updateGoalProgress()) {
+            return failNoPath("no net progress toward " + plannedCenter.toShortString()
+                    + " for 45s of pathing; the target appears unreachable");
         }
 
         driveRequested = true;
         return PlayerNav.Status.RUNNING;
+    }
+
+    /**
+     * Shared unreachable-target failure. PRESERVE 下算不出路是地形策略挡的,不是几何上
+     * 无路:类型必须如实报 TERRAIN_BLOCKED,否则上游会把真实原因错包成 NO_PATH
+     * (旧验收点名过这个坑)。
+     */
+    private PlayerNav.Status failNoPath(String detail) {
+        String qualifier = permit == TerrainPermit.PRESERVE
+                ? " under the no-terrain-alteration policy" : "";
+        String advice = terrainProbeRequested && permit == TerrainPermit.PRESERVE
+                ? "; a terrain-changing route has not been executed or assumed"
+                : "";
+        return fail(permit == TerrainPermit.PRESERVE
+                        ? FailureType.TERRAIN_BLOCKED : FailureType.NO_PATH,
+                detail + qualifier + advice);
+    }
+
+    /** Tracks net convergence toward the goal while executing; true while progress continues. */
+    private boolean updateGoalProgress() {
+        double distance = feet().distSqr(plannedCenter);
+        if (distance < bestGoalDistanceSqr - GOAL_PROGRESS_SQR) {
+            bestGoalDistanceSqr = distance;
+            ticksWithoutGoalProgress = 0;
+            return true;
+        }
+        return ++ticksWithoutGoalProgress < UNREACHABLE_GRIND_TICKS;
     }
 
     private PlayerNav.Status arrive() {
