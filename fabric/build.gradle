@@ -7,7 +7,7 @@ dependencies {
     mappings loom.officialMojangMappings()
     modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
-    // Vendored Baritone sources retain their upstream nullability annotations.
+    // Loader compilation includes common sources directly, so keep this on Fabric's classpath too.
     compileOnly "com.google.code.findbugs:jsr305:3.0.2"
 }
 

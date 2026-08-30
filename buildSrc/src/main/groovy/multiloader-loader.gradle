@@ -21,6 +21,14 @@ dependencies {
     commonResources project(path: ':common', configuration: 'commonResources')
 }
 
+// Register common resources as actual source-set inputs so loader tooling such as
+// Fabric Loom can discover and post-process common mixin configuration files.
+sourceSets {
+    main {
+        resources.srcDir(project(':common').file('src/main/resources'))
+    }
+}
+
 tasks.named('compileJava', JavaCompile) {
     dependsOn(configurations.commonJava)
     source(configurations.commonJava)
@@ -28,7 +36,6 @@ tasks.named('compileJava', JavaCompile) {
 
 processResources {
     dependsOn(configurations.commonResources)
-    from(configurations.commonResources)
 }
 
 tasks.named('javadoc', Javadoc).configure {
@@ -40,5 +47,4 @@ tasks.named('sourcesJar', Jar) {
     dependsOn(configurations.commonJava)
     from(configurations.commonJava)
     dependsOn(configurations.commonResources)
-    from(configurations.commonResources)
 }

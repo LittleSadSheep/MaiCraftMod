@@ -19,6 +19,8 @@ neoForge {
 dependencies {
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
     compileOnly group: 'org.ow2.asm', name: 'asm', version: '9.7'
+    // Vendored Baritone sources retain their upstream nullability annotations.
+    compileOnly group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
     // fabric and neoforge both bundle mixinextras, so it is safe to use it in common
     compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
     annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
@@ -39,3 +41,21 @@ artifacts {
     commonJava sourceSets.main.java.sourceDirectories.singleFile
     commonResources sourceSets.main.resources.sourceDirectories.singleFile
 }
+
+// Run the machine boundary regressions without introducing a test-framework dependency.
+// NeoForm exposes Minecraft on main's compile classpath only; standalone tests need the same types.
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
+tasks.register('machineRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks machine evidence, design contracts and native request boundaries.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+    mainClass = 'org.maiwithu.maicraft.intent.MachineRegressionSuite'
+    maxHeapSize = '512m'
+    def regressionDirectory = layout.buildDirectory.dir('machine-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
+}
+tasks.named('check') { dependsOn tasks.named('machineRegression') }

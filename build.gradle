@@ -11,5 +11,24 @@ subprojects {
         // schematica_api source set. Shipping them would impersonate optional third-party mods.
         exclude 'fi/dy/**'
         exclude 'com/github/lunatrius/**'
+
+        // MaiCraft drives embedded Baritone explicitly. Do not ship Baritone's standalone
+        // connector or inactive mixins, which would add competing lifecycle, input, chat,
+        // render, packet, or optional-integration hooks. The five mixins named in
+        // maicraft-baritone.mixins.json are intentionally not matched here.
+        exclude 'baritone/launch/BaritoneMixinConnector*'
+        exclude 'baritone/launch/mixins/MixinClientPlayNetHandler*'
+        exclude 'baritone/launch/mixins/MixinClientPlayerEntity*'
+        exclude 'baritone/launch/mixins/MixinCommandSuggestionHelper*'
+        exclude 'baritone/launch/mixins/MixinEntityRenderManager*'
+        exclude 'baritone/launch/mixins/MixinFireworkRocketEntity*'
+        exclude 'baritone/launch/mixins/MixinItemStack*'
+        exclude 'baritone/launch/mixins/MixinLootContextBuilder*'
+        exclude 'baritone/launch/mixins/MixinLootTable*'
+        exclude 'baritone/launch/mixins/MixinMinecraft*'
+        exclude 'baritone/launch/mixins/MixinNetworkManager*'
+        exclude 'baritone/launch/mixins/MixinPalettedContainer*'
+        exclude 'baritone/launch/mixins/MixinScreen*'
+        exclude 'baritone/launch/mixins/MixinWorldRenderer*'
     }
 }
