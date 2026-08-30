@@ -298,3 +298,73 @@ public final class TravelJumpPolicy {
         BlockPos ceiling = feet.above(2);
         var state = ctx.world().getBlockState(ceiling);
         return state.getFluidState().isEmpty()
+                && state.getCollisionShape(ctx.world(), ceiling).isEmpty();
+    }
+
+    /**
+     * 从当前路线对齐速度出发的保守原版跳跃投影。竖直飞行时间从玩家权威的
+     * 跳跃/重力属性积分;水平距离含疾跑跳冲量与按住前进的空中控制。实心顶盖
+     * 截断第一次向上碰撞,自然缩短跳步。
+     */
+    private static JumpProjection projectJump(LocalPlayer player, Vec3i direction, boolean headHit) {
+        double gravity = player.getAttributeValue(Attributes.GRAVITY);
+        double verticalSpeed = jumpVerticalSpeed(player);
+        if (gravity <= 0.0 || verticalSpeed <= 0.0) {
+            return null;
+        }
+        double height = 0.0;
+        double headroom = Math.max(0.0, 2.0 - player.getBbHeight());
+        Vec3 launchVelocity = sprintJumpLaunchVelocity(player);
+        double forwardSpeed = Math.max(0.0,
+                launchVelocity.x * direction.getX()
+                        + launchVelocity.z * direction.getZ());
+        double forwardDistance = 0.0;
+        double airDragSum = 0.0;
+        double drag = 1.0;
+        int airborneTicks = 0;
+        do {
+            // 局部物理飞行窗防止极小的模组重力把一个客户端 tick 变成无界数值循环。
+            // 调用方把这个有界投影换算成需要检查的精确有限格数。
+            if (airborneTicks >= MAX_PROJECTED_AIRBORNE_TICKS) {
+                return null;
+            }
+            forwardDistance += forwardSpeed;
+            airDragSum += drag;
+            forwardSpeed = (forwardSpeed + 0.02) * 0.91;
+            drag *= 0.91;
+
+            double nextHeight = height + verticalSpeed;
+            if (headHit && nextHeight > headroom) {
+                height = headroom;
+                verticalSpeed = 0.0;
+            } else {
+                height = nextHeight;
+                verticalSpeed = (verticalSpeed - gravity) * 0.98;
+            }
+            airborneTicks++;
+        } while (height > 0.0);
+        return new JumpProjection(forwardDistance, airDragSum);
+    }
+
+    /** LivingEntity#getJumpPower 同源的权威跳跃强度组成。 */
+    private static double jumpVerticalSpeed(LocalPlayer player) {
+        float bodyJumpFactor = player.level().getBlockState(player.blockPosition())
+                .getBlock().getJumpFactor();
+        float supportJumpFactor = player.level()
+                .getBlockState(player.getBlockPosBelowThatAffectsMyMovement())
+                .getBlock().getJumpFactor();
+        double blockJumpFactor = bodyJumpFactor == 1.0F
+                ? supportJumpFactor : bodyJumpFactor;
+        return player.getAttributeValue(Attributes.JUMP_STRENGTH)
+                * blockJumpFactor + player.getJumpBoostPower();
+    }
+
+    /** 当前速度加上原版按朝向施加的 0.2 疾跑跳冲量。 */
+    private static Vec3 sprintJumpLaunchVelocity(LocalPlayer player) {
+        double yaw = Math.toRadians(player.getYRot());
+        Vec3 velocity = player.getDeltaMovement();
+        return velocity.add(-Math.sin(yaw) * 0.2, 0.0, Math.cos(yaw) * 0.2);
+    }
+
+    private record JumpProjection(double forwardDistance, double airDragSum) {}
+}
