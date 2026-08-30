@@ -298,3 +298,42 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         }
         if (controlAttempted && !controlStateVerified) outcomeUncertain = true;
     }
+
+    @Override protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("operation", "set_control");
+        data.put("requested_powered", r.request.desiredPowered());
+        data.put("control_state_verified", controlStateVerified);
+        data.put("machine_production_verified", false);
+        data.put("connection_semantics_verified", false);
+        data.put("already_satisfied", alreadySatisfied);
+        data.put("effects_started", controlAttempted);
+        data.put("outcome_uncertain", outcomeUncertain);
+        data.put("mechanical_retry_allowed", !controlAttempted && !outcomeUncertain);
+        data.put("candidate_controls", candidateCount);
+        data.put("structure_fingerprint", r.request.structuralFingerprint());
+        data.put("next_observation", "survey the machine again and verify its actual output separately");
+        if (control != null) data.put("control_position", Map.of(
+                "x", control.getX(), "y", control.getY(), "z", control.getZ()));
+        if (before != null) data.put("before_powered", before.getValue(LeverBlock.POWERED));
+        if (controlStateVerified) data.put("after_powered", r.request.desiredPowered());
+        if (failureCode != null) data.put("failure_code", failureCode);
+        if (receiptStatus != null) data.put("native_receipt_status", receiptStatus);
+        return data;
+    }
+
+    @Override protected String successMessage() {
+        return "Existing lever is " + (r.request.desiredPowered() ? "powered" : "unpowered")
+                + "; downstream machine operation and production require separate observation.";
+    }
+
+    @Override protected String timeoutMessage() {
+        return controlAttempted ? "Machine control timed out after one use; inspect its state before retrying."
+                : "Machine control timed out before lever use.";
+    }
+
+    @Override protected String cancelledMessage() {
+        return controlAttempted ? "Machine control was interrupted after one use; its state needs inspection."
+                : "Machine control was interrupted before lever use.";
+    }
+}
