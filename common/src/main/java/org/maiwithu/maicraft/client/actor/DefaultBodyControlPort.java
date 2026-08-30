@@ -279,8 +279,9 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     /**
      * Critically damped second-order response. It preserves angular velocity across frames,
-     * eases both acceleration and arrival, and explicitly clamps at the target on any numerical
-     * crossing, so a moving target cannot make the camera ring or overshoot.
+     * explicitly clamps at the target on any numerical crossing, so a moving target cannot
+     * make the camera ring or overshoot, and bounds angular acceleration so big turns ramp
+     * into and out of their cruise rate (an S-curve) instead of panning linearly.
      */
     private static AxisStep smoothDampAngle(
             float current, float target, float velocity,
@@ -302,6 +303,15 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         float temporary = (velocity + omega * change) * dt;
         float nextVelocity = (velocity - omega * temporary) * decay;
         float output = adjustedTarget + (change + temporary) * decay;
+
+        // S-curve shaping: the bare spring reaches its cruise rate within a couple of
+        // frames, which reads as a linear pan across a big turn. Bounded angular
+        // acceleration supplies the ease-in; the spring's convergence supplies the
+        // ease-out. Displacement stays consistent with the limited rate.
+        float maxDeltaV = ANGULAR_ACCELERATION * dt;
+        nextVelocity = Mth.clamp(nextVelocity, velocity - maxDeltaV, velocity + maxDeltaV);
+        float maxStep = Math.max(Math.abs(velocity), Math.abs(nextVelocity)) * dt;
+        output = current + Mth.clamp(output - current, -maxStep, maxStep);
 
         float desiredDirection = adjustedTarget - current;
         if ((desiredDirection > 0.0f && output > adjustedTarget)
@@ -348,5 +358,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     private static final float PITCH_SMOOTH_TIME = 0.10f;
     private static final float MAX_YAW_SPEED = 240.0f;
     private static final float MAX_PITCH_SPEED = 180.0f;
+    /** 大转角的缓入/缓出加速度上限(度/秒²):240°/s 巡航在 ~0.12s 内爬升,90° 转角全程 ~0.45s。 */
+    private static final float ANGULAR_ACCELERATION = 2000.0f;
     private static final float MAX_LOOK_DELTA_SECONDS = 0.05f;
 }
