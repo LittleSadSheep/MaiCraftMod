@@ -319,6 +319,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     if (strictLandingInProgress()) {
                         yield TaskState.RUNNING;
                     }
+                    org.maiwithu.maicraft.core.Constants.LOG.info(
+                            "[maicraft-task] goto end kind={} result=failed type=NO_PATH"
+                                    + " feet={} reason=route ended without the exact grounded stance",
+                            r.kind, player.blockPosition().toShortString());
                     fail(blockedMessage(
                                     "the route ended without occupying the exact grounded stance"),
                             FailureType.NO_PATH);
@@ -367,6 +371,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         ? " (also retried accepting anywhere within "
                                 + (int) NEAR_SUCCESS_RADIUS + " blocks — no path either)"
                         : "";
+                org.maiwithu.maicraft.core.Constants.LOG.info(
+                        "[maicraft-task] goto end kind={} result=failed type={} feet={} reason={}",
+                        r.kind, nav.failType(), player.blockPosition().toShortString(),
+                        nav.failReason());
                 fail(blockedMessage(nav.failReason() + also), nav.failType());
                 yield TaskState.FAILED;
             }
@@ -457,6 +465,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** Capture only a terminal verified arrival; failed/cancelled movement has no handoff receipt. */
     private TaskState successAtBody() {
         BlockPos body = player.blockPosition();
+        // 到达即留痕:最终脚位与请求格同框——"报 exact 成功却站在别处"这类悬案,
+        // 下一轮实机的第一现场就在这一行。
+        org.maiwithu.maicraft.core.Constants.LOG.info(
+                "[maicraft-task] goto end kind={} result=success feet={} requested={}",
+                r.kind, body.toShortString(), blockTarget.toShortString());
         r.retainVerifiedPosition(new org.maiwithu.maicraft.task.InternalPositionReceipt.Position(
                 body.getX(), body.getY(), body.getZ(),
                 player.level().dimension().location().toString()));
@@ -584,11 +597,13 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             case YLEVEL -> "elevation y=" + by;
             case FIND -> "the nearest " + r.block;
         };
-        // 地形封路的验尸自带下一步(清单 + 重发提示),不再叠几何建议;其余无路才是
-        // 几何问题:换近一点的路点或扫描。除非她只是没有垫路的料——读起来同样是死路,
-        // 其实不是。
+        // 地形封路的验尸自带下一步,不再叠几何建议;策略挡路时出路是授权或垫料,
+        // 其余无路才是几何问题:换近一点的路点或扫描。
         String advice = "";
-        if (nav.failType() != FailureType.TERRAIN_BLOCKED) {
+        if (nav.failType() == FailureType.TERRAIN_BLOCKED) {
+            advice = " This route is only walkable with terrain alteration permitted"
+                    + " (may_alter_terrain), or with scaffolding blocks to pillar or bridge up.";
+        } else {
             advice = ScaffoldMaterials.shortageAdvice(player);
             if (advice == null) {
                 advice = " Try a nearer waypoint or scan_blocks for a way through.";
