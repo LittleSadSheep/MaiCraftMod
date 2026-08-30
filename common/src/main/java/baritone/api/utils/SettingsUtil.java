@@ -298,3 +298,54 @@ public class SettingsUtil {
                         .map(o -> keyParser.toString(keyType, o.getKey()) + "->" + valueParser.toString(valueType, o.getValue()))
                         .collect(Collectors.joining(","));
             }
+
+            @Override
+            public boolean accepts(Type type) {
+                return Map.class.isAssignableFrom(TypeUtils.resolveBaseClass(type));
+            }
+        };
+
+        private final Class<?> cla$$;
+        private final Function<String, Object> parser;
+        private final Function<Object, String> toString;
+
+        Parser() {
+            this.cla$$ = null;
+            this.parser = null;
+            this.toString = null;
+        }
+
+        <T> Parser(Class<T> cla$$, Function<String, T> parser) {
+            this(cla$$, parser, Object::toString);
+        }
+
+        <T> Parser(Class<T> cla$$, Function<String, T> parser, Function<T, String> toString) {
+            this.cla$$ = cla$$;
+            this.parser = parser::apply;
+            this.toString = x -> toString.apply((T) x);
+        }
+
+        @Override
+        public Object parse(Type type, String raw) {
+            Object parsed = this.parser.apply(raw);
+            Objects.requireNonNull(parsed);
+            return parsed;
+        }
+
+        @Override
+        public String toString(Type type, Object value) {
+            return this.toString.apply(value);
+        }
+
+        @Override
+        public boolean accepts(Type type) {
+            return type instanceof Class && this.cla$$.isAssignableFrom((Class) type);
+        }
+
+        public static Parser getParser(Type type) {
+            return Stream.of(values())
+                    .filter(parser -> parser.accepts(type))
+                    .findFirst().orElse(null);
+        }
+    }
+}
