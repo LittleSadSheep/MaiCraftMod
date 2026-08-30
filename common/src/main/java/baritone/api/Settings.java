@@ -853,7 +853,7 @@ public final class Settings {
     public final Setting<String> prefix = new Setting<>("#");
 
     /**
-     * Use a short Baritone prefix [B] instead of [Baritone] when logging to chat
+     * Use a short MaiCraft prefix [M] instead of [MaiCraft] when logging to chat
      */
     public final Setting<Boolean> shortBaritonePrefix = new Setting<>(false);
 

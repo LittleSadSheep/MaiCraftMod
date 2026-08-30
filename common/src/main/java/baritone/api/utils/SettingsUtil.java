@@ -95,7 +95,10 @@ public class SettingsUtil {
                 }
             });
         } catch (NoSuchFileException ignored) {
-            Helper.HELPER.logDirect("Baritone settings file not found, resetting.");
+            // Embedded build: every navigation configures the settings it needs programmatically
+            // (see EmbeddedBaritoneRuntime.configure), so a missing persisted file is the normal
+            // first-run state. Upstream broadcasts "Baritone settings file not found, resetting."
+            // to chat here; that message is pure noise for us, so it stays silent.
         } catch (Exception ex) {
             Helper.HELPER.logDirect("Exception while reading Baritone settings, some settings may be reset to default values!");
             ex.printStackTrace();

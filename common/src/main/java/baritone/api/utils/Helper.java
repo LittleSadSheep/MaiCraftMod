@@ -53,20 +53,20 @@ public interface Helper {
     /**
      * The tag to assign to chat messages when {@link Settings#useMessageTag} is {@code true}.
      */
-    GuiMessageTag MESSAGE_TAG = new GuiMessageTag(0xFF55FF, null, Component.literal("Baritone message."), "Baritone");
+    GuiMessageTag MESSAGE_TAG = new GuiMessageTag(0xFF55FF, null, Component.literal("MaiCraft message."), "MaiCraft");
 
     static Component getPrefix() {
-        // Inner text component
+        // Embedded vendored build: chat output is branded MaiCraft, not upstream Baritone.
         final Calendar now = Calendar.getInstance();
         final boolean xd = now.get(Calendar.MONTH) == Calendar.APRIL && now.get(Calendar.DAY_OF_MONTH) <= 3;
-        MutableComponent baritone = Component.literal(xd ? "Baritoe" : BaritoneAPI.getSettings().shortBaritonePrefix.value ? "B" : "Baritone");
-        baritone.setStyle(baritone.getStyle().withColor(ChatFormatting.LIGHT_PURPLE));
+        MutableComponent brand = Component.literal(xd ? "MaiCraf" : BaritoneAPI.getSettings().shortBaritonePrefix.value ? "M" : "MaiCraft");
+        brand.setStyle(brand.getStyle().withColor(ChatFormatting.LIGHT_PURPLE));
 
         // Outer brackets
         MutableComponent prefix = Component.literal("");
-        prefix.setStyle(baritone.getStyle().withColor(ChatFormatting.DARK_PURPLE));
+        prefix.setStyle(brand.getStyle().withColor(ChatFormatting.DARK_PURPLE));
         prefix.append("[");
-        prefix.append(baritone);
+        prefix.append(brand);
         prefix.append("]");
 
         return prefix;
