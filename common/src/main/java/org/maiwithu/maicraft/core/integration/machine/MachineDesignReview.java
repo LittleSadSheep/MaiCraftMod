@@ -298,3 +298,120 @@ public final class MachineDesignReview {
         return result;
     }
 
+    private static JsonObject constraints(JsonElement value, JsonArray errors) {
+        JsonObject input = object(value, "$.constraints", errors);
+        if (input == null) return null;
+        checkFields(input, CONSTRAINT_FIELDS, "$.constraints", errors);
+        JsonObject normalized = new JsonObject();
+        for (String key : List.of("max_width", "max_depth", "max_height")) {
+            if (!input.has(key)) continue;
+            JsonElement raw = input.get(key);
+            try {
+                if (!raw.isJsonPrimitive() || !raw.getAsJsonPrimitive().isNumber()) throw new ArithmeticException();
+                int limit = raw.getAsBigDecimal().intValueExact();
+                if (limit < 1 || limit > 128) throw new ArithmeticException();
+                normalized.addProperty(key, limit);
+            } catch (ArithmeticException | NumberFormatException invalid) {
+                error(errors, "$.constraints." + key, "invalid_dimension", "Expected an integer from 1 to 128.");
+            }
+        }
+        for (String key : List.of("terrain_fit", "throughput")) {
+            if (!input.has(key)) continue;
+            String text = string(input, key, "$.constraints", 160, errors);
+            if (text != null) normalized.addProperty(key, text);
+        }
+        for (String key : List.of("maintenance_access", "preserve_existing")) {
+            if (!input.has(key)) continue;
+            JsonElement raw = input.get(key);
+            if (!raw.isJsonPrimitive() || !raw.getAsJsonPrimitive().isBoolean()) {
+                error(errors, "$.constraints." + key, "boolean_required", "Expected true or false.");
+            } else {
+                normalized.addProperty(key, raw.getAsBoolean());
+            }
+        }
+        return normalized;
+    }
+
+    private static JsonArray array(JsonObject object, String key, int min, int max, JsonArray errors) {
+        JsonElement value = object.get(key);
+        if (value == null || !value.isJsonArray()) {
+            error(errors, "$." + key, "array_required", "Expected an array.");
+            return null;
+        }
+        JsonArray array = value.getAsJsonArray();
+        if (array.size() < min || array.size() > max) {
+            error(errors, "$." + key, "array_size", "Array must contain " + min + " to " + max + " entries.");
+            return null;
+        }
+        return array;
+    }
+
+    private static JsonObject object(JsonElement value, String path, JsonArray errors) {
+        if (value == null || !value.isJsonObject()) {
+            error(errors, path, "object_required", "Expected an object.");
+            return null;
+        }
+        return value.getAsJsonObject();
+    }
+
+    private static void checkFields(JsonObject object, Set<String> allowed, String path, JsonArray errors) {
+        for (String key : object.keySet()) {
+            if (!allowed.contains(key)) error(errors, path, "unknown_field", "Unsupported field: " + key.substring(0, Math.min(key.length(), 96)));
+            if (errors.size() >= MAX_ERRORS) return;
+        }
+    }
+
+    private static String string(JsonObject object, String key, String path, int maxLength, JsonArray errors) {
+        JsonElement value = object.get(key);
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+            error(errors, path + "." + key, "string_required", "Expected a nonempty string.");
+            return null;
+        }
+        String string = value.getAsString();
+        if (string.isBlank() || string.length() > maxLength || !string.equals(string.strip()) || string.codePoints().anyMatch(Character::isISOControl)) {
+            error(errors, path + "." + key, "invalid_string", "Use 1 to " + maxLength + " characters without leading/trailing whitespace or control characters.");
+            return null;
+        }
+        return string;
+    }
+
+    private static String identifier(JsonObject object, String key, String path, JsonArray errors) {
+        String value = string(object, key, path, 256, errors);
+        if (value != null && !ID.matcher(value).matches()) {
+            error(errors, path + "." + key, "invalid_identifier", "Expected a lowercase namespaced registry identifier such as minecraft:stone.");
+            return null;
+        }
+        return value;
+    }
+
+    private static int count(JsonObject object, String path, JsonArray errors) {
+        JsonElement value = object.get("count");
+        if (value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
+            try {
+                // Accept equivalent JSON number spellings, but never truncate fractions or overflow.
+                int count = value.getAsBigDecimal().intValueExact();
+                if (count >= 1 && count <= MAX_COMPONENT_COUNT) return count;
+            } catch (ArithmeticException | NumberFormatException invalid) { /* Return a validation issue below. */ }
+        }
+        error(errors, path + ".count", "invalid_count", "Expected a JSON integer from 1 to " + MAX_COMPONENT_COUNT + ".");
+        return -1;
+    }
+
+    private static void checkRegistry(Predicate<String> exists, String id, String path, String kind, JsonArray errors) {
+        try {
+            if (!exists.test(id)) error(errors, path, "unknown_" + kind, "No installed " + kind + " has this identifier.");
+        } catch (RuntimeException exception) {
+            // Registry unavailability is an explicit failure, never evidence that an identifier exists.
+            error(errors, path, "registry_unavailable", "Could not verify the installed " + kind + " registry.");
+        }
+    }
+
+    private static void error(JsonArray errors, String path, String code, String message) {
+        if (errors.size() >= MAX_ERRORS) return;
+        JsonObject error = new JsonObject();
+        error.addProperty("path", path);
+        error.addProperty("code", code);
+        error.addProperty("message", message);
+        errors.add(error);
+    }
+}
