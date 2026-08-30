@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 import baritone.Baritone;
 import baritone.api.pathing.movement.IMovement;
 import baritone.api.utils.IPlayerContext;
+import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.movements.MovementAscend;
 import baritone.pathing.movement.movements.MovementTraverse;
@@ -20,11 +21,15 @@ import java.util.List;
 /**
  * 赶路跑跳 —— MaiCraft {@code SprintPolicy} 在 Baritone 执行层的移植。
  *
- * <p>已经决定疾跑的平直路段,当跑道、支撑与头顶净空都被现成路径证明时,按住跳跃把
- * 疾跑换成跑跳;恰好经过的两格高顶头走廊(树下、隧道)用短促的顶头连跳进一步加速。
- * 只读取既有路径事实,绝不为了找一个顶头点改道。平走接上台的直跳由
- * {@link #ascendLaunchReady} 提供起跳时机:物理投影证明这一跳能落上平台,
- * 而不是走到面前卡住了再补跳。</p>
+ * <p>判据是"跳下去不受伤":不要求一段被证明的长直跑道,而是沿当前移动方向扫描
+ * 整个跳跃可达走廊,每一列都必须在无摔伤落点带(抬升一格/平/落一格,坠落距离全部
+ * 不超过原版安全值)里有干燥实心支撑。走廊里出现深洞、流体或立柱就这一步不跳,
+ * 走过去再跳——正是人在森林里冲刺跳的方式。恰好处于两格高顶头走廊(树下、隧道)
+ * 时投影自动缩短为顶头连跳,获得更快的节奏。空中不指望转向:身体沿出发方向飞,
+ * 落点偏出路径时由 Baritone 的 splice 逻辑重新对齐。</p>
+ *
+ * <p>平走接上台的直跳由 {@link #ascendLaunchReady} 提供起跳时机:物理投影证明这一跳
+ * 能落上平台,而不是走到面前卡住了再补跳。</p>
  *
  * <p>与原实现的差异:Baritone 的移动原语在空中也持续按住前进(splice 逻辑按真实脚位
  * 对齐路径),因此不移植 travel-jump 的空中相位与压舵状态。</p>
@@ -33,15 +38,17 @@ public final class TravelJumpPolicy {
 
     /** 超出这个物理飞行窗仍不落地的属性组合不交给普通赶路跳。 */
     private static final int MAX_PROJECTED_AIRBORNE_TICKS = 40;
-    /** 原版普通地面的摩擦系数;更滑的支撑不采用一格制动余量。 */
+    /** 原版普通地面的摩擦系数;更滑的支撑上起跳,速度投影不可信。 */
     private static final float NORMAL_GROUND_FRICTION = 0.6F;
+    /** 原版安全坠落距离:超过这个下落才开始掉血。 */
+    private static final double SAFE_FALL_DISTANCE = 3.0D;
 
     private TravelJumpPolicy() {}
 
     /**
      * 这一 tick 是否应该在疾跑中起跳。调用点在 Baritone 已决定疾跑之后
-     * ({@code shouldSprintNextTick} 的 {@code requested} 分支),因此饥饿与疾跑许可是
-     * 调用方已验证的前置条件;这里只裁决"跳了能不能安全落回原路"。
+     * ({@code shouldSprintNextTick} 的 {@code requested} 分支),因此饥饿、疾跑许可
+     * 与前进动量都是调用方已验证的前置条件;这里只裁决"这一跳落不落得下去"。
      */
     public static boolean shouldTravelJump(Baritone baritone, List<IMovement> movements,
                                            int pathPosition) {
@@ -57,10 +64,16 @@ public final class TravelJumpPolicy {
         }
         IMovement currentRaw = movements.get(pathPosition);
         if (!(currentRaw instanceof MovementTraverse current)
-                || !isSafeDryTraverse(baritone, current, ctx)) {
+                || current.getSrc().getY() != current.getDest().getY()) {
             return false;
         }
-
+        // 交互格全交给走廊与点击门裁决:待挖/待放/待挤目标只在身体真的停下来
+        // 操作(本 tick 正在点击)时阻止起跳;走廊扫描已验证飞跃的落点,跳过去
+        // 比停下来挖一格或搭一格更快。
+        if (baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_LEFT)
+                || baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_RIGHT)) {
+            return false;
+        }
         Vec3i direction = current.getDirection();
         if (direction.getY() != 0
                 || Math.abs(direction.getX()) + Math.abs(direction.getZ()) != 1) {
@@ -75,67 +88,26 @@ public final class TravelJumpPolicy {
             return false;
         }
 
-        BlockPos feet = ctx.playerFeet();
-        boolean headHit = feet.equals(current.getSrc())
-                && hasFullTwoBlockCeiling(ctx, current.getSrc())
-                && hasFullTwoBlockCeiling(ctx, current.getDest());
+        if (!isStableTakeoff(ctx, ctx.playerFeet())) {
+            return false;
+        }
+
+        // 顶头走廊:短投影只在顶盖真覆盖整段短走廊时成立——中途没了顶盖就按
+        // 敞空投影(撞上中途顶盖只会提前落在已验证列上,反过来则会飞出走廊)。
+        BlockPos src = current.getSrc();
+        BlockPos takeoff = ctx.playerFeet();
+        boolean headHit = takeoff.equals(src)
+                && hasContinuousCeiling(ctx, src, direction, HEAD_HIT_CORRIDOR_COLUMNS);
+
         JumpProjection projection = projectJump(player, direction, headHit);
         if (projection == null) {
             return false;
         }
 
-        // 投影已被飞行窗约束;只扫描能容纳这次飞行的具体格位外加最坏的结构余量
-        // (随后上升占两格)。这段有限跑道一旦证明成立,更长直路的其余部分改变不了
-        // 本次起跳决定,刻意不检查。
-        double worstControlReserve = 2.0 + player.getBbWidth() * 0.5 + forwardSpeed;
-        double sufficientRunway = projection.forwardDistance() + worstControlReserve;
-        int lastSafeMovement = pathPosition - 1;
-        BlockPos runEnd = current.getSrc();
-        boolean boundedRunwayProven = false;
-        for (int i = pathPosition; i < movements.size(); i++) {
-            IMovement movement = movements.get(i);
-            if (!(movement instanceof MovementTraverse traverse)
-                    || !direction.equals(movement.getDirection())
-                    || !isSafeDryTraverse(baritone, traverse, ctx)) {
-                break;
-            }
-            lastSafeMovement = i;
-            runEnd = movement.getDest();
-            double checkedRunway = direction.getX()
-                    * (runEnd.getX() + 0.5 - player.getX())
-                    + direction.getZ() * (runEnd.getZ() + 0.5 - player.getZ());
-            if (checkedRunway > sufficientRunway) {
-                boundedRunwayProven = true;
-                break;
-            }
-        }
-        if (lastSafeMovement < pathPosition) {
-            return false;
-        }
-
-        double remainingRunway = direction.getX() * (runEnd.getX() + 0.5 - player.getX())
-                + direction.getZ() * (runEnd.getZ() + 0.5 - player.getZ());
-        IMovement afterRun = !boundedRunwayProven
-                && lastSafeMovement + 1 < movements.size()
-                ? movements.get(lastSafeMovement + 1)
-                : null;
-        // 保留一个完整已规划格用于落地后的转向/制动;随后是上升时保留第二格,因为
-        // 上升的专属起跳从最后一条平边的起点发起,跑跳必须在那之前落地。
-        double controlReserve = boundedRunwayProven
-                ? worstControlReserve
-                : (afterRun instanceof MovementAscend ? 2.0 : 1.0)
-                        + player.getBbWidth() * 0.5 + forwardSpeed;
-        double maximumLandingDistance = remainingRunway - controlReserve;
-        if (maximumLandingDistance <= 0.0) {
-            return false;
-        }
-
-        // 空中把整个身体保持在一格宽的走廊里。允许当前的横向速度,条件是原版空气
-        // 阻力能在 AABB 离开已验证的路径柱之前耗散它。
-        double lateralOffset = Math.abs(direction.getX()
-                * (current.getSrc().getZ() + 0.5 - player.getZ()))
-                + Math.abs(direction.getZ()
-                        * (current.getSrc().getX() + 0.5 - player.getX()));
+        // 空中把身体保持在一格宽的走廊里:当前的横向偏移,加上原版空气阻力能耗散的
+        // 横向速度,都必须留在出发列的半格余量之内。
+        double lateralOffset = Math.abs(direction.getX() * (src.getZ() + 0.5 - player.getZ()))
+                + Math.abs(direction.getZ() * (src.getX() + 0.5 - player.getX()));
         Vec3 launchVelocity = sprintJumpLaunchVelocity(player);
         double lateralSpeed = Math.abs(direction.getX() * launchVelocity.z
                 + direction.getZ() * launchVelocity.x);
@@ -145,20 +117,25 @@ public final class TravelJumpPolicy {
             return false;
         }
 
-        if (projection.forwardDistance() >= maximumLandingDistance) {
-            return false;
+        // 跳跃可达走廊:从玩家当前格沿移动方向逐列验证——投影距离已从实时速度
+        // 出发,余量只需覆盖身体半宽与落点方差。任何一列在无摔伤落点带里没有
+        // 干燥安全支撑(深洞、流体、立柱),这一跳就可能摔进它——不跳,走过去再说。
+        double reach = projection.forwardDistance() + player.getBbWidth() * 0.5 + 0.25;
+        int columns = (int) Math.ceil(reach);
+        for (int d = 1; d <= columns; d++) {
+            BlockPos column = takeoff.offset(direction.getX() * d, 0, direction.getZ() * d);
+            if (!survivableColumn(ctx, column, projection.apexHeight())) {
+                return false;
+            }
         }
-
-        // 敞空跳不允许半途发现顶盖;反过来,顶头连跳只在身体已经处于一段足够覆盖
-        // 本次投影跳步的连续实心顶盖之下才启用。路径位逐格检查,共享的移动终点
-        // 伪造不出两格走廊。
-        return ceilingProfileMatches(ctx, movements, pathPosition, lastSafeMovement, direction,
-                projection.forwardDistance(), headHit);
+        return true;
     }
+
     /**
-     * 平走→上台直跳的起跳时机:这一落地刻起跳能否不先撞上台沿竖直面,并落上平台
-     * 或其身后已验证的干燥落格。返回 false 表示提前窗口未开(或已错过);普通上升
-     * 移动保持活跃,执行它原地的近距离跳。
+     * 平走→上台直跳的起跳时机:从当前实时身位与速度投影,这一 tick 起跳能否不先
+     * 撞上台沿竖直面,并落上平台或其身后已验证的落格。窗口随距离实时开合——
+     * 起跳点在台前一格半左右,不是走到台沿才跳。返回 false 表示窗口未开(或已
+     * 错过);普通上升移动保持活跃,执行它原地的近距离跳。
      */
     public static boolean ascendLaunchReady(Baritone baritone, MovementTraverse current,
                                             MovementAscend next, IMovement nextNext) {
