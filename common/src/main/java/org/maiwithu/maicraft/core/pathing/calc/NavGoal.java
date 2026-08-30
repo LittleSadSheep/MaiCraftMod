@@ -5,7 +5,10 @@ import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 import org.maiwithu.maicraft.core.pathing.moves.ActionCosts;
 import net.minecraft.core.BlockPos;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * What the search is trying to reach. Until
@@ -44,6 +47,95 @@ public interface NavGoal {
 
     /** Representative position — diagnostics, goal-moved checks, locate math. */
     BlockPos center();
+
+    /**
+     * Stable, immutable description of the goal's arrival and heuristic semantics.
+     *
+     * <p>Live-goal suppliers commonly rebuild an equivalent object every client tick. Object
+     * identity, the representative {@link #center()} alone, and periodic refreshes therefore
+     * cannot decide whether an in-flight search is stale: identity/periodic refresh churns a
+     * healthy search, while center-only comparison misses radius, member and threat changes.
+     * Embedded navigation compares this value instead.
+     *
+     * <p>The built-in goal vocabulary is covered centrally by {@link SemanticFingerprint#of}.
+     * A custom implementation whose semantics depend on anything besides its concrete class and
+     * center must override this method and return a fingerprint containing those parameters.
+     */
+    default SemanticFingerprint semanticFingerprint() {
+        return SemanticFingerprint.of(this);
+    }
+
+    /** Immutable value key used to compare two independently rebuilt goal snapshots. */
+    record SemanticFingerprint(String kind, List<?> parameters) {
+        public SemanticFingerprint {
+            kind = Objects.requireNonNull(kind, "kind");
+            parameters = List.copyOf(parameters);
+        }
+
+        public static SemanticFingerprint of(NavGoal goal) {
+            Objects.requireNonNull(goal, "goal");
+            if (goal instanceof Exact g) {
+                return key("exact", g.goal.asLong());
+            }
+            if (goal instanceof Column g) {
+                return key("column", g.x, g.z);
+            }
+            if (goal instanceof YLevel g) {
+                return key("y_level", g.level);
+            }
+            if (goal instanceof Near g) {
+                return key("near", g.goal.asLong(), g.radius);
+            }
+            if (goal instanceof Ring g) {
+                return key("ring", g.goal.asLong(), g.inner, g.outer);
+            }
+            if (goal instanceof NearGround g) {
+                return key("near_ground", g.goal.asLong(), g.radius);
+            }
+            if (goal instanceof Adjacent g) {
+                return key("adjacent", g.goal.asLong());
+            }
+            if (goal instanceof MineStance g) {
+                return key("mine_stance", g.ore.asLong());
+            }
+            if (goal instanceof GetToBlock g) {
+                return key("get_to_block", g.goal.asLong());
+            }
+            if (goal instanceof Composite g) {
+                return key("composite", multiset(g.members.stream()
+                        .map(NavGoal::semanticFingerprint).toList()));
+            }
+            if (goal instanceof MineColumn g) {
+                return key("mine_column", g.ore.asLong(), g.maxBelow);
+            }
+            if (goal instanceof Avoid g) {
+                return key("avoid", g.penaltyFactor, multiset(g.threats));
+            }
+            if (goal instanceof ApproachAvoiding g) {
+                return key("approach_avoiding", g.approach.semanticFingerprint(),
+                        g.penaltyFactor, multiset(g.threats));
+            }
+            if (goal instanceof RunAway g) {
+                return key("run_away", g.from.asLong(), g.maintainY);
+            }
+            // There is one legacy anonymous goal whose only varying parameter is its center.
+            // Future custom goals with additional parameters must override semanticFingerprint().
+            return key("custom:" + goal.getClass().getName(), goal.center().asLong());
+        }
+
+        private static SemanticFingerprint key(String kind, Object... parameters) {
+            return new SemanticFingerprint(kind, List.of(parameters));
+        }
+
+        /** Composite/avoid semantics are order-insensitive but duplicate-sensitive. */
+        private static <T> Map<T, Integer> multiset(List<T> values) {
+            Map<T, Integer> counts = new HashMap<>();
+            for (T value : values) {
+                counts.merge(value, 1, Integer::sum);
+            }
+            return Map.copyOf(counts);
+        }
+    }
 
     // ---- the shared octile + vertical point bound ----
 
@@ -606,20 +698,24 @@ public interface NavGoal {
      */
     final class Avoid implements NavGoal {
         public final GoalAvoidEntities engine;
+        public final double penaltyFactor;
+        public final List<GoalAvoidEntities.Threat> threats;
         private final BlockPos centroid;
 
         Avoid(double penaltyFactor, List<GoalAvoidEntities.Threat> threats) {
+            this.penaltyFactor = penaltyFactor;
+            this.threats = List.copyOf(threats);
             this.engine = new GoalAvoidEntities(penaltyFactor,
-                    threats.toArray(GoalAvoidEntities.Threat[]::new));
+                    this.threats.toArray(GoalAvoidEntities.Threat[]::new));
             double x = 0.0;
             double y = 0.0;
             double z = 0.0;
-            for (GoalAvoidEntities.Threat t : threats) {
+            for (GoalAvoidEntities.Threat t : this.threats) {
                 x += t.x();
                 y += t.y();
                 z += t.z();
             }
-            int n = threats.size();
+            int n = this.threats.size();
             this.centroid = BlockPos.containing(x / n, y / n, z / n);
         }
 
@@ -641,12 +737,16 @@ public interface NavGoal {
     final class ApproachAvoiding implements NavGoal {
         public final NavGoal approach;
         public final GoalAvoidEntities repulsion;
+        public final double penaltyFactor;
+        public final List<GoalAvoidEntities.Threat> threats;
 
         ApproachAvoiding(NavGoal approach, double penaltyFactor,
                          List<GoalAvoidEntities.Threat> threats) {
             this.approach = approach;
+            this.penaltyFactor = penaltyFactor;
+            this.threats = List.copyOf(threats);
             this.repulsion = new GoalAvoidEntities(penaltyFactor,
-                    threats.toArray(GoalAvoidEntities.Threat[]::new));
+                    this.threats.toArray(GoalAvoidEntities.Threat[]::new));
         }
 
         /** 走到了,而且脚下这一格不在任何一只的危险半径里。见 GoalApproachAvoiding。 */
