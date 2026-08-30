@@ -110,7 +110,9 @@ public final class ClientRuntime {
             }
             intents.controlAvailable();
             CompanionTickDispatcher.tick(context.player());
-            pathingMayDrive = true;
+            // A semantic action may have consumed this tick's one native-mutation slot. Do not
+            // let the embedded path executor append a break/place gesture after it.
+            pathingMayDrive = context.mutationAvailable();
             intents.tickPersistence(minecraft, context.player());
             GameplayAttentionMonitor.afterSemanticBind(context.player());
         } finally {
