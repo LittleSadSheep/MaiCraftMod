@@ -12,6 +12,7 @@ import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Compiles a task's INTENT into the full navigation contract. Each static
@@ -53,6 +54,22 @@ public final class GoalCompiler {
         /** engineGoal 从 goal 经映射表派生(既有调用方签名不变)。 */
         public Compiled(NavGoal goal, LongSet sacred) {
             this(goal, GoalAdapter.toEngineGoal(goal), sacred);
+        }
+
+        /**
+         * Frozen value key for live-goal comparison. The primitive sacred set is copied so a
+         * caller cannot mutate an earlier tick's baseline behind the navigator's back.
+         */
+        public CompiledFingerprint semanticFingerprint() {
+            return new CompiledFingerprint(goal.semanticFingerprint(), sacred);
+        }
+    }
+
+    public record CompiledFingerprint(
+            NavGoal.SemanticFingerprint goal,
+            Set<Long> sacred) {
+        public CompiledFingerprint {
+            sacred = Set.copyOf(sacred);
         }
     }
 
