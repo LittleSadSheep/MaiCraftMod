@@ -298,3 +298,50 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
     private static int capacity(Slot slot, ItemStack item) { return Math.min(item.getMaxStackSize(), slot.getMaxStackSize(item)) - slot.getItem().getCount(); }
 
     private TaskState failure(String code, String message, FailureType type) {
+        failureCode = code; uncertain |= effectsStarted; fail(message, type); return TaskState.FAILED;
+    }
+
+    @Override protected void cleanup() {
+        super.cleanup();
+        if (effectsStarted && !verified) uncertain = true;
+        if (menu != null && player.containerMenu == menu && !menu.getCarried().isEmpty()) {
+            try {
+                var context = ClientRuntime.requireContext(player);
+                context.menus().closeForTaskBoundary(context, 40,
+                        "machine transfer ended with a cursor stack; native close owns its return");
+                boundaryCloseRequested = true;
+            } catch (RuntimeException unavailable) { /* Actor body/human handoff also owns cursor return. */ }
+            uncertain = true;
+        }
+        if (!kind.isEmpty()) actualPlayerDelta = matchingPlayerCount() - initialPlayerCount;
+    }
+
+    @Override public boolean mustSettleBeforeSatisfiedCancellation() { return effectsStarted && !verified; }
+
+    @Override protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("operation", r.deposit ? "deposit" : "withdraw");
+        data.put("item_id", r.itemId.toString());
+        data.put("requested_count", r.count);
+        data.put("observed_entry_index", r.entryIndex);
+        data.put("transfer_verified", verified);
+        data.put("actual_player_delta", actualPlayerDelta);
+        data.put("confirmed_destination_count", placed);
+        data.put("machine_production_verified", false);
+        data.put("effects_started", effectsStarted);
+        data.put("outcome_uncertain", uncertain);
+        data.put("mechanical_retry_allowed", !effectsStarted);
+        data.put("boundary_close_requested", boundaryCloseRequested);
+        data.put("cursor_empty", menu != null && menu.getCarried().isEmpty());
+        if (nativeStatus != null) data.put("native_receipt_status", nativeStatus);
+        if (failureCode != null) data.put("failure_code", failureCode);
+        if (verified) data.put("menu_report", MachineMenu.inspect(player));
+        return data;
+    }
+
+    @Override protected String successMessage() {
+        return "Verified an exact " + r.count + " item " + (r.deposit ? "deposit into" : "withdrawal from")
+                + " the observed real machine entry. Machine processing and output still require separate verification.";
+    }
+    @Override protected String cancelledMessage() { return "Machine item transfer interrupted; reconcile its actual inventory delta and cursor before another transfer."; }
+}
