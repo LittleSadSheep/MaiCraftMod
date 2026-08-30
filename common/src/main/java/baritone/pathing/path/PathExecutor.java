@@ -36,6 +36,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.util.Tuple;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.pathing.baritone.TravelJumpPolicy;
 import java.util.*;
 
 import static baritone.api.pathing.movement.MovementStatus.*;
@@ -358,12 +359,17 @@ public class PathExecutor implements IPathExecutor, Helper {
             IMovement next = path.movements().get(pathPosition + 1);
             if (next instanceof MovementAscend && sprintableAscend(ctx, (MovementTraverse) current, (MovementAscend) next, path.movements().get(pathPosition + 2))) {
                 if (skipNow(ctx, current)) {
-                    logDebug("Skipping traverse to straight ascend");
-                    pathPosition++;
-                    onChangeInPathPosition();
-                    onTick();
-                    behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
-                    return true;
+                    // 起跳时机门:投影证明这一跳能落上平台而不是先撞台沿,才跳过平走直跳
+                    // 上台;窗口没开就留给普通上升移动做它的近距离跳。
+                    if (TravelJumpPolicy.ascendLaunchReady(behavior.baritone, (MovementTraverse) current, (MovementAscend) next, path.movements().get(pathPosition + 2))) {
+                        logDebug("Skipping traverse to straight ascend");
+                        pathPosition++;
+                        onChangeInPathPosition();
+                        onTick();
+                        behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+                        return true;
+                    }
+                    logDebug("Ascend launch window not open; ordinary ascend jump will handle it");
                 } else {
                     logDebug("Too far to the side to safely sprint ascend");
                 }
@@ -372,6 +378,11 @@ public class PathExecutor implements IPathExecutor, Helper {
 
         // if the movement requested sprinting, then we're done
         if (requested) {
+            // 赶路跑跳:已经决定疾跑、且跑道/顶头走廊在物理上成立的平直段,按住跳跃把
+            // 疾跑换成跑跳;恰好经过的两格高顶头走廊自动获得更短的连跳加速。
+            if (TravelJumpPolicy.shouldTravelJump(behavior.baritone, path.movements(), pathPosition)) {
+                behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+            }
             return true;
         }
 
