@@ -9,7 +9,6 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.Constants;
-import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.pathing.cache.PathCaches;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.scan.BlockSearch;
@@ -79,7 +78,6 @@ public final class ClientRuntime {
             bodyPresent = true;
             BlockSearch.tick(context.level());
             TargetIndex.clientTick(context.level());
-            Ae2ResourceSupply.observeNearbyAccess(context.player());
             GameplayAttentionMonitor.tick(context.player());
             IntentRuntime intents = IntentRuntime.get();
             intents.beforeBodyTick(minecraft);
@@ -170,7 +168,6 @@ public final class ClientRuntime {
 
         Minecraft minecraft = Minecraft.getInstance();
         Runnable cleanup = () -> {
-            EmbeddedBaritoneRuntime.bodyGone();
             ACTOR.shutdown();
             IntentRuntime.get().shutdownPersistence();
             bodyGone(false);
