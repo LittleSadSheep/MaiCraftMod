@@ -298,3 +298,65 @@ public final class MachineSurvey {
         final List<ObservedBlock> blocks = new ArrayList<>();
         final Set<String> mods = new LinkedHashSet<>();
         String fingerprint;
+        int total, loaded, unloaded, outside, air, unknownAe2Hosts;
+        boolean propertiesTruncated;
+        Capture(int radius, String worldScope) { this.radius = radius; this.worldScope = worldScope; }
+    }
+
+    /** Exact, read-only API whitelist already used by the existing Create/AE2 integrations. */
+    private static final class OptionalReads {
+        private static final Class<?> KINETIC = load("com.simibubi.create.content.kinetics.base.KineticBlockEntity");
+        private static final Class<?> CABLE_BUS = load("appeng.blockentity.networking.CableBusBlockEntity");
+        private static final Method SPEED = method(KINETIC, "getSpeed");
+        private static final Method NETWORK = method(KINETIC, "hasNetwork");
+        private static final Method OVERSTRESSED = method(KINETIC, "isOverStressed");
+        private static final Method PART = method(CABLE_BUS, "getPart", Direction.class);
+
+        static JsonObject kinetics(Object entity) {
+            if (KINETIC == null || !KINETIC.isInstance(entity)) return null;
+            JsonObject facts = new JsonObject();
+            Object speed = read(SPEED, entity);
+            if (speed instanceof Number number && Double.isFinite(number.doubleValue())) {
+                facts.addProperty("speed_rpm", number.doubleValue());
+            }
+            Object network = read(NETWORK, entity);
+            if (network instanceof Boolean value) facts.addProperty("has_network", value);
+            Object overstressed = read(OVERSTRESSED, entity);
+            if (overstressed instanceof Boolean value) facts.addProperty("overstressed", value);
+            if (facts.size() == 0) return null;
+            facts.addProperty("freshness", "client_synced_field_may_lag_server");
+            return facts;
+        }
+
+        static JsonObject ae2Parts(Object entity) {
+            if (CABLE_BUS == null || PART == null || !CABLE_BUS.isInstance(entity)) return null;
+            JsonObject parts = new JsonObject();
+            try {
+                Object center = PART.invoke(entity, new Object[] { null });
+                if (center != null) parts.addProperty("center", center.getClass().getName());
+                for (Direction face : Direction.values()) {
+                    Object part = PART.invoke(entity, face);
+                    if (part != null) parts.addProperty(face.getName(), part.getClass().getName());
+                }
+                return parts;
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) { return null; }
+        }
+
+        private static Object read(Method method, Object owner) {
+            if (method == null) return null;
+            try { return method.invoke(owner); }
+            catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) { return null; }
+        }
+
+        private static Class<?> load(String name) {
+            try { return Class.forName(name, false, MachineSurvey.class.getClassLoader()); }
+            catch (ClassNotFoundException | LinkageError ignored) { return null; }
+        }
+
+        private static Method method(Class<?> owner, String name, Class<?>... parameters) {
+            if (owner == null) return null;
+            try { return owner.getMethod(name, parameters); }
+            catch (NoSuchMethodException | SecurityException | LinkageError ignored) { return null; }
+        }
+    }
+}
