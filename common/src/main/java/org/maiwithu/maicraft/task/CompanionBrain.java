@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.task;
 
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.LocalToolDispatcher;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -38,7 +39,18 @@ final class CompanionBrain {
                 idlePoses,
                 player);
 
+        // A launched parkour/fall movement cannot surrender steering midway. Keep its existing
+        // body owner for this tick and retry the priority hand-off at the next safe movement
+        // boundary. Reflexes that need airborne takeover must first provide an explicit
+        // continuation controller; clearing the route's keys is never a safe approximation.
+        if (holder != winner && !EmbeddedBaritoneRuntime.canSafelySuspendActive()) {
+            winner = holder;
+        }
         if (holder != null && holder != winner) {
+            // A composite holder may keep its active navigator inside a child task, so stopping
+            // only the holder's own nav field is not a complete body hand-off. Retire the shared
+            // pathing keys/look/native receipt before the higher-priority winner gets this tick.
+            EmbeddedBaritoneRuntime.suspendActivePhysicalOutputs();
             holder.stop(player, Task.StopReason.PREEMPTED);
         }
         holder = winner;
