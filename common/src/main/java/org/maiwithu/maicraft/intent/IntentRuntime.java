@@ -58,7 +58,8 @@ public final class IntentRuntime {
             "required_coverage", "dark_cell_count", "site_verified",
             "waterfront_required", "max_distance", "farthest_body_distance",
             "target", "requested", "gathered", "confirmed_target_breaks", "scope",
-            "last_probe", "suggestions", "recovery_options", "decision", "recovery", "steps");
+            "last_probe", "suggestions", "recovery_options", "decision", "recovery", "steps",
+            "completed_effects", "remaining_effects");
     private static final Set<String> ATTENTION_ISSUE_FACT_KEYS = Set.of(
             "failure_type", "recipe_id", "missing", "item_ids", "required_final_count",
             "observed_final_count", "target", "requested",
@@ -79,6 +80,11 @@ public final class IntentRuntime {
             "maicraft:build",
             "maicraft:light_area",
             "maicraft:connect_mechanical_power",
+            "maicraft:inspect_machine",
+            "maicraft:design_machine",
+            "maicraft:operate_machine",
+            "maicraft:modify_machine",
+            "maicraft:build_machine",
             "maicraft:acquire_items",
             "maicraft:wait_for_condition",
             "maicraft:sequence");
@@ -180,8 +186,13 @@ public final class IntentRuntime {
     }
 
     public void remember(String label, Goal.WorldPosition position) {
+        remember(label, position, LandmarkAreaRole.ORDINARY);
+    }
+
+    public void remember(
+            String label, Goal.WorldPosition position, LandmarkAreaRole areaRole) {
         String key = normalizeLabel(label);
-        landmarks.put(key, new Landmark(label, position));
+        landmarks.put(key, new Landmark(label, position, areaRole));
         trimOldest(landmarks, MAX_LANDMARKS);
         markDirty();
     }
@@ -505,6 +516,21 @@ public final class IntentRuntime {
     public void validateDecisionAnswer(
             IntentTaskRecord record, String choice, JsonObject details) {
         JsonObject supplied = details == null ? new JsonObject() : details;
+        IntentTaskRecord.DecisionSnapshot pending = record.decisionSnapshot();
+        if ("retry".equals(choice) && pending != null) {
+            JsonObject context = pending.context();
+            JsonObject failure = context.has("failure") && context.get("failure").isJsonObject()
+                    ? context.getAsJsonObject("failure") : null;
+            if (!RecoveryAdvisor.ordinaryRetryAllowed(failure)) {
+                throw new SemanticContractException(
+                        "unsafe_retry", "answer.choice",
+                        record.stepIndex() < record.steps().size()
+                                ? record.steps().get(record.stepIndex()).ability() : null,
+                        "ordinary retry is forbidden because the previous mechanical outcome "
+                                + "is uncertain or explicitly unsafe to repeat; inspect current "
+                                + "facts and choose recover, replace_goal, skip or cancel");
+            }
+        }
         boolean semanticReplacement = "recover".equals(choice) || "replace_goal".equals(choice);
         if (semanticReplacement) {
             if (!supplied.has("goal") || !supplied.get("goal").isJsonObject()) {
@@ -713,11 +739,6 @@ public final class IntentRuntime {
             throw new IllegalArgumentException(
                     "semantic goals cannot contain " + forbidden + "; describe the outcome instead");
         }
-        JsonObject parameters = goal.parameters();
-        if ("maicraft:build".equals(goal.ability()) && parameters.has("ops")) {
-            throw new IllegalArgumentException(
-                    "semantic build goals cannot contain per-block ops; use shape/material/size or a blueprint");
-        }
     }
 
     private static String findMicroInstruction(JsonElement value) {
@@ -742,6 +763,8 @@ public final class IntentRuntime {
         if (Set.of(
                 "route", "waypoints", "path_nodes", "click", "clicks", "slot_clicks",
                 "click_sequence", "inventory_slots", "block_ops", "placements", "cells",
+                "blueprint", "blocks", "offset", "offsets", "block_states", "state_properties",
+                "block_properties", "placement_face", "build_order", "action_sequence", "ops",
                 "entity_id", "entity_ids", "entity_uuid", "entity_uuids", "runtime_id",
                 "runtime_ids", "target_runtime_id", "target_runtime_ids", "receipt",
                 "receipts").contains(key)) return true;
@@ -774,7 +797,38 @@ public final class IntentRuntime {
         }
     }
 
-    public record Landmark(String label, Goal.WorldPosition position) {}
+    /** Typed area meaning; human landmark labels are never interpreted as policy. */
+    public enum LandmarkAreaRole {
+        ORDINARY("ordinary"),
+        MANAGED_SETTLEMENT("managed_settlement");
+
+        private final String id;
+
+        LandmarkAreaRole(String id) {
+            this.id = id;
+        }
+
+        public String id() {
+            return id;
+        }
+
+        /** Missing, malformed and future values remain ordinary instead of granting protection. */
+        public static LandmarkAreaRole fromPersisted(String value) {
+            if (MANAGED_SETTLEMENT.id.equals(value)) return MANAGED_SETTLEMENT;
+            return ORDINARY;
+        }
+    }
+
+    public record Landmark(
+            String label, Goal.WorldPosition position, LandmarkAreaRole areaRole) {
+        public Landmark {
+            areaRole = areaRole == null ? LandmarkAreaRole.ORDINARY : areaRole;
+        }
+
+        public Landmark(String label, Goal.WorldPosition position) {
+            this(label, position, LandmarkAreaRole.ORDINARY);
+        }
+    }
 
     private static final class AttentionFeed {
         private final List<AttentionEvent> events = new ArrayList<>();

@@ -30,6 +30,9 @@ final class AbilityAdapter {
 
     static IntentAction adapt(
             Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
+        if (MachineAbilityAdapter.supports(goal.ability())) {
+            return MachineAbilityAdapter.adapt(goal, player, runtime, continuationToken);
+        }
         if (GeneralAbilityAdapter.supports(goal.ability())) {
             Goal executable = goal;
             if (GeneralAbilityAdapter.EQUIP.equals(goal.ability())) {
@@ -71,12 +74,18 @@ final class AbilityAdapter {
 
     static IntentAction fromAnswer(Goal goal, IntentTaskRecord.DecisionAnswer answer,
                                    LocalPlayer player, IntentRuntime runtime) {
-        return fromAnswer(goal, answer, player, runtime, null);
+        return fromAnswer(goal, answer, player, runtime, null, null);
     }
 
     static IntentAction fromAnswer(
             Goal goal, IntentTaskRecord.DecisionAnswer answer,
-            LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
+            LocalPlayer player, IntentRuntime runtime, UUID continuationToken,
+            JsonObject priorFailure) {
+        if ("retry".equals(answer.choice())
+                && !RecoveryAdvisor.ordinaryRetryAllowed(priorFailure)) {
+            return new IntentAction.Decision(
+                    RecoveryAdvisor.retryRefused(goal, priorFailure));
+        }
         JsonObject details = answer.details();
         JsonObject updates = details.has("parameters") && details.get("parameters").isJsonObject()
                 ? details.getAsJsonObject("parameters")
@@ -100,6 +109,19 @@ final class AbilityAdapter {
                                     "Provide details.goal with parameters.label set to a short name."),
                             option("cancel", "Cancel the task.")));
         }
+        String areaRoleId = string(parameters, "area_role");
+        IntentRuntime.LandmarkAreaRole areaRole;
+        if (areaRoleId == null || "ordinary".equals(areaRoleId)) {
+            areaRole = IntentRuntime.LandmarkAreaRole.ORDINARY;
+        } else if ("managed_settlement".equals(areaRoleId)) {
+            areaRole = IntentRuntime.LandmarkAreaRole.MANAGED_SETTLEMENT;
+        } else {
+            return decision(goal,
+                    "remember_place area_role must be ordinary or managed_settlement; no protection role was inferred from the label.",
+                    List.of(option("replace_goal",
+                                    "Provide details.goal with a declared area_role."),
+                            option("cancel", "Cancel the task.")));
+        }
         Goal.WorldPosition position = rememberPosition(goal, player, runtime);
         if (position == null) {
             return decision(goal,
@@ -107,7 +129,7 @@ final class AbilityAdapter {
                     List.of(option("skip", "Do not create a landmark."),
                             option("cancel", "Cancel the task.")));
         }
-        return new IntentAction.Remember(label, position);
+        return new IntentAction.Remember(label, position, areaRole);
     }
 
     private static IntentAction sleep(Goal goal, LocalPlayer player) {
@@ -574,6 +596,14 @@ final class AbilityAdapter {
                     List.of(option("replace_goal", "Use crop_growth coverage or choose another placement preference."),
                             option("cancel", "Cancel the task.")));
         }
+        String style = string(parameters, "style");
+        if (style != null) style = style.strip().toLowerCase(java.util.Locale.ROOT);
+        if (style != null && !List.of("auto", "ground", "unobtrusive").contains(style)) {
+            return decision(goal,
+                    "Unsupported lighting style: " + style,
+                    List.of(option("replace_goal", "Choose auto, ground or unobtrusive."),
+                            option("cancel", "Cancel the task.")));
+        }
         JsonObject args = new JsonObject();
         args.addProperty("center_x", center.x());
         args.addProperty("center_y", center.y());
@@ -872,6 +902,11 @@ final class AbilityAdapter {
 }
 
 sealed interface IntentAction {
+    /** Read-only semantic evidence, already bounded by its producer. */
+    record Report(org.maiwithu.maicraft.task.TaskResult result,
+                  Goal.WorldPosition verifiedPosition) implements IntentAction {}
+    /** Typed native child sharing the existing body scheduler and protection context. */
+    record Native(org.maiwithu.maicraft.task.TaskRecord record) implements IntentAction {}
     record Chain(List<Tool> actions) implements IntentAction {
         public Chain {
             actions = List.copyOf(actions);
@@ -883,7 +918,9 @@ sealed interface IntentAction {
             return JsonParser.parseString(argumentsJson).getAsJsonObject();
         }
     }
-    record Remember(String label, Goal.WorldPosition position) implements IntentAction {}
+    record Remember(
+            String label, Goal.WorldPosition position,
+            IntentRuntime.LandmarkAreaRole areaRole) implements IntentAction {}
     record Wait(String condition, long notBeforeGameTime) implements IntentAction {}
     record Decision(IntentTaskRecord.DecisionSnapshot snapshot) implements IntentAction {}
 }

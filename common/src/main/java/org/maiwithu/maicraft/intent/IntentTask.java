@@ -64,6 +64,7 @@ final class IntentTask implements Task {
     private List<IntentAction.Tool> chain = List.of();
     private int chainIndex;
     private TaskResult terminalResult;
+    private TaskResult interruptedChildResult;
     private boolean terminalPublished;
     private long childSerial;
     /** Opaque one-use receipts stay inside the Mod; the model only chooses semantic retry. */
@@ -128,7 +129,7 @@ final class IntentTask implements Task {
             }
             IntentAction resolved = AbilityAdapter.fromAnswer(
                     resolvedCurrentGoal(), answer, player, runtime,
-                    continuationFor(currentGoal()));
+                    continuationFor(currentGoal()), currentFailureResult());
             return begin(resolved);
         }
 
@@ -148,6 +149,17 @@ final class IntentTask implements Task {
     }
 
     private TaskState begin(IntentAction action) {
+        if (action instanceof IntentAction.Report report) {
+            if (!report.result().success()) return failStep(TaskState.FAILED, report.result());
+            if (report.verifiedPosition() != null) {
+                record.retainInternalStepPosition(record.stepIndex(), report.verifiedPosition());
+            }
+            completeStep(report.result());
+            return afterImmediate();
+        }
+        if (action instanceof IntentAction.Native nativeAction) {
+            return beginNative(nativeAction.record());
+        }
         if (action instanceof IntentAction.Chain nextChain) {
             chain = nextChain.actions();
             chainIndex = 0;
@@ -157,10 +169,11 @@ final class IntentTask implements Task {
             return requestDecision(decision.snapshot());
         }
         if (action instanceof IntentAction.Remember remember) {
-            runtime.remember(remember.label(), remember.position());
+            runtime.remember(remember.label(), remember.position(), remember.areaRole());
             record.retainInternalStepPosition(record.stepIndex(), remember.position());
             completeStep(TaskResult.ok("remembered " + remember.label(),
-                    Map.of("label", remember.label())));
+                    Map.of("label", remember.label(),
+                            "area_role", remember.areaRole().id())));
             return afterImmediate();
         }
         if (action instanceof IntentAction.Wait nextWait) {
@@ -202,7 +215,23 @@ final class IntentTask implements Task {
         }
 
         if (captured.get() != null) {
-            childRecord = captured.get();
+            return beginNative(captured.get());
+        }
+
+        if (immediate.get() != null) {
+            TaskResult result = parseImmediate(immediate.get());
+            if (!result.success()) return failStep(TaskState.FAILED, result);
+            return finishToolSuccess(result);
+        }
+
+        return failStep(
+                TaskState.FAILED,
+                TaskResult.fail("internal capability produced neither a child task nor a result: "
+                        + action.toolName()));
+    }
+
+    private TaskState beginNative(TaskRecord nextRecord) {
+            childRecord = nextRecord;
             childRecord.setState(TaskState.RUNNING);
             childRecord.markStarted(player.level().getGameTime());
             child = withExplicitAreaProtection(() -> TaskFactory.create(player, childRecord));
@@ -226,18 +255,6 @@ final class IntentTask implements Task {
                 return finishChild();
             }
             return TaskState.RUNNING;
-        }
-
-        if (immediate.get() != null) {
-            TaskResult result = parseImmediate(immediate.get());
-            if (!result.success()) return failStep(TaskState.FAILED, result);
-            return finishToolSuccess(result);
-        }
-
-        return failStep(
-                TaskState.FAILED,
-                TaskResult.fail("internal capability produced neither a child task nor a result: "
-                        + action.toolName()));
     }
 
     private TaskState tickChild() {
@@ -271,6 +288,14 @@ final class IntentTask implements Task {
             if (child == finishingChild) clearChild();
         }
         if (result == null) result = defaultResult(state);
+        if (finishingRecord instanceof org.maiwithu.maicraft.core.task.build.BuildTaskRecord
+                && MachineAbilityAdapter.supports(currentGoal().ability())) {
+            Map<String, Object> machineData = new LinkedHashMap<>(result.data());
+            machineData.put("machine_geometry_verified", result.success());
+            machineData.put("machine_production_verified", false);
+            machineData.put("verification_scope", "Mod-compiled physical targets and confirmed native effects; inspect menus, interfaces and actual production separately");
+            result = new TaskResult(result.success(), result.message(), result.timedOut(), result.interrupted(), machineData);
+        }
         InternalPositionReceipt.Position internalPosition = result.success()
                 && finishingRecord instanceof InternalPositionReceipt receipt
                 ? receipt.internalVerifiedPosition() : null;
@@ -307,7 +332,8 @@ final class IntentTask implements Task {
         JsonObject details = answer.details();
         if (!details.has("goal") || !details.get("goal").isJsonObject()) {
             return requestDecision(RecoveryAdvisor.invalidSemanticAnswer(
-                    currentGoal(), answer.choice() + " requires details.goal"));
+                    currentGoal(), answer.choice() + " requires details.goal",
+                    currentFailureResult()));
         }
         Goal semanticGoal;
         try {
@@ -315,7 +341,7 @@ final class IntentTask implements Task {
             runtime.validateGoal(semanticGoal);
         } catch (RuntimeException exception) {
             return requestDecision(RecoveryAdvisor.invalidSemanticAnswer(
-                    currentGoal(), safeMessage(exception)));
+                    currentGoal(), safeMessage(exception), currentFailureResult()));
         }
         if ("recover".equals(answer.choice())) {
             record.discardInternalStepPosition(record.stepIndex());
@@ -335,8 +361,8 @@ final class IntentTask implements Task {
         // A failed/abandoned execution can never authorize a later prior_result binding.
         record.discardInternalStepPosition(record.stepIndex());
         captureMechanicalContinuation(currentGoal(), result);
-        TaskResult failure = semanticResult(
-                result == null ? TaskResult.fail("internal action failed") : result);
+        TaskResult failure = withEffectLedger(semanticResult(
+                result == null ? TaskResult.fail("internal action failed") : result));
         Goal failedGoal = currentGoal();
         record.addAttempt(new IntentTaskRecord.AttemptSnapshot(
                 record.stepIndex(),
@@ -352,8 +378,66 @@ final class IntentTask implements Task {
                 failedGoal, failureState, failure));
     }
 
+    /** Add one stable semantic effect ledger to every failed step before it crosses MCP. */
+    private TaskResult withEffectLedger(TaskResult failure) {
+        Map<String, Object> data = new LinkedHashMap<>(failure.data());
+        data.put("completed_effects", completedEffects());
+        data.put("remaining_effects", remainingEffects());
+        return new TaskResult(
+                failure.success(), failure.message(), failure.timedOut(), failure.interrupted(),
+                Map.copyOf(data));
+    }
+
+    private List<Map<String, Object>> completedEffects() {
+        List<Map<String, Object>> effects = new ArrayList<>();
+        for (IntentTaskRecord.StepSnapshot step : record.stepResults()) {
+            Map<String, Object> effect = new LinkedHashMap<>();
+            effect.put("step_index", step.index());
+            effect.put("ability", step.ability());
+            if (step.index() >= 0 && step.index() < record.steps().size()) {
+                effect.put("outcome", sanitizeMessage(record.steps().get(step.index()).outcome()));
+            }
+            effect.put("success", step.success());
+            effect.put("summary", sanitizeMessage(step.message()));
+            Object confirmed = sanitizeJson(step.result());
+            if (confirmed != null) effect.put("confirmed_effect", confirmed);
+            effects.add(Map.copyOf(effect));
+        }
+        return List.copyOf(effects);
+    }
+
+    private List<Map<String, Object>> remainingEffects() {
+        List<Map<String, Object>> effects = new ArrayList<>();
+        for (int index = record.stepIndex(); index < record.steps().size(); index++) {
+            Goal pending = record.steps().get(index);
+            Map<String, Object> effect = new LinkedHashMap<>();
+            effect.put("step_index", index);
+            effect.put("state", index == record.stepIndex() ? "failed_current" : "pending");
+            effect.put("ability", pending.ability());
+            effect.put("outcome", sanitizeMessage(pending.outcome()));
+            effects.add(Map.copyOf(effect));
+        }
+        return List.copyOf(effects);
+    }
+
+    /** Return only the failed result for this exact still-current semantic step. */
+    private JsonObject currentFailureResult() {
+        List<IntentTaskRecord.AttemptSnapshot> attempts = record.attempts();
+        if (attempts.isEmpty() || record.stepIndex() >= record.steps().size()) return null;
+        IntentTaskRecord.AttemptSnapshot latest = attempts.getLast();
+        Goal current = record.steps().get(record.stepIndex());
+        if (latest.stepIndex() != record.stepIndex()
+                || !latest.goal().toJson().equals(current.toJson())) {
+            return null;
+        }
+        return latest.result();
+    }
+
     private void captureMechanicalContinuation(Goal goal, TaskResult raw) {
-        if (goal == null || !"maicraft:connect_mechanical_power".equals(goal.ability())) return;
+        if (goal == null || !("maicraft:connect_mechanical_power".equals(goal.ability())
+                || (MachineAbilityAdapter.MODIFY.equals(goal.ability())
+                    && goal.parameters().has("operation")
+                    && "connect_mechanical_power".equals(goal.parameters().get("operation").getAsString())))) return;
         String key = continuationKey(goal);
         Object value = raw == null || raw.data() == null
                 ? null : raw.data().get("continuation_token");
@@ -581,7 +665,7 @@ final class IntentTask implements Task {
         }
         if (reason == StopReason.PREEMPTED) {
             try {
-                stoppingChild.stop(player, reason);
+                withExplicitAreaProtection(() -> { stoppingChild.stop(player, reason); return null; });
             } catch (RuntimeException ignoredFailure) {
                 // The logical child is deliberately retained for resume.
             } finally {
@@ -592,7 +676,7 @@ final class IntentTask implements Task {
 
         try {
             try {
-                stoppingChild.stop(player, reason);
+                withExplicitAreaProtection(() -> { stoppingChild.stop(player, reason); return null; });
             } catch (RuntimeException ignoredFailure) {
                 // result() below remains the authoritative logical cleanup path.
             }
@@ -602,10 +686,13 @@ final class IntentTask implements Task {
             try {
                 TaskState state = stoppingRecord == null
                         ? TaskState.CANCELLED : stoppingRecord.getState();
-                TaskResult cleanupResult = stoppingChild.result(state);
+                TaskResult cleanupResult = withExplicitAreaProtection(() -> stoppingChild.result(state));
                 if (stoppingRecord != null) stoppingRecord.setResult(cleanupResult);
+                retainInterruptedChild(state, cleanupResult);
             } catch (RuntimeException ignoredFailure) {
-                // Physical release in finally must still run when logical cleanup is broken.
+                retainInterruptedChild(TaskState.CANCELLED, TaskResult.fail(
+                        "Child cleanup could not confirm its effects; inspect before another operation.",
+                        Map.of("outcome_uncertain", true, "mechanical_retry_allowed", false)));
             }
         } finally {
             releaseBody();
@@ -627,12 +714,36 @@ final class IntentTask implements Task {
                 default -> TaskResult.fail("semantic task failed");
             };
         }
+        if (interruptedChildResult != null && terminal != TaskState.SUCCESS) {
+            result = withInterruptedEffects(result, interruptedChildResult);
+        }
         if (!terminalPublished) {
             terminalPublished = true;
             record.terminal(terminal, result, player.level().getGameTime());
             runtime.terminal(record, terminal, result);
         }
         return result;
+    }
+
+    private void retainInterruptedChild(TaskState state, TaskResult result) {
+        interruptedChildResult = semanticResult(result == null ? TaskResult.fail(
+                "Child returned no effect evidence during interruption.",
+                Map.of("outcome_uncertain", true, "mechanical_retry_allowed", false)) : result);
+        if (record.stepIndex() < record.steps().size()) {
+            record.addAttempt(new IntentTaskRecord.AttemptSnapshot(record.stepIndex(), currentGoal(), state,
+                    interruptedChildResult.message(), interruptedChildResult.toJson(), player.level().getGameTime()));
+        }
+    }
+
+    /** Keep parent termination semantics and the child's exact partial-effect evidence together. */
+    static TaskResult withInterruptedEffects(TaskResult parent, TaskResult child) {
+        TaskResult clean = semanticResult(child);
+        Map<String, Object> data = new LinkedHashMap<>(parent.data());
+        data.put("interrupted_child", Map.of("message", clean.message(), "data", clean.data()));
+        for (String key : List.of("outcome_uncertain", "effects_started", "mechanical_retry_allowed")) {
+            if (clean.data().containsKey(key)) data.put(key, clean.data().get(key));
+        }
+        return new TaskResult(parent.success(), parent.message(), parent.timedOut(), parent.interrupted(), data);
     }
 
     private TaskResult successResult() {
