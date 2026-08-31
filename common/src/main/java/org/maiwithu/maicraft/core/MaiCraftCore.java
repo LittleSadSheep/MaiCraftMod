@@ -63,29 +63,31 @@ public final class MaiCraftCore {
     }
 
     /**
-     * 把 core 的五条生存本能链插进引擎的竞价调度(链登记口)。运输包与
+     * 把 core 的即时生存本能链插进引擎的竞价调度(链登记口)。运输包与
      * 生命周期对接已随排程机器归引擎,不再是 core 的事。
      */
     private static void registerReflexes() {
         // 注册号小的先问 —— 与原版 addGoal(int priority, goal) 同一惯例。
-        // 顺序<b>照搬旧的浮点优先级</b>(MLG 10 > 换气 6 > 自卫 5 > 进食 4/3 > 脱困 2),
+        // 顺序<b>照搬旧的浮点优先级</b>(MLG 10 > 换气 6 > 自卫 5),
         // 那些数值本身已经退役:反射之间的先后是固定的,不随世界状态变,用连续量
         // 表达一个固定序,数值就成了必须维护却没人看得懂的魔法数。
         //
-        // 正在坠落是最迫近的死法,所以摔落缓冲压过一切;卡住只是烦人,绝不该压过
-        // 打架或吃饭 —— 这条排序是有单测守着的(ReflexOrderTest)。
+        // 正在坠落是最迫近的死法,所以摔落缓冲压过一切。
+        //
+        // “卡住”不再是一条盲走反射。脱困可能需要沿水柱游、挖、垫或挖搭结合，
+        // 这些动作必须继承当前语义任务的 terrain permit、保护格和原生动作回执。
+        // 嵌入式路径执行器已经拥有这些信息；一个全局反射既拿不到授权，也会抢走
+        // 正在持续挖掘或完成跳跃的合法路线，因此不得再独立争夺身体。
         org.maiwithu.maicraft.task.BrainChains.register(10,
                 org.maiwithu.maicraft.core.task.chain.MLGChain::new);
         org.maiwithu.maicraft.task.BrainChains.register(20,
                 org.maiwithu.maicraft.core.task.chain.BreathChain::new);
         org.maiwithu.maicraft.task.BrainChains.register(30,
                 org.maiwithu.maicraft.core.task.chain.MobDefenseChain::new);
-        org.maiwithu.maicraft.task.BrainChains.register(50,
-                org.maiwithu.maicraft.core.task.chain.UnstuckChain::new);
     }
 
     /**
-     * The reflex roster (constitution §6): enlist core's instincts — the five
+     * The reflex roster (constitution §6): enlist core's immediate survival instincts
      * survival chains and the pure policies. The switch persistence is bound by
      * the engine ({@code CommonClass.wireTaskMachine}). Runs on BOTH sides like
      * the rest of init.
