@@ -269,7 +269,7 @@ public final class PlayerNav {
         this.core = new PathingCore(player, PoolSearchDispatcher.INSTANCE,
                 this::searchContext, this::executionContext, this.contextProvider.permit());
         this.embedded = new EmbeddedBaritoneNavigator(
-                player, compiledSupplier, reached, this.contextProvider.permit(),
+                player, compiledSupplier, reached, this.contextProvider,
                 sprintAllowed, revalidateGoalEachTick);
     }
 
@@ -326,6 +326,20 @@ public final class PlayerNav {
                                         LongSet forbiddenBodyCells);
         /** 本提供者建出的上下文所带的地形许可(执行器据此决定顺手的放置能不能做)。 */
         TerrainPermit permit();
+
+        /**
+         * Extra cells the embedded backend must never break or place in. The compiled goal's
+         * sacred cells are added separately; this hook preserves task-specific policies such as
+         * a construction footprint without recreating the retired pathfinder's cost context.
+         */
+        default LongSet embeddedProtectedMutationCells() {
+            return NavigationSafetyContext.protectedMutationCells();
+        }
+
+        /** Extra cells the embedded first-person body must never occupy. */
+        default LongSet embeddedForbiddenBodyCells() {
+            return NavigationSafetyContext.forbiddenBodyCells();
+        }
     }
 
     /** ARRIVED-IN-PLACE 已打点(边沿去重)。 */

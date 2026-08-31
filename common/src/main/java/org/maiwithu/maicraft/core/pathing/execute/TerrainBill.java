@@ -1,5 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.pathing.execute;
 
+import baritone.api.pathing.calc.IPath;
+import baritone.api.pathing.movement.IMovement;
+import baritone.utils.BlockStateInterface;
 import org.maiwithu.maicraft.core.pathing.astar.NavPath;
 import org.maiwithu.maicraft.core.pathing.moves.Movement;
 
@@ -13,6 +17,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 一张"动地形"的清单:哪些格要挖(按方块种类分组、保留坐标)、哪些格要放。
@@ -37,6 +42,34 @@ public final class TerrainBill {
             }
             for (BlockPos p : m.toPlace(level)) {
                 bill.addPlace(p, null);
+            }
+        }
+        return bill;
+    }
+
+    /**
+     * Terrain budget for an embedded Baritone path, evaluated against the same frozen block
+     * snapshot that produced the path. No live-world lookup is allowed here: doing so after an
+     * asynchronous search would mix two different world states and could name the wrong block in
+     * a failure receipt.
+     */
+    public static TerrainBill planned(IPath path, BlockStateInterface frozenBlocks) {
+        Objects.requireNonNull(path, "path");
+        Objects.requireNonNull(frozenBlocks, "frozenBlocks");
+        TerrainBill bill = new TerrainBill();
+        for (IMovement raw : path.movements()) {
+            if (!(raw instanceof baritone.pathing.movement.Movement movement)) {
+                throw new IllegalArgumentException(
+                        "embedded Baritone path contains an unsupported movement: "
+                                + raw.getClass().getName());
+            }
+            for (BlockPos pos : movement.toBreak(frozenBlocks)) {
+                bill.addBreak(pos, frozenBlocks.get0(pos));
+            }
+            for (BlockPos pos : movement.toPlace(frozenBlocks)) {
+                // The planner knows the cell but intentionally does not choose a concrete
+                // throwaway material. Material selection belongs to the later semantic task.
+                bill.addPlace(pos, null);
             }
         }
         return bill;
