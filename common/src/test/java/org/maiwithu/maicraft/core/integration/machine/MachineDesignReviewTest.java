@@ -298,3 +298,27 @@ public final class MachineDesignReviewTest {
 
     private static boolean hasError(JsonObject result, String code) {
         for (JsonElement error : result.getAsJsonObject("validation").getAsJsonArray("errors")) {
+            if (code.equals(error.getAsJsonObject().get("code").getAsString())) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasObligation(JsonObject result, String code) {
+        for (JsonElement obligation : result.getAsJsonArray("obligations")) {
+            if (code.equals(obligation.getAsJsonObject().get("code").getAsString())) return true;
+        }
+        return false;
+    }
+
+    private static void expectError(JsonObject design, String code) {
+        JsonObject result = review(design);
+        check(!valid(result) && hasError(result, code), "rejects with " + code);
+        check(!result.has("graph") && !result.has("material_requirements"), "invalid input has no misleading partial graph/materials");
+        check(!result.getAsJsonObject("readiness").get("executable").getAsBoolean(), "invalid graph remains non-executable");
+    }
+
+    private static void check(boolean condition, String message) {
+        checks++;
+        if (!condition) throw new AssertionError(message);
+    }
+}
