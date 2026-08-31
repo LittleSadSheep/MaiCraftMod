@@ -125,6 +125,7 @@ public final class IntentStateCodec {
             JsonObject value = new JsonObject();
             value.addProperty("label", bounded(landmark.label()));
             value.add("position", worldPosition(landmark.position()));
+            value.addProperty("area_role", landmark.areaRole().id());
             landmarkArray.add(value);
         }
         root.add("landmarks", landmarkArray);
@@ -284,7 +285,10 @@ public final class IntentStateCodec {
             JsonObject value = element.getAsJsonObject();
             landmarks.add(new IntentRuntime.Landmark(
                     bounded(text(value, "label")),
-                    decodePosition(value.getAsJsonObject("position"))));
+                    decodePosition(value.getAsJsonObject("position")),
+                    IntentRuntime.LandmarkAreaRole.fromPersisted(
+                            value.has("area_role") && value.get("area_role").isJsonPrimitive()
+                                    ? value.get("area_role").getAsString() : null)));
         }
         return new Decoded(
                 List.copyOf(plans), List.copyOf(tasks),
