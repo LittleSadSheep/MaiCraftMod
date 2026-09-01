@@ -14,6 +14,48 @@ public final class SemanticAbilityCatalog {
 
     public static JsonObject describe(String ability) {
         return switch (ability) {
+            case MachineAbilityAdapter.INSPECT -> contract(
+                    "Mark and inspect an existing machine, including Create, AE2, Mekanism and mixed assemblies. Returns bounded relative structure, state, candidate connections, evidence limits and an expiring snapshot_id for LLM analysis. Complete means the requested volume was observed, not that an entire network was discovered.",
+                    targets("current_place", "coordinates", "landmark", "area", "prior_result"),
+                    fields(
+                            field("label", "string", "Short durable machine label; required unless the target already supplies one. Stored as a landmark; observing grants no mutation authority."),
+                            field("radius", "integer", "Survey cube radius 0-8, default 4; larger machines need multiple labeled surveys. Unloaded or truncated evidence cannot authorize operations.")));
+            case MachineAbilityAdapter.DESIGN -> contract(
+                    "Review an LLM-designed semantic machine graph against live block/item IDs. The LLM may choose components, intended connections, style and high-level constraints, but never cells, offsets, block states, build order or clicks. Returns material estimates and unresolved layout/interface/recipe/power obligations. expected_output also queries bounded client-synchronized recipe evidence; custom chemistry and dynamic recipe fields remain explicit unknowns.",
+                    targets("landmark", "area"),
+                    fields(field("design", "object",
+                            "Shape: {components:[{name,block_id,count,role}],connections:[{from,to,medium,purpose}],expected_output?:item_id,style?:string,constraints?:{max_width?,max_depth?,max_height?,terrain_fit?,maintenance_access?,preserve_existing?,throughput?}}. At most 64 components, 128 connections, count 1-64 and 512 declared component blocks per work unit. Media: kinetic, items, fluids, energy, chemicals, ae_network, redstone, heat or a namespaced custom resource (addon:mana). This is a logical proposal; the Mod must compile any executable physical layout."),
+                            field("snapshot_id", "string", "Optional fresh site/machine observation that grounds site-specific analysis; requires the exact surveyed target label. It does not expose layout compilation to the LLM.")));
+            case MachineAbilityAdapter.BUILD -> contract(
+                    "Ask MaiCraft to compile and construct a semantic machine design at an observed site. The request contains only components, intended connections, style and high-level constraints. Exact layout, states, clearances, build order, routes and gestures are Mod-owned. If no native compiler supports the requested installed machine family, MaiCraft returns semantic_machine_layout_compiler_unavailable and leaves the site unchanged instead of asking for a per-block plan.",
+                    targets("landmark", "area"),
+                    fields(
+                            field("snapshot_id", "string", "Fresh complete inspect_machine receipt for the marked build site, including an empty site. Unsupported compilation does not consume it."),
+                            field("design", "object", "Same semantic graph as design_machine: components, connections, optional expected_output, style and high-level constraints. Blueprint, blocks, cells, offsets, state properties and action scripts are forbidden."),
+                            field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site. No repeated confirmation is needed for already authorized work.")));
+            case MachineAbilityAdapter.OPERATE -> contract(
+                    "Use existing machines through native evidence: open_menu on a surveyed block, perceive(machine_menu), then deposit/withdraw an exact observed entry. Transfers bind a fresh menu receipt, validate native slot rules and verify inventory/cursor effects. set_control observes one exact vanilla lever state. ae2_supply uses an accessible AE2 terminal, including already configured mixed-mod patterns. Success identifies the observed effect; it never invents production or the meaning of undocumented menu controls.",
+                    targets("landmark", "area", "nearest"),
+                    fields(
+                            field("operation", "string", "open_menu, close_menu, deposit, withdraw, set_control or ae2_supply; operation-specific fields are enforced. close_menu omits target and closes only the current menu opened by this workflow, with an empty cursor."),
+                            field("allow_use", "boolean", "Required true only when the player's instructions authorize this use of the machine/network; never infer ownership from a label."),
+                            field("snapshot_id", "string", "set_control/open_menu: fresh inspect_machine receipt for the exact target label; consumed by operation."),
+                            field("component_index", "integer", "open_menu only: index of the desired block in snapshot.relative_blocks; omit to use the marked center. Must come from that exact observation."),
+                            field("menu_receipt_id", "string", "deposit/withdraw only: receipt from perceive(view=machine_menu) after open_menu. Omit target; the receipt already binds the exact native menu. Inspect again after each transaction."),
+                            field("entry_index", "integer", "deposit/withdraw only: exact observed native menu entry. MaiCraft chooses player inventory entries, validates slot rules and never quick-moves or swaps arbitrary contents."),
+                            field("powered", "boolean", "set_control only: desired lever state, required. This is control state, not measured production."),
+                            field("control_label", "string", "set_control only: remembered exact vanilla lever within the surveyed region; omit only when exactly one lever is present."),
+                            field("item_id", "resource_id", "ae2_supply/deposit/withdraw: exact requested registered item."),
+                            field("count", "integer", "Exact item quantity, default 1: transfer 1-64, AE2 approved net increase 1-256. Use a stable execute request_key to prevent uncertain transport retries creating duplicate work."),
+                            field("allow_crafting", "boolean", "ae2_supply only: may submit an existing AE2 crafting pattern, default false. Requires target={kind:nearest} without a label; selecting a specific surveyed network is unsupported.")));
+            case MachineAbilityAdapter.MODIFY -> contract(
+                    "Modify an existing surveyed machine through a dedicated high-level native operation. connect_mechanical_power lets the Mod plan the entire Create rotational route and execute it with guarded first-person actions. Arbitrary per-block modifications are unsupported until a matching Mod-side semantic compiler exists.",
+                    targets("landmark", "area"),
+                    fields(
+                            field("operation", "string", "Currently connect_mechanical_power."),
+                            field("snapshot_id", "string", "Fresh complete receipt for the exact destination machine label; consumed before execution. Resurvey before another attempt."),
+                            field("source_label", "string", "connect_mechanical_power only: remembered powered Create source in the same dimension."),
+                            field("allow_modify", "boolean", "Required true when the player's instructions authorize this change; existing authorization carries through the workflow.")));
             case GeneralAbilityAdapter.FIND_ENTITY -> contract(
                     "Find real entities through loaded client evidence and bounded first-person frontier exploration; MaiCraft owns every route and concrete identity.",
                     targets("entity", "nearest", "area", "landmark", "current_place"),
@@ -115,7 +157,10 @@ public final class SemanticAbilityCatalog {
             case "maicraft:remember_place" -> contract(
                     "Remember a meaningful place under a human label.",
                     targets("current_place", "coordinates", "landmark", "area"),
-                    fields(field("label", "string", "The durable human name for the place.")));
+                    fields(
+                            field("label", "string", "The durable human name for the place."),
+                            field("area_role", "ordinary|managed_settlement",
+                                    "Optional typed policy, default ordinary. Use managed_settlement only when the player explicitly identifies this area as a managed base, city or settlement; labels themselves never imply this role.")));
             case "maicraft:travel" -> contract(
                     "Reach a semantic destination; MaiCraft resolves and follows the route.",
                     targets("coordinates", "landmark", "player", "entity", "nearest", "area", "prior_result"),
@@ -241,7 +286,7 @@ public final class SemanticAbilityCatalog {
                             field("allowed_sources", "array<string>", "Permitted semantic supply sources; never slots, routes or cells."),
                             field("allow_harm", "boolean", "Explicit harmful acquisition permission; false unless the player grants it."),
                             field("protected_labels", "array<string>", "Remembered areas/possessions that placement must not touch."),
-                            field("style", "string", "Auto, ground, wall, hanging or unobtrusive; MaiCraft still chooses cells."),
+                            field("style", "string", "Auto, ground or unobtrusive; MaiCraft still chooses cells. Wall and hanging layouts are not yet supported."),
                             field("max_placements", "integer", "Optional explicit total placement budget; omit it to let measured coverage and convergence end the task."),
                             field("placement_preference", "string", "Safe-candidate tie-break after measured coverage gain: coverage_optimal (default), central_unplanted (crop_growth only) or unobtrusive; MaiCraft still chooses cells.")));
             case "maicraft:connect_mechanical_power" -> contract(
@@ -284,7 +329,7 @@ public final class SemanticAbilityCatalog {
         result.add("accepted_hard_constraints", targets());
         result.addProperty(
                 "execution_boundary",
-                "MaiCraft selects routes, coordinates, placements, inventory slots and retries; the LLM does not.");
+                "Express outcomes and declared semantic fields only. MaiCraft owns layout compilation, exact cells and states, native routes, gestures, transactions, retries and result verification. Never provide blueprints, placements, offsets or click scripts.");
         return result;
     }
 

@@ -298,3 +298,74 @@ final class MachineAbilityAdapter {
     private static MachineSnapshots.Snapshot boundSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         MachineSnapshots.Snapshot snapshot = MachineSnapshots.requireFresh(player,
                 requiredString(goal.parameters(), "snapshot_id", 36));
+        Goal.WorldPosition target = resolve(goal.target(), player, runtime);
+        if (!snapshot.center().equals(block(target)) || !snapshot.label().equalsIgnoreCase(goal.target().label())) {
+            throw bad("machine_snapshot_target_mismatch: use the exact machine label measured by this snapshot");
+        }
+        return snapshot;
+    }
+
+    private static void requireMachineTarget(Goal goal) {
+        if (goal.target() == null || !Set.of("landmark", "area").contains(goal.target().kind())
+                || goal.target().label() == null || goal.target().label().isBlank()
+                || goal.target().position() != null || goal.target().relation() != null) {
+            throw bad("This machine operation requires one remembered machine label as target");
+        }
+    }
+
+    private static Goal.WorldPosition resolve(Goal.SemanticTarget target, LocalPlayer player, IntentRuntime runtime) {
+        if (target == null) throw bad("machine_target_missing");
+        String dimension = player.level().dimension().location().toString();
+        Goal.WorldPosition resolved = switch (target.kind()) {
+            case "current_place" -> new Goal.WorldPosition(player.blockPosition().getX(), player.blockPosition().getY(), player.blockPosition().getZ(), dimension);
+            case "coordinates" -> target.position();
+            case "landmark", "area" -> {
+                var place = runtime.landmark(target.label());
+                yield place == null ? null : place.position();
+            }
+            default -> null;
+        };
+        if (resolved == null) throw bad("machine_target_unresolved: identify or remember the intended place first");
+        if (resolved.dimension() != null && !dimension.equals(resolved.dimension())) throw bad("machine_target_wrong_dimension");
+        return new Goal.WorldPosition(resolved.x(), resolved.y(), resolved.z(), dimension);
+    }
+
+    private static BlockPos block(Goal.WorldPosition p) { return new BlockPos(p.x(), p.y(), p.z()); }
+    private static boolean registered(String value, boolean block) {
+        ResourceLocation id = ResourceLocation.tryParse(value);
+        return id != null && !"minecraft:air".equals(value)
+                && (block ? BuiltInRegistries.BLOCK.containsKey(id) : BuiltInRegistries.ITEM.containsKey(id));
+    }
+    private static void only(JsonObject p, String... keys) {
+        Set<String> allowed = Set.of(keys);
+        for (String key : p.keySet()) if (!allowed.contains(key)) throw bad("Unsupported field for this machine operation: " + key);
+    }
+    private static String optionalString(JsonObject p, String key, int max) {
+        if (!p.has(key)) return null;
+        return requiredString(p, key, max);
+    }
+    private static String requiredString(JsonObject p, String key, int max) {
+        if (!p.has(key) || !p.get(key).isJsonPrimitive() || !p.getAsJsonPrimitive(key).isString()) throw bad(key + " must be a string");
+        String value = p.get(key).getAsString();
+        if (value.isBlank() || value.length() > max) throw bad(key + " must contain 1.." + max + " characters");
+        return value;
+    }
+    private static boolean bool(JsonObject p, String key, Boolean fallback) {
+        if (!p.has(key)) {
+            if (fallback != null) return fallback;
+            throw bad(key + " is required");
+        }
+        if (!p.get(key).isJsonPrimitive() || !p.getAsJsonPrimitive(key).isBoolean()) throw bad(key + " must be boolean");
+        return p.get(key).getAsBoolean();
+    }
+    private static int integer(JsonObject p, String key, int fallback, int min, int max) {
+        if (!p.has(key)) return fallback;
+        try {
+            if (!p.get(key).isJsonPrimitive() || !p.getAsJsonPrimitive(key).isNumber()) throw bad(key + " must be an integer");
+            int value = p.get(key).getAsBigDecimal().intValueExact();
+            if (value < min || value > max) throw bad(key + " must be in " + min + ".." + max);
+            return value;
+        } catch (ArithmeticException | NumberFormatException invalid) { throw bad(key + " must be an integer in " + min + ".." + max); }
+    }
+    private static IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }
+}

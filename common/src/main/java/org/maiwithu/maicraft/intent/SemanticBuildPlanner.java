@@ -275,7 +275,13 @@ public final class SemanticBuildPlanner {
             JsonObject args = new JsonObject();
             args.add("ops", ops);
             args.addProperty("replace_existing", replace);
-            args.addProperty("allow_partial", policy.equals("storage_available"));
+            args.addProperty("allow_partial", true);
+            args.addProperty("material_policy",
+                    policy.equals("storage_available") ? "storage_available" : "ordinary");
+            args.addProperty("broaden_material_families", !policy.equals("specified"));
+            if (p.has("protected_labels") && p.get("protected_labels").isJsonArray()) {
+                args.add("protected_labels", p.get("protected_labels").deepCopy());
+            }
             args.add("semantic_contract", semanticContract(
                     size, features, site, resolvedCells, purpose));
             args.add("traversability_contract", traversabilityContract(site, size, features));
@@ -1101,26 +1107,43 @@ public final class SemanticBuildPlanner {
         Predicate<String> allowed = id -> !policy.equals("preserve_rare") || !rare(id);
         List<String> choices = preferred.stream().filter(SemanticBuildPlanner::validMaterial)
                 .filter(allowed).toList();
+        // These are registry-derived shape representatives, not a physical material decision.
+        // Before the first survival world effect SemanticBuildMaterialBinding replaces each broad
+        // family with the concrete variant selected from live inventory/storage/recipe/world
+        // evidence. Keeping representatives generic avoids encoding one vanilla wood species as
+        // the answer when the nearest obtainable family member is different.
+        String plankRepresentative = representative(
+                allowed.and(SemanticBuildPlanner::plankBlock), "planks");
+        String frameRepresentative = representative(
+                allowed.and(SemanticBuildPlanner::frameBlock), "wood frame");
+        String slabRepresentative = representative(
+                allowed.and(SemanticBuildPlanner::slab), "roof slab");
+        String doorRepresentative = representative(
+                allowed.and(SemanticBuildPlanner::doorBlock), "door");
+        String railingRepresentative = representative(
+                allowed.and(SemanticBuildPlanner::railingBlock), "railing");
+        String stairRepresentative = representative(
+                allowed.and(id -> path(id).endsWith("_stairs")), "stairs");
         String wallBase = role(choices, inventory, allowed, SemanticBuildPlanner::basic, policy);
-        if (wallBase == null) wallBase = "minecraft:oak_planks";
+        if (wallBase == null) wallBase = plankRepresentative;
         String foundationBase = role(
                 choices, inventory, allowed, id -> basic(id) && stone(id), policy);
         if (foundationBase == null) {
             foundationBase = stone(wallBase) ? wallBase : "minecraft:cobblestone";
         }
-        String floor = role(choices, inventory, allowed, id -> basic(id) && wood(id), policy);
-        if (floor == null) floor = wood(wallBase) ? wallBase : "minecraft:oak_planks";
+        String floor = role(choices, inventory, allowed, SemanticBuildPlanner::plankBlock, policy);
+        if (floor == null) floor = plankBlock(wallBase) ? wallBase : plankRepresentative;
         String frame = role(choices, inventory, allowed, SemanticBuildPlanner::frameBlock, policy);
-        if (frame == null) frame = deriveWood(floor, "_log", "minecraft:oak_log");
+        if (frame == null) frame = deriveWood(floor, "_log", frameRepresentative);
         String roof = role(choices, inventory, allowed, SemanticBuildPlanner::slab, policy);
-        if (roof == null) roof = deriveWood(floor, "_slab", "minecraft:oak_slab");
+        if (roof == null) roof = deriveWood(floor, "_slab", slabRepresentative);
         String door = role(choices, inventory, allowed, SemanticBuildPlanner::doorBlock, policy);
-        if (door == null) door = deriveWood(floor, "_door", "minecraft:oak_door");
+        if (door == null) door = deriveWood(floor, "_door", doorRepresentative);
         String window = role(choices, inventory, allowed, SemanticBuildPlanner::windowBlock, policy);
         if (window == null) window = "minecraft:glass_pane";
         String railing = role(
                 choices, inventory, allowed, SemanticBuildPlanner::railingBlock, policy);
-        if (railing == null) railing = deriveWood(floor, "_fence", "minecraft:oak_fence");
+        if (railing == null) railing = deriveWood(floor, "_fence", railingRepresentative);
         String ladder = role(
                 choices, inventory, allowed, SemanticBuildPlanner::ladderBlock, policy);
         if (ladder == null) ladder = "minecraft:ladder";
@@ -1138,7 +1161,7 @@ public final class SemanticBuildPlanner {
         if (study == null) study = "minecraft:bookshelf";
         String seat = role(
                 choices, inventory, allowed, id -> path(id).endsWith("_stairs"), policy);
-        if (seat == null) seat = deriveWood(floor, "_stairs", "minecraft:oak_stairs");
+        if (seat == null) seat = deriveWood(floor, "_stairs", stairRepresentative);
         String textile = role(
                 choices, inventory, allowed, id -> path(id).endsWith("_carpet"), policy);
         if (textile == null) textile = "minecraft:gray_carpet";
@@ -1179,6 +1202,17 @@ public final class SemanticBuildPlanner {
         return ids.stream().filter(predicate).findFirst().orElse(null);
     }
 
+    private static String representative(Predicate<String> predicate, String role) {
+        return BuiltInRegistries.BLOCK.stream()
+                .map(block -> BuiltInRegistries.BLOCK.getKey(block).toString())
+                .filter(SemanticBuildPlanner::validMaterial)
+                .filter(predicate)
+                .sorted()
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "no registered ordinary material can represent " + role));
+    }
+
     private static Block registered(String id) {
         ResourceLocation key = ResourceLocation.tryParse(id);
         if (key == null) return null;
@@ -1204,6 +1238,9 @@ public final class SemanticBuildPlanner {
     }
 
     private static boolean slab(String id) { return registered(id) instanceof SlabBlock; }
+    private static boolean plankBlock(String id) {
+        return basic(id) && path(id).endsWith("_planks");
+    }
     private static boolean doorBlock(String id) { return registered(id) instanceof DoorBlock; }
     private static boolean windowBlock(String id) {
         Block block = registered(id);
