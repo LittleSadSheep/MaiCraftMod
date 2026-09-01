@@ -12,15 +12,19 @@ import baritone.api.event.events.type.EventState;
 import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.behavior.LookBehavior;
 import baritone.behavior.PathingBehavior;
+import baritone.pathing.path.PathExecutor;
 import baritone.utils.InputOverrideHandler;
+import java.util.List;
 import java.util.function.BiFunction;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.Constants;
-import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
@@ -34,9 +38,21 @@ import org.maiwithu.maicraft.entity.InputDriver;
  * double ticking and a second {@code LocalPlayer.input} owner.</p>
  */
 public final class EmbeddedBaritoneRuntime {
+    private static final EmbeddedBaritoneActionBridge ACTIONS =
+            new EmbeddedBaritoneActionBridge();
     private static IBaritone backend;
     private static EmbeddedBaritoneNavigator owner;
     private static ClientLevel world;
+    private static LocalPlayerContext tickingContext;
+    private static EmbeddedBaritoneNavigator pendingPolicyOwner;
+    private static GoalCompiler.Compiled pendingPolicyGoal;
+    private static PendingStart pendingStart;
+
+    private record PendingStart(
+            EmbeddedBaritoneNavigator navigator,
+            GoalCompiler.Compiled compiled,
+            TerrainPermit permit,
+            boolean sprintAllowed) {}
 
     private EmbeddedBaritoneRuntime() {}
 
@@ -48,8 +64,12 @@ public final class EmbeddedBaritoneRuntime {
         requireClientThread();
         IBaritone baritone = backend();
         if (owner != null && owner != navigator) {
-            owner.preempted("another MaiCraft navigation acquired the first-person body");
-            baritone.getPathingBehavior().forceCancel();
+            EmbeddedBaritoneNavigator previous = owner;
+            queuePendingStart(new PendingStart(navigator, compiled, permit, sprintAllowed));
+            previous.preemptWhenSafe(
+                    "another MaiCraft navigation requested the first-person body");
+            if (owner == null) promotePendingStart(baritone);
+            return;
         }
 
         if (owner == null) {
