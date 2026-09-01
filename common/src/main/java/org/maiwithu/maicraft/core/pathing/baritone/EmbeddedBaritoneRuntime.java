@@ -51,24 +51,67 @@ public final class EmbeddedBaritoneRuntime {
             owner.preempted("another MaiCraft navigation acquired the first-person body");
             baritone.getPathingBehavior().forceCancel();
         }
-        owner = navigator;
-        courseCommitted = false;
-        courseTurning = false;
-        pendingSteerError = Float.NaN;
-        configure(baritone, permit, sprintAllowed);
-        refreshPolicy(navigator, compiled);
-        baritone.getCustomGoalProcess().setGoalAndPath(
-                new MaiCraftGoalAdapter(compiled.goal()));
-    }
 
-    static void refreshPolicy(
-            EmbeddedBaritoneNavigator navigator,
-            GoalCompiler.Compiled compiled) {
-        if (owner != navigator) return;
+        if (owner == null) {
+            queuePendingStart(new PendingStart(navigator, compiled, permit, sprintAllowed));
+            promotePendingStart(baritone);
+            return;
+        }
+
+        configure(baritone, permit, sprintAllowed);
         EmbeddedBaritonePolicy.install(
                 compiled.sacred(),
-                NavigationSafetyContext.protectedMutationCells(),
-                NavigationSafetyContext.forbiddenBodyCells());
+                navigator.protectedMutationCells(),
+                navigator.forbiddenBodyCells());
+        PathingBehavior pathing = (PathingBehavior) baritone.getPathingBehavior();
+        if (!pathing.isSafeToCancel()) {
+            pendingPolicyOwner = navigator;
+            pendingPolicyGoal = compiled;
+            return;
+        }
+        replaceActiveRoute(navigator, compiled, currentContext(),
+                "the navigation goal contract was refreshed");
+    }
+
+    static boolean refreshPolicy(
+            EmbeddedBaritoneNavigator navigator,
+            GoalCompiler.Compiled compiled) {
+        if (owner != navigator) return false;
+        boolean changed = EmbeddedBaritonePolicy.install(
+                compiled.sacred(),
+                navigator.protectedMutationCells(),
+                navigator.forbiddenBodyCells());
+        if (!changed || backend == null) return changed;
+        PathingBehavior pathing = (PathingBehavior) backend.getPathingBehavior();
+        if (!pathing.isSafeToCancel()) {
+            pendingPolicyOwner = navigator;
+            pendingPolicyGoal = compiled;
+            return true;
+        }
+        replaceActiveRoute(navigator, compiled, currentContext(),
+                "navigation safety policy changed while a route was active");
+        return true;
+    }
+
+    /**
+     * Submit one read-only terrain-changing second opinion for the current owner. The policy is
+     * frozen with the failed preserve calculation; the returned path is diagnostic evidence and
+     * is never installed into the live path executor.
+     */
+    static EmbeddedBaritoneTerrainProbe.ProbeFuture submitTerrainProbe(
+            EmbeddedBaritoneNavigator navigator,
+            BlockPos start,
+            org.maiwithu.maicraft.core.pathing.calc.NavGoal goal) {
+        requireClientThread();
+        if (owner != navigator || backend == null) return null;
+        return EmbeddedBaritoneTerrainProbe.submit(
+                backend, start, goal, EmbeddedBaritonePolicy.snapshot());
+    }
+
+    static EmbeddedBaritonePolicy.Snapshot policySnapshot(
+            EmbeddedBaritoneNavigator navigator) {
+        requireClientThread();
+        return owner == navigator ? EmbeddedBaritonePolicy.snapshot() : null;
     }
 
     /** Called exactly once at the end of an open MaiCraft actor tick. */
@@ -77,17 +120,54 @@ public final class EmbeddedBaritoneRuntime {
         IBaritone baritone = backend;
         if (baritone == null) return;
         syncWorld(baritone, context.level());
+        promotePendingStart(baritone);
 
         EmbeddedBaritoneNavigator current = owner;
-        boolean drive = schedulerAllowsBodyWork && current != null
-                && current.consumeDriveRequest();
+        if (current == null) {
+            // The embedded backend has no claim on this tick's body. A semantic task may have
+            // released navigation and immediately issued its own close-range movement (loot
+            // pickup, portal approach, boat hand-off, and similar). Halting here would make the
+            // dormant backend the last writer and erase that legitimate command.
+            baritone.getInputOverrideHandler().clearAllKeys();
+            ((LookBehavior) baritone.getLookBehavior()).clearTarget();
+            ACTIONS.suspendAny(context,
+                    "the navigation owner released its first-person body");
+            return;
+        }
+        // A task may have dropped its last PlayerNav reference after requesting a terminal
+        // outcome. Settle it here if the previous tick reached a safe movement boundary; while
+        // still airborne, keep only the already-selected movement alive even if normal scheduler
+        // work has moved on. Clearing its steering would turn cleanup into an avoidable fall.
+        current.settlePendingFailureAtSafeBoundary();
+        if (owner != current) {
+            promotePendingStart(baritone);
+            return;
+        }
+        boolean requested = current.consumeDriveRequest();
+        boolean drive = current.requiresOrphanContinuation()
+                || (schedulerAllowsBodyWork && requested);
         if (!drive) {
             baritone.getInputOverrideHandler().clearAllKeys();
-            InputDriver.halt(context.player());
+            ((LookBehavior) baritone.getLookBehavior()).clearTarget();
+            ACTIONS.suspend(context, current,
+                    "navigation did not retain physical drive this tick");
             return;
         }
 
+        if (pendingPolicyOwner == current
+                && pendingPolicyGoal != null
+                && ((PathingBehavior) baritone.getPathingBehavior()).isSafeToCancel()) {
+            replaceActiveRoute(current, pendingPolicyGoal, context,
+                    "a deferred navigation contract became safe to apply");
+            if (!context.mutationAvailable()) {
+                baritone.getInputOverrideHandler().clearAllKeys();
+                ((LookBehavior) baritone.getLookBehavior()).clearTarget();
+                return;
+            }
+        }
+
         try {
+            tickingContext = context;
             BiFunction<EventState, TickEvent.Type, TickEvent> events =
                     TickEvent.createNextProvider();
             baritone.getGameEventHandler().onTick(
@@ -96,15 +176,45 @@ public final class EmbeddedBaritoneRuntime {
                     events.apply(EventState.POST, TickEvent.Type.IN));
         } catch (RuntimeException failure) {
             Constants.LOG.error("[maicraft-path] embedded Baritone tick failed", failure);
-            current.preempted("embedded pathing tick failed: "
+            current.internalFailure("embedded pathing tick failed: "
                     + failure.getClass().getSimpleName());
             release(current);
+        } finally {
+            tickingContext = null;
         }
+        if (owner == current) current.settlePendingFailureAtSafeBoundary();
+        if (owner != current) promotePendingStart(baritone);
     }
 
     static void suspend(EmbeddedBaritoneNavigator navigator) {
         if (owner != navigator || backend == null) return;
         backend.getInputOverrideHandler().clearAllKeys();
+        ((LookBehavior) backend.getLookBehavior()).clearTarget();
+        ACTIONS.suspend(currentContext(), navigator, "navigation suspended");
+    }
+
+    /**
+     * Yield only physical outputs to a higher-priority first-person winner while retaining the
+     * calculated route. This never writes the body itself; the winning behavior owns that tick.
+     */
+    public static void suspendActivePhysicalOutputs() {
+        requireClientThread();
+        if (backend == null || owner == null) return;
+        backend.getInputOverrideHandler().clearAllKeys();
+        ((LookBehavior) backend.getLookBehavior()).clearTarget();
+        ACTIONS.suspend(currentContext(), owner,
+                "navigation yielded to another first-person winner");
+    }
+
+    /**
+     * Whether the active route is at a physical hand-off point. A fall or launched parkour
+     * movement must retain its steering until it reaches a cancellable state; clearing its keys
+     * first and asking afterwards turns a scheduler preemption into an avoidable fall.
+     */
+    public static boolean canSafelySuspendActive() {
+        requireClientThread();
+        return backend == null || owner == null
+                || ((PathingBehavior) backend.getPathingBehavior()).isSafeToCancel();
     }
 
     static void release(EmbeddedBaritoneNavigator navigator) {
@@ -114,34 +224,52 @@ public final class EmbeddedBaritoneRuntime {
             backend.getPathingBehavior().forceCancel();
             backend.getInputOverrideHandler().clearAllKeys();
             ((LookBehavior) backend.getLookBehavior()).clearTarget();
+            ACTIONS.suspend(currentContext(), navigator, "navigation ended");
+            ((PathingBehavior) backend.getPathingBehavior()).discardPendingPathEvents();
         }
         EmbeddedBaritonePolicy.clear();
+        pendingPolicyOwner = null;
+        pendingPolicyGoal = null;
         courseCommitted = false;
         courseTurning = false;
-        pendingSteerError = Float.NaN;
         owner = null;
     }
 
     public static void bodyGone() {
         requireClientThread();
         if (owner != null) owner.preempted("the local-player body or world disappeared");
+        if (pendingStart != null) {
+            pendingStart.navigator().preempted(
+                    "the local-player body or world disappeared before body acquisition");
+        }
         if (backend != null) {
             backend.getPathingBehavior().forceCancel();
             backend.getInputOverrideHandler().clearAllKeys();
+            ((LookBehavior) backend.getLookBehavior()).clearTarget();
+            ACTIONS.suspend(currentContext(), owner,
+                    "the local-player body or world disappeared");
+            ((PathingBehavior) backend.getPathingBehavior()).discardPendingPathEvents();
             backend.getGameEventHandler().onWorldEvent(
                     new WorldEvent(null, EventState.POST));
         }
+        ACTIONS.bodyGone();
         owner = null;
         world = null;
+        pendingPolicyOwner = null;
+        pendingPolicyGoal = null;
+        pendingStart = null;
         EmbeddedBaritonePolicy.clear();
         courseCommitted = false;
         courseTurning = false;
-        pendingSteerError = Float.NaN;
     }
 
     static boolean hasConcretePath(EmbeddedBaritoneNavigator navigator) {
         return owner == navigator && backend != null
                 && backend.getPathingBehavior().getCurrent() != null;
+    }
+
+    static boolean hasActiveAction(EmbeddedBaritoneNavigator navigator) {
+        return owner == navigator && ACTIONS.hasActiveWorldAction(navigator);
     }
 
     static boolean planningInFlight(EmbeddedBaritoneNavigator navigator) {
@@ -162,11 +290,42 @@ public final class EmbeddedBaritoneRuntime {
         return ((PathingBehavior) backend.getPathingBehavior()).pathStart();
     }
 
+    static HitResult objectMouseOver(EmbeddedBaritoneNavigator navigator) {
+        if (owner != navigator || backend == null || backend.getPlayerContext().player() == null) {
+            return null;
+        }
+        return backend.getPlayerContext().objectMouseOver();
+    }
+
+    /** Called by the adapted upstream input behavior while the actor lease is open. */
+    public static void applyActionState(InputOverrideHandler input) {
+        LocalPlayerContext context = tickingContext;
+        EmbeddedBaritoneNavigator current = owner;
+        if (context == null || current == null) return;
+        ACTIONS.tick(context, current, input);
+    }
+
+    /** Compatibility hook for upstream movement code that wants a selected hotbar slot. */
+    public static boolean ensureHotbarSelected(LocalPlayer player, int slot) {
+        LocalPlayerContext context = tickingContext;
+        EmbeddedBaritoneNavigator current = owner;
+        return context != null && current != null
+                && ACTIONS.ensureHotbarSelected(context, current, player, slot);
+    }
+
+    /** Compatibility hook for upstream cancellation sites; no game-mode call occurs here. */
+    public static void requestStopBreaking() {
+        ACTIONS.requestStopBreaking();
+    }
+
     /** Called by the adapted upstream input behavior while the actor lease is open. */
     public static void applyInputState(InputOverrideHandler input) {
         if (backend == null || owner == null) return;
         var player = backend.getPlayerContext().player();
         if (player == null) return;
+        var currentExecutor = backend.getPathingBehavior().getCurrent();
+        PathExecutor executor = currentExecutor instanceof PathExecutor pathExecutor
+                ? pathExecutor : null;
         float forward = (input.isInputForcedDown(baritone.api.utils.input.Input.MOVE_FORWARD) ? 1F : 0F)
                 - (input.isInputForcedDown(baritone.api.utils.input.Input.MOVE_BACK) ? 1F : 0F);
         float strafe = (input.isInputForcedDown(baritone.api.utils.input.Input.MOVE_LEFT) ? 1F : 0F)
@@ -174,22 +333,28 @@ public final class EmbeddedBaritoneRuntime {
         boolean jump = input.isInputForcedDown(baritone.api.utils.input.Input.JUMP);
         boolean sneak = input.isInputForcedDown(baritone.api.utils.input.Input.SNEAK);
         boolean sprint = input.isInputForcedDown(baritone.api.utils.input.Input.SPRINT)
-                || (backend.getPathingBehavior().getCurrent() != null
-                && ((baritone.pathing.path.PathExecutor)
-                        backend.getPathingBehavior().getCurrent()).isSprinting());
+                || (executor != null && executor.isSprinting());
         // 水中疾跑:Baritone 只在脚下有实心"桥面"时才请求疾跑,深水过河会退化成
         // 无疾跑的水面扑腾(~2 格/秒)。水中按住前进就强制疾跑——原版疾跑爬泳约
         // 5.3 格/秒,与潜泳相当,且身体贴着水面路径格,不破坏移动的完成判定。
-        if (player.isInWater() && forward > 0.5F) {
-            sprint = true;
-        }
-        // Course steering: a small bearing error between the held camera course and the
-        // movement's aim is absorbed as strafe (the human W+A / W+D habit) instead of
-        // rotating the view. Decomposition keeps the impulse vector at unit length (no
-        // speed loss) and forward >= cos(window), so sprint survives the correction.
-        if (forward > 0.5F && strafe == 0F && !Float.isNaN(pendingSteerError)) {
-            forward = (float) Math.cos(pendingSteerError);
-            strafe = -(float) Math.sin(pendingSteerError);
+        if (player.isInWater()) {
+            if (forward > 0.5F) sprint = true;
+            if (executor != null) {
+                int vertical = executor.waterVerticalIntent();
+                if (vertical < 0) {
+                    sneak = true;
+                    jump = false;
+                } else if (vertical > 0) {
+                    jump = true;
+                    sneak = false;
+                } else if (executor.submergedWaterTravelActive()) {
+                    // The upstream movement's generic water bob requests JUMP. While the selected
+                    // route owns a deliberate cruise depth, neutral vertical intent means hold
+                    // that depth, not surface.
+                    jump = false;
+                    sneak = false;
+                }
+            }
         }
         InputDriver.applyMovement(player, forward, strafe, jump, sneak, sprint);
     }
@@ -200,9 +365,10 @@ public final class EmbeddedBaritoneRuntime {
      * aim. That raw stream pitches down toward cell centers below eye level, steepening as
      * the body closes in and snapping back at every movement handoff — a visible per-block
      * bob with the head held down the entire trip. Here the camera locks to a course yaw;
-     * bearing corrections inside {@link #COURSE_TURN_WINDOW_DEGREES} never rotate the view —
-     * they are decomposed into strafe input by {@link #applyInputState} (the human W+A /
-     * W+D habit). Only a real corner re-commits the course and swings the camera once.
+     * bearing corrections inside {@link #COURSE_TURN_WINDOW_DEGREES} do not rotate the visible
+     * camera. Physical movement yaw is supplied independently by Baritone's player-rotation
+     * bridge, so the camera never decomposes that correction into a second steering input.
+     * Only a real corner re-commits the visible course and swings the camera once.
      * While grounded the pitch rests at a near-level scenic angle; airborne it follows the
      * aim so falls and jumps keep their control. Precision block-interaction aims bypass
      * all of this so digging and placing keep exact rotations.</p>
@@ -211,9 +377,14 @@ public final class EmbeddedBaritoneRuntime {
         if (backend == null || owner == null || backend.getPlayerContext().player() == null) return;
         var player = backend.getPlayerContext().player();
         if (precisionAim) {
-            pendingSteerError = Float.NaN;
             InputDriver.look(player, yaw, pitch);
             return;
+        }
+        var currentExecutor = backend.getPathingBehavior().getCurrent();
+        PathExecutor executor = currentExecutor instanceof PathExecutor pathExecutor
+                ? pathExecutor : null;
+        if (executor != null && executor.submergedWaterTravelActive()) {
+            pitch = executor.submergedWaterCameraPitch();
         }
         if (!courseCommitted) {
             courseYaw = Mth.wrapDegrees(yaw);
@@ -235,10 +406,6 @@ public final class EmbeddedBaritoneRuntime {
             courseYaw = Mth.wrapDegrees(courseYaw + Mth.clamp(bearingError,
                     -COURSE_TURN_STEP_DEGREES, COURSE_TURN_STEP_DEGREES));
         }
-        float steerError = Mth.wrapDegrees(yaw - courseYaw);
-        pendingSteerError = Math.abs(steerError) <= COURSE_TURN_WINDOW_DEGREES
-                ? (float) Math.toRadians(steerError)
-                : Float.NaN;
         // Re-issued every tick even when unchanged: the look lease must stay fresh or the
         // camera would freeze on whatever the last precision aim left it on.
         float walkPitch = player.onGround()
@@ -251,7 +418,6 @@ public final class EmbeddedBaritoneRuntime {
     private static boolean courseCommitted;
     private static boolean courseTurning;
     private static float courseYaw;
-    private static float pendingSteerError = Float.NaN;
     /** Bearing corrections beyond this window rotate the course (a real corner); smaller
      * ones are absorbed as strafe input, keeping the view steady. */
     private static final float COURSE_TURN_WINDOW_DEGREES = 25.0f;
@@ -292,11 +458,13 @@ public final class EmbeddedBaritoneRuntime {
         settings.randomLooking.value = 0D;
         settings.randomLooking113.value = 0D;
         settings.allowSprint.value = sprintAllowed;
+        settings.sprintAscends.value = true;
         settings.sprintInWater.value = true;
         // 非放置型跑酷(跨洞跳跃)不改动地形,PRESERVE 下也安全;放置型跑酷仍由
         // permit 门控(allowParkourPlace)。
         settings.allowParkour.value = true;
         settings.allowBreak.value = permit.mayAlter();
+        settings.allowBreakAnyway.value = List.of();
         settings.allowPlace.value = permit.mayAlter();
         settings.allowParkourPlace.value = permit.mayAlter();
         settings.allowDownward.value = permit.mayAlter();
@@ -321,5 +489,56 @@ public final class EmbeddedBaritoneRuntime {
         if (!Minecraft.getInstance().isSameThread()) {
             throw new IllegalStateException("embedded Baritone is client-thread owned");
         }
+    }
+
+    private static LocalPlayerContext currentContext() {
+        LocalPlayerContext current = tickingContext;
+        if (current != null && current.isCurrent()) return current;
+        return ClientRuntime.actor().activeContext().orElse(null);
+    }
+
+    private static void queuePendingStart(PendingStart next) {
+        PendingStart queued = pendingStart;
+        if (queued != null && queued.navigator() != next.navigator()) {
+            queued.navigator().preempted(
+                    "a newer MaiCraft navigation superseded it before body acquisition");
+        }
+        pendingStart = next;
+    }
+
+    private static void promotePendingStart(IBaritone baritone) {
+        if (owner != null || pendingStart == null) return;
+        PendingStart next = pendingStart;
+        pendingStart = null;
+        if (!next.navigator().canAcquireRuntimeOwnership()) return;
+
+        EmbeddedBaritoneNavigator navigator = next.navigator();
+        owner = navigator;
+        configure(baritone, next.permit(), next.sprintAllowed());
+        EmbeddedBaritonePolicy.install(
+                next.compiled().sacred(),
+                navigator.protectedMutationCells(),
+                navigator.forbiddenBodyCells());
+        pendingPolicyOwner = null;
+        pendingPolicyGoal = null;
+        courseCommitted = false;
+        courseTurning = false;
+        baritone.getCustomGoalProcess().setGoalAndPath(
+                new MaiCraftGoalAdapter(next.compiled().goal()));
+    }
+
+    private static void replaceActiveRoute(
+            EmbeddedBaritoneNavigator navigator,
+            GoalCompiler.Compiled compiled,
+            LocalPlayerContext context,
+            String reason) {
+        if (backend == null || owner != navigator) return;
+        ACTIONS.suspend(context, navigator, reason);
+        backend.getPathingBehavior().forceCancel();
+        ((PathingBehavior) backend.getPathingBehavior()).discardPendingPathEvents();
+        backend.getCustomGoalProcess().setGoalAndPath(
+                new MaiCraftGoalAdapter(compiled.goal()));
+        pendingPolicyOwner = null;
+        pendingPolicyGoal = null;
     }
 }
