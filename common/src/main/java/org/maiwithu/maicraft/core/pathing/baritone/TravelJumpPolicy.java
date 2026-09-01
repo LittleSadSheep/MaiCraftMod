@@ -282,7 +282,8 @@ public final class TravelJumpPolicy {
      * 截断第一次向上碰撞,自然缩短跳步。同时记录弧顶高度,用于落点带的
      * 坠落距离裁决。
      */
-    private static JumpProjection projectJump(LocalPlayer player, Vec3i direction, boolean headHit) {
+    private static JumpProjection projectJump(
+            LocalPlayer player, HorizontalHeading heading, boolean headHit) {
         double gravity = player.getAttributeValue(Attributes.GRAVITY);
         double verticalSpeed = jumpVerticalSpeed(player);
         if (gravity <= 0.0 || verticalSpeed <= 0.0) {
@@ -291,10 +292,10 @@ public final class TravelJumpPolicy {
         double height = 0.0;
         double apex = 0.0;
         double headroom = Math.max(0.0, 2.0 - player.getBbHeight());
-        Vec3 launchVelocity = sprintJumpLaunchVelocity(player);
+        Vec3 launchVelocity = sprintJumpLaunchVelocity(player, heading);
         double forwardSpeed = Math.max(0.0,
-                launchVelocity.x * direction.getX()
-                        + launchVelocity.z * direction.getZ());
+                launchVelocity.x * heading.x()
+                        + launchVelocity.z * heading.z());
         double forwardDistance = 0.0;
         double airDragSum = 0.0;
         double drag = 1.0;
@@ -336,11 +337,32 @@ public final class TravelJumpPolicy {
                 * blockJumpFactor + player.getJumpBoostPower();
     }
 
-    /** 当前速度加上原版按朝向施加的 0.2 疾跑跳冲量。 */
-    private static Vec3 sprintJumpLaunchVelocity(LocalPlayer player) {
-        double yaw = Math.toRadians(player.getYRot());
+    /**
+     * 当前速度加上原版的 0.2 疾跑跳冲量。物理旋转桥会在 jumpFromGround 内把
+     * 可见的平滑相机 yaw 临时替换成 Baritone 的路线朝向，所以投影也必须使用同一个
+     * 路线坐标系；读 player.getYRot() 会把镜头尚未转完的误差重新带回落点判断。
+     */
+    private static Vec3 sprintJumpLaunchVelocity(LocalPlayer player, Vec3i direction) {
+        HorizontalHeading heading = HorizontalHeading.of(direction);
+        if (heading == null) return player.getDeltaMovement();
+        return sprintJumpLaunchVelocity(player, heading);
+    }
+
+    private static Vec3 sprintJumpLaunchVelocity(
+            LocalPlayer player, HorizontalHeading heading) {
         Vec3 velocity = player.getDeltaMovement();
-        return velocity.add(-Math.sin(yaw) * 0.2, 0.0, Math.cos(yaw) * 0.2);
+        return velocity.add(heading.x() * 0.2, 0.0, heading.z() * 0.2);
+    }
+
+    private record HorizontalHeading(double x, double z, double stepLength) {
+        private static HorizontalHeading of(Vec3i direction) {
+            if (direction == null || direction.getY() != 0) return null;
+            int x = direction.getX();
+            int z = direction.getZ();
+            if (Math.abs(x) > 1 || Math.abs(z) > 1 || (x == 0 && z == 0)) return null;
+            double length = Math.hypot(x, z);
+            return new HorizontalHeading(x / length, z / length, length);
+        }
     }
 
     private record JumpProjection(double forwardDistance, double airDragSum, double apexHeight) {}
