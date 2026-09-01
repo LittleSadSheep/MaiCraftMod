@@ -379,9 +379,9 @@ public final class SemanticAcquireCompanionTask
                         ? CraftingWorkstationCoordinator.inspect(player) : null;
         Set<String> excludedRecipes = new LinkedHashSet<>(need.lineageRecipes);
         excludedRecipes.addAll(need.rejectedRecipes);
-        if (!need.committedRecipeIds.isEmpty()) {
-            excludedRecipes.addAll(nonCommittedCraftRecipes(need));
-        }
+        // A commitment prevents speculative recursion from hopping between incomplete routes. It
+        // must not hide a different route whose complete material condition is now true: using
+        // already-carried inputs is strictly less work than extending the old prerequisite chain.
         // One comparison round is one planner unit. Charging once per tag member made the result
         // depend on registry order and could stop before the cheapest satisfiable alternative.
         if (!takePlannerStep()) return TaskState.RUNNING;
@@ -401,14 +401,17 @@ public final class SemanticAcquireCompanionTask
         }
 
         ExecutableCraft selected = executable.stream()
-                .filter(candidate -> recipeAllowedByCommit(
-                        need, candidate.plan().task()))
                 .filter(candidate -> candidate.plan().cost() != null)
                 .min(Comparator.comparing(
                         candidate -> candidate.plan().cost(), CraftPlanCost.ORDER))
                 .orElse(null);
         if (selected != null) {
-            commitRecipe(need, Set.of(selected.plan().task().recipeId.toString()));
+            // Material-complete alternatives supersede an incomplete commitment. Commitment only
+            // prevents speculative prerequisite hopping; it may never force more acquisition
+            // after another acceptable recipe is already executable from live inventory.
+            need.committedRecipeIds.clear();
+            need.committedRecipeIds.add(selected.plan().task().recipeId.toString());
+            need.committedRecipeEffectsObserved = false;
             need.attempted(SemanticAcquireTaskRecord.Source.CRAFT);
             return startChild(need, SemanticAcquireTaskRecord.Source.CRAFT,
                     selected.plan().task(),
