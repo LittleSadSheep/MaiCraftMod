@@ -164,7 +164,16 @@ public final class SemanticBuildPlanner {
         JsonObject args = new JsonObject();
         args.add("ops", ops);
         args.addProperty("replace_existing", replace);
-        args.addProperty("allow_partial", policy.equals("storage_available"));
+        // Every survival semantic build retains the complete Mod-authored plan while the generic
+        // material coordinator supplies recoverable batches. The public Goal still contains no
+        // cells or concrete acquisition steps.
+        args.addProperty("allow_partial", true);
+        args.addProperty("material_policy",
+                policy.equals("storage_available") ? "storage_available" : "ordinary");
+        args.addProperty("broaden_material_families", !policy.equals("specified"));
+        if (p.has("protected_labels") && p.get("protected_labels").isJsonArray()) {
+            args.add("protected_labels", p.get("protected_labels").deepCopy());
+        }
         args.add("semantic_contract", semanticContract(
                 size, features, site, resolvedCells, purpose));
         args.add("traversability_contract", traversabilityContract(site, size, features));
