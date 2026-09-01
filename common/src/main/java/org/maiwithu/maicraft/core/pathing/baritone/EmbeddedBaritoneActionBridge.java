@@ -298,3 +298,184 @@ final class EmbeddedBaritoneActionBridge {
             InteractionHand hand,
             BlockHitResult hit,
             BlockPos clicked,
+            BlockState beforeClicked,
+            BlockPos actual,
+            BlockState beforeActual,
+            boolean mutatesTerrain) {
+        List<NativeConfirmation> confirmations = new ArrayList<>();
+        confirmations.add(NativeConfirmation.blockChanged(clicked, beforeClicked));
+        if (actual != null && !actual.equals(clicked) && beforeActual != null) {
+            confirmations.add(NativeConfirmation.blockChanged(actual, beforeActual));
+        }
+        try {
+            rememberUse(navigator, clicked, beforeClicked, actual, beforeActual, mutatesTerrain);
+            pendingKind = PendingKind.BLOCK_USE;
+            receipt = context.actions().useBlock(
+                    context,
+                    hand,
+                    hit,
+                    NativeConfirmation.anyOf(confirmations.toArray(NativeConfirmation[]::new)),
+                    USE_CONFIRM_TICKS);
+            rightClickCooldown = Math.max(0,
+                    BaritoneAPI.getSettings().rightClickSpeed.value - 1);
+            settle(context);
+        } catch (RuntimeException unavailable) {
+            clearReceipt();
+        }
+    }
+
+    private void submitItemUse(
+            LocalPlayerContext context,
+            EmbeddedBaritoneNavigator navigator,
+            InteractionHand hand,
+            BlockPos clicked,
+            BlockState beforeClicked,
+            BlockPos actual,
+            BlockState beforeActual) {
+        NativeConfirmation confirmation = NativeConfirmation.anyOf(
+                NativeConfirmation.blockChanged(clicked, beforeClicked),
+                NativeConfirmation.blockChanged(actual, beforeActual));
+        try {
+            rememberUse(navigator, clicked, beforeClicked, actual, beforeActual, true);
+            pendingKind = PendingKind.ITEM_USE;
+            receipt = context.actions().useItem(
+                    context, hand, confirmation, USE_CONFIRM_TICKS);
+            rightClickCooldown = Math.max(0,
+                    BaritoneAPI.getSettings().rightClickSpeed.value - 1);
+            settle(context);
+        } catch (RuntimeException unavailable) {
+            clearReceipt();
+        }
+    }
+
+    private void rememberUse(
+            EmbeddedBaritoneNavigator navigator,
+            BlockPos clicked,
+            BlockState beforeClicked,
+            BlockPos actual,
+            BlockState beforeActual,
+            boolean mutatesTerrain) {
+        receiptOwner = navigator;
+        clickedCell = clicked;
+        clickedBefore = beforeClicked;
+        placedCell = actual;
+        placedBefore = beforeActual;
+        terrainUse = mutatesTerrain;
+    }
+
+    private void settle(LocalPlayerContext context) {
+        NativeActionReceipt current = receipt;
+        if (current == null) return;
+        if (!current.terminal()) {
+            try {
+                current = context.actions().poll(context, current);
+                receipt = current;
+            } catch (RuntimeException unavailable) {
+                return;
+            }
+        }
+        if (!current.terminal()) return;
+        if (current.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED
+                && receiptOwner != null) {
+            if (pendingKind == PendingKind.BREAK
+                    || pendingKind == PendingKind.BLOCK_USE
+                    || pendingKind == PendingKind.ITEM_USE) {
+                receiptOwner.recordConfirmedNativeAction();
+            }
+            if (pendingKind == PendingKind.BREAK
+                    && breakTarget != null && breakBefore != null) {
+                receiptOwner.recordConfirmedBreak(breakTarget, breakBefore);
+            } else if ((pendingKind == PendingKind.BLOCK_USE
+                    || pendingKind == PendingKind.ITEM_USE) && terrainUse) {
+                recordWorldDelta(context, receiptOwner, clickedCell, clickedBefore);
+                if (placedCell != null && !placedCell.equals(clickedCell)) {
+                    recordWorldDelta(context, receiptOwner, placedCell, placedBefore);
+                }
+            }
+        }
+        clearReceipt();
+    }
+
+    private static void recordWorldDelta(
+            LocalPlayerContext context,
+            EmbeddedBaritoneNavigator navigator,
+            BlockPos cell,
+            BlockState before) {
+        if (cell == null || before == null || !context.level().isLoaded(cell)) return;
+        BlockState after = context.level().getBlockState(cell);
+        if (after.equals(before)) return;
+        boolean removedSolid = !before.isAir() && after.isAir();
+        boolean removedFluid = !before.getFluidState().isEmpty()
+                && after.getFluidState().isEmpty();
+        if (removedSolid || removedFluid) {
+            navigator.recordConfirmedBreak(cell, before);
+        }
+        boolean placedSolid = before.canBeReplaced() && !after.canBeReplaced();
+        boolean placedFluid = before.getFluidState().isEmpty()
+                && !after.getFluidState().isEmpty();
+        if (placedSolid || placedFluid) {
+            navigator.recordConfirmedPlace(cell, after);
+        }
+    }
+
+    private void clearReceipt() {
+        receipt = null;
+        pendingKind = null;
+        receiptOwner = null;
+        breakTarget = null;
+        breakBefore = null;
+        clickedCell = null;
+        clickedBefore = null;
+        placedCell = null;
+        placedBefore = null;
+        terrainUse = false;
+        hotbarTarget = -1;
+        stopBreakingRequested = false;
+    }
+
+    private static InteractionHand chooseUseHand(LocalPlayer player) {
+        ItemStack main = player.getMainHandItem();
+        ItemStack off = player.getOffhandItem();
+        if (main.getItem() instanceof BlockItem || main.getItem() instanceof BucketItem) {
+            return InteractionHand.MAIN_HAND;
+        }
+        if (off.getItem() instanceof BlockItem || off.getItem() instanceof BucketItem) {
+            return InteractionHand.OFF_HAND;
+        }
+        return InteractionHand.MAIN_HAND;
+    }
+
+    private static boolean isHandOpenable(BlockState state) {
+        return state.is(BlockTags.WOODEN_DOORS)
+                || state.getBlock() instanceof FenceGateBlock;
+    }
+
+    private static BlockPos otherDoorHalf(BlockPos clicked, BlockState state) {
+        if (!(state.getBlock() instanceof DoorBlock)
+                || !state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)) {
+            return null;
+        }
+        return state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.LOWER
+                ? clicked.above() : clicked.below();
+    }
+
+    private static BlockPos placementCell(
+            BlockPos clicked,
+            BlockState clickedState,
+            BlockHitResult hit) {
+        return (clickedState.canBeReplaced()
+                ? clicked : clicked.relative(hit.getDirection())).immutable();
+    }
+
+    /**
+     * Size the confirmation lease from vanilla's live per-tick destroy progress instead of
+     * imposing a fixed wall-clock cutoff. Slow but valid work (for example a poor tool against a
+     * hard block) therefore remains valid, while the extra half-duration plus synchronization
+     * margin still bounds a receipt whose server facts never arrive.
+     */
+    private static int breakConfirmationTicks(float destroyProgress) {
+        long expected = Math.max(1L, (long) Math.ceil(1.0D / destroyProgress));
+        long synchronizationMargin = Math.max(40L, expected / 2L);
+        return (int) Math.min(Integer.MAX_VALUE, expected + synchronizationMargin);
+    }
+}

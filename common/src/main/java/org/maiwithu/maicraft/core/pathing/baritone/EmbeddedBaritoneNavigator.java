@@ -142,34 +142,23 @@ public final class EmbeddedBaritoneNavigator {
         return PlayerNav.Status.RUNNING;
     }
 
-    /**
-     * Shared unreachable-target failure. PRESERVE 下算不出路是地形策略挡的,不是几何上
-     * 无路:类型必须如实报 TERRAIN_BLOCKED,否则上游会把真实原因错包成 NO_PATH
-     * (旧验收点名过这个坑)。
-     */
-    private PlayerNav.Status failNoPath(String detail) {
-        String qualifier = permit == TerrainPermit.PRESERVE
-                ? " under the no-terrain-alteration policy" : "";
-        String advice = terrainProbeRequested && permit == TerrainPermit.PRESERVE
-                ? "; a terrain-changing route has not been executed or assumed"
-                : "";
-        return fail(permit == TerrainPermit.PRESERVE
-                        ? FailureType.TERRAIN_BLOCKED : FailureType.NO_PATH,
-                detail + qualifier + advice);
+    /** Runtime continuation for callers that released their last PlayerNav reference mid-air. */
+    boolean requiresOrphanContinuation() {
+        return pendingFailureType != null || pendingPause;
     }
 
-    /** Tracks net convergence toward the goal while executing; true while progress continues. */
-    private boolean updateGoalProgress() {
-        double distance = feet().distSqr(plannedCenter);
-        if (distance < bestGoalDistanceSqr - GOAL_PROGRESS_SQR) {
-            bestGoalDistanceSqr = distance;
-            ticksWithoutGoalProgress = 0;
-            return true;
+    /** Finish a latched failure once the movement itself declares hand-off safe. */
+    void settlePendingFailureAtSafeBoundary() {
+        if (pendingFailureType != null && isSafeToCancel()) {
+            finishPendingFailureWhenSafe();
+        } else if (pendingPause && isSafeToCancel()) {
+            completePause();
         }
-        return ++ticksWithoutGoalProgress < UNREACHABLE_GRIND_TICKS;
     }
 
     private PlayerNav.Status arrive() {
+        cancelTerrainProbe();
+        pendingPause = false;
         arrivedLatched = true;
         driveRequested = false;
         EmbeddedBaritoneRuntime.suspend(this);
@@ -178,6 +167,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     private PlayerNav.Status fail(FailureType type, String reason) {
+        cancelTerrainProbe();
         failureType = type;
         failureReason = reason;
         terminalFailure = true;
@@ -222,11 +212,35 @@ public final class EmbeddedBaritoneNavigator {
                 && goal.isAt(EmbeddedBaritoneRuntime.pathStart(this, now));
     }
 
+    void preemptWhenSafe(String reason) {
+        failWhenSafe(FailureType.INTERRUPTED, reason);
+    }
+
     void preempted(String reason) {
-        failureType = FailureType.INTERRUPTED;
-        failureReason = reason;
+        abort(FailureType.INTERRUPTED, reason);
+    }
+
+    void internalFailure(String reason) {
+        abort(FailureType.INTERNAL, reason);
+    }
+
+    private void abort(FailureType fallbackType, String fallbackReason) {
+        if (terminalFailure) return;
+        cancelTerrainProbe();
+        // A hard body/world/runtime boundary cannot be drained, but it still must not erase a
+        // more specific result that was already waiting for an airborne movement to land.
+        failureType = pendingFailureType == null ? fallbackType : pendingFailureType;
+        failureReason = pendingFailureType == null ? fallbackReason : pendingFailureReason;
+        pendingFailureType = null;
+        pendingFailureReason = null;
+        pendingArrival = false;
+        pendingPause = false;
         terminalFailure = true;
         driveRequested = false;
+    }
+
+    boolean canAcquireRuntimeOwnership() {
+        return !terminalFailure && !stopped && pendingFailureType == null;
     }
 
     boolean consumeDriveRequest() {
@@ -256,13 +270,24 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public int stallTicks() {
-        return EmbeddedBaritoneRuntime.hasConcretePath(this)
-                ? ticksSincePhysicalProgress : 0;
+        if (EmbeddedBaritoneRuntime.hasActiveAction(this)) return 0;
+        if (!EmbeddedBaritoneRuntime.hasConcretePath(this)) return 0;
+        return Math.min(ticksSincePhysicalProgress, nativeActionProgressAge());
     }
 
     public boolean hasRecentPhysicalProgress(int graceTicks) {
-        return EmbeddedBaritoneRuntime.hasConcretePath(this)
-                && ticksSincePhysicalProgress <= Math.max(0, graceTicks);
+        int grace = Math.max(0, graceTicks);
+        return EmbeddedBaritoneRuntime.hasActiveAction(this)
+                || (EmbeddedBaritoneRuntime.hasConcretePath(this)
+                        && ticksSincePhysicalProgress <= grace)
+                || nativeActionProgressAge() <= grace;
+    }
+
+    private int nativeActionProgressAge() {
+        if (lastNativeActionProgressGameTime == Long.MIN_VALUE) return Integer.MAX_VALUE;
+        long age = player.level().getGameTime() - lastNativeActionProgressGameTime;
+        if (age < 0L || age > Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        return (int) age;
     }
 
     public String outcomeSummary() {
@@ -284,20 +309,34 @@ public final class EmbeddedBaritoneNavigator {
     public void stop() {
         if (stopped) return;
         stopped = true;
-        driveRequested = false;
-        EmbeddedBaritoneRuntime.release(this);
-        InputDriver.halt(player);
+        if (terminalFailure) return;
+        failWhenSafe(FailureType.TARGET_LOST, "navigation was stopped");
     }
 
     public void pause() {
+        driveRequested = false;
+        if (!isSafeToCancel()) {
+            pendingPause = true;
+            driveRequested = true;
+            return;
+        }
+        completePause();
+    }
+
+    private void completePause() {
+        // Another first-person winner may change the world while this task is suspended. A
+        // diagnostic A* is tied to the failed route's frozen chunk view, so discard it and take a
+        // fresh second opinion after resumption instead of reporting stale terrain evidence.
+        cancelTerrainProbe();
+        pendingPause = false;
         driveRequested = false;
         EmbeddedBaritoneRuntime.suspend(this);
         InputDriver.halt(player);
     }
 
     public boolean yieldForExternalAction() {
-        pause();
         if (!isSafeToCancel()) return false;
+        pause();
         var context = ClientRuntime.requireContext(player);
         return context.permitsNativeActions() && context.mutationAvailable();
     }
