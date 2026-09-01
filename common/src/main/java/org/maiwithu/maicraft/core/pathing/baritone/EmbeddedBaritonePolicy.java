@@ -18,7 +18,7 @@ public final class EmbeddedBaritonePolicy {
 
     private EmbeddedBaritonePolicy() {}
 
-    public static void install(
+    public static boolean install(
             LongSet sacred,
             LongSet protectedMutations,
             LongSet forbiddenBodyCells) {
@@ -29,9 +29,12 @@ public final class EmbeddedBaritonePolicy {
 
         LongOpenHashSet forbidden = new LongOpenHashSet();
         if (forbiddenBodyCells != null) forbidden.addAll(forbiddenBodyCells);
-        current = new Snapshot(
+        Snapshot next = new Snapshot(
                 LongSets.unmodifiable(protectedCells),
                 LongSets.unmodifiable(forbidden));
+        boolean changed = !next.equals(current);
+        current = next;
+        return changed;
     }
 
     public static Snapshot snapshot() {

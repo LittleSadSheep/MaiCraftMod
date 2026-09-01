@@ -2,12 +2,18 @@
 package org.maiwithu.maicraft.core.pathing.baritone;
 
 import baritone.api.event.events.PathEvent;
+import baritone.api.utils.PathCalculationResult;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
@@ -28,35 +34,22 @@ import org.maiwithu.maicraft.entity.InputDriver;
  * the calling semantic task retains its existing progress lease.</p>
  */
 public final class EmbeddedBaritoneNavigator {
-    private static final int LIVE_GOAL_REPLAN_TICKS = 5;
-    private static final double GOAL_MOVED_SQR = 4.0D;
-    /** Baritone answers an unreachable goal with best-effort partial paths toward the
-     * closest reachable point and replans forever — the body circles without converging
-     * (CALC_FAILED never fires, and circling keeps the physical-progress lease alive).
-     * No net progress toward the goal for this many executing ticks is reported as the
-     * honest unreachable failure it is; self-developed pathing failed fast here. */
-    private static final int UNREACHABLE_GRIND_TICKS = 900;
-    /** Squared net improvement (3 blocks) that counts as real progress and resets the
-     * grind clock; anything smaller is path jitter around the same frontier. */
-    private static final double GOAL_PROGRESS_SQR = 9.0D;
-
     private final LocalPlayer player;
     private final Supplier<GoalCompiler.Compiled> compiledSupplier;
     private final BooleanSupplier reached;
+    private final PlayerNav.ContextProvider contextProvider;
     private final TerrainPermit permit;
     private final boolean sprintAllowed;
-    private final boolean revalidateGoalEachTick;
     private final TerrainBill ledger = new TerrainBill();
     private final EnumMap<PathEvent, Integer> events = new EnumMap<>(PathEvent.class);
 
     private GoalCompiler.Compiled compiled;
+    private GoalCompiler.CompiledFingerprint compiledFingerprint;
     private NavGoal goal;
     private BlockPos plannedCenter;
     private BlockPos lastFeet;
-    private int ticksSinceGoalRead;
+    private long lastNativeActionProgressGameTime = Long.MIN_VALUE;
     private int ticksSincePhysicalProgress;
-    private int ticksWithoutGoalProgress;
-    private double bestGoalDistanceSqr = Double.MAX_VALUE;
     private boolean started;
     private boolean driveRequested;
     private boolean arrivedLatched;
@@ -64,6 +57,13 @@ public final class EmbeddedBaritoneNavigator {
     private boolean stopped;
     private boolean terminalFailure;
     private boolean terrainProbeRequested;
+    private boolean pendingArrival;
+    private boolean pendingPause;
+    private FailureType pendingFailureType;
+    private String pendingFailureReason;
+    private EmbeddedBaritoneTerrainProbe.ProbeFuture terrainProbe;
+    private GoalCompiler.CompiledFingerprint terrainProbeFingerprint;
+    private EmbeddedBaritonePolicy.Snapshot terrainProbePolicy;
     private FailureType failureType = FailureType.NO_PATH;
     private String failureReason = "embedded pathing has not failed";
 
@@ -71,15 +71,44 @@ public final class EmbeddedBaritoneNavigator {
             LocalPlayer player,
             Supplier<GoalCompiler.Compiled> compiledSupplier,
             BooleanSupplier reached,
-            TerrainPermit permit,
+            PlayerNav.ContextProvider contextProvider,
             boolean sprintAllowed,
             boolean revalidateGoalEachTick) {
         this.player = player;
         this.compiledSupplier = compiledSupplier;
         this.reached = reached;
-        this.permit = permit;
+        this.contextProvider = contextProvider;
+        this.permit = contextProvider.permit();
         this.sprintAllowed = sprintAllowed;
-        this.revalidateGoalEachTick = revalidateGoalEachTick;
+    }
+
+    LongSet protectedMutationCells() {
+        return contextProvider.embeddedProtectedMutationCells();
+    }
+
+    LongSet forbiddenBodyCells() {
+        return contextProvider.embeddedForbiddenBodyCells();
+    }
+
+    TerrainPermit permit() {
+        return permit;
+    }
+
+    HitResult objectMouseOver() {
+        return EmbeddedBaritoneRuntime.objectMouseOver(this);
+    }
+
+    void recordConfirmedBreak(BlockPos pos, BlockState before) {
+        ledger.addBreak(pos, before);
+    }
+
+    void recordConfirmedPlace(BlockPos pos, BlockState placed) {
+        ledger.addPlace(pos, placed.getBlock());
+    }
+
+    void recordConfirmedNativeAction() {
+        lastNativeActionProgressGameTime = player.level().getGameTime();
+        ticksSincePhysicalProgress = 0;
     }
 
     public static boolean enabled() {
@@ -92,30 +121,40 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public PlayerNav.Status tick() {
-        if (reached.getAsBoolean()) return arrive();
         if (terminalFailure) return PlayerNav.Status.FAILED;
-        if (stopped) return fail(FailureType.TARGET_LOST, "navigation was stopped");
+        if (pendingFailureType != null) return finishPendingFailureWhenSafe();
+        if (stopped) {
+            return failWhenSafe(FailureType.TARGET_LOST, "navigation was stopped");
+        }
+        if (pendingPause) {
+            if (!isSafeToCancel()) return continueToSafeBoundary();
+            completePause();
+        }
+
+        if (pendingArrival) {
+            if (!isSafeToCancel()) return continueToSafeBoundary();
+            pendingArrival = false;
+            if (reached.getAsBoolean()) return arrive();
+            // The stronger predicate moved away while the current movement landed. Fall through
+            // and compile a fresh goal before accepting graph membership from a live supplier.
+        }
+
+        if (reached.getAsBoolean()) return arriveWhenSafe();
         if (player.isPassenger()) player.stopRiding();
 
         GoalCompiler.Compiled fresh = compiledSupplier.get();
-        if (fresh == null) return fail(FailureType.TARGET_LOST, "target lost");
+        if (fresh == null) return failWhenSafe(FailureType.TARGET_LOST, "target lost");
         NavGoal freshGoal = fresh.goal();
         BlockPos freshCenter = freshGoal.center();
+        GoalCompiler.CompiledFingerprint freshFingerprint = fresh.semanticFingerprint();
 
-        boolean moved = plannedCenter != null
-                && freshCenter.distSqr(plannedCenter) > GOAL_MOVED_SQR;
-        boolean periodic = revalidateGoalEachTick
-                && ++ticksSinceGoalRead >= LIVE_GOAL_REPLAN_TICKS;
-        if (!started || moved || periodic || (arrivedLatched && !freshGoal.isAt(feet()))) {
-            // The grind clock follows the target, not the replan cadence: a periodic
-            // replan of an unmoved goal must not reset unreachability accounting, or
-            // live-goal navigations could circle forever.
-            if (moved || plannedCenter == null) {
-                ticksWithoutGoalProgress = 0;
-                bestGoalDistanceSqr = Double.MAX_VALUE;
-            }
-            ticksSinceGoalRead = 0;
+        boolean semanticsChanged = compiledFingerprint != null
+                && !compiledFingerprint.equals(freshFingerprint);
+        if (!started || semanticsChanged
+                || (arrivedLatched && !freshGoal.isAt(feet()))) {
+            if (semanticsChanged) cancelTerrainProbe();
             compiled = fresh;
+            compiledFingerprint = freshFingerprint;
             goal = freshGoal;
             plannedCenter = freshCenter.immutable();
             arrivedLatched = false;
@@ -125,19 +164,150 @@ public final class EmbeddedBaritoneNavigator {
         } else {
             // Protected-area ThreadLocals are task-scoped and may change even for a fixed target.
             // Refresh the policy before a later segment calculation without forcing a replan.
-            EmbeddedBaritoneRuntime.refreshPolicy(this, compiled);
+            if (EmbeddedBaritoneRuntime.refreshPolicy(this, compiled)) {
+                cancelTerrainProbe();
+                calculationFailed = false;
+            }
         }
 
         updatePhysicalProgress();
-        if (reached.getAsBoolean() || hasStableSearchMembership()) return arrive();
-        if (calculationFailed) {
-            return failNoPath("Baritone found no path to " + plannedCenter.toShortString());
+        if (reached.getAsBoolean() || hasStableSearchMembership()) return arriveWhenSafe();
+        if (calculationFailed
+                && !EmbeddedBaritoneRuntime.hasConcretePath(this)
+                && !EmbeddedBaritoneRuntime.planningInFlight(this)) {
+            return diagnoseNoPath();
         }
-        if (EmbeddedBaritoneRuntime.hasConcretePath(this) && !updateGoalProgress()) {
-            return failNoPath("no net progress toward " + plannedCenter.toShortString()
-                    + " for 45s of pathing; the target appears unreachable");
+        driveRequested = true;
+        return PlayerNav.Status.RUNNING;
+    }
+
+    private PlayerNav.Status diagnoseNoPath() {
+        String detail = "Baritone found no path to " + plannedCenter.toShortString();
+        if (!terrainProbeRequested || permit != TerrainPermit.PRESERVE) {
+            return failWhenSafe(FailureType.NO_PATH, detail);
+        }
+        if (terrainProbe == null) {
+            terrainProbeFingerprint = compiledFingerprint;
+            terrainProbePolicy = EmbeddedBaritoneRuntime.policySnapshot(this);
+            terrainProbe = terrainProbePolicy == null ? null
+                    : EmbeddedBaritoneRuntime.submitTerrainProbe(this, feet(), goal);
+            if (terrainProbe == null) {
+                clearTerrainProbeState();
+                return failWhenSafe(FailureType.NO_PATH,
+                        detail + "; the read-only terrain probe could not acquire the current "
+                                + "navigation evidence, and no terrain change was executed");
+            }
+        }
+        if (!terrainProbe.isDone()) {
+            driveRequested = false;
+            return PlayerNav.Status.RUNNING;
         }
 
+        EmbeddedBaritoneTerrainProbe.Result result;
+        try {
+            result = terrainProbe.join();
+        } catch (CancellationException cancelled) {
+            clearTerrainProbeState();
+            return failWhenSafe(FailureType.INTERRUPTED,
+                    "the read-only terrain probe was cancelled before it produced evidence; "
+                            + "no terrain change was executed");
+        } catch (CompletionException failed) {
+            Throwable cause = failed.getCause() == null ? failed : failed.getCause();
+            clearTerrainProbeState();
+            return failWhenSafe(FailureType.INTERNAL,
+                    "the read-only terrain probe failed internally: "
+                            + cause.getClass().getSimpleName()
+                            + "; no terrain change was executed");
+        }
+
+        GoalCompiler.CompiledFingerprint probedFingerprint = terrainProbeFingerprint;
+        EmbeddedBaritonePolicy.Snapshot probedPolicy = terrainProbePolicy;
+        clearTerrainProbeState();
+        if (!compiledFingerprint.equals(probedFingerprint)
+                || !EmbeddedBaritonePolicy.snapshot().equals(probedPolicy)) {
+            calculationFailed = false;
+            EmbeddedBaritoneRuntime.startOrUpdate(this, compiled, permit, sprintAllowed);
+            return PlayerNav.Status.RUNNING;
+        }
+        if (reached.getAsBoolean()) return arriveWhenSafe();
+
+        PathCalculationResult.Type type = result.calculation().getType();
+        TerrainBill bill = result.terrainBill();
+        if (type == PathCalculationResult.Type.EXCEPTION) {
+            return failWhenSafe(FailureType.INTERNAL,
+                    "the read-only terrain probe ended with an internal search error; no terrain "
+                            + "change was executed");
+        }
+        if (type == PathCalculationResult.Type.CANCELLATION) {
+            return failWhenSafe(FailureType.INTERRUPTED,
+                    "the read-only terrain probe was cancelled before a conclusion; no terrain "
+                            + "change was executed");
+        }
+        if (type != PathCalculationResult.Type.SUCCESS_TO_GOAL) {
+            String partial = bill.isEmpty() ? "" : "; its incomplete segment would "
+                    + bill.describe();
+            return failWhenSafe(FailureType.NO_PATH,
+                    detail + " even when a read-only probe was allowed to consider digging, "
+                            + "bridging, pillaring and water placement" + partial
+                            + "; the probe did not establish a complete route and executed nothing");
+        }
+        if (bill.isEmpty()) {
+            return failWhenSafe(FailureType.NO_PATH,
+                    "the preserve calculation failed, but a read-only second calculation reached "
+                            + "the goal without needing terrain changes; treat the original result "
+                            + "as transient and retry the same intent; nothing was executed");
+        }
+        return failWhenSafe(FailureType.TERRAIN_BLOCKED,
+                "no complete route was found without altering terrain; a read-only full-route "
+                        + "probe from " + feet().toShortString() + " toward "
+                        + plannedCenter.toShortString() + " would " + bill.describe()
+                        + ". This is a proposed terrain budget only: nothing was executed. "
+                        + "Retry with explicit terrain permission, choose another destination, "
+                        + "or ask the audience/player.");
+    }
+
+    private void cancelTerrainProbe() {
+        if (terrainProbe != null) terrainProbe.cancel(true);
+        clearTerrainProbeState();
+    }
+
+    private void clearTerrainProbeState() {
+        terrainProbe = null;
+        terrainProbeFingerprint = null;
+        terrainProbePolicy = null;
+    }
+
+    /** A completed predicate may not clear steering in the middle of a fall or parkour launch. */
+    private PlayerNav.Status arriveWhenSafe() {
+        if (!isSafeToCancel()) {
+            pendingArrival = true;
+            return continueToSafeBoundary();
+        }
+        return arrive();
+    }
+
+    private PlayerNav.Status failWhenSafe(FailureType type, String reason) {
+        pendingArrival = false;
+        pendingPause = false;
+        // Preserve the first concrete terminal cause. A later cleanup/stop request must not
+        // overwrite the TARGET_LOST, CALC_FAILED, or policy evidence already being drained.
+        if (pendingFailureType == null) {
+            pendingFailureType = type;
+            pendingFailureReason = reason;
+        }
+        return finishPendingFailureWhenSafe();
+    }
+
+    private PlayerNav.Status finishPendingFailureWhenSafe() {
+        if (!isSafeToCancel()) return continueToSafeBoundary();
+        FailureType type = pendingFailureType;
+        String reason = pendingFailureReason;
+        pendingFailureType = null;
+        pendingFailureReason = null;
+        return fail(type, reason);
+    }
+
+    private PlayerNav.Status continueToSafeBoundary() {
         driveRequested = true;
         return PlayerNav.Status.RUNNING;
     }
