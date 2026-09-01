@@ -322,19 +322,17 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             fixedCandidates = Ae2TerminalAccess.targetsFor(
                     player, remembered.position(), remembered.side());
         } else {
+            boolean rememberedTerminalMissing = remembered != null;
             if (remembered != null) Ae2TerminalAccess.discard(remembered);
             remembered = null;
-            Ae2TerminalAccess.Discovery discovery = Ae2TerminalAccess.discover(player, bridge);
-            fixedCandidates = discovery.targets();
-            if (fixedCandidates.isEmpty()) {
-                String code = discovery.terminalsObserved() > 0
-                        ? "fixed_terminal_unreachable" : "fixed_terminal_not_found";
-                finishNow(Ae2ResourceSupply.Status.FAILED, code,
-                        discovery.terminalsObserved() > 0
-                                ? "loaded fixed AE2 terminals have no bounded interaction approach"
-                                : "no wireless or loaded fixed AE2 terminal is available", false);
-                return;
-            }
+            finishNow(Ae2ResourceSupply.Status.FAILED,
+                    rememberedTerminalMissing
+                            ? "remembered_fixed_terminal_missing" : "fixed_terminal_not_known",
+                    rememberedTerminalMissing
+                            ? "the explicitly observed fixed AE2 terminal is no longer present; inspect or mark an AE terminal again"
+                            : "no wireless AE terminal is carried and no fixed AE terminal has been explicitly observed with inspect_machine; keep an AE storage menu open or inspect/mark a fixed terminal first",
+                    false);
+            return;
         }
         if (fixedCandidates.isEmpty()) {
             finishNow(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_unreachable",

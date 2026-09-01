@@ -17,7 +17,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
 
-/** Loaded-client-world discovery and process-local memory for AE2 terminal access. */
+/** Explicitly observed, process-local memory for AE2 terminal access. */
 final class Ae2TerminalAccess {
     static final List<ResourceLocation> WIRELESS_TERMINAL_IDS = List.of(
             ResourceLocation.fromNamespaceAndPath("ae2", "wireless_terminal"),
@@ -36,20 +36,17 @@ final class Ae2TerminalAccess {
         }
     }
 
-    record Discovery(List<FixedTarget> targets, int terminalsObserved) {
-        Discovery { targets = List.copyOf(targets); }
-    }
-
     record Known(UUID playerId, ClientLevel level, BlockPos position, Direction side) {
         Known { position = position.immutable(); }
     }
 
+    record ExplicitObservation(
+            int radius,
+            int fixedTerminalsObserved,
+            int terminalFacesObserved,
+            Known selected) {}
+
     private static Known remembered;
-    private static UUID observationPlayer;
-    private static ClientLevel observationLevel;
-    private static BlockPos observationOrigin;
-    private static int observationIndex;
-    private static long nextObservationTick;
 
     private Ae2TerminalAccess() {}
 
@@ -68,20 +65,29 @@ final class Ae2TerminalAccess {
         return null;
     }
 
-    static Discovery discover(LocalPlayer player, Ae2ReflectionBridge bridge) {
+    /**
+     * Remember a fixed terminal only from an explicit, bounded machine observation. This inspects
+     * block-entity maps of already-loaded chunks intersecting the observed cube; it never loads a
+     * chunk, moves the player, opens a menu, or broadens the requested observation area.
+     */
+    static synchronized ExplicitObservation rememberObservedWithin(
+            LocalPlayer player, Ae2ReflectionBridge bridge, BlockPos center, int requestedRadius) {
         ClientLevel level = (ClientLevel) player.level();
-        BlockPos origin = player.blockPosition();
+        if (requestedRadius < 0) {
+            throw new IllegalArgumentException("explicit observation radius may not be negative");
+        }
+        int radius = requestedRadius;
         BlockPos minimum = new BlockPos(
-                origin.getX() - FIXED_TERMINAL_RADIUS,
-                Math.max(level.getMinBuildHeight(), origin.getY() - FIXED_TERMINAL_VERTICAL_RADIUS),
-                origin.getZ() - FIXED_TERMINAL_RADIUS);
+                center.getX() - radius,
+                Math.max(level.getMinBuildHeight(), center.getY() - radius),
+                center.getZ() - radius);
         BlockPos maximum = new BlockPos(
-                origin.getX() + FIXED_TERMINAL_RADIUS,
-                Math.min(level.getMaxBuildHeight() - 1,
-                        origin.getY() + FIXED_TERMINAL_VERTICAL_RADIUS),
-                origin.getZ() + FIXED_TERMINAL_RADIUS);
+                center.getX() + radius,
+                Math.min(level.getMaxBuildHeight() - 1, center.getY() + radius),
+                center.getZ() + radius);
         List<Observed> observed = new ArrayList<>();
-        int observedCount = 0;
+        int terminalCount = 0;
+        int faceCount = 0;
         for (int chunkX = minimum.getX() >> 4; chunkX <= maximum.getX() >> 4; chunkX++) {
             for (int chunkZ = minimum.getZ() >> 4; chunkZ <= maximum.getZ() >> 4; chunkZ++) {
                 LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
@@ -92,21 +98,26 @@ final class Ae2TerminalAccess {
                             || position.getY() < minimum.getY() || position.getY() > maximum.getY()
                             || position.getZ() < minimum.getZ()
                             || position.getZ() > maximum.getZ()) continue;
-                    for (Direction side : bridge.fixedTerminalSides(entry.getValue())) {
-                        observedCount++;
-                        if (observed.size() < MAX_FIXED_TERMINALS) {
-                            observed.add(new Observed(position.immutable(), side));
-                        }
+                    List<Direction> sides = bridge.fixedTerminalSides(entry.getValue());
+                    if (sides.isEmpty()) continue;
+                    terminalCount++;
+                    faceCount += sides.size();
+                    for (Direction side : sides) {
+                        observed.add(new Observed(position.immutable(), side));
                     }
                 }
             }
         }
-        observed.sort(Comparator.comparingDouble(value -> value.position().distSqr(origin)));
-        List<FixedTarget> targets = new ArrayList<>();
-        for (Observed value : observed.stream().limit(MAX_FIXED_TERMINAL_PLAN_TARGETS).toList()) {
-            targets.addAll(targetsFor(player, value.position(), value.side()));
+        observed.sort(Comparator
+                .comparingDouble((Observed value) -> value.position().distSqr(center))
+                .thenComparingDouble(value -> value.position().distSqr(player.blockPosition())));
+        Known selected = null;
+        if (!observed.isEmpty()) {
+            Observed nearest = observed.getFirst();
+            selected = new Known(player.getUUID(), level, nearest.position(), nearest.side());
+            remembered = selected;
         }
-        return new Discovery(targets, observedCount);
+        return new ExplicitObservation(radius, terminalCount, faceCount, selected);
     }
 
     static List<FixedTarget> targetsFor(LocalPlayer player, BlockPos position, Direction side) {
@@ -151,61 +162,6 @@ final class Ae2TerminalAccess {
         return ((ClientLevel) player.level()).isLoaded(position);
     }
 
-    /**
-     * Incrementally remember a nearby fixed terminal while ordinary play is already keeping its
-     * chunk loaded.  This is passive perception, not a transaction: a bounded number of already
-     * loaded chunk block-entity maps is inspected per client tick and no packet, movement, menu or
-     * world action is submitted. Empty terrain is never scanned block by block.
-     *
-     * <p>The memory lets a later semantic material prerequisite return to an already observed AE
-     * access point after travelling elsewhere.  It remains only a last-known location until the
-     * terminal's chunk is loaded again and {@link #stillPresent} confirms it.</p>
-     */
-    static synchronized void observeNearby(
-            LocalPlayer player, Ae2ReflectionBridge bridge, int chunkBudget) {
-        if (chunkBudget <= 0 || remembered(player) != null) return;
-        ClientLevel level = (ClientLevel) player.level();
-        long now = level.getGameTime();
-        boolean identityChanged = observationPlayer == null
-                || !observationPlayer.equals(player.getUUID())
-                || observationLevel != level;
-        boolean originTooFar = observationOrigin != null
-                && observationOrigin.distSqr(player.blockPosition())
-                > square(OBSERVATION_CHUNK_RADIUS * 16);
-        boolean completed = observationIndex >= OBSERVATION_OFFSETS.size();
-        if (identityChanged || originTooFar || completed && now >= nextObservationTick) {
-            observationPlayer = player.getUUID();
-            observationLevel = level;
-            observationOrigin = player.blockPosition().immutable();
-            observationIndex = 0;
-        }
-        if (observationOrigin == null
-                || observationIndex >= OBSERVATION_OFFSETS.size()
-                && now < nextObservationTick) return;
-
-        int inspected = 0;
-        int originChunkX = observationOrigin.getX() >> 4;
-        int originChunkZ = observationOrigin.getZ() >> 4;
-        while (inspected++ < chunkBudget && observationIndex < OBSERVATION_OFFSETS.size()) {
-            BlockPos offset = OBSERVATION_OFFSETS.get(observationIndex++);
-            LevelChunk chunk = level.getChunkSource().getChunkNow(
-                    originChunkX + offset.getX(), originChunkZ + offset.getZ());
-            if (chunk == null) continue;
-            for (var entry : chunk.getBlockEntities().entrySet()) {
-                List<Direction> sides = bridge.fixedTerminalSides(entry.getValue());
-                if (sides.isEmpty()) continue;
-                remembered = new Known(player.getUUID(), level,
-                        entry.getKey(), sides.getFirst());
-                observationIndex = OBSERVATION_OFFSETS.size();
-                nextObservationTick = now + OBSERVATION_RESCAN_TICKS;
-                return;
-            }
-        }
-        if (observationIndex >= OBSERVATION_OFFSETS.size()) {
-            nextObservationTick = now + OBSERVATION_RESCAN_TICKS;
-        }
-    }
-
     static synchronized void remember(LocalPlayer player, FixedTarget target) {
         remembered = new Known(player.getUUID(), (ClientLevel) player.level(),
                 target.position(), target.side());
@@ -242,31 +198,7 @@ final class Ae2TerminalAccess {
 
     private record Observed(BlockPos position, Direction side) {}
 
-    private static List<BlockPos> makeObservationOffsets() {
-        List<BlockPos> result = new ArrayList<>();
-        for (int x = -OBSERVATION_CHUNK_RADIUS; x <= OBSERVATION_CHUNK_RADIUS; x++) {
-            for (int z = -OBSERVATION_CHUNK_RADIUS; z <= OBSERVATION_CHUNK_RADIUS; z++) {
-                result.add(new BlockPos(x, 0, z));
-            }
-        }
-        result.sort(Comparator.comparingLong(value ->
-                (long) value.getX() * value.getX()
-                        + (long) value.getZ() * value.getZ()));
-        return List.copyOf(result);
-    }
-
-    private static double square(int value) {
-        return (double) value * value;
-    }
-
     private static final List<Direction> HORIZONTAL_DIRECTIONS = List.of(
             Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST);
-    private static final int FIXED_TERMINAL_RADIUS = 16;
-    private static final int FIXED_TERMINAL_VERTICAL_RADIUS = 8;
-    private static final int MAX_FIXED_TERMINALS = 64;
-    private static final int MAX_FIXED_TERMINAL_PLAN_TARGETS = 8;
     private static final double TERMINAL_FACE_OFFSET = 0.45;
-    private static final int OBSERVATION_RESCAN_TICKS = 10 * 20;
-    private static final int OBSERVATION_CHUNK_RADIUS = 16;
-    private static final List<BlockPos> OBSERVATION_OFFSETS = makeObservationOffsets();
 }

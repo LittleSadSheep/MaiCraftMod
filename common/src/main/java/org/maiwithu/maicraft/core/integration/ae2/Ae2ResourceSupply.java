@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
@@ -25,6 +26,21 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
  * increase. AE2 remains an optional runtime dependency.</p>
  */
 public final class Ae2ResourceSupply {
+    /** Evidence produced only by an explicit bounded machine observation. */
+    public record ExplicitAccessObservation(
+            boolean integrationAvailable,
+            int radius,
+            int fixedTerminalsObserved,
+            int terminalFacesObserved,
+            boolean memoryUpdated,
+            BlockPos rememberedPosition,
+            String detail) {
+        public ExplicitAccessObservation {
+            if (rememberedPosition != null) rememberedPosition = rememberedPosition.immutable();
+            detail = detail == null ? "" : detail;
+        }
+    }
+
     /** Whether a request moves items to the player or only prepares complete network stock. */
     public enum Operation {
         SUPPLY,
@@ -264,17 +280,41 @@ public final class Ae2ResourceSupply {
         return Ae2ReflectionBridge.availability().detail();
     }
 
-    /** Token-free, side-effect-free observation of nearby fixed AE access for later prerequisites. */
-    public static void observeNearbyAccess(LocalPlayer player) {
-        if (player == null) return;
-        Ae2ReflectionBridge.availability().bridge().ifPresent(bridge -> {
-            try {
-                Ae2TerminalAccess.observeNearby(player, bridge, 16);
-            } catch (RuntimeException ignored) {
-                // This passive cache is optional. The foreground supply session reports protocol
-                // failures with exact evidence if AE access is actually requested.
-            }
-        });
+    /**
+     * Record fixed AE access seen inside an explicit {@code inspect_machine} observation. Merely
+     * walking near a terminal never calls this method and resource supply never performs discovery.
+     */
+    public static ExplicitAccessObservation rememberObservedAccess(
+            LocalPlayer player, BlockPos center, int radius) {
+        Objects.requireNonNull(player, "player");
+        Objects.requireNonNull(center, "center");
+        Ae2ReflectionBridge.Availability availability = Ae2ReflectionBridge.availability();
+        Optional<Ae2ReflectionBridge> bridge = availability.bridge();
+        if (bridge.isEmpty()) {
+            return new ExplicitAccessObservation(false, radius, 0, 0, false, null,
+                    availability.detail());
+        }
+        try {
+            Ae2TerminalAccess.ExplicitObservation observed =
+                    Ae2TerminalAccess.rememberObservedWithin(
+                            player, bridge.orElseThrow(), center, radius);
+            Ae2TerminalAccess.Known selected = observed.selected();
+            return new ExplicitAccessObservation(
+                    true,
+                    observed.radius(),
+                    observed.fixedTerminalsObserved(),
+                    observed.terminalFacesObserved(),
+                    selected != null,
+                    selected == null ? null : selected.position(),
+                    selected == null
+                            ? "no fixed AE terminal was observed inside this explicit machine survey"
+                            : "remembered the nearest fixed AE terminal observed by this machine survey");
+        } catch (RuntimeException failure) {
+            String message = failure.getMessage();
+            return new ExplicitAccessObservation(true, radius, 0, 0, false, null,
+                    "AE terminal observation failed: "
+                            + (message == null ? failure.getClass().getSimpleName() : message));
+        }
     }
 
     public static Session begin(LocalPlayer player, Request request) {
