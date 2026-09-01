@@ -7,7 +7,9 @@
   "client": [
     "MixinChunkArray",
     "MixinClientChunkProvider",
-    "MixinPlayerController"
+    "MixinPlayerController",
+    "MixinEntity",
+    "MixinLivingEntity"
   ],
   "injectors": {
     "defaultRequire": 1
