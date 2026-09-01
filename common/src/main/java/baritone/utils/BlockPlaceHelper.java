@@ -17,48 +17,12 @@
 
 package baritone.utils;
 
-import baritone.Baritone;
 import baritone.api.utils.IPlayerContext;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 
+/** Legacy compatibility shell; embedded clicks are owned by InputOverrideHandler's actor bridge. */
+@Deprecated
 public class BlockPlaceHelper {
-    // base ticks between places caused by tick logic
-    private static final int BASE_PLACE_DELAY = 1;
+    BlockPlaceHelper(IPlayerContext ignored) {}
 
-    private final IPlayerContext ctx;
-    private int rightClickTimer;
-
-    BlockPlaceHelper(IPlayerContext playerContext) {
-        this.ctx = playerContext;
-    }
-
-    public void tick(boolean rightClickRequested) {
-        if (rightClickTimer > 0) {
-            rightClickTimer--;
-            return;
-        }
-        HitResult mouseOver = ctx.objectMouseOver();
-        if (!rightClickRequested || ctx.player().isHandsBusy() || mouseOver == null || mouseOver.getType() != HitResult.Type.BLOCK) {
-            return;
-        }
-        BlockHitResult hit = (BlockHitResult) mouseOver;
-        // A stale execution segment must not turn a newly protected position into a scaffold.
-        if (EmbeddedBaritonePolicy.protects(hit.getBlockPos().relative(hit.getDirection()))) {
-            return;
-        }
-        rightClickTimer = Baritone.settings().rightClickSpeed.value - BASE_PLACE_DELAY;
-        for (InteractionHand hand : InteractionHand.values()) {
-            if (ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), hand, hit) == InteractionResult.SUCCESS) {
-                ctx.player().swing(hand);
-                return;
-            }
-            if (!ctx.player().getItemInHand(hand).isEmpty() && ctx.playerController().processRightClick(ctx.player(), ctx.world(), hand) == InteractionResult.SUCCESS) {
-                return;
-            }
-        }
-    }
+    public void tick(boolean ignored) {}
 }

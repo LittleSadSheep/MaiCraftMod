@@ -45,7 +45,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,13 +60,12 @@ public class Baritone implements IBaritone {
     private static final ThreadPoolExecutor threadPool;
 
     static {
-        // CachedWorld permanently occupies two workers (packer + periodic saver). Two further
-        // workers retain upstream's current/next path calculation capacity, while a bounded fixed
-        // pool prevents the original unbounded hand-off executor from fanning out. Daemon workers
-        // never keep the integrated client alive after Ctrl+C/shutdown.
+        // Keep upstream's direct hand-off semantics: stale calculations never accumulate in an
+        // unbounded queue behind the two long-lived cache workers. The only integration-specific
+        // change is daemon workers, so Baritone cannot keep the client alive after Ctrl+C.
         AtomicInteger sequence = new AtomicInteger();
-        threadPool = new ThreadPoolExecutor(4, 4, 60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(), runnable -> {
+        threadPool = new ThreadPoolExecutor(4, Integer.MAX_VALUE, 60L, TimeUnit.SECONDS,
+                new SynchronousQueue<>(), runnable -> {
                     Thread thread = new Thread(runnable,
                             "maicraft-path-" + sequence.incrementAndGet());
                     thread.setDaemon(true);
@@ -258,12 +257,14 @@ public class Baritone implements IBaritone {
 
     @Override
     public void openClick() {
-        new Thread(() -> {
+        Thread opener = new Thread(() -> {
             try {
                 Thread.sleep(100);
                 mc.execute(() -> mc.setScreen(new GuiClick()));
             } catch (Exception ignored) {}
-        }).start();
+        }, "maicraft-baritone-click-ui");
+        opener.setDaemon(true);
+        opener.start();
     }
 
     public Path getDirectory() {

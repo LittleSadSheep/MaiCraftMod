@@ -21,6 +21,7 @@ import baritone.Baritone;
 import baritone.api.event.events.TickEvent;
 import baritone.api.utils.Helper;
 import baritone.utils.ToolSet;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
@@ -199,7 +200,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
             // acceptableThrowawayItems to the CalculationContext
             if (desired.test(item)) {
                 if (select) {
-                    p.getInventory().selected = i;
+                    return EmbeddedBaritoneRuntime.ensureHotbarSelected(p, i);
                 }
                 return true;
             }
@@ -214,7 +215,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
                 ItemStack item = inv.get(i);
                 if (item.isEmpty() || item.getItem() instanceof PickaxeItem) {
                     if (select) {
-                        p.getInventory().selected = i;
+                        return EmbeddedBaritoneRuntime.ensureHotbarSelected(p, i);
                     }
                     return true;
                 }
@@ -226,7 +227,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
                 if (desired.test(inv.get(i))) {
                     if (select) {
                         requestSwapWithHotBar(i, 7);
-                        p.getInventory().selected = 7;
+                        return EmbeddedBaritoneRuntime.ensureHotbarSelected(p, 7);
                     }
                     return true;
                 }

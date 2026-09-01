@@ -96,6 +96,20 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         }
     }
 
+    /**
+     * Drop events belonging to a navigation owner that has just been replaced.
+     *
+     * <p>Path calculation is asynchronous, while path events are dispatched on the following
+     * client tick. The embedded integration has one shared Baritone instance for a succession of
+     * semantic tasks, so an already queued {@code CALC_FAILED} must not be delivered to the next
+     * owner. {@link #forceCancel()} advances the calculation generation; this method clears the
+     * remaining client-thread event mailbox and its one-tick failure latch.</p>
+     */
+    public void discardPendingPathEvents() {
+        toDispatch.clear();
+        calcFailedLastTick = false;
+    }
+
     @Override
     public void onTick(TickEvent event) {
         dispatchEvents();

@@ -43,12 +43,10 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
     private final Map<Input, Boolean> inputForceStateMap = new HashMap<>();
 
     private final BlockBreakHelper blockBreakHelper;
-    private final BlockPlaceHelper blockPlaceHelper;
 
     public InputOverrideHandler(Baritone baritone) {
         super(baritone);
         this.blockBreakHelper = new BlockBreakHelper(baritone.getPlayerContext());
-        this.blockPlaceHelper = new BlockPlaceHelper(baritone.getPlayerContext());
     }
 
     /**
@@ -90,8 +88,9 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
         if (isInputForcedDown(Input.CLICK_LEFT)) {
             setInputForceState(Input.CLICK_RIGHT, false);
         }
-        blockBreakHelper.tick(isInputForcedDown(Input.CLICK_LEFT));
-        blockPlaceHelper.tick(isInputForcedDown(Input.CLICK_RIGHT));
+        // Clicks are receipts owned by MaiCraft's actor boundary. Never let the legacy helpers
+        // call MultiPlayerGameMode directly or treat its immediate return value as success.
+        EmbeddedBaritoneRuntime.applyActionState(this);
         // Never install PlayerMovementInput: MaiCraft's actor boundary is the sole LocalPlayer.input
         // owner. Forward this tick's low-level decisions through its one-tick body lease instead.
         EmbeddedBaritoneRuntime.applyInputState(this);
