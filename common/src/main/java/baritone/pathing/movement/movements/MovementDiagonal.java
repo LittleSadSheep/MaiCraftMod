@@ -26,6 +26,7 @@ import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.MovementState;
+import baritone.pathing.path.PathExecutor;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.pathing.MutableMoveResult;
 import com.google.common.collect.ImmutableSet;
@@ -266,6 +267,17 @@ public class MovementDiagonal extends Movement {
             return state;
         }
 
+        var currentExecutor = baritone.getPathingBehavior().getCurrent();
+        PathExecutor executor = currentExecutor instanceof PathExecutor pathExecutor
+                ? pathExecutor : null;
+        if (executor != null && executor.controlsSubmergedWaterMovement(this)) {
+            if (executor.submergedWaterMovementReached(this)) {
+                return state.setStatus(MovementStatus.SUCCESS);
+            }
+            MovementHelper.moveTowards(ctx, state, dest);
+            return state.setInput(Input.SPRINT, true)
+                    .setInput(Input.SNEAK, false);
+        }
         if (ctx.playerFeet().equals(dest)) {
             return state.setStatus(MovementStatus.SUCCESS);
         } else if (!playerInValidPosition() && !(MovementHelper.isLiquid(ctx, src) && getValidPositions().contains(ctx.playerFeet().above()))) {

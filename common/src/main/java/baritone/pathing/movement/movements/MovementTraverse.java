@@ -29,6 +29,7 @@ import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.MovementState;
+import baritone.pathing.path.PathExecutor;
 import baritone.utils.BlockStateInterface;
 import com.google.common.collect.ImmutableSet;
 import net.minecraft.core.BlockPos;
@@ -247,6 +248,20 @@ public class MovementTraverse extends Movement {
 
         boolean isTheBridgeBlockThere = MovementHelper.canWalkOn(ctx, positionToPlace) || ladder || MovementHelper.canUseFrostWalker(ctx, positionToPlace);
         BlockPos feet = ctx.playerFeet();
+        var currentExecutor = baritone.getPathingBehavior().getCurrent();
+        PathExecutor executor = currentExecutor instanceof PathExecutor pathExecutor
+                ? pathExecutor : null;
+        if (executor != null && executor.controlsSubmergedWaterMovement(this)) {
+            if (executor.submergedWaterMovementReached(this)) {
+                return state.setStatus(MovementStatus.SUCCESS);
+            }
+            // The abstract water-surface cell is still the selected route. Keep horizontal control
+            // while the real first-person body briefly occupies the efficient layer below it;
+            // EmbeddedBaritoneRuntime independently supplies the proven vertical intent.
+            MovementHelper.moveTowards(ctx, state, positionsToBreak[0]);
+            return state.setInput(Input.SPRINT, true)
+                    .setInput(Input.SNEAK, false);
+        }
         if (feet.getY() != dest.getY() && !ladder) {
             // 赶路跑跳的飞行相位:脚位块恰好高出目标一格且离地,是这一跳的弧顶。
             // 放行到正常行走逻辑保持前进输入与空中控制;真正的高度异常才纠偏等待。

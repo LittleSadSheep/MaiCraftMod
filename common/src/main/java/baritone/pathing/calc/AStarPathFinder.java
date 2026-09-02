@@ -25,6 +25,7 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.SettingsUtil;
 import baritone.pathing.calc.openset.BinaryHeapOpenSet;
 import baritone.pathing.movement.CalculationContext;
+import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.Moves;
 import baritone.utils.pathing.BetterWorldBorder;
 import baritone.utils.pathing.Favoring;
@@ -122,7 +123,8 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                 if (actionCost >= ActionCosts.COST_INF) {
                     continue;
                 }
-                if (crossesForbiddenBodyCell(currentNode.x, currentNode.y, currentNode.z,
+                if (crossesForbiddenBodyCell(moves,
+                        currentNode.x, currentNode.y, currentNode.z,
                         res.x, res.y, res.z)) {
                     continue;
                 }
@@ -210,11 +212,38 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
      * preference, so sample the complete lattice segment conservatively.
      */
     private boolean crossesForbiddenBodyCell(
-            int fromX, int fromY, int fromZ, int toX, int toY, int toZ) {
+            Moves move, int fromX, int fromY, int fromZ, int toX, int toY, int toZ) {
+        if (!calcContext.hasForbiddenBodyCells()) {
+            return false;
+        }
+
+        BetterBlockPos source = new BetterBlockPos(fromX, fromY, fromZ);
+        Movement concrete = move.apply0(calcContext, source);
+        if (concrete.getDest().getX() == toX
+                && concrete.getDest().getY() == toY
+                && concrete.getDest().getZ() == toZ) {
+            // Movement implementations already define their real swept/valid body lattice. This
+            // includes diagonal corner cells, both parkour-height bands, fall columns, and the
+            // backing-up cell used by an ascend — details an endpoint line cannot reconstruct.
+            // Ignore only the source feet cell so a newly protected source remains escapable;
+            // every possible feet cell ahead remains a hard boundary.
+            for (BetterBlockPos cell : concrete.getValidPositions()) {
+                if (!cell.equals(source)
+                        && calcContext.isBodyCellForbidden(
+                        cell.getX(), cell.getY(), cell.getZ())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Defensive fallback for a dynamic movement whose second calculation no longer produced
+        // the same terminal cell. Path post-processing will reject that movement too; until then,
+        // conservatively protect every lattice cell after the source.
         int steps = Math.max(Math.abs(toX - fromX),
                 Math.max(Math.abs(toY - fromY), Math.abs(toZ - fromZ)));
-        for (int i = 0; i <= steps; i++) {
-            double ratio = steps == 0 ? 0.0D : (double) i / steps;
+        for (int i = 1; i <= steps; i++) {
+            double ratio = (double) i / steps;
             int x = (int) Math.round(fromX + (toX - fromX) * ratio);
             int y = (int) Math.round(fromY + (toY - fromY) * ratio);
             int z = (int) Math.round(fromZ + (toZ - fromZ) * ratio);

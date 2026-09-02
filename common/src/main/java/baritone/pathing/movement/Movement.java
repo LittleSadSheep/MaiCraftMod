@@ -123,6 +123,19 @@ public abstract class Movement implements IMovement, MovementHelper {
     @Override
     public MovementStatus update() {
         ctx.player().getAbilities().flying = false;
+        // A task's protected body region is live policy, not merely an A* hint. The policy can
+        // change after this segment was calculated (for example when a build survey discovers a
+        // crop or another protected footprint), so reject the real swept/valid feet cells before
+        // beginning any cancellable movement. Ignore only the cell the body already occupies: a
+        // newly protected source must remain escapable. An already airborne parkour movement is
+        // deliberately allowed to finish because cancelling its inputs is less safe than landing;
+        // every not-yet-launched movement, including diagonal corners and parkour columns, is
+        // checked here from its exact implementation-provided valid-position set.
+        if (safeToCancel(currentState) && entersLiveForbiddenBodyCell()) {
+            baritone.getInputOverrideHandler().clearAllKeys();
+            currentState = currentState.setStatus(MovementStatus.UNREACHABLE);
+            return currentState.getStatus();
+        }
         currentState = updateState(currentState);
         if (MovementHelper.isLiquid(ctx, ctx.playerFeet()) && ctx.player().position().y < dest.y + 0.6) {
             currentState.setInput(Input.JUMP, true);
@@ -155,6 +168,16 @@ public abstract class Movement implements IMovement, MovementHelper {
         return currentState.getStatus();
     }
 
+    private boolean entersLiveForbiddenBodyCell() {
+        BetterBlockPos occupied = ctx.playerFeet();
+        for (BetterBlockPos candidate : getValidPositions()) {
+            if (!candidate.equals(occupied) && EmbeddedBaritonePolicy.forbidsBody(candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     protected boolean prepared(MovementState state) {
         if (state.getStatus() == MovementStatus.WAITING) {
             return true;
@@ -181,10 +204,17 @@ public abstract class Movement implements IMovement, MovementHelper {
                     }
                     return false;
                 }
-                // Do not deliberately mine an arbitrary occluding neighbour in first person.
-                // The route must be replanned from a stance with an observed reachable face.
-                state.setStatus(MovementStatus.UNREACHABLE);
-                return true;
+                // Preserve Baritone's proven occluder-clearing fallback. The execution helper
+                // validates the block actually under the crosshair against the live MaiCraft
+                // mutation policy before it submits a click, so this can clear dirt/snow in the
+                // way without ever turning a protected cell into collateral damage.
+                state.setTarget(new MovementState.MovementTarget(
+                        RotationUtils.calcRotationFromVec3d(
+                                ctx.playerHead(), VecUtils.getBlockPosCenter(blockPos),
+                                ctx.playerRotations()),
+                        true));
+                state.setInput(Input.CLICK_LEFT, true);
+                return false;
             }
         }
         if (somethingInTheWay) {

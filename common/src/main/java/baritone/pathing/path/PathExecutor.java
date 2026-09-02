@@ -34,8 +34,10 @@ import baritone.pathing.movement.movements.*;
 import baritone.utils.BlockStateInterface;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Tuple;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.TravelJumpPolicy;
 import java.util.*;
 
@@ -76,12 +78,14 @@ public class PathExecutor implements IPathExecutor, Helper {
     private final IPlayerContext ctx;
 
     private boolean sprintNextTick;
+    private final SubmergedWaterTravelPolicy waterTravel;
 
     public PathExecutor(PathingBehavior behavior, IPath path) {
         this.behavior = behavior;
         this.ctx = behavior.ctx;
         this.path = path;
         this.pathPosition = 0;
+        this.waterTravel = new SubmergedWaterTravelPolicy(ctx, path);
     }
 
     /**
@@ -222,6 +226,10 @@ public class PathExecutor implements IPathExecutor, Helper {
             clearKeys();
             return true;
         }
+        // This is an execution optimisation of the already-selected route. It never adds a water
+        // node or enables terrain mutation; it only lets the real body occupy the efficient
+        // near-surface swim layer while the abstract route continues to own the surface cells.
+        waterTravel.update(pathPosition);
         MovementStatus movementStatus = movement.update();
         if (movementStatus == UNREACHABLE || movementStatus == FAILED) {
             logDebug("Movement returns status " + movementStatus);
@@ -627,6 +635,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
             ret.costEstimateIndex = costEstimateIndex;
             ret.ticksOnCurrent = ticksOnCurrent;
+            ret.waterTravel.inheritFrom(waterTravel);
             return ret;
         }).orElseGet(this::cutIfTooLong); // dont actually call cutIfTooLong every tick if we won't actually use it, use a method reference
     }
@@ -648,6 +657,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                 ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
             }
             ret.ticksOnCurrent = ticksOnCurrent;
+            ret.waterTravel.inheritFrom(waterTravel);
             return ret;
         }
         return this;
@@ -680,5 +690,47 @@ public class PathExecutor implements IPathExecutor, Helper {
 
     public boolean isSprinting() {
         return sprintNextTick;
+    }
+
+    /** Whether the selected current movement owns the temporary physical swim-depth offset. */
+    public boolean controlsSubmergedWaterMovement(IMovement movement) {
+        return waterTravel.controls(pathPosition, movement);
+    }
+
+    /** Horizontal route-cell completion while the physical body is in the swim layer. */
+    public boolean submergedWaterMovementReached(IMovement movement) {
+        return waterTravel.movementReached(pathPosition, movement);
+    }
+
+    public boolean submergedWaterTravelActive() {
+        return waterTravel.active();
+    }
+
+    public float submergedWaterCameraPitch() {
+        return waterTravel.cameraPitch();
+    }
+
+    /**
+     * Vertical intent for a submerged first-person body: {@code -1} descend, {@code +1} ascend,
+     * {@code 0} hold depth. Baritone's node route already chose the safe water column; the input
+     * bridge uses this only to make the real player swim toward that node instead of passively
+     * bobbing at the surface.
+     */
+    public int waterVerticalIntent() {
+        if (waterTravel.active()) {
+            return waterTravel.verticalIntent();
+        }
+        if (pathPosition < 0 || pathPosition >= path.movements().size()
+                || ctx.player() == null || !ctx.player().isInWater()) {
+            return 0;
+        }
+        IMovement movement = path.movements().get(pathPosition);
+        BlockPos feet = ctx.playerFeet();
+        BlockPos destination = movement.getDest();
+        if (!ctx.world().getFluidState(destination).is(FluidTags.WATER)
+                && !ctx.world().getFluidState(feet).is(FluidTags.WATER)) {
+            return 0;
+        }
+        return Integer.compare(destination.getY(), feet.getY());
     }
 }

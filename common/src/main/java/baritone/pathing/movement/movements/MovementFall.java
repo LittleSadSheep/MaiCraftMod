@@ -46,6 +46,7 @@ import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.WaterFluid;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 
 public class MovementFall extends Movement {
 
@@ -106,7 +107,12 @@ public class MovementFall extends Movement {
             }
 
             if (ctx.player().position().y - dest.getY() < ctx.playerController().getBlockReachDistance() && !ctx.player().onGround()) {
-                ctx.player().getInventory().selected = ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_WATER);
+                int waterBucketSlot = ctx.player().getInventory().findSlotMatchingItem(
+                        STACK_BUCKET_WATER);
+                if (!EmbeddedBaritoneRuntime.ensureHotbarSelected(
+                        ctx.player(), waterBucketSlot)) {
+                    return state;
+                }
 
                 targetRotation = new Rotation(toDest.getYaw(), 90.0F);
 
@@ -123,7 +129,12 @@ public class MovementFall extends Movement {
         if (playerFeet.equals(dest) && (ctx.player().position().y - playerFeet.getY() < 0.094 || isWater)) { // 0.094 because lilypads
             if (isWater) { // only match water, not flowing water (which we cannot pick up with a bucket)
                 if (Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_EMPTY))) {
-                    ctx.player().getInventory().selected = ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_EMPTY);
+                    int emptyBucketSlot = ctx.player().getInventory().findSlotMatchingItem(
+                            STACK_BUCKET_EMPTY);
+                    if (!EmbeddedBaritoneRuntime.ensureHotbarSelected(
+                            ctx.player(), emptyBucketSlot)) {
+                        return state;
+                    }
                     if (ctx.player().getDeltaMovement().y >= 0) {
                         return state.setInput(Input.CLICK_RIGHT, true);
                     } else {
@@ -194,6 +205,21 @@ public class MovementFall extends Movement {
 
     @Override
     protected boolean prepared(MovementState state) {
+        // Select and confirm the clutch bucket while still standing on the source block. A
+        // mid-air hotbar packet and water use cannot share MaiCraft's one mutation slot.
+        if (ctx.playerFeet().equals(src) && willPlaceBucket()
+                && ctx.world().dimension() != Level.NETHER) {
+            int waterBucketSlot = ctx.player().getInventory().findSlotMatchingItem(
+                    STACK_BUCKET_WATER);
+            if (!Inventory.isHotbarSlot(waterBucketSlot)) {
+                state.setStatus(MovementStatus.UNREACHABLE);
+                return true;
+            }
+            if (!EmbeddedBaritoneRuntime.ensureHotbarSelected(
+                    ctx.player(), waterBucketSlot)) {
+                return false;
+            }
+        }
         if (state.getStatus() == MovementStatus.WAITING) {
             return true;
         }

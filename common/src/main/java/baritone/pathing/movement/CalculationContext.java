@@ -42,6 +42,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
 
@@ -88,6 +89,14 @@ public class CalculationContext {
     /** Frozen task safety policy; safe for the calculation worker. */
     public final EmbeddedBaritonePolicy.Snapshot maicraftPolicy;
 
+    /**
+     * Fluid-placement settings are copied into the context for the same reason as the other
+     * movement switches: a worker must see one coherent policy for its entire search. A
+     * read-only terrain probe may deliberately enable these without mutating global settings.
+     */
+    private final boolean allowPlaceInFluidsSource;
+    private final boolean allowPlaceInFluidsFlow;
+
     public final PrecomputedData precomputedData;
 
     public CalculationContext(IBaritone baritone) {
@@ -95,6 +104,31 @@ public class CalculationContext {
     }
 
     public CalculationContext(IBaritone baritone, boolean forUseOnAnotherThread) {
+        this(baritone, forUseOnAnotherThread, false, EmbeddedBaritonePolicy.snapshot());
+    }
+
+    /**
+     * Make a frozen, worker-safe context used only to answer "would terrain alteration make a
+     * route possible?". This does not change {@link Baritone#settings()} and does not claim the
+     * player currently owns throwaway blocks or a water bucket; those are requirements reported
+     * by the resulting terrain plan, not actions performed by the probe.
+     *
+     * <p>The caller supplies the exact protected/body-cell snapshot paired with the failed
+     * preserve search. Keeping it explicit prevents a later semantic task from silently changing
+     * the question while this A* is running.</p>
+     */
+    public static CalculationContext forTerrainProbe(
+            IBaritone baritone,
+            EmbeddedBaritonePolicy.Snapshot frozenPolicy) {
+        return new CalculationContext(baritone, true, true,
+                Objects.requireNonNull(frozenPolicy, "frozenPolicy"));
+    }
+
+    private CalculationContext(
+            IBaritone baritone,
+            boolean forUseOnAnotherThread,
+            boolean forceTerrainMutation,
+            EmbeddedBaritonePolicy.Snapshot frozenPolicy) {
         this.precomputedData = new PrecomputedData();
         this.safeForThreadedUse = forUseOnAnotherThread;
         this.baritone = baritone;
@@ -103,39 +137,54 @@ public class CalculationContext {
         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
         this.toolSet = new ToolSet(player);
-        this.hasThrowaway = Baritone.settings().allowPlace.value && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway();
-        this.hasWaterBucket = Baritone.settings().allowWaterBucketFall.value && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && world.dimension() != Level.NETHER;
+        this.hasThrowaway = forceTerrainMutation
+                || (Baritone.settings().allowPlace.value
+                && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway());
+        this.hasWaterBucket = world.dimension() != Level.NETHER
+                && (forceTerrainMutation
+                || (Baritone.settings().allowWaterBucketFall.value
+                && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER))));
         this.canSprint = Baritone.settings().allowSprint.value && player.getFoodData().getFoodLevel() > 6;
         this.placeBlockCost = Baritone.settings().blockPlacementPenalty.value;
-        this.allowBreak = Baritone.settings().allowBreak.value;
-        this.allowBreakAnyway = new ArrayList<>(Baritone.settings().allowBreakAnyway.value);
+        this.allowBreak = forceTerrainMutation || Baritone.settings().allowBreak.value;
+        this.allowBreakAnyway = forceTerrainMutation
+                ? List.of()
+                : new ArrayList<>(Baritone.settings().allowBreakAnyway.value);
         this.allowParkour = Baritone.settings().allowParkour.value;
-        this.allowParkourPlace = Baritone.settings().allowParkourPlace.value;
+        this.allowParkourPlace = forceTerrainMutation
+                || Baritone.settings().allowParkourPlace.value;
         this.allowJumpAtBuildLimit = Baritone.settings().allowJumpAtBuildLimit.value;
         this.allowParkourAscend = Baritone.settings().allowParkourAscend.value;
         this.assumeWalkOnWater = Baritone.settings().assumeWalkOnWater.value;
         this.allowFallIntoLava = false; // Super secret internal setting for ElytraBehavior
-        // todo: technically there can now be datapack enchants that replace blocks with any other at any range
+        // Vanilla applies Frost Walker from the feet slot. Keep the proven upstream movement
+        // behaviour, but do not treat command-enchanted items in unrelated slots as active boots.
         int frostWalkerLevel = 0;
-        for (EquipmentSlot slot : EquipmentSlot.values()) {
-            ItemEnchantments itemEnchantments = baritone.getPlayerContext()
-                .player()
-                .getItemBySlot(slot)
-                .getEnchantments();
-            for (Holder<Enchantment> enchant : itemEnchantments.keySet()) {
-                if (enchant.is(Enchantments.FROST_WALKER)) {
-                    frostWalkerLevel = itemEnchantments.getLevel(enchant);
-                }
+        ItemEnchantments bootEnchantments = baritone.getPlayerContext()
+            .player()
+            .getItemBySlot(EquipmentSlot.FEET)
+            .getEnchantments();
+        for (Holder<Enchantment> enchant : bootEnchantments.keySet()) {
+            if (enchant.is(Enchantments.FROST_WALKER)) {
+                frostWalkerLevel = bootEnchantments.getLevel(enchant);
             }
         }
-        this.frostWalker = frostWalkerLevel;
+        // A probe must account only for explicit break/place/bucket movements. Frost Walker would
+        // otherwise create an implicit mutation that cannot be represented by its terrain bill.
+        this.frostWalker = forceTerrainMutation
+                ? 0
+                : Baritone.settings().allowPlace.value ? frostWalkerLevel : 0;
         this.allowDiagonalDescend = Baritone.settings().allowDiagonalDescend.value;
         this.allowDiagonalAscend = Baritone.settings().allowDiagonalAscend.value;
-        this.allowDownward = Baritone.settings().allowDownward.value;
+        this.allowDownward = forceTerrainMutation || Baritone.settings().allowDownward.value;
         this.minFallHeight = 3; // Minimum fall height used by MovementFall
         this.maxFallHeightNoWater = Baritone.settings().maxFallHeightNoWater.value;
         this.maxFallHeightBucket = Baritone.settings().maxFallHeightBucket.value;
-        float waterSpeedMultiplier = 1.0f;
+        // WATER_MOVEMENT_EFFICIENCY is the fraction of the gap from normal water speed to land
+        // speed that an enchantment closes. No enchantment therefore starts at 0, not 1; using 1
+        // made ordinary surface swimming look as cheap as walking and sent ground searches across
+        // large bodies of water for no real travel-time benefit.
+        float waterSpeedMultiplier = 0.0f;
         OUTER: for (EquipmentSlot slot : EquipmentSlot.values()) {
             ItemEnchantments itemEnchantments = baritone.getPlayerContext()
                 .player()
@@ -146,7 +195,8 @@ public class CalculationContext {
                     .getEffects(EnchantmentEffectComponents.ATTRIBUTES);
                 for (EnchantmentAttributeEffect effect : effects) {
                     if (effect.attribute().is(Attributes.WATER_MOVEMENT_EFFICIENCY.unwrapKey().get())) {
-                        waterSpeedMultiplier = effect.amount().calculate(itemEnchantments.getLevel(enchant));
+                        waterSpeedMultiplier = Math.max(0.0f, Math.min(1.0f,
+                                effect.amount().calculate(itemEnchantments.getLevel(enchant))));
                         break OUTER;
                     }
                 }
@@ -158,11 +208,15 @@ public class CalculationContext {
         this.jumpPenalty = Baritone.settings().jumpPenalty.value;
         this.walkOnWaterOnePenalty = Baritone.settings().walkOnWaterOnePenalty.value;
         this.allowWalkOnMagmaBlocks = Baritone.settings().allowWalkOnMagmaBlocks.value;
+        this.allowPlaceInFluidsSource = forceTerrainMutation
+                || Baritone.settings().allowPlaceInFluidsSource.value;
+        this.allowPlaceInFluidsFlow = forceTerrainMutation
+                || Baritone.settings().allowPlaceInFluidsFlow.value;
         // why cache these things here, why not let the movements just get directly from settings?
         // because if some movements are calculated one way and others are calculated another way,
         // then you get a wildly inconsistent path that isn't optimal for either scenario.
         this.worldBorder = new BetterWorldBorder(world.getWorldBorder());
-        this.maicraftPolicy = EmbeddedBaritonePolicy.snapshot();
+        this.maicraftPolicy = Objects.requireNonNull(frozenPolicy, "frozenPolicy");
     }
 
     public final IBaritone getBaritone() {
@@ -195,10 +249,10 @@ public class CalculationContext {
         if (!worldBorder.canPlaceAt(x, z)) {
             return COST_INF;
         }
-        if (!Baritone.settings().allowPlaceInFluidsSource.value && current.getFluidState().isSource()) {
+        if (!allowPlaceInFluidsSource && current.getFluidState().isSource()) {
             return COST_INF;
         }
-        if (!Baritone.settings().allowPlaceInFluidsFlow.value && !current.getFluidState().isEmpty() && !current.getFluidState().isSource()) {
+        if (!allowPlaceInFluidsFlow && !current.getFluidState().isEmpty() && !current.getFluidState().isSource()) {
             return COST_INF;
         }
         return placeBlockCost;
@@ -225,5 +279,10 @@ public class CalculationContext {
     /** A semantic parent may forbid occupying exact body cells without changing block costs. */
     public boolean isBodyCellForbidden(int x, int y, int z) {
         return maicraftPolicy.forbidsBody(x, y, z);
+    }
+
+    /** Avoid constructing movement objects in the hot A* loop when no body policy is active. */
+    public boolean hasForbiddenBodyCells() {
+        return !maicraftPolicy.forbiddenBodyCells().isEmpty();
     }
 }
