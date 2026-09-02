@@ -28,7 +28,7 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 
 /**
- * Binds a semantic building palette to one concrete AE2-supplyable variant per material family.
+ * Binds a semantic building palette to one concrete obtainable variant per material family.
  *
  * <p>The semantic planner still owns appearance and layout. This class only broadens ordinary
  * building roles (planks, masonry, logs, slabs, doors, panes, railings, stairs and carpet) to
@@ -83,7 +83,7 @@ final class SemanticBuildMaterialBinding {
 
     private SemanticBuildMaterialBinding() {}
 
-    static Proposal propose(BuildTaskRecord plan) {
+    static Proposal propose(BuildTaskRecord plan, boolean broadenMaterialFamilies) {
         Map<String, Accumulator> accumulators = new LinkedHashMap<>();
         for (BuildTaskRecord.Target target : plan.targets) {
             int count = target.materialCount();
@@ -102,7 +102,8 @@ final class SemanticBuildMaterialBinding {
         for (Accumulator accumulator : accumulators.values()) {
             List<ResourceLocation> originals = accumulator.originals.stream().sorted().toList();
             ResourceLocation primary = originals.getFirst();
-            List<ResourceLocation> alternatives = alternatives(accumulator.kind, originals);
+            List<ResourceLocation> alternatives = broadenMaterialFamilies
+                    ? alternatives(accumulator.kind, originals) : originals;
             Family family = new Family(
                     accumulator.identity, primary, originals, alternatives, accumulator.count);
             families.add(family);
@@ -128,7 +129,8 @@ final class SemanticBuildMaterialBinding {
             ResourceLocation selected = selectedByGroup.get(family.groupId());
             if (selected == null || !family.alternatives().contains(selected)) {
                 throw new IllegalArgumentException(
-                        "AE2 did not return one reviewed material variant for " + family.identity());
+                        "semantic supply did not select one reviewed material variant for "
+                                + family.identity());
             }
             for (ResourceLocation original : family.originals()) {
                 replacements.put(original, selected);

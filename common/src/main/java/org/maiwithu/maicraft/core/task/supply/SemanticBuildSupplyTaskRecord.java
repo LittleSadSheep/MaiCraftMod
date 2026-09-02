@@ -22,6 +22,12 @@ public final class SemanticBuildSupplyTaskRecord extends TaskRecord
             String toolCallId, long deadlineGameTime, BuildTaskRecord plan) {
         super(BuildTaskRecord.TOOL_NAME, toolCallId, deadlineGameTime);
         this.plan = Objects.requireNonNull(plan, "plan");
+        this.materialPolicy = materialPolicy == null
+                ? SemanticMaterialSupplyCoordinator.MaterialPolicy.ORDINARY : materialPolicy;
+        this.allowedSources = allowedSources == null ? List.of() : List.copyOf(allowedSources);
+        this.allowHarm = allowHarm;
+        this.protectedLabels = protectedLabels == null ? List.of() : List.copyOf(protectedLabels);
+        this.broadenMaterialFamilies = broadenMaterialFamilies;
     }
 
     public static void ensureRegistered() {}
@@ -37,6 +43,6 @@ public final class SemanticBuildSupplyTaskRecord extends TaskRecord
 
     @Override
     public String describe() {
-        return "搭建并从 AE 分批供应 " + plan.targets.size() + " 格";
+        return "搭建并按语义材料策略分批供应 " + plan.targets.size() + " 格";
     }
 }
