@@ -172,6 +172,8 @@ final class BuildPlacementGeometry {
     /** True for the final state or for a receipt-confirmable intermediate of a bounded multi-use. */
     static boolean isProgress(BuildTaskRecord.Target target, BlockState before, BlockState after) {
         if (target.matches(after)) return true;
+        // Machine-authored custom state must not be reinterpreted as a generic accumulation step.
+        if (!target.matchesExactProperties(after)) return false;
         BlockState desired = target.desiredState();
         if (after.getBlock() != desired.getBlock()) return false;
 
@@ -263,7 +265,8 @@ final class BuildPlacementGeometry {
         // A standing/wall item may return null solely because its planned support does not exist
         // yet.  The clicked outward face is exactly the authored wall-facing property.
         if (target.item() instanceof StandingAndWallBlockItem
-                && gesture.face().getAxis().isHorizontal()) {
+                && gesture.face().getAxis().isHorizontal()
+                && target.exactProperties().isEmpty()) {
             BlockState desired = target.desiredState();
             if (desired.hasProperty(BlockStateProperties.HORIZONTAL_FACING)
                     && desired.getValue(BlockStateProperties.HORIZONTAL_FACING) == gesture.face()) {

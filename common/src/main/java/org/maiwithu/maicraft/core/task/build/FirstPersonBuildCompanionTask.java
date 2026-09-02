@@ -127,6 +127,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 NavigationSafetyContext.protectedMutationCells());
         protectedCells.addAll(inheritedProtectedMutationCells);
         forbiddenBodyCells.addAll(NavigationSafetyContext.forbiddenBodyCells());
+        addProtectedNavigationCells(record.protectedNavigationCells());
         preflightOrder.sort(BuildOrder.BUILD_ORDER);
     }
 
@@ -296,6 +297,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState finishPreflight() {
+        if (!r.preflightGuardMatches(player)) {
+            failAt(siteMin, "observed build region changed before construction", FailureType.TARGET_LOST,
+                    "build_observation_stale", false); return TaskState.FAILED;
+        }
         if (!unsupported.isEmpty()) {
             failPreflight("some cells cannot be expressed by a verified first-person gesture",
                     FailureType.UNSUPPORTED, "unsupported_cells"); return TaskState.FAILED;
@@ -363,6 +368,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     "cell_unloaded", false); return TaskState.FAILED;
         }
         BlockState live = player.level().getBlockState(clearing);
+        if (!r.mutationGuardMatches(player, clearing)) {
+            failAt(clearing, "observed target changed before clearing", FailureType.TARGET_LOST,
+                    "build_target_changed", false); return TaskState.FAILED;
+        }
         if (live.isAir()) return nextClear();
         if (live.hasBlockEntity() && !r.replaceBlockEntities) {
             failAt(clearing, "protected block entity appeared after preflight",
@@ -389,10 +398,31 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failAt(clearing, "break target unloaded", FailureType.TARGET_LOST,
                     "clear_target_lost", false); return TaskState.FAILED;
         }
-        if (player.level().getBlockState(clearing).isAir()) return nextClear();
+        if (player.level().getBlockState(clearing).isAir()) {
+            if (!r.hasExecutionGuards()) return nextClear();
+            // A guarded machine edit accepts disappearance only through its own pending break receipt.
+            return switch (digger.settleGone(true)) {
+                case PROGRESSING -> TaskState.RUNNING;
+                case BROKE_TARGET -> {
+                    r.confirmedMutation(player, clearing);
+                    r.brokeOne(); renewBuildProgress(); yield nextClear();
+                }
+                default -> {
+                    failAt(clearing, "target disappeared without a confirmed owned break", FailureType.TARGET_LOST,
+                            "build_target_changed", false); yield TaskState.FAILED;
+                }
+            };
+        }
+        if (!r.mutationGuardMatches(player, clearing)) {
+            failAt(clearing, "observed target changed before breaking", FailureType.TARGET_LOST,
+                    "build_target_changed", false); return TaskState.FAILED;
+        }
         return switch (digger.digTargetStep(clearing)) {
             case PROGRESSING -> TaskState.RUNNING;
-            case BROKE_TARGET -> { r.brokeOne(); renewBuildProgress(); yield nextClear(); }
+            case BROKE_TARGET -> {
+                r.confirmedMutation(player, clearing);
+                r.brokeOne(); renewBuildProgress(); yield nextClear();
+            }
             case BROKE_OCCLUDER -> {
                 failAt(clearing, "target-only breaker changed another block", FailureType.INTERNAL,
                         "unexpected_break_target", true); yield TaskState.FAILED;
@@ -509,6 +539,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.FAILED;
         }
         Map<Long, BlockState> frozen = freeze(cell);
+        if (!r.mutationGuardMatches(player, cell.target().pos())
+                || cell.generated().stream().anyMatch(effect -> !r.mutationGuardMatches(player, effect.pos()))) {
+            failAt(cell.target().pos(), "observed target changed before placement", FailureType.TARGET_LOST,
+                    "build_target_changed", false); return TaskState.FAILED;
+        }
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
         useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
                 confirmation(cell, frozen), USE_TIMEOUT);
@@ -566,6 +601,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.FAILED;
         }
         useCount++;
+        r.confirmedMutation(player, cell.target().pos());
+        for (BuildPlacementGeometry.GeneratedCell effect : cell.generated()) r.confirmedMutation(player, effect.pos());
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
         BlockState live = player.level().getBlockState(cell.target().pos());
         if (useCount < BuildPlacementGeometry.maximumUses(cell.target())
@@ -963,6 +1000,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         inventory.availableStates(true), r.replaceExisting));
     }
     @Override public TerrainPermit permit() { return TerrainPermit.TERRAFORM; }
+    @Override public LongSet embeddedProtectedMutationCells() {
+        return union(NavigationSafetyContext.protectedMutationCells());
+    }
+    @Override public LongSet embeddedForbiddenBodyCells() {
+        return unionForbidden(NavigationSafetyContext.forbiddenBodyCells());
+    }
     private LongSet union(LongSet other) {
         if (other == null || other.isEmpty()) return protectedCells;
         LongOpenHashSet out = new LongOpenHashSet(protectedCells); out.addAll(other); return out;

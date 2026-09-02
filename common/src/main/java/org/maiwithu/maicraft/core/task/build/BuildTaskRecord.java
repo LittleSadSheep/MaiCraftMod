@@ -96,6 +96,29 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private BuildTraversabilityContract traversabilityContract;
     /** Verified semantic site retained inside the Mod for a later prior_result binding. */
     private Position verifiedPosition;
+    private List<BlockPos> protectedNavigationCells = List.of();
+    private java.util.function.Predicate<net.minecraft.client.player.LocalPlayer> preflightGuard = player -> true;
+    private java.util.function.BiPredicate<net.minecraft.client.player.LocalPlayer, BlockPos> mutationGuard = (player, pos) -> true;
+    private java.util.function.BiConsumer<net.minecraft.client.player.LocalPlayer, BlockPos> confirmedMutation = (player, pos) -> {};
+    private boolean hasExecutionGuards;
+
+    /** Optional externally observed structure constraints; ordinary build records keep no guards. */
+    public void executionGuards(List<BlockPos> protectedCells,
+            java.util.function.Predicate<net.minecraft.client.player.LocalPlayer> beforeStart,
+            java.util.function.BiPredicate<net.minecraft.client.player.LocalPlayer, BlockPos> beforeMutation,
+            java.util.function.BiConsumer<net.minecraft.client.player.LocalPlayer, BlockPos> afterConfirmedMutation) {
+        this.protectedNavigationCells = protectedCells.stream().map(BlockPos::immutable).toList();
+        this.preflightGuard = Objects.requireNonNull(beforeStart, "beforeStart");
+        this.mutationGuard = Objects.requireNonNull(beforeMutation, "beforeMutation");
+        this.confirmedMutation = Objects.requireNonNull(afterConfirmedMutation, "afterConfirmedMutation");
+        this.hasExecutionGuards = true;
+    }
+
+    List<BlockPos> protectedNavigationCells() { return protectedNavigationCells; }
+    boolean preflightGuardMatches(net.minecraft.client.player.LocalPlayer player) { return preflightGuard.test(player); }
+    boolean mutationGuardMatches(net.minecraft.client.player.LocalPlayer player, BlockPos pos) { return mutationGuard.test(player, pos); }
+    boolean hasExecutionGuards() { return hasExecutionGuards; }
+    void confirmedMutation(net.minecraft.client.player.LocalPlayer player, BlockPos pos) { confirmedMutation.accept(player, pos); }
 
     // 注:曾有 layerHeight(分层施工的层高门)。施工模型改为"低层优先的确定
     // 顺序 + 分遍补漏"之后,层高不再有任何裁决作用,留着就是个调了不起作用
@@ -179,6 +202,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         List<Target> out = new java.util.ArrayList<>(targets.size());
         for (Target t : targets) {
             boolean plain = !t.itemPlace()
+                    && !t.strictIdentity()
                     && !t.desiredState().isAir()
                     && t.desiredState().getProperties().isEmpty()
                     && !blockEntityData.containsKey(t.pos().asLong())
@@ -347,7 +371,16 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
      */
     public record Target(BlockState desiredState, Item item, BlockPos pos, String label,
                          Direction facing, Direction.Axis axis, Boolean topHalf,
-                         boolean itemPlace) {
+                         boolean itemPlace, java.util.Set<String> exactProperties, boolean strictIdentity) {
+        public Target(BlockState desiredState, Item item, BlockPos pos, String label,
+                      Direction facing, Direction.Axis axis, Boolean topHalf, boolean itemPlace,
+                      java.util.Set<String> exactProperties) {
+            this(desiredState, item, pos, label, facing, axis, topHalf, itemPlace, exactProperties, false);
+        }
+        public Target(BlockState desiredState, Item item, BlockPos pos, String label,
+                      Direction facing, Direction.Axis axis, Boolean topHalf, boolean itemPlace) {
+            this(desiredState, item, pos, label, facing, axis, topHalf, itemPlace, java.util.Set.of());
+        }
         public Target(BlockState desiredState, Item item, BlockPos pos, String label,
                       Direction facing, Direction.Axis axis, Boolean topHalf) {
             this(desiredState, item, pos, label, facing, axis, topHalf, false);
@@ -364,15 +397,16 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
          * 原样返回:车道的前提是"手里有一件能放的东西"。
          */
         public Target asItemPlace() {
-            if (desiredState.isAir()
+            if (strictIdentity || desiredState.isAir()
                     || desiredState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock
                     || !(item instanceof net.minecraft.world.item.BlockItem)) {
                 return this;
             }
-            return new Target(desiredState, item, pos, label, facing, axis, topHalf, true);
+            return new Target(desiredState, item, pos, label, facing, axis, topHalf, true, exactProperties, strictIdentity);
         }
 
         public Target {
+            exactProperties = exactProperties == null ? java.util.Set.of() : java.util.Set.copyOf(exactProperties);
             desiredState = Objects.requireNonNull(desiredState, "desiredState");
             // 归一在这一处做完:每一个目标格无论从工具还是从图纸来,都必须过这道口,
             // 所以运行态(作物生长阶段、含水、活塞伸出、堆肥进度、锅里装的东西)
@@ -380,6 +414,11 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
             desiredState = org.maiwithu.maicraft.core.build.BuildStates.normalize(desiredState);
             item = Objects.requireNonNull(item, "item");
             pos = Objects.requireNonNull(pos, "pos").immutable();
+            for (String property : exactProperties) {
+                if (desiredState.getBlock().getStateDefinition().getProperty(property) == null) {
+                    throw new IllegalArgumentException("unknown exact block property " + property);
+                }
+            }
             if (facing != null && facingOf(desiredState) == null) {
                 throw new IllegalArgumentException(desiredState.getBlock().getName().getString()
                         + " does not support facing");
@@ -474,6 +513,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         }
 
         public boolean matches(BlockState state) {
+            if (!matchesExactProperties(state)) return false;
             if (itemPlace) {
                 // 原生格的对账不看状态位:没提朝向的格子,朝向就不是工程量——游戏按
                 // 玩家规则给什么就是什么。方块种类按"自述名"对,不只按注册名:有模组
@@ -487,7 +527,20 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         }
 
         public boolean acceptsPlacedState(BlockState state) {
-            return BuildValidity.valid(state, desiredState, true);
+            return matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true);
+        }
+
+        /** Explicit machine-state requests are verified even if general building settings ignore them. */
+        public boolean matchesExactProperties(BlockState state) {
+            if (strictIdentity && (state == null || state.getBlock() != desiredState.getBlock())) return false;
+            if (exactProperties.isEmpty()) return true;
+            if (state == null || state.getBlock() != desiredState.getBlock()) return false;
+            for (String name : exactProperties) {
+                var property = desiredState.getBlock().getStateDefinition().getProperty(name);
+                if (!state.hasProperty(property)
+                        || !state.getValue(property).equals(desiredState.getValue(property))) return false;
+            }
+            return true;
         }
 
         public String shortPos() {
