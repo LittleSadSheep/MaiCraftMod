@@ -159,6 +159,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                     arguments.get("after_cursor").getAsLong(),
                     arguments.get("limit").getAsInt());
             case "landmarks" -> landmarks(player);
+            case "machines" -> org.maiwithu.maicraft.core.integration.machine.MachineSnapshots.summaries(player);
+            case "machine_menu" -> org.maiwithu.maicraft.core.integration.machine.MachineMenu.inspect(player);
             default -> throw new IllegalArgumentException("unknown perceive view: " + view);
         };
     }
@@ -425,7 +427,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("semantic_abilities", abilities);
         result.addProperty(
                 "boundary",
-                "Express outcomes and only fields declared by each ability contract. The Mod owns routes, clicks, slots and block cells.");
+                "Use fields declared by each ability. Machine design may include components, intended connections, style, constraints and observed menu references. MaiCraft owns exact layouts, states, routes, gestures, retries and confirmation; never submit per-block blueprints or click scripts.");
         return result;
     }
 
@@ -435,6 +437,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         for (IntentRuntime.Landmark landmark : intents.landmarks()) {
             JsonObject item = new JsonObject();
             item.addProperty("label", landmark.label());
+            item.addProperty("area_role", landmark.areaRole().id());
             String dimension = landmark.position().dimension();
             if (dimension != null && !dimension.isBlank()) {
                 item.addProperty("dimension", dimension);
@@ -494,7 +497,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             result.add("pause", pause);
         }
         if (record.decisionSnapshot() != null) {
-            result.add("decision", decision(record.decisionSnapshot()));
+            JsonObject decision = decision(record.decisionSnapshot());
+            result.add("decision", decision);
+            copyEffectLedger(result, decision.getAsJsonObject("context"));
         }
         if (record.terminalSnapshot() != null) {
             JsonObject terminal = new JsonObject();
@@ -504,6 +509,20 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             result.add("terminal", terminal);
         }
         return result;
+    }
+
+    /** Surface the current failed-step ledger directly while retaining it in decision.context. */
+    private static void copyEffectLedger(JsonObject target, JsonObject decisionContext) {
+        if (decisionContext == null || !decisionContext.has("failure")
+                || !decisionContext.get("failure").isJsonObject()) return;
+        JsonObject failure = decisionContext.getAsJsonObject("failure");
+        if (!failure.has("data") || !failure.get("data").isJsonObject()) return;
+        JsonObject data = failure.getAsJsonObject("data");
+        for (String key : List.of("completed_effects", "remaining_effects")) {
+            if (data.has(key) && data.get(key).isJsonArray()) {
+                target.add(key, data.get(key).deepCopy());
+            }
+        }
     }
 
     private static JsonObject taskSummary(IntentTaskRecord record) {
@@ -623,6 +642,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     private static String abilityMode(String ability) {
         return switch (ability) {
             case "maicraft:remember_place" -> "local_memory";
+            case "maicraft:inspect_machine", "maicraft:design_machine" -> "bounded_machine_evidence_review";
             case "maicraft:wait_for_condition" -> "client_clock_or_predicate";
             case "maicraft:sequence" -> "sequential_children";
             default -> "compiled_to_internal_task";

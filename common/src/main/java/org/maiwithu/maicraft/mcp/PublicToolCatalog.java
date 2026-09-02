@@ -23,7 +23,7 @@ final class PublicToolCatalog {
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     );
     private static final Set<String> VIEWS = Set.of(
-            "situation", "surroundings", "abilities", "tasks", "attention", "landmarks"
+            "situation", "surroundings", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu"
     );
     private static final Set<String> TARGET_KINDS = Set.of(
             "current_place", "coordinates", "landmark", "player", "entity", "nearest", "area", "prior_result"
@@ -83,7 +83,7 @@ final class PublicToolCatalog {
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks"],"default":"situation","description":"landmarks returns durable semantic labels and same-dimension availability; stored coordinates remain private to MaiCraft."},
+                                "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks","machines","machine_menu"],"default":"situation","description":"landmarks returns durable semantic labels. machines lists cached session observations; inspect_machine gives fresh geometry. machine_menu returns structured current native menu evidence and a receipt for exact entry transfers. Stored absolute coordinates remain private to MaiCraft."},
                                 "focus":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For view=tasks, return one full task when present; otherwise list concise recent task summaries."},
                                  "after_cursor":{"type":"integer","minimum":0,"default":0},
@@ -124,7 +124,8 @@ final class PublicToolCatalog {
                     "Inspect or control a runtime task. When state=waiting_for_decision, answer with the exact "
                             + "decision_id and one listed choice. retry may refine details.parameters; recover "
                             + "and replace_goal require one semantic details.goal. Never provide internal tool "
-                            + "names, routes, clicks, inventory slots, or block cells.",
+                            + "names, routes, block layouts or click scripts. Machine abilities accept semantic "
+                            + "design fields and receipt-bound observed menu entries; MaiCraft compiles exact work.",
                     goalSchema("""
                             {
                               "type":"object",
