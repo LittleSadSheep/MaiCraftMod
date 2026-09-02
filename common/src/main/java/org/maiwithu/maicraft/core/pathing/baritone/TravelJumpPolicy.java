@@ -7,6 +7,7 @@ import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.movements.MovementAscend;
+import baritone.pathing.movement.movements.MovementDiagonal;
 import baritone.pathing.movement.movements.MovementTraverse;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -21,12 +22,12 @@ import java.util.List;
 /**
  * 赶路跑跳 —— MaiCraft {@code SprintPolicy} 在 Baritone 执行层的移植。
  *
- * <p>判据是"跳下去不受伤":不要求一段被证明的长直跑道,而是沿当前移动方向扫描
- * 整个跳跃可达走廊,每一列都必须在无摔伤落点带(抬升一格/平/落一格,坠落距离全部
- * 不超过原版安全值)里有干燥实心支撑。走廊里出现深洞、流体或立柱就这一步不跳,
- * 走过去再跳——正是人在森林里冲刺跳的方式。恰好处于两格高顶头走廊(树下、隧道)
- * 时投影自动缩短为顶头连跳,获得更快的节奏。空中不指望转向:身体沿出发方向飞,
- * 落点偏出路径时由 Baritone 的 splice 逻辑重新对齐。</p>
+ * <p>判据是"路线已经承诺了一段完整直跑道,并且跳下去不受伤":投影覆盖的每个路径
+ * 原语都必须是同高同向平走,物理走廊的每一列也必须在无摔伤落点带(抬升一格/平/
+ * 落一格)里有干燥实心支撑。于是终点前、拐弯前、落差前、液体或立柱前都会自然
+ * 收步,不会为了看起来快而飞出选定路线。恰好处于两格高顶头走廊(树下、隧道)时
+ * 投影自动缩短为顶头连跳,且只使用路线本来就经过的顶盖。空中不指望转向:身体沿
+ * 出发方向飞,落点偏出路径时由 Baritone 的 splice 逻辑重新对齐。</p>
  *
  * <p>平走接上台的直跳由 {@link #ascendLaunchReady} 提供起跳时机:物理投影证明这一跳
  * 能落上平台,而不是走到面前卡住了再补跳。</p>
@@ -62,9 +63,8 @@ public final class TravelJumpPolicy {
                 || player.hasEffect(MobEffects.SLOW_FALLING)) {
             return false;
         }
-        IMovement currentRaw = movements.get(pathPosition);
-        if (!(currentRaw instanceof MovementTraverse current)
-                || current.getSrc().getY() != current.getDest().getY()) {
+        IMovement current = movements.get(pathPosition);
+        if (!isFlatRunwayMovement(current)) {
             return false;
         }
         // 交互格全交给走廊与点击门裁决:待挖/待放/待挤目标只在身体真的停下来
@@ -75,15 +75,15 @@ public final class TravelJumpPolicy {
             return false;
         }
         Vec3i direction = current.getDirection();
-        if (direction.getY() != 0
-                || Math.abs(direction.getX()) + Math.abs(direction.getZ()) != 1) {
+        HorizontalHeading heading = HorizontalHeading.of(direction);
+        if (heading == null) {
             return false;
         }
 
         // 起跳只在前进动量已经建立后才有意义:物理判据而非计时器——新路线先在
         // 普通疾跑下加速,第一个速度指向既定边缘的落地刻才变得 eligible。
         Vec3 velocity = player.getDeltaMovement();
-        double forwardSpeed = velocity.x * direction.getX() + velocity.z * direction.getZ();
+        double forwardSpeed = velocity.x * heading.x() + velocity.z * heading.z();
         if (forwardSpeed <= 0.0) {
             return false;
         }
@@ -96,21 +96,31 @@ public final class TravelJumpPolicy {
         // 敞空投影(撞上中途顶盖只会提前落在已验证列上,反过来则会飞出走廊)。
         BlockPos src = current.getSrc();
         BlockPos takeoff = ctx.playerFeet();
-        boolean headHit = takeoff.equals(src)
-                && hasContinuousCeiling(ctx, src, direction, HEAD_HIT_CORRIDOR_COLUMNS);
+        boolean headHit = false;
+        if (takeoff.equals(src) && hasFullTwoBlockCeiling(ctx, src)) {
+            JumpProjection capped = projectJump(player, heading, true);
+            if (capped != null) {
+                int cappedMovements = (int) Math.ceil(
+                        (capped.forwardDistance() + player.getBbWidth() * 0.5 + 0.25)
+                                / heading.stepLength());
+                headHit = hasContinuousCeiling(
+                        ctx, movements, pathPosition, direction, cappedMovements);
+            }
+        }
 
-        JumpProjection projection = projectJump(player, direction, headHit);
+        JumpProjection projection = projectJump(player, heading, headHit);
         if (projection == null) {
             return false;
         }
 
         // 空中把身体保持在一格宽的走廊里:当前的横向偏移,加上原版空气阻力能耗散的
         // 横向速度,都必须留在出发列的半格余量之内。
-        double lateralOffset = Math.abs(direction.getX() * (src.getZ() + 0.5 - player.getZ()))
-                + Math.abs(direction.getZ() * (src.getX() + 0.5 - player.getX()));
-        Vec3 launchVelocity = sprintJumpLaunchVelocity(player);
-        double lateralSpeed = Math.abs(direction.getX() * launchVelocity.z
-                + direction.getZ() * launchVelocity.x);
+        double relativeX = player.getX() - (src.getX() + 0.5D);
+        double relativeZ = player.getZ() - (src.getZ() + 0.5D);
+        double lateralOffset = Math.abs(-heading.z() * relativeX + heading.x() * relativeZ);
+        Vec3 launchVelocity = sprintJumpLaunchVelocity(player, heading);
+        double lateralSpeed = Math.abs(-heading.z() * launchVelocity.x
+                + heading.x() * launchVelocity.z);
         double lateralRoom = 0.5 - player.getBbWidth() * 0.5 - lateralOffset;
         if (lateralRoom <= 0.0
                 || lateralSpeed * projection.airDragSum() >= lateralRoom) {
@@ -121,14 +131,48 @@ public final class TravelJumpPolicy {
         // 出发,余量只需覆盖身体半宽与落点方差。任何一列在无摔伤落点带里没有
         // 干燥安全支撑(深洞、流体、立柱),这一跳就可能摔进它——不跳,走过去再说。
         double reach = projection.forwardDistance() + player.getBbWidth() * 0.5 + 0.25;
-        int columns = (int) Math.ceil(reach);
-        for (int d = 1; d <= columns; d++) {
-            BlockPos column = takeoff.offset(direction.getX() * d, 0, direction.getZ() * d);
-            if (!survivableColumn(ctx, column, projection.apexHeight())) {
+        int runwayMovements = (int) Math.ceil(reach / heading.stepLength());
+        if (!routeCommitsStraightRunway(
+                movements, pathPosition, direction, runwayMovements)) {
+            return false;
+        }
+        for (int offset = 0; offset < runwayMovements; offset++) {
+            IMovement movement = movements.get(pathPosition + offset);
+            if (!safeFlightMovement(ctx, movement, projection.apexHeight(), headHit)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * The travel jump may only consume cells that the selected path already owns as a straight,
+     * level runway. This is route-derived rather than a magic "long trip" distance: the physical
+     * jump projection itself decides how many committed movements are required.
+     */
+    private static boolean routeCommitsStraightRunway(
+            List<IMovement> movements, int pathPosition, Vec3i direction, int columns) {
+        if (columns < 1 || pathPosition < 0) {
+            return false;
+        }
+        BlockPos expectedSource = movements.get(pathPosition).getSrc();
+        for (int offset = 0; offset < columns; offset++) {
+            int index = pathPosition + offset;
+            if (index >= movements.size()
+                    || !isFlatRunwayMovement(movements.get(index))
+                    || !movements.get(index).getSrc().equals(expectedSource)
+                    || !movements.get(index).getDirection().equals(direction)) {
+                return false;
+            }
+            expectedSource = movements.get(index).getDest();
+        }
+        return true;
+    }
+
+    private static boolean isFlatRunwayMovement(IMovement movement) {
+        return (movement instanceof MovementTraverse || movement instanceof MovementDiagonal)
+                && movement.getSrc().getY() == movement.getDest().getY()
+                && HorizontalHeading.of(movement.getDirection()) != null;
     }
 
     /**
@@ -155,7 +199,7 @@ public final class TravelJumpPolicy {
 
         double gravity = player.getAttributeValue(Attributes.GRAVITY);
         double verticalSpeed = jumpVerticalSpeed(player);
-        Vec3 launchVelocity = sprintJumpLaunchVelocity(player);
+        Vec3 launchVelocity = sprintJumpLaunchVelocity(player, direction);
         double horizontalSpeed = launchVelocity.x * direction.getX()
                 + launchVelocity.z * direction.getZ();
         if (gravity <= 0.0 || verticalSpeed <= 0.0 || horizontalSpeed <= 0.0) {
@@ -261,17 +305,65 @@ public final class TravelJumpPolicy {
                 && state.isCollisionShapeFullBlock(ctx.world(), ceiling);
     }
 
-    /** 从 feet 起连续 columns 格都有两格高实心顶盖(顶头短跳的走廊前提)。 */
-    private static boolean hasContinuousCeiling(IPlayerContext ctx, BlockPos src,
-                                                Vec3i direction, int columns) {
-        if (!hasFullTwoBlockCeiling(ctx, src)) {
+    /** 顶头短跳只使用所选路线实际扫过的格；对角边的两个角格也必须连续有顶。 */
+    private static boolean hasContinuousCeiling(
+            IPlayerContext ctx, List<IMovement> movements, int pathPosition,
+            Vec3i direction, int movementCount) {
+        if (movementCount < 1 || pathPosition < 0
+                || pathPosition >= movements.size()
+                || !hasFullTwoBlockCeiling(ctx, movements.get(pathPosition).getSrc())) {
             return false;
         }
-        for (int d = 1; d <= columns; d++) {
-            BlockPos cell = src.offset(direction.getX() * d, 0, direction.getZ() * d);
-            if (!hasFullTwoBlockCeiling(ctx, cell)) {
+        for (int offset = 0; offset < movementCount; offset++) {
+            int index = pathPosition + offset;
+            if (index >= movements.size()) return false;
+            IMovement movement = movements.get(index);
+            if (!isFlatRunwayMovement(movement)
+                    || !movement.getDirection().equals(direction)
+                    || !hasFullTwoBlockCeiling(ctx, movement.getDest())) {
                 return false;
             }
+            if (movement instanceof MovementDiagonal) {
+                BlockPos src = movement.getSrc();
+                BlockPos dest = movement.getDest();
+                if (!hasFullTwoBlockCeiling(ctx,
+                            new BlockPos(src.getX(), src.getY(), dest.getZ()))
+                        || !hasFullTwoBlockCeiling(ctx,
+                            new BlockPos(dest.getX(), src.getY(), src.getZ()))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /** Every possible diagonal corner and landing column stays inside the selected dry runway. */
+    private static boolean safeFlightMovement(
+            IPlayerContext ctx, IMovement movement, double apexHeight, boolean headHit) {
+        if (!safeFlightColumn(ctx, movement.getDest(), apexHeight, headHit)) return false;
+        if (movement instanceof MovementDiagonal) {
+            BlockPos src = movement.getSrc();
+            BlockPos dest = movement.getDest();
+            return safeFlightColumn(ctx,
+                        new BlockPos(src.getX(), src.getY(), dest.getZ()), apexHeight, headHit)
+                    && safeFlightColumn(ctx,
+                        new BlockPos(dest.getX(), src.getY(), src.getZ()), apexHeight, headHit);
+        }
+        return true;
+    }
+
+    private static boolean safeFlightColumn(
+            IPlayerContext ctx, BlockPos feet, double apexHeight, boolean headHit) {
+        if (!survivableColumn(ctx, feet, apexHeight)
+                || !MovementHelper.fullyPassable(ctx, feet)
+                || !MovementHelper.fullyPassable(ctx, feet.above())) {
+            return false;
+        }
+        if (headHit) return hasFullTwoBlockCeiling(ctx, feet);
+        int highestBodyCell = Math.max(2,
+                (int) Math.ceil(ctx.player().getBbHeight() + apexHeight) - 1);
+        for (int y = 2; y <= highestBodyCell; y++) {
+            if (!MovementHelper.fullyPassable(ctx, feet.above(y))) return false;
         }
         return true;
     }
