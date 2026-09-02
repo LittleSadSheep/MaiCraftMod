@@ -8,10 +8,10 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -28,9 +28,10 @@ import java.util.Set;
  * Causally bounded collection of drops created by targets defeated in one combat beat.
  *
  * <p>The client is not told a mob-drop parent id. The strongest evidence it can actually prove
- * is therefore a conjunction: the item id did not exist in the pre-kill snapshot, it first
- * appeared inside the short death synchronization window, and it appeared close to the recorded
- * corpse position. {@link ItemEntity#getOwner()} cannot strengthen that proof because the
+ * is therefore a conjunction: the item id did not exist in the pre-kill snapshot, its client age
+ * dates its spawn to the target's death, and its observed position and velocity are compatible
+ * with having left the recorded death position. {@link ItemEntity#getOwner()} cannot strengthen
+ * that proof because the
  * thrower/pickup-target fields are not synchronized to this client. A merely nearby old stack is
  * never collected. If a new drop merges into such a stack, the causal portion cannot be separated
  * from somebody else's items, so the merge is reported as ambiguous and left alone.</p>
@@ -40,14 +41,8 @@ final class LootSweep {
     enum PickupContact { NONE, WAITING, NO_CAPACITY, REFUSED_WITH_CAPACITY }
     enum VanishState { CLEAR, WAITING_FOR_INVENTORY_SYNC, UNCONFIRMED }
 
-    /** Allow death and item-spawn packets to settle before deciding that no loot exists. */
-    private static final int DROP_SETTLE_TICKS = 10;
-    /** Vanilla mob drops spawn at the corpse and drift only a short distance in this window. */
-    private static final double ATTRIBUTION_RADIUS = 4.5;
-    private static final double ATTRIBUTION_RADIUS_SQR =
-            ATTRIBUTION_RADIUS * ATTRIBUTION_RADIUS;
-    /** Repeated proven no-path results make a drop unreachable, not silently collected. */
-    private static final int MAX_APPROACH_FAILURES = 2;
+    /** Packet ordering may expose a newly spawned item one client tick before the death update. */
+    private static final int SPAWN_TICK_SKEW = 1;
     /** Require repeated synchronized capacity evidence before diagnosing a full inventory. */
     private static final int NO_CAPACITY_CONFIRM_TICKS = 3;
     /** True vanilla contact plus free capacity should settle promptly; beyond this it is not full. */
@@ -66,43 +61,68 @@ final class LootSweep {
     private final Map<Integer, Integer> trackedCounts = new HashMap<>();
     private final Set<Integer> tracked = new LinkedHashSet<>();
     private final Set<Integer> skipped = new HashSet<>();
-    private final List<BlockPos> deathPositions = new ArrayList<>();
+    private final List<DeathWitness> deaths = new ArrayList<>();
     private final Map<Item, Integer> inventoryAtSweepStart = new HashMap<>();
     private final Map<Item, Integer> sweepAttributed = new HashMap<>();
     private final Map<Item, Integer> sweepAmbiguous = new HashMap<>();
     private final Map<Item, Integer> sweepUnreachable = new HashMap<>();
+    private final Map<Integer, BlockedApproach> blockedApproaches = new HashMap<>();
+    private final Map<Integer, UnresolvedCandidate> unresolvedCandidates = new HashMap<>();
     private final Map<Item, Integer> attributedTotal = new HashMap<>();
     private final Map<Item, Integer> collectedFromSettledSweeps = new HashMap<>();
     private final Map<Item, Integer> unreachableByItem = new HashMap<>();
     private final Map<Item, Integer> ambiguousByItem = new HashMap<>();
     private final Map<Item, Integer> rejectedLocalPlayerDrops = new HashMap<>();
 
-    private long settleUntil;
-    private int approachFailures;
     private int capableContactTicks;
     private int noCapacityContactTicks;
     private int contactItemId = -1;
     private long unaccountedSince = Long.MIN_VALUE;
-    private int unreachableCount;
     private int ambiguousMergedCount;
     private boolean active;
+
+    private static final class DeathWitness {
+        private final int sourceEntityId;
+        private final BlockPos position;
+        private final long observedAt;
+        private long lifecycleEndedAt = Long.MIN_VALUE;
+
+        private DeathWitness(int sourceEntityId, BlockPos position, long observedAt) {
+            this.sourceEntityId = sourceEntityId;
+            this.position = position;
+            this.observedAt = observedAt;
+        }
+
+        int sourceEntityId() { return sourceEntityId; }
+        BlockPos position() { return position; }
+        long observedAt() { return observedAt; }
+    }
+
+    private record BlockedApproach(BlockPos playerPosition, BlockPos itemPosition,
+                                   long localWorldFingerprint, Item item, int count) { }
+
+    private record UnresolvedCandidate(Item item, int count, BlockPos position, String reason) { }
 
     LootSweep(LocalPlayer player) {
         this.player = player;
     }
 
-    /** Snapshot everything already at the prospective kill site before a lethal hit lands. */
-    void rememberPreexisting(BlockPos around) {
-        AABB box = new AABB(around).inflate(ATTRIBUTION_RADIUS);
-        for (ItemEntity item : player.level().getEntitiesOfClass(ItemEntity.class, box)) {
-            preexistingCounts.put(item.getId(), item.getItem().getCount());
-            preexistingItems.put(item.getId(), item.getItem().getItem());
-            preexistingPositions.put(item.getId(), item.position());
+    /**
+     * Snapshot every item the client already knows before a lethal hit.  Scoping this snapshot to
+     * an arbitrary corpse radius made an old item crossing that radius look newly spawned.
+     */
+    void rememberPreexisting() {
+        for (Entity entity : player.clientLevel.entitiesForRendering()) {
+            if (entity instanceof ItemEntity item && !item.isRemoved()) {
+                preexistingCounts.put(item.getId(), item.getItem().getCount());
+                preexistingItems.put(item.getId(), item.getItem().getItem());
+                preexistingPositions.put(item.getId(), item.position());
+            }
         }
     }
 
     /** Begin a new post-kill synchronization window. */
-    void begin(BlockPos where) {
+    void begin(int sourceEntityId, BlockPos where) {
         Set<Integer> staleBaseline = new HashSet<>();
         for (int id : preexistingCounts.keySet()) {
             if (!(player.clientLevel.getEntity(id) instanceof ItemEntity)) staleBaseline.add(id);
@@ -114,11 +134,12 @@ final class LootSweep {
         vanishedPreexistingByItem.clear();
         unmatchedVanishedPreexistingByItem.clear();
         active = true;
-        deathPositions.clear();
+        deaths.clear();
         tracked.clear();
         trackedCounts.clear();
         skipped.clear();
-        approachFailures = 0;
+        blockedApproaches.clear();
+        unresolvedCandidates.clear();
         capableContactTicks = 0;
         noCapacityContactTicks = 0;
         contactItemId = -1;
@@ -128,114 +149,72 @@ final class LootSweep {
         sweepAmbiguous.clear();
         sweepUnreachable.clear();
         unaccountedSince = Long.MIN_VALUE;
-        addDeath(where);
+        addDeath(sourceEntityId, where);
     }
 
     /** Sweeping/ranged damage can settle more than one target in the same tick. */
-    void addDeath(BlockPos where) {
-        if (!deathPositions.contains(where)) deathPositions.add(where.immutable());
-        settleUntil = Math.max(settleUntil,
-                player.level().getGameTime() + DROP_SETTLE_TICKS);
+    void addDeath(int sourceEntityId, BlockPos where) {
+        DeathWitness witness = new DeathWitness(sourceEntityId, where.immutable(),
+                player.level().getGameTime());
+        if (deaths.stream().noneMatch(old -> old.sourceEntityId() == sourceEntityId)) {
+            deaths.add(witness);
+        }
     }
 
     boolean settling() {
-        return player.level().getGameTime() <= settleUntil;
+        long now = player.level().getGameTime();
+        for (DeathWitness death : deaths) {
+            Entity source = player.clientLevel.getEntity(death.sourceEntityId());
+            // LivingEntity death animation/removal is the server-backed end marker. For entities
+            // already removed when first observed, one subsequent world tick is enough to see all
+            // packets from that update without inventing a ten-tick attribution window.
+            boolean lifecycleActive = source != null && !source.isRemoved()
+                    && (!(source instanceof LivingEntity living)
+                    || !living.isDeadOrDying() || living.deathTime < 20);
+            if (lifecycleActive) return true;
+            if (death.lifecycleEndedAt == Long.MIN_VALUE) death.lifecycleEndedAt = now;
+            // Observe one complete client-world update after the source lifecycle ended. This is
+            // a packet boundary, not an attribution timeout; spawn age and trajectory still decide
+            // which item entities are causal.
+            if (now <= death.lifecycleEndedAt + 1) return true;
+        }
+        return false;
     }
 
     /**
-     * Admit new item ids observed inside the death window.  In 1.21.1 neither ItemEntity.thrower
+     * Admit new item ids observed while the defeated entity's synchronized lifecycle is settling.
+     * In 1.21.1 neither ItemEntity.thrower
      * nor its pickup target is synchronized to the client, so {@code getOwner()==null} is not
      * evidence of a wild/mob drop and must not reject legitimate loot.  The usable client proof is
-     * the pre-kill id/count snapshot plus the tight death time/space window. A simultaneous local
+     * the pre-kill id/count snapshot plus spawn-time and trajectory evidence. A simultaneous local
      * inventory decrease for the same item type is specific evidence that this body dropped it.
      */
     void discover() {
         if (!active) return;
-        boolean admissionOpen = player.level().getGameTime() <= settleUntil;
+        boolean admissionOpen = settling();
         observePreexistingDisappearances();
-        for (BlockPos death : deathPositions) {
-            AABB box = new AABB(death).inflate(ATTRIBUTION_RADIUS);
-            for (ItemEntity item : player.level().getEntitiesOfClass(ItemEntity.class, box)) {
-                if (!nearAnyDeath(item)) continue;
-                int id = item.getId();
-                if (tracked.contains(id)) {
-                    int trackedBefore = trackedCounts.getOrDefault(id, item.getItem().getCount());
-                    int growth = item.getItem().getCount() - trackedBefore;
-                    int oldMergedUnits = consumeVanishedPreexisting(
-                            item.getItem().getItem(), growth);
-                    if (growth > 0 && oldMergedUnits > 0) {
-                        ambiguousMergedCount++;
-                        skipped.add(id);
-                        // The external growth is the old stack. What became uncollectable is the
-                        // causal portion that was already on this tracked entity before the merge.
-                        int causalPortion = Math.min(trackedBefore,
-                                sweepAttributed.getOrDefault(item.getItem().getItem(), 0));
-                        account(ambiguousByItem, item.getItem().getItem(), causalPortion);
-                        account(sweepAmbiguous, item.getItem().getItem(), causalPortion);
-                        Constants.LOG.warn("[maicraft-loot] leaving inseparable merged stack {} x{} "
-                                        + "at {}; causal_units_at_risk={}",
-                                itemName(item.getItem().getItem()), item.getItem().getCount(),
-                                item.blockPosition().toShortString(), causalPortion);
-                    }
-                    trackedCounts.put(id, item.getItem().getCount());
-                    continue;
-                }
-                Integer before = preexistingCounts.get(id);
-                if (before == null) {
-                    if (admissionOpen && !locallyDroppedDuringSweep(item)) {
-                        Item type = item.getItem().getItem();
-                        int current = item.getItem().getCount();
-                        // Vanilla may keep the NEW id when an old nearby stack merges into it.
-                        // The old id then vanishes before this branch sees the survivor. Consume at
-                        // most current-1 old units: a genuinely new id in the death window must
-                        // still contain at least one causal unit. The inseparable stack is left in
-                        // place and reported rather than silently taking the old portion.
-                        int oldMergedUnits = consumeVanishedPreexisting(
-                                type, Math.max(0, current - 1));
-                        if (oldMergedUnits > 0) {
-                            int causalUnits = current - oldMergedUnits;
-                            ambiguousMergedCount++;
-                            account(attributedTotal, type, causalUnits);
-                            account(sweepAttributed, type, causalUnits);
-                            account(ambiguousByItem, type, causalUnits);
-                            account(sweepAmbiguous, type, causalUnits);
-                            preexistingCounts.put(id, current);
-                            preexistingItems.put(id, type);
-                            preexistingPositions.put(id, item.position());
-                            Constants.LOG.warn("[maicraft-loot] leaving new-id survivor {} x{} "
-                                            + "at {}; contains {} old unit(s), causal_units_at_risk={}",
-                                    itemName(type), current,
-                                    item.blockPosition().toShortString(),
-                                    oldMergedUnits, causalUnits);
-                        } else {
-                            tracked.add(id);
-                            trackedCounts.put(id, current);
-                            account(attributedTotal, type, current);
-                            account(sweepAttributed, type, current);
-                            Constants.LOG.info("[maicraft-loot] attributed {} x{} at {} "
-                                            + "(client_owner_visible={})",
-                                    itemName(type), current,
-                                    item.blockPosition().toShortString(), item.getOwner() != null);
-                        }
-                    } else if (admissionOpen) {
-                        account(rejectedLocalPlayerDrops,
-                                item.getItem().getItem(), item.getItem().getCount());
-                        preexistingCounts.put(id, item.getItem().getCount());
-                        preexistingItems.put(id, item.getItem().getItem());
-                        preexistingPositions.put(id, item.position());
-                        Constants.LOG.warn("[maicraft-loot] rejected local-player drop evidence "
-                                        + "for {} x{} at {}",
-                                itemName(item.getItem().getItem()), item.getItem().getCount(),
-                                item.blockPosition().toShortString());
-                    }
-                } else if (admissionOpen && !tracked.contains(id)
-                        && item.getItem().getCount() > before) {
-                    ambiguousMergedCount++;
-                    account(ambiguousByItem, item.getItem().getItem(),
-                            item.getItem().getCount() - before);
-                    account(sweepAmbiguous, item.getItem().getItem(),
-                            item.getItem().getCount() - before);
-                    preexistingCounts.put(id, item.getItem().getCount());
+        for (Entity entity : player.clientLevel.entitiesForRendering()) {
+            if (!(entity instanceof ItemEntity item) || item.isRemoved()) continue;
+            int id = item.getId();
+            if (tracked.contains(id)) {
+                observeTrackedGrowth(item);
+                continue;
+            }
+            Integer before = preexistingCounts.get(id);
+            if (before == null) {
+                if (!admissionOpen) continue;
+                CausalMatch match = causalMatch(item);
+                if (locallyDroppedDuringSweep(item)) {
+                    account(rejectedLocalPlayerDrops,
+                            item.getItem().getItem(), item.getItem().getCount());
+                    rememberAsPreexisting(item);
+                } else if (match.strong()) {
+                    admit(item);
+                } else if (match.plausible()) {
+                    unresolvedCandidates.put(id, new UnresolvedCandidate(
+                            item.getItem().getItem(), item.getItem().getCount(),
+                            item.blockPosition().immutable(), match.reason()));
+                    rememberAsPreexisting(item);
                 }
             } else if (admissionOpen && item.getItem().getCount() > before) {
                 // A causal drop may have merged into an old stack, but the units cannot be
