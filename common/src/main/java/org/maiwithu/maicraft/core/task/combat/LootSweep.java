@@ -237,8 +237,109 @@ final class LootSweep {
                             item.getItem().getCount() - before);
                     preexistingCounts.put(id, item.getItem().getCount());
                 }
+            } else if (admissionOpen && item.getItem().getCount() > before) {
+                // A causal drop may have merged into an old stack, but the units cannot be
+                // separated. Never take the old stack; expose the uncertain causal units.
+                int growth = item.getItem().getCount() - before;
+                ambiguousMergedCount++;
+                account(ambiguousByItem, item.getItem().getItem(), growth);
+                account(sweepAmbiguous, item.getItem().getItem(), growth);
+                preexistingCounts.put(id, item.getItem().getCount());
             }
         }
+    }
+
+    private void observeTrackedGrowth(ItemEntity item) {
+        int id = item.getId();
+        int trackedBefore = trackedCounts.getOrDefault(id, item.getItem().getCount());
+        int growth = item.getItem().getCount() - trackedBefore;
+        int oldMergedUnits = consumeVanishedPreexisting(item.getItem().getItem(), growth);
+        if (growth > 0 && oldMergedUnits > 0) {
+            ambiguousMergedCount++;
+            skipped.add(id);
+            int causalPortion = Math.min(trackedBefore,
+                    sweepAttributed.getOrDefault(item.getItem().getItem(), 0));
+            account(ambiguousByItem, item.getItem().getItem(), causalPortion);
+            account(sweepAmbiguous, item.getItem().getItem(), causalPortion);
+        }
+        trackedCounts.put(id, item.getItem().getCount());
+    }
+
+    private void admit(ItemEntity item) {
+        Item type = item.getItem().getItem();
+        int current = item.getItem().getCount();
+        int oldMergedUnits = consumeVanishedPreexisting(type, Math.max(0, current - 1));
+        if (oldMergedUnits > 0) {
+            int causalUnits = current - oldMergedUnits;
+            ambiguousMergedCount++;
+            account(attributedTotal, type, causalUnits);
+            account(sweepAttributed, type, causalUnits);
+            account(ambiguousByItem, type, causalUnits);
+            account(sweepAmbiguous, type, causalUnits);
+            rememberAsPreexisting(item);
+            return;
+        }
+        tracked.add(item.getId());
+        trackedCounts.put(item.getId(), current);
+        account(attributedTotal, type, current);
+        account(sweepAttributed, type, current);
+        Constants.LOG.info("[maicraft-loot] causally attributed {} x{} at {} (age={}, velocity={})",
+                itemName(type), current, item.blockPosition().toShortString(), item.tickCount,
+                item.getDeltaMovement());
+    }
+
+    private void rememberAsPreexisting(ItemEntity item) {
+        preexistingCounts.put(item.getId(), item.getItem().getCount());
+        preexistingItems.put(item.getId(), item.getItem().getItem());
+        preexistingPositions.put(item.getId(), item.position());
+    }
+
+    private record CausalMatch(boolean strong, boolean plausible, String reason) { }
+
+    private CausalMatch causalMatch(ItemEntity item) {
+        long now = player.level().getGameTime();
+        long estimatedSpawn = now - Math.max(0, item.tickCount);
+        DeathWitness best = null;
+        double bestMargin = Double.NEGATIVE_INFINITY;
+        boolean weaklyCompatible = false;
+        for (DeathWitness death : deaths) {
+            long temporalOffset = estimatedSpawn - death.observedAt();
+            if (temporalOffset < -SPAWN_TICK_SKEW) continue;
+            int age = Math.max(0, item.tickCount);
+            Vec3 delta = item.position().subtract(Vec3.atCenterOf(death.position()));
+            double horizontal = Math.hypot(delta.x, delta.z);
+            double observedHorizontalSpeed = Math.hypot(
+                    item.getDeltaMovement().x, item.getDeltaMovement().z);
+            // Reverse the observed drag only far enough to establish a conservative physical
+            // envelope. This expands with actual age and motion instead of using a corpse radius.
+            double physicalReach = 1.0 + age * Math.max(0.12, observedHorizontalSpeed * 1.25);
+            double verticalReach = 1.5 + age * (0.25 + Math.abs(item.getDeltaMovement().y));
+            double margin = Math.min(physicalReach - horizontal,
+                    verticalReach - Math.abs(delta.y));
+            boolean weakMotion = horizontal <= physicalReach * 2.0
+                    && Math.abs(delta.y) <= verticalReach * 2.0;
+            weaklyCompatible |= weakMotion;
+            // Target loot and the death update are produced by the same server event. A new item
+            // whose first visible tick is much later is nearby new loot, but not provably this
+            // target's loot; keep it unresolved instead of silently annexing it.
+            if (temporalOffset > SPAWN_TICK_SKEW) continue;
+            if (margin > bestMargin) {
+                bestMargin = margin;
+                best = death;
+            }
+        }
+        if (best == null) {
+            return new CausalMatch(false, weaklyCompatible,
+                    weaklyCompatible
+                            ? "spawn became visible after the target death packet boundary"
+                            : "spawn age or motion is incompatible with every observed death");
+        }
+        if (bestMargin < 0.0) {
+            return new CausalMatch(false, weaklyCompatible,
+                    "new during death event but motion cannot prove origin at a death position");
+        }
+        return new CausalMatch(true, true,
+                "new entity id, death-consistent spawn age and physically compatible trajectory");
     }
 
     private void observePreexistingDisappearances() {
@@ -274,15 +375,14 @@ final class LootSweep {
         return inventoryCount(type) < inventoryAtSweepStart.getOrDefault(type, 0);
     }
 
-    private boolean nearAnyDeath(ItemEntity item) {
-        return nearAnyDeath(item.position());
-    }
-
     private boolean nearAnyDeath(Vec3 position) {
-        for (BlockPos death : deathPositions) {
+        long now = player.level().getGameTime();
+        for (DeathWitness death : deaths) {
+            long elapsed = Math.max(0L, now - death.observedAt());
+            double reach = 1.0 + elapsed * 0.12;
             if (position.distanceToSqr(
-                    death.getX() + 0.5, death.getY() + 0.5, death.getZ() + 0.5)
-                    <= ATTRIBUTION_RADIUS_SQR) {
+                    death.position().getX() + 0.5, death.position().getY() + 0.5,
+                    death.position().getZ() + 0.5) <= reach * reach) {
                 return true;
             }
         }
@@ -293,7 +393,8 @@ final class LootSweep {
         List<ItemEntity> out = new ArrayList<>();
         for (int id : tracked) {
             Entity entity = player.clientLevel.getEntity(id);
-            if (entity instanceof ItemEntity item && !item.isRemoved() && !skipped.contains(id)) {
+            if (entity instanceof ItemEntity item && !item.isRemoved() && !skipped.contains(id)
+                    && approachMayBeRetried(item)) {
                 out.add(item);
             }
         }
@@ -304,7 +405,10 @@ final class LootSweep {
         tracked.removeIf(id -> {
             Entity entity = player.clientLevel.getEntity(id);
             boolean gone = !(entity instanceof ItemEntity) || entity.isRemoved();
-            if (gone) trackedCounts.remove(id);
+            if (gone) {
+                trackedCounts.remove(id);
+                blockedApproaches.remove(id);
+            }
             return gone;
         });
     }
@@ -404,17 +508,41 @@ final class LootSweep {
     }
 
     void noteApproachFailure() {
-        if (++approachFailures < MAX_APPROACH_FAILURES) return;
-        approachFailures = 0;
         nearest().ifPresent(item -> {
-            if (skipped.add(item.getId())) {
-                unreachableCount++;
+            long fingerprint = localWorldFingerprint(item.blockPosition());
+            if (blockedApproaches.put(item.getId(), new BlockedApproach(
+                    player.blockPosition().immutable(), item.blockPosition().immutable(),
+                    fingerprint, item.getItem().getItem(), item.getItem().getCount())) == null) {
                 account(unreachableByItem,
                         item.getItem().getItem(), item.getItem().getCount());
                 account(sweepUnreachable,
                         item.getItem().getItem(), item.getItem().getCount());
             }
         });
+    }
+
+    private boolean approachMayBeRetried(ItemEntity item) {
+        BlockedApproach blocked = blockedApproaches.get(item.getId());
+        if (blocked == null) return true;
+        if (!blocked.playerPosition().equals(player.blockPosition())
+                || !blocked.itemPosition().equals(item.blockPosition())
+                || blocked.localWorldFingerprint() != localWorldFingerprint(item.blockPosition())) {
+            blockedApproaches.remove(item.getId());
+            subtract(sweepUnreachable, blocked.item(), blocked.count());
+            subtract(unreachableByItem, blocked.item(), blocked.count());
+            return true;
+        }
+        return false;
+    }
+
+    private long localWorldFingerprint(BlockPos center) {
+        long hash = 0xcbf29ce484222325L;
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-1, -1, -1),
+                center.offset(1, 2, 1))) {
+            hash ^= player.level().getBlockState(pos).hashCode();
+            hash *= 0x100000001b3L;
+        }
+        return hash;
     }
 
     private java.util.Optional<ItemEntity> nearest() {
@@ -429,13 +557,13 @@ final class LootSweep {
         tracked.clear();
         trackedCounts.clear();
         skipped.clear();
-        deathPositions.clear();
+        deaths.clear();
         resetContactEvidence();
         Constants.LOG.info("[maicraft-loot] completed causal sweep: {}", receipt);
     }
 
     int unreachableCount() {
-        return unreachableCount;
+        return blockedApproaches.size();
     }
 
     int ambiguousMergedCount() {
@@ -447,7 +575,8 @@ final class LootSweep {
                 || !live().isEmpty()
                 || !unaccountedByItem().isEmpty()
                 || hasUnreachableCurrentSweep()
-                || hasAmbiguousCurrentSweep());
+                || hasAmbiguousCurrentSweep()
+                || hasUnresolvedCurrentSweep());
     }
 
     boolean hasUnreachableCurrentSweep() {
@@ -456,6 +585,10 @@ final class LootSweep {
 
     boolean hasAmbiguousCurrentSweep() {
         return !sweepAmbiguous.isEmpty();
+    }
+
+    boolean hasUnresolvedCurrentSweep() {
+        return !unresolvedCandidates.isEmpty();
     }
 
     String unreachableEvidence() {
@@ -470,6 +603,15 @@ final class LootSweep {
                 + "; confirmed_inventory_gain=" + named(currentSweepInventoryGain());
     }
 
+    String unresolvedEvidence() {
+        return unresolvedCandidates.values().stream()
+                .map(candidate -> itemName(candidate.item()) + " x" + candidate.count()
+                        + " at " + candidate.position().toShortString()
+                        + " (" + candidate.reason() + ")")
+                .sorted()
+                .toList().toString();
+    }
+
     Map<String, Object> report() {
         Map<Item, Integer> confirmed = new HashMap<>(collectedFromSettledSweeps);
         if (active) {
@@ -480,23 +622,30 @@ final class LootSweep {
             }
         }
         Map<Item, Integer> remaining = new HashMap<>();
+        Map<Item, Integer> blocked = new HashMap<>();
         for (int id : tracked) {
             if (skipped.contains(id)) continue;
             Entity entity = player.clientLevel.getEntity(id);
             if (entity instanceof ItemEntity item && !item.isRemoved()) {
-                account(remaining, item.getItem().getItem(), item.getItem().getCount());
+                if (blockedApproaches.containsKey(id)) {
+                    account(blocked, item.getItem().getItem(), item.getItem().getCount());
+                } else {
+                    account(remaining, item.getItem().getItem(), item.getItem().getCount());
+                }
             }
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("attributed_by_item", named(attributedTotal));
         out.put("confirmed_inventory_gain_by_item", named(confirmed));
         out.put("remaining_reachable_by_item", named(remaining));
+        out.put("remaining_loaded_but_unreached_by_item", named(blocked));
         out.put("unreachable_by_item", named(unreachableByItem));
         out.put("ambiguous_merged_by_item", named(ambiguousByItem));
         out.put("rejected_local_player_drops_by_item", named(rejectedLocalPlayerDrops));
         out.put("preexisting_stack_disappeared_by_item", named(vanishedPreexistingByItem));
         out.put("unconfirmed_vanished_by_item", named(unaccountedByItem()));
-        out.put("death_site_count", deathPositions.size());
+        out.put("unresolved_candidate_evidence", unresolvedEvidence());
+        out.put("death_site_count", deaths.size());
         out.put("active_sweep", active);
         out.put("attribution_window_open", active && settling());
         out.put("contact_evidence", contactEvidence());
@@ -525,6 +674,18 @@ final class LootSweep {
     private Map<Item, Integer> reachableTrackedLiveCounts() {
         Map<Item, Integer> out = new HashMap<>();
         for (int id : tracked) {
+            if (skipped.contains(id) || blockedApproaches.containsKey(id)) continue;
+            Entity entity = player.clientLevel.getEntity(id);
+            if (entity instanceof ItemEntity item && !item.isRemoved()) {
+                account(out, item.getItem().getItem(), item.getItem().getCount());
+            }
+        }
+        return out;
+    }
+
+    private Map<Item, Integer> allTrackedLiveCounts() {
+        Map<Item, Integer> out = new HashMap<>();
+        for (int id : tracked) {
             if (skipped.contains(id)) continue;
             Entity entity = player.clientLevel.getEntity(id);
             if (entity instanceof ItemEntity item && !item.isRemoved()) {
@@ -536,7 +697,7 @@ final class LootSweep {
 
     private Map<Item, Integer> unaccountedByItem() {
         Map<Item, Integer> gains = currentSweepInventoryGain();
-        Map<Item, Integer> liveCounts = reachableTrackedLiveCounts();
+        Map<Item, Integer> liveCounts = allTrackedLiveCounts();
         Map<Item, Integer> out = new HashMap<>();
         for (var entry : sweepAttributed.entrySet()) {
             int missing = entry.getValue()
@@ -566,6 +727,12 @@ final class LootSweep {
 
     private static void account(Map<Item, Integer> counts, Item item, int amount) {
         if (amount > 0) counts.merge(item, amount, Integer::sum);
+    }
+
+    private static void subtract(Map<Item, Integer> counts, Item item, int amount) {
+        int remaining = counts.getOrDefault(item, 0) - amount;
+        if (remaining > 0) counts.put(item, remaining);
+        else counts.remove(item);
     }
 
     private static Map<String, Integer> named(Map<Item, Integer> counts) {

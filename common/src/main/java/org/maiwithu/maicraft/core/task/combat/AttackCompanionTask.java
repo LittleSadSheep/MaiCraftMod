@@ -223,7 +223,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (target != null) {
             lastTargetPosition = target.position();
             lastTargetPositions.put(target.getId(), lastTargetPosition);
-            loot.rememberPreexisting(BlockPos.containing(lastTargetPosition));
+            loot.rememberPreexisting();
         }
         // 攻击与移动<b>正交</b>:每刻先问一次"冷却好了吗、够得着谁吗",够得着就打 ——
         // 不管这一刻在靠近、在拉开、还是站着。攻击不影响寻路,最多让她回个头。
@@ -328,14 +328,14 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 if (r.strikes(id) > 0) {
                     r.defeated(id);
                     renewCombatProgress();
-                    beginLoot(lastTargetPositions.getOrDefault(id, lastTargetPosition));
+                    beginLoot(id, lastTargetPositions.getOrDefault(id, lastTargetPosition));
                 } else {
                     r.lost(id);
                 }
             } else if (e instanceof LivingEntity living && living.isDeadOrDying()) {
                 r.defeated(id);
                 renewCombatProgress();
-                beginLoot(lastTargetPositions.getOrDefault(id, e.position()));
+                beginLoot(id, lastTargetPositions.getOrDefault(id, e.position()));
             } else if (e instanceof LivingEntity living) {
                 float current = living.getHealth();
                 Float previous = observedHealth.put(id, current);
@@ -918,15 +918,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // ==================== 拾荒 ====================
 
-    private void beginLoot(Vec3 where) {
+    private void beginLoot(int sourceEntityId, Vec3 where) {
         stopNav();
         abortShot();
         InputDriver.halt(player);
         BlockPos death = BlockPos.containing(where != null ? where : player.position());
         if (phase == Phase.LOOT) {
-            loot.addDeath(death);
+            loot.addDeath(sourceEntityId, death);
         } else {
-            loot.begin(death);
+            loot.begin(sourceEntityId, death);
         }
         target = null;
         lastMove = null;   // 目标没了,承诺一并作废
@@ -935,11 +935,14 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     private TaskState tickLoot() {
         loot.discover();
-        if (loot.settling()) {
+        boolean deathStreamOpen = loot.settling();
+        loot.prune();
+        // Do not wait beside visible loot for the corpse lifecycle to finish. Continue collecting
+        // every already-attributed entity while keeping admission open for later packets.
+        if (deathStreamOpen && loot.live().isEmpty()) {
             InputDriver.halt(player);
             return TaskState.RUNNING;
         }
-        loot.prune();
         switch (loot.pickupContact()) {
             case WAITING -> {
                 stopNav();
@@ -987,6 +990,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             if (loot.hasAmbiguousCurrentSweep()) {
                 fail("attributable loot merged with a pre-existing stack and cannot be collected "
                                 + "without taking older items: " + loot.ambiguousEvidence(),
+                        FailureType.UNKNOWN);
+                return TaskState.FAILED;
+            }
+            if (loot.hasUnresolvedCurrentSweep()) {
+                fail("new item entities appeared during the target death event, but client facts "
+                                + "cannot conservatively prove that they came from that target: "
+                                + loot.unresolvedEvidence(),
                         FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
