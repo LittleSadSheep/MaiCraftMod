@@ -43,7 +43,17 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class SemanticExploreCompanionTask
         extends AbstractCompanionTask<SemanticExploreTaskRecord> {
 
-    private enum TargetKind { BIOME, COAST }
+    private enum FrontierSurfacePreference { ANY_TRAVERSABLE, DRY_LAND }
+    private enum TargetKind {
+        BIOME(FrontierSurfacePreference.ANY_TRAVERSABLE),
+        COAST(FrontierSurfacePreference.DRY_LAND);
+
+        private final FrontierSurfacePreference frontierSurfacePreference;
+
+        TargetKind(FrontierSurfacePreference frontierSurfacePreference) {
+            this.frontierSurfacePreference = frontierSurfacePreference;
+        }
+    }
     private enum Stage { OBSERVE, TRAVEL_TARGET, VERIFY_TARGET, TRAVEL_WAYPOINT }
     private enum SurfaceKind { LAND, WATER, UNKNOWN }
 
@@ -65,6 +75,7 @@ public final class SemanticExploreCompanionTask
     private record ScoredCoast(
             TargetCandidate candidate, boolean preferredShore,
             double travelDistance, int evidenceScore) {}
+    private record FrontierChoice(BlockPos position, boolean crossesObservedWater) {}
 
     private static final int OBSERVATION_RADIUS = 112;
     private static final int BIOME_OBSERVATION_STEP = 4;
@@ -80,6 +91,15 @@ public final class SemanticExploreCompanionTask
     private static final int LARGE_WATER_MIN_LATERAL_WIDTH = 7;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
+    /** A new observation center should expose more than the chunk already around the body. */
+    private static final int MIN_FRONTIER_PROGRESS = 16;
+    /** Finite loaded-column sampling budget; this limits one selection slice, not travel time. */
+    private static final int FRONTIER_DIRECTION_PROBES = 16;
+    private static final int FRONTIER_DIRECTION_PASSES = 2;
+    private static final int FRONTIER_RAY_STRIDE = 8;
+    private static final int[] SHORE_RETURN_RADII = {
+            1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 88, 112
+    };
     /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
     private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
@@ -128,7 +148,15 @@ public final class SemanticExploreCompanionTask
     private int targetAttempts;
     private final Set<Long> rejectedTargets = new HashSet<>();
     private final Set<Long> attemptedWaypoints = new HashSet<>();
+    private final Set<Long> failedShoreReturnWaypoints = new HashSet<>();
     private final List<Map<String, Object>> legFailures = new ArrayList<>();
+    private boolean waypointSelectionDeferred;
+    private boolean selectedWaypointShoreReturn;
+    private boolean activeWaypointShoreReturn;
+    private int frontierDirectionPass;
+    private int dryLandWaypoints;
+    private int shoreReturnWaypoints;
+    private int observedWaterCrossingWaypoints;
 
     private int spiralX;
     private int spiralZ;
@@ -346,10 +374,16 @@ public final class SemanticExploreCompanionTask
             return exhausted();
         }
         BlockPos waypoint = nextWaypoint(level);
+        if (waypoint == null && waypointSelectionDeferred) {
+            waypointSelectionDeferred = false;
+            return TaskState.RUNNING;
+        }
         if (waypoint == null) {
             return exhausted();
         }
         activeWaypoint = waypoint;
+        activeWaypointShoreReturn = selectedWaypointShoreReturn;
+        selectedWaypointShoreReturn = false;
         waypointAttempts++;
         startMove(waypoint, false);
         stage = Stage.TRAVEL_WAYPOINT;
@@ -360,10 +394,10 @@ public final class SemanticExploreCompanionTask
         long now = player.level().getGameTime();
         String parentCall = r.getToolCallId() == null ? "explore" : r.getToolCallId();
         String childCall = parentCall + "-internal-leg-" + (++legSerial);
-        // Coast promises an exact grounded dry stance to downstream tasks. Other biome targets
-        // deliberately retain the original stand-or-swim movement contract and are confirmed
-        // from the live body's biome in VERIFY_TARGET (an ocean cell cannot be onGround).
-        moveRecord = exact && targetKind == TargetKind.COAST
+        // A target kind that promises a dry approach uses the same exact grounded contract for
+        // both its observation frontiers and its final target. Terrain-neutral biome targets keep
+        // the original stand-or-swim contract (an ocean-biome cell cannot be onGround).
+        moveRecord = targetKind.frontierSurfacePreference == FrontierSurfacePreference.DRY_LAND
                 ? MoveToTaskRecord.strictStance(
                         childCall, now + INITIAL_LEG_LEASE_TICKS, target, r.mayAlterTerrain)
                 : new MoveToTaskRecord(
@@ -409,9 +443,14 @@ public final class SemanticExploreCompanionTask
             waypointReached++;
         } else {
             waypointFailed++;
+            if (activeWaypointShoreReturn && activeWaypoint != null) {
+                failedShoreReturnWaypoints.add(BlockPos.asLong(
+                        activeWaypoint.getX(), 0, activeWaypoint.getZ()));
+            }
             recordLegFailure("exploration_waypoint", activeWaypoint, result);
         }
         activeWaypoint = null;
+        activeWaypointShoreReturn = false;
         beginObservation();
         return TaskState.RUNNING;
     }
@@ -666,12 +705,190 @@ public final class SemanticExploreCompanionTask
     }
 
     private BlockPos nextWaypoint(ClientLevel level) {
+        selectedWaypointShoreReturn = false;
+        waypointSelectionDeferred = false;
+        if (targetKind.frontierSurfacePreference == FrontierSurfacePreference.DRY_LAND) {
+            return nextDryLandWaypoint(level);
+        }
+        return nextTerrainNeutralWaypoint(level);
+    }
+
+    private BlockPos nextTerrainNeutralWaypoint(ClientLevel level) {
         for (int probe = 0; probe < MAX_SPIRAL_PROBES; probe++) {
             BlockPos desired = nextSpiralPoint();
             if (!insideScope(desired.getX(), desired.getZ())) continue;
             BlockPos frontier = loadedFrontierToward(level, desired);
             if (frontier != null && attemptedWaypoints.add(
                     BlockPos.asLong(frontier.getX(), 0, frontier.getZ()))) return frontier;
+        }
+        return null;
+    }
+
+    /**
+     * Choose an observation center for a target whose semantic approach is dry land. The target
+     * kind merely declares that surface contract; this selector contains no biome/entity special
+     * case. It samples loaded facts only and leaves actual reachability to the first-person child.
+     */
+    private BlockPos nextDryLandWaypoint(ClientLevel level) {
+        BlockPos current = BlockHelper.playerFeet(
+                level, player.getX(), player.getY(), player.getZ()).immutable();
+        if (player.isInWater()) {
+            BlockPos shore = nearestLoadedDryLand(level, current);
+            if (shore == null) return deferFrontierDirectionPass();
+            attemptedWaypoints.add(BlockPos.asLong(shore.getX(), 0, shore.getZ()));
+            selectedWaypointShoreReturn = true;
+            shoreReturnWaypoints++;
+            frontierDirectionPass = 0;
+            return shore;
+        }
+
+        double rotation = frontierDirectionPass * Math.PI / FRONTIER_DIRECTION_PROBES;
+        List<FrontierChoice> choices = new ArrayList<>();
+        for (int direction = 0; direction < FRONTIER_DIRECTION_PROBES; direction++) {
+            double angle = rotation
+                    + Math.PI * 2.0 * direction / FRONTIER_DIRECTION_PROBES;
+            BlockPos desired = new BlockPos(
+                    current.getX() + (int) Math.round(Math.cos(angle) * MAX_LEG_DISTANCE),
+                    current.getY(),
+                    current.getZ() + (int) Math.round(Math.sin(angle) * MAX_LEG_DISTANCE));
+            FrontierChoice choice = sampledDryFrontierToward(level, current, desired);
+            if (choice != null && isNovelWaypoint(choice.position())) choices.add(choice);
+        }
+        if (choices.isEmpty()) return deferFrontierDirectionPass();
+
+        // Keep the outward spiral's coverage ordering, but never choose an observed water
+        // crossing while an all-dry expansion is available in this selection slice.
+        boolean hasAllDryChoice = choices.stream()
+                .anyMatch(choice -> !choice.crossesObservedWater());
+        BlockPos desired = nextSpiralPoint();
+        FrontierChoice selected = choices.stream()
+                .filter(choice -> !hasAllDryChoice || !choice.crossesObservedWater())
+                .min(Comparator
+                        .comparingDouble((FrontierChoice choice) -> horizontalDistance(
+                                choice.position(), desired))
+                        .thenComparing((first, second) -> Double.compare(
+                                horizontalDistance(current, second.position()),
+                                horizontalDistance(current, first.position()))))
+                .orElse(null);
+        if (selected == null) return deferFrontierDirectionPass();
+        attemptedWaypoints.add(BlockPos.asLong(
+                selected.position().getX(), 0, selected.position().getZ()));
+        if (selected.crossesObservedWater()) observedWaterCrossingWaypoints++;
+        else dryLandWaypoints++;
+        frontierDirectionPass = 0;
+        return selected.position();
+    }
+
+    /**
+     * Sample one ray in loaded terrain. Water is not treated as a destination. A far bank becomes
+     * eligible only after the complete sampled water run and at least as much dry runway have
+     * both been observed; this prevents a guessed far shore from turning into open-water search.
+     */
+    private FrontierChoice sampledDryFrontierToward(
+            ClientLevel level, BlockPos current, BlockPos desired) {
+        double dx = desired.getX() - current.getX();
+        double dz = desired.getZ() - current.getZ();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 1.0) return null;
+        double ux = dx / length;
+        double uz = dz / length;
+        double farthest = Math.min(MAX_LEG_DISTANCE,
+                Math.max(length, minimumFrontierProgress()));
+        BlockPos lastDryBeforeWater = null;
+        BlockPos verifiedFarShore = null;
+        boolean enteredWater = false;
+        int waterSamples = 0;
+        int farShoreDrySamples = 0;
+        long previousColumn = Long.MIN_VALUE;
+        for (int step = FRONTIER_RAY_STRIDE;
+                step <= farthest;
+                step += FRONTIER_RAY_STRIDE) {
+            int x = (int) Math.round(current.getX() + ux * step);
+            int z = (int) Math.round(current.getZ() + uz * step);
+            long column = BlockPos.asLong(x, 0, z);
+            if (column == previousColumn) continue;
+            previousColumn = column;
+            if (!insideScope(x, z)) break;
+            SurfaceInfo surface = surfaceInfo(level, x, z);
+            if (surface.kind() == SurfaceKind.UNKNOWN) break;
+            if (!enteredWater) {
+                if (surface.kind() == SurfaceKind.WATER) {
+                    enteredWater = true;
+                    waterSamples = 1;
+                } else if (horizontalDistance(current, surface.approach())
+                        >= minimumFrontierProgress()) {
+                    lastDryBeforeWater = surface.approach();
+                }
+                continue;
+            }
+            if (surface.kind() == SurfaceKind.WATER) {
+                if (farShoreDrySamples > 0) break;
+                waterSamples++;
+                continue;
+            }
+            farShoreDrySamples++;
+            if (farShoreDrySamples >= waterSamples
+                    && horizontalDistance(current, surface.approach())
+                            >= minimumFrontierProgress()) {
+                verifiedFarShore = surface.approach();
+            }
+        }
+        return verifiedFarShore != null
+                ? new FrontierChoice(verifiedFarShore, true)
+                : lastDryBeforeWater == null
+                        ? null : new FrontierChoice(lastDryBeforeWater, false);
+    }
+
+    private BlockPos nearestLoadedDryLand(ClientLevel level, BlockPos current) {
+        BlockPos best = null;
+        double bestDistance = Double.POSITIVE_INFINITY;
+        double rotation = frontierDirectionPass * Math.PI / FRONTIER_DIRECTION_PROBES;
+        for (int radius : SHORE_RETURN_RADII) {
+            for (int direction = 0; direction < FRONTIER_DIRECTION_PROBES; direction++) {
+                double angle = rotation
+                        + Math.PI * 2.0 * direction / FRONTIER_DIRECTION_PROBES;
+                int x = current.getX() + (int) Math.round(Math.cos(angle) * radius);
+                int z = current.getZ() + (int) Math.round(Math.sin(angle) * radius);
+                if (!insideScope(x, z)) continue;
+                SurfaceInfo surface = surfaceInfo(level, x, z);
+                if (surface.kind() != SurfaceKind.LAND || surface.approach() == null
+                        || isFailedShoreReturnNeighborhood(surface.approach())) continue;
+                double distance = horizontalDistance(current, surface.approach());
+                if (distance < bestDistance) {
+                    best = surface.approach();
+                    bestDistance = distance;
+                }
+            }
+            if (best != null) break;
+        }
+        return best;
+    }
+
+    private boolean isFailedShoreReturnNeighborhood(BlockPos candidate) {
+        for (long packed : failedShoreReturnWaypoints) {
+            if (horizontalDistance(candidate, BlockPos.of(packed)) <= 4.0) return true;
+        }
+        return false;
+    }
+
+    private boolean isNovelWaypoint(BlockPos candidate) {
+        double separation = minimumFrontierProgress();
+        for (long packed : attemptedWaypoints) {
+            if (horizontalDistance(candidate, BlockPos.of(packed)) < separation) return false;
+        }
+        return true;
+    }
+
+    private int minimumFrontierProgress() {
+        return Math.max(1, Math.min(MIN_FRONTIER_PROGRESS, r.maxDistance / 2));
+    }
+
+    private BlockPos deferFrontierDirectionPass() {
+        frontierDirectionPass++;
+        if (frontierDirectionPass < FRONTIER_DIRECTION_PASSES) {
+            waypointSelectionDeferred = true;
+        } else {
+            frontierDirectionPass = 0;
         }
         return null;
     }
@@ -820,6 +1037,15 @@ public final class SemanticExploreCompanionTask
         data.put("waypoints_failed", waypointFailed);
         data.put("target_approaches_attempted", targetAttempts);
         data.put("failed_legs", List.copyOf(legFailures));
+        data.put("frontier_surface_preference",
+                targetKind == null
+                        ? "unresolved"
+                        : targetKind.frontierSurfacePreference.name()
+                                .toLowerCase(java.util.Locale.ROOT));
+        data.put("dry_land_waypoints", dryLandWaypoints);
+        data.put("shore_return_waypoints", shoreReturnWaypoints);
+        data.put("observed_water_crossing_waypoints", observedWaterCrossingWaypoints);
+        data.put("failed_shore_return_waypoints", failedShoreReturnWaypoints.size());
 
         List<Map<String, Object>> centers = exploredCenters.stream()
                 .map(pos -> Map.<String, Object>of(
