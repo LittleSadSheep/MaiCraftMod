@@ -106,15 +106,17 @@ public final class EntitySemanticSafety {
             // A label without a resolved location proves nothing about this entity. Likewise, a
             // remembered landmark is only area context: the point/radius is not itself a fence.
             // Physical enclosure evidence below is what turns that context into protection.
-            if (landmark != null && insideLandmark(position, landmark, dimension)) {
+            if (landmark != null
+                    && landmark.areaRole()
+                            == IntentRuntime.LandmarkAreaRole.MANAGED_SETTLEMENT
+                    && insideLandmark(position, landmark, dimension)) {
                 containingAreas.add(landmark.label());
             }
         }
         /*
-         * A remembered Landmark currently carries only a point, not an area kind or measured
-         * boundary.  Treating every remembered point as managed terrain caused arbitrary wild
-         * entities nearby to be protected.  Until semantic area metadata is persisted, only the
-         * caller's explicit protected_labels can establish this area context.
+         * Human labels are never policy.  Only a caller-selected protected label carrying the
+         * durable managed-settlement role can establish area context; physical enclosure remains
+         * independently required by the caller above.
          */
         return new ProtectedAreaEvidence(
                 List.of(), List.copyOf(containingAreas));
