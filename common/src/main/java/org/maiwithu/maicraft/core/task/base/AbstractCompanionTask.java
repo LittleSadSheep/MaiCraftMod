@@ -342,6 +342,13 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         // 被抢占:只松开身体(归零移动输入、放开潜行),<b>逻辑字段一个不动</b>——
         // 尤其是寻路计划,它正是下次拿回身体时能接着走的原因。不调 nav.stop()。
         // 被换掉/身体没了不需要额外收尾:buildResult 里的 cleanup() 会跑。
+        if (nav != null) {
+            // Preserve the calculated route, but release every physical Baritone output before
+            // the higher-priority winner starts. This is the only safe point to stop a path-owned
+            // native break; doing it later in the frame-finally block could cancel the new
+            // winner's own action instead.
+            nav.pause();
+        }
         InputDriver.halt(player);
         ClientRuntime.requireContext(player).body().releaseAll();
     }
