@@ -114,6 +114,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     /** Release the held use; no nav / overlay to clear. */
     @Override
     protected void cleanup() {
+        selection.reset();
         if (eat != null) {
             eat.stop();
         }

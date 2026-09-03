@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** Unequip through confirmed hotbar selection or inventory-menu QUICK_MOVE clicks. */
@@ -27,11 +28,10 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
     private MenuReceipt receipt;
     private EquipmentSlot pendingSlot;
     private ItemStack pendingPiece = ItemStack.EMPTY;
-    private boolean closing;
+    private final VisibleMenuSession menuSession = new VisibleMenuSession();
     private String message = "";
 
     public UnequipCompanionTask(LocalPlayer player, UnequipTaskRecord record) { super(player, record); }
-    @Override protected void onStart() { closing = player.containerMenu != player.inventoryMenu; }
 
     @Override protected TaskState onTick() {
         var context = ClientRuntime.requireContext(player);
@@ -43,20 +43,15 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
                 return TaskState.FAILED;
             }
             receipt = null;
-            if (closing) { closing = false; return TaskState.RUNNING; }
             removed.add(itemName(pendingPiece) + " (" + pendingSlot.getName() + ")");
             index++; pendingSlot = null; pendingPiece = ItemStack.EMPTY;
-        }
-        if (closing) {
-            receipt = context.menus().close(context, 20);
-            return TaskState.RUNNING;
         }
         while (index < r.slots.size() && player.getItemBySlot(r.slots.get(index)).isEmpty()) index++;
         if (index >= r.slots.size()) {
             if (removed.isEmpty()) message = "nothing to take off — " + r.label + " already empty";
             else message = "took off " + String.join(", ", removed)
                     + (kept.isEmpty() ? "" : "; still wearing " + String.join(", ", kept));
-            return TaskState.SUCCESS;
+            return menuSession.close(context) ? TaskState.SUCCESS : TaskState.RUNNING;
         }
         pendingSlot = r.slots.get(index);
         pendingPiece = player.getItemBySlot(pendingSlot).copy();
@@ -71,6 +66,7 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
             fail("unsupported equipment slot: " + pendingSlot.getName(), FailureType.UNKNOWN);
             return TaskState.FAILED;
         }
+        if (!menuSession.inventoryReady(context)) return TaskState.RUNNING;
         receipt = context.menus().click(context, menuSlot, 0, ClickType.QUICK_MOVE,
                 (c, ignored) -> c.player().getItemBySlot(pendingSlot).isEmpty()
                         ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
@@ -96,6 +92,7 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
         }
         int menuSlot = 36 + inv.selected;
         var context = ClientRuntime.requireContext(player);
+        if (!menuSession.inventoryReady(context)) return TaskState.RUNNING;
         receipt = context.menus().click(context, menuSlot, 0, ClickType.QUICK_MOVE,
                 (c, ignored) -> c.player().getMainHandItem().isEmpty()
                         ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
@@ -112,7 +109,11 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
     private static String itemName(ItemStack stack) {
         return BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
     }
-    @Override protected void cleanup() { receipt = null; selection.reset(); }
+    @Override protected void cleanup() {
+        menuSession.cleanup(player);
+        receipt = null;
+        selection.reset();
+    }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         if (!removed.isEmpty()) data.put("removed", List.copyOf(removed));

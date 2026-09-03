@@ -258,6 +258,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     /** Release the interaction, then the nav + overlay (base default). */
     @Override
     protected void cleanup() {
+        selection.reset();
         if (interaction != null) interaction.stop();
         super.cleanup();
     }

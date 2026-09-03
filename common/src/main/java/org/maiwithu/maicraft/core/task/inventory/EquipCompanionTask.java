@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
+import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** Equip using only synchronized hotbar selection, native item use, or an offhand SWAP click. */
@@ -28,7 +29,8 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
     private int carriedBefore;
     private Interaction use;
     private MenuReceipt menuReceipt;
-    private boolean closing;
+    private boolean offhandApplied;
+    private final VisibleMenuSession menuSession = new VisibleMenuSession();
     private String message = "";
     private String slotName = "";
 
@@ -44,7 +46,6 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
         sourceSlot = findItem(player.getInventory());
         item = player.getInventory().getItem(sourceSlot).getItem();
         carriedBefore = PlayerInv.carriedCount(player.getInventory(), item);
-        closing = r.slot == EquipmentSlot.OFFHAND && player.containerMenu != player.inventoryMenu;
     }
 
     @Override protected TaskState onTick() {
@@ -72,6 +73,9 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
 
     private TaskState equipOffhand() {
         var context = ClientRuntime.requireContext(player);
+        if (offhandApplied) {
+            return menuSession.close(context) ? TaskState.SUCCESS : TaskState.RUNNING;
+        }
         if (menuReceipt != null) {
             menuReceipt = context.menus().poll(context, menuReceipt);
             if (!menuReceipt.terminal()) return TaskState.RUNNING;
@@ -80,16 +84,17 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
                 return TaskState.FAILED;
             }
             menuReceipt = null;
-            if (closing) { closing = false; return TaskState.RUNNING; }
             message = "equipped " + r.label + " in offhand";
             slotName = "offhand";
-            return TaskState.SUCCESS;
-        }
-        if (closing) {
-            menuReceipt = context.menus().close(context, 20);
+            offhandApplied = true;
             return TaskState.RUNNING;
         }
+        if (!menuSession.inventoryReady(context)) return TaskState.RUNNING;
         sourceSlot = findItem(player.getInventory());
+        if (sourceSlot < 0) {
+            fail("the item disappeared before offhand equip", FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
         int menuSlot = sourceSlot < 9 ? 36 + sourceSlot : sourceSlot;
         var before = player.getOffhandItem().copy();
         menuReceipt = context.menus().click(context, menuSlot, 40, ClickType.SWAP,
@@ -126,7 +131,12 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
     private static boolean same(net.minecraft.world.item.ItemStack a, net.minecraft.world.item.ItemStack b) {
         return a.getCount() == b.getCount() && net.minecraft.world.item.ItemStack.isSameItemSameComponents(a, b);
     }
-    @Override protected void cleanup() { if (use != null) use.stop(); selection.reset(); menuReceipt = null; }
+    @Override protected void cleanup() {
+        if (use != null) use.stop();
+        selection.reset();
+        menuSession.cleanup(player);
+        menuReceipt = null;
+    }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>(); data.put("item", r.label);
         if (!slotName.isEmpty()) data.put("slot", slotName); return data;

@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
+import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** One creative slot packet per tick, followed by a later inventory-fact confirmation. */
@@ -20,6 +21,7 @@ public final class CreativeTakeItemsCompanionTask
     private int pendingInventorySlot = -1;
     private ItemStack expected = ItemStack.EMPTY;
     private NativeActionReceipt receipt;
+    private final VisibleMenuSession menuSession = new VisibleMenuSession();
 
     public CreativeTakeItemsCompanionTask(LocalPlayer player, CreativeTakeItemsTaskRecord record) {
         super(player, record);
@@ -33,6 +35,10 @@ public final class CreativeTakeItemsCompanionTask
         beforeTotal = PlayerInv.count(player.getInventory(), r.template.getItem());
     }
     @Override protected TaskState onTick() {
+        var context = ClientRuntime.requireContext(player);
+        if (added >= r.count) {
+            return menuSession.close(context) ? TaskState.SUCCESS : TaskState.RUNNING;
+        }
         if (receipt != null) {
             if (!receipt.terminal()) return TaskState.RUNNING;
             if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
@@ -44,10 +50,10 @@ public final class CreativeTakeItemsCompanionTask
             receipt = null;
             pendingInventorySlot = -1;
             expected = ItemStack.EMPTY;
-            if (added >= r.count) return TaskState.SUCCESS;
             return TaskState.RUNNING;
         }
 
+        if (!menuSession.inventoryReady(context)) return TaskState.RUNNING;
         int remaining = r.count - added;
         int slot = destinationSlot();
         if (slot < 0) {
@@ -60,7 +66,6 @@ public final class CreativeTakeItemsCompanionTask
         int amount = Math.min(remaining, capacity);
         expected = r.template.copyWithCount((current.isEmpty() ? 0 : current.getCount()) + amount);
         pendingInventorySlot = slot;
-        var context = ClientRuntime.requireContext(player);
         receipt = context.actions().creativeSetSlot(context, slot, expected, 20);
         return TaskState.RUNNING;
     }
@@ -76,6 +81,7 @@ public final class CreativeTakeItemsCompanionTask
         return -1;
     }
     @Override protected void cleanup() {
+        menuSession.cleanup(player);
         receipt = null;
         pendingInventorySlot = -1;
         expected = ItemStack.EMPTY;

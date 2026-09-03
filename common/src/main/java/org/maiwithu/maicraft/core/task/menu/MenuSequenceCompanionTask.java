@@ -18,6 +18,7 @@ public final class MenuSequenceCompanionTask
     private boolean rollingBack;
     private String pendingFailure;
     private int rollbackSlot = -1;
+    private final VisibleMenuSession menuSession = new VisibleMenuSession();
 
     public MenuSequenceCompanionTask(LocalPlayer player, MenuSequenceTaskRecord record) {
         super(player, record);
@@ -25,6 +26,9 @@ public final class MenuSequenceCompanionTask
 
     @Override protected TaskState onTick() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (index >= r.clicks.size()) {
+            return menuSession.close(context) ? TaskState.SUCCESS : TaskState.RUNNING;
+        }
         if (r.expectedContainerId >= 0
                 && player.containerMenu.containerId != r.expectedContainerId) {
             fail("menu changed before click " + index + " (expected container "
@@ -57,7 +61,6 @@ public final class MenuSequenceCompanionTask
             }
             receipt = null;
             index++;
-            if (index >= r.clicks.size()) return TaskState.SUCCESS;
             return TaskState.RUNNING;
         }
         if (rollingBack) {
@@ -66,6 +69,7 @@ public final class MenuSequenceCompanionTask
                         FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
+            if (!menuSession.ready(context)) return TaskState.RUNNING;
             receipt = context.menus().click(context, rollbackSlot, 0, net.minecraft.world.inventory.ClickType.PICKUP,
                     (c, ignored) -> c.player().containerMenu.getCarried().isEmpty()
                             ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
@@ -77,6 +81,7 @@ public final class MenuSequenceCompanionTask
             fail("menu slot is unavailable: " + click.slot(), FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
+        if (!menuSession.ready(context)) return TaskState.RUNNING;
         ItemStack slotBefore = player.containerMenu.getSlot(click.slot()).getItem().copy();
         ItemStack carriedBefore = player.containerMenu.getCarried().copy();
         MenuConfirmation changed = (c, ignored) -> {
@@ -94,16 +99,8 @@ public final class MenuSequenceCompanionTask
         return a.getCount() == b.getCount() && ItemStack.isSameItemSameComponents(a, b);
     }
     @Override protected void cleanup() {
+        menuSession.cleanup(player);
         receipt = null;
-        if (!player.containerMenu.getCarried().isEmpty()) {
-            try {
-                var context = ClientRuntime.requireContext(player);
-                context.menus().close(context, 20);
-            } catch (RuntimeException ignored) {
-                // Actor/control revocation may make submission impossible. Root actor cleanup must
-                // close/return a carried cursor stack when human takeover revokes a pending click.
-            }
-        }
     }
     @Override protected Map<String, Object> resultData() { return Map.of("clicks", index); }
     @Override protected String successMessage() { return "confirmed " + index + " menu click(s)"; }

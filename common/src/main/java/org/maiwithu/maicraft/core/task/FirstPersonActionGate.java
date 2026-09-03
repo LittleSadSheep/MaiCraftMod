@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 
 /**
  * Per-task gate for selecting a real hotbar item. Receipts deliberately live on the task instance:
@@ -24,8 +25,11 @@ public final class FirstPersonActionGate {
     private boolean stagedToHotbar;
     private boolean ready;
     private String failure = "selection was not confirmed";
+    private VisibleMenuSession menuSession = new VisibleMenuSession();
+    private LocalPlayer owner;
 
     public Status select(LocalPlayer player, int inventorySlot) {
+        owner = player;
         // A confirmed main-inventory -> hotbar swap necessarily changes where a caller that
         // rediscovers the item will find it (source S becomes hotbar H). Settle that transaction
         // before validating/comparing the freshly discovered slot; otherwise a correct S -> H
@@ -73,6 +77,7 @@ public final class FirstPersonActionGate {
         // Do not swap S back into H when a caller intentionally keeps passing its cached source
         // slot. The confirmed transaction has already made H the physical selection target.
         if (stagedToHotbar) {
+            if (!menuSession.close(context) || !context.mutationAvailable()) return Status.RUNNING;
             if (player.getInventory().selected == selectedHotbarSlot) {
                 ready = true;
                 return Status.READY;
@@ -85,6 +90,7 @@ public final class FirstPersonActionGate {
         selectedHotbarSlot = inventorySlot < 9
                 ? inventorySlot : player.getInventory().selected;
         if (inventorySlot >= 9) {
+            if (!menuSession.inventoryReady(context)) return Status.RUNNING;
             staging = context.menus().swapInventoryToHotbar(
                     context, inventorySlot, selectedHotbarSlot, CONFIRM_TICKS);
             return Status.RUNNING;
@@ -101,8 +107,11 @@ public final class FirstPersonActionGate {
         return failure;
     }
 
-    /** Logical reset only. The actor boundary owns orphaned native/menu receipt cleanup. */
+    /** Close any inventory screen opened while staging, including interrupted transactions. */
     public void reset() {
+        if (owner != null) menuSession.cleanup(owner);
+        menuSession = new VisibleMenuSession();
+        owner = null;
         staging = null;
         selecting = null;
         requestedInventorySlot = -1;

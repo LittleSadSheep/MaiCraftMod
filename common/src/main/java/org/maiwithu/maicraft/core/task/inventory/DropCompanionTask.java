@@ -11,6 +11,7 @@ import net.minecraft.world.inventory.ClickType;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
@@ -18,15 +19,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** {@code drop_items} on the player body — toss items forward, natively. One-tick. */
+/** Toss inventory items through visible, confirmed inventory-menu clicks. */
 public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTaskRecord> {
+    private static final long DROP_PROGRESS_LEASE_TICKS = 10L * 20L;
 
     private int dropped;
     private String doneMessage = "done";
     private MenuReceipt receipt;
     private int target;
     private int pendingDrop;
-    private boolean closing;
+    private final VisibleMenuSession menuSession = new VisibleMenuSession();
 
     public DropCompanionTask(LocalPlayer player, DropItemsTaskRecord record) {
         super(player, record);
@@ -45,7 +47,6 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         Inventory inv = player.getInventory();
         int have = PlayerInv.count(inv, r.item);
         target = Math.min(r.count, have);
-        closing = player.containerMenu != player.inventoryMenu;
     }
 
     @Override
@@ -55,24 +56,20 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
             receipt = context.menus().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
             if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                fail((closing ? "inventory menu close" : "item drop")
-                        + " was not confirmed: " + receipt.detail(), FailureType.UNKNOWN);
+                fail("item drop was not confirmed: " + receipt.detail(), FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
             receipt = null;
-            if (closing) { closing = false; return TaskState.RUNNING; }
             dropped += pendingDrop;
             pendingDrop = 0;
+            r.extendDeadlineTo(player.level().getGameTime() + DROP_PROGRESS_LEASE_TICKS);
         }
         if (dropped >= target) {
             doneMessage = "dropped " + dropped + "x " + r.label
                     + (dropped < r.count ? " (only had " + dropped + ")" : "");
-            return TaskState.SUCCESS;
+            return menuSession.close(context) ? TaskState.SUCCESS : TaskState.RUNNING;
         }
-        if (closing) {
-            receipt = context.menus().close(context, 20);
-            return TaskState.RUNNING;
-        }
+        if (!menuSession.inventoryReady(context)) return TaskState.RUNNING;
         int inventorySlot = PlayerInv.findSlot(player.getInventory(), r.item);
         if (inventorySlot < 0) {
             fail("the item stack disappeared before all requested drops were confirmed",
@@ -91,9 +88,8 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         return TaskState.RUNNING;
     }
 
-    /** No nav / overlay to release. */
     @Override
-    protected void cleanup() { receipt = null; }
+    protected void cleanup() { menuSession.cleanup(player); receipt = null; }
 
     @Override
     protected Map<String, Object> resultData() {

@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.Minecraft;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
@@ -30,7 +32,8 @@ public final class ContainerOps {
      */
     public Plan plan(List<Move> moves, LocalPlayer self, ToolContext context) {
         AbstractContainerMenu menu = self.containerMenu;
-        if (menu == null || menu == self.inventoryMenu) {
+        if (menu == null || menu == self.inventoryMenu
+                || !MenuVisibility.matches(Minecraft.getInstance(), menu)) {
             return immediateFailure("no container or machine GUI is open — interact with one first",
                     Map.of("recovery", "open_container_or_machine"));
         }

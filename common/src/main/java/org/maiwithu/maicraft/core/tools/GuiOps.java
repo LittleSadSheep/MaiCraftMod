@@ -1,6 +1,8 @@
 package org.maiwithu.maicraft.core.tools;
 
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.Minecraft;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.task.TaskResult;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -22,9 +24,10 @@ public final class GuiOps {
         if (menu == null) {
             return TaskResult.fail("no GUI open.").toJson();
         }
-        // With no block menu open, containerMenu IS your own InventoryMenu — which carries the 2x2
-        // crafting grid. Surface it so the model can craft small recipes without a table.
+        // InventoryMenu always exists, even when its screen is closed. Expose the read-only
+        // inventory facts without claiming an invisible menu is an open GUI.
         boolean ownInventory = menu == self.inventoryMenu;
+        boolean visible = MenuVisibility.matches(Minecraft.getInstance(), menu);
         StringBuilder container = new StringBuilder();
         StringBuilder mine = new StringBuilder();
         // Crafting grid (if any). Detect generically: a slot backed by a CraftingContainer IS a grid
@@ -105,8 +108,10 @@ public final class GuiOps {
         }
 
         String header = ownInventory
-                ? "GUI: InventoryMenu (YOUR own inventory — includes the 2x2 crafting grid below)\n"
-                : "GUI: " + menu.getClass().getSimpleName() + "\n";
+                ? (visible ? "GUI: InventoryMenu" : "GUI: closed; inventory snapshot")
+                        + " (YOUR own inventory — includes the 2x2 crafting grid below)\n"
+                : "GUI: " + menu.getClass().getSimpleName()
+                        + (visible ? "\n" : " (screen not visible; operations must wait for it)\n");
         return TaskResult.ok(header
                 + gridSection
                 + "container slots:\n" + (container.length() == 0 ? "  (none)\n" : container)
