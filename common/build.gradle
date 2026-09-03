@@ -59,3 +59,19 @@ tasks.register('machineRegression', JavaExec) {
     doFirst { regressionDirectory.get().asFile.mkdirs() }
 }
 tasks.named('check') { dependsOn tasks.named('machineRegression') }
+
+tasks.register('guiRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks rendered GUI gates, menu timing and task cleanup boundaries.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+    mainClass = 'org.maiwithu.maicraft.client.actor.GuiRegressionSuite'
+    maxHeapSize = '512m'
+    timeout = java.time.Duration.ofSeconds(45)
+    def regressionDirectory = layout.buildDirectory.dir('gui-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
+}
+
+tasks.named('check') { dependsOn tasks.named('guiRegression') }
