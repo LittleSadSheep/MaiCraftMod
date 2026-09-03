@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
@@ -32,7 +33,10 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private enum Phase {
         START,
+        STAGE,
         WAIT_STAGE,
+        CLOSE_STAGE,
+        WAIT_STAGE_CLOSE,
         WAIT_SELECT,
         NAVIGATE_FIXED,
         FACE_FIXED,
@@ -136,6 +140,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private boolean movedForFixedTerminal;
     private PlayerNav navigation;
     private InventorySwap inventorySwap;
+    private boolean inventoryGuiOwned;
     private int selectedTerminalSlot = -1;
     private NativeActionReceipt nativeReceipt;
     private MenuReceipt menuReceipt;
@@ -183,7 +188,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         try {
             switch (phase) {
                 case START -> start(context);
+                case STAGE -> stage(context);
                 case WAIT_STAGE -> waitStage(context);
+                case CLOSE_STAGE -> closeStage(context);
+                case WAIT_STAGE_CLOSE -> waitStageClose(context);
                 case WAIT_SELECT -> waitSelect(context);
                 case NAVIGATE_FIXED -> navigateFixed();
                 case FACE_FIXED -> faceFixed(context);
@@ -262,10 +270,11 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 || menuReceipt != null && !menuReceipt.terminal()
                 || craftingJobEffectPending
                 || !player.containerMenu.getCarried().isEmpty();
-        if (player.containerMenu != player.inventoryMenu) {
+        if (ownsOpenMenu(context)) {
             try {
                 // Vanilla close returns a carried cursor stack through the authoritative menu path.
-                MenuReceipt closeReceipt = context.menus().close(context, 20);
+                MenuReceipt closeReceipt = context.menus().closeForTaskBoundary(context, 20, "AE2 supply cancelled");
+                menuReceipt = closeReceipt;
                 uncertain |= !closeReceipt.terminal()
                         || closeReceipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED;
             } catch (RuntimeException ignored) {
@@ -363,13 +372,37 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 player.getInventory().getItem(hotbarSlot));
         selectedTerminalSlot = hotbarSlot;
         afterSelect = next;
+        setPhase(Phase.STAGE);
+    }
+
+    private void stage(LocalPlayerContext context) {
+        inventoryGuiOwned = true;
+        if (!context.menus().ensureVisible(context)) return;
+        if (!same(player.getInventory().getItem(inventorySwap.sourceSlot()), inventorySwap.sourceBefore())
+                || !same(player.getInventory().getItem(inventorySwap.hotbarSlot()), inventorySwap.hotbarBefore())) {
+            inventorySwap = null;
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "inventory_changed_before_stage",
+                    "the terminal staging slots changed while the inventory GUI was opening");
+            return;
+        }
         menuReceipt = context.menus().swapInventoryToHotbar(
-                context, sourceSlot, hotbarSlot, INVENTORY_CONFIRM_TICKS);
+                context, inventorySwap.sourceSlot(), inventorySwap.hotbarSlot(), INVENTORY_CONFIRM_TICKS);
         setPhase(Phase.WAIT_STAGE);
     }
 
     private void waitStage(LocalPlayerContext context) {
         if (!settleMenuReceipt(context, "inventory_stage_unconfirmed")) return;
+        setPhase(Phase.CLOSE_STAGE);
+    }
+
+    private void closeStage(LocalPlayerContext context) {
+        menuReceipt = context.menus().close(context, INVENTORY_CONFIRM_TICKS);
+        setPhase(Phase.WAIT_STAGE_CLOSE);
+    }
+
+    private void waitStageClose(LocalPlayerContext context) {
+        if (!settleMenuReceipt(context, "inventory_stage_close_unconfirmed")) return;
+        inventoryGuiOwned = false;
         requestSelect(context, selectedTerminalSlot, afterSelect);
     }
 
@@ -771,6 +804,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (extraction == null) return;
         Object menu = storageMenuOrFail();
         if (menu == null) return;
+        if (!context.menus().ensureVisible(context)) return;
         if (!extraction.planValidated) {
             List<Ae2ReflectionBridge.Entry> entries = bridge.entries(menu);
             if (entries == null) {
@@ -863,6 +897,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     "the reserved inventory destination changed during exact extraction");
             return;
         }
+        if (!context.menus().ensureVisible(context)) return;
         menuReceipt = context.menus().click(
                 context, extraction.menuSlot, 0, ClickType.PICKUP,
                 (fresh, ignored) -> {
@@ -1168,6 +1203,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     private void cleanWaitClose(LocalPlayerContext context) {
         if (!settleMenuReceipt(context, "terminal_close_unconfirmed")) return;
+        inventoryGuiOwned = false;
         setPhase(Phase.CLEAN_RESTORE);
     }
 
@@ -1177,7 +1213,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             setPhase(Phase.CLEAN_SELECT);
             return;
         }
-        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu
+        if (context.minecraft().screen != null && !MenuVisibility.inventoryVisible(context.minecraft(), player)
+                || player.containerMenu != player.inventoryMenu
                 || !player.inventoryMenu.getCarried().isEmpty()) {
             finishCleanupFailure("inventory_not_ready_for_restore");
             return;
@@ -1188,6 +1225,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             finishCleanupFailure("inventory_changed_before_restore");
             return;
         }
+        inventoryGuiOwned = true;
+        if (!context.menus().ensureVisible(context)) return;
         menuReceipt = context.menus().swapInventoryToHotbar(
                 context, swap.sourceSlot(), swap.hotbarSlot(), INVENTORY_CONFIRM_TICKS);
         setPhase(Phase.CLEAN_WAIT_RESTORE);
@@ -1204,7 +1243,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         inventorySwap = null;
-        setPhase(Phase.CLEAN_SELECT);
+        setPhase(Phase.CLEAN_CLOSE);
     }
 
     private void cleanSelect(LocalPlayerContext context) {
@@ -1286,6 +1325,14 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private void finishNow(
             Ae2ResourceSupply.Status status, String code, String message, boolean uncertain) {
         if (terminal != null) return;
+        try {
+            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+            if (ownsOpenMenu(context) && (menuReceipt == null || menuReceipt.terminal()
+                    || menuReceipt.kind() != MenuReceipt.Kind.CLOSE)) {
+                context.menus().closeForTaskBoundary(context, INVENTORY_CONFIRM_TICKS,
+                        "AE2 supply session ended: " + code);
+            }
+        } catch (RuntimeException unavailable) { /* Body/control handoff owns the old menu. */ }
         terminal = new Ae2ResourceSupply.Outcome(
                 status, code, message, groupDeltas(), request.operation(), request.allowCrafting(),
                 craftingRequests, craftingJobsSubmitted, effectsStarted,
@@ -1343,6 +1390,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             String operation,
             Runnable submission,
             NativeConfirmation confirmation) {
+        if (!context.menus().ensureVisible(context)) return false;
         if (nativeReceipt != null) {
             if (pendingTerminal != null) {
                 finishCleanupFailure("overlapping_actor_protocol_receipt");
@@ -1371,10 +1419,17 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     private Object storageMenuOrFail() {
         Object menu = player.containerMenu;
-        if (bridge.isStorageMenu(menu)) return menu;
+        var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+        if (bridge.isStorageMenu(menu) && MenuVisibility.matches(context.minecraft(), player.containerMenu)) return menu;
         beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
-                "ae2_menu_changed", "the active menu is no longer the AE2 storage menu");
+                "ae2_menu_changed", "the AE2 storage GUI is no longer visibly open");
         return null;
+    }
+
+    private boolean ownsOpenMenu(LocalPlayerContext context) {
+        Object menu = player.containerMenu;
+        return bridge.isStorageMenu(menu) || bridge.isCraftAmountMenu(menu) || bridge.isCraftConfirmMenu(menu)
+                || inventoryGuiOwned && MenuVisibility.inventoryVisible(context.minecraft(), player);
     }
 
     private ExactExtraction requireExtraction() {

@@ -13,8 +13,11 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import net.minecraft.core.Direction;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 
 /**
  * Reflection-only access to the AE2 client menu protocol.
@@ -207,16 +210,19 @@ final class Ae2ReflectionBridge {
 
     void pickupSingle(Object menu, long serial) {
         requireStorageMenu(menu);
+        requireVisibleMenu(menu);
         invoke(handleInteraction, menu, serial, pickupSingle);
     }
 
     void returnCarriedToNetwork(Object menu) {
         requireStorageMenu(menu);
+        requireVisibleMenu(menu);
         invoke(handleInteraction, menu, -1L, pickupOrSetDown);
     }
 
     void startAutoCraft(Object menu, long serial) {
         requireStorageMenu(menu);
+        requireVisibleMenu(menu);
         invoke(handleInteraction, menu, serial, autoCraft);
     }
 
@@ -226,6 +232,7 @@ final class Ae2ReflectionBridge {
         }
         // Auto-start stays disabled. The state machine waits for plan/CPU synchronization and
         // submits exactly one job itself.
+        requireVisibleMenu(menu);
         invoke(confirmCraftAmount, menu, amount, false, false);
     }
 
@@ -241,6 +248,7 @@ final class Ae2ReflectionBridge {
 
     void startCraftingJob(Object menu) {
         requireCraftConfirmMenu(menu);
+        requireVisibleMenu(menu);
         invoke(craftConfirmStartJob, menu);
     }
 
@@ -257,6 +265,14 @@ final class Ae2ReflectionBridge {
 
     private void requireStorageMenu(Object menu) {
         if (!isStorageMenu(menu)) throw new Ae2ProtocolException("the active menu is not AE2 MEStorageMenu");
+    }
+
+    private static void requireVisibleMenu(Object menu) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (!(menu instanceof AbstractContainerMenu container) || minecraft.player == null
+                || minecraft.player.containerMenu != container || !MenuVisibility.matches(minecraft, container)) {
+            throw new Ae2ProtocolException("the corresponding AE2 GUI must be visibly open before an operation");
+        }
     }
 
     private void requireCraftConfirmMenu(Object menu) {

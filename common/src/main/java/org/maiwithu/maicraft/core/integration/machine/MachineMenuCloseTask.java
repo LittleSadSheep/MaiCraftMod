@@ -27,13 +27,16 @@ public final class MachineMenuCloseTask extends AbstractCompanionTask<MachineMen
             receipt = context.menus().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
             if (receipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED
-                    && player.containerMenu == player.inventoryMenu) {
+                    && player.containerMenu == player.inventoryMenu && context.minecraft().screen == null) {
                 verified = true; return TaskState.SUCCESS;
             }
             return failure("machine_menu_close_unconfirmed", "The native machine-menu close was not confirmed; inspect the current menu.");
         }
         if (closeAttempted) return failure("machine_menu_close_uncertain", "A close was already entered without a complete receipt; no second close was sent.");
-        if (player.containerMenu == player.inventoryMenu) { verified = true; return TaskState.SUCCESS; }
+        if (player.containerMenu == player.inventoryMenu) {
+            if (context.minecraft().screen != null) return failure("machine_menu_not_owned", "A different screen is now open.");
+            verified = true; return TaskState.SUCCESS;
+        }
         if (menu == null) menu = player.containerMenu;
         if (player.containerMenu != menu || !MachineMenu.ownedMenu(player, menu)) {
             return failure("machine_menu_not_owned", "The active menu was not opened by this machine operation.");

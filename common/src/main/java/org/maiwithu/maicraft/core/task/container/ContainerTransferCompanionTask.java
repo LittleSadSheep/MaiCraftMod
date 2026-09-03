@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
@@ -19,7 +20,7 @@ public final class ContainerTransferCompanionTask
         extends AbstractCompanionTask<ContainerTransferTaskRecord> {
     /** Confirmed native menu changes keep a large transfer alive; pending receipts do not. */
     private static final long CLICK_PROGRESS_LEASE_TICKS = 60L * 20L;
-    private enum Phase { BEGIN, QUICK, PICKUP, PLACE_ALL, PLACE_ONE, SWAP_DEST, RETURN_CURSOR, FAILING }
+    private enum Phase { BEGIN, QUICK, PICKUP, PLACE_ALL, PLACE_ONE, SWAP_DEST, RETURN_CURSOR, CLOSE, FAILING }
     private int moveIndex;
     private Phase phase = Phase.BEGIN;
     private MenuReceipt receipt;
@@ -32,16 +33,22 @@ public final class ContainerTransferCompanionTask
     private boolean wholePlacement;
     private final List<Integer> moved = new ArrayList<>();
     private String pendingFailure;
+    private AbstractContainerMenu menu;
+    private boolean completed;
 
     public ContainerTransferCompanionTask(LocalPlayer player, ContainerTransferTaskRecord record) {
         super(player, record);
     }
 
     @Override protected TaskState onTick() {
-        if (player.containerMenu.containerId != r.expectedContainerId) {
-            return beginFailure("active container changed before transfer completed");
-        }
         var context = ClientRuntime.requireContext(player);
+        if (phase == Phase.CLOSE) return closeCompleted(context);
+        if (player.containerMenu.containerId != r.expectedContainerId
+                || menu != null && player.containerMenu != menu) {
+            fail("active container changed before transfer completed; no rollback targeted the replacement menu", FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        if (menu == null) menu = player.containerMenu;
         if (receipt != null) {
             receipt = context.menus().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
@@ -66,7 +73,12 @@ public final class ContainerTransferCompanionTask
             fail(pendingFailure, FailureType.UNKNOWN);
             return TaskState.FAILED;
         }
-        if (moveIndex >= r.moves.size()) return TaskState.SUCCESS;
+        if (moveIndex >= r.moves.size()) {
+            if (!r.closeAfter) { completed = true; return TaskState.SUCCESS; }
+            phase = Phase.CLOSE;
+            return closeCompleted(context);
+        }
+        if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
         ContainerTransferTaskRecord.Move move = r.moves.get(moveIndex);
         return switch (phase) {
             case BEGIN -> beginMove(move);
@@ -76,8 +88,25 @@ public final class ContainerTransferCompanionTask
             case PLACE_ONE -> submitOne(context, move);
             case SWAP_DEST -> submitSwap(context, move);
             case RETURN_CURSOR -> submitReturn(context, move);
+            case CLOSE -> closeCompleted(context);
             case FAILING -> TaskState.FAILED;
         };
+    }
+
+    private TaskState closeCompleted(LocalPlayerContext context) {
+        if (receipt == null) {
+            receipt = context.menus().close(context, 40);
+            return TaskState.RUNNING;
+        }
+        receipt = context.menus().poll(context, receipt);
+        if (!receipt.terminal()) return TaskState.RUNNING;
+        if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED
+                || player.containerMenu != player.inventoryMenu || context.minecraft().screen != null) {
+            fail("container transfer completed but its GUI close was not confirmed", FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
+        completed = true;
+        return TaskState.SUCCESS;
     }
 
     private TaskState beginMove(ContainerTransferTaskRecord.Move move) {
@@ -271,11 +300,16 @@ public final class ContainerTransferCompanionTask
         return a.getCount() == b.getCount() && ItemStack.isSameItemSameComponents(a, b);
     }
     @Override protected void cleanup() {
-        receipt = null;
-        if (!player.containerMenu.getCarried().isEmpty()) {
-            try { ClientRuntime.requireContext(player).menus().close(ClientRuntime.requireContext(player), 20); }
+        if (menu != null && player.containerMenu == menu && (!completed || r.closeAfter)
+                && (receipt == null || receipt.terminal() || receipt.kind() != MenuReceipt.Kind.CLOSE)) {
+            try {
+                var context = ClientRuntime.requireContext(player);
+                context.menus().closeForTaskBoundary(context, 40, "container transfer task ended");
+            }
             catch (RuntimeException ignored) { }
         }
+        receipt = null;
+        super.cleanup();
     }
     @Override protected Map<String, Object> resultData() {
         return Map.of("completed_moves", moveIndex, "moved_counts", List.copyOf(moved));

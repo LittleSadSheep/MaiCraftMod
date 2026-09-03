@@ -34,6 +34,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
@@ -323,6 +324,8 @@ public final class SemanticContainerCompanionTask
     private TaskState waitMenu() {
         if (player.containerMenu != player.inventoryMenu) {
             openedMenu = true;
+            var context = ClientRuntime.requireContext(player);
+            if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
             AbstractContainerMenu menu = player.containerMenu;
             if (!menu.getCarried().isEmpty()) {
                 outcomeUncertain = true;
@@ -598,7 +601,7 @@ public final class SemanticContainerCompanionTask
         beforeItems = itemCounts(view.playerSlots());
         return start(new ContainerTransferTaskRecord(childId("transfer"),
                 childDeadline(2L * 60L * 20L), expectedContainerId,
-                List.of(pendingMove.move())), Purpose.TRANSFER);
+                List.of(pendingMove.move()), false), Purpose.TRANSFER);
     }
 
     private TaskState verifyTransfer() {
@@ -654,7 +657,7 @@ public final class SemanticContainerCompanionTask
     }
 
     private TaskState cleanupMenu() {
-        if (player.containerMenu == player.inventoryMenu) {
+        if (player.containerMenu == player.inventoryMenu && ClientRuntime.requireContext(player).minecraft().screen == null) {
             openedMenu = false;
             openRequested = false;
             if (!player.inventoryMenu.getCarried().isEmpty()) outcomeUncertain = true;
@@ -718,6 +721,7 @@ public final class SemanticContainerCompanionTask
                 openedMenu = false;
                 openRequested = false;
                 if (player.containerMenu != player.inventoryMenu
+                        || ClientRuntime.requireContext(player).minecraft().screen != null
                         || !player.inventoryMenu.getCarried().isEmpty()) {
                     outcomeUncertain = true;
                     if (failureMessage == null) {
@@ -742,6 +746,8 @@ public final class SemanticContainerCompanionTask
 
     private boolean menuValid() {
         return view != null && player.containerMenu != player.inventoryMenu
+                && player.containerMenu == view.menu()
+                && MenuVisibility.matches(ClientRuntime.requireContext(player).minecraft(), player.containerMenu)
                 && player.containerMenu.containerId == expectedContainerId
                 && player.containerMenu.getClass() == expectedMenuClass;
     }
@@ -758,7 +764,7 @@ public final class SemanticContainerCompanionTask
             failureMessage = message;
             failureType = type == null ? FailureType.UNKNOWN : type;
         }
-        if (player.containerMenu != player.inventoryMenu) {
+        if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
             openedMenu = true;
             phase = Phase.CLEANUP;
         } else {
@@ -881,7 +887,7 @@ public final class SemanticContainerCompanionTask
         if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
             try {
                 var context = ClientRuntime.requireContext(player);
-                context.menus().close(context, 20);
+                context.menus().closeForTaskBoundary(context, 40, "semantic container task ended");
             } catch (RuntimeException ignored) {
                 outcomeUncertain = true;
             }

@@ -13,6 +13,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
@@ -82,6 +83,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         }
         var context = ClientRuntime.requireContext(player);
         if (!context.mutationAvailable()) return TaskState.RUNNING;
+        if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
         return switch (phase) {
             case PICKUP -> pickup();
             case PLACE -> place();
@@ -251,6 +253,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         var origin = inspection.origin;
         var context = ClientRuntime.requireContext(player);
         return origin.player().get() == player && context.bodyEpoch() == inspection.bodyEpoch
+                && MenuVisibility.matches(context.minecraft(), menu)
                 && origin.dimension().equals(player.level().dimension().location().toString())
                 && player.level().isLoaded(origin.position())
                 && BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(origin.position()).getBlock()).equals(origin.blockId());
@@ -304,14 +307,14 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
     @Override protected void cleanup() {
         super.cleanup();
         if (effectsStarted && !verified) uncertain = true;
-        if (menu != null && player.containerMenu == menu && !menu.getCarried().isEmpty()) {
+        if (menu != null && player.containerMenu == menu && (!verified || !menu.getCarried().isEmpty())) {
             try {
                 var context = ClientRuntime.requireContext(player);
                 context.menus().closeForTaskBoundary(context, 40,
-                        "machine transfer ended with a cursor stack; native close owns its return");
+                        "machine transfer ended before verification; native close owns cursor return");
                 boundaryCloseRequested = true;
             } catch (RuntimeException unavailable) { /* Actor body/human handoff also owns cursor return. */ }
-            uncertain = true;
+            uncertain |= effectsStarted;
         }
         if (!kind.isEmpty()) actualPlayerDelta = matchingPlayerCount() - initialPlayerCount;
     }

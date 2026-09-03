@@ -6,6 +6,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 
 /** Receipt-driven inventory-menu staging. It never writes an inventory or selected slot directly. */
@@ -20,6 +21,8 @@ final class CreateMechanicalStager {
     private int activeSwapSource = -1;
     private int activeSwapHotbar = -1;
     private boolean swapRestorationPending;
+    private boolean closeAfterSwap;
+    private boolean inventoryScreenOwned;
     private int pendingSelect = -1;
     private ItemStack expectedDisplacedAtSource = ItemStack.EMPTY;
     private String detail = "inventory staging is pending";
@@ -61,8 +64,10 @@ final class CreateMechanicalStager {
 
         // An exhausted staged stack has to be swapped back before another source is chosen.
         if (activeSwapSource >= 0) {
+            if (!readyInventory(context)) return Status.RUNNING;
             menuReceipt = context.menus().swapInventoryToHotbar(
                     context, activeSwapSource, activeSwapHotbar, CONFIRM_TICKS);
+            closeAfterSwap = true;
             swapRestorationPending = true;
             detail = "returning the displaced hotbar stack before staging the next material stack";
             return Status.RUNNING;
@@ -86,10 +91,12 @@ final class CreateMechanicalStager {
             detail = "no safe hotbar slot can temporarily hold the chain-drive stack";
             return Status.FAILED;
         }
+        if (!readyInventory(context)) return Status.RUNNING;
         activeSwapSource = source;
         activeSwapHotbar = hotbar;
         expectedDisplacedAtSource = player.getInventory().getItem(hotbar).copy();
         menuReceipt = context.menus().swapInventoryToHotbar(context, source, hotbar, CONFIRM_TICKS);
+        closeAfterSwap = true;
         pendingSelect = hotbar;
         detail = "staging a chain-drive stack through a confirmed inventory swap";
         return Status.RUNNING;
@@ -107,8 +114,10 @@ final class CreateMechanicalStager {
             return Status.RUNNING;
         }
         if (activeSwapSource >= 0) {
+            if (!readyInventory(context)) return Status.RUNNING;
             menuReceipt = context.menus().swapInventoryToHotbar(
                     context, activeSwapSource, activeSwapHotbar, CONFIRM_TICKS);
+            closeAfterSwap = true;
             swapRestorationPending = true;
             detail = "restoring the displaced hotbar stack";
             return Status.RUNNING;
@@ -124,7 +133,7 @@ final class CreateMechanicalStager {
     }
 
     boolean hasPendingReceipt() {
-        return menuReceipt != null && !menuReceipt.terminal()
+        return closeAfterSwap || menuReceipt != null && !menuReceipt.terminal()
                 || selectReceipt != null && !selectReceipt.terminal();
     }
 
@@ -148,14 +157,22 @@ final class CreateMechanicalStager {
     }
 
     private Status pollPending(LocalPlayerContext context) {
+        if (menuReceipt == null && closeAfterSwap) {
+            menuReceipt = context.menus().close(context, CONFIRM_TICKS);
+            closeAfterSwap = false;
+            detail = "closing the inventory GUI before returning to the world";
+            return Status.RUNNING;
+        }
         if (menuReceipt != null) {
             menuReceipt = context.menus().poll(context, menuReceipt);
             if (!menuReceipt.terminal()) return Status.RUNNING;
             MenuReceipt.Status status = menuReceipt.status();
+            MenuReceipt.Kind kind = menuReceipt.kind();
             String receiptDetail = menuReceipt.detail();
             menuReceipt = null;
             if (status != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                if (status == MenuReceipt.Status.CONFIRMED_NOT_APPLIED) {
+                closeAfterSwap = false;
+                if (status == MenuReceipt.Status.CONFIRMED_NOT_APPLIED && kind == MenuReceipt.Kind.SWAP_TO_HOTBAR) {
                     if (!swapRestorationPending) {
                         activeSwapSource = -1;
                         activeSwapHotbar = -1;
@@ -177,6 +194,8 @@ final class CreateMechanicalStager {
                 expectedDisplacedAtSource = ItemStack.EMPTY;
                 swapRestorationPending = false;
             }
+            if (closeAfterSwap) return Status.RUNNING;
+            if (context.minecraft().screen == null) inventoryScreenOwned = false;
             // A staged swap is confirmed; select it in a later native mutation.
             if (pendingSelect >= 0 && context.player().getInventory().selected != pendingSelect) {
                 int slot = pendingSelect;
@@ -202,6 +221,17 @@ final class CreateMechanicalStager {
             return Status.READY;
         }
         return Status.READY;
+    }
+
+    private boolean readyInventory(LocalPlayerContext context) {
+        inventoryScreenOwned = true;
+        return context.menus().ensureVisible(context);
+    }
+
+    void closeForTaskBoundary(LocalPlayerContext context) {
+        if (!inventoryScreenOwned || !MenuVisibility.inventoryVisible(context.minecraft(), context.player())) return;
+        context.menus().closeForTaskBoundary(context, CONFIRM_TICKS, "Create inventory staging ended");
+        inventoryScreenOwned = false;
     }
 
     private static int findUsableSlot(LocalPlayer player, Item item) {

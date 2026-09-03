@@ -28,11 +28,18 @@ public final class ContainerTransferTaskRecord extends TaskRecord {
     }
     public final int expectedContainerId;
     public final List<Move> moves;
+    public final boolean closeAfter;
     public ContainerTransferTaskRecord(String callId, long deadline, int expectedContainerId,
                                        List<Move> moves) {
+        this(callId, deadline, expectedContainerId, moves, true);
+    }
+    /** Composed tasks retain the visible menu until their complete transaction finishes. */
+    public ContainerTransferTaskRecord(String callId, long deadline, int expectedContainerId,
+                                       List<Move> moves, boolean closeAfter) {
         super("container_transfer", callId, deadline);
         this.expectedContainerId = expectedContainerId;
         this.moves = List.copyOf(moves);
+        this.closeAfter = closeAfter;
         if (this.moves.isEmpty()) throw new IllegalArgumentException("moves must not be empty");
     }
     @Override public String describe() { return "container_transfer " + moves.size() + " move(s)"; }

@@ -95,6 +95,7 @@ public final class SemanticTradeCompanionTask
     private Purpose activePurpose;
     private int childSerial;
     private boolean openedMenu;
+    private boolean openRequested;
     private boolean menuClaimed;
     private boolean nextAfterClose;
     private boolean finishRequested;
@@ -244,6 +245,7 @@ public final class SemanticTradeCompanionTask
                 continue;
             }
             menuClaimed = false;
+            openRequested = true;
             return start(new InteractEntityTaskRecord(
                     childId("open"), childDeadline(2L * 60L * 20L),
                     MouseButton.RIGHT, merchant.getId(), 0, null), Purpose.OPEN);
@@ -254,6 +256,8 @@ public final class SemanticTradeCompanionTask
     private TaskState waitMenu() {
         if (player.containerMenu instanceof MerchantMenu) {
             openedMenu = true;
+            var context = ClientRuntime.requireContext(player);
+            if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
             inspectedMenus++;
             phase = Phase.SELECT;
             return TaskState.RUNNING;
@@ -571,7 +575,7 @@ public final class SemanticTradeCompanionTask
         selectedPaymentFacts = payment.paymentFacts;
         return start(new ContainerTransferTaskRecord(
                 childId("pay"), childDeadline(2L * 60L * 20L),
-                menu.containerId, payment.moves), Purpose.PAY);
+                menu.containerId, payment.moves, false), Purpose.PAY);
     }
 
     private TaskState take() {
@@ -594,12 +598,12 @@ public final class SemanticTradeCompanionTask
         return start(new ContainerTransferTaskRecord(
                 childId("take"), childDeadline(2L * 60L * 20L),
                 menu.containerId,
-                List.of(new ContainerTransferTaskRecord.Move(2, -1, 0))),
+                List.of(new ContainerTransferTaskRecord.Move(2, -1, 0)), false),
                 Purpose.TAKE);
     }
 
     private TaskState cleanupMenu() {
-        if (player.containerMenu == player.inventoryMenu) {
+        if (player.containerMenu == player.inventoryMenu && ClientRuntime.requireContext(player).minecraft().screen == null) {
             openedMenu = false;
             return afterClosed();
         }
@@ -608,14 +612,14 @@ public final class SemanticTradeCompanionTask
                 return start(new ContainerTransferTaskRecord(
                         childId("return-a"), childDeadline(2L * 60L * 20L),
                         menu.containerId,
-                        List.of(new ContainerTransferTaskRecord.Move(0, -1, 0))),
+                        List.of(new ContainerTransferTaskRecord.Move(0, -1, 0)), false),
                         Purpose.CLEAN_A);
             }
             if (!menu.getSlot(1).getItem().isEmpty()) {
                 return start(new ContainerTransferTaskRecord(
                         childId("return-b"), childDeadline(2L * 60L * 20L),
                         menu.containerId,
-                        List.of(new ContainerTransferTaskRecord.Move(1, -1, 0))),
+                        List.of(new ContainerTransferTaskRecord.Move(1, -1, 0)), false),
                         Purpose.CLEAN_B);
             }
         }
@@ -624,6 +628,7 @@ public final class SemanticTradeCompanionTask
     }
 
     private TaskState afterClosed() {
+        openRequested = false;
         menuClaimed = false;
         offerPlan = null;
         merchant = null;
@@ -809,7 +814,7 @@ public final class SemanticTradeCompanionTask
             failureMessage = message;
             failureType = type == null ? FailureType.UNKNOWN : type;
         }
-        if (player.containerMenu != player.inventoryMenu) {
+        if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
             openedMenu = true;
             phase = Phase.CLEANUP;
         } else {
@@ -855,10 +860,10 @@ public final class SemanticTradeCompanionTask
             activeRecord = null;
             activePurpose = null;
         }
-        if (openedMenu && player.containerMenu != player.inventoryMenu) {
+        if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
             try {
                 var context = ClientRuntime.requireContext(player);
-                context.menus().close(context, 20);
+                context.menus().closeForTaskBoundary(context, 40, "semantic trade task ended");
             } catch (RuntimeException ignored) {
                 outcomeUncertain = true;
             }

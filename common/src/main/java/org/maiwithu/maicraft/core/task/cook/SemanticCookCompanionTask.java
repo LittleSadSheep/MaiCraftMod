@@ -115,6 +115,7 @@ public final class SemanticCookCompanionTask
     private boolean stationClaimed;
     private boolean stationPlaced;
     private boolean openedMenu;
+    private boolean openRequested;
     private boolean effectsStarted;
     private boolean finishRequested;
     private boolean replenishAfterClose;
@@ -759,6 +760,7 @@ public final class SemanticCookCompanionTask
             openAttempts = 0;
         }
         openAttempts++;
+        openRequested = true;
         return start(new InteractAtTaskRecord(
                 childId("open"), childDeadline(30L * 20L),
                 MouseButton.RIGHT, stationPos, 0, null), Purpose.OPEN_STATION);
@@ -766,6 +768,9 @@ public final class SemanticCookCompanionTask
 
     private TaskState waitMenu() {
         if (player.containerMenu instanceof AbstractFurnaceMenu) {
+            openedMenu = true;
+            var context = ClientRuntime.requireContext(player);
+            if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
             if (!menuMatches()) {
                 rememberFailure("wrong_station_menu",
                         "The opened workstation does not match the selected cooking recipe.",
@@ -1088,7 +1093,7 @@ public final class SemanticCookCompanionTask
         }
         return start(new ContainerTransferTaskRecord(
                 childId("menu"), childDeadline(2L * 60L * 20L),
-                player.containerMenu.containerId, moves), purpose);
+                player.containerMenu.containerId, moves, false), purpose);
     }
 
     private TaskState cleanupMachine() {
@@ -1289,6 +1294,7 @@ public final class SemanticCookCompanionTask
             case TAKE_OUTPUT -> phase = Phase.VERIFY_OUTPUT;
             case CLOSE_WAIT -> {
                 openedMenu = false;
+                openRequested = false;
                 closedWaitStartedTick = player.level().getGameTime();
                 openMode = OpenMode.RESUME_BATCH;
                 phase = Phase.WAIT_CLOSED;
@@ -1296,10 +1302,12 @@ public final class SemanticCookCompanionTask
             case CLEAN_INPUT -> phase = Phase.VERIFY_CLEAN_INPUT;
             case CLOSE -> {
                 openedMenu = false;
+                openRequested = false;
                 return finishCleanup();
             }
             case ABANDON_CLOSE -> {
                 openedMenu = false;
+                openRequested = false;
                 phase = Phase.COMPLETE;
             }
         }
@@ -1645,7 +1653,7 @@ public final class SemanticCookCompanionTask
             activeRecord = null;
             activePurpose = null;
         }
-        if (openedMenu && player.containerMenu != player.inventoryMenu) {
+        if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
             try {
                 var context = ClientRuntime.requireContext(player);
                 context.menus().closeForTaskBoundary(
@@ -1653,9 +1661,6 @@ public final class SemanticCookCompanionTask
                         "the cooking task ended before its active menu transaction settled");
             } catch (RuntimeException closeFailure) {
                 outcomeUncertain = true;
-                try {
-                    player.closeContainer();
-                } catch (RuntimeException ignored) { }
             }
         }
         openedMenu = false;

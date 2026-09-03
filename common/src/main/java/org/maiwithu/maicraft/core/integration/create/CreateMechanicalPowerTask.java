@@ -1011,6 +1011,11 @@ final class CreateMechanicalPowerTask
         if (progressiveSurvey != null) progressiveSurvey.stop();
         constructionTravel.stop();
         stopNavSafely();
+        if (stager != null) {
+            try {
+                stager.closeForTaskBoundary(ClientRuntime.requireContext(player));
+            } catch (RuntimeException unavailable) { /* Body/control handoff owns the old menu. */ }
+        }
         issueContinuationIfSafe();
     }
 

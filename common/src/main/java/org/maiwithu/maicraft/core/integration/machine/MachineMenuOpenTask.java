@@ -152,6 +152,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
                 || !BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(r.request.machinePosition()).getBlock()).equals(blockId)) {
             return failure("machine_menu_open_unconfirmed", "No empty-cursor native menu was confirmed for the selected machine; no second use was attempted.", FailureType.UNKNOWN);
         }
+        if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
         MachineMenu.bindOpened(player, player.containerMenu, r.request, blockId);
         menuReport = MachineMenu.inspect(player);
         verified = true;
@@ -196,6 +197,12 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
                 var context = ClientRuntime.requireContext(player);
                 context.actions().retireOneShotForTaskBoundary(context, receipt, "machine menu opening ended");
             } catch (RuntimeException unavailable) { /* The actor owns old-body receipt retirement. */ }
+        }
+        if (openAttempted && !verified && player.containerMenu != player.inventoryMenu) {
+            try {
+                var context = ClientRuntime.requireContext(player);
+                context.menus().closeForTaskBoundary(context, 40, "machine menu opening did not complete");
+            } catch (RuntimeException unavailable) { /* Body/control handoff owns the old menu. */ }
         }
     }
 

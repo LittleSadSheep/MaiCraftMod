@@ -21,6 +21,7 @@ import net.minecraft.world.inventory.ResultSlot;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.task.TaskFactory;
 
@@ -107,6 +108,8 @@ public final class MachineMenu {
         JsonObject out = new JsonObject();
         out.addProperty("schema_version", 1);
         out.addProperty("menu_class", menu.getClass().getName());
+        boolean visible = MenuVisibility.matches(context.minecraft(), menu);
+        out.addProperty("gui_visible", visible);
         out.addProperty("menu_state_revision", menu.getStateId());
         out.addProperty("evidence_source", "native_client_menu");
         out.addProperty("machine_production_verified", false);
@@ -155,7 +158,7 @@ public final class MachineMenu {
         boolean validOrigin = origin != null && origin.player().get() == self
                 && origin.bodyEpoch() == context.bodyEpoch()
                 && origin.dimension().equals(self.level().dimension().location().toString());
-        boolean canTransfer = validOrigin && menu != self.inventoryMenu && menu.getCarried().isEmpty()
+        boolean canTransfer = visible && validOrigin && menu != self.inventoryMenu && menu.getCarried().isEmpty()
                 && menu.slots.size() <= MAX_ENTRIES && !virtualMenu(menu)
                 && self.level().isLoaded(origin.position())
                 && BuiltInRegistries.BLOCK.getKey(self.level().getBlockState(origin.position()).getBlock()).equals(origin.blockId())
@@ -170,7 +173,8 @@ public final class MachineMenu {
             out.addProperty("menu_receipt_id", id.toString());
         }
         out.addProperty("transfer_contract", "one receipt permits one exact deposit/withdraw of 1..64 items against one observed entry; no swaps, quick-move, ghost filters or recipe claims");
-        if (!validOrigin) out.addProperty("transfer_unavailable_reason", "open this exact machine through the machine menu operation first");
+        if (!visible) out.addProperty("transfer_unavailable_reason", "the machine GUI must be visibly open before inspection can authorize a transfer");
+        else if (!validOrigin) out.addProperty("transfer_unavailable_reason", "open this exact machine through the machine menu operation first");
         else if (virtualMenu(menu)) out.addProperty("transfer_unavailable_reason", "virtual storage uses a dedicated integration such as AE2 supply");
         return out;
     }
@@ -184,6 +188,7 @@ public final class MachineMenu {
         var context = ClientRuntime.requireContext(player);
         AbstractContainerMenu menu = player.containerMenu;
         if (inspection.player.get() != player || inspection.menu.get() != menu
+                || !MenuVisibility.matches(context.minecraft(), menu)
                 || inspection.bodyEpoch != context.bodyEpoch() || inspection.expires < context.tickRevision()
                 || menu.getStateId() != inspection.stateId || !menu.getCarried().isEmpty()
                 || !sameEntries(inspection, menu)) {
