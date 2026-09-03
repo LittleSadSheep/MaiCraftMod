@@ -5,6 +5,7 @@ bin
 .metadata
 .classpath
 .project
+**/.eclipse/
 
 # idea
 out
@@ -35,4 +36,5 @@ runs
 *.ai.md
 *.prompt.md
 *.generated.md
+docs/repository-audit-*.md
 .vscode
