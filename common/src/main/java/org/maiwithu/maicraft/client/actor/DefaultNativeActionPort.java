@@ -10,6 +10,11 @@ import net.minecraft.world.phys.BlockHitResult;
 
 /** Default MultiPlayerGameMode action port. Immediate return values are never treated as success. */
 public final class DefaultNativeActionPort implements NativeActionPort {
+    String diagnosticState() {
+        return active == null ? "none" : active.kind() + ":" + active.status()
+                + " submitted=" + active.submittedTick() + " deadline=" + active.deadlineTick();
+    }
+
     private NativeActionReceipt active;
     /** Non-null while an ownerless break must be physically stopped by {@link #advance}. */
     private String pendingBreakCancellationReason;

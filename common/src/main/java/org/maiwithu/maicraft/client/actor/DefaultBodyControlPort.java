@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.client.actor;
 
 import net.minecraft.client.player.Input;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
@@ -165,7 +167,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         LocalPlayer player = controlledPlayer;
         if (input == null || player == null) return;
 
-        Movement command = movementLease == context.tickRevision() && context.minecraft().screen == null
+        Movement command = movementLease == context.tickRevision() && permitsWorldMovement(context.minecraft().screen)
                 ? movement : Movement.STOPPED;
         input.forwardImpulse = command.forward();
         input.leftImpulse = command.strafe();
@@ -181,6 +183,13 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             pitchVelocity = 0.0f;
             lastLookUpdateNanos = 0L;
         }
+    }
+
+    /** Screens that can coexist with leased world movement. */
+    public static boolean permitsWorldMovement(Screen screen) {
+        // BotInput contains movement signals, not keyboard events. Chat may stay open while the
+        // assigned route runs; container and modal screens still suppress world movement.
+        return screen == null || screen instanceof ChatScreen;
     }
 
     /** Advance the same physical first-person camera once per rendered frame. */

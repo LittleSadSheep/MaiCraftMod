@@ -110,6 +110,27 @@ public final class ClientActorBoundary {
     public DefaultNativeActionPort actions() { return actions; }
     public DefaultMenuPort menus() { return menus; }
 
+    /** Read-only diagnostics; requesting them must not create a tick or take control. */
+    public java.util.Map<String, Object> diagnosticState() {
+        requireClientThread();
+        var result = new java.util.LinkedHashMap<String, Object>();
+        result.put("actor_tick", tickRevision);
+        result.put("control_revision", controlRevision);
+        result.put("control_requested", body.automationControlRequested());
+        result.put("owns_controls", body.automationOwnsControls());
+        var input = minecraft.player == null ? null : minecraft.player.input;
+        result.put("input", input == null ? "none" : input.getClass().getName());
+        result.put("forward", input == null ? 0 : input.forwardImpulse);
+        result.put("jump", input != null && input.jumping);
+        result.put("sneak", input != null && input.shiftKeyDown);
+        result.put("on_ground", minecraft.player != null && minecraft.player.onGround());
+        result.put("horizontal_collision", minecraft.player != null && minecraft.player.horizontalCollision);
+        result.put("screen", minecraft.screen == null ? "none" : minecraft.screen.getClass().getName());
+        result.put("native_action", actions.diagnosticState());
+        result.put("menu_action", menus.diagnosticState());
+        return result;
+    }
+
     /** Render-cadence camera integration; no task or native mutation is advanced here. */
     public void renderFrame() {
         requireClientThread();

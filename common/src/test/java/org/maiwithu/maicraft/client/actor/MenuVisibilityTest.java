@@ -37,17 +37,22 @@ public final class MenuVisibilityTest {
         MenuVisibility visibility = new MenuVisibility();
         visibility.reset();
         check(!visibility.ready(context), "the permanent inventory menu is not a visible GUI");
-        MenuVisibility.rendered(minecraft);
+        MenuVisibility.rendered(minecraft.screen);
         tick[0] = 10;
         check(!visibility.ready(context), "world frames cannot make an unopened inventory ready");
 
         var screen = (MenuVisibility.PlayerInventoryScreen)
                 memory.allocateInstance(MenuVisibility.PlayerInventoryScreen.class);
         assign(AbstractContainerScreen.class, screen, "menu", inventory);
+        check(DefaultBodyControlPort.permitsWorldMovement(null), "world view permits leased movement");
+        var chat = (net.minecraft.client.gui.screens.ChatScreen)
+                memory.allocateInstance(net.minecraft.client.gui.screens.ChatScreen.class);
+        check(DefaultBodyControlPort.permitsWorldMovement(chat), "chat must not silently zero navigation input");
+        check(!DefaultBodyControlPort.permitsWorldMovement(screen), "inventory still suppresses world movement");
         minecraft.screen = screen;
         check(MenuVisibility.inventoryVisible(minecraft, player), "inventory screen identity matches");
         check(!visibility.ready(context), "opening the GUI does not permit a same-tick mutation");
-        MenuVisibility.rendered(minecraft);
+        MenuVisibility.rendered(minecraft.screen);
         tick[0] = 13;
         check(!visibility.ready(context), "a rendered opening still needs its initial dwell");
         tick[0] = 14;
@@ -57,14 +62,14 @@ public final class MenuVisibilityTest {
 
         visibility.changed(context);
         tick[0] = 15;
-        MenuVisibility.rendered(minecraft);
+        MenuVisibility.rendered(minecraft.screen);
         check(!visibility.ready(context), "a rendered transaction still needs its dwell");
         tick[0] = 16;
         check(visibility.ready(context), "a rendered transaction settles after its dwell");
         visibility.changed(context);
         tick[0] = 30;
         check(!visibility.ready(context), "ticks alone never replace a post-transaction frame");
-        MenuVisibility.rendered(minecraft);
+        MenuVisibility.rendered(minecraft.screen);
         check(visibility.ready(context), "a new frame unlocks the settled transaction");
 
         var replacement = (MenuVisibility.PlayerInventoryScreen)
@@ -74,12 +79,14 @@ public final class MenuVisibilityTest {
         check(!visibility.ready(context), "replacing a screen restarts its visibility lease");
         tick[0] = 40;
         check(!visibility.ready(context), "a previous screen's frame cannot authorize its replacement");
-        MenuVisibility.rendered(minecraft);
+        MenuVisibility.rendered(screen);
+        check(!visibility.ready(context), "rendering another layer cannot authorize the current screen");
+        MenuVisibility.rendered(minecraft.screen);
         check(visibility.ready(context), "the replacement's own rendered frame is accepted");
         player.containerMenu = (InventoryMenu) memory.allocateInstance(InventoryMenu.class);
         check(!visibility.ready(context), "the screen must display the exact active menu object");
         tick[0] = 50;
-        MenuVisibility.rendered(minecraft);
+        MenuVisibility.rendered(minecraft.screen);
         check(!visibility.ready(context), "waiting cannot authorize a mismatched menu");
         minecraft.screen = null;
         check(!visibility.ready(context), "closing the GUI immediately revokes visibility");

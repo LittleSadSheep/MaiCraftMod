@@ -8,6 +8,11 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 
 /** Default one-click-at-a-time menu port using MultiPlayerGameMode. */
 public final class DefaultMenuPort implements MenuPort {
+    String diagnosticState() {
+        return active == null ? "none" : active.kind() + ":" + active.status()
+                + " deadline=" + active.deadlineTick() + " closing=" + (closingMenu != null);
+    }
+
     private MenuReceipt active;
     private final MenuVisibility visibility = new MenuVisibility();
     private AbstractContainerMenu closingMenu;

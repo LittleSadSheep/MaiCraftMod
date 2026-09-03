@@ -20,10 +20,17 @@ public interface NativeConfirmation {
         BlockPos frozen = target.immutable();
         return context -> {
             if (!context.level().isLoaded(frozen)) return Verdict.PENDING;
-            BlockState live = context.level().getBlockState(frozen);
-            if (live.isAir()) return Verdict.APPLIED;
-            return live == before || live.equals(before) ? Verdict.PENDING : Verdict.DIVERGED;
+            return breakReplacementVerdict(before, context.level().getBlockState(frozen));
         };
+    }
+
+    /** Vanilla removal leaves the original fluid behind when breaking a waterlogged block. */
+    static Verdict breakReplacementVerdict(BlockState before, BlockState live) {
+        if (live.isAir()) return Verdict.APPLIED;
+        if (live.equals(before)) return Verdict.PENDING;
+        if (!before.getFluidState().isEmpty()
+                && live.equals(before.getFluidState().createLegacyBlock())) return Verdict.APPLIED;
+        return Verdict.DIVERGED;
     }
 
     public static NativeConfirmation blockState(BlockPos target, BlockState before, BlockState expected) {

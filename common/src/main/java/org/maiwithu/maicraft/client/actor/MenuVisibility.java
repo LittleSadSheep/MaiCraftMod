@@ -31,8 +31,8 @@ public final class MenuVisibility {
     }
 
     /** Called after rendering the screen, never from a game tick. */
-    public static void rendered(Minecraft minecraft) {
-        renderedScreen = minecraft.screen;
+    public static void rendered(Screen screen) {
+        renderedScreen = screen;
         renderedFrame++;
     }
 

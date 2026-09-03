@@ -18,7 +18,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.Comparator;
 import java.util.Set;
-import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
 /** Shared block-aim policy for semantic preflight and the eventual first-person interaction. */
 public final class FirstPersonInteractionTargeting {
@@ -126,7 +126,7 @@ public final class FirstPersonInteractionTargeting {
     public static BlockPos nearestVisibleStand(
             LocalPlayer player, BlockPos target, double reach, Set<Long> excluded) {
         if (target == null || !player.level().isLoaded(target)) return null;
-        BlockPos current = PathExecutor.playerFeet(player);
+        BlockPos current = PlayerNav.playerFeet(player);
         java.util.ArrayList<BlockPos> candidates = new java.util.ArrayList<>();
         for (int radius = 1; radius <= 3; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
