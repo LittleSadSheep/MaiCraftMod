@@ -27,6 +27,8 @@ MaiCraft 是一个 Minecraft 1.21.1 客户端 Mod：LLM 只表达游玩意图，
 .\gradlew.bat build --no-parallel --max-workers=1 --no-daemon
 ```
 
+`common:check` 包含 `machineRegression`，覆盖结构推断、设计验证、原生请求边界与机器能力参数。编译和回归测试不能替代装有目标模组的实机验收。
+
 ## 许可证
 
 MaiCraft 全部代码采用 GNU General Public License v3.0 only（SPDX：`GPL-3.0-only`），详见 [LICENSE](LICENSE)。
