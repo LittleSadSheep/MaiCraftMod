@@ -202,6 +202,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         if (!current.player().getAbilities().instabuild) {
             throw new IllegalStateException("creative slot mutation requires creative mode");
         }
+        if (!current.menus().ensureVisible(current)) {
+            throw new IllegalStateException("creative inventory changes require a rendered player inventory GUI");
+        }
         requireIdle();
         current.claimMutation();
         ItemStack frozen = expected.copy();
@@ -214,6 +217,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             int protocolSlot = inventorySlot < 9 ? 36 + inventorySlot : inventorySlot;
             current.connection().send(
                     new ServerboundSetCreativeModeSlotPacket(protocolSlot, frozen.copy()));
+            current.menus().interactionSubmitted(current);
         } catch (RuntimeException failure) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
                     "creative slot packet threw before synchronized inventory confirmation");
@@ -238,6 +242,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                 NativeActionReceipt.Kind.MOD_PROTOCOL, current, confirmation, timeoutTicks);
         try {
             submission.run();
+            current.menus().interactionSubmitted(current);
         } catch (RuntimeException failure) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
                     name + " threw after protocol submission began; application is unknown");

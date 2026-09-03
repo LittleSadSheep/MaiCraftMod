@@ -18,4 +18,12 @@ public abstract class GameRendererCameraMixin {
             DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo callback) {
         ClientRuntime.renderFrame(Minecraft.getInstance());
     }
+
+    @Inject(method = "render", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/gui/screens/Screen;renderWithTooltip(Lnet/minecraft/client/gui/GuiGraphics;IIF)V",
+            shift = At.Shift.AFTER))
+    private void maicraft$observeMenuFrame(
+            DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo callback) {
+        org.maiwithu.maicraft.client.actor.MenuVisibility.rendered(Minecraft.getInstance());
+    }
 }

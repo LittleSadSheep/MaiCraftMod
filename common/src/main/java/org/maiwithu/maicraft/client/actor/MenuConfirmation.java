@@ -37,6 +37,7 @@ public interface MenuConfirmation {
 
     static MenuConfirmation closedToInventory() {
         return (context, receipt) -> context.player().containerMenu == context.player().inventoryMenu
+                && context.minecraft().screen == null
                 ? Verdict.APPLIED : Verdict.PENDING;
     }
 

@@ -9,18 +9,45 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 /** Default one-click-at-a-time menu port using MultiPlayerGameMode. */
 public final class DefaultMenuPort implements MenuPort {
     private MenuReceipt active;
+    private final MenuVisibility visibility = new MenuVisibility();
+    private AbstractContainerMenu closingMenu;
+
+    @Override
+    public boolean ensureVisible(LocalPlayerContext context) {
+        DefaultLocalPlayerContext current = requireSubmission(context);
+        if (closingMenu != null) return false;
+        if (current.minecraft().screen == null && current.player().containerMenu == current.player().inventoryMenu) {
+            if (!current.mutationAvailable()) return false;
+            current.claimMutation();
+            current.body().releaseAll();
+            current.minecraft().setScreen(new MenuVisibility.PlayerInventoryScreen(current.player()));
+        }
+        return visibility.ready(current);
+    }
+
+    @Override
+    public void interactionSubmitted(LocalPlayerContext context) {
+        context.requireCurrent();
+        visibility.changed(context);
+    }
+
+    private void requireVisible(LocalPlayerContext context) {
+        if (!visibility.ready(context)) throw new IllegalStateException("the matching menu GUI must be rendered before operating it");
+    }
 
     @Override
     public MenuReceipt click(LocalPlayerContext context, int slot, int button, ClickType clickType,
                              MenuConfirmation confirmation, int timeoutTicks) {
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
+        requireVisible(current);
         AbstractContainerMenu menu = current.player().containerMenu;
         if (slot < 0 || slot >= menu.slots.size()) throw new IllegalArgumentException("menu slot is out of range");
         current.claimMutation();
         MenuReceipt receipt = create(MenuReceipt.Kind.CLICK, current, menu, timeoutTicks, false, confirmation);
         try {
             current.gameMode().handleInventoryMouseClick(menu.containerId, slot, button, clickType, current.player());
+            interactionSubmitted(current);
         } catch (RuntimeException failure) {
             receipt.finish(MenuReceipt.Status.UNCERTAIN,
                     "menu click threw after entering the client transaction path");
@@ -40,6 +67,7 @@ public final class DefaultMenuPort implements MenuPort {
             throw new IllegalStateException("the player inventory menu must be active for hotbar staging");
         }
         requireIdle();
+        requireVisible(current);
         ItemStack sourceBefore = current.player().getInventory().getItem(sourceInventorySlot).copy();
         ItemStack hotbarBefore = current.player().getInventory().getItem(hotbarSlot).copy();
         MenuConfirmation confirmation = MenuConfirmation.inventorySwap(
@@ -53,6 +81,7 @@ public final class DefaultMenuPort implements MenuPort {
             // the destination hotbar index for ClickType.SWAP.
             current.gameMode().handleInventoryMouseClick(
                     menu.containerId, sourceInventorySlot, hotbarSlot, ClickType.SWAP, current.player());
+            interactionSubmitted(current);
         } catch (RuntimeException failure) {
             receipt.finish(MenuReceipt.Status.UNCERTAIN,
                     "hotbar staging threw after entering the client transaction path");
@@ -65,12 +94,14 @@ public final class DefaultMenuPort implements MenuPort {
                                    MenuConfirmation confirmation, int timeoutTicks) {
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
+        requireVisible(current);
         AbstractContainerMenu menu = current.player().containerMenu;
         current.claimMutation();
         MenuReceipt receipt = create(
                 MenuReceipt.Kind.PLACE_RECIPE, current, menu, timeoutTicks, false, confirmation);
         try {
             current.gameMode().handlePlaceRecipe(menu.containerId, recipe, shift);
+            interactionSubmitted(current);
         } catch (RuntimeException failure) {
             receipt.finish(MenuReceipt.Status.UNCERTAIN,
                     "recipe placement threw after entering the client transaction path");
@@ -83,28 +114,52 @@ public final class DefaultMenuPort implements MenuPort {
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
         AbstractContainerMenu menu = current.player().containerMenu;
-        if (menu == current.player().inventoryMenu) {
+        if (menu == current.player().inventoryMenu && current.minecraft().screen == null
+                && menu.getCarried().isEmpty() && !inventoryGridOccupied(current)) {
             MenuReceipt receipt = create(MenuReceipt.Kind.CLOSE, current, menu, timeoutTicks, true,
                     MenuConfirmation.closedToInventory());
             receipt.finish(MenuReceipt.Status.CONFIRMED_APPLIED, "the inventory menu was already active");
             return receipt;
         }
-        current.claimMutation();
         MenuReceipt receipt = create(MenuReceipt.Kind.CLOSE, current, menu, timeoutTicks, true,
                 MenuConfirmation.closedToInventory());
+        closingMenu = menu;
+        advanceClose(current, receipt);
+        return receipt;
+    }
+
+    private void advanceClose(DefaultLocalPlayerContext current, MenuReceipt receipt) {
+        if (current.player().containerMenu != closingMenu) {
+            closingMenu = null;
+            receipt.finish(MenuReceipt.Status.UNCERTAIN, "the menu changed before its GUI could be closed");
+            return;
+        }
+        boolean visible = MenuVisibility.matches(current.minecraft(), closingMenu);
+        if (!current.mutationAvailable() || (visible && !visibility.ready(current))) return;
+        current.claimMutation();
         try {
             current.player().closeContainer();
+            closingMenu = null;
+            visibility.reset();
         } catch (RuntimeException failure) {
+            closingMenu = null;
             receipt.finish(MenuReceipt.Status.UNCERTAIN,
                     "menu close threw after entering the client transaction path");
         }
-        return receipt;
+    }
+
+    private static boolean inventoryGridOccupied(LocalPlayerContext context) {
+        for (int slot = 1; slot <= 4; slot++) {
+            if (!context.player().inventoryMenu.getSlot(slot).getItem().isEmpty()) return true;
+        }
+        return false;
     }
 
     @Override
     public MenuReceipt closeForTaskBoundary(
             LocalPlayerContext context, int timeoutTicks, String boundaryReason) {
         requireSubmission(context);
+        if (active != null && !active.terminal() && active.kind() == MenuReceipt.Kind.CLOSE) return active;
         if (active != null && !active.terminal()) {
             active.finish(MenuReceipt.Status.UNCERTAIN,
                     boundaryReason == null || boundaryReason.isBlank()
@@ -127,6 +182,17 @@ public final class DefaultMenuPort implements MenuPort {
             receipt.finish(MenuReceipt.Status.UNCERTAIN,
                     "body or control authority changed before menu confirmation");
             return receipt;
+        }
+        if (closingMenu != null && context instanceof DefaultLocalPlayerContext current) {
+            advanceClose(current, receipt);
+            if (receipt.terminal()) return receipt;
+            if (closingMenu != null) {
+                if (context.tickRevision() >= receipt.deadlineTick()) {
+                    receipt.finish(MenuReceipt.Status.UNCERTAIN, "the GUI close presentation window expired");
+                    closingMenu = null;
+                }
+                return receipt;
+            }
         }
         AbstractContainerMenu menu = context.player().containerMenu;
         boolean containerChanged = menu.containerId != receipt.containerId();
@@ -183,6 +249,7 @@ public final class DefaultMenuPort implements MenuPort {
             receipt.finish(MenuReceipt.Status.UNCERTAIN,
                     "the bounded menu confirmation window expired");
         }
+        if (receipt.terminal() && receipt.kind() != MenuReceipt.Kind.CLOSE) visibility.changed(context);
         return receipt;
     }
 
@@ -200,6 +267,8 @@ public final class DefaultMenuPort implements MenuPort {
 
     void revokeForBoundary(String reason) {
         if (active != null && !active.terminal()) active.finish(MenuReceipt.Status.UNCERTAIN, reason);
+        closingMenu = null;
+        visibility.reset();
     }
 
     /**
@@ -212,7 +281,10 @@ public final class DefaultMenuPort implements MenuPort {
             active.finish(MenuReceipt.Status.UNCERTAIN, reason);
         }
         if (player == null) return;
-        boolean automationMenuOpen = player.containerMenu != player.inventoryMenu;
+        closingMenu = null;
+        visibility.reset();
+        boolean automationMenuOpen = player.containerMenu != player.inventoryMenu
+                || MenuVisibility.inventoryVisible(net.minecraft.client.Minecraft.getInstance(), player);
         boolean carrying = !player.containerMenu.getCarried().isEmpty();
         if (!automationMenuOpen && !carrying) return;
         try {

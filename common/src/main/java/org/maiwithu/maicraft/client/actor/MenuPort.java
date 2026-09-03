@@ -6,6 +6,12 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 
 /** Serialized client menu transactions. A later click is forbidden until the prior receipt settles. */
 public interface MenuPort {
+    /** Open the player inventory if needed; wait for the matching GUI and a visible action cadence. */
+    boolean ensureVisible(LocalPlayerContext context);
+
+    /** Mark a GUI operation submitted through a mod's native protocol. */
+    void interactionSubmitted(LocalPlayerContext context);
+
     MenuReceipt click(LocalPlayerContext context, int slot, int button, ClickType clickType,
                       MenuConfirmation confirmation, int timeoutTicks);
 

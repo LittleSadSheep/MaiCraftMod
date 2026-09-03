@@ -9,7 +9,8 @@
   ],
   "client": [
     "ClientLevelBlockChangeMixin",
-    "GameRendererCameraMixin"
+    "GameRendererCameraMixin",
+    "InventoryScreenModeMixin"
   ],
   "server": [],
   "injectors": {
