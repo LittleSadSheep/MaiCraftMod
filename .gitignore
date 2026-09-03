@@ -27,4 +27,12 @@ out
 eclipse
 run
 runs
+
+# local AI-assisted working artifacts
+.ai/
+.ai-work/
+.ai-notes/
+*.ai.md
+*.prompt.md
+*.generated.md
 .vscode
