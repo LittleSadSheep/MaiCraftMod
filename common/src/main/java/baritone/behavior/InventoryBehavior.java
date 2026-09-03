@@ -26,7 +26,6 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.DiggerItem;
 import net.minecraft.world.item.Item;
@@ -46,9 +45,6 @@ import java.util.function.Predicate;
 
 public final class InventoryBehavior extends Behavior implements Helper {
 
-    int ticksSinceLastInventoryMove;
-    int[] lastTickRequestedMove; // not everything asks every tick, so remember the request while coming to a halt
-
     public InventoryBehavior(Baritone baritone) {
         super(baritone);
     }
@@ -65,7 +61,6 @@ public final class InventoryBehavior extends Behavior implements Helper {
             // we have a crafting table or a chest or something open
             return;
         }
-        ticksSinceLastInventoryMove++;
         if (firstValidThrowaway() >= 9) { // aka there are none on the hotbar, but there are some in main inventory
             requestSwapWithHotBar(firstValidThrowaway(), 8);
         }
@@ -73,20 +68,11 @@ public final class InventoryBehavior extends Behavior implements Helper {
         if (pick >= 9) {
             requestSwapWithHotBar(pick, 0);
         }
-        if (lastTickRequestedMove != null) {
-            logDebug("Remembering to move " + lastTickRequestedMove[0] + " " + lastTickRequestedMove[1] + " from a previous tick");
-            requestSwapWithHotBar(lastTickRequestedMove[0], lastTickRequestedMove[1]);
-        }
     }
 
     public boolean attemptToPutOnHotbar(int inMainInvy, Predicate<Integer> disallowedHotbar) {
         OptionalInt destination = getTempHotbarSlot(disallowedHotbar);
-        if (destination.isPresent()) {
-            if (!requestSwapWithHotBar(inMainInvy, destination.getAsInt())) {
-                return false;
-            }
-        }
-        return true;
+        return destination.isPresent() && requestSwapWithHotBar(inMainInvy, destination.getAsInt());
     }
 
     public OptionalInt getTempHotbarSlot(Predicate<Integer> disallowedHotbar) {
@@ -111,19 +97,10 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     private boolean requestSwapWithHotBar(int inInventory, int inHotbar) {
-        lastTickRequestedMove = new int[]{inInventory, inHotbar};
-        if (ticksSinceLastInventoryMove < Baritone.settings().ticksBetweenInventoryMoves.value) {
-            logDebug("Inventory move requested but delaying " + ticksSinceLastInventoryMove + " " + Baritone.settings().ticksBetweenInventoryMoves.value);
-            return false;
-        }
-        if (Baritone.settings().inventoryMoveOnlyIfStationary.value && !baritone.getInventoryPauserProcess().stationaryForInventoryMove()) {
-            logDebug("Inventory move requested but delaying until stationary");
-            return false;
-        }
-        ctx.playerController().windowClick(ctx.player().inventoryMenu.containerId, inInventory < 9 ? inInventory + 36 : inInventory, inHotbar, ClickType.SWAP, ctx.player());
-        ticksSinceLastInventoryMove = 0;
-        lastTickRequestedMove = null;
-        return true;
+        // Embedded navigation delegates inventory work to FirstPersonActionGate. This legacy
+        // synchronous hook cannot wait for GUI presentation or server receipts, so it must refuse
+        // even if allowInventory is manually enabled; it must never claim an unperformed swap.
+        return false;
     }
 
     private int firstValidThrowaway() { // TODO offhand idk
@@ -226,7 +203,7 @@ public final class InventoryBehavior extends Behavior implements Helper {
             for (int i = 9; i < 36; i++) {
                 if (desired.test(inv.get(i))) {
                     if (select) {
-                        requestSwapWithHotBar(i, 7);
+                        if (!requestSwapWithHotBar(i, 7)) return false;
                         return EmbeddedBaritoneRuntime.ensureHotbarSelected(p, 7);
                     }
                     return true;

@@ -236,6 +236,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         if (submission == null) throw new IllegalArgumentException("submission is required");
         if (confirmation == null) throw new IllegalArgumentException("confirmation is required");
         String name = operation == null || operation.isBlank() ? "mod protocol action" : operation;
+        if (!current.menus().ensureVisible(current)) {
+            throw new IllegalStateException("mod menu protocols require a rendered GUI");
+        }
         requireIdle();
         current.claimMutation();
         NativeActionReceipt receipt = oneShot(
@@ -345,6 +348,10 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         if (!receipt.terminal() && context.tickRevision() >= receipt.deadlineTick()) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
                     "the bounded read-only confirmation window expired");
+        }
+        if (receipt.terminal() && (receipt.kind() == NativeActionReceipt.Kind.CREATIVE_SET_SLOT
+                || receipt.kind() == NativeActionReceipt.Kind.MOD_PROTOCOL)) {
+            context.menus().interactionSubmitted(context);
         }
         return receipt;
     }

@@ -27,6 +27,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -131,7 +132,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     @Override protected void onStart() {
-        var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
+        var context = ClientRuntime.requireContext(player);
+        var manager = context.connection().getRecipeManager();
         for (RecipeHolder<?> candidate : manager.getRecipes()) {
             if (candidate.id().toString().equals(r.recipeId.toString())) { recipe = candidate; break; }
         }
@@ -174,7 +176,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                 requiresTable ? 3 : 2, requiresTable ? 3 : 2);
         if (compatibleMenu) {
             stage = Stage.PLACE;
-        } else if (player.containerMenu != player.inventoryMenu) {
+        } else if (player.containerMenu != player.inventoryMenu
+                || MenuVisibility.inventoryVisible(context.minecraft(), player)) {
             stage = Stage.CLOSE_WRONG_MENU;
         } else {
             if (r.station != null) bindStation(r.station);
@@ -582,6 +585,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
 
     private TaskState placeRecipe() {
         var context = ClientRuntime.requireContext(player);
+        if (menuReceipt == null && !craftingMenuReady()) return TaskState.RUNNING;
         if (menuReceipt == null) {
             if (completedBatches >= plannedBatches) {
                 afterGridReturn = Stage.CLOSE;
@@ -643,6 +647,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
 
     private TaskState takeResult() {
         var context = ClientRuntime.requireContext(player);
+        if (menuReceipt == null && !craftingMenuReady()) return TaskState.RUNNING;
         if (menuReceipt == null) {
             if (!player.containerMenu.getCarried().isEmpty()) {
                 return beginGridReturnFailure(
@@ -703,6 +708,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
 
     private TaskState stowResult() {
         var context = ClientRuntime.requireContext(player);
+        if (menuReceipt == null && !craftingMenuReady()) return TaskState.RUNNING;
         if (menuReceipt == null) {
             ItemStack cursor = player.containerMenu.getCarried();
             if (cursor.isEmpty()) {
@@ -781,6 +787,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             renewProgressLease();
         }
 
+        if (!craftingMenuReady()) return TaskState.RUNNING;
         if (!player.containerMenu.getCarried().isEmpty()) {
             terminalGridCleanupUnconfirmed = true;
             fail("crafting-grid cleanup found an unexpected non-empty cursor",
@@ -829,6 +836,14 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                 context, cleanupGridSlot, 0, ClickType.QUICK_MOVE,
                 (fresh, ignored) -> cleanupMoveVerdict(fresh.player()), 40);
         return TaskState.RUNNING;
+    }
+
+    private boolean craftingMenuReady() {
+        InputDriver.halt(player);
+        var context = ClientRuntime.requireContext(player);
+        // InventoryMenu exists even with no screen. Every batch and grid/cursor move must wait
+        // for the actual matching GUI and its previous transaction to have been rendered.
+        return context.menus().ensureVisible(context);
     }
 
     private TaskState closeMenu() {
@@ -1301,26 +1316,17 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         stationDrops.clear();
         boolean ownsUnsettledGrid = gridCommitmentStarted;
         if (ownsUnsettledGrid) terminalGridCleanupUnconfirmed = true;
-        if (player.containerMenu != player.inventoryMenu || ownsUnsettledGrid) {
-            try {
-                var context = ClientRuntime.requireContext(player);
+        try {
+            var context = ClientRuntime.requireContext(player);
+            if (player.containerMenu != player.inventoryMenu || ownsUnsettledGrid
+                    || MenuVisibility.inventoryVisible(context.minecraft(), player)) {
                 menuReceipt = context.menus().closeForTaskBoundary(
                         context, 20,
                         "the crafting task ended before its active menu transaction settled");
-                // DefaultMenuPort.close intentionally treats InventoryMenu as already closed. A
-                // terminal task that still owns its 2x2 grid must nevertheless send vanilla's
-                // close-container path so InventoryMenu.removed returns grid/cursor contents.
-                if (ownsUnsettledGrid && player.containerMenu == player.inventoryMenu) {
-                    player.closeContainer();
-                }
-            } catch (RuntimeException closeFailure) {
-                // The task is already terminal, so there is no later task tick to retry from. The
-                // vanilla close path is the final safety net: it returns grid/cursor contents and
-                // sends the normal close-container packet instead of leaving movement under a GUI.
-                try {
-                    player.closeContainer();
-                } catch (RuntimeException ignored) { }
             }
+        } catch (RuntimeException closeFailure) {
+            org.maiwithu.maicraft.core.Constants.LOG.warn(
+                    "Could not schedule crafting GUI cleanup at the actor boundary", closeFailure);
         }
         menuReceipt = null;
         workstation.close();

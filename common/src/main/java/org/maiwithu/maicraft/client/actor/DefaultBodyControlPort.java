@@ -165,7 +165,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         LocalPlayer player = controlledPlayer;
         if (input == null || player == null) return;
 
-        Movement command = movementLease == context.tickRevision() ? movement : Movement.STOPPED;
+        Movement command = movementLease == context.tickRevision() && context.minecraft().screen == null
+                ? movement : Movement.STOPPED;
         input.forwardImpulse = command.forward();
         input.leftImpulse = command.strafe();
         input.jumping = command.jumping();

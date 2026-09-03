@@ -15,14 +15,14 @@ public final class DefaultMenuPort implements MenuPort {
     @Override
     public boolean ensureVisible(LocalPlayerContext context) {
         DefaultLocalPlayerContext current = requireSubmission(context);
+        current.body().releaseAll();
         if (closingMenu != null) return false;
         if (current.minecraft().screen == null && current.player().containerMenu == current.player().inventoryMenu) {
             if (!current.mutationAvailable()) return false;
             current.claimMutation();
-            current.body().releaseAll();
             current.minecraft().setScreen(new MenuVisibility.PlayerInventoryScreen(current.player()));
         }
-        return visibility.ready(current);
+        return current.mutationAvailable() && visibility.ready(current);
     }
 
     @Override
@@ -135,7 +135,13 @@ public final class DefaultMenuPort implements MenuPort {
             return;
         }
         boolean visible = MenuVisibility.matches(current.minecraft(), closingMenu);
-        if (!current.mutationAvailable() || (visible && !visibility.ready(current))) return;
+        current.body().releaseAll();
+        if (!current.mutationAvailable()) return;
+        if (visible && !visibility.ready(current)) {
+            // A terminating task may already be gone; keep its successor out until close settles.
+            current.claimMutation();
+            return;
+        }
         current.claimMutation();
         try {
             current.player().closeContainer();
@@ -327,6 +333,11 @@ public final class DefaultMenuPort implements MenuPort {
         MenuReceipt receipt = active;
         if (receipt != null && !receipt.terminal()) {
             poll(context, receipt);
+            if (!receipt.terminal() && receipt.kind() == MenuReceipt.Kind.CLOSE
+                    && context.mutationAvailable() && context instanceof DefaultLocalPlayerContext current) {
+                current.body().releaseAll();
+                current.claimMutation();
+            }
         }
     }
 }

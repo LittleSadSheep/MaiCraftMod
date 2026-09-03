@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.menu;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /** A task-owned visible menu, including confirmed completion and interrupted-task cleanup. */
@@ -20,20 +21,38 @@ public final class VisibleMenuSession {
     /** Inventory slot numbers are valid only after an existing workstation has been closed. */
     public boolean inventoryReady(LocalPlayerContext context) {
         used = true;
-        if (switching != null) {
-            switching = context.menus().poll(context, switching);
-            if (!switching.terminal()) return false;
-            if (switching.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                throw new IllegalStateException("previous menu close was not confirmed: " + switching.detail());
-            }
-            switching = null;
-            return false;
-        }
+        if (!settleSwitch(context)) return false;
         if (context.player().containerMenu != context.player().inventoryMenu) {
             switching = context.menus().close(context, 20);
             return false;
         }
         return ready(context);
+    }
+
+    /** A hotbar item still cannot be used in the world while a container screen is open. */
+    public boolean worldReady(LocalPlayerContext context) {
+        if (!settleSwitch(context)) return false;
+        if (context.minecraft().screen == null
+                && context.player().containerMenu == context.player().inventoryMenu) {
+            return context.mutationAvailable();
+        }
+        if (context.minecraft().screen != null
+                && !MenuVisibility.matches(context.minecraft(), context.player().containerMenu)) return false;
+        used = true;
+        closed = false;
+        switching = context.menus().close(context, 20);
+        return false;
+    }
+
+    private boolean settleSwitch(LocalPlayerContext context) {
+        if (switching == null) return true;
+        switching = context.menus().poll(context, switching);
+        if (!switching.terminal()) return false;
+        if (switching.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
+            throw new IllegalStateException("previous menu close was not confirmed: " + switching.detail());
+        }
+        switching = null;
+        return false;
     }
 
     /** Wait for the last operation to remain visible and the native close to be confirmed. */

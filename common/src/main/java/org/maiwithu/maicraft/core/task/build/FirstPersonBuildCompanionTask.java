@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
+import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
@@ -102,6 +104,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private List<BuildPlacementGeometry.Gesture> liveGestures = List.of();
     private BuildPlacementGeometry.Gesture gesture;
     private NativeActionReceipt useReceipt, creativeReceipt;
+    private VisibleMenuSession creativeMenu = new VisibleMenuSession();
     private BuildTraversabilityVerifier.Result traversabilityResult;
     private int creativeSlot = -1;
     private ItemStack creativeStack = ItemStack.EMPTY;
@@ -471,7 +474,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState selectItemTick() {
-        if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
         if (creativeReceipt != null) {
             LocalPlayerContext ctx = ClientRuntime.requireContext(player);
             creativeReceipt = ctx.actions().poll(ctx, creativeReceipt);
@@ -482,7 +484,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         creativeReceipt.status() == NativeActionReceipt.Status.UNCERTAIN);
                 return TaskState.FAILED;
             }
+            if (!creativeMenu.close(ctx)) return TaskState.RUNNING;
             creativeReceipt = null;
+            creativeMenu = new VisibleMenuSession();
+        }
+        if (matches(cell.target(), cell.generated())) {
+            if (!creativeMenu.close(ClientRuntime.requireContext(player))) return TaskState.RUNNING;
+            creativeMenu = new VisibleMenuSession();
+            finishPlaced();
+            return TaskState.RUNNING;
         }
         int slot = inventory.findSlot(cell.target().item(), true);
         if (slot < 0 && player.getAbilities().instabuild) {
@@ -492,8 +502,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         FailureType.NO_SPACE, "no_creative_staging_slot", false); return TaskState.FAILED;
             }
             if (creativeStack.isEmpty()) {
-                creativeStack = new ItemStack(cell.target().item(), 1);
                 LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+                if (!creativeMenu.inventoryReady(ctx)) return TaskState.RUNNING;
+                creativeStack = new ItemStack(cell.target().item(), 1);
                 creativeReceipt = ctx.actions().creativeSetSlot(
                         ctx, creativeSlot, creativeStack, CREATIVE_TIMEOUT);
                 return TaskState.RUNNING;
@@ -620,15 +631,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private void finishPlaced() {
         r.placedOne(); renewBuildProgress(); markComplete(cell);
         if (creativeSlot >= 0 && !creativeStack.isEmpty()) {
-            LocalPlayerContext ctx = ClientRuntime.requireContext(player);
-            creativeReceipt = ctx.actions().creativeSetSlot(
-                    ctx, creativeSlot, ItemStack.EMPTY, CREATIVE_TIMEOUT);
             phase = Phase.CLEAR_CREATIVE;
         } else finishCell();
     }
 
     private TaskState clearCreativeTick() {
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+        if (creativeReceipt == null) {
+            if (!creativeMenu.inventoryReady(ctx)) return TaskState.RUNNING;
+            creativeReceipt = ctx.actions().creativeSetSlot(
+                    ctx, creativeSlot, ItemStack.EMPTY, CREATIVE_TIMEOUT);
+            return TaskState.RUNNING;
+        }
         creativeReceipt = ctx.actions().poll(ctx, creativeReceipt);
         if (!creativeReceipt.terminal()) return TaskState.RUNNING;
         if (creativeReceipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
@@ -637,7 +651,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     creativeReceipt.status() == NativeActionReceipt.Status.UNCERTAIN);
             return TaskState.FAILED;
         }
+        if (!creativeMenu.close(ctx)) return TaskState.RUNNING;
         creativeReceipt = null; creativeSlot = -1; creativeStack = ItemStack.EMPTY;
+        creativeMenu = new VisibleMenuSession();
         finishCell(); return TaskState.RUNNING;
     }
 
@@ -1025,7 +1041,16 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (digger.current() != null) digger.cancel();
         drainScaffolds(); unregisterProvider(); InputDriver.halt(player); selection.reset();
         aimConvergence.reset();
-        bestEffortCreativeCleanup(); super.cleanup();
+        retireCreativeReceipt();
+        bestEffortCreativeCleanup(); retireCreativeReceipt();
+        creativeMenu.cleanup(player); super.cleanup();
+    }
+    private void retireCreativeReceipt() {
+        if (creativeReceipt == null || creativeReceipt.terminal()) return;
+        try {
+            LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+            ctx.actions().retireOneShotForTaskBoundary(ctx, creativeReceipt, "creative build task ended");
+        } catch (RuntimeException unavailable) { /* Actor revocation owns old-body receipts. */ }
     }
     private void bestEffortCreativeCleanup() {
         if (creativeSlot < 0 || creativeStack.isEmpty() || !player.getAbilities().instabuild) return;
@@ -1033,8 +1058,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!ItemStack.isSameItemSameComponents(live, creativeStack)) return;
         try {
             LocalPlayerContext ctx = ClientRuntime.requireContext(player);
-            if (creativeReceipt == null || creativeReceipt.terminal())
-                ctx.actions().creativeSetSlot(ctx, creativeSlot, ItemStack.EMPTY, CREATIVE_TIMEOUT);
+            if (MenuVisibility.inventoryVisible(ctx.minecraft(), player)
+                    && (creativeReceipt == null || creativeReceipt.terminal()) && ctx.menus().ensureVisible(ctx))
+                creativeReceipt = ctx.actions().creativeSetSlot(ctx, creativeSlot, ItemStack.EMPTY, CREATIVE_TIMEOUT);
         } catch (RuntimeException ignored) { }
     }
 

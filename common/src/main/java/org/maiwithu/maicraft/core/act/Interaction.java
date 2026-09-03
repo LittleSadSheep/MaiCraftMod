@@ -269,7 +269,8 @@ public final class Interaction {
 
     public Status tick() {
         if (receipt == null
-                && (closeReceipt != null || player.containerMenu != player.inventoryMenu)) {
+                && (closeReceipt != null || player.containerMenu != player.inventoryMenu
+                || net.minecraft.client.Minecraft.getInstance().screen != null)) {
             Status menuStatus = awaitWorldInputReady();
             if (menuStatus != null) {
                 return menuStatus;
@@ -301,7 +302,7 @@ public final class Interaction {
         String detail = closeReceipt.detail();
         closeReceipt = null;
         if (status == MenuReceipt.Status.CONFIRMED_APPLIED) {
-            return null;
+            return context.mutationAvailable() ? null : Status.RUNNING;
         }
         failReason = "could not close the active menu before the world action: " + detail;
         failType = FailureType.UNKNOWN;

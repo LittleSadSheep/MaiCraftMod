@@ -247,6 +247,7 @@ public final class BlockDigger {
                 return DigResult.NO_SHOT;
             }
             submitToolSelection(toolContext);
+            return DigResult.PROGRESSING;
         }
         if (toolStageReceipt != null) {
             if (!toolStageReceipt.terminal()) {
@@ -258,9 +259,15 @@ public final class BlockDigger {
             MenuReceipt.Status status = toolStageReceipt.status();
             toolStageReceipt = null;
             if (status != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                reset();
+                cancel();
                 return DigResult.NO_SHOT;
             }
+            toolCloseReceipt = toolContext.menus().close(toolContext, TOOL_TIMEOUT_TICKS);
+            return DigResult.PROGRESSING;
+        }
+        if (pendingToolSlot >= 0) {
+            submitToolSelection(toolContext);
+            return DigResult.PROGRESSING;
         }
         if (toolSelectReceipt != null) {
             if (!toolSelectReceipt.terminal()) {
@@ -307,7 +314,10 @@ public final class BlockDigger {
     }
 
     private boolean start(BlockPos target, boolean selectTool) {
-        if (receipt != null && !receipt.terminal()) {
+        if (receipt != null && !receipt.terminal()
+                || toolStageReceipt != null && !toolStageReceipt.terminal()
+                || toolSelectReceipt != null && !toolSelectReceipt.terminal()
+                || toolCloseReceipt != null && !toolCloseReceipt.terminal()) {
             cancel();
             return false;
         }
@@ -317,7 +327,7 @@ public final class BlockDigger {
                 ? ToolSelect.bestSlot(player, player.level().getBlockState(pos))
                 : -1;
         LocalPlayerContext context = ClientRuntime.requireContext(player);
-        if (player.containerMenu != player.inventoryMenu) {
+        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) {
             toolCloseReceipt = context.menus().close(context, TOOL_TIMEOUT_TICKS);
         } else {
             submitToolSelection(context);
@@ -330,6 +340,7 @@ public final class BlockDigger {
 
     private void submitToolSelection(LocalPlayerContext context) {
         int bestSlot = pendingToolSlot;
+        if (bestSlot >= 9 && bestSlot < 36 && !context.menus().ensureVisible(context)) return;
         pendingToolSlot = -1;
         int selected = player.getInventory().selected;
         if (bestSlot >= 0 && bestSlot < 9 && bestSlot != selected) {
@@ -353,7 +364,9 @@ public final class BlockDigger {
         boolean pendingBreak = receipt != null && !receipt.terminal();
         boolean pendingSelection = toolSelectReceipt != null && !toolSelectReceipt.terminal();
         boolean pendingMenu = (toolCloseReceipt != null && !toolCloseReceipt.terminal())
-                || (toolStageReceipt != null && !toolStageReceipt.terminal());
+                || (toolStageReceipt != null && !toolStageReceipt.terminal())
+                || org.maiwithu.maicraft.client.actor.MenuVisibility.inventoryVisible(
+                        net.minecraft.client.Minecraft.getInstance(), player);
         LocalPlayerContext context = pendingBreak || pendingSelection || pendingMenu
                 ? ClientRuntime.requireContext(player)
                 : null;

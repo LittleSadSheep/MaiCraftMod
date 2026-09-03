@@ -68,7 +68,8 @@ public final class BaritonePlayerController implements IPlayerController {
 
     @Override
     public void windowClick(int windowId, int slotId, int mouseButton, ClickType type, Player player) {
-        mc.gameMode.handleInventoryMouseClick(windowId, slotId, mouseButton, type, player);
+        throw new UnsupportedOperationException(
+                "Inventory changes require a visible GUI and confirmed transactions through ClientRuntime.requireContext(player).menus()");
     }
 
     @Override

@@ -59,8 +59,8 @@ public final class FirstPersonActionGate {
             return Status.FAILED;
         }
         if (requestedInventorySlot == -1) requestedInventorySlot = inventorySlot;
-        if (ready) return Status.READY;
         LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (ready) return menuSession.worldReady(context) ? Status.READY : Status.RUNNING;
 
         if (selecting != null) {
             selecting = context.actions().poll(context, selecting);
@@ -71,7 +71,7 @@ public final class FirstPersonActionGate {
             }
             selecting = null;
             ready = true;
-            return Status.READY;
+            return Status.RUNNING;
         }
 
         // Do not swap S back into H when a caller intentionally keeps passing its cached source
@@ -95,6 +95,7 @@ public final class FirstPersonActionGate {
                     context, inventorySlot, selectedHotbarSlot, CONFIRM_TICKS);
             return Status.RUNNING;
         }
+        if (!menuSession.worldReady(context)) return Status.RUNNING;
         if (player.getInventory().selected == selectedHotbarSlot) {
             ready = true;
             return Status.READY;
