@@ -43,7 +43,9 @@ final class BlueprintFormats {
      * <p>256³ 对真实图纸绰绰有余:量过的日式小屋是 40×23×45,骏马马厩是 52×35×54,
      * 都在这个数的百分之一以内。
      */
-    private static final long MAX_REGION_VOLUME = 256L * 256L * 256L;
+    static final long MAX_REGION_VOLUME = 256L * 256L * 256L;
+    static final int MAX_CELLS = 32768;
+    static final int MAX_PALETTE = 65536;
 
     // ------------------------------------------------------------------
     // .litematic
@@ -63,17 +65,22 @@ final class BlueprintFormats {
         int maxZ = Integer.MIN_VALUE;
         ListTag entities = new ListTag();
         List<CompoundTag> regionTags = new ArrayList<>();
+        long totalVolume = 0;
         for (String key : regions.getAllKeys()) {
             CompoundTag region = regions.getCompound(key);
             regionTags.add(region);
             int[] min = regionMin(region);
             int[] abs = regionAbsSize(region);
+            totalVolume += checkedVolume(abs[0], abs[1], abs[2]);
+            if (totalVolume > MAX_REGION_VOLUME) {
+                throw new IllegalArgumentException("litematic total region volume exceeds the import work budget");
+            }
             minX = Math.min(minX, min[0]);
             minY = Math.min(minY, min[1]);
             minZ = Math.min(minZ, min[2]);
-            maxX = Math.max(maxX, min[0] + abs[0] - 1);
-            maxY = Math.max(maxY, min[1] + abs[1] - 1);
-            maxZ = Math.max(maxZ, min[2] + abs[2] - 1);
+            maxX = Math.max(maxX, Math.toIntExact((long) min[0] + abs[0] - 1));
+            maxY = Math.max(maxY, Math.toIntExact((long) min[1] + abs[1] - 1));
+            maxZ = Math.max(maxZ, Math.toIntExact((long) min[2] + abs[2] - 1));
         }
 
         ListTag palette = new ListTag();
@@ -81,10 +88,13 @@ final class BlueprintFormats {
         for (CompoundTag region : regionTags) {
             int paletteBase = palette.size();
             ListTag regionPalette = region.getList("BlockStatePalette", Tag.TAG_COMPOUND);
+            if (regionPalette.isEmpty() || palette.size() + regionPalette.size() > MAX_PALETTE) {
+                throw new IllegalArgumentException("litematic palette is empty or exceeds the import memory budget");
+            }
             boolean[] isAir = new boolean[regionPalette.size()];
             for (int i = 0; i < regionPalette.size(); i++) {
                 CompoundTag entry = regionPalette.getCompound(i);
-                isAir[i] = entry.getString("Name").endsWith("air");
+                isAir[i] = isAir(entry.getString("Name"));
                 palette.add(entry.copy());
             }
             int[] min = regionMin(region);
@@ -92,12 +102,16 @@ final class BlueprintFormats {
             long[] packed = region.getLongArray("BlockStates");
             int bits = Math.max(2, 32 - Integer.numberOfLeadingZeros(
                     Math.max(1, regionPalette.size() - 1)));
+            long volume = checkedVolume(abs[0], abs[1], abs[2]);
+            if (packed.length < (volume * bits + 63) / 64) {
+                throw new IllegalArgumentException("litematic block-state data is truncated");
+            }
             // 方块实体数据(箱子里的东西、告示牌的字、旗帜花纹)按区域内坐标索引,
             // 出格时挂到对应的格上——不带它,社区图纸里的箱子告示牌全是空的
-            Map<Long, CompoundTag> regionData = new HashMap<>();
+            Map<CellPosition, CompoundTag> regionData = new HashMap<>();
             for (Tag t : region.getList("TileEntities", Tag.TAG_COMPOUND)) {
                 CompoundTag be = ((CompoundTag) t).copy();
-                long key = key3(be.getInt("x"), be.getInt("y"), be.getInt("z"));
+                CellPosition key = key3(be.getInt("x"), be.getInt("y"), be.getInt("z"));
                 be.remove("x");
                 be.remove("y");
                 be.remove("z");
@@ -110,28 +124,31 @@ final class BlueprintFormats {
                     continue;
                 }
                 e.remove("Pos");
+                requireCapacity(entities);
                 entities.add(entityCell(at.getDouble(0) - minX, at.getDouble(1) - minY,
                         at.getDouble(2) - minZ, e));
             }
-            long volume = (long) abs[0] * abs[1] * abs[2];
-            if (volume > MAX_REGION_VOLUME) {
-                throw new IllegalArgumentException("litematic region is " + abs[0] + "x" + abs[1]
-                        + "x" + abs[2] + " — that is beyond anything buildable and usually means"
-                        + " the file is corrupt or was downloaded incompletely");
-            }
             for (long i = 0; i < volume; i++) {
+                if ((i & 4095) == 0) checkInterrupted();
                 int idx = unpack(packed, bits, i);
-                if (idx >= regionPalette.size() || isAir[idx]) {
+                if (idx < 0 || idx >= regionPalette.size()) {
+                    throw new IllegalArgumentException("litematic block-state palette index is invalid");
+                }
+                if (isAir[idx]) {
                     continue;   // 稀疏语义:空气不入格
                 }
                 int x = (int) (i % abs[0]);
                 int z = (int) ((i / abs[0]) % abs[2]);
                 int y = (int) (i / ((long) abs[0] * abs[2]));
-                blocks.add(cell(min[0] + x - minX, min[1] + y - minY, min[2] + z - minZ,
+                requireCapacity(blocks);
+                blocks.add(cell(Math.toIntExact((long) min[0] + x - minX),
+                        Math.toIntExact((long) min[1] + y - minY), Math.toIntExact((long) min[2] + z - minZ),
                         paletteBase + idx, regionData.get(key3(x, y, z))));
             }
         }
-        return assemble(maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1, palette, blocks, entities);
+        return assemble(Math.toIntExact((long) maxX - minX + 1),
+                Math.toIntExact((long) maxY - minY + 1), Math.toIntExact((long) maxZ - minZ + 1),
+                palette, blocks, entities);
     }
 
     /** 区域最小角:负尺寸表示向负方向延伸(min = pos + size + 1)。 */
@@ -139,15 +156,16 @@ final class BlueprintFormats {
         CompoundTag pos = region.getCompound("Position");
         CompoundTag size = region.getCompound("Size");
         return new int[]{
-                pos.getInt("x") + Math.min(0, size.getInt("x") + 1),
-                pos.getInt("y") + Math.min(0, size.getInt("y") + 1),
-                pos.getInt("z") + Math.min(0, size.getInt("z") + 1)};
+                Math.toIntExact((long) pos.getInt("x") + Math.min(0L, (long) size.getInt("x") + 1)),
+                Math.toIntExact((long) pos.getInt("y") + Math.min(0L, (long) size.getInt("y") + 1)),
+                Math.toIntExact((long) pos.getInt("z") + Math.min(0L, (long) size.getInt("z") + 1))};
     }
 
     private static int[] regionAbsSize(CompoundTag region) {
         CompoundTag size = region.getCompound("Size");
-        return new int[]{Math.abs(size.getInt("x")), Math.abs(size.getInt("y")),
-                Math.abs(size.getInt("z"))};
+        return new int[]{Math.toIntExact(Math.abs((long) size.getInt("x"))),
+                Math.toIntExact(Math.abs((long) size.getInt("y"))),
+                Math.toIntExact(Math.abs((long) size.getInt("z")))};
     }
 
     /** {@code .litematic} 的跨 long 连续位流取值。 */
