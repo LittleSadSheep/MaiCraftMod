@@ -1,7 +1,7 @@
 package org.maiwithu.maicraft.core.task.build;
 
 import org.maiwithu.maicraft.core.PlayerInv;
-import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -146,7 +146,7 @@ final class BuildInventory {
             return;
         }
         try {
-            BlockPos feet = PathExecutor.playerFeet(player);
+            BlockPos feet = PlayerNav.playerFeet(player);
             BlockHitResult hit = new BlockHitResult(player.position(), Direction.UP, feet, false);
             BlockState state = blockItem.getBlock().getStateForPlacement(new BlockPlaceContext(new UseOnContext(
                     player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}));
