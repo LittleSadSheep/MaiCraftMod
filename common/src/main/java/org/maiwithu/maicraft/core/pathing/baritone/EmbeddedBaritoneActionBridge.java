@@ -4,11 +4,11 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.utils.input.Input;
 import baritone.utils.InputOverrideHandler;
+import baritone.utils.accessor.IPlayerControllerMP;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.BucketItem;
@@ -51,6 +51,7 @@ final class EmbeddedBaritoneActionBridge {
     private int hotbarTarget = -1;
     private int rightClickCooldown;
     private boolean stopBreakingRequested;
+    private final BreakProgress breakProgress = new BreakProgress();
 
     void tick(
             LocalPlayerContext context,
@@ -123,17 +124,6 @@ final class EmbeddedBaritoneActionBridge {
         }
     }
 
-    /** A live, actor-owned world action is concrete liveness evidence for its navigator. */
-    boolean hasActiveWorldAction(EmbeddedBaritoneNavigator navigator) {
-        return navigator != null
-                && receiptOwner == navigator
-                && receipt != null
-                && !receipt.terminal()
-                && (pendingKind == PendingKind.BREAK
-                        || pendingKind == PendingKind.BLOCK_USE
-                        || pendingKind == PendingKind.ITEM_USE);
-    }
-
     void suspend(
             LocalPlayerContext context,
             EmbeddedBaritoneNavigator navigator,
@@ -183,6 +173,7 @@ final class EmbeddedBaritoneActionBridge {
 
     void bodyGone() {
         clearReceipt();
+        breakProgress.reset();
         rightClickCooldown = 0;
         stopBreakingRequested = false;
     }
@@ -207,6 +198,7 @@ final class EmbeddedBaritoneActionBridge {
             pendingKind = PendingKind.BREAK;
             breakTarget = hit.getBlockPos().immutable();
             breakBefore = before;
+            breakProgress.begin(breakTarget, before);
             stopBreakingRequested = false;
             receipt = context.actions().startBreaking(
                     context, hit, breakConfirmationTicks(destroyProgress));
@@ -255,16 +247,21 @@ final class EmbeddedBaritoneActionBridge {
         }
         BlockPos clicked = hit.getBlockPos().immutable();
         BlockState clickedState = context.level().getBlockState(clicked);
-        InteractionHand hand = chooseUseHand(context.player());
+        boolean openable = isHandOpenable(clickedState) && !sneakRequested;
+        // The movement command is submitted after this action phase. Wait for the real body to
+        // release secondary use; otherwise vanilla skips the door and may place a held block.
+        if (openable && !passageUseReady(sneakRequested, context.player().isSecondaryUseActive())) return;
+        InteractionHand hand = chooseUseHand(clickedState, sneakRequested,
+                context.player().getMainHandItem(), context.player().getOffhandItem());
         ItemStack held = context.player().getItemInHand(hand);
         boolean terrainItem = held.getItem() instanceof BlockItem
                 || held.getItem() instanceof BucketItem;
-        boolean openable = isHandOpenable(clickedState) && !sneakRequested;
 
         if (openable) {
             BlockPos otherHalf = otherDoorHalf(clicked, clickedState);
-            if (EmbeddedBaritonePolicy.protects(clicked)
-                    || EmbeddedBaritonePolicy.protects(otherHalf)) {
+            // Protecting a structure from mining/placement must still allow its doors to work.
+            if (EmbeddedBaritonePolicy.forbidsBody(clicked)
+                    || EmbeddedBaritonePolicy.forbidsBody(otherHalf)) {
                 return;
             }
             submitBlockUse(context, navigator, hand, hit, clicked, clickedState,
@@ -366,6 +363,18 @@ final class EmbeddedBaritoneActionBridge {
     private void settle(LocalPlayerContext context) {
         NativeActionReceipt current = receipt;
         if (current == null) return;
+        if (!current.terminal() && pendingKind == PendingKind.BREAK
+                && receiptOwner != null
+                && context.gameMode() instanceof IPlayerControllerMP controller
+                && controller.isHittingBlock()
+                && breakTarget.equals(controller.getCurrentBlock())) {
+            float progress = controller.getDestroyProgress();
+            // A held mouse button is not progress. Keep the high-water mark across retries of
+            // this block so a server-rejected break cannot keep the navigation alive forever.
+            if (breakProgress.observe(progress)) {
+                receiptOwner.recordConfirmedNativeAction();
+            }
+        }
         if (!current.terminal()) {
             try {
                 current = context.actions().poll(context, current);
@@ -385,6 +394,9 @@ final class EmbeddedBaritoneActionBridge {
             if (pendingKind == PendingKind.BREAK
                     && breakTarget != null && breakBefore != null) {
                 receiptOwner.recordConfirmedBreak(breakTarget, breakBefore);
+                // A later replacement at the same coordinate starts a new excavation. Failed
+                // attempts retain their high-water mark, but a confirmed break ends that episode.
+                breakProgress.reset();
             } else if ((pendingKind == PendingKind.BLOCK_USE
                     || pendingKind == PendingKind.ITEM_USE) && terrainUse) {
                 recordWorldDelta(context, receiptOwner, clickedCell, clickedBefore);
@@ -433,9 +445,11 @@ final class EmbeddedBaritoneActionBridge {
         stopBreakingRequested = false;
     }
 
-    private static InteractionHand chooseUseHand(LocalPlayer player) {
-        ItemStack main = player.getMainHandItem();
-        ItemStack off = player.getOffhandItem();
+    static InteractionHand chooseUseHand(BlockState clicked, boolean sneakRequested,
+                                         ItemStack main, ItemStack off) {
+        // Vanilla invokes a door's useWithoutItem only for MAIN_HAND. An offhand block here
+        // would bypass opening and reach the item's placement fallback instead.
+        if (isHandOpenable(clicked) && !sneakRequested) return InteractionHand.MAIN_HAND;
         if (main.getItem() instanceof BlockItem || main.getItem() instanceof BucketItem) {
             return InteractionHand.MAIN_HAND;
         }
@@ -445,8 +459,39 @@ final class EmbeddedBaritoneActionBridge {
         return InteractionHand.MAIN_HAND;
     }
 
-    private static boolean isHandOpenable(BlockState state) {
-        return state.is(BlockTags.WOODEN_DOORS)
+    static boolean passageUseReady(boolean sneakRequested, boolean actualSecondaryUse) {
+        return !sneakRequested && !actualSecondaryUse;
+    }
+
+    /** Tracks one excavation across retries, until its block is confirmed removed. */
+    static final class BreakProgress {
+        private BlockPos target;
+        private BlockState state;
+        private float best;
+
+        void begin(BlockPos nextTarget, BlockState nextState) {
+            if (!nextTarget.equals(target) || !nextState.equals(state)) {
+                target = nextTarget.immutable();
+                state = nextState;
+                best = 0;
+            }
+        }
+
+        boolean observe(float value) {
+            if (!Float.isFinite(value) || value <= best) return false;
+            best = value;
+            return true;
+        }
+
+        void reset() {
+            target = null;
+            state = null;
+            best = 0;
+        }
+    }
+
+    static boolean isHandOpenable(BlockState state) {
+        return state.getBlock() instanceof DoorBlock door && door.type().canOpenByHand()
                 || state.getBlock() instanceof FenceGateBlock;
     }
 
