@@ -1,21 +1,16 @@
 package org.maiwithu.maicraft.core.tools.work;
 
 import static org.maiwithu.maicraft.task.TaskDispatch.ctx;
-import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
-import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.blueprint.BlueprintStore;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import net.minecraft.client.player.LocalPlayer;
-import org.maiwithu.maicraft.task.TaskResult;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Vec3i;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -82,24 +77,8 @@ public final class BlueprintTool implements MaiCraftTool {
     @Override
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
-        var clientContext = ClientRuntime.requireContext(companion);
         if ("list".equals(a.action())) {
-            List<Map<String, Object>> out = new ArrayList<>();
-            for (String name : BlueprintStore.list(clientContext)) {
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("name", name);
-                try {
-                    Vec3i size = BlueprintStore.peekSize(clientContext, name);
-                    entry.put("size", size.getX() + "x" + size.getY() + "x" + size.getZ());
-                } catch (Exception e) {
-                    entry.put("size", "unreadable: " + e.getMessage());
-                }
-                out.add(entry);
-            }
-            String message = out.isEmpty()
-                    ? "no blueprints yet; drop .litematic / .schem / .nbt files into the schematics folder"
-                    : out.size() + " blueprint(s) available";
-            reply.accept(TaskResult.ok(message, Map.of("blueprints", out)).toJson());
+            org.maiwithu.maicraft.core.blueprint.BlueprintPreparation.list(companion, toolCallId, reply);
             return;
         }
         if (!"build".equals(a.action())) {
@@ -112,10 +91,15 @@ public final class BlueprintTool implements MaiCraftTool {
             throw new IllegalArgumentException("build needs anchor x, y, z (minimum corner)");
         }
         int quarters = a.rotation() == null ? 0 : Math.floorMod(a.rotation(), 360) / 90;
-        BlueprintStore.Loaded loaded = BlueprintStore.load(clientContext, a.file(),
-                new BlockPos(a.x(), a.y(), a.z()), quarters);
+        org.maiwithu.maicraft.core.blueprint.BlueprintPreparation.build(
+                companion, toolCallId, a.file(), new BlockPos(a.x(), a.y(), a.z()), quarters,
+                (player, loaded) -> buildRecord(toolCallId, a.file(), player, loaded), args, reply);
+    }
+
+    private static BuildTaskRecord buildRecord(String toolCallId, String file,
+            LocalPlayer companion, BlueprintStore.Loaded loaded) {
         if (loaded.targets().isEmpty()) {
-            throw new IllegalArgumentException("blueprint " + a.file() + " contains no buildable cells");
+            throw new IllegalArgumentException("blueprint " + file + " contains no buildable cells");
         }
         // 材料记账随能力画像(同 build 工具):免耗材想建就建,否则消耗并预检报缺。
         boolean consume = !org.maiwithu.maicraft.core.WorkProfile.of(companion).freeMaterials();
@@ -130,6 +114,6 @@ public final class BlueprintTool implements MaiCraftTool {
         record.droppedAtLoad(loaded.dropped());
         // 逐格料单:带花的花盆收盆加花两件,带花纹的旗帜收一叠但要组件一致
         record.cellNeeds(loaded.cellNeeds());
-        setTask(companion, record, args, reply);
+        return record;
     }
 }

@@ -57,7 +57,7 @@ public final class BlueprintReadTool implements MaiCraftTool {
                 + "several gathering trips. Pass the optional anchor x,y,z (and rotation) as well and you "
                 + "also get what is ALREADY standing there, what is still missing, and what she is short "
                 + "of right now — use that to resume a part-built structure or to check a site before "
-                + "committing to it. Instant, read-only; use the blueprint tool to actually build.";
+                + "committing to it. Read-only; import progresses in the background. Use the blueprint tool to actually build.";
     }
 
     @Override
@@ -90,107 +90,91 @@ public final class BlueprintReadTool implements MaiCraftTool {
         boolean anchored = a.x() != null && a.y() != null && a.z() != null;
         BlockPos anchor = anchored ? new BlockPos(a.x(), a.y(), a.z()) : BlockPos.ZERO;
         int quarters = a.rotation() == null ? 0 : Math.floorMod(a.rotation(), 360) / 90;
-        var clientContext = ClientRuntime.requireContext(companion);
-        var level = clientContext.level();
-        BlueprintStore.Loaded loaded = BlueprintStore.load(
-                clientContext, a.file(), anchor, quarters);
+        org.maiwithu.maicraft.core.blueprint.BlueprintPreparation.read(
+                companion, toolCallId, a.file(), anchor, quarters,
+                new ReadReport(a), reply);
+    }
 
-        Map<Item, Integer> cost = new LinkedHashMap<>();
-        Map<Integer, Integer> byLayer = new TreeMap<>();
-        int placed = 0;
-        int clears = 0;
-        int unknownSiteCells = 0;
-        Map<Item, Integer> remaining = new LinkedHashMap<>();
-        Map<Item, Integer> unknownCost = new LinkedHashMap<>();
-        org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView siteView = anchored
-                ? (org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView)
-                        org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(level)
-                : null;
-        int baseY = loaded.targets().stream().mapToInt(t -> t.pos().getY()).min().orElse(0);
-        // 按组件全等收料的那些格(旗帜的花纹)与摆设身上带的东西,要单独点名:报价
-        // 说一句"white_banner x3"而实际要的是三面绣好花纹的旗,玩家按报价备齐了照样
-        // 一格都放不下去。判据严到哪里,报价就得说到哪里——这是同一个口径问题。
-        Map<String, Integer> extra = new LinkedHashMap<>();
-        Map<String, Integer> exact = new LinkedHashMap<>();
-        for (var list : loaded.cellNeeds().values()) {
-            for (var need : list) {
-                (need.exact() ? exact : extra)
-                        .merge(need.stack().getHoverName().getString(), 1, Integer::sum);
-            }
+    private static final class ReadReport implements org.maiwithu.maicraft.core.blueprint.BlueprintPreparation.Report {
+        private final Args a;
+        private final boolean anchored;
+        private final Map<Item, Integer> cost = new LinkedHashMap<>();
+        private final Map<Integer, Integer> byLayer = new TreeMap<>();
+        private final Map<Item, Integer> remaining = new LinkedHashMap<>();
+        private final Map<Item, Integer> unknownCost = new LinkedHashMap<>();
+        private final Map<String, Integer> extra = new LinkedHashMap<>();
+        private final Map<String, Integer> exact = new LinkedHashMap<>();
+        private int placed, clears, unknownSiteCells, baseY;
+        private java.util.Iterator<List<BuildTaskRecord.CellNeed>> needs;
+        private java.util.Iterator<BuildTaskRecord.EntitySpawn> spawns;
+        private java.util.Iterator<BuildTaskRecord.Target> targets;
+
+        ReadReport(Args a) {
+            this.a = a;
+            anchored = a.x() != null && a.y() != null && a.z() != null;
         }
-        for (var spawn : loaded.entities()) {
-            for (var stack : spawn.payload(level.registryAccess())) {
-                exact.merge(stack.getHoverName().getString(), 1, Integer::sum);
+
+        @Override public TaskResult tick(LocalPlayer companion, BlueprintStore.Loaded loaded) {
+            var level = ClientRuntime.requireContext(companion).level();
+            var siteView = (org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView)
+                    org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(level);
+            if (needs == null) {
+                needs = loaded.cellNeeds().values().iterator();
+                spawns = loaded.entities().iterator();
+                targets = loaded.targets().iterator();
+                baseY = loaded.targets().stream().mapToInt(t -> t.pos().getY()).min().orElse(0);
             }
-        }
-        for (BuildTaskRecord.Target t : loaded.targets()) {
-            byLayer.merge(t.pos().getY() - baseY, 1, Integer::sum);
-            if (!t.costsMaterial()) {
-                clears++;
-                continue;
-            }
-            // 有料单的格不进普通清单,否则同一面旗帜/同一个花盆会被索要两次
-            if (loaded.cellNeeds().containsKey(t.pos().asLong())) {
-                continue;
-            }
-            // 件数问 Target 要,不在这里另数一遍:清单与实扣一旦不同源,玩家
-            // 按清单备齐了照样建到一半停下(双层砖一格两件就是这么漏掉的)
-            cost.merge(t.item(), t.materialCount(), Integer::sum);
-            if (anchored) {
-                if (!siteView.isLoaded(t.pos().getX(), t.pos().getZ())) {
-                    unknownSiteCells++;
-                    unknownCost.merge(t.item(), t.materialCount(), Integer::sum);
-                } else if (t.matches(siteView.getBlockState(t.pos()))) {
-                    placed++;
-                } else {
-                    remaining.merge(t.item(), t.materialCount(), Integer::sum);
+            long deadline = System.nanoTime() + 2_000_000L;
+            int remainingBudget = 128;
+            while (needs.hasNext() && remainingBudget-- > 0 && System.nanoTime() < deadline) {
+                var list = needs.next();
+                for (var need : list) {
+                    (need.exact() ? exact : extra)
+                            .merge(need.stack().getHoverName().getString(), 1, Integer::sum);
                 }
             }
-        }
+            if (needs.hasNext()) return null;
+            while (spawns.hasNext() && remainingBudget-- > 0 && System.nanoTime() < deadline) {
+                var spawn = spawns.next();
+                for (var stack : spawn.payload(level.registryAccess())) {
+                    exact.merge(stack.getHoverName().getString(), 1, Integer::sum);
+                }
+            }
+            if (spawns.hasNext()) return null;
+            while (targets.hasNext() && remainingBudget-- > 0 && System.nanoTime() < deadline) {
+                BuildTaskRecord.Target t = targets.next();
+                byLayer.merge(t.pos().getY() - baseY, 1, Integer::sum);
+                if (!t.costsMaterial()) {
+                    clears++;
+                    continue;
+                }
+                // 有料单的格不进普通清单,否则同一面旗帜/同一个花盆会被索要两次
+                if (loaded.cellNeeds().containsKey(t.pos().asLong())) {
+                    continue;
+                }
+                // 件数问 Target 要,不在这里另数一遍:清单与实扣一旦不同源,玩家
+                // 按清单备齐了照样建到一半停下(双层砖一格两件就是这么漏掉的)
+                cost.merge(t.item(), t.materialCount(), Integer::sum);
+                if (anchored) {
+                    if (!siteView.isLoaded(t.pos().getX(), t.pos().getZ())) {
+                        unknownSiteCells++;
+                        unknownCost.merge(t.item(), t.materialCount(), Integer::sum);
+                    } else if (t.matches(siteView.getBlockState(t.pos()))) {
+                        placed++;
+                    } else {
+                        remaining.merge(t.item(), t.materialCount(), Integer::sum);
+                    }
+                }
+            }
 
-        Map<String, Object> data = new LinkedHashMap<>();
-        var size = loaded.size();
-        data.put("size", size.getX() + "x" + size.getY() + "x" + size.getZ());
-        data.put("cells", loaded.targets().size());
-        data.put("cells_costing_materials", sum(cost));
-        if (clears > 0) {
-            data.put("cells_that_only_clear", clears);
-        }
-        if (loaded.dropped() > 0) {
-            // 掉格要在<b>报价这一步</b>就说清:模型正是在这里决定要不要建、缺什么料。
-            // 不说的话它拿到的格数就是"全部",而设计已经缺了一块,谁都不知道。
-            data.put("cells_dropped", loaded.dropped()
-                    + " (liquids, or blocks with no item to pay with — she will not build these)");
-        }
-        data.put("materials", summarize(cost));
-        // 这两项和 materials 一样出 map 而不是拼好的字符串:模型要拿它们做算术(还差
-        // 几件、够不够),给字符串等于逼它先解析我们的排版。同一份数据两种形状,是给
-        // 自己找的麻烦。
-        if (!extra.isEmpty()) {
-            // 一格多件的那些(带花的花盆是盆加花两件),单列出来才对得上实扣
-            data.put("materials_for_multi_item_cells", extra);
-        }
-        if (!exact.isEmpty()) {
-            data.put("materials_needing_an_exact_match", exact);
-            data.put("exact_match_means",
-                    "same patterns / enchantments / contents, not just the same kind of item");
-        }
-        data.put("layer_profile", layerProfile(byLayer));
-
-        StringBuilder msg = new StringBuilder();
-        msg.append(a.file()).append(": ").append(size.getX()).append('x').append(size.getY())
-                .append('x').append(size.getZ()).append(", ").append(loaded.targets().size())
-                .append(" cells, needs ").append(sum(cost)).append(" items across ")
-                .append(cost.size()).append(" kinds — ").append(topLine(cost));
-
-        if (anchored) {
-            data.put("already_standing_visible", placed);
-            data.put("still_to_place_visible", sum(remaining));
-            if (unknownSiteCells == 0) {
-                data.put("still_to_place", sum(remaining));
-            } else {
-                data.put("site_cells_unknown_unloaded", unknownSiteCells);
-                data.put("materials_if_unknown_cells_are_missing", summarize(unknownCost));
+            if (targets.hasNext()) return null;
+            Map<String, Object> data = new LinkedHashMap<>();
+            var size = loaded.size();
+            data.put("size", size.getX() + "x" + size.getY() + "x" + size.getZ());
+            data.put("cells", loaded.targets().size());
+            data.put("cells_costing_materials", sum(cost));
+            if (clears > 0) {
+                data.put("cells_that_only_clear", clears);
             }
             if (loaded.dropped() > 0) {
                 // 掉格要在<b>报价这一步</b>就说清:模型正是在这里决定要不要建、缺什么料。
