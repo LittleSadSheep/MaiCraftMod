@@ -79,6 +79,9 @@ public class PathExecutor implements IPathExecutor, Helper {
 
     private boolean sprintNextTick;
     private final SubmergedWaterTravelPolicy waterTravel;
+    private final PathTickBudget tickBudget = new PathTickBudget();
+    private boolean advanceAgain;
+    private boolean jumpAfterAdvance;
 
     public PathExecutor(PathingBehavior behavior, IPath path) {
         this.behavior = behavior;
@@ -95,6 +98,30 @@ public class PathExecutor implements IPathExecutor, Helper {
      * not sneaking out over lava), false otherwise
      */
     public boolean onTick() {
+        tickBudget.reset();
+        jumpAfterAdvance = false;
+        boolean result;
+        do {
+            var decision = tickBudget.enter(pathPosition);
+            if (decision == PathTickBudget.Decision.CYCLE) {
+                logDebug("Movement completion and relocation revisited the same path cursor; replanning");
+                cancel();
+                return false;
+            }
+            if (decision == PathTickBudget.Decision.YIELD) {
+                clearKeys();
+                return true;
+            }
+            advanceAgain = false;
+            result = tickMovement();
+        } while (advanceAgain && !failed);
+        if (jumpAfterAdvance && !failed && pathPosition < path.movements().size()) {
+            behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+        }
+        return result;
+    }
+
+    private boolean tickMovement() {
         if (pathPosition == path.length() - 1) {
             pathPosition++;
         }
@@ -102,9 +129,10 @@ public class PathExecutor implements IPathExecutor, Helper {
             return true; // stop bugging me, I'm done
         }
         Movement movement = (Movement) path.movements().get(pathPosition);
-        BetterBlockPos whereAmI = ctx.playerFeet();
+        waterTravel.update(pathPosition);
+        BetterBlockPos whereAmI = waterTravel.routeFeet(ctx.playerFeet());
         if (!movement.getValidPositions().contains(whereAmI)) {
-            for (int i = 0; i < pathPosition && i < path.length(); i++) {//this happens for example when you lag out and get teleported back a couple blocks
+            for (int i = pathPosition - 1; i >= 0; i--) {// prefer the nearest matching movement after knockback
                 if (((Movement) path.movements().get(i)).getValidPositions().contains(whereAmI)) {
                     int previousPos = pathPosition;
                     pathPosition = i;
@@ -112,7 +140,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                         path.movements().get(j).reset();
                     }
                     onChangeInPathPosition();
-                    onTick();
+                    advanceAgain = true;
                     return false;
                 }
             }
@@ -125,7 +153,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                     //System.out.println("Double skip sundae");
                     pathPosition = i - 1;
                     onChangeInPathPosition();
-                    onTick();
+                    advanceAgain = true;
                     return false;
                 }
             }
@@ -226,10 +254,6 @@ public class PathExecutor implements IPathExecutor, Helper {
             clearKeys();
             return true;
         }
-        // This is an execution optimisation of the already-selected route. It never adds a water
-        // node or enables terrain mutation; it only lets the real body occupy the efficient
-        // near-surface swim layer while the abstract route continues to own the surface cells.
-        waterTravel.update(pathPosition);
         MovementStatus movementStatus = movement.update();
         if (movementStatus == UNREACHABLE || movementStatus == FAILED) {
             logDebug("Movement returns status " + movementStatus);
@@ -240,10 +264,11 @@ public class PathExecutor implements IPathExecutor, Helper {
             //System.out.println("Movement done, next path");
             pathPosition++;
             onChangeInPathPosition();
-            onTick();
+            advanceAgain = true;
             return true;
         } else {
             sprintNextTick = shouldSprintNextTick();
+            if (advanceAgain) return false;
             if (!sprintNextTick) {
                 ctx.player().setSprinting(false); // letting go of control doesn't make you stop sprinting actually
             }
@@ -266,7 +291,10 @@ public class PathExecutor implements IPathExecutor, Helper {
         BlockPos bestPos = null;
         for (IMovement movement : path.movements()) {
             for (BlockPos pos : ((Movement) movement).getValidPositions()) {
-                double dist = VecUtils.entityDistanceToCenter(ctx.player(), pos);
+                double dist = waterTravel.active()
+                        ? Math.hypot(ctx.player().getX() - pos.getX() - 0.5,
+                                ctx.player().getZ() - pos.getZ() - 0.5)
+                        : VecUtils.entityDistanceToCenter(ctx.player(), pos);
                 if (dist < best || best == -1) {
                     best = dist;
                     bestPos = pos;
@@ -360,6 +388,8 @@ public class PathExecutor implements IPathExecutor, Helper {
         if (!new CalculationContext(behavior.baritone, false).canSprint) {
             return false;
         }
+        // A submerged body uses its swim phase, not land sprint-jump or ascend handoff rules.
+        if (waterTravel.active()) return waterTravel.sprinting();
         IMovement current = path.movements().get(pathPosition);
 
         // traverse requests sprinting, so we need to do this check first
@@ -373,8 +403,8 @@ public class PathExecutor implements IPathExecutor, Helper {
                         logDebug("Skipping traverse to straight ascend");
                         pathPosition++;
                         onChangeInPathPosition();
-                        onTick();
-                        behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+                        advanceAgain = true;
+                        jumpAfterAdvance = true;
                         return true;
                     }
                     logDebug("Ascend launch window not open; ordinary ascend jump will handle it");
@@ -428,7 +458,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                     // a descend then an ascend in the same direction
                     pathPosition++;
                     onChangeInPathPosition();
-                    onTick();
+                    advanceAgain = true;
                     // okay to skip clearKeys and / or onChangeInPathPosition here since this isn't possible to repeat, since it's asymmetric
                     logDebug("Skipping descend to straight ascend");
                     return true;
@@ -445,7 +475,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                     if (ctx.playerFeet().equals(current.getDest())) {
                         pathPosition++;
                         onChangeInPathPosition();
-                        onTick();
+                        advanceAgain = true;
                     }
 
                     return true;
@@ -481,7 +511,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                 if (ctx.playerFeet().equals(fallDest)) {
                     pathPosition = path.positions().indexOf(fallDest);
                     onChangeInPathPosition();
-                    onTick();
+                    advanceAgain = true;
                     return true;
                 }
                 clearKeys();
@@ -601,6 +631,7 @@ public class PathExecutor implements IPathExecutor, Helper {
     private void onChangeInPathPosition() {
         clearKeys();
         ticksOnCurrent = 0;
+        costEstimateIndex = null;
     }
 
     private void clearKeys() {
@@ -704,6 +735,18 @@ public class PathExecutor implements IPathExecutor, Helper {
 
     public boolean submergedWaterTravelActive() {
         return waterTravel.active();
+    }
+
+    public boolean submergedWaterSprinting() {
+        return waterTravel.sprinting();
+    }
+
+    public boolean submergedWaterManagesAir() {
+        return waterTravel.managesAir();
+    }
+
+    public boolean submergedWaterMovingForward() {
+        return waterTravel.movingForward();
     }
 
     public float submergedWaterCameraPitch() {

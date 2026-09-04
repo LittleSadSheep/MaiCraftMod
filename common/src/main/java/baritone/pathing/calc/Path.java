@@ -31,8 +31,9 @@ import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 
 /**
  * A node based implementation of IPath
@@ -79,7 +80,11 @@ class Path extends PathBase {
         PathNode current = end;
         List<BetterBlockPos> tempPath = new ArrayList<>();
         List<PathNode> tempNodes = new ArrayList<>();
+        Set<PathNode> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         while (current != null) {
+            if (!visited.add(current)) {
+                throw new IllegalStateException("Cycle in path parent links");
+            }
             tempNodes.add(current);
             tempPath.add(new BetterBlockPos(current.x, current.y, current.z));
             current = current.previous;
