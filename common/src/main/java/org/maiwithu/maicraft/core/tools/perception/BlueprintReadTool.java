@@ -192,34 +192,71 @@ public final class BlueprintReadTool implements MaiCraftTool {
                 data.put("site_cells_unknown_unloaded", unknownSiteCells);
                 data.put("materials_if_unknown_cells_are_missing", summarize(unknownCost));
             }
-            msg.append(". At this anchor, loaded client facts show ").append(placed)
-                    .append(" already standing and ").append(sum(remaining)).append(" still to place");
-            if (unknownSiteCells > 0) {
-                msg.append("; ").append(unknownSiteCells)
-                        .append(" cells are outside loaded chunks and remain unknown");
+            if (loaded.dropped() > 0) {
+                // 掉格要在<b>报价这一步</b>就说清:模型正是在这里决定要不要建、缺什么料。
+                // 不说的话它拿到的格数就是"全部",而设计已经缺了一块,谁都不知道。
+                data.put("cells_dropped", loaded.dropped()
+                        + " (liquids, or blocks with no item to pay with — she will not build these)");
             }
-            if (WorkProfile.of(companion).freeMaterials()) {
-                msg.append("; she builds free of charge in this mode");
-            } else {
-                Map<Item, Integer> shortOf = new LinkedHashMap<>();
-                Map<Item, Integer> conservativeRemaining = new LinkedHashMap<>(remaining);
-                unknownCost.forEach((item, amount) -> conservativeRemaining.merge(item, amount, Integer::sum));
-                for (var e : conservativeRemaining.entrySet()) {
-                    // 和逐格闸门、实扣同源的 36 格口径。用 41 格的那个会让报价说"料够了"
-                    // 而施工每格都判缺料——副手上那叠木板正是这么骗过报价的。
-                    int have = PlayerInv.buildableCount(companion.getInventory(), e.getKey());
-                    if (have < e.getValue()) {
-                        shortOf.put(e.getKey(), e.getValue() - have);
-                    }
+            data.put("materials", summarize(cost));
+            // 这两项和 materials 一样出 map 而不是拼好的字符串:模型要拿它们做算术(还差
+            // 几件、够不够),给字符串等于逼它先解析我们的排版。同一份数据两种形状,是给
+            // 自己找的麻烦。
+            if (!extra.isEmpty()) {
+                // 一格多件的那些(带花的花盆是盆加花两件),单列出来才对得上实扣
+                data.put("materials_for_multi_item_cells", extra);
+            }
+            if (!exact.isEmpty()) {
+                data.put("materials_needing_an_exact_match", exact);
+                data.put("exact_match_means",
+                        "same patterns / enchantments / contents, not just the same kind of item");
+            }
+            data.put("layer_profile", layerProfile(byLayer));
+
+            StringBuilder msg = new StringBuilder();
+            msg.append(a.file()).append(": ").append(size.getX()).append('x').append(size.getY())
+                    .append('x').append(size.getZ()).append(", ").append(loaded.targets().size())
+                    .append(" cells, needs ").append(sum(cost)).append(" items across ")
+                    .append(cost.size()).append(" kinds — ").append(topLine(cost));
+
+            if (anchored) {
+                data.put("already_standing_visible", placed);
+                data.put("still_to_place_visible", sum(remaining));
+                if (unknownSiteCells == 0) {
+                    data.put("still_to_place", sum(remaining));
+                } else {
+                    data.put("site_cells_unknown_unloaded", unknownSiteCells);
+                    data.put("materials_if_unknown_cells_are_missing", summarize(unknownCost));
                 }
-                data.put(unknownSiteCells == 0 ? "short_of" : "short_of_if_unknown_cells_are_missing",
-                        summarize(shortOf));
-                msg.append(shortOf.isEmpty()
-                        ? "; she is carrying enough to finish it"
-                        : "; still short " + topLine(shortOf));
+                msg.append(". At this anchor, loaded client facts show ").append(placed)
+                        .append(" already standing and ").append(sum(remaining)).append(" still to place");
+                if (unknownSiteCells > 0) {
+                    msg.append("; ").append(unknownSiteCells)
+                            .append(" cells are outside loaded chunks and remain unknown");
+                }
+                if (WorkProfile.of(companion).freeMaterials()) {
+                    msg.append("; she builds free of charge in this mode");
+                } else {
+                    Map<Item, Integer> shortOf = new LinkedHashMap<>();
+                    Map<Item, Integer> conservativeRemaining = new LinkedHashMap<>(remaining);
+                    unknownCost.forEach((item, amount) -> conservativeRemaining.merge(item, amount, Integer::sum));
+                    for (var e : conservativeRemaining.entrySet()) {
+                        // 和逐格闸门、实扣同源的 36 格口径。用 41 格的那个会让报价说"料够了"
+                        // 而施工每格都判缺料——副手上那叠木板正是这么骗过报价的。
+                        int have = PlayerInv.buildableCount(companion.getInventory(), e.getKey());
+                        if (have < e.getValue()) {
+                            shortOf.put(e.getKey(), e.getValue() - have);
+                        }
+                    }
+                    data.put(unknownSiteCells == 0 ? "short_of" : "short_of_if_unknown_cells_are_missing",
+                            summarize(shortOf));
+                    msg.append(shortOf.isEmpty()
+                            ? "; she is carrying enough to finish it"
+                            : "; still short " + topLine(shortOf));
+                }
             }
+            return TaskResult.ok(msg.toString(), data);
         }
-        reply.accept(TaskResult.ok(msg.toString(), data).toJson());
     }
 
     private static int sum(Map<Item, Integer> m) {
