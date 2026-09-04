@@ -66,6 +66,7 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
         MutableMoveResult res = new MutableMoveResult();
         BetterWorldBorder worldBorder = new BetterWorldBorder(calcContext.world.getWorldBorder());
         long startTime = System.currentTimeMillis();
+        long nextPreviewTime = startTime;
         boolean slowPath = Baritone.settings().slowPath.value;
         if (slowPath) {
             logDebug("slowPath is on, path timeout will be " + Baritone.settings().slowPathTimeoutMS.value + "ms instead of " + primaryTimeout + "ms");
@@ -87,11 +88,19 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                 if (now - failureTimeoutTime >= 0 || (!failing && now - primaryTimeoutTime >= 0)) {
                     break;
                 }
+                if (now >= nextPreviewTime) {
+                    publishPathSnapshots(numNodes);
+                    nextPreviewTime = now + 50L;
+                }
             }
             if (slowPath) {
                 try {
                     Thread.sleep(Baritone.settings().slowPathTimeDelayMS.value);
-                } catch (InterruptedException ignored) {}
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    cancel();
+                    return Optional.empty();
+                }
             }
             PathNode currentNode = openSet.removeLowest();
             mostRecentConsidered = currentNode;
@@ -113,7 +122,7 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                 if (!moves.dynamicXZ && !worldBorder.entirelyContains(newX, newZ)) {
                     continue;
                 }
-                if (currentNode.y + moves.yOffset > height || currentNode.y + moves.yOffset < minY) {
+                if (currentNode.y + moves.yOffset >= maxY || currentNode.y + moves.yOffset < minY) {
                     continue;
                 }
                 res.reset();
@@ -195,6 +204,7 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
         if (cancelRequested) {
             return Optional.empty();
         }
+        publishPathSnapshots(numNodes);
         System.out.println(numMovementsConsidered + " movements considered");
         System.out.println("Open set size: " + openSet.size());
         System.out.println("PathNode map size: " + mapSize());

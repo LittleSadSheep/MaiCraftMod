@@ -58,7 +58,12 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
 
     private volatile boolean isFinished;
 
-    protected boolean cancelRequested;
+    protected volatile boolean cancelRequested;
+
+    // Only the search worker traverses mutable parent links. Render/tick callers read the
+    // position snapshots it publishes instead of walking a graph being relaxed concurrently.
+    private volatile IPath bestPathSnapshot;
+    private volatile IPath recentPathSnapshot;
 
     /**
      * This is really complicated and hard to explain. I wrote a comment in the old version of MineBot but it was so
@@ -83,13 +88,20 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
     protected static final double MIN_IMPROVEMENT = 0.01;
 
     AbstractNodeCostSearch(BetterBlockPos realStart, int startX, int startY, int startZ, Goal goal, CalculationContext context) {
+        this(realStart, startX, startY, startZ, goal, context,
+                Baritone.settings().pathingMapDefaultSize.value,
+                Baritone.settings().pathingMapLoadFactor.value);
+    }
+
+    AbstractNodeCostSearch(BetterBlockPos realStart, int startX, int startY, int startZ,
+                          Goal goal, CalculationContext context, int initialCapacity, float loadFactor) {
         this.realStart = realStart;
         this.startX = startX;
         this.startY = startY;
         this.startZ = startZ;
         this.goal = goal;
         this.context = context;
-        this.map = new Long2ObjectOpenHashMap<>(Baritone.settings().pathingMapDefaultSize.value, Baritone.settings().pathingMapLoadFactor.value);
+        this.map = new Long2ObjectOpenHashMap<>(initialCapacity, loadFactor);
     }
 
     public void cancel() {
@@ -101,14 +113,20 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
         if (isFinished) {
             throw new IllegalStateException("Path finder cannot be reused!");
         }
-        cancelRequested = false;
         try {
-            IPath path = calculate0(primaryTimeout, failureTimeout).map(IPath::postProcess).orElse(null);
+            if (cancelRequested) {
+                return new PathCalculationResult(PathCalculationResult.Type.CANCELLATION);
+            }
+            IPath path = calculate0(primaryTimeout, failureTimeout).orElse(null);
             if (cancelRequested) {
                 return new PathCalculationResult(PathCalculationResult.Type.CANCELLATION);
             }
             if (path == null) {
                 return new PathCalculationResult(PathCalculationResult.Type.FAILURE);
+            }
+            path = path.postProcess();
+            if (cancelRequested) {
+                return new PathCalculationResult(PathCalculationResult.Type.CANCELLATION);
             }
             int previousLength = path.length();
             path = path.cutoffAtLoadedChunks(context.bsi);
@@ -179,12 +197,19 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
 
     @Override
     public Optional<IPath> pathToMostRecentNodeConsidered() {
-        return Optional.ofNullable(mostRecentConsidered).map(node -> new Path(realStart, startNode, node, 0, goal, context));
+        return Optional.ofNullable(recentPathSnapshot);
     }
 
     @Override
     public Optional<IPath> bestPathSoFar() {
-        return bestSoFar(false, 0);
+        return Optional.ofNullable(bestPathSnapshot);
+    }
+
+    /** Called by the search worker between expansions, never by the render/client thread. */
+    protected final void publishPathSnapshots(int numNodes) {
+        bestPathSnapshot = bestSoFar(false, numNodes).orElse(null);
+        recentPathSnapshot = mostRecentConsidered == null ? null
+                : new Path(realStart, startNode, mostRecentConsidered, numNodes, goal, context);
     }
 
     protected Optional<IPath> bestSoFar(boolean logInfo, int numNodes) {

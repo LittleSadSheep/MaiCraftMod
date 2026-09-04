@@ -40,8 +40,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
 
 public final class PathingBehavior extends Behavior implements IPathingBehavior, Helper {
 
@@ -50,6 +52,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
 
     private Goal goal;
     private CalculationContext context;
+    private CalculationContext customCalculationContext;
 
     /*eta*/
     private int ticksElapsedSoFar;
@@ -63,15 +66,10 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private boolean calcFailedLastTick;
 
     private volatile AbstractNodeCostSearch inProgress;
-    /**
-     * Monotonic ownership epoch for asynchronous calculations. A cancelled worker may complete
-     * after a semantic task has handed the physical body to another task; its result must never
-     * install a segment, emit a failure, or clear that newer calculation.
-     */
-    private volatile long pathCalculationGeneration;
-    private final Object pathCalcLock = new Object();
-
-    private final Object pathPlanLock = new Object();
+    // Only the client thread owns these handles; detached futures cannot affect a later owner.
+    private CompletableFuture<PathCalculationResult> pendingCalculation;
+    private BlockPos calculationStart;
+    private BlockPos failedPlanAheadStart;
 
     private boolean lastAutoJump;
 
@@ -102,7 +100,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
      * <p>Path calculation is asynchronous, while path events are dispatched on the following
      * client tick. The embedded integration has one shared Baritone instance for a succession of
      * semantic tasks, so an already queued {@code CALC_FAILED} must not be delivered to the next
-     * owner. {@link #forceCancel()} advances the calculation generation; this method clears the
+     * owner. {@link #forceCancel()} detaches the cancelled calculation; this method clears the
      * remaining client-thread event mailbox and its one-tick failure latch.</p>
      */
     public void discardPendingPathEvents() {
@@ -112,7 +110,6 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
 
     @Override
     public void onTick(TickEvent event) {
-        dispatchEvents();
         if (event.getType() == TickEvent.Type.OUT) {
             secretInternalSegmentCancel();
             baritone.getPathingControlManager().cancelEverything();
@@ -120,6 +117,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         }
 
         expectedSegmentStart = pathStart();
+        acceptCalculatedPath();
+        dispatchEvents();
         baritone.getPathingControlManager().preTick();
         tickPath();
         ticksElapsedSoFar++;
@@ -150,106 +149,101 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
             cancelRequested = false;
             baritone.getInputOverrideHandler().clearAllKeys();
         }
-        synchronized (pathPlanLock) {
-            synchronized (pathCalcLock) {
-                if (inProgress != null) {
-                    // we are calculating
-                    // are we calculating the right thing though? 🤔
-                    BetterBlockPos calcFrom = inProgress.getStart();
-                    Optional<IPath> currentBest = inProgress.bestPathSoFar();
-                    if ((current == null || !current.getPath().getDest().equals(calcFrom)) // if current ends in inProgress's start, then we're ok
-                            && !calcFrom.equals(ctx.playerFeet()) && !calcFrom.equals(expectedSegmentStart) // if current starts in our playerFeet or pathStart, then we're ok
-                            && (!currentBest.isPresent() || (!currentBest.get().positions().contains(ctx.playerFeet()) && !currentBest.get().positions().contains(expectedSegmentStart))) // if
-                    ) {
-                        // when it was *just* started, currentBest will be empty so we need to also check calcFrom since that's always present
-                        inProgress.cancel(); // cancellation doesn't dispatch any events
-                    }
-                }
+        if (inProgress != null) {
+            // we are calculating
+            // are we calculating the right thing though? 🤔
+            BetterBlockPos calcFrom = inProgress.getStart();
+            Optional<IPath> currentBest = inProgress.bestPathSoFar();
+            if ((current == null || !current.getPath().getDest().equals(calcFrom)) // if current ends in inProgress's start, then we're ok
+                    && !calcFrom.equals(ctx.playerFeet()) && !calcFrom.equals(expectedSegmentStart) // if current starts in our playerFeet or pathStart, then we're ok
+                    && (!currentBest.isPresent() || (!currentBest.get().positions().contains(ctx.playerFeet()) && !currentBest.get().positions().contains(expectedSegmentStart))) // if
+            ) {
+                // when it was *just* started, currentBest will be empty so we need to also check calcFrom since that's always present
+                cancelCalculation();
             }
-            if (current == null) {
-                return;
-            }
-            safeToCancel = current.onTick();
-            if (current.failed() || current.finished()) {
-                current = null;
-                if (goal == null || goal.isInGoal(ctx.playerFeet())) {
-                    logDebug("All done. At " + goal);
-                    queuePathEvent(PathEvent.AT_GOAL);
-                    next = null;
-                    if (Baritone.settings().disconnectOnArrival.value) {
-                        ctx.world().disconnect();
-                    }
-                    return;
-                }
-                if (next != null && !next.getPath().positions().contains(ctx.playerFeet()) && !next.getPath().positions().contains(expectedSegmentStart)) { // can contain either one
-                    // if the current path failed, we may not actually be on the next one, so make sure
-                    logDebug("Discarding next path as it does not contain current position");
-                    // for example if we had a nicely planned ahead path that starts where current ends
-                    // that's all fine and good
-                    // but if we fail in the middle of current
-                    // we're nowhere close to our planned ahead path
-                    // so need to discard it sadly.
-                    queuePathEvent(PathEvent.DISCARD_NEXT);
-                    next = null;
-                }
-                if (next != null) {
-                    logDebug("Continuing on to planned next path");
-                    queuePathEvent(PathEvent.CONTINUING_ONTO_PLANNED_NEXT);
-                    current = next;
-                    next = null;
-                    current.onTick(); // don't waste a tick doing nothing, get started right away
-                    return;
-                }
-                // at this point, current just ended, but we aren't in the goal and have no plan for the future
-                synchronized (pathCalcLock) {
-                    if (inProgress != null) {
-                        queuePathEvent(PathEvent.PATH_FINISHED_NEXT_STILL_CALCULATING);
-                        return;
-                    }
-                    // we aren't calculating
-                    queuePathEvent(PathEvent.CALC_STARTED);
-                    findPathInNewThread(expectedSegmentStart, true, context);
+        }
+        if (current == null) {
+            return;
+        }
+        safeToCancel = current.onTick();
+        if (current.failed() || current.finished()) {
+            current = null;
+            if (goal == null || goal.isInGoal(ctx.playerFeet())) {
+                logDebug("All done. At " + goal);
+                queuePathEvent(PathEvent.AT_GOAL);
+                next = null;
+                if (Baritone.settings().disconnectOnArrival.value) {
+                    ctx.world().disconnect();
                 }
                 return;
             }
-            // at this point, we know current is in progress
-            if (safeToCancel && next != null && next.snipsnapifpossible()) {
-                // a movement just ended; jump directly onto the next path
-                logDebug("Splicing into planned next path early...");
-                queuePathEvent(PathEvent.SPLICING_ONTO_NEXT_EARLY);
+            if (next != null && !next.getPath().positions().contains(ctx.playerFeet()) && !next.getPath().positions().contains(expectedSegmentStart)) { // can contain either one
+                // if the current path failed, we may not actually be on the next one, so make sure
+                logDebug("Discarding next path as it does not contain current position");
+                // for example if we had a nicely planned ahead path that starts where current ends
+                // that's all fine and good
+                // but if we fail in the middle of current
+                // we're nowhere close to our planned ahead path
+                // so need to discard it sadly.
+                queuePathEvent(PathEvent.DISCARD_NEXT);
+                next = null;
+            }
+            if (next != null) {
+                logDebug("Continuing on to planned next path");
+                queuePathEvent(PathEvent.CONTINUING_ONTO_PLANNED_NEXT);
                 current = next;
                 next = null;
-                current.onTick();
+                current.onTick(); // don't waste a tick doing nothing, get started right away
                 return;
             }
-            if (Baritone.settings().splicePath.value) {
-                current = current.trySplice(next);
+            // at this point, current just ended, but we aren't in the goal and have no plan for the future
+            if (inProgress != null) {
+                queuePathEvent(PathEvent.PATH_FINISHED_NEXT_STILL_CALCULATING);
+                return;
             }
-            if (next != null && current.getPath().getDest().equals(next.getPath().getDest())) {
-                next = null;
-            }
-            synchronized (pathCalcLock) {
-                if (inProgress != null) {
-                    // if we aren't calculating right now
-                    return;
-                }
-                if (next != null) {
-                    // and we have no plan for what to do next
-                    return;
-                }
-                if (goal == null || goal.isInGoal(current.getPath().getDest())) {
-                    // and this path doesn't get us all the way there
-                    return;
-                }
-                if (ticksRemainingInSegment(false).get() < Baritone.settings().planningTickLookahead.value) {
-                    // and this path has 7.5 seconds or less left
-                    // don't include the current movement so a very long last movement (e.g. descend) doesn't trip it up
-                    // if we actually included current, it wouldn't start planning ahead until the last movement was done, if the last movement took more than 7.5 seconds on its own
-                    logDebug("Path almost over. Planning ahead...");
-                    queuePathEvent(PathEvent.NEXT_SEGMENT_CALC_STARTED);
-                    findPathInNewThread(current.getPath().getDest(), false, context);
-                }
-            }
+            // we aren't calculating
+            queuePathEvent(PathEvent.CALC_STARTED);
+            findPathInNewThread(expectedSegmentStart, true);
+            return;
+        }
+        // at this point, we know current is in progress
+        if (safeToCancel && next != null && next.snipsnapifpossible()) {
+            // a movement just ended; jump directly onto the next path
+            logDebug("Splicing into planned next path early...");
+            queuePathEvent(PathEvent.SPLICING_ONTO_NEXT_EARLY);
+            current = next;
+            next = null;
+            current.onTick();
+            return;
+        }
+        if (Baritone.settings().splicePath.value) {
+            current = current.trySplice(next);
+        }
+        if (next != null && current.getPath().getDest().equals(next.getPath().getDest())) {
+            next = null;
+        }
+        if (inProgress != null) {
+            // if we aren't calculating right now
+            return;
+        }
+        if (next != null) {
+            // and we have no plan for what to do next
+            return;
+        }
+        if (goal == null || goal.isInGoal(current.getPath().getDest())) {
+            // and this path doesn't get us all the way there
+            return;
+        }
+        // A failed speculative route from this endpoint will have the same inputs while we are
+        // still following this segment. Retry from the real position when the segment finishes.
+        if (current.getPath().getDest().equals(failedPlanAheadStart)) return;
+        if (ticksRemainingInSegment(false).get() < Baritone.settings().planningTickLookahead.value) {
+            // and this path has 7.5 seconds or less left
+            // don't include the current movement so a very long last movement (e.g. descend) doesn't trip it up
+            // if we actually included current, it wouldn't start planning ahead until the last movement was done, if the last movement took more than 7.5 seconds on its own
+            logDebug("Path almost over. Planning ahead...");
+            queuePathEvent(PathEvent.NEXT_SEGMENT_CALC_STARTED);
+            findPathInNewThread(current.getPath().getDest(), false);
         }
     }
 
