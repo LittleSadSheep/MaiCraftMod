@@ -185,13 +185,9 @@ final class BlueprintFormats {
         if (width == 0 || height == 0 || length == 0) {
             throw new IllegalArgumentException("schem has zero dimension");
         }
-        if ((long) width * height * length > MAX_REGION_VOLUME) {
-            throw new IllegalArgumentException("schem is " + width + "x" + height + "x" + length
-                    + " — that is beyond anything buildable and usually means the file is corrupt"
-                    + " or was downloaded incompletely");
-        }
+        long volume = checkedVolume(width, height, length);
         // 方块实体数据:v3 在 Blocks.BlockEntities,v2 平铺在根
-        Map<Long, CompoundTag> beData = new HashMap<>();
+        Map<CellPosition, CompoundTag> beData = new HashMap<>();
         ListTag beList = blocksHolder.contains("BlockEntities", Tag.TAG_LIST)
                 ? blocksHolder.getList("BlockEntities", Tag.TAG_COMPOUND)
                 : root.getList("BlockEntities", Tag.TAG_COMPOUND);
@@ -226,27 +222,25 @@ final class BlueprintFormats {
             if (e.contains("Id", Tag.TAG_STRING)) {
                 data.putString("id", e.getString("Id"));
             }
+            requireCapacity(entities);
             entities.add(entityCell(at.getDouble(0), at.getDouble(1), at.getDouble(2), data));
         }
         CompoundTag paletteMap = blocksHolder.getCompound("Palette");
-        int maxId = -1;
-        for (String key : paletteMap.getAllKeys()) {
-            maxId = Math.max(maxId, paletteMap.getInt(key));
+        if (paletteMap.isEmpty() || paletteMap.size() > MAX_PALETTE) {
+            throw new IllegalArgumentException("schem palette is empty or exceeds the import memory budget");
         }
-        CompoundTag[] byId = new CompoundTag[maxId + 1];
-        boolean[] isAir = new boolean[maxId + 1];
+        Map<Integer, CompoundTag> byId = new HashMap<>();
         for (String key : paletteMap.getAllKeys()) {
             int id = paletteMap.getInt(key);
-            byId[id] = parseStateString(key);
-            isAir[id] = byId[id].getString("Name").endsWith("air");
+            if (id < 0 || byId.putIfAbsent(id, parseStateString(key)) != null) {
+                throw new IllegalArgumentException("schem palette has a negative or duplicate id");
+            }
         }
         ListTag palette = new ListTag();
-        int[] remap = new int[maxId + 1];
-        for (int id = 0; id <= maxId; id++) {
-            remap[id] = palette.size();
-            if (byId[id] != null) {
-                palette.add(byId[id]);
-            }
+        Map<Integer, Integer> remap = new HashMap<>();
+        for (int id : byId.keySet().stream().sorted().toList()) {
+            remap.put(id, palette.size());
+            palette.add(byId.get(id));
         }
 
         byte[] data = blocksHolder.contains("Data", Tag.TAG_BYTE_ARRAY)
@@ -254,24 +248,33 @@ final class BlueprintFormats {
                 : blocksHolder.getByteArray("BlockData");   // v2 字段名
         ListTag blocks = new ListTag();
         int cursor = 0;
-        long volume = (long) width * height * length;
-        for (long i = 0; i < volume && cursor < data.length; i++) {
+        for (long i = 0; i < volume; i++) {
+            if ((i & 4095) == 0) checkInterrupted();
             // LEB128 varint
             int id = 0;
             int shift = 0;
             while (true) {
+                if (cursor >= data.length || shift > 28) {
+                    throw new IllegalArgumentException("schem block data contains a truncated or oversized varint");
+                }
                 byte b = data[cursor++];
+                if (shift == 28 && (b & 0xF8) != 0) {
+                    throw new IllegalArgumentException("schem block-data palette index overflows a positive integer");
+                }
                 id |= (b & 0x7F) << shift;
                 if ((b & 0x80) == 0) break;
                 shift += 7;
             }
-            if (id > maxId || byId[id] == null || isAir[id]) {
+            CompoundTag state = byId.get(id);
+            if (state == null) throw new IllegalArgumentException("schem block data references an unknown palette id");
+            if (isAir(state.getString("Name"))) {
                 continue;   // 稀疏语义:空气不入格
             }
             int x = (int) (i % width);
             int z = (int) ((i / width) % length);
             int y = (int) (i / ((long) width * length));
-            blocks.add(cell(x, y, z, remap[id], beData.get(key3(x, y, z))));
+            requireCapacity(blocks);
+            blocks.add(cell(x, y, z, remap.get(id), beData.get(key3(x, y, z))));
         }
         return assemble(width, height, length, palette, blocks, entities);
     }
@@ -300,10 +303,10 @@ final class BlueprintFormats {
 
     // ------------------------------------------------------------------
 
-    /** 三维坐标压成一个键——两种格式都要按坐标去认方块实体。 */
-    private static long key3(int x, int y, int z) {
-        return ((long) (x & 0xFFFFF) << 42) | ((long) (y & 0x1FFFFF) << 21) | (z & 0x1FFFFF);
-    }
+    private record CellPosition(int x, int y, int z) {}
+
+    /** Import coordinates need not fit Minecraft's packed-position bit widths. */
+    private static CellPosition key3(int x, int y, int z) { return new CellPosition(x, y, z); }
 
     private static CompoundTag cell(int x, int y, int z, int stateIndex) {
         return cell(x, y, z, stateIndex, null);
@@ -330,6 +333,9 @@ final class BlueprintFormats {
      * 存着的牛马村民不是设计,照搬等于凭空造生物。
      */
     private static CompoundTag entityCell(double x, double y, double z, CompoundTag nbt) {
+        if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
+            throw new IllegalArgumentException("blueprint entity has a non-finite position");
+        }
         CompoundTag out = new CompoundTag();
         ListTag pos = new ListTag();
         pos.add(net.minecraft.nbt.DoubleTag.valueOf(x));
@@ -361,5 +367,30 @@ final class BlueprintFormats {
         out.put("blocks", blocks);
         out.put("entities", entities);
         return out;
+    }
+
+    static long checkedVolume(int x, int y, int z) {
+        if (x <= 0 || y <= 0 || z <= 0 || x > MAX_REGION_VOLUME / y
+                || (long) x * y > MAX_REGION_VOLUME / z) {
+            throw new IllegalArgumentException("blueprint region dimensions are invalid or exceed the import work budget");
+        }
+        return (long) x * y * z;
+    }
+
+    static void checkInterrupted() {
+        if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
+    }
+
+    private static void requireCapacity(ListTag entries) {
+        if (entries.size() >= MAX_CELLS) {
+            throw new IllegalArgumentException("blueprint exceeds the " + MAX_CELLS + " entry import memory budget");
+        }
+    }
+
+    private static boolean isAir(String id) {
+        return switch (id) {
+            case "air", "cave_air", "void_air", "minecraft:air", "minecraft:cave_air", "minecraft:void_air" -> true;
+            default -> false;
+        };
     }
 }
