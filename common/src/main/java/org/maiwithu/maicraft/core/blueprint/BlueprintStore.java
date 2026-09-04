@@ -290,27 +290,36 @@ public final class BlueprintStore {
                 if (Files.exists(nbt)) {
                     return NbtIo.readCompressed(nbt, NbtAccounter.unlimitedHeap());
                 }
-                if (Files.exists(snbt)) {
-                    return NbtUtils.snbtToStructure(Files.readString(snbt));
-                }
-                // 社区格式:读出 gzip NBT 后转成原版结构形态,下游管线无感
-                if (Files.exists(litematic)) {
-                    return BlueprintFormats.fromLitematic(
-                            NbtIo.readCompressed(litematic, NbtAccounter.unlimitedHeap()));
-                }
-                if (Files.exists(schem)) {
-                    return BlueprintFormats.fromSchem(
-                            NbtIo.readCompressed(schem, NbtAccounter.unlimitedHeap()));
-                }
-            } catch (Exception e) {
-                throw new IllegalArgumentException("blueprint " + name + " cannot be read: " + e.getMessage(), e);
             }
+            if (blockIndex < blocks.size()) return null;
+            while (entityIndex < entities.size() && remaining-- > 0 && System.nanoTime() < deadline) {
+                CompoundTag e = entities.getCompound(entityIndex++);
+                CompoundTag safe = org.maiwithu.maicraft.core.build.BlueprintSafety
+                        .safeEntityData(e.getCompound("nbt"), level.registryAccess());
+                if (safe == null) {
+                    continue;
+                }
+                ListTag at = e.getList("pos", Tag.TAG_DOUBLE);
+                if (at.size() != 3) {
+                    continue;
+                }
+                double ex = at.getDouble(0);
+                double ey = at.getDouble(1);
+                double ez = at.getDouble(2);
+                double rx;
+                double rz;
+                switch (quarters) {
+                    case 1 -> { rx = sz - ez; rz = ex; }
+                    case 2 -> { rx = sx - ex; rz = sz - ez; }
+                    case 3 -> { rx = ez; rz = sx - ex; }
+                    default -> { rx = ex; rz = ez; }
+                }
+                spawns.add(new BuildTaskRecord.EntitySpawn(
+                        anchor.getX() + rx, anchor.getY() + ey, anchor.getZ() + rz, rotation, safe));
+            }
+            if (entityIndex < entities.size()) return null;
+            Vec3i size = (quarters % 2 == 0) ? new Vec3i(sx, sy, sz) : new Vec3i(sz, sy, sx);
+            return new Loaded(new ArrayList<>(byPos.values()), size, beData, spawns, needs, dropped);
         }
-        throw new IllegalArgumentException("blueprint " + name + " not found; use blueprint_list first");
-    }
-
-    private static Path gameDirectory(LocalPlayerContext context) {
-        context.requireCurrent();
-        return context.minecraft().gameDirectory.toPath().toAbsolutePath().normalize();
     }
 }
