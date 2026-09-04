@@ -14,11 +14,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Set;
 
 /**
  * 客户端已加载目标方块索引:回答"离这里最近的 X 方块在哪"而【不做周期性全量扫描】。
@@ -33,7 +34,7 @@ import java.util.Map;
  *   <li><b>懒构建</b>——查询碰到未建/过期的 section 时就地构建:palette 预筛(不含目标的
  *       section 几乎零成本跳过)+ 一趟计数 + 一趟收位,每次查询有构建预算封顶。</li>
  *   <li><b>驱逐</b>——{@link #clientTick} 周期清除已卸载区块的条目;最后一个任务注销时整个
- *       维度索引直接丢弃。</li>
+ *       索引短暂保留，供跨 tick 的规划查询继续复用。</li>
  * </ol>
  *
  * <h2>丰度分级</h2>
@@ -55,6 +56,11 @@ public final class TargetIndex {
     private static final short[] SATURATED = {-1};
     /** 驱逐清扫周期(tick)。 */
     private static final int EVICT_SWEEP_TICKS = 200;
+    private static final long QUERY_NANOS_PER_TICK = 2_000_000L;
+    private static final int MAX_PENDING_QUERIES = 32;
+    private static final int COMPLETED_QUERY_TICKS = 20;
+    private static long queryTick = Long.MIN_VALUE;
+    private static long queryDeadline;
 
     /** 有任何维度有注册目标时为 true——方块变更钩子的最外层免费闸门。 */
     private static volatile boolean anyActive;
@@ -69,15 +75,38 @@ public final class TargetIndex {
         final Long2ObjectOpenHashMap<SectionEntry> sections = new Long2ObjectOpenHashMap<>();
         /** 目标集合的版本号:成员增减时自增,旧版本条目查询时懒重建。 */
         int version = 1;
+        int activeRefs;
+        long lastUseTick;
+        final Map<QueryKey, QueryProgress> queries = new LinkedHashMap<>();
+    }
+
+    private record QueryKey(BlockPos center, List<Block> targets, int want, int radius,
+                            Set<BlockPos> excluded) {}
+
+    /** A cold query resumes at its next section instead of repeatedly walking its warm prefix. */
+    private static final class QueryProgress {
+        final int[] sectionOrder;
+        final SearchGeometry.NearestPositions nearest;
+        int ring, perimeterIndex, sectionIndex;
+        boolean complete;
+        long completedTick;
+
+        QueryProgress(ClientLevel level, QueryKey key) {
+            sectionOrder = SearchGeometry.sectionOrder(level.getMinSection(),
+                    level.getMaxSection() - 1, SectionPos.blockToSectionCoord(key.center().getY()));
+            nearest = new SearchGeometry.NearestPositions(key.center(), key.want(), key.excluded());
+        }
     }
 
     /** 一个 section 的条目:该段内每种目标的打包位置(y<<8|z<<4|x),或饱和标记。 */
     private static final class SectionEntry {
         final int version;
+        final LevelChunkSection source;
         final Reference2ObjectOpenHashMap<Block, short[]> hits = new Reference2ObjectOpenHashMap<>();
 
-        SectionEntry(int version) {
+        SectionEntry(int version, LevelChunkSection source) {
             this.version = version;
+            this.source = source;
         }
 
         void add(Block b, short packed) {
@@ -120,7 +149,7 @@ public final class TargetIndex {
         }
     }
 
-    /** 查询结果:命中(环序,近似由近及远)+ 覆盖是否完整(构建预算未耗尽即真)。 */
+    /** At most the requested nearest hits, in distance order; incomplete scans resume next tick. */
     public record Result(List<BlockPos> hits, boolean complete) {}
 
     // ==================== 注册 ====================
@@ -130,27 +159,28 @@ public final class TargetIndex {
         LevelIndex idx = INDEXES.computeIfAbsent(level.dimension(), k -> new LevelIndex());
         boolean changed = false;
         for (Block b : blocks) {
-            if (idx.targetRefs.addTo(b, 1) == 0) {
-                changed = true;
-            }
+            if (!idx.targetRefs.containsKey(b)) changed = true;
+            idx.targetRefs.addTo(b, 1);
+            idx.activeRefs++;
         }
         if (changed) {
             idx.version++;
+            idx.queries.clear();
         }
+        idx.lastUseTick = level.getGameTime();
         anyActive = true;
     }
 
-    /** 任务结束时注销;该维度最后一个目标注销后整个索引释放。 */
+    /** Release ownership; the next eviction sweep retires a cache unused for 200 ticks. */
     public static void unregister(ClientLevel level, Collection<Block> blocks) {
         LevelIndex idx = INDEXES.get(level.dimension());
         if (idx == null) {
             return;
         }
-        boolean changed = false;
         for (Block b : blocks) {
-            if (idx.targetRefs.addTo(b, -1) == 1) {
-                idx.targetRefs.removeInt(b);
-                changed = true;
+            if (idx.targetRefs.getInt(b) > 0) {
+                idx.targetRefs.addTo(b, -1);
+                idx.activeRefs--;
             }
         }
         // Keep a short-lived warm cache, including zero-reference target kinds. Planning probes
