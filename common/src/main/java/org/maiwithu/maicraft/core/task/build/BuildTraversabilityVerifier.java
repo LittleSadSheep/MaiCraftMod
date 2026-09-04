@@ -5,6 +5,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -14,14 +15,12 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
-/** Read-only proof that planner-named entrances, floors, ladders and docks are actually usable. */
+/** Read-only, incremental proof of the finished structure's walking and climbing routes. */
 public final class BuildTraversabilityVerifier {
-    private static final long MAX_INTERIOR_VOLUME = 96L * 48L * 96L;
-
     private BuildTraversabilityVerifier() {}
 
     public record Result(boolean valid, String code, String message, BlockPos position,
@@ -32,82 +31,118 @@ public final class BuildTraversabilityVerifier {
         }
     }
 
-    public static Result verify(ClientLevel level, BuildTraversabilityContract contract) {
-        if (contract == null) return ok(Map.of("contract", "not_requested"));
-        if (contract.exteriorApproach() == null || contract.entranceDoor() == null
-                || contract.interiorEntry() == null || contract.interiorBounds() == null) {
-            return bad("invalid_traversability_contract",
-                    "the internal traversability contract is incomplete", null);
-        }
-        BuildTraversabilityContract.Bounds bounds = contract.interiorBounds();
-        if (bounds.volume() <= 0 || bounds.volume() > MAX_INTERIOR_VOLUME) {
-            return bad("invalid_traversability_bounds",
-                    "the internal traversability bounds are empty or exceed the bounded verifier", null);
+    public static Verification begin(ClientLevel level, BuildTraversabilityContract contract) {
+        return begin(level, level::isLoaded, contract);
+    }
+
+    static Verification begin(BlockGetter level, Predicate<BlockPos> loaded,
+                              BuildTraversabilityContract contract) {
+        return new Verification(new World(level, loaded), contract);
+    }
+
+    private record World(BlockGetter level, Predicate<BlockPos> loaded) {
+        boolean isLoaded(BlockPos pos) { return loaded.test(pos); }
+        BlockState getBlockState(BlockPos pos) { return level.getBlockState(pos); }
+    }
+
+    /** One task keeps one session. A null tick result means the scan has yielded, not failed. */
+    public static final class Verification {
+        private enum Phase { INITIAL, ENTRANCE, BOUNDS, VERTICAL, FLOOD, WAYPOINTS, DOCK, DONE }
+        private static final int CELLS_PER_TICK = 128;
+        private static final long SLICE_NANOS = 2_000_000L;
+        private final World level;
+        private final BuildTraversabilityContract contract;
+        private Set<Long> reachable = new LinkedHashSet<>();
+        private ArrayDeque<BlockPos> frontier = new ArrayDeque<>();
+        private Phase phase = Phase.INITIAL;
+        private BuildTraversabilityContract.Bounds bounds;
+        private BlockPos inside, lineCursor, lineEnd;
+        private int chunkX, chunkZ, firstChunkZ, lastChunkX, lastChunkZ;
+        private int verticalY, waypointIndex, dockLength;
+        private Result result;
+
+        private Verification(World level, BuildTraversabilityContract contract) {
+            this.level = level;
+            this.contract = contract;
         }
 
-        BlockPos outside = contract.exteriorApproach().pos();
-        BlockPos door = contract.entranceDoor().pos();
-        BlockPos inside = contract.interiorEntry().pos();
-        Result loaded = requireLoaded(level, List.of(outside, door, door.above(), inside));
-        if (loaded != null) return loaded;
-        BlockState lowerDoor = level.getBlockState(door);
-        BlockState upperDoor = level.getBlockState(door.above());
-        if (!(lowerDoor.getBlock() instanceof DoorBlock)
-                || !(upperDoor.getBlock() instanceof DoorBlock)
-                || lowerDoor.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
-                && lowerDoor.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) != DoubleBlockHalf.LOWER
-                || upperDoor.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
-                && upperDoor.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) != DoubleBlockHalf.UPPER) {
-            return bad("entrance_door_missing",
-                    "the planned exterior entrance is not a complete two-block door", door);
-        }
-        Result entrance = verifyAlignedWalkingLine(level, outside, door, "entrance_approach_blocked");
-        if (entrance != null) return entrance;
-        if (!adjacentAcrossDoor(outside, door, inside) || !standable(level, inside)) {
-            return bad("entrance_crossing_blocked",
-                    "the outside approach, door and interior landing do not form one usable crossing", inside);
-        }
+        public Result tick() { return tick(CELLS_PER_TICK); }
 
-        Result boundsLoaded = requireBoundsLoaded(level, bounds);
-        if (boundsLoaded != null) return boundsLoaded;
-        if (!bounds.contains(inside)) {
-            return bad("invalid_interior_entry",
-                    "the verified doorway does not enter the bounded interior", inside);
-        }
-
-        BuildTraversabilityContract.VerticalLink link = contract.verticalLink();
-        if (link != null) {
-            Result ladder = verifyVerticalLink(level, link, bounds);
-            if (ladder != null) return ladder;
-        }
-
-        Set<Long> reachable = floodInterior(level, inside, bounds);
-        if (!reachable.contains(inside.asLong())) {
-            return bad("interior_entry_blocked",
-                    "the cell immediately inside the door is not a valid standing place", inside);
-        }
-        int waypointCount = 0;
-        for (BuildTraversabilityContract.Cell cell : contract.floorWaypoints()) {
-            if (cell == null) {
-                return bad("invalid_floor_waypoint",
-                        "the internal floor waypoint list contains an empty entry", null);
+        Result tick(int cellBudget) {
+            if (cellBudget < 1) throw new IllegalArgumentException("positive scan budget required");
+            long started = System.nanoTime();
+            for (int i = 0; i < cellBudget && result == null; i++) {
+                advance();
+                if (System.nanoTime() - started >= SLICE_NANOS) break;
             }
-            BlockPos waypoint = cell.pos();
-            waypointCount++;
-            if (!bounds.contains(waypoint) || !standable(level, waypoint)
-                    || !reachable.contains(waypoint.asLong())) {
-                return bad("interior_floor_unreachable",
-                        "an intended room or storey has no continuous walk/climb route from the entrance",
-                        waypoint);
+            return result;
+        }
+
+        private void advance() {
+            switch (phase) {
+                case INITIAL -> initialize();
+                case ENTRANCE -> {
+                    if (scanWalkingCell("entrance_approach_blocked")) {
+                        chunkX = Math.floorDiv(bounds.minX(), 16);
+                        chunkZ = firstChunkZ = Math.floorDiv(bounds.minZ(), 16);
+                        lastChunkX = Math.floorDiv(bounds.maxX(), 16);
+                        lastChunkZ = Math.floorDiv(bounds.maxZ(), 16);
+                        phase = Phase.BOUNDS;
+                    }
+                }
+                case BOUNDS -> scanChunk();
+                case VERTICAL -> scanVerticalCell();
+                case FLOOD -> expandInteriorCell();
+                case WAYPOINTS -> scanWaypoint();
+                case DOCK -> { if (scanWalkingCell("dock_walkway_blocked")) finish(); }
+                case DONE -> { }
             }
         }
 
-        BuildTraversabilityContract.DockPath dock = contract.dockPath();
-        int dockLength = 0;
-        if (dock != null) {
-            if (dock.houseSide() == null || dock.deckEnd() == null) {
-                return bad("invalid_dock_contract",
-                        "the internal dock path is incomplete", null);
+        private void initialize() {
+            if (contract == null) { result = ok(Map.of("contract", "not_requested")); return; }
+            if (contract.exteriorApproach() == null || contract.entranceDoor() == null
+                    || contract.interiorEntry() == null || contract.interiorBounds() == null) {
+                fail("invalid_traversability_contract", "the internal traversability contract is incomplete", null);
+                return;
+            }
+            bounds = contract.interiorBounds();
+            if (bounds.minX() > bounds.maxX() || bounds.minY() > bounds.maxY()
+                    || bounds.minZ() > bounds.maxZ()) {
+                fail("invalid_traversability_bounds", "the internal traversability bounds are empty", null);
+                return;
+            }
+            BlockPos outside = contract.exteriorApproach().pos();
+            BlockPos door = contract.entranceDoor().pos();
+            inside = contract.interiorEntry().pos();
+            for (BlockPos pos : new BlockPos[]{outside, door, door.above(), inside}) {
+                if (!level.isLoaded(pos)) {
+                    fail("traversability_observation_unloaded", "a required route cell could not be observed", pos);
+                    return;
+                }
+            }
+            BlockState lower = level.getBlockState(door), upper = level.getBlockState(door.above());
+            if (!(lower.getBlock() instanceof DoorBlock) || !(upper.getBlock() instanceof DoorBlock)
+                    || lower.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) != DoubleBlockHalf.LOWER
+                    || upper.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) != DoubleBlockHalf.UPPER) {
+                fail("entrance_door_missing", "the planned exterior entrance is not a complete two-block door", door);
+                return;
+            }
+            if (!adjacentAcrossDoor(outside, door, inside) || !standable(level, inside)) {
+                fail("entrance_crossing_blocked", "the outside approach, door and interior landing do not form one usable crossing", inside);
+                return;
+            }
+            if (!bounds.contains(inside)) {
+                fail("invalid_interior_entry", "the verified doorway does not enter the bounded interior", inside);
+                return;
+            }
+            if (startWalkingLine(outside, door)) phase = Phase.ENTRANCE;
+        }
+
+        private boolean startWalkingLine(BlockPos from, BlockPos to) {
+            if (from.getY() != to.getY() || from.getX() != to.getX() && from.getZ() != to.getZ()) {
+                fail("invalid_straight_path_contract", "a planner-authored entrance or dock path is not a straight level line", from);
+                return false;
             }
             lineCursor = from;
             lineEnd = to;

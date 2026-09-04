@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.build.BuildValidity;
 import org.maiwithu.maicraft.core.pathing.bridge.ContextFactory;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
-import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
@@ -61,7 +61,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private static final int CREATIVE_TIMEOUT = 30;
 
     private enum Phase { PREFLIGHT, SELECT, CLEAR_NAV, CLEAR, PLACE_NAV, SELECT_ITEM,
-        AIM, WAIT_USE, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK }
+        AIM, WAIT_USE, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, ROUTE_VERIFY }
     private record CellPlan(BuildTaskRecord.Target target,
                             List<BuildPlacementGeometry.GeneratedCell> generated) {
         CellPlan { generated = List.copyOf(generated); }
@@ -106,6 +106,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private NativeActionReceipt useReceipt, creativeReceipt;
     private VisibleMenuSession creativeMenu = new VisibleMenuSession();
     private BuildTraversabilityVerifier.Result traversabilityResult;
+    private BuildTraversabilityVerifier.Verification traversabilityScan;
     private int creativeSlot = -1;
     private ItemStack creativeStack = ItemStack.EMPTY;
     private FirstPersonActionGate selection = new FirstPersonActionGate();
@@ -180,6 +181,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             case CLEAR_CREATIVE -> clearCreativeTick(); case VERIFY -> verifyTick();
             case SCAFFOLD_SELECT -> scaffoldSelectTick(); case SCAFFOLD_NAV -> scaffoldNavTick();
             case SCAFFOLD_BREAK -> scaffoldBreakTick();
+            case ROUTE_VERIFY -> routeVerifyTick();
         };
     }
 
@@ -457,7 +459,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (nav == null) {
             BlockPos stance = gesture.stance();
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), 1.0,
-                    () -> PathExecutor.playerFeet(player).equals(stance), this);
+                    () -> PlayerNav.playerFeet(player).equals(stance), this);
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
@@ -578,7 +580,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState rejectPlayerOccupiedGesture() {
-        BlockPos occupiedFeet = PathExecutor.playerFeet(player);
+        BlockPos occupiedFeet = PlayerNav.playerFeet(player);
         InputDriver.halt(player); stopNav(); selection.reset(); aimConvergence.reset();
         gesture = null;
         do {
@@ -689,7 +691,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private PlacementAttemptSignature placementAttemptSignature() {
-        BlockPos feet = PathExecutor.playerFeet(player);
+        BlockPos feet = PlayerNav.playerFeet(player);
         long hash = 0xcbf29ce484222325L;
         hash = mixStateHash(hash, liveGestures.size());
         for (BuildPlacementGeometry.Gesture candidate : liveGestures) {
@@ -730,6 +732,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private void beginVerify() {
         stopNav(); verifyAt = 0; verifyFailed.clear(); verifyFailureStates.clear();
+        traversabilityScan = null;
+        traversabilityResult = null;
         phase = Phase.VERIFY;
     }
 
@@ -796,13 +800,27 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         r.completed(countMatching());
         if (r.completed() != r.targets.size()) { beginVerify(); return TaskState.RUNNING; }
         if (r.traversabilityContract() != null) {
-            traversabilityResult = BuildTraversabilityVerifier.verify(
+            traversabilityScan = BuildTraversabilityVerifier.begin(
                     player.clientLevel, r.traversabilityContract());
-            if (!traversabilityResult.valid()) {
-                failAt(traversabilityResult.position(), traversabilityResult.message(),
-                        FailureType.NO_PATH, traversabilityResult.code(), false);
-                return TaskState.FAILED;
-            }
+            phase = Phase.ROUTE_VERIFY;
+            return TaskState.RUNNING;
+        }
+        retainVerifiedSitePosition();
+        return TaskState.SUCCESS;
+    }
+
+    private TaskState routeVerifyTick() {
+        traversabilityResult = traversabilityScan.tick();
+        if (traversabilityResult == null) {
+            // This tick consumed new, finite verification work; yielding it must not spend the
+            // build's remaining native-action budget on main-thread scheduling fairness.
+            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+            return TaskState.RUNNING;
+        }
+        if (!traversabilityResult.valid()) {
+            failAt(traversabilityResult.position(), traversabilityResult.message(),
+                    FailureType.NO_PATH, traversabilityResult.code(), false);
+            return TaskState.FAILED;
         }
         retainVerifiedSitePosition();
         return TaskState.SUCCESS;
