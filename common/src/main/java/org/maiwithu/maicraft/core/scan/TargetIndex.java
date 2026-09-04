@@ -153,12 +153,9 @@ public final class TargetIndex {
                 changed = true;
             }
         }
-        if (changed) {
-            idx.version++;
-        }
-        if (idx.targetRefs.isEmpty()) {
-            INDEXES.remove(level.dimension());
-        }
+        // Keep a short-lived warm cache, including zero-reference target kinds. Planning probes
+        // register/unregister between ticks and must be able to finish their pending scan.
+        idx.lastUseTick = level.getGameTime();
         anyActive = !INDEXES.isEmpty();
     }
 
@@ -180,6 +177,7 @@ public final class TargetIndex {
         if ((!oldT && !newT) || ob == nb) {
             return;
         }
+        idx.queries.clear();
         long key = SectionPos.asLong(SectionPos.blockToSectionCoord(pos.getX()),
                 SectionPos.blockToSectionCoord(pos.getY()), SectionPos.blockToSectionCoord(pos.getZ()));
         SectionEntry e = idx.sections.get(key);
@@ -204,76 +202,80 @@ public final class TargetIndex {
      * 还近才停。
      *
      * <p>只读索引;未建条目就地构建,每次调用最多构建 {@code buildBudget} 个 section(预算耗尽
-     * 返回 {@code complete=false},调用方稍后再查,冷区域在几次查询内渐进变热)。未加载区块
+     * 返回 {@code complete=false},调用方稍后再查)。所有查询共享每 tick 2ms 墙钟预算，
+     * 包括热索引遍历和饱和段取位；游标跨 tick 续进，避免反复遍历前缀饿死冷段。未加载区块
      * 跳过——索引只回答已加载世界。
      */
     public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget) {
+        return query(level, center, targets, want, maxChunkRadius, buildBudget, Set.of());
+    }
+
+    /** Exclusions participate in the nearest selection, not after truncating the result window. */
+    public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
+                               int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded) {
         LevelIndex idx = INDEXES.get(level.dimension());
-        if (idx == null) {
+        if (idx == null || targets.isEmpty() || want <= 0) {
             return new Result(List.of(), true);
         }
-        List<BlockPos> out = new ArrayList<>();
+        long tick = level.getGameTime();
+        if (queryTick != tick) {
+            queryTick = tick;
+            queryDeadline = System.nanoTime() + QUERY_NANOS_PER_TICK;
+        }
+        idx.lastUseTick = tick;
+        QueryKey key = new QueryKey(center.immutable(), List.copyOf(targets), want,
+                Math.max(0, maxChunkRadius), excluded.stream().map(BlockPos::immutable)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+        QueryProgress progress = idx.queries.get(key);
+        if (progress != null && progress.complete
+                && (tick < progress.completedTick || tick - progress.completedTick >= COMPLETED_QUERY_TICKS)) {
+            idx.queries.remove(key);
+            progress = null;
+        }
+        if (progress == null) {
+            while (idx.queries.size() >= MAX_PENDING_QUERIES) {
+                idx.queries.remove(idx.queries.keySet().iterator().next());
+            }
+            progress = new QueryProgress(level, key);
+            idx.queries.put(key, progress);
+        }
         int centerCx = SectionPos.blockToSectionCoord(center.getX());
         int centerCz = SectionPos.blockToSectionCoord(center.getZ());
         int minSection = level.getMinSection();
-        int sectionCount = level.getSectionsCount();
-        int[] sectionOrder = SearchGeometry.sectionOrder(minSection, minSection + sectionCount - 1,
-                SectionPos.blockToSectionCoord(center.getY()));
-        SearchGeometry.NearestBound bound = new SearchGeometry.NearestBound(want);
-        int fed = 0;
-        int budget = buildBudget;
-        boolean complete = true;
-
-        outer:
-        for (int r = 0; r <= maxChunkRadius; r++) {
-            for (int cx = centerCx - r; cx <= centerCx + r; cx++) {
-                for (int cz = centerCz - r; cz <= centerCz + r; cz++) {
-                    if (Math.max(Math.abs(cx - centerCx), Math.abs(cz - centerCz)) != r) {
-                        continue;   // 只走环壳
-                    }
-                    LevelChunk chunk = level.getChunkSource().getChunkNow(cx, cz);
-                    if (chunk == null) {
-                        continue;
-                    }
-                    LevelChunkSection[] secs = chunk.getSections();
-                    for (int sy : sectionOrder) {
-                        int si = sy - minSection;
-                        if (si < 0 || si >= secs.length) {
-                            continue;
-                        }
-                        long key = SectionPos.asLong(cx, sy, cz);
-                        SectionEntry e = idx.sections.get(key);
-                        if (e == null || e.version != idx.version) {
-                            // 预算只计两趟扫描(计数+收位)的真构建。palette 预筛排除的段
-                            // (纯空气/不含目标)是 O(palette) 的,记零成本直接落缓存——
-                            // 常驻加载的大片空段(出生区块、平坦世界)按真构建计价的话,
-                            // 预算会在空气上烧光,覆盖永远到不了头。
-                            if (triviallyEmpty(secs[si], idx)) {
-                                e = new SectionEntry(idx.version);
-                                idx.sections.put(key, e);
-                            } else {
-                                if (budget <= 0) {
-                                    complete = false;
-                                    break outer;
-                                }
-                                budget--;
-                                e = build(secs[si], idx);
-                                idx.sections.put(key, e);
-                            }
-                        }
-                        collect(e, secs[si], cx, sy, cz, targets, want, out);
-                        while (fed < out.size()) {
-                            bound.offer(Math.sqrt(out.get(fed++).distSqr(center)));
-                        }
-                    }
+        int budget = Math.max(1, buildBudget);
+        while (!progress.complete && System.nanoTime() < queryDeadline) {
+            if (progress.perimeterIndex >= RingSpiral.perimeter(progress.ring)) {
+                if (progress.nearest.canStopAfterRing(progress.ring)
+                        || ++progress.ring > key.radius()) {
+                    progress.complete = true;
+                    progress.completedTick = tick;
+                    break;
                 }
+                progress.perimeterIndex = 0;
             }
-            if (SearchGeometry.canStop(r, bound)) {
-                break;   // 攒够的这批已经比下一环最近的可能还近
+            int[] offset = RingSpiral.offset(progress.ring, progress.perimeterIndex);
+            int cx = centerCx + offset[0];
+            int cz = centerCz + offset[1];
+            LevelChunk chunk = level.getChunkSource().getChunkNow(cx, cz);
+            if (chunk == null || progress.sectionIndex >= progress.sectionOrder.length) {
+                progress.perimeterIndex++;
+                progress.sectionIndex = 0;
+                continue;
             }
+            int sy = progress.sectionOrder[progress.sectionIndex];
+            LevelChunkSection section = chunk.getSections()[sy - minSection];
+            long sectionKey = SectionPos.asLong(cx, sy, cz);
+            SectionEntry entry = idx.sections.get(sectionKey);
+            if (entry == null || entry.version != idx.version || entry.source != section) {
+                if (budget-- <= 0) break;
+                entry = build(section, idx);
+                idx.sections.put(sectionKey, entry);
+            }
+            collect(entry, section, cx, sy, cz, targets, progress.nearest);
+            progress.sectionIndex++;
         }
-        return new Result(out, complete);
+        return new Result(progress.nearest.sorted(), progress.complete);
     }
 
     /** palette 预筛:这个 section 一定不含任何目标(纯空气,或调色板里就没有)。 */
@@ -285,7 +287,7 @@ public final class TargetIndex {
 
     /** 构建一个 section 的条目:palette 预筛 → 一趟计数定饱和 → 一趟收位。 */
     private static SectionEntry build(LevelChunkSection section, LevelIndex idx) {
-        SectionEntry e = new SectionEntry(idx.version);
+        SectionEntry e = new SectionEntry(idx.version, section);
         if (triviallyEmpty(section, idx)) {
             return e;
         }
@@ -332,7 +334,7 @@ public final class TargetIndex {
     /** 把条目中所请求目标的位置追加进 {@code out};饱和目标对该一个 section 现场取位。 */
     private static void collect(SectionEntry e, LevelChunkSection section,
                                 int cx, int sy, int cz, Collection<Block> targets,
-                                int want, List<BlockPos> out) {
+                                SearchGeometry.NearestPositions nearest) {
         if (e.hits.isEmpty()) {
             return;
         }
@@ -345,13 +347,14 @@ public final class TargetIndex {
                 continue;
             }
             if (arr == SATURATED) {
-                // 铺天盖地的目标:就地对这一个 section 取位,凑到 want 即止
+                // Dense cells are compared by distance too; y/z/x iteration order is not proximity.
                 var states = section.getStates();
-                for (int y = 0; y < 16 && out.size() < want; y++) {
-                    for (int z = 0; z < 16 && out.size() < want; z++) {
-                        for (int x = 0; x < 16 && out.size() < want; x++) {
+                BlockPos.MutableBlockPos cell = new BlockPos.MutableBlockPos();
+                for (int y = 0; y < 16; y++) {
+                    for (int z = 0; z < 16; z++) {
+                        for (int x = 0; x < 16; x++) {
                             if (states.get(x, y, z).getBlock() == b) {
-                                out.add(new BlockPos(baseX | x, baseY + y, baseZ | z));
+                                nearest.offer(cell.set(baseX | x, baseY + y, baseZ | z));
                             }
                         }
                     }
@@ -359,7 +362,7 @@ public final class TargetIndex {
                 continue;
             }
             for (short p : arr) {
-                out.add(new BlockPos(baseX | (p & 15), baseY + (p >> 8 & 15), baseZ | (p >> 4 & 15)));
+                nearest.offer(new BlockPos(baseX | (p & 15), baseY + (p >> 8 & 15), baseZ | (p >> 4 & 15)));
             }
         }
     }
@@ -372,6 +375,9 @@ public final class TargetIndex {
             return;
         }
         sweepTimer = 0;
+        INDEXES.entrySet().removeIf(entry -> entry.getValue().activeRefs == 0
+                && level.getGameTime() - entry.getValue().lastUseTick >= EVICT_SWEEP_TICKS);
+        anyActive = !INDEXES.isEmpty();
         for (Map.Entry<ResourceKey<Level>, LevelIndex> entry : INDEXES.entrySet()) {
             if (!entry.getKey().equals(level.dimension())) {
                 entry.getValue().sections.clear();
@@ -401,6 +407,7 @@ public final class TargetIndex {
         INDEXES.clear();
         anyActive = false;
         sweepTimer = 0;
+        queryTick = Long.MIN_VALUE;
     }
 
     private static short pack(BlockPos pos) {

@@ -2,6 +2,10 @@ package org.maiwithu.maicraft.core.scan;
 
 import java.util.Comparator;
 import java.util.PriorityQueue;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import net.minecraft.core.BlockPos;
 
 /**
  * "由近及远"的两条判据,全仓找方块的地方共用:<b>哪一节先看</b>,和
@@ -109,6 +113,52 @@ public final class SearchGeometry {
         /** 留住的这批里最远的那个;没攒够是正无穷。 */
         public double worst() {
             return full() ? kept.peek() : Double.POSITIVE_INFINITY;
+        }
+    }
+
+    /** Bounded nearest candidates; dense sections must compare every cell before discarding it. */
+    public static final class NearestPositions {
+        private final int want;
+        private final BlockPos center;
+        private final Comparator<BlockPos> order;
+        private final PriorityQueue<BlockPos> kept;
+        private final Set<BlockPos> excluded;
+
+        public NearestPositions(BlockPos center, int want) {
+            this(center, want, Set.of());
+        }
+
+        public NearestPositions(BlockPos center, int want, Set<BlockPos> excluded) {
+            this.center = center.immutable();
+            this.want = Math.max(1, want);
+            this.excluded = excluded.stream().map(BlockPos::immutable)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            this.order = Comparator.comparingDouble((BlockPos pos) -> pos.distSqr(this.center))
+                    .thenComparingInt(BlockPos::getY)
+                    .thenComparingInt(BlockPos::getX)
+                    .thenComparingInt(BlockPos::getZ);
+            this.kept = new PriorityQueue<>(Math.min(this.want, 64), order.reversed());
+        }
+
+        public void offer(BlockPos pos) {
+            if (excluded.contains(pos)) return;
+            if (kept.size() < want) kept.add(pos.immutable());
+            else if (order.compare(pos, kept.peek()) < 0) {
+                kept.poll();
+                kept.add(pos.immutable());
+            }
+        }
+
+        public boolean canStopAfterRing(int ring) {
+            double lowerBound = ringFloorDistance(ring + 1);
+            // Strict comparison keeps equal-distance tie-breaking independent of ring order.
+            return kept.size() >= want && kept.peek().distSqr(center) < lowerBound * lowerBound;
+        }
+
+        public List<BlockPos> sorted() {
+            List<BlockPos> result = new ArrayList<>(kept);
+            result.sort(order);
+            return List.copyOf(result);
         }
     }
 }

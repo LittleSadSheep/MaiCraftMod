@@ -71,8 +71,10 @@ public final class BlockSearch {
     private int ring, perimIdx;
     private long deadline = -1;
     private int columnsScanned, columnsUnloaded;
+    private int sectionsScanned;
     private final int columnsTotal;
     private boolean stoppedEarly;
+    private boolean matchesTrimmed;
 
     /** How far out the nearest {@code want} reach — the stop rule's whole input. */
     private final SearchGeometry.NearestBound bound;
@@ -94,11 +96,12 @@ public final class BlockSearch {
      */
     public record ScanResult(List<BlockScanner.Hit> matches, int columnsScanned,
                              int columnsUnloaded, int columnsTotal,
-                             boolean deadlineHit, boolean stoppedEarly) {
+                             int sectionsScanned, boolean deadlineHit, boolean stoppedEarly,
+                             boolean collectCapHit) {
 
         /** Did the walk actually cover the whole requested sphere? */
         public boolean coveredEverything() {
-            return !deadlineHit && !stoppedEarly && columnsUnloaded == 0;
+            return !deadlineHit && !stoppedEarly && !collectCapHit && columnsUnloaded == 0;
         }
     }
 
@@ -106,7 +109,7 @@ public final class BlockSearch {
                           Set<Block> targets, Consumer<ScanResult> onDone) {
         this.entityUuid = entityUuid;
         this.dimension = level.dimension();
-        this.center = center;
+        this.center = center.immutable();
         this.radius = radius;
         this.radiusSq = (double) radius * radius;
         this.filter = state -> targets.contains(state.getBlock());
@@ -115,8 +118,10 @@ public final class BlockSearch {
         this.centerChunkX = SectionPos.blockToSectionCoord(center.getX());
         this.centerChunkZ = SectionPos.blockToSectionCoord(center.getZ());
         this.maxRing = Math.max(
-                SectionPos.blockToSectionCoord(center.getX() + radius) - centerChunkX,
-                centerChunkX - SectionPos.blockToSectionCoord(center.getX() - radius));
+                Math.max(SectionPos.blockToSectionCoord(center.getX() + radius) - centerChunkX,
+                        centerChunkX - SectionPos.blockToSectionCoord(center.getX() - radius)),
+                Math.max(SectionPos.blockToSectionCoord(center.getZ() + radius) - centerChunkZ,
+                        centerChunkZ - SectionPos.blockToSectionCoord(center.getZ() - radius)));
         this.sectionOrder = SearchGeometry.sectionOrder(
                 SectionPos.blockToSectionCoord(Math.max(center.getY() - radius, level.getMinBuildHeight())),
                 SectionPos.blockToSectionCoord(Math.min(center.getY() + radius, level.getMaxBuildHeight())),
@@ -156,10 +161,8 @@ public final class BlockSearch {
     public static void tick(ClientLevel level) {
         if (JOBS.isEmpty()) return;
         SearchBudget.refresh(level.getGameTime());
-        Iterator<BlockSearch> it = JOBS.iterator();
-        while (it.hasNext()) {
-            BlockSearch job = it.next();
-            if (job.tickOne(level)) it.remove();
+        for (BlockSearch job : List.copyOf(JOBS)) {
+            if (JOBS.contains(job) && job.tickOne(level)) JOBS.remove(job);
         }
     }
 
@@ -180,6 +183,7 @@ public final class BlockSearch {
         }
         while (true) {
             if (currentChunk == null && !nextColumn(level)) {
+                if (!stoppedEarly && ring <= maxRing) return false; // column-check budget exhausted
                 finish(level.getGameTime(), false);   // spiral exhausted
                 return true;
             }
@@ -190,11 +194,15 @@ public final class BlockSearch {
                         currentChunkX, sectionOrder[sectionCursor], currentChunkZ,
                         center, radius, radiusSq, filter, matches);
                 sectionCursor++;
+                sectionsScanned++;
                 feedBound();
-                if (matches.size() >= MAX_COLLECT) {
-                    // Ring order means what we have is the nearest area anyway.
-                    finish(level.getGameTime(), false);
-                    return true;
+                if (matches.size() > MAX_COLLECT) {
+                    // A memory bound must not stop mid-ring: an adjacent section may contain
+                    // closer cells than the dense section visited first.
+                    matches.sort(Comparator.comparingDouble(BlockScanner.Hit::distance));
+                    matches.subList(MAX_COLLECT, matches.size()).clear();
+                    matchesTrimmed = true;
+                    fed = matches.size();
                 }
             }
             currentChunk = null;
@@ -205,8 +213,8 @@ public final class BlockSearch {
     /**
      * Resolve the next spiral column into {@link #currentChunk}, tallying and
      * skipping columns whose chunk isn't loaded. Returns false only when the
-     * spiral is exhausted — walking past unloaded terrain costs one cache lookup
-     * per column, so it needs no permit and never defers to the next tick.
+     * spiral is exhausted or the shared column-check budget is spent. Even unloaded columns
+     * consume a permit so a large empty search cannot bypass the tick deadline.
      */
     private boolean nextColumn(ClientLevel level) {
         while (ring <= maxRing) {
@@ -220,6 +228,7 @@ public final class BlockSearch {
                 perimIdx = 0;
                 continue;
             }
+            if (!SearchBudget.tryCheck()) return false;
             int[] d = RingSpiral.offset(ring, perimIdx++);
             int cx = centerChunkX + d[0];
             int cz = centerChunkZ + d[1];
@@ -246,6 +255,8 @@ public final class BlockSearch {
     }
 
     private void finish(long now, boolean deadlineHit) {
+        // Remove before calling foreign callbacks: they may enqueue/cancel searches or throw.
+        JOBS.remove(this);
         matches.sort(Comparator.comparingDouble(BlockScanner.Hit::distance));
         // One line per search, and it has to carry everything a bug report needs: what was
         // asked, what came back, WHY it stopped, and what it cost. "She can't find X" is
@@ -256,14 +267,15 @@ public final class BlockSearch {
                 matches.isEmpty() ? "" : String.format(", nearest %.1f", matches.get(0).distance()),
                 stopReason(deadlineHit), columnsScanned, columnsTotal, columnsUnloaded,
                 startTick < 0 ? 0 : now - startTick);
-        onDone.accept(new ScanResult(matches, columnsScanned, columnsUnloaded, columnsTotal,
-                deadlineHit, stoppedEarly));
+        onDone.accept(new ScanResult(List.copyOf(matches),
+                columnsScanned + (currentChunk == null ? 0 : 1), columnsUnloaded, columnsTotal,
+                sectionsScanned, deadlineHit, stoppedEarly, matchesTrimmed));
     }
 
     private String stopReason(boolean deadlineHit) {
         if (deadlineHit) return "deadline";
         if (stoppedEarly) return "proved nearest at ring " + ring;
-        if (matches.size() >= MAX_COLLECT) return "collect cap";
+        if (matchesTrimmed) return "covered the whole radius; retained nearest matches";
         return "covered the whole radius";
     }
 
