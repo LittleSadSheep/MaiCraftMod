@@ -218,7 +218,7 @@ public final class IntentRuntime {
             stateIdentity = next;
             restoreBound(player.level().getGameTime());
         } else if (!stateIdentity.key().equals(next.key())) {
-            if (bodyAttached) saveNow(true);
+            if (bodyAttached) captureCheckpoint(true);
             clearSemanticState();
             stateIdentity = next;
             restoreBound(player.level().getGameTime());
@@ -235,7 +235,8 @@ public final class IntentRuntime {
             stateIdentity = next;
         }
         bodyAttached = true;
-        if (dirty && System.nanoTime() >= nextSaveNanos) saveNow(false);
+        if ((dirty || stateStore.hasFailedSave(stateIdentity))
+                && System.nanoTime() >= nextSaveNanos) captureCheckpoint(false);
     }
 
     /** Bind an MCP request without racing a pending body/world replacement. */
@@ -257,34 +258,34 @@ public final class IntentRuntime {
 
     /**
      * Save the old connection before the body scheduler observes a replacement world.  Marking the
-     * body detached after a successful save prevents cancellation cleanup from overwriting the
+     * body detached after capturing a checkpoint prevents cancellation cleanup from overwriting the
      * resumable semantic snapshot; the normal post-scheduler bind then clears the old read model.
      */
     public void beforeBodyTick(Minecraft minecraft) {
         StateIdentity next = StateIdentity.resolve(minecraft).orElse(null);
         if (next != null && stateIdentity != null && bodyAttached
-                && !stateIdentity.key().equals(next.key()) && saveNow(true)) {
+                && !stateIdentity.key().equals(next.key()) && captureCheckpoint(true)) {
             bodyAttached = false;
         }
     }
 
     /** Save before the body scheduler cancels records during disconnect or replacement. */
     public void bodyUnavailable() {
-        saveNow(true);
+        captureCheckpoint(true);
         bodyAttached = false;
     }
 
-    /** Persist the exact semantic checkpoint while the death-screen body is still addressable. */
+    /** Capture the exact checkpoint before death cleanup; disk persistence continues asynchronously. */
     public boolean checkpointDeath() {
-        return saveNow(true);
+        return captureCheckpoint(true);
     }
 
     /**
-     * Persist and detach before a native respawn replaces LocalPlayer in the same world identity.
+     * Capture and detach before a native respawn replaces LocalPlayer in the same world identity.
      * The next normal persistence bind restores the non-terminal task in a paused state.
      */
     public boolean prepareRespawnHandoff() {
-        boolean saved = saveNow(true);
+        boolean saved = captureCheckpoint(true);
         bodyAttached = false;
         return saved;
     }
@@ -321,12 +322,12 @@ public final class IntentRuntime {
         long gameTime = minecraft.level == null ? 0L : minecraft.level.getGameTime();
         record.requestDecision(snapshot, gameTime);
         decision(record, snapshot);
-        saveNow(true);
+        captureCheckpoint(true);
     }
 
-    /** Loader shutdown hook: a synchronous best-effort forced save, never a background write. */
+    /** Submit a final immutable checkpoint; shutdown never waits for a slow or unavailable disk. */
     public void shutdownPersistence() {
-        saveNow(true);
+        captureCheckpoint(true);
         bodyAttached = false;
     }
 
@@ -420,13 +421,18 @@ public final class IntentRuntime {
                 data);
     }
 
-    private boolean saveNow(boolean force) {
-        if (stateIdentity == null || (!force && !dirty)) return stateIdentity != null;
+    /** Returns whether a detached in-process checkpoint is available, not a disk durability receipt. */
+    private boolean captureCheckpoint(boolean force) {
+        if (stateIdentity == null) return false;
+        // Body teardown mutates old task records after the checkpoint. Never replace the
+        // detached handoff with those cancellation side effects, including on shutdown.
+        if (!bodyAttached) return stateStore.hasSnapshot(stateIdentity);
+        if (!force && !dirty && !stateStore.hasFailedSave(stateIdentity)) return true;
         try {
             JsonObject root = IntentStateCodec.encode(
                     stateIdentity.key(), plans.values(), tasks.values(),
                     requestKeys, landmarks.values());
-            stateStore.save(stateIdentity, root);
+            stateStore.saveAsync(stateIdentity, root);
             dirty = false;
             return true;
         } catch (IOException | RuntimeException failure) {
