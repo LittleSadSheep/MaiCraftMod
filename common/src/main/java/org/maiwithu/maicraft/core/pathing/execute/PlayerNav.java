@@ -155,142 +155,76 @@ public final class PlayerNav {
 
     /** 单格目标:按意图编译(可走格=站上去,占用格=贴脸即到,不吞噬目标)。 */
     public PlayerNav(LocalPlayer player, BlockPos goal, double speed, BooleanSupplier reached) {
-        this(player, speed, reached, () -> GoalCompiler.block(player.level(), goal));
+        this(player, speed, reached, () -> GoalCompiler.block(player.level(), goal), ContextProvider.DEFAULT);
     }
 
-    /** 可移动的单格目标:每次拉取重新按意图编译(格位腾空后收紧为站上去)。 */
     public PlayerNav(LocalPlayer player, Supplier<BlockPos> goalSupplier, double speed,
                      BooleanSupplier reached) {
         this(player, speed, reached, () -> {
-            BlockPos g = goalSupplier.get();
-            return g == null ? null : GoalCompiler.block(player.level(), g);
-        });
+            BlockPos goal = goalSupplier.get();
+            return goal == null ? null : GoalCompiler.block(player.level(), goal);
+        }, ContextProvider.DEFAULT);
     }
 
-    /** 编译契约正门:goal + sacred + 到达原料一体下发。 */
     public static PlayerNav to(LocalPlayer player, Supplier<GoalCompiler.Compiled> compiled,
                                double speed, BooleanSupplier reached) {
-        return new PlayerNav(player, speed, reached, compiled);
+        return to(player, compiled, speed, reached, ContextProvider.DEFAULT);
     }
 
-    /** 编译契约正门,带任务专用的搜索/执行成本上下文。 */
     public static PlayerNav to(LocalPlayer player, Supplier<GoalCompiler.Compiled> compiled,
-                               double speed, BooleanSupplier reached,
-                               ContextProvider contextProvider) {
-        return new PlayerNav(player, speed, reached, compiled, false, contextProvider);
+                               double speed, BooleanSupplier reached, ContextProvider contextProvider) {
+        return new PlayerNav(player, speed, reached, compiled, contextProvider);
     }
 
-    /** 编译契约正门,并在每 tick 重新读取目标与保护格。 */
+    /** Goal suppliers are revalidated on every tick, including task-specific protection cells. */
     public static PlayerNav toRevalidating(LocalPlayer player, Supplier<GoalCompiler.Compiled> compiled,
-                                           double speed, BooleanSupplier reached,
-                                           ContextProvider contextProvider) {
-        return new PlayerNav(player, speed, reached, compiled, true, contextProvider);
+                                          double speed, BooleanSupplier reached, ContextProvider contextProvider) {
+        return to(player, compiled, speed, reached, contextProvider);
     }
 
-    /** 同上,用缺省搜索/执行上下文。 */
     public static PlayerNav toRevalidating(LocalPlayer player, Supplier<GoalCompiler.Compiled> compiled,
-                                           double speed, BooleanSupplier reached) {
-        return new PlayerNav(player, speed, reached, compiled, true);
+                                          double speed, BooleanSupplier reached) {
+        return to(player, compiled, speed, reached);
     }
 
-    /** 裸自定义目标(runAway、column 等)。不带 sacred——有方块目标的意图
-     *  应走 {@link #to} / {@link GoalCompiler},让目标受保护。 */
-    public static PlayerNav toGoal(LocalPlayer player, Supplier<NavGoal> goalSupplier,
+    public static PlayerNav toGoal(LocalPlayer player, Supplier<NavGoal> goals,
                                    double speed, BooleanSupplier reached) {
-        return new PlayerNav(player, speed, reached, bare(goalSupplier));
+        return toGoal(player, goals, speed, reached, ContextProvider.DEFAULT);
     }
 
-    /** 同上,带任务专用的搜索/执行成本上下文(挖矿等要改地形的意图从这儿进)。 */
-    public static PlayerNav toGoal(LocalPlayer player, Supplier<NavGoal> goalSupplier,
-                                   double speed, BooleanSupplier reached,
-                                   ContextProvider contextProvider) {
-        return new PlayerNav(player, speed, reached, bare(goalSupplier), false, contextProvider);
+    public static PlayerNav toGoal(LocalPlayer player, Supplier<NavGoal> goals,
+                                   double speed, BooleanSupplier reached, ContextProvider contextProvider) {
+        return to(player, bare(goals), speed, reached, contextProvider);
     }
 
-    /**
-     * 目标<b>会动</b>的裸目标导航。两件事:每 tick 重新校验她还在不在目标里,走出去了就接着走;
-     * 每 {@link #LIVE_GOAL_REPLAN_TICKS} 刻重取一次目标,让威胁快照跟上。
-     *
-     * <p>{@link #toGoal} 一旦搜索满足就永久返回 {@code ARRIVED},不再驱动移动 —— 那对固定
-     * 坐标是对的,对"跟着一只怪保持站位"就成了站死。追击与近身走位都要这一个。
-     */
-    public static PlayerNav trackGoal(LocalPlayer player, Supplier<NavGoal> goalSupplier,
+    public static PlayerNav trackGoal(LocalPlayer player, Supplier<NavGoal> goals,
                                       double speed, BooleanSupplier reached) {
-        return new PlayerNav(player, speed, reached, bare(goalSupplier), true);
+        return toGoal(player, goals, speed, reached);
     }
 
-    /** 同上,带任务专用的搜索/执行成本上下文。 */
-    public static PlayerNav trackGoal(LocalPlayer player, Supplier<NavGoal> goalSupplier,
-                                      double speed, BooleanSupplier reached,
-                                      ContextProvider contextProvider) {
-        return new PlayerNav(player, speed, reached, bare(goalSupplier), true, contextProvider);
+    public static PlayerNav trackGoal(LocalPlayer player, Supplier<NavGoal> goals,
+                                      double speed, BooleanSupplier reached, ContextProvider contextProvider) {
+        return toGoal(player, goals, speed, reached, contextProvider);
     }
 
-    /**
-     * 开启无路探针:只走不改找不到路时,探一条可改地形的路并把要动的方块列给任务层
-     * (见类文档)。建好导航、首次 tick 前调用。
-     */
-    public PlayerNav withTerrainProbe() {
-        this.terrainProbe = true;
-        embedded.withTerrainProbe();
-        return this;
-    }
-
-    /** 把裸目标包成无 sacred 的编译契约(engineGoal 经词表映射同步派生)。 */
     private static Supplier<GoalCompiler.Compiled> bare(Supplier<NavGoal> goals) {
         return () -> {
-            NavGoal g = goals.get();
-            return g == null ? null
-                    : new GoalCompiler.Compiled(g, LongSets.emptySet());
+            NavGoal goal = goals.get();
+            return goal == null ? null : new GoalCompiler.Compiled(goal, LongSets.emptySet());
         };
     }
 
     private PlayerNav(LocalPlayer player, double speed, BooleanSupplier reached,
-                      Supplier<GoalCompiler.Compiled> compiledSupplier) {
-        this(player, speed, reached, compiledSupplier, false, ContextProvider.DEFAULT);
+                      Supplier<GoalCompiler.Compiled> compiledSupplier, ContextProvider contextProvider) {
+        navigator = new EmbeddedBaritoneNavigator(player, compiledSupplier, reached,
+                contextProvider == null ? ContextProvider.DEFAULT : contextProvider, speed >= 1.0);
     }
 
-    private PlayerNav(LocalPlayer player, double speed, BooleanSupplier reached,
-                      Supplier<GoalCompiler.Compiled> compiledSupplier,
-                      boolean revalidateGoalEachTick) {
-        this(player, speed, reached, compiledSupplier, revalidateGoalEachTick,
-                ContextProvider.DEFAULT);
+    public PlayerNav withTerrainProbe() {
+        navigator.withTerrainProbe();
+        return this;
     }
 
-    private PlayerNav(LocalPlayer player, double speed, BooleanSupplier reached,
-                      Supplier<GoalCompiler.Compiled> compiledSupplier,
-                      boolean revalidateGoalEachTick, ContextProvider contextProvider) {
-        this.player = player;
-        this.compiledSupplier = compiledSupplier;
-        this.sprintAllowed = speed >= 1.0;
-        this.reached = reached;
-        this.contextProvider = contextProvider == null ? ContextProvider.DEFAULT : contextProvider;
-        this.revalidateGoalEachTick = revalidateGoalEachTick;
-        this.core = new PathingCore(player, PoolSearchDispatcher.INSTANCE,
-                this::searchContext, this::executionContext, this.contextProvider.permit());
-        this.embedded = new EmbeddedBaritoneNavigator(
-                player, compiledSupplier, reached, this.contextProvider,
-                sprintAllowed, revalidateGoalEachTick);
-    }
-
-    /** 搜索用冻结上下文:快照世界 + 快照背包,穿透三个语义开关。 */
-    private CalculationContext searchContext() {
-        CalculationContext ctx = contextProvider.forSearch(
-                player, sacred, deniedPlace, NavigationSafetyContext.forbiddenBodyCells());
-        lastSearchContext = ctx;
-        return ctx;
-    }
-
-    /** 执行期复核用实时上下文:活世界 + 当下背包,同一套语义开关。 */
-    private CalculationContext executionContext() {
-        return contextProvider.forExecution(
-                player, sacred, deniedPlace, NavigationSafetyContext.forbiddenBodyCells());
-    }
-
-    /**
-     * 一次导航的成本上下文来源:搜索用冻结快照、执行用活世界,外加这次移动的地形许可。
-     * 许可只在这里定一次——上下文按它折成本,执行器按它决定能不能顺手放一块。
-     */
     public interface ContextProvider {
         /** 缺省:只走不改。接近类动作全部用它,忘了指定也只会更保守。 */
         ContextProvider DEFAULT = of(TerrainPermit.PRESERVE);
@@ -345,60 +279,6 @@ public final class PlayerNav {
     /** Shared feet convention for navigation and interaction stances. */
     public static BlockPos playerFeet(LocalPlayer player) {
         return org.maiwithu.maicraft.core.pathing.moves.Movement.feet(player);
-    }
-
-    /**
-     * 空搜索结果的教学式验尸——直接喂给模型的人话:离目标多远、有无
-     * 搭路耗材、还有什么可解锁的手段。搜索器统计面未随异步句柄暴露,
-     * 此处按可得素材给结构化结论。
-     */
-    /** @param qualifier 紧跟 "no path to target" 之后的限定语(地形许可的说明),可为空串 */
-    private String noPathAutopsy(NavGoal goal, String qualifier) {
-        BlockPos feet = PathExecutor.playerFeet(player);
-        BlockPos center = goal.center();
-        double dist = Math.sqrt(feet.distSqr(center));
-        StringBuilder r = new StringBuilder("no path to target").append(qualifier);
-        r.append(String.format(" (from %s toward %s, about %.0f blocks away;"
-                        + " the search burned its whole budget without finding a route",
-                feet.toShortString(), center.toShortString(), dist));
-        if (lastSearchContext != null && !lastSearchContext.hasThrowaway) {
-            r.append("; carrying no scaffolding blocks to bridge or pillar with");
-        }
-        if (!deniedPlace.isEmpty()) {
-            r.append("; ").append(deniedPlace.size())
-                    .append(" scaffold spot(s) already proven unplaceable this navigation");
-        }
-        r.append(')');
-        String reason = r.toString();
-        Constants.LOG.info("[maicraft-path] NO-PATH start={} goal={} | {}",
-                feet.toShortString(), center.toShortString(), reason);
-        return reason;
-    }
-
-    public boolean isSafeToCancel() {
-        if (EmbeddedBaritoneNavigator.enabled()) return embedded.isSafeToCancel();
-        return core.isSafeToCancel();
-    }
-
-    public BlockPos pathStart() {
-        if (EmbeddedBaritoneNavigator.enabled()) return embedded.pathStart();
-        return core.pathStart();
-    }
-
-    /**
-     * 这次导航真挖了什么、真放了什么。任务层在 stopNav 时并进旅程账,回执末尾如实相告。
-     * PRESERVE 导航的账本通常为空(规划不出动地形的路,执行器也不会顺手动),但窒息自救
-     * 的挖出算在内——那是反射,不是寻路决定,也该如实报。
-     */
-    public TerrainBill ledger() {
-        if (EmbeddedBaritoneNavigator.enabled()) return embedded.ledger();
-        return core.ledger();
-    }
-
-    /** FAILED 后的人话验尸(直接喂 LLM)。 */
-    public String failReason() {
-        if (EmbeddedBaritoneNavigator.enabled()) return embedded.failReason();
-        return failReason;
     }
 
     public Status tick() { return navigator.tick(); }
