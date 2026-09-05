@@ -74,7 +74,8 @@ public final class SurvivalDecisions {
      * submerge the eyes again before that refill is complete, producing an endless
      * surface/dive oscillation around the low-air threshold.
      *
-     * <p>Leaving the water entirely is also a safe terminal condition.  Otherwise
+     * <p>Landing out of water is also a safe terminal condition. Briefly cresting above the
+     * surface while airborne is still part of the same refill. Otherwise
      * the rescue remains authoritative until the eyes are breathable and the
      * server-synchronised air value reaches the player's current maximum.  Using
      * {@code maxAirSupply} keeps the rule correct for bodies whose maximum is
@@ -82,9 +83,10 @@ public final class SurvivalDecisions {
      */
     public static boolean breathRecoveryRequired(boolean bodyInWater,
                                                  boolean headUnderWater,
+                                                 boolean grounded,
                                                  int airSupply,
                                                  int maxAirSupply) {
-        if (!bodyInWater && !headUnderWater) return false;
+        if (!bodyInWater && !headUnderWater && grounded) return false;
         return headUnderWater || airSupply < maxAirSupply;
     }
 }

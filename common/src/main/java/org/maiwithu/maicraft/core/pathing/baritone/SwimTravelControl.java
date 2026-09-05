@@ -1,27 +1,36 @@
 package org.maiwithu.maicraft.core.pathing.baritone;
 
+import org.maiwithu.maicraft.core.pathing.util.SwimAirBudget;
+
 /** Physical swim phases shared by the live route controller and its deterministic regressions. */
-final class SwimTravelControl {
+public final class SwimTravelControl {
     enum Phase { OFF, DIVING, CRUISING, SURFACING, REFILL }
 
     private static final double DEPTH_DEADBAND = 0.12;
+    final SwimAirBudget airBudget = new SwimAirBudget();
     private Phase phase = Phase.OFF;
     private double targetY;
     private double feetY;
 
-    void update(boolean inWater, boolean swimming, boolean eyesWet, double feetY,
+    void update(boolean inWater, boolean onGround, boolean swimming, boolean eyesWet, double feetY,
                 double eyeHeight, double waterSurface, double routeY, boolean deepRoute,
                 boolean approachingShore, int air, int maxAir, int ascentReserve) {
         this.feetY = feetY;
-        if (!inWater) {
+        if (!inWater && onGround) {
             phase = Phase.OFF;
+            return;
+        }
+        if (!inWater) {
+            // An upward stroke can briefly lift the whole bounding box out of water. That is
+            // still the same recovery episode, not a landing or permission to dive again.
+            if (phase != Phase.OFF) phase = air < maxAir ? Phase.REFILL : Phase.OFF;
             return;
         }
         if (phase == Phase.SURFACING) {
             if (!eyesWet) phase = air < maxAir ? Phase.REFILL : Phase.OFF;
         } else if (phase == Phase.REFILL) {
-            if (eyesWet) phase = Phase.SURFACING;
-            else if (air >= maxAir || !deepRoute) phase = Phase.OFF;
+            if (air >= maxAir) phase = Phase.OFF;
+            else if (eyesWet) phase = Phase.SURFACING;
         } else if (phase != Phase.OFF
                 && (air <= ascentReserve || !deepRoute || approachingShore)) {
             phase = Phase.SURFACING;
@@ -56,14 +65,33 @@ final class SwimTravelControl {
     }
 
     boolean active() { return phase != Phase.OFF; }
-    boolean surfacing() { return phase == Phase.SURFACING; }
+    boolean recovering() { return phase == Phase.SURFACING || phase == Phase.REFILL; }
     boolean sprinting() { return phase == Phase.DIVING || phase == Phase.CRUISING; }
     Phase phase() { return phase; }
-    void reset() { phase = Phase.OFF; }
+    /** Structural path moves release depth tracking, but cannot erase unfinished air recovery. */
+    void releaseRoute(boolean inWater, boolean onGround, int air, int maxAir) {
+        if ((!inWater && onGround) || air >= maxAir || !recovering()) phase = Phase.OFF;
+    }
 
-    void inheritFrom(SwimTravelControl previous) {
-        phase = previous.phase;
-        targetY = previous.targetY;
-        feetY = previous.feetY;
+    /** All route segments for one physical body share recovery; a respawn/world change does not. */
+    public static final class BodyState {
+        private Object body;
+        private Object world;
+        private SwimTravelControl control;
+
+        public SwimTravelControl bind(Object body, Object world) {
+            if (control == null || this.body != body || this.world != world) {
+                this.body = body;
+                this.world = world;
+                control = new SwimTravelControl();
+            }
+            return control;
+        }
+
+        public void clear() {
+            body = null;
+            world = null;
+            control = null;
+        }
     }
 }

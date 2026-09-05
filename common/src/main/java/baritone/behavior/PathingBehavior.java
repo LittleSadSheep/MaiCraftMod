@@ -44,6 +44,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
+import org.maiwithu.maicraft.core.pathing.baritone.SwimTravelControl;
 
 public final class PathingBehavior extends Behavior implements IPathingBehavior, Helper {
 
@@ -70,6 +71,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private CompletableFuture<PathCalculationResult> pendingCalculation;
     private BlockPos calculationStart;
     private BlockPos failedPlanAheadStart;
+    private final SwimTravelControl.BodyState swimBodyState = new SwimTravelControl.BodyState();
 
     private boolean lastAutoJump;
 
@@ -111,6 +113,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     @Override
     public void onTick(TickEvent event) {
         if (event.getType() == TickEvent.Type.OUT) {
+            swimBodyState.clear();
             secretInternalSegmentCancel();
             baritone.getPathingControlManager().cancelEverything();
             return;
@@ -314,6 +317,11 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     @Override
     public PathExecutor getNext() {
         return next;
+    }
+
+    /** Physical air recovery survives replans and plan-ahead segment construction. */
+    public SwimTravelControl swimTravelControl() {
+        return swimBodyState.bind(ctx.player(), ctx.world());
     }
 
     @Override

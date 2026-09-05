@@ -88,7 +88,7 @@ public class PathExecutor implements IPathExecutor, Helper {
         this.ctx = behavior.ctx;
         this.path = path;
         this.pathPosition = 0;
-        this.waterTravel = new SubmergedWaterTravelPolicy(ctx, path);
+        this.waterTravel = new SubmergedWaterTravelPolicy(ctx, path, behavior.swimTravelControl());
     }
 
     /**
@@ -666,7 +666,6 @@ public class PathExecutor implements IPathExecutor, Helper {
             ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
             ret.costEstimateIndex = costEstimateIndex;
             ret.ticksOnCurrent = ticksOnCurrent;
-            ret.waterTravel.inheritFrom(waterTravel);
             return ret;
         }).orElseGet(this::cutIfTooLong); // dont actually call cutIfTooLong every tick if we won't actually use it, use a method reference
     }
@@ -688,7 +687,6 @@ public class PathExecutor implements IPathExecutor, Helper {
                 ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
             }
             ret.ticksOnCurrent = ticksOnCurrent;
-            ret.waterTravel.inheritFrom(waterTravel);
             return ret;
         }
         return this;

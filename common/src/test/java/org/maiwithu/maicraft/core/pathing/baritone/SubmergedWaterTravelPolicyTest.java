@@ -31,6 +31,8 @@ public final class SubmergedWaterTravelPolicyTest {
                         BuiltInRegistries.FLUID.wrapAsHolder(Fluids.FLOWING_LAVA))));
         diveWaitsForSwimmingPose();
         reserveSurfacesUntilAirRefills();
+        airborneDryTicksCannotEndRefill();
+        segmentsShareRecoveryButBodiesDoNot();
         shorelineReleasesTheSwimPhase();
         surfaceGeometryMatchesBothRouteConventions();
         System.out.println("SubmergedWaterTravelPolicyTest: passed");
@@ -51,11 +53,8 @@ public final class SubmergedWaterTravelPolicyTest {
         update(control, true, true, 63.0, 0.4, true, false, 230);
         check(control.phase() == SwimTravelControl.Phase.CRUISING,
                 "three seconds submerged must not interrupt a swim with ample ascent air");
-        SwimTravelControl spliced = new SwimTravelControl();
-        spliced.inheritFrom(control);
-        check(spliced.phase() == SwimTravelControl.Phase.CRUISING && spliced.verticalIntent() == 0,
-                "path splicing discarded the active swim phase");
-        control.update(true, true, true, 50.1, 0.4, 64, 50, true, false, 300, 300, 135);
+        control.update(true, false, true, true, 50.1, 0.4, 64, 50, true, false,
+                300, 300, SwimAirBudget.requiredAirForAscent(13.5, 1));
         check(control.verticalIntent() == 0,
                 "an underwater route must retain its intended depth instead of rising past its goal");
     }
@@ -87,8 +86,61 @@ public final class SubmergedWaterTravelPolicyTest {
         update(control, true, true, 63.0, 0.4, true, true, 279);
         check(control.phase() == SwimTravelControl.Phase.SURFACING,
                 "begin rising before the route leaves deep water");
-        control.update(false, false, false, 64, 1.62, 64, 63, false, true, 280, 300, 20);
+        control.update(false, true, false, false, 64, 1.62, 64, 63, false, true,
+                280, 300, SwimAirBudget.requiredAirForAscent(0, 1));
         check(!control.active(), "walking onto land must release swim controls immediately");
+    }
+
+    private static void airborneDryTicksCannotEndRefill() {
+        SwimTravelControl control = new SwimTravelControl();
+        update(control, true, true, 63, 0.4, true, false, 150);
+        update(control, true, true, 63, 0.4, true, false, 60);
+        control.update(false, false, false, false, 64.05, 1.62, 64, 63,
+                true, false, 78, 300, SwimAirBudget.requiredAirForAscent(0, 1));
+        check(control.phase() == SwimTravelControl.Phase.REFILL && !control.sprinting(),
+                "an airborne dry tick above the water must retain the refill episode");
+        update(control, false, false, 63.7, 1.62, true, false, 105);
+        check(control.phase() == SwimTravelControl.Phase.REFILL && control.verticalIntent() > 0,
+                "returning to the water at air 105 must not restart a dive");
+        update(control, false, true, 62.3, 1.62, true, false, 104);
+        check(control.phase() == SwimTravelControl.Phase.SURFACING && !control.sprinting(),
+                "a wave covering the eyes during refill must request another rise");
+        control.update(false, false, false, false, 64.05, 1.62, 64, 63,
+                false, true, 120, 300, SwimAirBudget.requiredAirForAscent(0, 1));
+        check(control.phase() == SwimTravelControl.Phase.REFILL,
+                "a temporary missing deep-water route must not stand in for a physical landing");
+        control.releaseRoute(false, false, 130, 300);
+        check(control.phase() == SwimTravelControl.Phase.REFILL,
+                "a structural or replacement segment must retain unfinished refill");
+        control.update(false, true, false, false, 64, 1.62, 64, 63,
+                false, true, 150, 300, SwimAirBudget.requiredAirForAscent(0, 1));
+        check(!control.active(), "a real dry grounded landing must release refill");
+    }
+
+    private static void segmentsShareRecoveryButBodiesDoNot() {
+        SwimTravelControl.BodyState bodyState = new SwimTravelControl.BodyState();
+        Object body = new Object();
+        Object world = new Object();
+        SwimTravelControl currentSegment = bodyState.bind(body, world);
+        currentSegment.airBudget.observe(1, 200, true);
+        currentSegment.airBudget.observe(2, 198, true);
+        update(currentSegment, true, true, 63, 0.4, true, false, 150);
+        SwimTravelControl plannedAhead = bodyState.bind(body, world);
+        check(plannedAhead == currentSegment, "planning ahead must not copy a stale swim phase");
+        check(plannedAhead.airBudget.airPerTick() == 2,
+                "segment replacement forgot the body's observed oxygen consumption");
+        update(currentSegment, true, true, 63, 0.4, true, false, 60);
+        update(currentSegment, false, false, 63.7, 1.62, true, false, 78);
+        check(plannedAhead.phase() == SwimTravelControl.Phase.REFILL,
+                "the next segment missed air recovery that began after its construction");
+        SwimTravelControl replanned = bodyState.bind(body, world);
+        update(replanned, false, false, 63.7, 1.62, true, false, 105);
+        check(replanned.phase() == SwimTravelControl.Phase.REFILL,
+                "a replacement first segment must not start a new dive before full refill");
+        check(!bodyState.bind(new Object(), world).active(), "respawn inherited another body's recovery");
+        check(!bodyState.bind(body, new Object()).active(), "world replacement inherited stale recovery");
+        bodyState.clear();
+        check(!bodyState.bind(body, world).active(), "world teardown retained swim recovery");
     }
 
     private static void surfaceGeometryMatchesBothRouteConventions() {
@@ -118,7 +170,8 @@ public final class SubmergedWaterTravelPolicyTest {
     private static void update(SwimTravelControl control, boolean swimming, boolean eyesWet,
                                double feetY, double eyeHeight, boolean deep, boolean shore, int air) {
         int reserve = SwimAirBudget.requiredAirForAscent(Math.max(0, 64 - feetY - eyeHeight), 1);
-        control.update(true, swimming, eyesWet, feetY, eyeHeight, 64, 63, deep, shore, air, 300, reserve);
+        control.update(true, false, swimming, eyesWet, feetY, eyeHeight, 64, 63,
+                deep, shore, air, 300, reserve);
     }
 
     private static void check(boolean condition, String message) {

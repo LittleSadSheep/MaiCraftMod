@@ -80,7 +80,7 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         } else {
             triggered = episodeActive
                     ? SurvivalDecisions.breathRecoveryRequired(
-                            companion.isInWater(), headUnderWater,
+                            companion.isInWater(), headUnderWater, companion.onGround(),
                             companion.getAirSupply(), companion.getMaxAirSupply())
                     : !EmbeddedBaritoneRuntime.managesSwimAir(companion)
                             && SurvivalDecisions.breathTriggered(headUnderWater, companion.getAirSupply(),

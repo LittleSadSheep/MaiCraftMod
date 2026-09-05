@@ -4,7 +4,8 @@ package org.maiwithu.maicraft.core.pathing.util;
 /** Air needed to reach a known open surface, in the same air units used by the player. */
 public final class SwimAirBudget {
     private static final double ASCENT_BLOCKS_PER_TICK = 0.12D;
-    private static final int REACTION_TICKS = 20;
+    /** Keep three seconds beyond the ascent estimate for an obstruction, hit or delayed input. */
+    private static final int REACTION_TICKS = 60;
     private long lastTick = Long.MIN_VALUE;
     private int lastAir;
     private double airPerTick = 1.0D;
