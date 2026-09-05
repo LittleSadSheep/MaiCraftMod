@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.pathing.calc;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -9,8 +10,7 @@ import java.util.function.Supplier;
 
 /**
  * The shared worker pool that runs A* searches off the Minecraft client thread. Each
- * {@link org.maiwithu.maicraft.core.pathing.execute.PlayerNav} submits its search here and polls the returned
- * future each tick.
+ * embedded Baritone navigation submits its search here and polls the returned future each tick.
  *
  * <h2>Sizing: bounded, CPU-friendly</h2>
  * A* is pure CPU work. MaiCraft controls one local body, so more than two workers only adds heat and
@@ -35,7 +35,7 @@ public final class PathPlannerPool {
 
     private static ThreadPoolExecutor createPool() {
         ThreadPoolExecutor pool = new ThreadPoolExecutor(
-                POOL_SIZE, POOL_SIZE, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(),
+                POOL_SIZE, POOL_SIZE, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(32),
                 runnable -> {
                     Thread thread = new Thread(runnable, "maicraft-path-" + COUNTER.incrementAndGet());
                     thread.setDaemon(true);
@@ -48,7 +48,12 @@ public final class PathPlannerPool {
 
     /** Run {@code task} on the planner pool; the result lands in the returned future. */
     public static <T> CompletableFuture<T> submit(Supplier<T> task) {
-        return CompletableFuture.supplyAsync(task, POOL);
+        try {
+            return CompletableFuture.supplyAsync(task, POOL);
+        } catch (RejectedExecutionException rejected) {
+            // Never fall back to CallerRunsPolicy: the submitter is the Minecraft client thread.
+            return CompletableFuture.failedFuture(rejected);
+        }
     }
 
     // ==================== 性能探针用的池快照(见 NavProfiler)====================

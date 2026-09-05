@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
 import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 
 /**
@@ -27,7 +28,7 @@ import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
  *
  * <p>{@link #submit} must be called from the Minecraft client thread because constructing a
  * thread-safe {@code BlockStateInterface} copies the loaded chunk view there. The expensive A*
- * itself runs on Baritone's daemon executor with the ordinary upstream primary/failure budgets.</p>
+ * itself runs on the bounded path worker pool with the ordinary primary/failure budgets.</p>
  */
 public final class EmbeddedBaritoneTerrainProbe {
 
@@ -66,29 +67,18 @@ public final class EmbeddedBaritoneTerrainProbe {
         long failureTimeout = Baritone.settings().failureTimeoutMS.value;
         ProbeFuture future = new ProbeFuture(search);
 
-        try {
-            Baritone.getExecutor().execute(() -> {
-                try {
-                    if (future.isCancelled()) {
-                        search.cancel();
-                        return;
-                    }
-                    PathCalculationResult calculation = search.calculate(
-                            primaryTimeout, failureTimeout);
-                    if (future.isCancelled()) {
-                        return;
-                    }
-                    TerrainBill bill = calculation.getPath()
-                            .map(path -> TerrainBill.planned(path, context.bsi))
-                            .orElseGet(TerrainBill::new);
-                    future.complete(new Result(calculation, bill));
-                } catch (RuntimeException failure) {
-                    future.completeExceptionally(failure);
-                }
-            });
-        } catch (RuntimeException rejected) {
-            future.completeExceptionally(rejected);
-        }
+        PathPlannerPool.submit(() -> {
+            if (future.isCancelled()) return null;
+            PathCalculationResult calculation = search.calculate(primaryTimeout, failureTimeout);
+            if (future.isCancelled()) return null;
+            TerrainBill bill = calculation.getPath()
+                    .map(path -> TerrainBill.planned(path, context.bsi))
+                    .orElseGet(TerrainBill::new);
+            return new Result(calculation, bill);
+        }).whenComplete((result, failure) -> {
+            if (failure != null) future.completeExceptionally(failure);
+            else if (result != null) future.complete(result);
+        });
         return future;
     }
 

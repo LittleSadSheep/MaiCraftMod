@@ -645,93 +645,19 @@ public final class PlayerNav {
         return failReason;
     }
 
-    /** FAILED 的结构化归因,任务层恢复梯按枚举分支。 */
-    public FailureType failType() {
-        if (EmbeddedBaritoneNavigator.enabled()) return embedded.failType();
-        return failType;
-    }
-
-    /**
-     * 距上次真实推进(移动完成/重定位/活跃挖掘)的 tick 数——进度租约
-     * 型任务 deadline 的 liveness 信号。规划间隙(无执行段)读 0:预算内
-     * 的搜索本身就是进度,只是不是走路那种。
-     */
-    public int stallTicks() {
-        if (EmbeddedBaritoneNavigator.enabled()) return embedded.stallTicks();
-        PathExecutor current = core.getCurrent();
-        return current == null ? 0 : current.ticksSinceProgress();
-    }
-
-    /**
-     * True only while a concrete execution segment has made recent physical progress. Unlike
-     * {@link #stallTicks()}, an absent segment is not treated as progress; callers can therefore
-     * renew a task lease without accidentally keeping an idle navigator alive forever.
-     */
+    public Status tick() { return navigator.tick(); }
+    public boolean isSafeToCancel() { return navigator.isSafeToCancel(); }
+    public BlockPos pathStart() { return navigator.pathStart(); }
+    public TerrainBill ledger() { return navigator.ledger(); }
+    public String failReason() { return navigator.failReason(); }
+    public FailureType failType() { return navigator.failType(); }
+    public int stallTicks() { return navigator.stallTicks(); }
     public boolean hasRecentPhysicalProgress(int graceTicks) {
-        if (EmbeddedBaritoneNavigator.enabled()) {
-            return embedded.hasRecentPhysicalProgress(graceTicks);
-        }
-        PathExecutor current = core.getCurrent();
-        return current != null && current.ticksSinceProgress() <= Math.max(0, graceTicks);
+        return navigator.hasRecentPhysicalProgress(graceTicks);
     }
-
-    /** 搜索结论分布摘要,转发自内核(排障日志用)。 */
-    public String outcomeSummary() {
-        if (EmbeddedBaritoneNavigator.enabled()) return embedded.outcomeSummary();
-        return core.outcomeSummary();
-    }
-
-    /**
-     * 规划器在飞且当前无路段在执行——身体站着等异步搜索返回。任务层用它
-     * 冻结任务 deadline:deadline 度量的是身体干活的刻,搜索的墙钟延迟不该
-     * 折算成任务超时(tick 越快于真实时间,这笔折算越离谱,无上限 tick 的
-     * 测试服上足以在首次搜索返回前烧光整个预算)。
-     */
-    public boolean planningInFlight() {
-        if (EmbeddedBaritoneNavigator.enabled()) return embedded.planningInFlight();
-        return core.hasInProgressSearch() && core.getCurrent() == null;
-    }
-
-    /** 停止导航:取消在飞搜索、丢段、清键停挖,并把身体停稳、松潜行。 */
-    public void stop() {
-        if (EmbeddedBaritoneNavigator.enabled()) {
-            embedded.stop();
-            return;
-        }
-        stopped = true;
-        searchSatisfied = false;
-        if (terraformProbe != null) {
-            terraformProbe.cancel();
-            terraformProbe = null;
-        }
-        core.forceCancel();
-        InputDriver.halt(player);
-    }
-
-    /**
-     * 本 tick 原地站住:清移动输入、松潜行,但目标、当前路径段与在飞搜索全部保留,
-     * 下一次 {@link #tick()} 从当前状态续跑——不产生任何冷启动搜索。身体必须静止的
-     * 就地作业(如站桩挖掘)期间逐 tick 调用;与 {@link #stop()}(终局释放)互不替代。
-     */
-    public void pause() {
-        if (EmbeddedBaritoneNavigator.enabled()) {
-            embedded.pause();
-            return;
-        }
-        InputDriver.halt(player);
-    }
-
-    /**
-     * Pause movement and hand any in-flight navigation mutation to another first-person action,
-     * retaining the current route/search state for a warm resume.
-     *
-     * @return true only when the actor's native slot and this tick's mutation lease are both ready
-     */
-    public boolean yieldForExternalAction() {
-        if (EmbeddedBaritoneNavigator.enabled()) {
-            return embedded.yieldForExternalAction();
-        }
-        InputDriver.halt(player);
-        return core.yieldNativeActions();
-    }
+    public String outcomeSummary() { return navigator.outcomeSummary(); }
+    public boolean planningInFlight() { return navigator.planningInFlight(); }
+    public void stop() { navigator.stop(); }
+    public void pause() { navigator.pause(); }
+    public boolean yieldForExternalAction() { return navigator.yieldForExternalAction(); }
 }
