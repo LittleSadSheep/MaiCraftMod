@@ -37,8 +37,6 @@ import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CarpetBlock;
-import net.minecraft.world.level.block.DoorBlock;
-import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -78,6 +76,11 @@ public class MovementTraverse extends Movement {
     public static double cost(CalculationContext context, int x, int y, int z, int destX, int destZ) {
         BlockState pb0 = context.get(destX, y + 1, destZ);
         BlockState pb1 = context.get(destX, y, destZ);
+        int dx = destX - x, dz = destZ - z;
+        if (MovementHelper.openDoorBlocksDirection(pb0, dx, dz)
+                || MovementHelper.openDoorBlocksDirection(pb1, dx, dz)
+                || MovementHelper.openDoorBlocksDirection(context.get(x, y, z), dx, dz)
+                || MovementHelper.openDoorBlocksDirection(context.get(x, y + 1, z), dx, dz)) return COST_INF;
         BlockState destOn = context.get(destX, y - 1, destZ);
         BlockState srcDown = context.get(x, y - 1, z);
         Block srcDownBlock = srcDown.getBlock();
@@ -224,28 +227,6 @@ public class MovementTraverse extends Movement {
         //sneak may have been set to true in the PREPPING state while mining an adjacent block, but we still want it to be true if the player is about to go on magma
         state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && MovementHelper.steppingOnBlocks(ctx).stream().anyMatch(block -> ctx.world().getBlockState(block).is(Blocks.MAGMA_BLOCK)));
 
-        if (pb0.getBlock() instanceof DoorBlock || pb1.getBlock() instanceof DoorBlock) {
-            boolean notPassable = pb0.getBlock() instanceof DoorBlock && !MovementHelper.isDoorPassable(ctx, src, dest) || pb1.getBlock() instanceof DoorBlock && !MovementHelper.isDoorPassable(ctx, dest, src);
-            boolean canOpen = !(Blocks.IRON_DOOR.equals(pb0.getBlock()) || Blocks.IRON_DOOR.equals(pb1.getBlock()));
-
-            if (notPassable && canOpen) {
-                return state.setTarget(new MovementState.MovementTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.calculateBlockCenter(ctx.world(), positionsToBreak[0]), ctx.playerRotations()), true))
-                        .setInput(Input.CLICK_RIGHT, true);
-            }
-        }
-
-        if (pb0.getBlock() instanceof FenceGateBlock || pb1.getBlock() instanceof FenceGateBlock) {
-            BlockPos blocked = !MovementHelper.isGatePassable(ctx, positionsToBreak[0], src.above()) ? positionsToBreak[0]
-                    : !MovementHelper.isGatePassable(ctx, positionsToBreak[1], src) ? positionsToBreak[1]
-                    : null;
-            if (blocked != null) {
-                Optional<Rotation> rotation = RotationUtils.reachable(ctx, blocked);
-                if (rotation.isPresent()) {
-                    return state.setTarget(new MovementState.MovementTarget(rotation.get(), true)).setInput(Input.CLICK_RIGHT, true);
-                }
-            }
-        }
-
         boolean isTheBridgeBlockThere = MovementHelper.canWalkOn(ctx, positionToPlace) || ladder || MovementHelper.canUseFrostWalker(ctx, positionToPlace);
         BlockPos feet = ctx.playerFeet();
         var currentExecutor = baritone.getPathingBehavior().getCurrent();
@@ -259,7 +240,8 @@ public class MovementTraverse extends Movement {
             // while the real first-person body briefly occupies the efficient layer below it;
             // EmbeddedBaritoneRuntime independently supplies the proven vertical intent.
             MovementHelper.moveTowards(ctx, state, positionsToBreak[0]);
-            return state.setInput(Input.SPRINT, true)
+            return state.setInput(Input.MOVE_FORWARD, executor.submergedWaterMovingForward())
+                    .setInput(Input.SPRINT, executor.submergedWaterSprinting())
                     .setInput(Input.SNEAK, false);
         }
         if (feet.getY() != dest.getY() && !ladder) {

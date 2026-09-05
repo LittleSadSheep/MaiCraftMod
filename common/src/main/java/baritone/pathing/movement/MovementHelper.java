@@ -157,11 +157,10 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (Baritone.settings().blocksToAvoid.value.contains(block)) {
             return NO;
         }
-        if (block instanceof DoorBlock || block instanceof FenceGateBlock) {
-            // TODO this assumes that all doors in all mods are openable
-            if (block == Blocks.IRON_DOOR) {
-                return NO;
-            }
+        if (block instanceof DoorBlock door) {
+            return door.type().canOpenByHand() || state.getValue(DoorBlock.OPEN) ? YES : NO;
+        }
+        if (block instanceof FenceGateBlock) {
             return YES;
         }
         if (block instanceof CarpetBlock) {
@@ -351,23 +350,34 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean isHorizontalBlockPassable(BlockPos blockPos, BlockState blockState, BlockPos playerPos, BooleanProperty propertyOpen) {
-        if (playerPos.equals(blockPos)) {
-            return false;
-        }
-
         Direction.Axis facing = blockState.getValue(HorizontalDirectionalBlock.FACING).getAxis();
         boolean open = blockState.getValue(propertyOpen);
+        return doorPassableAlong(facing, open,
+                blockPos.getX() - playerPos.getX(), blockPos.getZ() - playerPos.getZ());
+    }
 
-        Direction.Axis playerFacing;
-        if (playerPos.north().equals(blockPos) || playerPos.south().equals(blockPos)) {
-            playerFacing = Direction.Axis.Z;
-        } else if (playerPos.east().equals(blockPos) || playerPos.west().equals(blockPos)) {
-            playerFacing = Direction.Axis.X;
-        } else {
-            return true;
+    /** Whether the door panel is parallel to this movement. Door halves share this geometry. */
+    static boolean doorPassableAlong(Direction.Axis facing, boolean open, int dx, int dz) {
+        if (dx == 0 && dz == 0) return true;
+        Direction.Axis panelNormal = open
+                ? (facing == Direction.Axis.X ? Direction.Axis.Z : Direction.Axis.X)
+                : facing;
+        return panelNormal == Direction.Axis.X ? dx == 0 : dz == 0;
+    }
+
+    static boolean passageNeedsInteraction(BlockState state, BlockPos from, BlockPos to) {
+        if (state.getBlock() instanceof DoorBlock) {
+            return !doorPassableAlong(state.getValue(DoorBlock.FACING).getAxis(),
+                    state.getValue(DoorBlock.OPEN),
+                    to.getX() - from.getX(), to.getZ() - from.getZ());
         }
+        return state.getBlock() instanceof FenceGateBlock && !state.getValue(FenceGateBlock.OPEN);
+    }
 
-        return (facing == playerFacing) == open;
+    static boolean openDoorBlocksDirection(BlockState state, int dx, int dz) {
+        return state.getBlock() instanceof DoorBlock door && !door.type().canOpenByHand()
+                && state.getValue(DoorBlock.OPEN)
+                && !doorPassableAlong(state.getValue(DoorBlock.FACING).getAxis(), true, dx, dz);
     }
 
     static boolean avoidWalkingInto(BlockState state) {

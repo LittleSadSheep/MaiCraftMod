@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.entity.InputDriver;
  * double ticking and a second {@code LocalPlayer.input} owner.</p>
  */
 public final class EmbeddedBaritoneRuntime {
+    private static long lastSwimDriveTick = Long.MIN_VALUE;
     private static final EmbeddedBaritoneActionBridge ACTIONS =
             new EmbeddedBaritoneActionBridge();
     private static IBaritone backend;
@@ -55,6 +56,33 @@ public final class EmbeddedBaritoneRuntime {
             boolean sprintAllowed) {}
 
     private EmbeddedBaritoneRuntime() {}
+
+    /** Optional live diagnostics, without bootstrapping an otherwise idle Baritone instance. */
+    public static java.util.Map<String, Object> diagnosticState() {
+        requireClientThread();
+        var result = new java.util.LinkedHashMap<String, Object>();
+        result.put("has_owner", owner != null);
+        result.put("pending_owner", pendingStart != null);
+        result.put("last_drive_tick", lastSwimDriveTick);
+        if (backend == null) return result;
+        var pathing = (PathingBehavior) backend.getPathingBehavior();
+        result.put("planning", pathing.getInProgress().isPresent());
+        result.put("safe_to_cancel", pathing.isSafeToCancel());
+        var executor = pathing.getCurrent();
+        if (executor == null) return result;
+        int index = executor.getPosition();
+        var movements = executor.getPath().movements();
+        result.put("path_index", index);
+        result.put("path_length", movements.size());
+        if (index >= 0 && index < movements.size()) {
+            var movement = movements.get(index);
+            result.put("movement", movement.getClass().getSimpleName());
+            result.put("from", movement.getSrc().toShortString());
+            result.put("to", movement.getDest().toShortString());
+        }
+        result.put("input", backend.getInputOverrideHandler().isInputForcedDown(baritone.api.utils.input.Input.MOVE_FORWARD));
+        return result;
+    }
 
     static void startOrUpdate(
             EmbeddedBaritoneNavigator navigator,
@@ -167,6 +195,7 @@ public final class EmbeddedBaritoneRuntime {
         boolean drive = current.requiresOrphanContinuation()
                 || (schedulerAllowsBodyWork && requested);
         if (!drive) {
+            lastSwimDriveTick = Long.MIN_VALUE;
             baritone.getInputOverrideHandler().clearAllKeys();
             ((LookBehavior) baritone.getLookBehavior()).clearTarget();
             ACTIONS.suspend(context, current,
@@ -187,6 +216,7 @@ public final class EmbeddedBaritoneRuntime {
         }
 
         try {
+            lastSwimDriveTick = context.level().getGameTime();
             tickingContext = context;
             BiFunction<EventState, TickEvent.Type, TickEvent> events =
                     TickEvent.createNextProvider();
@@ -208,6 +238,7 @@ public final class EmbeddedBaritoneRuntime {
 
     static void suspend(EmbeddedBaritoneNavigator navigator) {
         if (owner != navigator || backend == null) return;
+        lastSwimDriveTick = Long.MIN_VALUE;
         backend.getInputOverrideHandler().clearAllKeys();
         ((LookBehavior) backend.getLookBehavior()).clearTarget();
         ACTIONS.suspend(currentContext(), navigator, "navigation suspended");
@@ -219,6 +250,7 @@ public final class EmbeddedBaritoneRuntime {
      */
     public static void suspendActivePhysicalOutputs() {
         requireClientThread();
+        lastSwimDriveTick = Long.MIN_VALUE;
         if (backend == null || owner == null) return;
         backend.getInputOverrideHandler().clearAllKeys();
         ((LookBehavior) backend.getLookBehavior()).clearTarget();
@@ -288,14 +320,22 @@ public final class EmbeddedBaritoneRuntime {
                 && backend.getPathingBehavior().getCurrent() != null;
     }
 
-    static boolean hasActiveAction(EmbeddedBaritoneNavigator navigator) {
-        return owner == navigator && ACTIONS.hasActiveWorldAction(navigator);
-    }
-
     static boolean planningInFlight(EmbeddedBaritoneNavigator navigator) {
         return owner == navigator && backend != null
                 && backend.getPathingBehavior().getCurrent() == null
                 && backend.getPathingBehavior().getInProgress().isPresent();
+    }
+
+    /** The driven water route owns normal ascent/refill; the reflex covers idle or suspended bodies. */
+    public static boolean managesSwimAir(LocalPlayer player) {
+        if (player == null || backend == null || owner == null
+                || backend.getPlayerContext().player() != player
+                || lastSwimDriveTick == Long.MIN_VALUE
+                || player.level().getGameTime() - lastSwimDriveTick > 1
+                || !org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(
+                        Minecraft.getInstance().screen)) return false;
+        return backend.getPathingBehavior().getCurrent() instanceof PathExecutor executor
+                && executor.submergedWaterManagesAir();
     }
 
     static boolean isSafeToCancel(EmbeddedBaritoneNavigator navigator) {
@@ -354,11 +394,11 @@ public final class EmbeddedBaritoneRuntime {
         boolean sneak = input.isInputForcedDown(baritone.api.utils.input.Input.SNEAK);
         boolean sprint = input.isInputForcedDown(baritone.api.utils.input.Input.SPRINT)
                 || (executor != null && executor.isSprinting());
-        // 水中疾跑:Baritone 只在脚下有实心"桥面"时才请求疾跑,深水过河会退化成
-        // 无疾跑的水面扑腾(~2 格/秒)。水中按住前进就强制疾跑——原版疾跑爬泳约
-        // 5.3 格/秒,与潜泳相当,且身体贴着水面路径格,不破坏移动的完成判定。
+        // The swim phase owns sprinting as well as depth: rising/refilling needs an upright body.
         if (player.isInWater()) {
-            if (forward > 0.5F) sprint = true;
+            if (executor != null && executor.submergedWaterTravelActive()) {
+                sprint = executor.submergedWaterSprinting() && forward > 0.5F;
+            } else if (forward > 0.5F) sprint = true;
             if (executor != null) {
                 int vertical = executor.waterVerticalIntent();
                 if (vertical < 0) {
@@ -429,6 +469,7 @@ public final class EmbeddedBaritoneRuntime {
         // Re-issued every tick even when unchanged: the look lease must stay fresh or the
         // camera would freeze on whatever the last precision aim left it on.
         float walkPitch = player.onGround()
+                && !(executor != null && executor.submergedWaterTravelActive())
                 ? WALK_PITCH_DEGREES
                 : Mth.clamp(pitch, -90.0f, 90.0f);
         InputDriver.look(player, courseYaw, walkPitch);

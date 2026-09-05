@@ -38,6 +38,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 public class MovementDiagonal extends Movement {
@@ -110,6 +111,12 @@ public class MovementDiagonal extends Movement {
     }
 
     public static void cost(CalculationContext context, int x, int y, int z, int destX, int destZ, MutableMoveResult res) {
+        // A door panel always intersects a diagonal sweep, whichever OPEN state it has. Route
+        // through the doorway with cardinal movements instead of repeatedly toggling the door.
+        if (context.get(x, y, z).getBlock() instanceof DoorBlock
+                || context.get(x, y + 1, z).getBlock() instanceof DoorBlock
+                || context.get(destX, y, destZ).getBlock() instanceof DoorBlock
+                || context.get(destX, y + 1, destZ).getBlock() instanceof DoorBlock) return;
         if (!MovementHelper.canWalkThrough(context, destX, y + 1, destZ)) {
             return;
         }
@@ -185,6 +192,9 @@ public class MovementDiagonal extends Movement {
         }
         BlockState pb0 = context.get(x, y, destZ);
         BlockState pb2 = context.get(destX, y, z);
+        if (pb0.getBlock() instanceof DoorBlock || pb2.getBlock() instanceof DoorBlock
+                || context.get(x, y + 1, destZ).getBlock() instanceof DoorBlock
+                || context.get(destX, y + 1, z).getBlock() instanceof DoorBlock) return;
         if (ascend) {
             boolean ATop = MovementHelper.canWalkThrough(context, x, y + 2, destZ);
             boolean AMid = MovementHelper.canWalkThrough(context, x, y + 1, destZ);
@@ -275,7 +285,8 @@ public class MovementDiagonal extends Movement {
                 return state.setStatus(MovementStatus.SUCCESS);
             }
             MovementHelper.moveTowards(ctx, state, dest);
-            return state.setInput(Input.SPRINT, true)
+            return state.setInput(Input.MOVE_FORWARD, executor.submergedWaterMovingForward())
+                    .setInput(Input.SPRINT, executor.submergedWaterSprinting())
                     .setInput(Input.SNEAK, false);
         }
         if (ctx.playerFeet().equals(dest)) {

@@ -182,17 +182,21 @@ public abstract class Movement implements IMovement, MovementHelper {
         if (state.getStatus() == MovementStatus.WAITING) {
             return true;
         }
+        // A door can obstruct both entry and exit, including a step up/down through its upper
+        // half. Handle passage interaction for every movement before considering excavation.
+        if (!preparePassage(state, src) || !preparePassage(state, src.above())) return false;
         boolean somethingInTheWay = false;
         for (BetterBlockPos blockPos : positionsToBreak) {
-            // The policy can change after planning; execution must always honour the live view.
-            if (EmbeddedBaritonePolicy.protects(blockPos)) {
-                state.setStatus(MovementStatus.UNREACHABLE);
-                return true;
-            }
+            if (!preparePassage(state, blockPos)) return false;
             if (!ctx.world().getEntitiesOfClass(FallingBlockEntity.class, new AABB(0, 0, 0, 1, 1.1, 1).move(blockPos)).isEmpty() && Baritone.settings().pauseMiningForFallingBlocks.value) {
                 return false;
             }
             if (!MovementHelper.canWalkThrough(ctx, blockPos)) { // can't break air, so don't try
+                // Protection forbids mutation, not walking through air or using a doorway.
+                if (EmbeddedBaritonePolicy.protects(blockPos)) {
+                    state.setStatus(MovementStatus.UNREACHABLE);
+                    return true;
+                }
                 somethingInTheWay = true;
                 MovementHelper.switchToBestToolFor(ctx, BlockStateInterface.get(ctx, blockPos));
                 Optional<Rotation> reachable = RotationUtils.reachable(ctx, blockPos, ctx.playerController().getBlockReachDistance());
@@ -224,6 +228,33 @@ public abstract class Movement implements IMovement, MovementHelper {
             return true;
         }
         return true;
+    }
+
+    private boolean preparePassage(MovementState state, BlockPos pos) {
+        var blockState = BlockStateInterface.get(ctx, pos);
+        if (!MovementHelper.passageNeedsInteraction(blockState, src, dest)) return true;
+        if (blockState.getBlock() instanceof net.minecraft.world.level.block.DoorBlock door) {
+            if (MovementHelper.passageNeedsInteraction(
+                    blockState.cycle(net.minecraft.world.level.block.DoorBlock.OPEN), src, dest)) {
+                state.setStatus(MovementStatus.UNREACHABLE);
+                return false;
+            }
+            if (!door.type().canOpenByHand()) {
+                // A closed iron door in front may be mined with permission. An open iron door
+                // blocking the side of the route cannot be rotated by a right-click.
+                if (!blockState.getValue(net.minecraft.world.level.block.DoorBlock.OPEN)
+                        && !pos.equals(src) && !pos.equals(src.above())) return true;
+                state.setStatus(MovementStatus.UNREACHABLE);
+                return false;
+            }
+        }
+        Optional<Rotation> rotation = RotationUtils.reachable(ctx, pos);
+        if (rotation.isPresent()) {
+            state.setTarget(new MovementState.MovementTarget(rotation.get(), true));
+            state.setInput(Input.SNEAK, false);
+            state.setInput(Input.CLICK_RIGHT, ctx.isLookingAt(pos));
+        }
+        return false;
     }
 
     @Override
@@ -258,7 +289,7 @@ public abstract class Movement implements IMovement, MovementHelper {
      */
     public MovementState updateState(MovementState state) {
         if (!prepared(state)) {
-            return state.setStatus(MovementStatus.PREPPING);
+            return state.getStatus().isComplete() ? state : state.setStatus(MovementStatus.PREPPING);
         } else if (state.getStatus() == MovementStatus.PREPPING) {
             state.setStatus(MovementStatus.WAITING);
         }

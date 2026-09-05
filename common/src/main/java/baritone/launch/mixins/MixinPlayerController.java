@@ -39,6 +39,10 @@ public abstract class MixinPlayerController implements IPlayerControllerMP {
     @Override
     public abstract BlockPos getCurrentBlock();
 
+    @Accessor("destroyProgress")
+    @Override
+    public abstract float getDestroyProgress();
+
     @Invoker("ensureHasSentCarriedItem")
     @Override
     public abstract void callSyncCurrentPlayItem();

@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
-import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
@@ -47,9 +47,7 @@ public final class EmbeddedBaritoneNavigator {
     private GoalCompiler.CompiledFingerprint compiledFingerprint;
     private NavGoal goal;
     private BlockPos plannedCenter;
-    private BlockPos lastFeet;
-    private long lastNativeActionProgressGameTime = Long.MIN_VALUE;
-    private int ticksSincePhysicalProgress;
+    private final NavigationProgress progress = new NavigationProgress();
     private boolean started;
     private boolean driveRequested;
     private boolean arrivedLatched;
@@ -72,8 +70,7 @@ public final class EmbeddedBaritoneNavigator {
             Supplier<GoalCompiler.Compiled> compiledSupplier,
             BooleanSupplier reached,
             PlayerNav.ContextProvider contextProvider,
-            boolean sprintAllowed,
-            boolean revalidateGoalEachTick) {
+            boolean sprintAllowed) {
         this.player = player;
         this.compiledSupplier = compiledSupplier;
         this.reached = reached;
@@ -107,12 +104,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     void recordConfirmedNativeAction() {
-        lastNativeActionProgressGameTime = player.level().getGameTime();
-        ticksSincePhysicalProgress = 0;
-    }
-
-    public static boolean enabled() {
-        return true;
+        progress.confirm(player.level().getGameTime());
     }
 
     public EmbeddedBaritoneNavigator withTerrainProbe() {
@@ -348,17 +340,11 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     private void updatePhysicalProgress() {
-        BlockPos now = feet();
-        if (lastFeet == null || !lastFeet.equals(now)) {
-            lastFeet = now.immutable();
-            ticksSincePhysicalProgress = 0;
-        } else if (EmbeddedBaritoneRuntime.hasConcretePath(this)) {
-            ticksSincePhysicalProgress++;
-        }
+        progress.observe(player.getX(), player.getY(), player.getZ(), player.level().getGameTime());
     }
 
     private BlockPos feet() {
-        return PathExecutor.playerFeet(player);
+        return PlayerNav.playerFeet(player);
     }
 
     void onPathEvent(PathEvent event) {
@@ -440,24 +426,11 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public int stallTicks() {
-        if (EmbeddedBaritoneRuntime.hasActiveAction(this)) return 0;
-        if (!EmbeddedBaritoneRuntime.hasConcretePath(this)) return 0;
-        return Math.min(ticksSincePhysicalProgress, nativeActionProgressAge());
+        return progress.stalledTicks(player.level().getGameTime());
     }
 
     public boolean hasRecentPhysicalProgress(int graceTicks) {
-        int grace = Math.max(0, graceTicks);
-        return EmbeddedBaritoneRuntime.hasActiveAction(this)
-                || (EmbeddedBaritoneRuntime.hasConcretePath(this)
-                        && ticksSincePhysicalProgress <= grace)
-                || nativeActionProgressAge() <= grace;
-    }
-
-    private int nativeActionProgressAge() {
-        if (lastNativeActionProgressGameTime == Long.MIN_VALUE) return Integer.MAX_VALUE;
-        long age = player.level().getGameTime() - lastNativeActionProgressGameTime;
-        if (age < 0L || age > Integer.MAX_VALUE) return Integer.MAX_VALUE;
-        return (int) age;
+        return progress.recent(player.level().getGameTime(), graceTicks);
     }
 
     public String outcomeSummary() {
