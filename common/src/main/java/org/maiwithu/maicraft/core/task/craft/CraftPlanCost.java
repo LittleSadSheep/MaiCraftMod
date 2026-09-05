@@ -21,6 +21,7 @@ public record CraftPlanCost(
     public enum Surface {
         READY,
         PREPARABLE,
+        SEARCHING,
         PREREQUISITE,
         UNAVAILABLE,
         UNSUPPORTED
@@ -44,7 +45,8 @@ public record CraftPlanCost(
     /** True when the Mod can start this recipe without asking for another semantic decision. */
     public boolean dispatchable() {
         return missingMaterials == 0
-                && (surface == Surface.READY || surface == Surface.PREPARABLE);
+                && (surface == Surface.READY || surface == Surface.PREPARABLE
+                        || surface == Surface.SEARCHING);
     }
 
     /**
@@ -53,10 +55,10 @@ public record CraftPlanCost(
      */
     private int tier() {
         if (missingMaterials == 0 && surface == Surface.READY) return 0;
-        if (missingMaterials == 0 && surface == Surface.PREPARABLE) return 1;
+        if (missingMaterials == 0 && (surface == Surface.PREPARABLE || surface == Surface.SEARCHING)) return 1;
         if (missingMaterials == 0 && surface == Surface.PREREQUISITE) return 2;
         if (missingMaterials > 0 && surface == Surface.READY) return 3;
-        if (missingMaterials > 0 && surface == Surface.PREPARABLE) return 4;
+        if (missingMaterials > 0 && (surface == Surface.PREPARABLE || surface == Surface.SEARCHING)) return 4;
         if (missingMaterials > 0 && surface == Surface.PREREQUISITE) return 5;
         if (missingMaterials == 0 && surface == Surface.UNAVAILABLE) return 6;
         if (missingMaterials > 0 && surface == Surface.UNAVAILABLE) return 7;

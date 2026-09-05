@@ -152,6 +152,7 @@ final class AbilityAdapter {
             } finally {
                 TargetIndex.unregister(player.clientLevel, bedBlocks);
             }
+            if (!beds.complete()) return IntentAction.Pending.INSTANCE;
             if (!beds.hits().isEmpty()) {
                 if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
                     return waitForNightDecision(goal);
@@ -902,6 +903,8 @@ final class AbilityAdapter {
 }
 
 sealed interface IntentAction {
+    /** Evidence is still being scanned; adapt the same goal again on the next client tick. */
+    enum Pending implements IntentAction { INSTANCE }
     /** Read-only semantic evidence, already bounded by its producer. */
     record Report(org.maiwithu.maicraft.task.TaskResult result,
                   Goal.WorldPosition verifiedPosition) implements IntentAction {}

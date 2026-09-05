@@ -60,14 +60,13 @@ public class Baritone implements IBaritone {
     private static final ThreadPoolExecutor threadPool;
 
     static {
-        // Keep upstream's direct hand-off semantics: stale calculations never accumulate in an
-        // unbounded queue behind the two long-lived cache workers. The only integration-specific
-        // change is daemon workers, so Baritone cannot keep the client alive after Ctrl+C.
+        // Cache packing has long-lived workers, so it must not share the bounded A* pool.
+        // PathingBehavior and terrain probes dispatch CPU work to PathPlannerPool instead.
         AtomicInteger sequence = new AtomicInteger();
         threadPool = new ThreadPoolExecutor(4, Integer.MAX_VALUE, 60L, TimeUnit.SECONDS,
                 new SynchronousQueue<>(), runnable -> {
                     Thread thread = new Thread(runnable,
-                            "maicraft-path-" + sequence.incrementAndGet());
+                            "maicraft-baritone-worker-" + sequence.incrementAndGet());
                     thread.setDaemon(true);
                     return thread;
                 });

@@ -32,6 +32,7 @@ public final class ClientRuntime {
     private static EmbeddedMcpService mcp;
     private static String lastMcpError;
     private static boolean bodyPresent;
+    private static String tickStage = "not_started";
 
     private ClientRuntime() {}
 
@@ -63,9 +64,11 @@ public final class ClientRuntime {
      */
     public static void tick(Minecraft minecraft) {
         requireClientThread(minecraft);
+        tickStage = "observing";
         PathCaches.clientTick(minecraft.player);
         Optional<LocalPlayerContext> opened = ACTOR.beginTick();
         if (opened.isEmpty()) {
+            tickStage = "no_body";
             if (bodyPresent) {
                 bodyGone();
             }
@@ -85,11 +88,13 @@ public final class ClientRuntime {
             // portal handoff, but never advances timers or task logic without control authority.
             CompanionTickDispatcher.observeBody(context.player());
             if (GameplayAttentionMonitor.blocksAutomation(context.player())) {
+                tickStage = "attention_required";
                 intents.tickPersistence(minecraft, context.player());
                 GameplayAttentionMonitor.afterSemanticBind(context.player());
                 return;
             }
             if (!context.permitsNativeActions()) {
+                tickStage = context.body().automationOwnsControls() ? "control_transition" : "player_control";
                 if (!context.body().automationOwnsControls()) {
                     intents.controlUnavailable(
                             context.player(), ACTOR.controlUnavailableReason());
@@ -102,11 +107,13 @@ public final class ClientRuntime {
             // ownerless native action.  Keep the semantic task intact and resume next tick; trying
             // to advance a new child now would violate the one-native-mutation boundary.
             if (!context.mutationAvailable()) {
+                tickStage = "settling_native_action";
                 intents.tickPersistence(minecraft, context.player());
                 GameplayAttentionMonitor.afterSemanticBind(context.player());
                 return;
             }
             intents.controlAvailable();
+            tickStage = "running_tasks";
             CompanionTickDispatcher.tick(context.player());
             // A semantic action may have consumed this tick's one native-mutation slot. Do not
             // let the embedded path executor append a break/place gesture after it.
@@ -141,6 +148,9 @@ public final class ClientRuntime {
     public static ClientActorBoundary actor() {
         return ACTOR;
     }
+
+    public static String lastTickStage() { return tickStage; }
+
 
     /** Advance only the leased first-person camera at render cadence. */
     public static void renderFrame(Minecraft minecraft) {

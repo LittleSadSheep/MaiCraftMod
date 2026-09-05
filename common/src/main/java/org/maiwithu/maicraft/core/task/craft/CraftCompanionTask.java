@@ -42,7 +42,7 @@ import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
-import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
 import org.maiwithu.maicraft.entity.InputDriver;
@@ -233,6 +233,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         }
         CraftingWorkstationCoordinator.Directive directive = workstation.next(player, station);
         return switch (directive.action()) {
+            case SEARCHING -> TaskState.RUNNING;
             case READY, MOVE_TO_EXISTING -> prepareExistingStation(directive);
             case PLACE_CARRIED -> {
                 BlockPos site = directive.position();
@@ -312,7 +313,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
 
     private TaskState startAlternativeStationStance(
             CraftingWorkstationCoordinator.Directive directive) {
-        rejectedStationStances.add(PathExecutor.playerFeet(player).asLong());
+        rejectedStationStances.add(PlayerNav.playerFeet(player).asLong());
         BlockPos stance = FirstPersonInteractionTargeting.nearestVisibleStand(
                 player, directive.position(), 4.5D, rejectedStationStances);
         if (stance == null) {
@@ -535,11 +536,11 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private boolean currentStanceRejected() {
-        return rejectedStationStances.contains(PathExecutor.playerFeet(player).asLong());
+        return rejectedStationStances.contains(PlayerNav.playerFeet(player).asLong());
     }
 
     private void rejectCurrentStance() {
-        rejectedStationStances.add(PathExecutor.playerFeet(player).asLong());
+        rejectedStationStances.add(PlayerNav.playerFeet(player).asLong());
         stationAimPoint = null;
         stationAimRequestedRevision = Long.MIN_VALUE;
     }

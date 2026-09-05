@@ -194,6 +194,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         } catch (PayloadTooLargeException exception) {
             sendStatusSafely(exchange, 413, exception.getMessage());
         } catch (Exception exception) {
+            org.maiwithu.maicraft.core.Constants.LOG.debug("[maicraft-mcp] Transport request failed", exception);
             sendStatusSafely(exchange, 500, "Internal MCP transport error");
         }
     }
@@ -265,6 +266,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         } catch (IllegalArgumentException exception) {
             response = error(id, -32602, exception.getMessage());
         } catch (Exception exception) {
+            org.maiwithu.maicraft.core.Constants.LOG.error("[maicraft-mcp] RPC dispatch failed: {}", method, exception);
             response = error(id, -32603, "Internal error");
         }
         sendJson(exchange, 200, response, session);
@@ -382,6 +384,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
             Throwable failure = unwrap(exception);
             if (failure instanceof SemanticContractException violation) {
                 return semanticContractError(violation, requestKey);
+            }
+            if (!(failure instanceof IllegalArgumentException || failure instanceof IllegalStateException)) {
+                org.maiwithu.maicraft.core.Constants.LOG.error("[maicraft-mcp] Runtime call failed: {}", name, failure);
             }
             boolean outcomeKnown = !mutatesSemanticState(name, arguments);
             return toolError("runtime_error", message(failure), true,

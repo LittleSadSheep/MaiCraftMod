@@ -89,6 +89,13 @@ final class CompanionBrain {
         return current.record();
     }
 
+    String controllingTask() {
+        return holder == null ? "none" : holder == currentProxy ? "current_task"
+                : holder == syncProxy ? "synchronous_task" : holder.getClass().getName();
+    }
+
+
+
     List<TaskRecord> list() {
         List<TaskRecord> records = new ArrayList<>(2);
         if (sync.record() != null) {

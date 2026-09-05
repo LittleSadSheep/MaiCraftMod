@@ -63,7 +63,7 @@ public final class InputDriver {
         if (context == null) return;
         resetFor(context);
         sneaking = on;
-        if (on) sprinting = false;
+        sprinting = permitsSprint(sprinting, on, player.isInWater());
         flush(context);
     }
 
@@ -76,6 +76,17 @@ public final class InputDriver {
     }
 
     public static void halt(LocalPlayer player) {
+        // MCP cancellation runs on the client thread but may arrive between actor ticks. Stopping
+        // an existing input lease needs no native-action slot; requiring one made ordinary
+        // cancellation throw and falsely report that its movement effects were uncertain.
+        var boundary = ClientRuntime.actor();
+        if (boundary.activeContext().isEmpty()) {
+            if (net.minecraft.client.Minecraft.getInstance().player == player
+                    && boundary.body().automationOwnsControls()) {
+                boundary.body().releaseAll();
+            }
+            return;
+        }
         LocalPlayerContext context = context(player);
         if (context == null) return;
         resetFor(context);
@@ -101,8 +112,13 @@ public final class InputDriver {
         strafe = Mth.clamp(requestedStrafe, -1.0f, 1.0f);
         jumping = requestedJump;
         sneaking = requestedSneak;
-        sprinting = requestedSprint && !requestedSneak;
+        sprinting = permitsSprint(requestedSprint, requestedSneak, player.isInWater());
         flush(context);
+    }
+
+    /** In water, Shift descends; it must not cancel the sprinting swimming pose. */
+    static boolean permitsSprint(boolean requested, boolean sneak, boolean inWater) {
+        return requested && (!sneak || inWater);
     }
 
     /**

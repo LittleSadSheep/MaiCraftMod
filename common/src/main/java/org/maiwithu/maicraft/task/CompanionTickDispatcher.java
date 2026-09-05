@@ -82,6 +82,13 @@ public final class CompanionTickDispatcher {
         return brain == null ? null : brain.current();
     }
 
+    public static String controllingTask() {
+        requireClientThread();
+        return brain == null ? "none" : brain.controllingTask();
+    }
+
+
+
     /** Both occupied slots, sync first and current second. */
     public static List<TaskRecord> list() {
         requireClientThread();

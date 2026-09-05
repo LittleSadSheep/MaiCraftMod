@@ -55,6 +55,10 @@ public final class LocalToolDispatcher {
             }
             tool.onGameCall(call.id(), call.args(), player, result -> deliver(call.id(), result));
         } catch (RuntimeException exception) {
+            if (!(exception instanceof IllegalArgumentException)) {
+                org.maiwithu.maicraft.core.Constants.LOG.error(
+                        "[maicraft-tool] {} failed (call {})", call.toolName(), call.id(), exception);
+            }
             deliver(call.id(), TaskResult.fail("capability failed: " + safeMessage(exception)).toJson());
         }
     }

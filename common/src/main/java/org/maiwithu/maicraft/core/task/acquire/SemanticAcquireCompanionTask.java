@@ -377,6 +377,9 @@ public final class SemanticAcquireCompanionTask
         CraftingWorkstationCoordinator.PlanningSnapshot workstation =
                 CraftOps.requiresWorkstationForAny(need.itemIds, player)
                         ? CraftingWorkstationCoordinator.inspect(player) : null;
+        if (workstation != null && workstation.surface() == CraftPlanCost.Surface.SEARCHING) {
+            return TaskState.RUNNING;
+        }
         Set<String> excludedRecipes = new LinkedHashSet<>(need.lineageRecipes);
         excludedRecipes.addAll(need.rejectedRecipes);
         // A commitment prevents speculative recursion from hopping between incomplete routes. It

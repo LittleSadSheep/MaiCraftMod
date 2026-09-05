@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.core.tools.perception;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView;
-import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 import net.minecraft.client.player.LocalPlayer;
 import com.google.gson.JsonObject;
@@ -100,7 +100,7 @@ public final class LookAroundTool implements MaiCraftTool {
     private static String render(LocalPlayer self, int radius) {
         BlockGetter view = LoadedOnlyView.of(self.level());
         LoadedOnlyView loaded = view instanceof LoadedOnlyView v ? v : null;
-        BlockPos center = PathExecutor.playerFeet(self);
+        BlockPos center = PlayerNav.playerFeet(self);
         int cx = center.getX();
         int cy = center.getY();
         int cz = center.getZ();

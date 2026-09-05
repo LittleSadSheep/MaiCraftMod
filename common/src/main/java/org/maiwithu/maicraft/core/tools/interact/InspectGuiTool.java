@@ -22,8 +22,9 @@ public final class InspectGuiTool implements MaiCraftTool {
     @Override
     public String description() {
         return "Look at the GUI you currently have open. After interact_at right-clicks a chest / "
-                + "furnace / machine it shows that container; with NO container open it shows YOUR own "
-                + "inventory menu (which includes a 2x2 crafting grid), so you can craft small recipes "
+                + "furnace / machine it shows that container; with NO container open it shows a read-only "
+                + "inventory snapshot (including a 2x2 crafting grid), clearly marked as closed. Craft "
+                + "opens the real GUI before operating, so you can craft small recipes "
                 + "without a table. Lists every slot — index, side, item + count, [output] mark — plus "
                 + "the cursor and any machine progress. If a crafting grid is open it draws the grid as "
                 + "a 2D map of slot numbers. Use it to understand a modded machine, choose transfer "

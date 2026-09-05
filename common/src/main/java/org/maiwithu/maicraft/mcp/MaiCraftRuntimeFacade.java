@@ -139,7 +139,18 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         intents.bindForRequest(minecraft, player);
         String view = arguments.get("view").getAsString();
         return switch (view) {
-            case "situation" -> situation(player);
+            case "situation" -> {
+                JsonObject situation = situation(player);
+                if ("maicraft:navigation".equals(nullableString(arguments, "focus"))) {
+                    var gson = new com.google.gson.Gson();
+                    situation.add("actor", gson.toJsonTree(ClientRuntime.actor().diagnosticState()));
+                    situation.addProperty("tick_stage", ClientRuntime.lastTickStage());
+                    situation.addProperty("controlling_task", CompanionTickDispatcher.controllingTask());
+                    situation.add("navigation", gson.toJsonTree(
+                            org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.diagnosticState()));
+                }
+                yield situation;
+            }
             case "surroundings" -> surroundings(player);
             case "abilities" -> abilities(nullableString(arguments, "focus"));
             case "tasks" -> {
@@ -274,6 +285,10 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("max_health", player.getMaxHealth());
         result.addProperty("food", player.getFoodData().getFoodLevel());
         result.addProperty("air", player.getAirSupply());
+        result.addProperty("in_water", player.isInWater());
+        result.addProperty("underwater", player.isEyeInFluid(FluidTags.WATER));
+        result.addProperty("swimming", player.isSwimming());
+        result.addProperty("sprinting", player.isSprinting());
         WorldTimeSemantics.Phase timePhase = WorldTimeSemantics.phase(player.level());
         result.addProperty("day", WorldTimeSemantics.isDaytime(player.level()));
         result.addProperty("is_daytime", WorldTimeSemantics.isDaytime(player.level()));

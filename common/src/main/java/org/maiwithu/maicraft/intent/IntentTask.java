@@ -149,6 +149,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState begin(IntentAction action) {
+        if (action == IntentAction.Pending.INSTANCE) return TaskState.RUNNING;
         if (action instanceof IntentAction.Report report) {
             if (!report.result().success()) return failStep(TaskState.FAILED, report.result());
             if (report.verifiedPosition() != null) {

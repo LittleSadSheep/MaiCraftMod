@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.core.pathing.moves.ActionCosts;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 import org.maiwithu.maicraft.core.act.BlockDigger;
-import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.NavProfiler;
@@ -999,7 +999,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         heartbeatTimer = QUERY_HEARTBEAT_TICKS;
         queryCooldown = QUERY_MIN_GAP_TICKS;
         TargetIndex.Result res = TargetIndex.query(sl, feet(), r.targets,
-                MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET);
+                MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET, unworkable);
         lastQueryComplete = res.complete();
         if (lastQueryComplete) {
             coldMapFails = 0;   // 图齐了，之前那几次无路不再算数
@@ -1205,7 +1205,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     /** Use the same authoritative feet cell as path planning/execution. */
     private BlockPos feet() {
-        return PathExecutor.playerFeet(player);
+        return PlayerNav.playerFeet(player);
     }
 
     /** Stop the nav AND clear the branch-mode flag (extends the base's nav release). */

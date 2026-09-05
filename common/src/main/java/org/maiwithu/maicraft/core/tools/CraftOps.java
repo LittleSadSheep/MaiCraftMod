@@ -97,7 +97,8 @@ public final class CraftOps {
         }
 
         boolean surfacePreparable() {
-            return cost.surface() == CraftPlanCost.Surface.PREPARABLE;
+            return cost.surface() == CraftPlanCost.Surface.PREPARABLE
+                    || cost.surface() == CraftPlanCost.Surface.SEARCHING;
         }
 
         boolean executableNow() {

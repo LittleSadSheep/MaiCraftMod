@@ -47,6 +47,7 @@ final class SemanticBuildSupplyCompanionTask
     private String failureCode;
     private Map<String, Object> finalBuildData = Map.of();
     private BuildTraversabilityVerifier.Result traversabilityResult;
+    private BuildTraversabilityVerifier.Verification traversabilityScan;
     private BuildTaskRecord activePlan;
     private SemanticBuildMaterialBinding.Proposal materialProposal;
     private final SemanticMaterialSupplyCoordinator supply =
@@ -78,7 +79,6 @@ final class SemanticBuildSupplyCompanionTask
                 .map(BlockPos::immutable).distinct().forEach(plannedMutationCells::add);
         if (allMatched()) {
             prepared = true;
-            if (verifyTraversability()) succeed();
             return;
         }
         try {
@@ -102,6 +102,7 @@ final class SemanticBuildSupplyCompanionTask
     protected TaskState onTick() {
         if (supply.active()) return tickSupply();
         if (activeChild != null) return tickChild();
+        if (traversabilityScan != null) return finishMatched();
         // Let the first-person child finish its receipt checks and scaffold cleanup before the
         // outer coordinator performs aggregate route verification.
         if (allMatched()) return finishMatched();
@@ -363,22 +364,25 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private TaskState finishMatched() {
-        return verifyTraversability() ? TaskState.SUCCESS : TaskState.FAILED;
-    }
-
-    private boolean verifyTraversability() {
         if (activePlan.traversabilityContract() == null) {
             retainVerifiedPosition();
-            return true;
+            return TaskState.SUCCESS;
         }
-        traversabilityResult = BuildTraversabilityVerifier.verify(
-                player.clientLevel, activePlan.traversabilityContract());
+        if (traversabilityScan == null) {
+            traversabilityScan = BuildTraversabilityVerifier.begin(
+                    player.clientLevel, activePlan.traversabilityContract());
+        }
+        traversabilityResult = traversabilityScan.tick();
+        if (traversabilityResult == null) {
+            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+            return TaskState.RUNNING;
+        }
         if (traversabilityResult.valid()) {
             retainVerifiedPosition();
-            return true;
+            return TaskState.SUCCESS;
         }
         stopWith(traversabilityResult.code(), traversabilityResult.message(), FailureType.NO_PATH);
-        return false;
+        return TaskState.FAILED;
     }
 
     private void retainVerifiedPosition() {

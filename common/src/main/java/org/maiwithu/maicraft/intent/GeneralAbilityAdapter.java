@@ -466,6 +466,7 @@ public final class GeneralAbilityAdapter {
         } finally {
             TargetIndex.unregister(level, List.of(block));
         }
+        if (!query.complete()) return IntentAction.Pending.INSTANCE;
         List<BlockPos> hits = query.hits().stream()
                 .filter(pos -> squaredHorizontal(pos, center) <= (long) radius * radius)
                 .filter(pos -> level.getBlockState(pos).is(block))

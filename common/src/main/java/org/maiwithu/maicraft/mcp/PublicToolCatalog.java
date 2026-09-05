@@ -84,7 +84,7 @@ final class PublicToolCatalog {
                               "type":"object",
                               "properties": {
                                 "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks","machines","machine_menu"],"default":"situation","description":"landmarks returns durable semantic labels. machines lists cached session observations; inspect_machine gives fresh geometry. machine_menu returns structured current native menu evidence and a receipt for exact entry transfers. Stored absolute coordinates remain private to MaiCraft."},
-                                "focus":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
+                                "focus":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$","description":"Ability filter for abilities; maicraft:navigation with situation includes optional live control and path diagnostics."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For view=tasks, return one full task when present; otherwise list concise recent task summaries."},
                                  "after_cursor":{"type":"integer","minimum":0,"default":0},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"For view=attention, wait up to this duration for a newer event without polling raw game state."},

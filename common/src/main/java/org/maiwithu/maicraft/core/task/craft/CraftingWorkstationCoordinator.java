@@ -22,7 +22,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CraftingTableBlock;
-import org.maiwithu.maicraft.core.pathing.execute.PathExecutor;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.build.FirstPersonPlacementProbe;
@@ -39,8 +39,7 @@ import org.maiwithu.maicraft.core.task.build.FirstPersonPlacementProbe;
  */
 public final class CraftingWorkstationCoordinator {
     private static final double REACH = 4.5D;
-    private static final int SEARCH_HORIZONTAL = 32;
-    private static final int SEARCH_VERTICAL = 16;
+    private static final int INDEX_SECTIONS_PER_QUERY = 32;
     private static final int PLACEMENT_RADIUS = 5;
 
     /**
@@ -58,6 +57,7 @@ public final class CraftingWorkstationCoordinator {
         READY,
         MOVE_TO_EXISTING,
         PLACE_CARRIED,
+        SEARCHING,
         UNAVAILABLE
     }
 
@@ -153,12 +153,13 @@ public final class CraftingWorkstationCoordinator {
     public static PlanningSnapshot inspect(LocalPlayer player) {
         List<Block> tables = craftingTableBlocks();
         TargetIndex.register(player.clientLevel, tables);
-        BlockPos station;
+        TableSearch search;
         try {
-            station = nearestIndexedTable(player, Set.of(), tables);
+            search = nearestIndexedTable(player, Set.of(), tables);
         } finally {
             TargetIndex.unregister(player.clientLevel, tables);
         }
+        BlockPos station = search.station();
         if (station != null && withinReach(player, station)) {
             return new PlanningSnapshot(
                     CraftPlanCost.Surface.READY, station,
@@ -172,14 +173,19 @@ public final class CraftingWorkstationCoordinator {
                         CraftPlanCost.Surface.PREPARABLE, null,
                         "a carried crafting table can be placed on a verified nearby support");
             }
-            return new PlanningSnapshot(
-                    CraftPlanCost.Surface.UNAVAILABLE, null,
-                    "a crafting table is carried, but no verified nearby placement cell is available");
         }
         if (station != null) {
             return new PlanningSnapshot(
                     CraftPlanCost.Surface.PREPARABLE, station,
                     "an existing loaded crafting table can be approached");
+        }
+        if (!search.complete()) {
+            return new PlanningSnapshot(CraftPlanCost.Surface.SEARCHING, null,
+                    "the loaded crafting-table search is continuing on the next client tick");
+        }
+        if (carried != null) {
+            return new PlanningSnapshot(CraftPlanCost.Surface.UNAVAILABLE, null,
+                    "a crafting table is carried, but no nearby placement cell or loaded table is available");
         }
         BlockPos site = placementSite(player, Set.of(), Blocks.CRAFTING_TABLE);
         if (site == null) {
@@ -200,7 +206,8 @@ public final class CraftingWorkstationCoordinator {
         BlockPos preferred = usableTable(player, preferredStation)
                         && !rejectedStations.contains(preferredStation.asLong())
                 ? preferredStation : null;
-        BlockPos existing = nearestIndexedTable(player, rejectedStations, indexedTables);
+        TableSearch search = nearestIndexedTable(player, rejectedStations, indexedTables);
+        BlockPos existing = search.station();
 
         // Conserve a carried table when a live station is already at hand.
         if (preferred != null && withinReach(player, preferred)) {
@@ -235,6 +242,10 @@ public final class CraftingWorkstationCoordinator {
             return new Directive(Action.MOVE_TO_EXISTING, existing, existingBlock,
                     "approach the nearest loaded crafting table");
         }
+        if (!search.complete()) {
+            return new Directive(Action.SEARCHING, null,
+                    "continue the bounded loaded crafting-table search on the next tick");
+        }
         if (carried == null) {
             return new Directive(Action.UNAVAILABLE, null,
                     "no loaded or carried crafting table is available; semantic acquisition must "
@@ -258,7 +269,7 @@ public final class CraftingWorkstationCoordinator {
                     rejectedSites.add(directive.position().asLong());
                 }
             }
-            case UNAVAILABLE -> { }
+            case SEARCHING, UNAVAILABLE -> { }
         }
     }
 
@@ -289,24 +300,19 @@ public final class CraftingWorkstationCoordinator {
         return null;
     }
 
-    private static BlockPos nearestIndexedTable(
+    private record TableSearch(BlockPos station, boolean complete) {}
+
+    private static TableSearch nearestIndexedTable(
             LocalPlayer player, Set<Long> rejected, List<Block> tables) {
         BlockPos origin = player.blockPosition();
         int wantedCandidates = rejected.size() + 1;
-        TargetIndex.Result result;
-        do {
-            result = TargetIndex.query(
-                    player.clientLevel, origin, tables,
-                    wantedCandidates, 2, 384);
-        } while (!result.complete());
+        TargetIndex.Result result = TargetIndex.query(
+                player.clientLevel, origin, tables,
+                wantedCandidates, 2, INDEX_SECTIONS_PER_QUERY);
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (BlockPos candidate : result.hits()) {
-            int dx = Math.abs(candidate.getX() - origin.getX());
-            int dy = Math.abs(candidate.getY() - origin.getY());
-            int dz = Math.abs(candidate.getZ() - origin.getZ());
-            if (dx > SEARCH_HORIZONTAL || dy > SEARCH_VERTICAL || dz > SEARCH_HORIZONTAL
-                    || rejected.contains(candidate.asLong())
+            if (rejected.contains(candidate.asLong())
                     || !usableTable(player, candidate)) {
                 continue;
             }
@@ -316,7 +322,7 @@ public final class CraftingWorkstationCoordinator {
                 best = candidate.immutable();
             }
         }
-        return best;
+        return new TableSearch(best, result.complete());
     }
 
     private static List<Block> craftingTableBlocks() {
@@ -343,7 +349,7 @@ public final class CraftingWorkstationCoordinator {
 
     private static BlockPos placementSite(
             LocalPlayer player, Set<Long> rejected, Block workstation) {
-        BlockPos origin = PathExecutor.playerFeet(player);
+        BlockPos origin = PlayerNav.playerFeet(player);
         for (int radius = 1; radius <= PLACEMENT_RADIUS; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
@@ -370,7 +376,7 @@ public final class CraftingWorkstationCoordinator {
 
     private static boolean validSite(
             LocalPlayer player, BlockPos cell, Block workstation) {
-        BlockPos feet = PathExecutor.playerFeet(player);
+        BlockPos feet = PlayerNav.playerFeet(player);
         if (!player.level().isLoaded(cell)
                 || !player.level().getBlockState(cell).canBeReplaced()
                 || !player.level().getFluidState(cell).isEmpty()
