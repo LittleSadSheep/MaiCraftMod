@@ -63,188 +63,139 @@ public final class SubmergedWaterTravelPolicy {
             waitForAirRefill = false;
             return;
         }
-
-        if (waitForAirRefill) {
-            if (player.getAirSupply() < diveAirThreshold(player)) {
-                phase = Phase.OFF;
-                return;
-            }
-            waitForAirRefill = false;
+        BlockPos surface = flatWaterMove ? findWaterSurface(current.getSrc()) : null;
+        BlockPos bodySurface = findWaterSurface(BlockPos.containing(player.getEyePosition()));
+        breathingEscapeKnown = bodySurface != null && safeSurfaceColumn(bodySurface);
+        boolean deepRoute = surface != null && safeDeepMovement(current, surface.getY());
+        if (deepRoute) {
+            routeY = current.getSrc().getY();
+            waterSurface = surface.getY()
+                    + context.world().getFluidState(surface).getHeight(context.world(), surface);
         }
-
-        IMovement current = movements.get(pathPosition);
-        if (phase == Phase.OFF) {
-            int candidateSurfaceY = current.getSrc().getY();
-            double selectedRun = safeDeepRunDistance(movements, pathPosition, candidateSurfaceY);
-            if (selectedRun < MIN_EFFICIENT_RUN_BLOCKS
-                    || player.getAirSupply() < diveAirThreshold(player)) {
-                return;
-            }
-            surfaceY = candidateSurfaceY;
-            phase = player.isSwimming() || player.isUnderWater()
-                    ? Phase.CRUISING : Phase.DIVING;
-            return;
-        }
-
-        if (airIsLow(player)) {
-            phase = Phase.SURFACING;
-            waitForAirRefill = true;
-        } else if (phase != Phase.SURFACING
-                && safeDeepRunDistance(movements, pathPosition, surfaceY)
-                        <= SURFACE_RUNWAY_BLOCKS) {
-            // The current route itself proves where deep water ends. Rise on its final water
-            // runway so the following shore/step movement receives an ordinary standing body.
-            phase = Phase.SURFACING;
-        } else if (phase == Phase.DIVING
-                && (player.isSwimming() || player.isUnderWater())) {
-            phase = Phase.CRUISING;
-        }
-
-        if (phase == Phase.SURFACING
-                && !player.isEyeInFluid(FluidTags.WATER)
-                && player.getY() >= surfaceY) {
-            phase = Phase.OFF;
-        }
+        double rise = Math.max(0, waterSurface - player.getEyeY());
+        int reserve = SwimAirBudget.requiredAirForAscent(rise, airBudget.airPerTick());
+        // Only the distance physically needed to rise before land matters. No arbitrary minimum
+        // river length is required, and lookahead stops once enough water has been proved.
+        double speed = Math.max(0.15, player.getDeltaMovement().horizontalDistance());
+        double runway = rise / 0.12 * speed + player.getBbWidth();
+        boolean approachingShore = deepRoute && routeY >= surface.getY()
+                && safeDeepRunDistance(pathPosition, surface.getY(), runway + 1.0) <= runway;
+        control.update(player.isInWater(), player.isSwimming(), eyesWet, player.getY(),
+                player.getEyeHeight(), waterSurface, routeY, deepRoute, approachingShore,
+                player.getAirSupply(), player.getMaxAirSupply(), reserve);
+        if (control.active() && flatWaterMove) controlledMovement = current;
     }
 
-    /** Whether this exact current movement owns the temporary physical depth offset. */
     public boolean controls(int pathPosition, IMovement movement) {
-        return phase != Phase.OFF
-                && pathPosition >= 0
-                && pathPosition < path.movements().size()
-                && path.movements().get(pathPosition) == movement;
+        return control.active() && controlledMovement == movement;
     }
 
-    /**
-     * Surface-lattice movements complete by horizontal cell while cruising. During the rise phase
-     * the last water movement remains open until the real eyes and feet have reached the surface.
-     */
+    /** Permit the intentional depth offset while the same horizontal route corridor is owned. */
+    public BetterBlockPos routeFeet(BetterBlockPos physicalFeet) {
+        return controlledMovement == null || !control.active() ? physicalFeet
+                : new BetterBlockPos(physicalFeet.getX(), routeY, physicalFeet.getZ());
+    }
+
     public boolean movementReached(int pathPosition, IMovement movement) {
-        if (!controls(pathPosition, movement)) return false;
-        LocalPlayer player = context.player();
-        if (player == null
-                || Mth.floor(player.getX()) != movement.getDest().getX()
-                || Mth.floor(player.getZ()) != movement.getDest().getZ()) {
-            return false;
-        }
-        return phase != Phase.SURFACING
-                || (!player.isEyeInFluid(FluidTags.WATER) && player.getY() >= surfaceY);
+        if (!controls(pathPosition, movement) || !atDestination(movement)) return false;
+        return !control.surfacing() || !context.player().isEyeInFluid(FluidTags.WATER);
     }
 
-    public boolean active() {
-        return phase != Phase.OFF;
+    /** At a shoreline endpoint, rise instead of swimming past the selected movement. */
+    public boolean movingForward() {
+        return controlledMovement != null
+                && !(control.surfacing() && atDestination(controlledMovement));
     }
 
-    /** -1 descends, +1 rises, 0 holds the efficient near-surface swimming layer. */
-    public int verticalIntent() {
-        LocalPlayer player = context.player();
-        if (player == null || phase == Phase.OFF) return 0;
-        if (phase == Phase.SURFACING) return 1;
-        if (phase == Phase.DIVING) {
-            double diveTargetY = surfaceY + DIVE_TARGET_OFFSET;
-            if (player.getY() > diveTargetY + DEPTH_DEADBAND) return -1;
-            if (player.getY() < diveTargetY - DEPTH_DEADBAND) return 1;
-            return 0;
-        }
-        double targetY = surfaceY + CRUISE_TARGET_OFFSET;
-        if (player.getY() > targetY + DEPTH_DEADBAND) return -1;
-        if (player.getY() < targetY - DEPTH_DEADBAND) return 1;
-        return 0;
+    private boolean atDestination(IMovement movement) {
+        return Mth.floor(context.player().getX()) == movement.getDest().getX()
+                && Mth.floor(context.player().getZ()) == movement.getDest().getZ();
     }
 
-    /** Pitch paired with the same visible first-person camera curve used by ordinary travel. */
-    public float cameraPitch() {
-        if (phase == Phase.DIVING) return 28.0F;
-        if (phase == Phase.SURFACING) return -24.0F;
-        if (phase == Phase.CRUISING) {
-            LocalPlayer player = context.player();
-            if (player != null) {
-                double targetY = surfaceY + CRUISE_TARGET_OFFSET;
-                if (player.getY() > targetY + DEPTH_DEADBAND) return 8.0F;
-                if (player.getY() < targetY - DEPTH_DEADBAND) return -8.0F;
-            }
-        }
-        return 0.0F;
-    }
+    public boolean active() { return control.active() && controlledMovement != null; }
+    public boolean managesAir() { return active() && breathingEscapeKnown; }
+    public boolean sprinting() { return control.sprinting(); }
+    public int verticalIntent() { return control.verticalIntent(); }
+    public float cameraPitch() { return control.cameraPitch(); }
 
-    /** Preserve an in-flight swim phase when Baritone splices or trims the same route. */
     public void inheritFrom(SubmergedWaterTravelPolicy previous) {
         if (previous == null) return;
-        phase = previous.phase;
-        surfaceY = previous.surfaceY;
-        waitForAirRefill = previous.waitForAirRefill;
+        control.inheritFrom(previous.control);
+        routeY = previous.routeY;
+        waterSurface = previous.waterSurface;
     }
 
-    private double safeDeepRunDistance(
-            List<IMovement> movements, int start, int candidateSurfaceY) {
-        double distance = 0.0D;
-        for (int index = start; index < movements.size(); index++) {
-            IMovement movement = movements.get(index);
-            if (!safeDeepSurfaceMovement(movement, candidateSurfaceY)) break;
-            distance += Math.hypot(
-                    movement.getDirection().getX(), movement.getDirection().getZ());
+    private double safeDeepRunDistance(int start, int surfaceY, double enoughDistance) {
+        double distance = 0;
+        for (int index = start; index < path.movements().size(); index++) {
+            IMovement movement = path.movements().get(index);
+            if (!safeDeepMovement(movement, surfaceY)) break;
+            distance += index == start
+                    ? Math.hypot(context.player().getX() - movement.getDest().getX() - 0.5,
+                            context.player().getZ() - movement.getDest().getZ() - 0.5)
+                    : Math.hypot(movement.getDirection().getX(), movement.getDirection().getZ());
+            if (distance > enoughDistance) break;
         }
         return distance;
     }
 
-    private boolean safeDeepSurfaceMovement(IMovement movement, int candidateSurfaceY) {
-        if (!(movement instanceof MovementTraverse)
-                && !(movement instanceof MovementDiagonal)) {
-            return false;
-        }
+    private static boolean flatMovement(IMovement movement) {
+        return (movement instanceof MovementTraverse || movement instanceof MovementDiagonal)
+                && movement.getSrc().getY() == movement.getDest().getY();
+    }
+
+    private boolean safeDeepMovement(IMovement movement, int surfaceY) {
+        if (!flatMovement(movement)) return false;
         BlockPos src = movement.getSrc();
         BlockPos dest = movement.getDest();
-        if (src.getY() != candidateSurfaceY || dest.getY() != candidateSurfaceY) {
-            return false;
-        }
-        if (!safeSurfaceColumn(src) || !safeSurfaceColumn(dest)) return false;
+        if (!safeSurfaceColumn(new BlockPos(src.getX(), surfaceY, src.getZ()))
+                || !safeSurfaceColumn(new BlockPos(dest.getX(), surfaceY, dest.getZ()))) return false;
         if (movement instanceof MovementDiagonal) {
-            BlockPos cornerA = new BlockPos(src.getX(), candidateSurfaceY, dest.getZ());
-            BlockPos cornerB = new BlockPos(dest.getX(), candidateSurfaceY, src.getZ());
-            return safeSurfaceColumn(cornerA) && safeSurfaceColumn(cornerB);
+            return safeSurfaceColumn(new BlockPos(src.getX(), surfaceY, dest.getZ()))
+                    && safeSurfaceColumn(new BlockPos(dest.getX(), surfaceY, src.getZ()));
         }
         return true;
     }
 
-    /** Two water cells, an open escape surface, and no bubble/harm source in the dive layer. */
+    /** Accept both a water node and the air node above it, then locate its actual surface. */
+    private BlockPos findWaterSurface(BlockPos route) {
+        if (!context.world().hasChunkAt(route)) return null;
+        return findWaterSurface(context.world(), route);
+    }
+
+    static BlockPos findWaterSurface(BlockGetter world, BlockPos route) {
+        BlockPos cursor = route;
+        if (!world.getFluidState(cursor).is(FluidTags.WATER)) cursor = cursor.below();
+        if (!world.getFluidState(cursor).is(FluidTags.WATER)) return null;
+        while (cursor.getY() + 1 < world.getMaxBuildHeight()
+                && world.getFluidState(cursor.above()).is(FluidTags.WATER)) cursor = cursor.above();
+        return cursor;
+    }
+
+    /** Two clear water cells and a breathable surface provide the body and its exit corridor. */
     private boolean safeSurfaceColumn(BlockPos surface) {
+        if (!context.world().hasChunkAt(surface)) return false;
+        return safeSurfaceColumn(context.world(), surface)
+                && !EmbeddedBaritonePolicy.forbidsBody(surface)
+                && !EmbeddedBaritonePolicy.forbidsBody(surface.below());
+    }
+
+    static boolean safeSurfaceColumn(BlockGetter world, BlockPos surface) {
         BlockPos lower = surface.below();
         BlockPos above = surface.above();
-        BlockPos floor = lower.below();
-        if (!context.world().hasChunkAt(surface)
-                || !context.world().hasChunkAt(lower)
-                || !context.world().hasChunkAt(above)
-                || !context.world().hasChunkAt(floor)) {
-            return false;
-        }
-        BlockState surfaceState = context.world().getBlockState(surface);
-        BlockState lowerState = context.world().getBlockState(lower);
-        BlockState aboveState = context.world().getBlockState(above);
-        BlockState floorState = context.world().getBlockState(floor);
-        return waterWithoutBubble(surfaceState)
-                && waterWithoutBubble(lowerState)
+        BlockState upperState = world.getBlockState(surface);
+        BlockState lowerState = world.getBlockState(lower);
+        BlockState aboveState = world.getBlockState(above);
+        BlockState floor = world.getBlockState(lower.below());
+        return clearWater(world, surface, upperState) && clearWater(world, lower, lowerState)
                 && aboveState.getFluidState().isEmpty()
-                && aboveState.getCollisionShape(context.world(), above).isEmpty()
-                && !floorState.getFluidState().is(FluidTags.LAVA)
-                && !floorState.is(Blocks.MAGMA_BLOCK)
-                && !floorState.is(Blocks.SOUL_SAND);
+                && aboveState.getCollisionShape(world, above).isEmpty()
+                && !floor.is(Blocks.MAGMA_BLOCK) && !floor.is(Blocks.SOUL_SAND)
+                && !floor.getFluidState().is(FluidTags.LAVA);
     }
 
-    private static boolean waterWithoutBubble(BlockState state) {
-        return state.getFluidState().is(FluidTags.WATER)
-                && !state.is(Blocks.BUBBLE_COLUMN);
-    }
-
-    private static boolean airIsLow(LocalPlayer player) {
-        return player.getAirSupply() <= airReserve(player);
-    }
-
-    private static int diveAirThreshold(LocalPlayer player) {
-        int maximum = Math.max(1, player.getMaxAirSupply());
-        return Math.min(maximum, Math.max(airReserve(player) + 40, maximum * 2 / 3));
-    }
-
-    private static int airReserve(LocalPlayer player) {
-        return Math.max(40, Math.max(1, player.getMaxAirSupply()) / 4);
+    private static boolean clearWater(BlockGetter world, BlockPos position, BlockState state) {
+        return state.getFluidState().is(FluidTags.WATER) && !state.is(Blocks.BUBBLE_COLUMN)
+                && state.getCollisionShape(world, position).isEmpty();
     }
 }
