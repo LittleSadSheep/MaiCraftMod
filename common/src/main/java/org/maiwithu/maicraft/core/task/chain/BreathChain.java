@@ -4,6 +4,8 @@ import org.maiwithu.maicraft.task.reflex.Reflex;
 import org.maiwithu.maicraft.entity.InputDriver;
 
 import org.maiwithu.maicraft.core.WorkProfile;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.core.pathing.util.SwimAirBudget;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.task.survival.SurvivalDecisions;
@@ -12,6 +14,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -22,8 +25,8 @@ import net.minecraft.world.phys.Vec3;
  * holding the jump key: navigation strokes it afloat only while a move is being
  * executed, so a body left idle in deep water (a task that ended mid-swim, an
  * owner Stop, plain wandering) sinks, runs out of air, and drowns. This chain
- * polls head-submersion + air supply each tick; once air dips past
- * {@link SurvivalDecisions#LOW_AIR_TICKS} it takes the body, swims straight up,
+ * polls submersion and the air needed to reach the surface. When navigation is not already
+ * managing a deliberate swim, it takes the body before ascent reserves are exhausted,
  * and keeps ownership after the head clears until the authoritative air value
  * is full.  That recovery hysteresis prevents the interrupted navigation edge
  * from immediately diving again on the first breathable tick.
@@ -58,47 +61,52 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
     /** One trapped-diary line per episode, written the moment the search comes up
      *  empty — while there is still air left for the cognition layer to act on. */
     private boolean trappedNoted;
-    /** 无畏画像的入水计时(不扣氧,改按持续没顶时间触发漂浮)。 */
-    private int submergedTicks;
+    private final SwimAirBudget airBudget = new SwimAirBudget();
     private float attentionStartHealth;
     private int swimTicks;
-    /** 没顶多久后开始上浮——对齐生存端低氧窗口的量级(300-240=60 tick,3 秒)。 */
-    private static final int FEARLESS_FLOAT_DELAY_TICKS = 60;
 
     public BreathChain() {
     }
 
     @Override
     public boolean canRun(LocalPlayer companion) {
-        // 无畏画像(创造)不扣氧气,airSupply 恒满——但这条反射是假玩家唯一的
-        // 漂浮本能,不能跟着休眠(否则闲置沉底就永远留在水底)。改按
-        // "眼在水下持续 N tick"触发,窗口对齐生存的低氧阈值。
         boolean triggered;
         boolean headUnderWater = companion.isEyeInFluid(FluidTags.WATER);
-        if (WorkProfile.of(companion).fearless()) {
-            if (headUnderWater) {
-                submergedTicks++;
-            } else {
-                submergedTicks = 0;
-            }
-            // Creative/fearless bodies do not consume air, so their episode ends
-            // at a genuinely breathable eye position rather than waiting for an
-            // air value which was full throughout.
-            triggered = episodeActive
-                    ? headUnderWater
-                    : submergedTicks > FEARLESS_FLOAT_DELAY_TICKS;
+        airBudget.observe(companion.level().getGameTime(), companion.getAirSupply(), headUnderWater);
+        if (WorkProfile.of(companion).fearless()
+                || companion.hasEffect(MobEffects.WATER_BREATHING)
+                || companion.hasEffect(MobEffects.CONDUIT_POWER)) {
+            triggered = false;
         } else {
-            submergedTicks = 0;
             triggered = episodeActive
                     ? SurvivalDecisions.breathRecoveryRequired(
                             companion.isInWater(), headUnderWater,
                             companion.getAirSupply(), companion.getMaxAirSupply())
-                    : SurvivalDecisions.breathTriggered(headUnderWater, companion.getAirSupply());
+                    : !EmbeddedBaritoneRuntime.managesSwimAir(companion)
+                            && SurvivalDecisions.breathTriggered(headUnderWater, companion.getAirSupply(),
+                                    requiredAirForSurface(companion));
         }
         if (!triggered && episodeActive) {
             noteEpisode(companion);
         }
         return triggered;
+    }
+
+    private int requiredAirForSurface(LocalPlayer player) {
+        Vec3 eyes = player.getEyePosition();
+        BlockPos head = BlockPos.containing(eyes);
+        for (int rise = 0; rise < CEILING_PROBE; rise++) {
+            BlockPos pos = head.above(rise);
+            if (!player.level().hasChunkAt(pos)) break;
+            BlockState state = player.level().getBlockState(pos);
+            if (state.getFluidState().is(FluidTags.WATER)) continue;
+            if (breathable(player.level(), pos, state)) {
+                return SwimAirBudget.requiredAirForAscent(pos.getY() + 0.2D - eyes.y, airBudget.airPerTick());
+            }
+            break;
+        }
+        // Unknown depth or a sealed roof needs time to search for an opening as well as rise.
+        return SwimAirBudget.requiredAirForAscent(CEILING_PROBE, airBudget.airPerTick());
     }
 
     @Override
@@ -221,7 +229,8 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         int worst = worstAir;
         float healthLost = Math.max(0.0F, attentionStartHealth - companion.getHealth());
         GameplayAttentionMonitor.reflexFinished(
-                id(), "breathable air reached", swimTicks,
+                id(), companion.isEyeInFluid(FluidTags.WATER)
+                        ? "air recovery no longer needed" : "breathable air reached", swimTicks,
                 "no item consumption observed",
                 healthLost > 0.0F ? "health lost during reflex: " + healthLost : "no health loss observed");
         episodeActive = false;
@@ -231,7 +240,7 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         retargetCooldown = 0;
         trappedNoted = false;
         org.maiwithu.maicraft.core.Constants.LOG.info(
-                "[maicraft-breath] nearly drowned ({}s of air left); swam up for a breath",
+                "[maicraft-breath] breath recovery completed (lowest air: {}s)",
                 Math.max(0, worst / 20));
     }
 

@@ -59,31 +59,16 @@ public final class SurvivalDecisions {
      */
     public static final double MLG_SETTLED_SPEED = -0.5;
 
-    // ---- breath thresholds (vanilla air is 0..300 ticks; damage starts at 0) ----
-    /**
-     * Air ticks at/below which surfacing takes the body. 240 leaves a ~3-second
-     * dip tolerance (normal head-bobs while swimming don't trigger), while the
-     * remaining 12 seconds of air are ample for any plausible swim-up. The band
-     * between wake (240) and full (300) also gives an idle body in deep water a
-     * natural bob cycle: sink → head under → air dips past 240 → surface → refill
-     * — automation must explicitly hold the LocalPlayer jump key, so this chain is its
-     * float instinct.
-     */
-    public static final int LOW_AIR_TICKS = 240;
-
-    /**
-     * 换气触发条件:头没在水里且氧气见底。头一出水面立刻不触发(氧气自己回),
-     * 氧气还够也不触发。
-     */
-    public static boolean breathTriggered(boolean headUnderWater, int airSupply) {
-        return headUnderWater && airSupply <= LOW_AIR_TICKS;
+    /** Start ascent while enough air remains for its measured depth and reaction margin. */
+    public static boolean breathTriggered(boolean headUnderWater, int airSupply, int ascentAir) {
+        return headUnderWater && airSupply <= Math.max(1, ascentAir);
     }
 
     /**
      * Whether an already-running breath rescue still owns the body.
      *
      * <p>This is deliberately a hysteresis decision, not another invocation of
-     * {@link #breathTriggered(boolean, int)}.  Crossing the surface is only the
+     * {@link #breathTriggered(boolean, int, int)}. Crossing the surface is only the
      * beginning of recovery: vanilla restores air over several ticks.  Giving
      * navigation the body at the first breathable tick lets a downward swim edge
      * submerge the eyes again before that refill is complete, producing an endless

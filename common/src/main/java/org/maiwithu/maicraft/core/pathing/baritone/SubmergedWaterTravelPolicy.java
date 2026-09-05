@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 
 import baritone.api.pathing.calc.IPath;
 import baritone.api.pathing.movement.IMovement;
+import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.IPlayerContext;
 import baritone.pathing.movement.movements.MovementDiagonal;
 import baritone.pathing.movement.movements.MovementTraverse;
@@ -10,57 +11,40 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.core.pathing.util.SwimAirBudget;
 
-import java.util.List;
-
-/**
- * Physical first-person swim phase for an already-selected deep-water route.
- *
- * <p>The path remains authoritative: this policy neither adds a node nor changes terrain. It may
- * only lower the real body below a contiguous sequence of loaded, two-cell-deep surface-water
- * movements which the path already owns. Before the route reaches shallow water, land or a
- * structural movement, it raises the body back to the surface and hands control to the ordinary
- * movement implementation.</p>
- */
+/** Follows the selected water route in swimming pose, surfacing for air or the next shore. */
 public final class SubmergedWaterTravelPolicy {
-
-    private enum Phase { OFF, DIVING, CRUISING, SURFACING }
-
-    /** Enough selected water runway for the dive/rise transition to pay for itself. */
-    private static final double MIN_EFFICIENT_RUN_BLOCKS = 8.0D;
-    /** Begin rising while these final selected water blocks are still available. */
-    private static final double SURFACE_RUNWAY_BLOCKS = 3.0D;
-    /** Upright eyes must enter the water before vanilla can adopt the swimming pose. */
-    private static final double DIVE_TARGET_OFFSET = -0.75D;
-    /** Once swimming, travel just below the surface rather than along the bottom. */
-    private static final double CRUISE_TARGET_OFFSET = 0.10D;
-    private static final double DEPTH_DEADBAND = 0.10D;
-
     private final IPlayerContext context;
     private final IPath path;
-    private Phase phase = Phase.OFF;
-    private int surfaceY;
-    private boolean waitForAirRefill;
+    private final SwimTravelControl control = new SwimTravelControl();
+    private final SwimAirBudget airBudget = new SwimAirBudget();
+    private int routeY;
+    private double waterSurface;
+    private IMovement controlledMovement;
+    private boolean breathingEscapeKnown;
 
     public SubmergedWaterTravelPolicy(IPlayerContext context, IPath path) {
         this.context = context;
         this.path = path;
     }
 
-    /** Re-evaluate the physical phase from the current selected path movement. */
+    /** Update before ordinary path membership checks, which otherwise reject the dive's Y offset. */
     public void update(int pathPosition) {
         LocalPlayer player = context.player();
-        List<IMovement> movements = path.movements();
-        if (player == null || pathPosition < 0 || pathPosition >= movements.size()) {
-            phase = Phase.OFF;
-            return;
-        }
-
-        if (!player.isInWater()) {
-            phase = Phase.OFF;
-            waitForAirRefill = false;
+        controlledMovement = null;
+        breathingEscapeKnown = false;
+        if (player == null) return;
+        boolean eyesWet = player.isEyeInFluid(FluidTags.WATER);
+        airBudget.observe(player.level().getGameTime(), player.getAirSupply(), eyesWet);
+        IMovement current = pathPosition >= 0 && pathPosition < path.movements().size()
+                ? path.movements().get(pathPosition) : null;
+        boolean flatWaterMove = flatMovement(current);
+        if (!flatWaterMove) {
+            control.reset();
             return;
         }
         BlockPos surface = flatWaterMove ? findWaterSurface(current.getSrc()) : null;
