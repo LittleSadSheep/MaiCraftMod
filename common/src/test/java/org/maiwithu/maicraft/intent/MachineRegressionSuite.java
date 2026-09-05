@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintStateTest;
 /** No game launch required; actual server receipts still require in-game acceptance tests. */
 public final class MachineRegressionSuite {
     public static void main(String[] args) {
+        org.maiwithu.maicraft.core.scan.SearchGeometryTest.main(args);
         MachineSurveyModelTest.main(args);
         MachineDesignReviewTest.main(args);
         MachineControlTest.main(args);
