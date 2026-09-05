@@ -165,13 +165,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         };
     }
 
-    /**
-     * BLOCK auto-typing: an enterable target cell means "stand exactly there"
-     * ({@link NavGoal#exact}); a cell occupied by a solid means "get to that
-     * block" ({@link NavGoal#getToBlock} — beside/on top counts, the block stays
-     * untouched). Re-evaluated per replan, so a cell that opens up mid-journey
-     * (the occupant broke) tightens back to exact.
-     */
+    /** Full coordinates always mean the supported feet cell, never a nearby fallback. */
     private NavGoal blockGoal() {
         return blockCompiled().goal();
     }
@@ -213,9 +207,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private boolean reached() {
         boolean supportedGoalMembership = inGoalCell(feet())
                 && inGoalCell(org.maiwithu.maicraft.core.pathing.moves.Movement.pathStart(player));
-        // A strict internal stance is a fact about the live body, not just two pathing cells.
+        // An exact stance is a fact about the live body, not just two pathing cells.
         // During a jump both cells can briefly name the destination before vanilla physics has
-        // actually put the player on its support. Public goto retains its historical semantics.
+        // actually put the player on its support. Every full-coordinate target has this contract.
         return supportedGoalMembership && (!r.requiresStrictStance() || player.onGround());
     }
 
@@ -309,9 +303,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
                 // PlayerNav also reports ARRIVED when its search goal is satisfied but the live
-                // supported-body predicate is not (a stable STANCE_DUD signal). Public goto keeps
-                // its historical teaching-success semantics; internal strict stance moves must
-                // reject that candidate rather than hand a nearby body position downstream.
+                // supported-body predicate is not. Full coordinates must reject that candidate
+                // rather than hand a nearby body position downstream.
                 if (r.requiresStrictStance()) {
                     if (reached()) {
                         yield successAtBody();
@@ -528,20 +521,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected String successMessage() {
         int gy = player.blockPosition().getY();
         return switch (r.kind) {
-            case BLOCK -> {
-                if (feet().equals(blockTarget)) {
-                    yield "reached the exact cell " + bx + "," + by + "," + bz + ".";
-                }
-                // Got to the column but not the exact y (the usual "guessed Y was in
-                // the air" case) — teach the model to drop Y for a location.
-                int dy = by - gy;
-                yield "arrived at location x=" + bx + " z=" + bz + ", standing on the ground at y=" + gy
-                        + ". The exact cell y=" + by + " wasn't reachable (" + Math.abs(dy) + " blocks "
-                        + (dy > 0 ? "up — likely mid-air" : "down — likely blocked")
-                        + "); for a location, omit y and I resolve the surface.";
-            }
+            case BLOCK -> "reached the exact cell " + bx + "," + by + "," + bz + ".";
             case COLUMN -> "arrived at location x=" + bx + " z=" + bz
-                    + ", standing on the ground at y=" + gy + ".";
+                    + (player.isInWater() ? ", in water at y=" : ", standing on the ground at y=") + gy + ".";
             case YLEVEL -> "reached elevation y=" + gy
                     + (gy == by ? "." : " (requested y=" + by + ").");
             case FIND -> {

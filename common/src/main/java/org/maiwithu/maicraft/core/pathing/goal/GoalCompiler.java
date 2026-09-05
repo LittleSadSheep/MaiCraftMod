@@ -1,8 +1,6 @@
 package org.maiwithu.maicraft.core.pathing.goal;
 
-import org.maiwithu.maicraft.core.pathing.bridge.GoalAdapter;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
-import org.maiwithu.maicraft.core.pathing.goals.Goal;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
@@ -17,7 +15,7 @@ import java.util.Set;
 /**
  * Compiles a task's INTENT into the full navigation contract. Each static
  * factory IS an intent — there is deliberately no intent enum, the method
- * names are the vocabulary — and each returns the three things the navigation
+ * names are the vocabulary — and each returns the two things the navigation
  * and its task must agree on, derived together so they can never drift:
  *
  * <ul>
@@ -42,20 +40,11 @@ public final class GoalCompiler {
      * The compiled navigation contract.
      *
      * @param goal           search goal — node-domain arrival
-     * @param engineGoal     the SAME arrival semantics as a new-kernel
-     *                       {@link Goal} — derived from {@code goal} through
-     *                       {@link GoalAdapter}'s per-factory mapping table, so the
-     *                       two goal domains can never drift apart
      * @param sacred         {@link BlockPos#asLong()} keys of cells the route must not
      *                       break or bury (the {@code CalculationContext} domain);
      *                       empty when the intent has no block objective
      */
-    public record Compiled(NavGoal goal, Goal engineGoal, LongSet sacred) {
-        /** engineGoal 从 goal 经映射表派生(既有调用方签名不变)。 */
-        public Compiled(NavGoal goal, LongSet sacred) {
-            this(goal, GoalAdapter.toEngineGoal(goal), sacred);
-        }
-
+    public record Compiled(NavGoal goal, LongSet sacred) {
         /**
          * Frozen value key for live-goal comparison. The primitive sacred set is copied so a
          * caller cannot mutate an earlier tick's baseline behind the navigator's back.

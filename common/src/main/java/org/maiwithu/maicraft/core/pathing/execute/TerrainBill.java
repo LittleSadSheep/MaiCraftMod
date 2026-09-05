@@ -4,12 +4,9 @@ package org.maiwithu.maicraft.core.pathing.execute;
 import baritone.api.pathing.calc.IPath;
 import baritone.api.pathing.movement.IMovement;
 import baritone.utils.BlockStateInterface;
-import org.maiwithu.maicraft.core.pathing.astar.NavPath;
-import org.maiwithu.maicraft.core.pathing.moves.Movement;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -32,20 +29,6 @@ public final class TerrainBill {
 
     private final Map<Block, List<BlockPos>> breaks = new LinkedHashMap<>();
     private final Map<Block, List<BlockPos>> places = new LinkedHashMap<>();
-
-    /** 规划路径的预算:沿途每个移动原语此刻仍需挖/放的格。 */
-    public static TerrainBill planned(NavPath path, BlockGetter level) {
-        TerrainBill bill = new TerrainBill();
-        for (Movement m : path.movements()) {
-            for (BlockPos p : m.toBreak(level)) {
-                bill.addBreak(p, level.getBlockState(p));
-            }
-            for (BlockPos p : m.toPlace(level)) {
-                bill.addPlace(p, null);
-            }
-        }
-        return bill;
-    }
 
     /**
      * Terrain budget for an embedded Baritone path, evaluated against the same frozen block
