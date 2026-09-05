@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.core.pathing;
+
+/** Regressions of production algorithms; live movement and server confirmations need a game session. */
+public final class NavigationRegressionSuite {
+    public static void main(String[] args) throws Exception {
+        org.maiwithu.maicraft.entity.InputDriverTest.main(args);
+        org.maiwithu.maicraft.core.pathing.util.SwimAirBudgetTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicyTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BlueprintImportTest.main(args);
+        org.maiwithu.maicraft.intent.persistence.IntentStateStoreTest.main(args);
+        org.maiwithu.maicraft.core.task.move.MoveToContractTest.main(args);
+        baritone.pathing.calc.PathSearchRegressionTest.main(args);
+        baritone.pathing.path.PathTickBudgetTest.main(args);
+        baritone.pathing.movement.DoorPassageTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest.main(args);
+        org.maiwithu.maicraft.client.actor.NativeConfirmationTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest.main(args);
+        System.out.println("NavigationRegressionSuite: passed");
+    }
+}
