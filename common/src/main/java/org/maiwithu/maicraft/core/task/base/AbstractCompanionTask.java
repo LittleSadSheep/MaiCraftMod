@@ -350,7 +350,9 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
             nav.pause();
         }
         InputDriver.halt(player);
-        ClientRuntime.requireContext(player).body().releaseAll();
+        // MCP cancellation can arrive between actor ticks; halt already revokes that body's lease.
+        ClientRuntime.actor().activeContext().filter(context -> context.player() == player)
+                .ifPresent(context -> context.body().releaseAll());
     }
 
     @Override

@@ -6,6 +6,7 @@ public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
         MenuVisibilityTest.main(args);
         WindowControlTest.main(args);
+        CompanionCancellationTest.main(args);
         VisibleMenuSessionTest.main(args);
         LegacyInventoryBoundaryTest.main(args);
         GuiBoundaryAuditTest.main(args);
