@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
 
 /**
  * Typed descriptor for {@code interact_at} — the point-aimed half of the native
@@ -31,14 +32,21 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public final BlockPos aim;     // null → current facing (in-air use)
     public final int holdTicks;
     public final Item item;        // null → use whatever is already in hand; else equip this first
+    public final Block expectedBlock;
 
     public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,
                                 MouseButton button, BlockPos aim, int holdTicks, Item item) {
+        this(toolCallId, deadlineGameTime, button, aim, holdTicks, item, null);
+    }
+
+    public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,
+                                MouseButton button, BlockPos aim, int holdTicks, Item item, Block expectedBlock) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.button = button;
         this.aim = aim != null ? aim.immutable() : null;
         this.holdTicks = holdTicks;
         this.item = item;
+        this.expectedBlock = expectedBlock;
     }
 
     @Override

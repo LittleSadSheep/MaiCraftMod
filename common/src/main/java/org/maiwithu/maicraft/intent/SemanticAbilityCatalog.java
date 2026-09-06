@@ -89,7 +89,7 @@ public final class SemanticAbilityCatalog {
                             field("entity_name", "string", "Optional visible custom/display name."),
                             field("player_name", "string", "Optional exact player name."),
                             field("item_id", "resource_id", "Optional carried item whose ordinary use is intended."),
-                            field("purpose", "string", "Non-destructive intent such as open, talk, trade or use."),
+                            field("purpose", "string", "Open, talk, trade, use or till. Till prepares a suitable hoe when item_id is omitted."),
                             field("selection", "string", "Nearest means any nearest loaded semantic match is acceptable."),
                             field("radius", "integer", "Bounded loaded-world search radius."),
                             field("may_alter_terrain", "boolean", "Explicit route permission; default false.")));

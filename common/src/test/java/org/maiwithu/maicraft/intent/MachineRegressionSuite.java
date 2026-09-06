@@ -52,6 +52,8 @@ public final class MachineRegressionSuite {
                 || childData.has("slot") || !interruption.getAsJsonObject("data").get("outcome_uncertain").getAsBoolean()) {
             throw new AssertionError("Cancellation lost or leaked native partial-effect evidence");
         }
+        org.maiwithu.maicraft.core.task.acquire.WorkToolPreparationTest.main(args);
+        SemanticInteractionToolTest.main(args);
         System.out.println("MachineRegressionSuite: semantic contracts passed");
     }
 

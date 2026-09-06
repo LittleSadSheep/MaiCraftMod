@@ -428,18 +428,47 @@ public final class GeneralAbilityAdapter {
                                     : "Provide block_id, entity_type_id, entity_name, or player_name."),
                             option("cancel", "Cancel interaction.")), null);
         }
-        return interactBlock(goal, player, runtime, blockId, itemId(p));
+        var hoe = !containerOnly && "till".equals(purpose) && itemId(p) == null
+                ? org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.tillingTool(player) : null;
+        String selectedItem = hoe == null ? itemId(p) : hoe.itemId().toString();
+        IntentAction interaction = interactBlock(goal, player, runtime, blockId, selectedItem, hoe != null && !hoe.carried());
+        if (hoe == null) return interaction;
+        int carried = org.maiwithu.maicraft.core.PlayerInv.buildableCount(
+                player.getInventory(), BuiltInRegistries.ITEM.get(hoe.itemId()));
+        boolean storage = org.maiwithu.maicraft.core.inventory.StockEvidence.latest(player)
+                .map(org.maiwithu.maicraft.core.inventory.StockEvidence.Snapshot::supportsToolSupply).orElse(false);
+        return prepareUseTool(hoe, carried, storage, interaction);
+    }
+
+    static IntentAction prepareUseTool(
+            org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.UseTool tool,
+            int carriedCount, boolean storage, IntentAction interaction) {
+        if (tool.carried() || !(interaction instanceof IntentAction.Tool || interaction instanceof IntentAction.Chain))
+            return interaction;
+        JsonObject args = new JsonObject();
+        args.addProperty("item_id", tool.itemId().toString());
+        args.addProperty("count", carriedCount + 1);
+        JsonArray sources = new JsonArray();
+        sources.add("inventory"); sources.add("craft");
+        if (storage) sources.add("storage");
+        if (!tool.stockOnly()) { sources.add("nearby"); sources.add("mine"); }
+        args.add("allowed_sources", sources);
+        List<IntentAction.Tool> actions = new ArrayList<>();
+        actions.add(new IntentAction.Tool("acquire_items", args.toString()));
+        if (interaction instanceof IntentAction.Tool one) actions.add(one);
+        else actions.addAll(((IntentAction.Chain) interaction).actions());
+        return new IntentAction.Chain(actions);
     }
 
     private static IntentAction interactBlock(
-            Goal goal, LocalPlayer player, IntentRuntime runtime, String rawBlockId, String itemId) {
+            Goal goal, LocalPlayer player, IntentRuntime runtime, String rawBlockId, String itemId, boolean prepareTool) {
         ResourceLocation id = ResourceLocation.tryParse(rawBlockId);
         if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
             return decision(goal, "Unknown block id: " + rawBlockId,
                     List.of(option("retry", "Retry with a valid namespaced block id."),
                             option("cancel", "Cancel interaction.")), null);
         }
-        IntentAction missingItem = requireInventoryItem(goal, player, itemId);
+        IntentAction missingItem = prepareTool ? null : requireInventoryItem(goal, player, itemId);
         if (missingItem != null) return missingItem;
 
         ClientLevel level = player.clientLevel;
@@ -497,8 +526,10 @@ public final class GeneralAbilityAdapter {
         use.addProperty("x", target.getX());
         use.addProperty("y", target.getY());
         use.addProperty("z", target.getZ());
+        if ("till".equals(lower(string(goal.parameters(), "purpose"))))
+            use.addProperty("expected_block_id", "minecraft:farmland");
         if (itemId != null) use.addProperty("item_id", itemId);
-        if (hasLoadedInteractionLine(level, player, player.getEyePosition(), target)) {
+        if (!prepareTool && hasLoadedInteractionLine(level, player, player.getEyePosition(), target)) {
             return new IntentAction.Tool("interact_at", use.toString());
         }
         BlockPos stand = interactionStand(level, player, target, player.blockPosition());

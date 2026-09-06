@@ -176,12 +176,12 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         if (holdUntil >= 0 && player.level().getGameTime() >= holdUntil) {
             interaction.stop();
             successMsg = describeDone() + settle();
-            return TaskState.SUCCESS;
+            return verifiedOutcome();
         }
         return switch (interaction.tick()) {
             case DONE -> {
                 successMsg = describeDone() + settle();
-                yield TaskState.SUCCESS;
+                yield verifiedOutcome();
             }
             case FAILED -> {
                 fail(interaction.failReason(), FailureType.UNKNOWN);
@@ -191,6 +191,14 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         };
     }
 
+    private TaskState verifiedOutcome() {
+        if (r.expectedBlock != null && (r.aim == null || !player.level().getBlockState(r.aim).is(r.expectedBlock))) {
+            fail("interaction completed without producing the required block "
+                    + BuiltInRegistries.BLOCK.getKey(r.expectedBlock), FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
+        return TaskState.SUCCESS;
+    }
 
     /** In-ladder nav causes the reposition rung handles; anything else kicks straight back to the LLM. */
     private static boolean repositionable(FailureType type) {
