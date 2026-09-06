@@ -120,12 +120,17 @@ http://127.0.0.1:8766/mcp
 
 ## 许可证
 
-MaiCraft 以 [GNU General Public License v3.0 only](LICENSE) 发布（SPDX：`GPL-3.0-only`）。仓库包含的第三方代码仍适用各自的许可证；Baritone 相关声明见 [`third_party/baritone/`](third_party/baritone/)。
+MaiCraft 作为整体以 [GNU General Public License v3.0 only](LICENSE) 发布（SPDX：`GPL-3.0-only`）。本项目是经过修改的作品，自 2026 年 7 月 30 日起由 LittleSadSheep 修改和维护。
+
+仓库包含以下第三方来源：
+
+- 部分代码派生自 [minecraft-numen](https://github.com/Dwinovo/minecraft-numen) 的 `1.21.1` 分支，原许可证为 `LGPL-3.0-only`。本仓库依照 GNU GPLv3 第 7 条移除该副本的 LGPLv3 额外许可，将修改后的 Numen 派生代码按 `GPL-3.0-only` 分发；原项目及贡献者仍保留其版权。本仓库不包含 Numen 的美术、音频或品牌资产。
+- 内嵌寻路代码来自 [Baritone](https://github.com/cabaletta/baritone)，基于上游提交 `5f259b7f` 修改，仍适用 `LGPL-3.0-or-later`。相关源码保留了原始许可声明，完整许可证和来源说明见 [`third_party/baritone/`](third_party/baritone/)。
+- 使用 [MultiLoader-Template](https://github.com/jaredlll08/MultiLoader-Template) 提供的多加载器项目结构。
 
 ## 鸣谢
 
 - Minecraft 与 Mojang Studios
 - [minecraft-numen](https://github.com/Dwinovo/minecraft-numen)
 - [Baritone](https://github.com/cabaletta/baritone)
-
-本项目包含来自 Dwinovo/minecraft-numen 和 cabaletta/baritone 的部分源代码，该部分原以 LGPL-3.0 授权。本项目依据 GNU GPLv3 第 7 条移除该部分的 LGPLv3 额外许可，将其随本项目按 GPL-3.0 分发。
+- [MultiLoader-Template](https://github.com/jaredlll08/MultiLoader-Template)
