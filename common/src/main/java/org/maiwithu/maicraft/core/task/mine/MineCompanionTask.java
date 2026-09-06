@@ -162,6 +162,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private List<BlockPos> drops = List.of();
     private List<ItemEntity> liveOwnedDrops = List.of();
     private MiningBatch batch;
+    private final NaturalTreeSource naturalTrees = new NaturalTreeSource();
+    private final boolean naturalLogSource;
     private long pendingDropsSince = Long.MIN_VALUE;
     /** Recently broken target cells retained as temporary walk-over members. */
     private final Map<BlockPos, Long> anticipatedDrops = new HashMap<>();
@@ -220,10 +222,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** Requested target stays distinct from BlockDigger.current(), which may be
      *  a temporary occluder selected to open the target's line of sight. */
     private BlockPos activeTarget;
+    private BlockPos harvestTarget;
+    private BlockState harvestBefore;
+    private final List<Map<String, Object>> confirmedHarvests = new ArrayList<>();
+    private int truncatedHarvests;
 
     public MineCompanionTask(LocalPlayer player, MineBlockTaskRecord record) {
         super(player, record);
         this.digger = new BlockDigger(player);
+        this.naturalLogSource = record.naturalLogsOnly
+                && record.targets.stream().anyMatch(block -> block.defaultBlockState().is(BlockTags.LOGS));
     }
 
     @Override
@@ -411,7 +419,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 // and standing in a stance whose ore just got mined out resumes navigation
                 // instead of reporting a stale arrival.
                 nav = PlayerNav.toRevalidating(player, this::oreFieldCompiled, MINE_SPEED,
-                        () -> reachableTarget() != null, PlayerNav.ContextProvider.TERRAFORM);
+                        () -> reachableTarget() != null, travelContext());
                 navIsBranch = false;
                 navIsDrop = false;
             }
@@ -515,7 +523,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (nav == null || !navIsBranch) {
             stopNav();
             nav = PlayerNav.toGoal(player, () -> NavGoal.runAway(branchPoint, branchY),
-                    MINE_SPEED, () -> false, PlayerNav.ContextProvider.TERRAFORM);
+                    MINE_SPEED, () -> false, travelContext());
             navIsBranch = true;
         }
         switch (nav.tick()) {
@@ -710,7 +718,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (nav == null || !navIsDrop) {
             stopNav();
             nav = PlayerNav.toRevalidating(player, this::dropFieldCompiled, MINE_SPEED,
-                    () -> drops.isEmpty(), PlayerNav.ContextProvider.TERRAFORM);
+                    () -> drops.isEmpty(), travelContext());
             navIsDrop = true;
         }
         return switch (nav.tick()) {
@@ -949,15 +957,34 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  而不是永远等一个不会来的射线。<b>记的是这一格,不是猜一格</b> —— 这是唯一一处
      *  按格记账的地方,因为它是唯一一件关于那一格的可复现事实。 */
     private void mineProgress(BlockPos pos) {
+        if (!pos.equals(harvestTarget)) {
+            harvestTarget = pos.immutable();
+            harvestBefore = player.level().getBlockState(pos);
+        }
         if (activeTarget == null) {
             activeTarget = pos.immutable();
         }
-        acceptDigResult(activeTarget, digger.digStep(activeTarget));
+        acceptDigResult(activeTarget, naturalLogSource
+                ? digger.digTargetStep(activeTarget) : digger.digStep(activeTarget));
+    }
+
+    private PlayerNav.ContextProvider travelContext() {
+        return naturalLogSource ? PlayerNav.ContextProvider.DEFAULT : PlayerNav.ContextProvider.TERRAFORM;
     }
 
     private void acceptDigResult(BlockPos target, BlockDigger.DigResult result) {
         switch (result) {
             case BROKE_TARGET -> {
+                if (target.equals(harvestTarget) && harvestBefore != null && !harvestBefore.isAir()) {
+                    if (confirmedHarvests.size() < 32) confirmedHarvests.add(Map.of(
+                            "position", Map.of("x", target.getX(), "y", target.getY(), "z", target.getZ()),
+                            "block_id", net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(harvestBefore.getBlock()).toString(),
+                            "block_state", harvestBefore.toString(),
+                            "natural_tree_filter_enabled", r.naturalLogsOnly && harvestBefore.is(BlockTags.LOGS)));
+                    else truncatedHarvests++;
+                }
+                harvestTarget = null;
+                harvestBefore = null;
                 knownOres.remove(target);
                 watchedTargetCells.remove(target);
                 pendingPathBreaks.remove(target);
@@ -1067,8 +1094,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         lastQueryChunk = ChunkPos.asLong(feet());
         heartbeatTimer = QUERY_HEARTBEAT_TICKS;
         queryCooldown = QUERY_MIN_GAP_TICKS;
+        Set<BlockPos> excluded = new HashSet<>(unworkable);
+        excluded.addAll(naturalTrees.rejected);
+        int rejectedBefore = naturalTrees.rejected.size();
+        naturalTrees.beginQuery();
         TargetIndex.Result res = TargetIndex.query(sl, feet(), r.targets,
-                MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET, unworkable);
+                MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET, excluded);
         lastQueryComplete = res.complete();
         if (lastQueryComplete) {
             coldMapFails = 0;   // 图齐了，之前那几次无路不再算数
@@ -1078,6 +1109,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 feet().toShortString(), res.hits().size(), res.complete(),
                 knownOres.size());
         mergeHits(res.hits());
+        lastQueryComplete &= !naturalTrees.deferred && rejectedBefore == naturalTrees.rejected.size();
     }
 
     /** Add fresh, still-workable hits to knownOres, then prune (which re-validates
@@ -1090,6 +1122,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         for (BlockPos hit : hits) {
             BlockPos p = hit.immutable();
             if (unworkable.contains(p) || !seen.add(p)) continue;
+            if (r.naturalLogsOnly && player.level().getBlockState(p).is(BlockTags.LOGS)
+                    && !naturalTrees.accepts(p, player.level(), player.level()::hasChunkAt)) continue;
             knownOres.add(p);
             watchedTargetCells.add(p);
         }
@@ -1303,6 +1337,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
+        if (naturalLogSource) data.put("excluded_unverified_logs", naturalTrees.rejected.size());
+        data.put("confirmed_harvests", List.copyOf(confirmedHarvests));
+        data.put("confirmed_harvests_truncated", truncatedHarvests);
         data.put("unreachable_drop_count", unreachableDropCount);
         data.put("ambiguous_merged_drop_count", ambiguousMergedDropCount);
         return data;

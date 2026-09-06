@@ -643,7 +643,7 @@ public final class SemanticAcquireCompanionTask
         need.efficientBatchStarted |= efficient && bootstrap == 0 && missing(need) >= WorkToolPreparation.BATCH_SIZE;
         MineBlockTaskRecord record = new MineBlockTaskRecord(
                 childId("mine"), now + budget, blocks, deficit, blockLabel(blocks),
-                progressItems, efficient);
+                progressItems, efficient, true);
         return startChild(need, SemanticAcquireTaskRecord.Source.MINE,
                 record, "mine BlockItem-derived or semantic source blocks");
     }

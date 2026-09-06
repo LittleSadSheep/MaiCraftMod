@@ -37,6 +37,8 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public final Set<Item> progressItems;
     /** A prepared work batch must return for another tool instead of degrading to bare hands. */
     public final boolean requireEfficientTool;
+    /** Automatic material supply must distinguish natural trees from structural log blocks. */
+    public final boolean naturalLogsOnly;
 
     /** Live progress = matching ITEMS gathered since the task started (counted in the inventory,
      *  not blocks broken — multi-drop ores like redstone yield several items per block). Set each tick
@@ -57,12 +59,19 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public MineBlockTaskRecord(String toolCallId, long deadlineGameTime,
                                Set<Block> targets, int count, String label,
                                Set<Item> progressItems, boolean requireEfficientTool) {
+        this(toolCallId, deadlineGameTime, targets, count, label, progressItems, requireEfficientTool, false);
+    }
+
+    public MineBlockTaskRecord(String toolCallId, long deadlineGameTime,
+                               Set<Block> targets, int count, String label,
+                               Set<Item> progressItems, boolean requireEfficientTool, boolean naturalLogsOnly) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.targets = Set.copyOf(targets);
         this.count = count;
         this.label = label;
         this.progressItems = Set.copyOf(progressItems);
         this.requireEfficientTool = requireEfficientTool;
+        this.naturalLogsOnly = naturalLogsOnly;
     }
 
     /** Matches the native tool selector's main-inventory reach, including tools not yet staged. */

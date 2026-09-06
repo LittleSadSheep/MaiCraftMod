@@ -9,6 +9,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicyTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest.main(args);
         org.maiwithu.maicraft.core.task.mine.MiningBatchTest.main(args);
+        org.maiwithu.maicraft.core.task.mine.NaturalTreeSourceTest.main(args);
         org.maiwithu.maicraft.core.task.mine.MiningToolRequirementTest.main(args);
         org.maiwithu.maicraft.core.tools.perception.LocalFloorSenseTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BlueprintImportTest.main(args);

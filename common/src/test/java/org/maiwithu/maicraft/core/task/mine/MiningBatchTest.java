@@ -39,14 +39,16 @@ public final class MiningBatchTest {
         catch (UnsupportedOperationException expected) { }
 
         TestWorld world = new TestWorld();
-        BlockPos leaf = root.above(3).east();
-        world.blocks.put(leaf, Blocks.BIRCH_LEAVES.defaultBlockState());
+        for (int x = -1; x <= 1; x++) for (int z = -1; z <= 1; z++) {
+            if (x != 0 || z != 0) world.blocks.put(root.above(2).offset(x, 0, z),
+                    Blocks.BIRCH_LEAVES.defaultBlockState().setValue(LeavesBlock.DISTANCE, 1));
+        }
         check(MiningBatch.hasNaturalCrown(trunk.targets(), world, pos -> true),
                 "a loaded natural crown did not authorize finishing the current upright trunk");
-        world.blocks.put(leaf, Blocks.BIRCH_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true));
+        world.blocks.replaceAll((pos, state) -> state.setValue(LeavesBlock.PERSISTENT, true));
         check(!MiningBatch.hasNaturalCrown(trunk.targets(), world, pos -> true),
                 "player-placed persistent foliage became natural-tree evidence");
-        world.blocks.put(leaf, Blocks.BIRCH_LEAVES.defaultBlockState());
+        world.blocks.replaceAll((pos, state) -> state.setValue(LeavesBlock.PERSISTENT, false));
         check(!MiningBatch.hasNaturalCrown(trunk.targets(), world, pos -> false),
                 "an unloaded crown was treated as observed tree evidence");
         world.blocks.put(root.below(), Blocks.STONE.defaultBlockState());

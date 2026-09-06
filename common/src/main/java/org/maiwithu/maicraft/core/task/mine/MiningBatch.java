@@ -42,12 +42,37 @@ record MiningBatch(Set<BlockPos> targets, boolean followTrunk) {
     static boolean hasNaturalCrown(Set<BlockPos> trunk, BlockGetter world, Predicate<BlockPos> loaded) {
         if (trunk.isEmpty()) return false;
         BlockPos top = trunk.stream().max(Comparator.comparingInt(BlockPos::getY)).orElseThrow();
-        for (BlockPos nearby : BlockPos.betweenClosed(top.offset(-2, -1, -2), top.offset(2, 2, 2))) {
-            if (!loaded.test(nearby)) continue;
-            var state = world.getBlockState(nearby);
-            if (state.getBlock() instanceof LeavesBlock && !state.getValue(LeavesBlock.PERSISTENT)) return true;
+        Set<BlockPos> visited = new HashSet<>();
+        Set<Direction> attachedSides = new HashSet<>();
+        ArrayDeque<BlockPos> pending = new ArrayDeque<>();
+        for (BlockPos log : trunk) {
+            if (log.getY() < top.getY() - 1) continue;
+            for (Direction side : Direction.Plane.HORIZONTAL) {
+                BlockPos leaf = log.relative(side);
+                if (!loaded.test(leaf)) continue;
+                var state = world.getBlockState(leaf);
+                if (naturalLeaf(state) && state.getValue(LeavesBlock.DISTANCE) == 1) {
+                    attachedSides.add(side);
+                    pending.add(leaf);
+                }
+            }
+        }
+        if (attachedSides.size() < 2) return false;
+        int leaves = 0;
+        while (!pending.isEmpty()) {
+            BlockPos leaf = pending.removeFirst();
+            if (Math.abs(leaf.getX() - top.getX()) > 2 || Math.abs(leaf.getZ() - top.getZ()) > 2
+                    || leaf.getY() < top.getY() - 1 || leaf.getY() > top.getY() + 2
+                    || !visited.add(leaf) || !loaded.test(leaf)) continue;
+            if (!naturalLeaf(world.getBlockState(leaf))) continue;
+            if (++leaves >= 8) return true;
+            for (Direction side : Direction.values()) pending.addLast(leaf.relative(side));
         }
         return false;
+    }
+
+    private static boolean naturalLeaf(net.minecraft.world.level.block.state.BlockState state) {
+        return state.getBlock() instanceof LeavesBlock && !state.getValue(LeavesBlock.PERSISTENT);
     }
 
     static boolean safeDropLanding(BlockPos position, BlockGetter world, Predicate<BlockPos> loaded) {
