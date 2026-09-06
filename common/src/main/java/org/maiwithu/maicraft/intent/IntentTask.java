@@ -931,7 +931,7 @@ final class IntentTask implements Task {
         for (Map.Entry<String, Object> entry : source.entrySet()) {
             String key = entry.getKey();
             if (key == null || internalResultKey(key)) continue;
-            Object value = sanitizeValue(entry.getValue());
+            Object value = sanitizeEntry(key, entry.getValue());
             if (value != null) clean.put(key, value);
         }
         return Map.copyOf(clean);
@@ -946,7 +946,7 @@ final class IntentTask implements Task {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
                 if (internalResultKey(key)) continue;
-                Object nested = sanitizeValue(entry.getValue());
+                Object nested = sanitizeEntry(key, entry.getValue());
                 if (nested != null) clean.put(key, nested);
             }
             return Map.copyOf(clean);
@@ -981,7 +981,7 @@ final class IntentTask implements Task {
             for (Map.Entry<String, com.google.gson.JsonElement> entry
                     : value.getAsJsonObject().entrySet()) {
                 if (internalResultKey(entry.getKey())) continue;
-                Object nested = sanitizeJson(entry.getValue());
+                Object nested = sanitizeEntry(entry.getKey(), entry.getValue());
                 if (nested != null) clean.put(entry.getKey(), nested);
             }
             return Map.copyOf(clean);
@@ -998,6 +998,35 @@ final class IntentTask implements Task {
         if (primitive.isBoolean()) return primitive.getAsBoolean();
         if (primitive.isNumber()) return primitive.getAsNumber();
         return sanitizeMessage(primitive.getAsString());
+    }
+
+    private static Object sanitizeEntry(String key, Object value) {
+        if (!"confirmed_harvests".equals(key)) return sanitizeValue(value);
+        // Committed block changes are auditable world evidence, not a replayable planned route.
+        var json = new com.google.gson.Gson().toJsonTree(value);
+        if (!json.isJsonArray()) return List.of();
+        List<Object> result = new ArrayList<>();
+        for (var entry : json.getAsJsonArray()) {
+            if (result.size() == 32) break;
+            if (!entry.isJsonObject()) continue;
+            var row = entry.getAsJsonObject();
+            Map<String, Object> clean = new LinkedHashMap<>();
+            for (String field : List.of("block_id", "block_state", "natural_tree_filter_enabled")) {
+                if (row.has(field)) clean.put(field, sanitizeJson(row.get(field)));
+            }
+            if (row.has("position") && row.get("position").isJsonObject()) {
+                var pos = row.getAsJsonObject("position");
+                Map<String, Integer> coordinates = new LinkedHashMap<>();
+                for (String axis : List.of("x", "y", "z")) {
+                    var number = pos.get(axis);
+                    if (number != null && number.isJsonPrimitive() && number.getAsJsonPrimitive().isNumber()
+                            && number.getAsDouble() == number.getAsInt()) coordinates.put(axis, number.getAsInt());
+                }
+                if (coordinates.size() == 3) clean.put("position", Map.copyOf(coordinates));
+            }
+            result.add(clean);
+        }
+        return List.copyOf(result);
     }
 
     private static boolean internalResultKey(String raw) {
