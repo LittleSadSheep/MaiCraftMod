@@ -23,6 +23,7 @@ final class TransportPlan {
                            TransportMode mode, LongSet forbidden) {
         List<Offer> offers = new ArrayList<>();
         List<String> unavailable = new ArrayList<>();
+        if (targets.destinations().isEmpty()) unavailable.add("no supported, unobstructed landing satisfies the destination; " + targets.diagnostic());
         var floors = new HashSet<Integer>();
         for (var destination : targets.destinations()) {
             if (mode != TransportMode.ELEVATOR && mode != TransportMode.GROUND) {

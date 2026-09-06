@@ -33,6 +33,10 @@ public final class TransportIntentTest {
         check(!workstation.goal().isAt(upper), "fixture must be an occupied goal cell");
         check(TransportNavigator.compatibleGoal(workstation, upper, workstation.semanticFingerprint(), empty, empty),
                 "an intermediate elevator floor must not cancel an unchanged workstation approach");
+        String failure = TransportNavigator.exhaustedReason(List.of(java.util.Map.of("mode", "elevator", "success", false,
+                "code", "no_proven_elevator_route", "detail", "no confirmed boarding doorway")), List.of());
+        check(failure.contains("no_proven_elevator_route") && failure.contains("no confirmed boarding doorway"),
+                "an exhausted transport plan must preserve the actual session failure in the task result");
         System.out.println("TransportIntentTest: passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

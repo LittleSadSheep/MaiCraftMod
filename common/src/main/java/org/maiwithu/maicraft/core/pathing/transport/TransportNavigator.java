@@ -136,7 +136,7 @@ public final class TransportNavigator {
             }
             targets = null;
             if (mode != TransportMode.AUTO || !probeRequested) {
-                failure = "no available native transport reached the goal; " + String.join("; ", unavailable);
+                failure = exhaustedReason(attempts, unavailable);
                 return PlayerNav.Status.FAILED;
             }
             ground = newGround(); ground.withTerrainProbe();
@@ -174,6 +174,17 @@ public final class TransportNavigator {
         return current != null && destination != null
                 && (current.semanticFingerprint().equals(original) || current.goal().isAt(destination))
                 && previousForbidden.equals(currentForbidden);
+    }
+
+    static String exhaustedReason(List<Map<String, Object>> attempts, List<String> unavailable) {
+        List<String> reasons = new ArrayList<>();
+        for (var attempt : attempts) {
+            if (!Boolean.TRUE.equals(attempt.get("success"))) reasons.add(attempt.get("mode") + " ["
+                    + attempt.get("code") + "]: " + attempt.get("detail"));
+        }
+        reasons.addAll(unavailable);
+        return "no available native transport reached the goal"
+                + (reasons.isEmpty() ? "; no transport endpoint was verified" : "; " + String.join("; ", reasons));
     }
 
     private String offerKey(TransportPlan.Offer offer) {
