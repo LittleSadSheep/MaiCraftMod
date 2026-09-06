@@ -84,6 +84,9 @@ public abstract class Movement implements IMovement, MovementHelper {
     public double getCost(CalculationContext context) {
         if (cost == null) {
             cost = calculateCost(context);
+            if (cost < COST_INF && !context.collisionGeometry.clear(src.x, src.y, src.z, dest.x, dest.y, dest.z)) {
+                cost = COST_INF;
+            }
         }
         return cost;
     }

@@ -97,6 +97,7 @@ public class CalculationContext {
     private final boolean allowPlaceInFluidsFlow;
 
     public final PrecomputedData precomputedData;
+    public final CollisionGeometry collisionGeometry;
 
     public CalculationContext(IBaritone baritone) {
         this(baritone, false);
@@ -135,6 +136,8 @@ public class CalculationContext {
         this.world = baritone.getPlayerContext().world();
         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
+        this.collisionGeometry = new CollisionGeometry(bsi.access, forUseOnAnotherThread,
+                player.position(), baritone.getPlayerContext().playerFeet());
         this.toolSet = new ToolSet(player);
         this.hasThrowaway = forceTerrainMutation
                 || (Baritone.settings().allowPlace.value

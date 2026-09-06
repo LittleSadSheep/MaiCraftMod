@@ -131,6 +131,9 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                 if (actionCost >= ActionCosts.COST_INF) {
                     continue;
                 }
+                if (!calcContext.collisionGeometry.clear(currentNode.x, currentNode.y, currentNode.z, res.x, res.y, res.z)) {
+                    continue;
+                }
                 if (crossesForbiddenBodyCell(moves,
                         currentNode.x, currentNode.y, currentNode.z,
                         res.x, res.y, res.z)) {

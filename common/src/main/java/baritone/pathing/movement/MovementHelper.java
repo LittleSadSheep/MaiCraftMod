@@ -37,6 +37,8 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.piston.MovingPistonBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -182,7 +184,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             return NO;
         }
         if (state.isPathfindable(PathComputationType.LAND)) {
-            return YES;
+            return MAYBE; // Partial mod shapes may advertise LAND pathfinding but still collide.
         } else {
             return NO;
         }
@@ -227,7 +229,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             return fluidState.getType() instanceof WaterFluid;
         }
 
-        return state.isPathfindable(PathComputationType.LAND);
+        return state.getCollisionShape(bsi.access, new BlockPos(x, y, z)).isEmpty();
     }
 
     static Ternary fullyPassableBlockState(BlockState state) {
@@ -253,10 +255,9 @@ public interface MovementHelper extends ActionCosts, Helper {
                 || block instanceof ShulkerBoxBlock) {
             return NO;
         }
-        // door, fence gate, liquid, trapdoor have been accounted for, nothing else uses the world or pos parameters
-        // at least in 1.12.2 vanilla, that is.....
+        // Mod collision shapes may depend on the real block position and its neighbors.
         if (state.isPathfindable(PathComputationType.LAND)) {
-            return YES;
+            return MAYBE;
         } else {
             return NO;
         }
@@ -283,14 +284,14 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (fullyPassable == NO) {
             return false;
         }
-        return state.isPathfindable(PathComputationType.LAND);
+        return state.getCollisionShape(ctx.world(), pos).isEmpty();
     }
 
     /**
      * params retained for backwards compatibility
      */
     static boolean fullyPassablePosition(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
-        return state.isPathfindable(PathComputationType.LAND);
+        return state.getCollisionShape(bsi.access, new BlockPos(x, y, z)).isEmpty();
     }
 
     static boolean isReplaceable(int x, int y, int z, BlockState state, BlockStateInterface bsi) {
@@ -418,8 +419,10 @@ public interface MovementHelper extends ActionCosts, Helper {
 
     static Ternary canWalkOnBlockState(BlockState state) {
         Block block = state.getBlock();
-        if (isBlockNormalCube(state) && (block != Blocks.MAGMA_BLOCK || Baritone.settings().allowWalkOnMagmaBlocks.value) && block != Blocks.BUBBLE_COLUMN && block != Blocks.HONEY_BLOCK) {
-            return YES;
+        if (state.isAir()) return NO;
+        if (block == Blocks.MAGMA_BLOCK && !Baritone.settings().allowWalkOnMagmaBlocks.value
+                || block == Blocks.BUBBLE_COLUMN || block == Blocks.HONEY_BLOCK) {
+            return NO;
         }
         if (block instanceof AzaleaBlock) {
             return YES;
@@ -454,7 +457,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             }
             return YES;
         }
-        return NO;
+        return MAYBE; // Generic supports require their contextual collision shape.
     }
 
     static boolean canWalkOnPosition(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
@@ -480,7 +483,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             return true;
         }
 
-        return false; // If we don't recognise it then we want to just return false to be safe.
+        return isBlockNormalCube(bsi.access, new BlockPos(x, y, z), state);
     }
 
     static boolean canWalkOn(CalculationContext context, int x, int y, int z, BlockState state) {
@@ -594,7 +597,8 @@ public interface MovementHelper extends ActionCosts, Helper {
         // can we look at the center of a side face of this block and likely be able to place?
         // (thats how this check is used)
         // therefore dont include weird things that we technically could place against (like carpet) but practically can't
-        return isBlockNormalCube(state) || state.getBlock() == Blocks.GLASS || state.getBlock() instanceof StainedGlassBlock;
+        return isBlockNormalCube(bsi.access, new BlockPos(x, y, z), state)
+                || state.getBlock() == Blocks.GLASS || state.getBlock() instanceof StainedGlassBlock;
     }
 
     /**
@@ -786,6 +790,10 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean isBlockNormalCube(BlockState state) {
+        return isBlockNormalCube(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state);
+    }
+
+    static boolean isBlockNormalCube(BlockGetter view, BlockPos pos, BlockState state) {
         Block block = state.getBlock();
         if (block instanceof BambooStalkBlock
                 || block instanceof MovingPistonBlock
@@ -796,7 +804,7 @@ public interface MovementHelper extends ActionCosts, Helper {
             return false;
         }
         try {
-            return Block.isShapeFullBlock(state.getCollisionShape(null, null));
+            return Block.isShapeFullBlock(state.getCollisionShape(view, pos));
         } catch (Exception ignored) {
             // if we can't get the collision shape, assume it's bad and add to blocksToAvoid
         }
