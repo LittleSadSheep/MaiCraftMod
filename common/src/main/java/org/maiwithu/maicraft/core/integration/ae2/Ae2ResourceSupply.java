@@ -341,7 +341,7 @@ public final class Ae2ResourceSupply {
 
     /**
      * Record fixed AE access seen inside an explicit {@code inspect_machine} observation. Merely
-     * walking near a terminal never calls this method and resource supply never performs discovery.
+     * walking near a terminal never calls this method; supply also has its own bounded discovery.
      */
     public static ExplicitAccessObservation rememberObservedAccess(
             LocalPlayer player, BlockPos center, int radius) {

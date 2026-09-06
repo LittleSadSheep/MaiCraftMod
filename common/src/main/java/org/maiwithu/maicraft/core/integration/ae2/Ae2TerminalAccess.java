@@ -7,6 +7,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Iterator;
+import java.util.PriorityQueue;
+import java.util.function.Function;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -17,7 +20,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
 
-/** Explicitly observed, process-local memory for AE2 terminal access. */
+/** Observed terminal access, with bounded task-owned discovery and process-local successful access memory. */
 final class Ae2TerminalAccess {
     static final List<ResourceLocation> WIRELESS_TERMINAL_IDS = List.of(
             ResourceLocation.fromNamespaceAndPath("ae2", "wireless_terminal"),
@@ -196,7 +199,65 @@ final class Ae2TerminalAccess {
                 + approach.getX() + ',' + approach.getY() + ',' + approach.getZ();
     }
 
-    private record Observed(BlockPos position, Direction side) {}
+    record Observed(BlockPos position, Direction side) {
+        Observed { position = position.immutable(); }
+    }
+
+    /** Scan loaded block-entity maps by coordinate so block updates cannot invalidate an iterator. */
+    static final class Discovery {
+        static final int RADIUS = 16;
+        static final int CELLS_PER_TICK = 1024;
+        static final int MAX_FACES = 32;
+        private final Iterator<BlockPos> cells;
+        private final Function<BlockPos, List<Direction>> probe;
+        private final Comparator<Observed> order;
+        private final PriorityQueue<Observed> found;
+        private int checkedCells, unloadedCells;
+
+        Discovery(LocalPlayer player, Ae2ReflectionBridge bridge) {
+            this(player.blockPosition(), position -> {
+                ClientLevel level = (ClientLevel) player.level();
+                LevelChunk chunk = level.getChunkSource().getChunkNow(position.getX() >> 4, position.getZ() >> 4);
+                return chunk == null ? null : bridge.fixedTerminalSides(chunk.getBlockEntities().get(position));
+            });
+        }
+
+        Discovery(BlockPos center, Function<BlockPos, List<Direction>> probe) {
+            this.probe = probe;
+            cells = BlockPos.betweenClosed(center.offset(-RADIUS, -RADIUS, -RADIUS),
+                    center.offset(RADIUS, RADIUS, RADIUS)).iterator();
+            order = Comparator.comparingDouble((Observed value) -> value.position().distSqr(center))
+                    .thenComparingLong(value -> value.position().asLong()).thenComparingInt(value -> value.side().ordinal());
+            found = new PriorityQueue<>(order.reversed());
+        }
+
+        boolean tick() {
+            long deadline = System.nanoTime() + 1_000_000;
+            for (int checked = 0; checked < CELLS_PER_TICK && cells.hasNext() && System.nanoTime() < deadline; checked++) {
+                BlockPos position = cells.next();
+                checkedCells++;
+                List<Direction> sides = probe.apply(position);
+                if (sides == null) { unloadedCells++; continue; }
+                for (Direction side : sides) {
+                    Observed candidate = new Observed(position, side);
+                    if (found.contains(candidate)) continue;
+                    if (found.size() < MAX_FACES) found.add(candidate);
+                    else if (order.compare(candidate, found.peek()) < 0) {
+                        found.poll();
+                        found.add(candidate);
+                    }
+                }
+            }
+            return !cells.hasNext();
+        }
+
+        List<Observed> result() { return found.stream().sorted(order).toList(); }
+
+        String summary() {
+            return "radius=" + RADIUS + ", checked_cells=" + checkedCells + ", unloaded_cells=" + unloadedCells
+                    + ", retained_terminal_faces=" + found.size() + "; only the loaded portion of this local cube was observed";
+        }
+    }
 
     private static final List<Direction> HORIZONTAL_DIRECTIONS = List.of(
             Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST);

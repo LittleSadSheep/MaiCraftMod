@@ -58,8 +58,8 @@ public final class Ae2ScreenAccessTest {
         minecraft.screen = (ChatScreen) memory.allocateInstance(ChatScreen.class);
         var chat = new Ae2SupplySession(player, request, bridge);
         invoke(chat, "start", context);
-        check(chat.outcome().orElseThrow().code().equals("fixed_terminal_not_known"),
-                "chat reaches terminal discovery instead of failing screen_open");
+        check(chat.outcome().isEmpty() && chat.phase().equals("discover_fixed"),
+                "without a wireless item or remembered terminal, chat starts bounded fixed-terminal discovery");
         minecraft.screen = (PauseScreen) memory.allocateInstance(PauseScreen.class);
         var modal = new Ae2SupplySession(player, request, bridge);
         invoke(modal, "start", context);

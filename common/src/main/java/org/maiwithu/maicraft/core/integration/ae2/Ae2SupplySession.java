@@ -39,6 +39,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         CLOSE_STAGE,
         WAIT_STAGE_CLOSE,
         WAIT_SELECT,
+        DISCOVER_FIXED,
         NAVIGATE_FIXED,
         FACE_FIXED,
         OPEN_FIXED,
@@ -140,6 +141,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private List<Ae2TerminalAccess.FixedTarget> fixedCandidates = List.of();
     private Ae2TerminalAccess.FixedTarget fixedTarget;
     private Ae2TerminalAccess.Known remembered;
+    private Ae2TerminalAccess.Discovery discovery;
+    private boolean discoveryAttempted;
+    private String fixedDiscoverySummary = "";
     private boolean movedForFixedTerminal;
     private PlayerNav navigation;
     private InventorySwap inventorySwap;
@@ -199,6 +203,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 case CLOSE_STAGE -> closeStage(context);
                 case WAIT_STAGE_CLOSE -> waitStageClose(context);
                 case WAIT_SELECT -> waitSelect(context);
+                case DISCOVER_FIXED -> discoverFixed(context);
                 case NAVIGATE_FIXED -> navigateFixed();
                 case FACE_FIXED -> faceFixed(context);
                 case OPEN_FIXED -> openFixed(context);
@@ -339,21 +344,36 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             fixedCandidates = Ae2TerminalAccess.targetsFor(
                     player, remembered.position(), remembered.side());
         } else {
-            boolean rememberedTerminalMissing = remembered != null;
             if (remembered != null) Ae2TerminalAccess.discard(remembered);
             remembered = null;
-            finishNow(Ae2ResourceSupply.Status.FAILED,
-                    rememberedTerminalMissing
-                            ? "remembered_fixed_terminal_missing" : "fixed_terminal_not_known",
-                    rememberedTerminalMissing
-                            ? "the explicitly observed fixed AE2 terminal is no longer present; inspect or mark an AE terminal again"
-                            : "no wireless AE terminal is carried and no fixed AE terminal has been explicitly observed with inspect_machine; keep an AE storage menu open or inspect/mark a fixed terminal first",
-                    false);
+            beginDiscovery();
             return;
         }
+        prepareFixedAccess(context);
+    }
+
+    private void beginDiscovery() {
+        discoveryAttempted = true;
+        terminalAccess = "fixed_terminal_discovery";
+        discovery = new Ae2TerminalAccess.Discovery(player, bridge);
+        setPhase(Phase.DISCOVER_FIXED);
+    }
+
+    private void discoverFixed(LocalPlayerContext context) {
+        if (!discovery.tick()) return;
+        fixedCandidates = discovery.result().stream()
+                .flatMap(found -> Ae2TerminalAccess.targetsFor(player, found.position(), found.side()).stream())
+                .distinct().toList();
+        fixedDiscoverySummary = discovery.summary();
+        discovery = null;
+        prepareFixedAccess(context);
+    }
+
+    private void prepareFixedAccess(LocalPlayerContext context) {
         if (fixedCandidates.isEmpty()) {
-            finishNow(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_unreachable",
-                    "the remembered AE2 terminal has no bounded interaction approach", false);
+            finishNow(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_not_found",
+                    "no loaded fixed AE2 terminal with an interaction approach was observed nearby; "
+                            + fixedDiscoverySummary, false);
             return;
         }
         terminalAccess = "fixed_terminal";
@@ -440,11 +460,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         if (navigation == null) {
-            List<NavGoal> goals = fixedCandidates.stream()
-                    .map(target -> NavGoal.exact(target.approach())).toList();
+            NavGoal goal = fixedGoal(fixedCandidates);
             navigation = PlayerNav.toGoal(
                     player,
-                    () -> NavGoal.composite(goals),
+                    () -> goal,
                     1.0,
                     () -> fixedCandidates.stream()
                             .anyMatch(target -> target.approach().equals(player.blockPosition())));
@@ -458,6 +477,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (status == PlayerNav.Status.FAILED) {
             String reason = navigation.failReason();
             stopNavigation();
+            if (!discoveryAttempted) {
+                beginDiscovery();
+                return;
+            }
             beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
                     remembered != null ? "last_known_terminal_path_blocked" : "fixed_terminal_unreachable",
                     "the player could not reach a fixed AE2 terminal: " + reason);
@@ -475,6 +498,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         setPhase(Phase.FACE_FIXED);
+    }
+
+    static NavGoal fixedGoal(List<Ae2TerminalAccess.FixedTarget> candidates) {
+        return NavGoal.composite(candidates.stream().map(target -> NavGoal.exact(target.approach())).toList());
     }
 
     private void faceFixed(LocalPlayerContext context) {
