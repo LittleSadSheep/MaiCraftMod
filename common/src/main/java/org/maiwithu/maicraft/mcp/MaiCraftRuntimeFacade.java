@@ -145,6 +145,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                     situation.addProperty("controlling_task", CompanionTickDispatcher.controllingTask());
                     situation.add("navigation", gson.toJsonTree(
                             org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.diagnosticState()));
+                    situation.add("collision_geometry", NearbyCollisionPerception.observe(player));
                 }
                 yield situation;
             }
