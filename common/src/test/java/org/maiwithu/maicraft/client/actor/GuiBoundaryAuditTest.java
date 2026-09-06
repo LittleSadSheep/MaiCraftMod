@@ -42,6 +42,17 @@ public final class GuiBoundaryAuditTest {
             before(method(port, name), "requireVisible(", ".gameMode().handle",
                     name + " cannot submit a native menu mutation while hidden", "");
         }
+        String renderer = Files.readString(root.resolve(base + "core/mixin/GameRendererCameraMixin.java"));
+        check(renderer.contains("Lnet/minecraft/client/Minecraft;pauseGame(Z)V")
+                        && renderer.contains("!ClientRuntime.actor().automationControlRequested()"),
+                "only the renderer's automatic focus-loss pause is suppressed while controlled");
+        check(!renderer.contains("pauseOnLostFocus ="), "takeover cannot persist or overwrite user pause settings");
+        String mouse = Files.readString(root.resolve(base + "core/mixin/MouseHandlerControlMixin.java"));
+        check(mouse.contains("method = \"grabMouse\"") && mouse.contains("cancellable = true")
+                        && mouse.contains("preventsMouseGrab()) callback.cancel()"),
+                "every native cursor grab must respect automation, including screen closure and clicks");
+        String mixins = Files.readString(root.resolve("common/src/main/resources/maicraft.mixins.json"));
+        check(mixins.contains("\"MouseHandlerControlMixin\""), "the cursor guard must be registered");
         System.out.println("GuiBoundaryAuditTest: passed");
     }
 

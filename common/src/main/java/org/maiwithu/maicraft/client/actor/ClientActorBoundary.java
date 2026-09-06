@@ -23,6 +23,8 @@ public final class ClientActorBoundary {
     private long tickRevision;
     private long mutationClaimedTick = Long.MIN_VALUE;
     private DefaultLocalPlayerContext activeContext;
+    private boolean windowControlActive;
+    private boolean restoreMouseOnRelease;
 
     public ClientActorBoundary() {
         this(Minecraft.getInstance());
@@ -55,6 +57,7 @@ public final class ClientActorBoundary {
             bodyEpoch = nextRevision(bodyEpoch, "body epoch");
         }
         body.beginTick(tickRevision);
+        updateWindowControl(body.automationControlRequested());
         if (player == null || minecraft.level == null || minecraft.gameMode == null ||
                 minecraft.getConnection() == null) {
             if (playerChanged) {
@@ -79,6 +82,7 @@ public final class ClientActorBoundary {
             }
             mutationClaimedTick = tickRevision;
         }
+        updateWindowControl(body.automationControlRequested());
 
         DefaultLocalPlayerContext context = new DefaultLocalPlayerContext(
                 this,
@@ -104,6 +108,29 @@ public final class ClientActorBoundary {
         }
         body.endTick(current);
         activeContext = null;
+    }
+
+    /** Retain the cursor guard while F8 settles an open automation menu before restoring it. */
+    public boolean preventsMouseGrab() {
+        return windowControlActive || body.automationControlRequested();
+    }
+
+    /** Mouse ownership follows the logical request, including a retained portal handoff. */
+    void updateWindowControl(boolean controlled) {
+        if (controlled == windowControlActive) return;
+        windowControlActive = controlled;
+        if (controlled) {
+            restoreMouseOnRelease = minecraft.mouseHandler.isMouseGrabbed();
+            minecraft.mouseHandler.releaseMouse();
+        } else {
+            boolean restore = restoreMouseOnRelease;
+            restoreMouseOnRelease = false;
+            // Never focus another window, dismiss a GUI, or lock the cursor after disconnecting.
+            if (restore && minecraft.isWindowActive() && minecraft.screen == null
+                    && minecraft.player != null && minecraft.level != null) {
+                minecraft.mouseHandler.grabMouse();
+            }
+        }
     }
 
     public DefaultBodyControlPort body() { return body; }
@@ -223,6 +250,8 @@ public final class ClientActorBoundary {
         actions.revokeForBoundary("the client runtime stopped");
         menus.revokeForHumanHandoff(player, "the client runtime stopped");
         body.shutdown();
+        restoreMouseOnRelease = false;
+        updateWindowControl(false);
         activeContext = null;
         observedPlayer = null;
         mutationClaimedTick = Long.MIN_VALUE;
