@@ -8,6 +8,7 @@ public final class GuiRegressionSuite {
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);
         BodyControlInputTest.main(args);
+        org.maiwithu.maicraft.client.lightnav.LightNavProtocolTest.main(args);
         CompanionCancellationTest.main(args);
         org.maiwithu.maicraft.core.inventory.StockEvidenceTest.main(args);
         org.maiwithu.maicraft.core.integration.create.CreateStockObservationTest.main(args);
