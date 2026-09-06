@@ -456,6 +456,14 @@ public final class EmbeddedBaritoneNavigator {
         failWhenSafe(FailureType.TARGET_LOST, "navigation was stopped");
     }
 
+    /** Drop local planning on manual takeover without submitting a native world action. */
+    public void abandon() {
+        cancelTerrainProbe();
+        stopped = true; terminalFailure = true; driveRequested = false;
+        pendingPause = false; pendingFailureType = null;
+        EmbeddedBaritoneRuntime.abandon(this);
+    }
+
     public void pause() {
         driveRequested = false;
         if (!isSafeToCancel()) {

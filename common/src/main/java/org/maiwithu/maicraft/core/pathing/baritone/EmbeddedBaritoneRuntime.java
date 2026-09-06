@@ -324,6 +324,24 @@ public final class EmbeddedBaritoneRuntime {
         courseTurning = false;
     }
 
+    static void abandon(EmbeddedBaritoneNavigator navigator) {
+        requireClientThread();
+        if (pendingStart != null && pendingStart.navigator() == navigator) pendingStart = null;
+        if (owner != navigator) return;
+        if (backend != null) {
+            // Embedded BlockBreakHelper records only a local stop request. The actor boundary
+            // owns any native receipt invalidation after manual control or world loss.
+            backend.getPathingBehavior().forceCancel();
+            backend.getInputOverrideHandler().clearAllKeys();
+            ((LookBehavior) backend.getLookBehavior()).clearTarget();
+            ((PathingBehavior) backend.getPathingBehavior()).discardPendingPathEvents();
+        }
+        ACTIONS.bodyGone();
+        owner = null; pendingPolicyOwner = null; pendingPolicyGoal = null;
+        EmbeddedBaritonePolicy.clear();
+        courseCommitted = false; courseTurning = false;
+    }
+
     static boolean hasConcretePath(EmbeddedBaritoneNavigator navigator) {
         return owner == navigator && backend != null
                 && backend.getPathingBehavior().getCurrent() != null;
