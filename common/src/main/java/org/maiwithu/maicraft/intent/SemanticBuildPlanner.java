@@ -316,7 +316,7 @@ public final class SemanticBuildPlanner {
         return target(goal, player, runtime);
     }
 
-    private record Size(int width, int depth, int storeys, int floorHeight) {
+    record Size(int width, int depth, int storeys, int floorHeight) {
         int wallHeight() { return storeys * floorHeight; }
     }
     private record Shore(Direction direction, int waterY, int length, int[][] supportFloor) {
@@ -324,12 +324,12 @@ public final class SemanticBuildPlanner {
             return supportFloor[distance - 1][lateral + 1];
         }
     }
-    private record Palette(
+    record Palette(
             String foundation, String floor, String wall, String frame, String roof,
             String accent, String door, String window, String railing, String ladder,
             String light, String storage, String work, String study, String seat,
             String textile) {}
-    private record StyleProfile(
+    record StyleProfile(
             List<String> roofShapes, String roofCurve, int overhang, int cornerLift,
             boolean soffit, boolean exposedFrame, int windowStride) {}
     private record StyleRule(Set<String> tokens, StyleProfile profile) {}
@@ -338,13 +338,16 @@ public final class SemanticBuildPlanner {
         int centerX() { return Math.floorDiv(minX + maxX, 2); }
         int centerZ() { return Math.floorDiv(minZ + maxZ, 2); }
     }
-    private record Site(int minX, int maxX, int minZ, int maxZ, int baseY,
+    record Site(int minX, int maxX, int minZ, int maxZ, int baseY,
                         int lowY, int highY, int[][] heights, Direction front,
                         Shore shore, int score) {}
 
     private static final StyleProfile DEFAULT_STYLE = new StyleProfile(
             List.of("xuanshan", "wudian"), "concave", 2, 0, true, true, 3);
     private static final List<StyleRule> STYLE_RULES = List.of(
+            new StyleRule(Set.of("simple", "temporary", "survival", "hut"),
+                    new StyleProfile(List.of("flat"),
+                            "straight", 0, 0, false, false, 3)),
             new StyleRule(Set.of("chinese", "japanese", "korean", "east_asian", "hanok",
                     "minka", "shrine", "pagoda"),
                     new StyleProfile(List.of("xieshan", "wudian", "xuanshan"),
@@ -592,18 +595,20 @@ public final class SemanticBuildPlanner {
                 : (dz < 0 ? Direction.NORTH : Direction.SOUTH);
     }
 
-    private static JsonArray design(Site s, Size size, String purpose,
+    static JsonArray design(Site s, Size size, String purpose,
                                     Set<String> features, Palette palette,
                                     StyleProfile style, String terrain, boolean replace) {
         JsonArray ops = new JsonArray();
         int floorY = s.baseY;
         int wallTop = floorY + size.wallHeight();
+        String foundation = style.roofShapes.contains("flat") ? palette.floor : palette.foundation;
         BlockPos ladder = ladderPosition(s, floorY + 1);
         BlockPos cellarLadder = ladder.relative(s.front);
 
         if (replace) {
             ops.add(box("minecraft:air", s.minX + 1, floorY + 1,
-                    s.minZ + 1, s.maxX - 1, wallTop, s.maxZ - 1, false));
+                    s.minZ + 1, s.maxX - 1, terrain.equals("embedded") ? wallTop + 2 : wallTop,
+                    s.maxZ - 1, false));
         }
         if (features.contains("cellar") && replace) {
             ops.add(box(palette.foundation, s.minX + 1, floorY - 4, s.minZ + 1,
@@ -611,8 +616,8 @@ public final class SemanticBuildPlanner {
             ops.add(box("minecraft:air", s.minX + 2, floorY - 3, s.minZ + 2,
                     s.maxX - 2, floorY - 1, s.maxZ - 2, false));
         }
-        if (terrain.equals("hillside")) supports(ops, s, palette.foundation);
-        ops.add(box(palette.foundation, s.minX, floorY, s.minZ,
+        if (terrain.equals("hillside")) supports(ops, s, foundation);
+        ops.add(box(foundation, s.minX, floorY, s.minZ,
                 s.maxX, floorY, s.maxZ, false));
         ops.add(box(palette.floor, s.minX + 1, floorY, s.minZ + 1,
                 s.maxX - 1, floorY, s.maxZ - 1, false));
@@ -638,9 +643,15 @@ public final class SemanticBuildPlanner {
                     ops, s, size, storeyFloor, palette.wall, functions, roomSerial);
             roomSerial += rooms.size();
             for (Room room : rooms) {
-                ceilingAndLight(ops, room, storeyFloor + size.floorHeight,
-                        palette.frame, palette.light, reserved);
-                furnish(ops, room, storeyFloor, palette, reserved);
+                if (interiorLighting(features)) {
+                    ceilingAndLight(ops, room, storeyFloor + size.floorHeight,
+                            palette.frame, palette.light, reserved);
+                }
+                if (features.contains("furnished") || features.contains("storage")
+                        || features.contains("workshop") || features.contains("kitchen")
+                        || features.contains("study") || features.contains("bedroom")) {
+                    furnish(ops, room, storeyFloor, palette, reserved);
+                }
             }
         }
 
@@ -672,9 +683,11 @@ public final class SemanticBuildPlanner {
             serviceDoor = edge(s, side, floorY + 1, 0);
             openings.add(serviceDoor);
         }
-        for (int storey = 0; storey < size.storeys; storey++) {
-            int windowY = floorY + storey * size.floorHeight + 2;
-            windows(ops, s, windowY, openings, palette.window, style.windowStride);
+        if (features.contains("windows") || features.contains("furnished")) {
+            for (int storey = 0; storey < size.storeys; storey++) {
+                int windowY = floorY + storey * size.floorHeight + 2;
+                windows(ops, s, windowY, openings, palette.window, style.windowStride);
+            }
         }
         ops.add(door(palette.door, mainDoor, s.front));
         if (serviceDoor != null) {
@@ -685,7 +698,7 @@ public final class SemanticBuildPlanner {
         if (features.contains("dock") && s.shore != null) {
             dock(ops, s, palette);
         } else {
-            entryTerrace(ops, s, palette, features.contains("porch"));
+            entryTerrace(ops, s, palette, features.contains("porch"), interiorLighting(features));
         }
         return ops;
     }
@@ -878,6 +891,9 @@ public final class SemanticBuildPlanner {
 
     private static JsonObject roof(Palette palette, Site s, int y,
                                    StyleProfile style, String purpose) {
+        if (style.roofShapes.contains("flat")) {
+            return box(palette.floor, s.minX, y, s.minZ, s.maxX, y, s.maxZ, false);
+        }
         JsonObject op = base("roof", palette.roof);
         bounds(op, s.minX, y, s.minZ, s.maxX, y, s.maxZ);
         int variant = Math.floorMod(
@@ -896,7 +912,7 @@ public final class SemanticBuildPlanner {
         return op;
     }
 
-    private static void entryTerrace(JsonArray ops, Site s, Palette palette, boolean porch) {
+    private static void entryTerrace(JsonArray ops, Site s, Palette palette, boolean porch, boolean lights) {
         int depth = porch ? 3 : 2;
         int halfWidth = porch ? 2 : 1;
         BlockPos a = edge(s, s.front, s.baseY, 1);
@@ -913,10 +929,10 @@ public final class SemanticBuildPlanner {
                     a.getZ() - halfWidth, Math.max(a.getX(), b.getX()),
                     s.baseY, a.getZ() + halfWidth, false));
         }
-        for (int lateral : new int[]{-halfWidth, halfWidth}) {
+        if (porch || lights) for (int lateral : new int[]{-halfWidth, halfWidth}) {
             BlockPos post = lateral(edge(s, s.front, s.baseY + 1, depth), s.front, lateral);
             ops.add(set(palette.railing, post.getX(), post.getY(), post.getZ()));
-            ops.add(set(palette.light, post.getX(), post.getY() + 1, post.getZ()));
+            if (lights) ops.add(set(palette.light, post.getX(), post.getY() + 1, post.getZ()));
         }
     }
 
@@ -976,14 +992,19 @@ public final class SemanticBuildPlanner {
         };
     }
 
-    private static StyleProfile styleProfile(String requestedStyle, String purpose) {
-        String language = ((requestedStyle == null ? "" : requestedStyle) + ' ' + purpose)
+    static StyleProfile styleProfile(String requestedStyle, String purpose) {
+        String requested = (requestedStyle == null ? "" : requestedStyle)
+                .toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        String language = purpose
                 .toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
         StyleProfile selected = DEFAULT_STYLE;
         int bestScore = 0;
         for (StyleRule rule : STYLE_RULES) {
             int score = 0;
-            for (String token : rule.tokens) if (language.contains(token)) score++;
+            for (String token : rule.tokens) {
+                if (requested.contains(token)) score += 8;
+                if (language.contains(token)) score++;
+            }
             if (score > bestScore) {
                 bestScore = score;
                 selected = rule.profile;
@@ -1001,12 +1022,11 @@ public final class SemanticBuildPlanner {
                 .filter(entry -> language.contains(entry.getKey()))
                 .map(Map.Entry::getValue).forEach(uses::add);
         uses.add(RoomUse.COMMON);
-        uses.add(RoomUse.REST);
-        uses.add(RoomUse.KITCHEN);
-        uses.add(RoomUse.STORAGE);
-        uses.add(RoomUse.WORK);
-        uses.add(RoomUse.STUDY);
         return List.copyOf(uses);
+    }
+
+    private static boolean interiorLighting(Set<String> features) {
+        return features.contains("lighting") || features.contains("furnished");
     }
 
     private static JsonObject semanticContract(Size size, Set<String> features, Site site,
@@ -1024,7 +1044,7 @@ public final class SemanticBuildPlanner {
         contract.addProperty("bounded_cell_count", resolvedCells);
         contract.addProperty("storeys", size.storeys);
         contract.addProperty("interior_rooms", roomCount);
-        contract.addProperty("interior_lights", roomCount);
+        contract.addProperty("interior_lights", interiorLighting(features) ? roomCount : 0);
         contract.addProperty("floor_slabs", size.storeys);
         contract.addProperty("exterior_doors", features.contains("workshop") ? 2 : 1);
         contract.addProperty("terrain_entry_approach", true);
@@ -1393,11 +1413,11 @@ public final class SemanticBuildPlanner {
         return position.dimension() == null || position.dimension().equals(dimension) ? position : null;
     }
 
-    private static Size parseSize(JsonElement element) {
+    static Size parseSize(JsonElement element) {
         if (element == null || element.isJsonNull()) return null;
         if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()) {
             return switch (element.getAsString().trim().toLowerCase(Locale.ROOT)) {
-                case "small", "compact" -> new Size(9, 7, 1, 4);
+                case "small", "compact" -> new Size(5, 5, 1, 3);
                 case "medium", "normal" -> new Size(13, 11, 2, 4);
                 case "large", "spacious" -> new Size(19, 15, 3, 4);
                 default -> null;

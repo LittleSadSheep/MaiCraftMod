@@ -331,13 +331,18 @@ public final class BuildTool implements MaiCraftTool {
      * inevitably drifting geometry estimate.
      */
     public static int resolvedCellCount(JsonArray ops) {
+        return resolvedTargets(ops).size();
+    }
+
+    /** The actual deduplicated construction plan, shared by geometry checks and estimates. */
+    public static List<BuildTaskRecord.Target> resolvedTargets(JsonArray ops) {
         if (ops == null || ops.size() == 0) {
             throw new IllegalArgumentException("ops must contain at least one instruction");
         }
         JsonObject wrapper = new JsonObject();
         wrapper.add("ops", ops.deepCopy());
         Args parsed = GSON.fromJson(wrapper, Args.class);
-        return resolveTargets(parsed.ops()).size();
+        return List.copyOf(resolveTargets(parsed.ops()));
     }
 
     private static List<BuildTaskRecord.Target> resolveTargets(List<OpSpec> ops) {

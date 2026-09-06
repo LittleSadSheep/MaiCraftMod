@@ -18,6 +18,8 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.client.actor.NativeConfirmationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest.main(args);
         org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeightTest.main(args);
+        org.maiwithu.maicraft.core.task.acquire.AcquisitionProtectionTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.NavigationPolicySnapshotTest.main(args);
         System.out.println("NavigationRegressionSuite: passed");
     }
 }

@@ -21,6 +21,7 @@ public final class MachineRegressionSuite {
         MachineBlueprintSpecTest.main(args);
         MachineBlueprintStateTest.main(args);
         org.maiwithu.maicraft.core.task.build.MachineBlueprintGeometryTest.main(args);
+        SemanticBuildPlannerTest.main(args);
         accepts("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"label\":\"factory\",\"radius\":4}");
         rejects("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"radius\":4.5}");
         rejects("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"radius\":2147483648}");
