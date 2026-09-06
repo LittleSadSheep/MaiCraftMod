@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package baritone.selection;
 
 import baritone.api.selection.ISelection;
