@@ -138,7 +138,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return switch (view) {
             case "situation" -> {
                 JsonObject situation = situation(player);
-                if ("maicraft:navigation".equals(nullableString(arguments, "focus"))) {
+                String focus = nullableString(arguments, "focus");
+                if ("maicraft:navigation".equals(focus) || "maicraft:transport".equals(focus)) {
                     var gson = new com.google.gson.Gson();
                     situation.add("actor", gson.toJsonTree(ClientRuntime.actor().diagnosticState()));
                     situation.addProperty("tick_stage", ClientRuntime.lastTickStage());
@@ -146,6 +147,14 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                     situation.add("navigation", gson.toJsonTree(
                             org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.diagnosticState()));
                     situation.add("collision_geometry", NearbyCollisionPerception.observe(player));
+                    situation.add("transport", gson.toJsonTree(
+                            org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.diagnosticState()));
+                    situation.add("landing_assist", gson.toJsonTree(
+                            org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.diagnosticState()));
+                    situation.add("jetpack", gson.toJsonTree(
+                            org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession.inspect(player)));
+                    situation.add("elevators", gson.toJsonTree(
+                            org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorTravel.inspect(player)));
                 }
                 yield situation;
             }

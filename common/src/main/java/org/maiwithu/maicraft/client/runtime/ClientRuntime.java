@@ -80,6 +80,7 @@ public final class ClientRuntime {
         boolean pathingMayDrive = false;
         try {
             bodyPresent = true;
+            org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.observeControl(context);
             BlockSearch.tick(context.level());
             TargetIndex.clientTick(context.level());
             GameplayAttentionMonitor.tick(context.player());
@@ -114,6 +115,13 @@ public final class ClientRuntime {
                 return;
             }
             intents.controlAvailable();
+            if (org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.tickCleanup(context)) {
+                tickStage = "settling_transport";
+                pathingMayDrive = context.mutationAvailable();
+                intents.tickPersistence(minecraft, context.player());
+                GameplayAttentionMonitor.afterSemanticBind(context.player());
+                return;
+            }
             tickStage = "running_tasks";
             CompanionTickDispatcher.tick(context.player());
             // A semantic action may have consumed this tick's one native-mutation slot. Do not
@@ -214,6 +222,7 @@ public final class ClientRuntime {
 
     private static void bodyGone(boolean saveSemanticState) {
         EmbeddedBaritoneRuntime.bodyGone();
+        org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.abandon();
         if (saveSemanticState) IntentRuntime.get().bodyUnavailable();
         CompanionTickDispatcher.bodyGone();
         PathCaches.dropAll();

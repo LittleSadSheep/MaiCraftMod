@@ -453,6 +453,13 @@ public final class EmbeddedBaritoneRuntime {
                 }
             }
         }
+        MovementFall assistedFall = currentFall(owner);
+        var landingMovement = assistedFall != null && assistedFall.landingBoat() != null
+                ? assistedFall.landingBoat().movementOverride() : null;
+        if (landingMovement != null) {
+            forward = landingMovement.forward(); strafe = landingMovement.strafe();
+            jump = landingMovement.jumping(); sneak = landingMovement.sneaking(); sprint = landingMovement.sprinting();
+        }
         InputDriver.applyMovement(player, forward, strafe, jump, sneak, sprint);
     }
 
@@ -570,6 +577,7 @@ public final class EmbeddedBaritoneRuntime {
     }
 
     static void configureTerrain(Settings settings, TerrainPermit permit) {
+        org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.configure(permit);
         settings.allowBreak.value = permit.mayAlter();
         settings.allowBreakAnyway.value = List.of();
         settings.allowPlace.value = permit.mayAlter();

@@ -43,7 +43,8 @@ final class CompanionBrain {
         // body owner for this tick and retry the priority hand-off at the next safe movement
         // boundary. Reflexes that need airborne takeover must first provide an explicit
         // continuation controller; clearing the route's keys is never a safe approximation.
-        if (holder != winner && !EmbeddedBaritoneRuntime.canSafelySuspendActive()) {
+        if (holder != winner && (!EmbeddedBaritoneRuntime.canSafelySuspendActive()
+                || !org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.canSafelySuspendActive())) {
             winner = holder;
         }
         if (holder != null && holder != winner) {
@@ -51,6 +52,7 @@ final class CompanionBrain {
             // only the holder's own nav field is not a complete body hand-off. Retire the shared
             // pathing keys/look/native receipt before the higher-priority winner gets this tick.
             EmbeddedBaritoneRuntime.suspendActivePhysicalOutputs();
+            org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.suspendActive();
             holder.stop(player, Task.StopReason.PREEMPTED);
         }
         holder = winner;
