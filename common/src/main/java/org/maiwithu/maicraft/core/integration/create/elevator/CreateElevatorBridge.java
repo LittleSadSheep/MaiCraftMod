@@ -5,7 +5,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -16,7 +15,6 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
@@ -38,6 +36,7 @@ final class CreateElevatorBridge {
     private final Class<?> scrolling = type(ROOT + "contraptions.elevator.ElevatorControlsHandler");
     private final Class<?> selectionType = type(ROOT + "contraptions.actors.contraptionControls.ContraptionControlsMovement$ElevatorFloorSelection");
     private final Object controlsSlot = construct(ROOT + "contraptions.actors.contraptionControls.ContraptionControlsBlockEntity$ControlsSlot");
+    private final Object elevatorSlot = privateValue(scrolling, "slot");
 
     record Column(int x, int z, Direction side) { BlockPos at(int y) { return new BlockPos(x, y, z); } }
     record Floor(int contactY, String shortName, String longName) {}
@@ -135,12 +134,23 @@ final class CreateElevatorBridge {
     }
 
     int selected(Cabin cabin, BlockPos control) {
+        Object selection = selection(cabin, control);
+        return selection == null ? Integer.MIN_VALUE : number(value(selection, "currentTargetY"));
+    }
+
+    private Object selection(Cabin cabin, BlockPos control) {
         Object actor = call(cabin.contraption, "getActorAt", control);
-        if (actor == null) return Integer.MIN_VALUE;
+        if (actor == null) return null;
         Object movement = call(actor, "getRight");
-        if (movement == null) return Integer.MIN_VALUE;
+        if (movement == null) return null;
         Object selection = value(movement, "temporaryData");
-        return !selectionType.isInstance(selection) ? Integer.MIN_VALUE : number(value(selection, "currentTargetY"));
+        return selectionType.isInstance(selection) ? selection : null;
+    }
+
+    boolean scrollHit(LocalPlayerContext ctx, Cabin cabin, BlockPos control) {
+        BlockHitResult hit = hit(ctx, cabin, control);
+        return hit != null && Boolean.TRUE.equals(call(elevatorSlot, "testHit", ctx.level(), control,
+                cabin.blocks.get(control).state(), hit.getLocation().subtract(Vec3.atLowerCornerOf(control))));
     }
 
     boolean recentSupport(Cabin cabin, LocalPlayer player) {
@@ -150,9 +160,9 @@ final class CreateElevatorBridge {
     }
 
     void scroll(LocalPlayerContext ctx, Cabin cabin, BlockPos control, int floor) {
-        if (hit(ctx, cabin, control) == null) throw new IllegalStateException("controller is no longer under the crosshair");
-        int current = selected(cabin, control);
-        int from = index(cabin, current), to = index(cabin, floor);
+        if (!scrollHit(ctx, cabin, control)) throw new IllegalStateException("controller dial is no longer under the crosshair");
+        Object selection = selection(cabin, control);
+        int from = selection == null ? -1 : number(value(selection, "currentIndex")), to = index(cabin, floor);
         if (from < 0 || to < 0) throw new IllegalStateException("elevator floor selection is not synchronized");
         if (from != to && !Boolean.TRUE.equals(call(scrolling, "onScroll", (double) (to - from)))) {
             throw new IllegalStateException("native elevator scroll did not hit the controls dial");
@@ -209,6 +219,10 @@ final class CreateElevatorBridge {
             field.setAccessible(true);
             return field.get(owner instanceof Class<?> ? null : owner);
         } catch (ReflectiveOperationException failure) { throw new IllegalStateException("Create field " + name, failure); }
+    }
+    private static Object privateValue(Class<?> owner, String name) {
+        try { Field field = owner.getDeclaredField(name); field.setAccessible(true); return field.get(null); }
+        catch (ReflectiveOperationException failure) { throw new IllegalStateException("Create control slot unavailable", failure); }
     }
     private static Object call(Object owner, String name, Object... args) {
         Class<?> type = owner instanceof Class<?> c ? c : owner.getClass();

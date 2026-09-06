@@ -25,6 +25,7 @@ final class ElevatorInspection {
                 data.put("target_contact_y", cabin.targetY()); data.put("arrived_hint", cabin.arrived());
                 data.put("aligned_at_target", cabin.aligned(cabin.targetY())); data.put("origin", point(cabin.origin()));
                 data.put("body_supported_by_cabin", supports(cabin, player));
+                data.put("recent_native_surface_contact", BRIDGE.recentSupport(cabin, player));
                 data.put("floors", cabin.floors().stream().map(f -> Map.of("contact_y", f.contactY(), "short_name", f.shortName(),
                         "long_name", f.longName(), "in_rope_range", cabin.serves(f.contactY()))).toList());
                 data.put("controls", cabin.controls().stream().map(p -> Map.of("local_position", point(Vec3.atLowerCornerOf(p)),
