@@ -11,14 +11,11 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
-import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.SemanticAbilityCatalog;
@@ -342,95 +339,15 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
      * reports regions and risks, not a raw block dump.
      */
     private JsonObject localDecisionSummary(LocalPlayer player, int hostileCount) {
-        final int radius = 8;
-        final int stride = 2;
-        BlockPos origin = player.blockPosition();
-        Map<String, SectorStats> sectors = new LinkedHashMap<>();
-        Map<String, RegionStats> surfaces = new LinkedHashMap<>();
-        Map<String, Integer> hazards = new LinkedHashMap<>();
-        JsonArray interactionCandidates = new JsonArray();
-
-        for (int dx = -radius; dx <= radius; dx += stride) {
-            for (int dz = -radius; dz <= radius; dz += stride) {
-                int x = origin.getX() + dx;
-                int z = origin.getZ() + dz;
-                BlockPos columnProbe = new BlockPos(x, origin.getY(), z);
-                if (!player.level().isLoaded(columnProbe)) {
-                    hazards.merge("unloaded_boundary", 1, Integer::sum);
-                    continue;
-                }
-                int y = ClientSurfaceHeight.motionBlockingNoLeaves(player.clientLevel, x, z);
-                BlockPos feet = new BlockPos(x, y, z);
-                BlockPos support = feet.below();
-                var supportState = player.level().getBlockState(support);
-                var feetState = player.level().getBlockState(feet);
-                var headState = player.level().getBlockState(feet.above());
-
-                boolean standable = feetState.getCollisionShape(player.level(), feet).isEmpty()
-                        && headState.getCollisionShape(player.level(), feet.above()).isEmpty()
-                        && Block.isShapeFullBlock(
-                                supportState.getCollisionShape(player.level(), support));
-                String sectorName = sector(dx, dz);
-                sectors.computeIfAbsent(sectorName, ignored -> new SectorStats())
-                        .sample(standable, y);
-
-                String surfaceId = BuiltInRegistries.BLOCK.getKey(supportState.getBlock()).toString();
-                surfaces.computeIfAbsent(surfaceId, ignored -> new RegionStats(surfaceId))
-                        .sample(x, y - 1, z);
-
-                if (supportState.getFluidState().is(FluidTags.LAVA)
-                        || feetState.getFluidState().is(FluidTags.LAVA)) {
-                    hazards.merge("lava", 1, Integer::sum);
-                }
-                if (isHotOrDamaging(supportState.getBlock()) || isHotOrDamaging(feetState.getBlock())) {
-                    hazards.merge("damaging_surface", 1, Integer::sum);
-                }
-                if (y < origin.getY() - 4) {
-                    hazards.merge("drop_edge", 1, Integer::sum);
-                }
-
-                if (interactionCandidates.size() < 6) {
-                    BlockPos candidate = supportState.hasBlockEntity() ? support
-                            : feetState.hasBlockEntity() ? feet : null;
-                    if (candidate != null) {
-                        JsonObject reference = new JsonObject();
-                        reference.addProperty("block_id", BuiltInRegistries.BLOCK.getKey(
-                                player.level().getBlockState(candidate).getBlock()).toString());
-                        reference.add("position", blockPosition(candidate));
-                        interactionCandidates.add(reference);
-                    }
-                }
-            }
+        JsonObject summary = org.maiwithu.maicraft.core.tools.perception.LocalFloorSense.describe(player);
+        if (hostileCount > 0) {
+            JsonObject hostile = new JsonObject();
+            hostile.addProperty("kind", "hostile_entities");
+            hostile.addProperty("samples", hostileCount);
+            summary.getAsJsonArray("hazards").add(hostile);
         }
-        if (hostileCount > 0) hazards.put("hostile_entities", hostileCount);
-
-        JsonArray standableRegions = new JsonArray();
-        for (Map.Entry<String, SectorStats> entry : sectors.entrySet()) {
-            standableRegions.add(entry.getValue().toJson(entry.getKey()));
-        }
-
-        JsonArray surfaceRegions = new JsonArray();
-        surfaces.values().stream()
-                .sorted((left, right) -> Integer.compare(right.samples, left.samples))
-                .limit(8)
-                .forEach(region -> surfaceRegions.add(region.toJson()));
-
-        JsonArray hazardSummary = new JsonArray();
-        hazards.forEach((kind, count) -> {
-            JsonObject hazard = new JsonObject();
-            hazard.addProperty("kind", kind);
-            hazard.addProperty("samples", count);
-            hazardSummary.add(hazard);
-        });
-
-        JsonObject summary = new JsonObject();
-        summary.add("standable_regions", standableRegions);
-        summary.add("surface_region_references", surfaceRegions);
-        summary.add("interaction_candidates", interactionCandidates);
-        summary.add("hazards", hazardSummary);
         return summary;
     }
-
     private JsonObject abilities(String focus) {
         JsonArray abilities = new JsonArray();
         for (String ability : IntentRuntime.KNOWN_ABILITIES.stream().sorted().toList()) {
@@ -619,27 +536,6 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("y", player.getY());
         result.addProperty("z", player.getZ());
         return result;
-    }
-
-    private static JsonObject blockPosition(BlockPos position) {
-        JsonObject result = new JsonObject();
-        result.addProperty("x", position.getX());
-        result.addProperty("y", position.getY());
-        result.addProperty("z", position.getZ());
-        return result;
-    }
-
-    private static String sector(int dx, int dz) {
-        if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2) return "center";
-        if (Math.abs(dx) > Math.abs(dz)) return dx < 0 ? "west" : "east";
-        return dz < 0 ? "north" : "south";
-    }
-
-    private static boolean isHotOrDamaging(Block block) {
-        return block == Blocks.FIRE || block == Blocks.SOUL_FIRE
-                || block == Blocks.CAMPFIRE || block == Blocks.SOUL_CAMPFIRE
-                || block == Blocks.MAGMA_BLOCK || block == Blocks.CACTUS
-                || block == Blocks.POWDER_SNOW || block == Blocks.SWEET_BERRY_BUSH;
     }
 
     private IntentTaskRecord currentIntent() {
@@ -836,67 +732,4 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         }
     }
 
-    private static final class SectorStats {
-        private int samples;
-        private int standable;
-        private int minY = Integer.MAX_VALUE;
-        private int maxY = Integer.MIN_VALUE;
-
-        void sample(boolean canStand, int y) {
-            samples++;
-            if (canStand) standable++;
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-        }
-
-        JsonObject toJson(String name) {
-            JsonObject result = new JsonObject();
-            result.addProperty("region", name);
-            result.addProperty("standable_fraction",
-                    samples == 0 ? 0.0 : Math.round(standable * 100.0 / samples) / 100.0);
-            result.addProperty("min_y", minY);
-            result.addProperty("max_y", maxY);
-            return result;
-        }
-    }
-
-    private static final class RegionStats {
-        private final String blockId;
-        private int samples;
-        private int minX = Integer.MAX_VALUE;
-        private int minY = Integer.MAX_VALUE;
-        private int minZ = Integer.MAX_VALUE;
-        private int maxX = Integer.MIN_VALUE;
-        private int maxY = Integer.MIN_VALUE;
-        private int maxZ = Integer.MIN_VALUE;
-
-        private RegionStats(String blockId) {
-            this.blockId = blockId;
-        }
-
-        void sample(int x, int y, int z) {
-            samples++;
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            minZ = Math.min(minZ, z);
-            maxX = Math.max(maxX, x);
-            maxY = Math.max(maxY, y);
-            maxZ = Math.max(maxZ, z);
-        }
-
-        JsonObject toJson() {
-            JsonObject result = new JsonObject();
-            result.addProperty("surface_block", blockId);
-            result.addProperty("sample_count", samples);
-            JsonObject bounds = new JsonObject();
-            bounds.addProperty("min_x", minX);
-            bounds.addProperty("min_y", minY);
-            bounds.addProperty("min_z", minZ);
-            bounds.addProperty("max_x", maxX);
-            bounds.addProperty("max_y", maxY);
-            bounds.addProperty("max_z", maxZ);
-            result.add("sample_bounds", bounds);
-            return result;
-        }
-    }
 }
