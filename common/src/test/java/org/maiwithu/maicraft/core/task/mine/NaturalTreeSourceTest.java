@@ -62,8 +62,18 @@ public final class NaturalTreeSourceTest {
         check(!accepts(root.above(2), beam), "horizontal timber was treated as upright trunk");
         Scene complete = new Scene(); complete.grow(root);
         var missing = new NaturalTreeSource(); missing.beginQuery();
-        check(!missing.accepts(root, complete, pos -> !pos.equals(root.below())) && missing.deferred
+        check(!missing.accepts(root, complete, pos -> !pos.equals(root.below())) && missing.unloadedEvidence && !missing.budgetDeferred
                         && missing.rejected.isEmpty(), "unloaded evidence was permanently rejected or accepted");
+        int beforeRetry = complete.reads;
+        missing.beginQuery();
+        for (int i = 0; i < 20; i++) check(!missing.accepts(root, complete, pos -> !pos.equals(root.below())), "missing root accepted");
+        check(complete.reads == beforeRetry && !missing.budgetDeferred,
+                "unchanged unloaded evidence consumed the local-work budget or rescanned the tree");
+        for (int i = 1; i <= 8; i++) {
+            BlockPos candidate = root.east(i * 8); complete.grow(candidate);
+            check(missing.accepts(candidate, complete, pos -> !pos.equals(root.below())),
+                    "unloaded candidates starved later loaded trees");
+        }
         missing.beginQuery();
         check(missing.accepts(root, complete, pos -> true), "loaded evidence did not resume");
         Scene forest = new Scene();
@@ -72,7 +82,7 @@ public final class NaturalTreeSourceTest {
             BlockPos next = root.east(i * 8); forest.grow(next);
             check(budget.accepts(next, forest, pos -> true) == (i < 8), "one query exceeded its tree observation budget");
         }
-        check(budget.deferred && forest.reads < 4096, "source inspection performed an unbounded scan");
+        check(budget.budgetDeferred && !budget.unloadedEvidence && forest.reads < 4096, "source inspection performed an unbounded scan");
         budget.beginQuery();
         check(budget.accepts(root.east(64), forest, pos -> true), "deferred candidate was lost");
         } finally {

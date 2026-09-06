@@ -945,6 +945,16 @@ public final class SemanticAcquireCompanionTask
                     childFailureType(terminal, result));
         }
 
+        if (completedSource == SemanticAcquireTaskRecord.Source.MINE && terminal != TaskState.SUCCESS
+                && result != null && result.data() != null
+                && (integer(result.data().get("unreachable_drop_count"), 0) > 0
+                        || integer(result.data().get("ambiguous_merged_drop_count"), 0) > 0)) {
+            addIssue("mine", "mining_loot_uncollected",
+                    "requested inventory progress is retained, but some mining drops were not collected",
+                    Map.of("unreachable_drop_count", integer(result.data().get("unreachable_drop_count"), 0),
+                            "ambiguous_merged_drop_count", integer(result.data().get("ambiguous_merged_drop_count"), 0),
+                            "inventory_progress", progress, "requires_narration", true));
+        }
         if (count(r.itemIds) >= r.count) return TaskState.SUCCESS;
         if (after >= completedNeed.requiredFinalCount) {
             if (!needs.isEmpty() && needs.peek() == completedNeed) {
@@ -2504,6 +2514,10 @@ public final class SemanticAcquireCompanionTask
         data.put("recipe_trace", List.copyOf(recipeTrace));
         data.put("issues", List.copyOf(issues));
         data.put("outcome_uncertain", outcomeUncertain);
+        if (hasIssue("mining_loot_uncollected")) {
+            data.put("collection_complete", false);
+            data.put("requires_narration", true);
+        }
         boolean effectsObserved =
                 (rootNeed != null && rootNeed.effectsObserved)
                         || (failureNeed != null && failureNeed.effectsObserved)
@@ -2577,6 +2591,8 @@ public final class SemanticAcquireCompanionTask
 
     @Override
     protected String successMessage() {
+        if (hasIssue("mining_loot_uncollected")) return "requested inventory count reached: "
+                + count(r.itemIds) + "/" + r.count + "; mining left uncollected drops; see issues for details";
         return "final inventory fact satisfied: carrying " + count(r.itemIds)
                 + "/" + r.count + " across acceptable items " + itemStrings(r.itemIds);
     }

@@ -210,8 +210,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private long lastProgressTick;
     private BlockPos lastProgressPos;
 
-    /** 地图不完整时连续无路的次数（见 {@link NoPathVerdict}）。 */
-    private int coldMapFails;
+    private NoPathVerdict failedPath;
+    private NoPathVerdict pathAttempt;
     /** 上一次索引查询是否覆盖完整(构建预算未耗尽)。false = 冷区域仍在渐进构建,
      *  终局判定("附近没有目标")必须等它为 true 才能下。 */
     private boolean lastQueryComplete;
@@ -403,12 +403,21 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         //    next tick and takes the exclusive pickup branch above.
         if (!knownOres.isEmpty()) {
             branchTicks = 0;
+            var currentGoals = oreFieldCompiled().semanticFingerprint();
             TaskState stalled = stalledOut();
             if (stalled != null) {
                 return stalled;
             }
+            if (failedPath != null) {
+                switch (failedPath.next(player.position(), currentGoals, lastQueryComplete)) {
+                    case FAIL -> { return exhaustedPath(); }
+                    case WAIT_FOR_QUERY -> { return TaskState.RUNNING; }
+                    case SEARCH -> failedPath = null;
+                }
+            }
             if (nav == null || navIsBranch || navIsDrop) {
                 stopNav();
+                pathAttempt = new NoPathVerdict(player.position(), currentGoals, "");
                 // Compiled front door: one composite over every known target stance.
                 // A route may chop a target on the way past; its matching native result
                 // is detected next tick and moved into the exclusive pickup branch.
@@ -422,6 +431,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                         () -> reachableTarget() != null, travelContext());
                 navIsBranch = false;
                 navIsDrop = false;
+            }
+            if (!pathAttempt.goals().equals(currentGoals)) {
+                pathAttempt = new NoPathVerdict(player.position(), currentGoals, "");
             }
             switch (nav.tick()) {
                 case RUNNING -> { return TaskState.RUNNING; }
@@ -446,35 +458,20 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     return TaskState.RUNNING;   // a reachable shaft is handled next tick
                 }
                 case FAILED -> {
-                    // [ANCHOR nav-cold-map] 地图自己都说了还没查完，这个“没路”不算证据。
-                    //
-                    // 世界刚加载时共用索引是冷的，第一次查询烧完预算也扫不完请求半径
-                    // ({@code complete=false})，名单里可能只有几十格外的一簇，而脚边那片还没进图。
-                    // 拿这种半张图上的无路去永久拉黑一个好方块，是把“我还不知道”当成了“不可能”。
-                    //
-                    // 跟上面 ARRIVED-dud 是同一条纪律：拉黑只该给真正失败的路。
-                    if (NoPathVerdict.of(lastQueryComplete, coldMapFails)
-                            == NoPathVerdict.Verdict.REQUERY) {
-                        if (++coldMapFails == 1) {
-                            org.maiwithu.maicraft.core.Constants.LOG.info(
-                                    "[maicraft-task] mine nav failed ({}) 但目标图还没查完 —— 不拉黑，重查 | nearestOre={}",
-                                    nav.failType(), nearestOreInfo());
-                        }
-                        stopNav();
-                        queryCooldown = 0;   // 下一刻就接着建图，别干等冷却
+                    FailureType type = nav.failType();
+                    String reason = nav.failReason();
+                    stopNav();
+                    if (type != FailureType.NO_PATH) {
+                        fail(reason, type);
+                        return TaskState.FAILED;
+                    }
+                    failedPath = new NoPathVerdict(pathAttempt.source(), pathAttempt.goals(), reason);
+                    if (failedPath.next(player.position(), currentGoals, lastQueryComplete) == NoPathVerdict.Next.SEARCH) {
+                        failedPath = null;
                         return TaskState.RUNNING;
                     }
-                    // [ANCHOR nav-failed] 完整图上真的没路。
-                    //
-                    // <b>这句话的主语是"这一批",不是"最近那颗"。</b>复合目标撒在全部目标上,
-                    // 搜不出路的意思是一个都到不了 —— 拿"离脚最近的"顶罪只是猜,而猜错了不会
-                    // 报错(日志只会写"记下 X",而 X 看着完全合理)。所以这里什么都不记,
-                    // 重新规划;真的一直出不去,由 STALL_TICKS 收工。
-                    org.maiwithu.maicraft.core.Constants.LOG.info(
-                            "[maicraft-task] mine nav failed ({}): {} | 复合目标 {} 个,nearestOre={}",
-                            nav.failType(), nav.failReason(), knownOres.size(), nearestOreInfo());
-                    coldMapFails = 0;
-                    stopNav();
+                    if (lastQueryComplete) return exhaustedPath();
+                    queryCooldown = 0;
                     return TaskState.RUNNING;
                 }
             }
@@ -972,6 +969,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return naturalLogSource ? PlayerNav.ContextProvider.DEFAULT : PlayerNav.ContextProvider.TERRAFORM;
     }
 
+    private TaskState exhaustedPath() {
+        fail("no route from the current stance to any of the " + knownOres.size()
+                + " verified targets; gathered " + r.getMined() + "/" + r.count + ". "
+                + failedPath.detail(), FailureType.NO_PATH);
+        return TaskState.FAILED;
+    }
+
     private void acceptDigResult(BlockPos target, BlockDigger.DigResult result) {
         switch (result) {
             case BROKE_TARGET -> {
@@ -1101,15 +1105,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         TargetIndex.Result res = TargetIndex.query(sl, feet(), r.targets,
                 MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET, excluded);
         lastQueryComplete = res.complete();
-        if (lastQueryComplete) {
-            coldMapFails = 0;   // 图齐了，之前那几次无路不再算数
-        }
         org.maiwithu.maicraft.core.Constants.LOG.debug(
                 "[maicraft-task] mine query feet={} raw={} complete={} known(before merge)={}",
                 feet().toShortString(), res.hits().size(), res.complete(),
                 knownOres.size());
         mergeHits(res.hits());
-        lastQueryComplete &= !naturalTrees.deferred && rejectedBefore == naturalTrees.rejected.size();
+        lastQueryComplete &= !naturalTrees.budgetDeferred && rejectedBefore == naturalTrees.rejected.size();
     }
 
     /** Add fresh, still-workable hits to knownOres, then prune (which re-validates
@@ -1338,6 +1339,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
         if (naturalLogSource) data.put("excluded_unverified_logs", naturalTrees.rejected.size());
+        if (naturalLogSource) data.put("unloaded_tree_evidence", naturalTrees.unloadedEvidence);
         data.put("confirmed_harvests", List.copyOf(confirmedHarvests));
         data.put("confirmed_harvests_truncated", truncatedHarvests);
         data.put("unreachable_drop_count", unreachableDropCount);

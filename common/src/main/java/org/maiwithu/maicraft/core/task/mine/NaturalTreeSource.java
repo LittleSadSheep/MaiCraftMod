@@ -1,6 +1,8 @@
 package org.maiwithu.maicraft.core.task.mine;
 
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
@@ -16,24 +18,35 @@ import net.minecraft.world.level.block.state.BlockState;
 final class NaturalTreeSource {
     private final Set<BlockPos> verified = new HashSet<>();
     final Set<BlockPos> rejected = new HashSet<>();
+    private final Map<BlockPos, BlockPos> awaitingChunk = new HashMap<>();
     private int remaining;
-    boolean deferred;
+    boolean budgetDeferred;
+    boolean unloadedEvidence;
 
-    void beginQuery() { remaining = 8; deferred = false; }
+    void beginQuery() { remaining = 8; budgetDeferred = false; unloadedEvidence = false; }
 
     boolean accepts(BlockPos seed, BlockGetter world, Predicate<BlockPos> loaded) {
         if (verified.contains(seed)) return true;
         if (rejected.contains(seed)) return false;
-        if (remaining-- <= 0) { deferred = true; return false; }
+        BlockPos missing = awaitingChunk.get(seed);
+        if (missing != null && !loaded.test(missing)) { unloadedEvidence = true; return false; }
+        if (remaining-- <= 0) { budgetDeferred = true; return false; }
         Set<BlockPos> trunk = new HashSet<>();
-        boolean[] incomplete = {false};
+        BlockPos[] incomplete = {null};
         Predicate<BlockPos> available = pos -> {
             if (loaded.test(pos)) return true;
-            incomplete[0] = true;
+            incomplete[0] = pos.immutable();
             return false;
         };
         boolean natural = inspect(seed, world, available, trunk);
-        if (incomplete[0]) { deferred = true; return false; }
+        if (incomplete[0] != null) {
+            unloadedEvidence = true;
+            awaitingChunk.put(seed.immutable(), incomplete[0]);
+            for (BlockPos log : trunk) awaitingChunk.put(log, incomplete[0]);
+            return false;
+        }
+        awaitingChunk.remove(seed);
+        for (BlockPos log : trunk) awaitingChunk.remove(log);
         (natural ? verified : rejected).addAll(trunk);
         (natural ? verified : rejected).add(seed.immutable());
         return natural;
