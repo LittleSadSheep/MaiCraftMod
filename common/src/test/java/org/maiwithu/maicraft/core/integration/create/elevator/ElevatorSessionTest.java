@@ -36,7 +36,7 @@ public final class ElevatorSessionTest {
         check(!cabin.aligned(102), "Create's coarse arrived flag alone authorized exit");
         check(!cabin.serves(103), "arbitrary unregistered floor was accepted");
         check(Math.abs(cabin.originAt(114).y - 111.6) < 1e-6, "moving entity position was mistaken for contact floor Y");
-        geometryStateHash(); receiptGate(); terminalGuard(player);
+        geometryStateHash(); receiptGate(); failedWalkAndCancelledExit(player); terminalGuard(player);
         System.out.println("ElevatorSessionTest: passed");
     }
 
@@ -79,6 +79,46 @@ public final class ElevatorSessionTest {
         finish.invoke(current[0], NativeActionReceipt.Status.UNCERTAIN, "server outcome missing");
         check(actions.settle(context[0]) && actions.uncertain && actions.failure != null, "uncertain gesture became successful transport");
         actions.abandon(); check(sends.get() == 2, "abandon emitted another world operation");
+    }
+
+    private static void failedWalkAndCancelledExit(LocalPlayer player) throws Exception {
+        var floor = net.minecraft.world.level.block.Blocks.IRON_BLOCK.defaultBlockState();
+        var first = BlockPos.ZERO;
+        var second = new BlockPos(3, 0, 0);
+        var blocks = Map.of(first, new net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo(first, floor, null),
+                second, new net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo(second, floor, null));
+        var geometry = new ElevatorGeometry(blocks, null, 0.6, 1.8);
+        Vec3 start = new Vec3(0.5, 1, 0.5), destination = new Vec3(3.5, 1, 0.5);
+        set(Entity.class, player, "position", start);
+        var cabin = new CreateElevatorBridge.Cabin(player, null, new CreateElevatorBridge.Column(0, 0, Direction.NORTH),
+                0, 1, true, Vec3.ZERO, blocks, null, List.of(), List.of(), 0, 200);
+        BodyControlPort body = (BodyControlPort) Proxy.newProxyInstance(BodyControlPort.class.getClassLoader(), new Class<?>[]{BodyControlPort.class},
+                (p,m,a) -> m.getReturnType() == boolean.class ? true : null);
+        LocalPlayerContext context = proxyContext(player, body, null);
+        ElevatorMotion motion = new ElevatorMotion();
+        // This is the persisted state after a failed path search: a goal, but no route.
+        set(ElevatorMotion.class, motion, "localGoal", destination);
+        for (int tick = 0; tick < 2; tick++) check(motion.inside(context, cabin, geometry, destination,
+                it.unimi.dsi.fastutil.longs.LongSets.emptySet()) == ElevatorMotion.Progress.BLOCKED, "empty failed route became arrival on the next tick");
+        set(Entity.class, player, "position", destination);
+        check(motion.inside(context, cabin, geometry, destination, it.unimi.dsi.fastutil.longs.LongSets.emptySet())
+                == ElevatorMotion.Progress.REACHED, "actual supported destination was rejected");
+        set(Entity.class, player, "position", start);
+        CreateElevatorTravel journey = new CreateElevatorTravel(new BlockPos(4, 1, 0)); journey.requestStop();
+        set(CreateElevatorTravel.class, journey, "geometry", geometry);
+        set(CreateElevatorTravel.class, journey, "exit", new ElevatorGeometry.Landing(destination.add(1, 0, 0), destination));
+        set(CreateElevatorTravel.class, journey, "exitFloor", 1);
+        set(CreateElevatorTravel.class, journey, "aboard", true);
+        Field field = CreateElevatorTravel.class.getDeclaredField("motion"); field.setAccessible(true);
+        set(ElevatorMotion.class, field.get(journey), "localGoal", destination);
+        var exit = CreateElevatorTravel.class.getDeclaredMethod("exit", LocalPlayerContext.class, CreateElevatorBridge.Cabin.class, boolean.class); exit.setAccessible(true);
+        for (long tick : new long[]{0, 19, 20}) {
+            set(CreateElevatorTravel.class, journey, "now", tick);
+            var result = (TransportSession.Result) exit.invoke(journey, context, cabin, true);
+            check((result.state() == TransportSession.State.FAILED) == (tick == 20), "blocked cancellation ignored the bounded door synchronization window");
+            if (tick == 20) check(result.uncertain() && result.code().equals("elevator_needs_attention") && !journey.safeToInterrupt(),
+                    "blocked cabin exit claimed safe disembarkation");
+        }
     }
 
     private static void terminalGuard(LocalPlayer player) throws Exception {
