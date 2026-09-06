@@ -16,6 +16,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
 
 /**
  * Internal semantic entry point for exact AE2 resource supply.
@@ -278,6 +279,30 @@ public final class Ae2ResourceSupply {
 
     public static String availabilityDetail() {
         return Ae2ReflectionBridge.availability().detail();
+    }
+
+    /** Current synchronized repository only; craftable patterns never contribute to stored counts. */
+    public static Optional<StockEvidence.Snapshot> observeOpenStock(
+            Object menu, long observedGameTick) {
+        try {
+            var available = Ae2ReflectionBridge.availability().bridge();
+            if (available.isEmpty()) return Optional.empty();
+            var bridge = available.orElseThrow();
+            if (!bridge.isStorageMenu(menu) || !bridge.connected(menu)) return Optional.empty();
+            var entries = bridge.entries(menu);
+            if (entries == null) return Optional.empty();
+            Map<ResourceLocation, Long> stored = new LinkedHashMap<>();
+            Set<ResourceLocation> craftable = new LinkedHashSet<>();
+            for (var entry : entries) {
+                StockEvidence.add(stored, entry.sample(), entry.storedAmount());
+                if (entry.craftable()) craftable.add(entry.itemId());
+            }
+            return Optional.of(new StockEvidence.Snapshot(
+                    StockEvidence.Source.AE2,
+                    stored, craftable, observedGameTick));
+        } catch (RuntimeException | LinkageError unavailable) {
+            return Optional.empty();
+        }
     }
 
     /**
