@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package baritone.pathing.path;
 
 /** Bounds same-tick movement handoffs; revisiting a cursor cannot represent physical progress. */
