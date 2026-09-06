@@ -171,6 +171,10 @@ public final class DefaultBodyControlPort implements BodyControlPort {
                 ? movement : Movement.STOPPED;
         input.forwardImpulse = command.forward();
         input.leftImpulse = command.strafe();
+        input.up = command.forward() > 0.0f;
+        input.down = command.forward() < 0.0f;
+        input.left = command.strafe() > 0.0f;
+        input.right = command.strafe() < 0.0f;
         input.jumping = command.jumping();
         input.shiftKeyDown = command.sneaking();
         player.setSprinting(command.sprinting());
@@ -250,6 +254,10 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         if (input != null) {
             input.forwardImpulse = 0.0f;
             input.leftImpulse = 0.0f;
+            input.up = false;
+            input.down = false;
+            input.left = false;
+            input.right = false;
             input.jumping = false;
             input.shiftKeyDown = false;
         }

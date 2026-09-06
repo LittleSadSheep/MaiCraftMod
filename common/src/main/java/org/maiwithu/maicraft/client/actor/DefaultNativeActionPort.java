@@ -16,6 +16,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     private NativeActionReceipt active;
+    private boolean activeProtocolUsesMenu;
     /** Non-null while an ownerless break must be physically stopped by {@link #advance}. */
     private String pendingBreakCancellationReason;
 
@@ -237,20 +238,45 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             Runnable submission,
             NativeConfirmation confirmation,
             int timeoutTicks) {
+        return submitProtocol(context, operation, submission, confirmation, timeoutTicks, true);
+    }
+
+    @Override
+    public NativeActionReceipt submitControlProtocol(
+            LocalPlayerContext context,
+            String operation,
+            Runnable submission,
+            NativeConfirmation confirmation,
+            int timeoutTicks) {
+        return submitProtocol(context, operation, submission, confirmation, timeoutTicks, false);
+    }
+
+    private NativeActionReceipt submitProtocol(
+            LocalPlayerContext context,
+            String operation,
+            Runnable submission,
+            NativeConfirmation confirmation,
+            int timeoutTicks,
+            boolean usesMenu) {
         DefaultLocalPlayerContext current = requireSubmission(context);
         if (submission == null) throw new IllegalArgumentException("submission is required");
         if (confirmation == null) throw new IllegalArgumentException("confirmation is required");
         String name = operation == null || operation.isBlank() ? "mod protocol action" : operation;
-        if (!current.menus().ensureVisible(current)) {
-            throw new IllegalStateException("mod menu protocols require a rendered GUI");
+        if (usesMenu) {
+            if (!current.menus().ensureVisible(current)) {
+                throw new IllegalStateException("mod menu protocols require a rendered GUI");
+            }
+        } else if (!DefaultBodyControlPort.permitsWorldMovement(current.minecraft().screen)) {
+            throw new IllegalStateException("mod control protocols require a world interaction screen");
         }
         requireIdle();
         current.claimMutation();
         NativeActionReceipt receipt = oneShot(
                 NativeActionReceipt.Kind.MOD_PROTOCOL, current, confirmation, timeoutTicks);
+        activeProtocolUsesMenu = usesMenu;
         try {
             submission.run();
-            current.menus().interactionSubmitted(current);
+            if (usesMenu) current.menus().interactionSubmitted(current);
         } catch (RuntimeException failure) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
                     name + " threw after protocol submission began; application is unknown");
@@ -355,7 +381,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                     "the bounded read-only confirmation window expired");
         }
         if (receipt.terminal() && (receipt.kind() == NativeActionReceipt.Kind.CREATIVE_SET_SLOT
-                || receipt.kind() == NativeActionReceipt.Kind.MOD_PROTOCOL)) {
+                || (receipt.kind() == NativeActionReceipt.Kind.MOD_PROTOCOL && activeProtocolUsesMenu))) {
             context.menus().interactionSubmitted(context);
         }
         return receipt;
@@ -378,6 +404,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     private void install(NativeActionReceipt receipt) {
         active = receipt;
+        activeProtocolUsesMenu = false;
         pendingBreakCancellationReason = null;
     }
 

@@ -51,6 +51,14 @@ public interface NativeActionPort {
             NativeConfirmation confirmation,
             int timeoutTicks);
 
+    /** Native world controls share action serialization and authority, without opening a menu. */
+    NativeActionReceipt submitControlProtocol(
+            LocalPlayerContext context,
+            String operation,
+            Runnable submission,
+            NativeConfirmation confirmation,
+            int timeoutTicks);
+
     NativeActionReceipt attack(
 
             LocalPlayerContext context,
