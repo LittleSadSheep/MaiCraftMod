@@ -151,7 +151,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 }
                 yield situation;
             }
-            case "surroundings" -> surroundings(player);
+            case "surroundings" -> surroundings(player, nullableString(arguments, "focus"),
+                    arguments.has("limit") ? arguments.get("limit").getAsInt() : 16);
             case "abilities" -> abilities(nullableString(arguments, "focus"));
             case "tasks" -> {
                 String rawTaskId = nullableString(arguments, "task_id");
@@ -309,7 +310,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    private JsonObject surroundings(LocalPlayer player) {
+    private JsonObject surroundings(LocalPlayer player, String focus, int limit) {
         JsonObject result = new JsonObject();
         result.add("position", position(player));
         result.addProperty("dimension", player.level().dimension().location().toString());
@@ -329,6 +330,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             entities.add(item);
         }
         result.add("nearby_entities", entities);
+        JsonObject signs = NearbySignPerception.observe(player, focus, limit);
+        result.add("nearby_signs", signs.remove("signs"));
+        result.add("sign_observation", signs);
         result.add("local_decision_summary", localDecisionSummary(player, hostileCount));
         return result;
     }
