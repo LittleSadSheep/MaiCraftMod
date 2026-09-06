@@ -53,7 +53,15 @@ public final class EmbeddedBaritoneRuntime {
             EmbeddedBaritoneNavigator navigator,
             GoalCompiler.Compiled compiled,
             TerrainPermit permit,
-            boolean sprintAllowed) {}
+            boolean sprintAllowed,
+            EmbeddedBaritonePolicy.Snapshot policy) {
+        private PendingStart(EmbeddedBaritoneNavigator navigator, GoalCompiler.Compiled compiled,
+                             TerrainPermit permit, boolean sprintAllowed) {
+            this(navigator, compiled, permit, sprintAllowed,
+                    EmbeddedBaritonePolicy.capture(compiled.sacred(),
+                            navigator.protectedMutationCells(), navigator.forbiddenBodyCells()));
+        }
+    }
 
     private EmbeddedBaritoneRuntime() {}
 
@@ -576,10 +584,9 @@ public final class EmbeddedBaritoneRuntime {
         EmbeddedBaritoneNavigator navigator = next.navigator();
         owner = navigator;
         configure(baritone, next.permit(), next.sprintAllowed());
-        EmbeddedBaritonePolicy.install(
-                next.compiled().sacred(),
-                navigator.protectedMutationCells(),
-                navigator.forbiddenBodyCells());
+        // Activation may happen after the semantic parent's ThreadLocal scope has closed.
+        // The queued request owns the immutable policy captured when that parent requested it.
+        EmbeddedBaritonePolicy.installSnapshot(next.policy());
         pendingPolicyOwner = null;
         pendingPolicyGoal = null;
         courseCommitted = false;

@@ -22,6 +22,12 @@ public final class EmbeddedBaritonePolicy {
             LongSet sacred,
             LongSet protectedMutations,
             LongSet forbiddenBodyCells) {
+        return installSnapshot(capture(sacred, protectedMutations, forbiddenBodyCells));
+    }
+
+    /** Freeze a queued owner's policy without changing the body that is still executing. */
+    public static Snapshot capture(
+            LongSet sacred, LongSet protectedMutations, LongSet forbiddenBodyCells) {
         LongOpenHashSet protectedCells = new LongOpenHashSet();
         if (sacred != null) protectedCells.addAll(sacred);
         if (protectedMutations != null) protectedCells.addAll(protectedMutations);
@@ -29,9 +35,13 @@ public final class EmbeddedBaritonePolicy {
 
         LongOpenHashSet forbidden = new LongOpenHashSet();
         if (forbiddenBodyCells != null) forbidden.addAll(forbiddenBodyCells);
-        Snapshot next = new Snapshot(
+        return new Snapshot(
                 LongSets.unmodifiable(protectedCells),
                 LongSets.unmodifiable(forbidden));
+    }
+
+    /** Install a snapshot previously detached by {@link #capture}. */
+    static boolean installSnapshot(Snapshot next) {
         boolean changed = !next.equals(current);
         current = next;
         return changed;
