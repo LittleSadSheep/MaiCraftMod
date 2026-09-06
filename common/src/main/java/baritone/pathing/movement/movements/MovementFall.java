@@ -19,6 +19,7 @@ package baritone.pathing.movement.movements;
 import baritone.api.IBaritone;
 import baritone.api.pathing.movement.MovementStatus;
 import baritone.api.utils.BetterBlockPos;
+import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
 import baritone.api.utils.VecUtils;
@@ -57,6 +58,12 @@ public class MovementFall extends Movement {
     public boolean hasPlacedWater() {
         return waterPlacement != null && waterPlacement.status()
                 == NativeActionReceipt.Status.CONFIRMED_APPLIED;
+    }
+
+    /** Shared by ordinary execution and the executor's optional straight-line fall extension. */
+    public static boolean reachedLanding(IPlayerContext context, BlockPos destination, BlockState state) {
+        return context.playerFeet().equals(destination)
+                && (context.player().onGround() || MovementHelper.isWater(state));
     }
 
     private static final ItemStack STACK_BUCKET_WATER = new ItemStack(Items.WATER_BUCKET);
@@ -135,7 +142,9 @@ public class MovementFall extends Movement {
         } else {
             state.setTarget(new MovementTarget(toDest, false));
         }
-        if (playerFeet.equals(dest) && (ctx.player().position().y - playerFeet.getY() < 0.094 || isWater)) { // 0.094 because lilypads
+        // Slab feet are represented by the cell above the half-height support. Matching that
+        // cell is not a landing until collision has actually put the player on the ground.
+        if (reachedLanding(ctx, dest, destState)) {
             if (isWater) { // only match water, not flowing water (which we cannot pick up with a bucket)
                 if (waterPlacement != null && !waterPlacement.terminal()) return state;
                 if (hasPlacedWater() && Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_EMPTY))) {
@@ -215,7 +224,11 @@ public class MovementFall extends Movement {
 
     @Override
     protected boolean prepared(MovementState state) {
-        if (ctx.playerFeet().equals(src) && calculateCost(new CalculationContext(baritone)) >= COST_INF) {
+        // Runs before every tick that could leave the source, including RUNNING. A prior fall,
+        // incoming damage, an expired buff or removed boots must invalidate the stale A* budget.
+        // Once airborne retain steering toward the already selected landing.
+        if (ctx.player().onGround() && !ctx.playerFeet().equals(dest)
+                && calculateCost(new CalculationContext(baritone)) >= COST_INF) {
             state.setStatus(MovementStatus.UNREACHABLE);
             return true;
         }

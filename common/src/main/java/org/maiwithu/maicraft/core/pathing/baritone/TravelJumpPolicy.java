@@ -22,8 +22,8 @@ import java.util.List;
 /**
  * 赶路跑跳 —— MaiCraft {@code SprintPolicy} 在 Baritone 执行层的移植。
  *
- * <p>判据是"路线已经承诺了一段完整直跑道,并且跳下去不受伤":投影覆盖的每个路径
- * 原语都必须是同高同向平走,物理走廊的每一列也必须在无摔伤落点带(抬升一格/平/
+ * <p>判据是"路线已经承诺了一段完整直跑道,并且能承受落地伤害":投影覆盖的每个路径
+ * 原语都必须是同高同向平走,物理走廊的每一列也必须在可承受落点带(抬升一格/平/
  * 落一格)里有干燥实心支撑。于是终点前、拐弯前、落差前、液体或立柱前都会自然
  * 收步,不会为了看起来快而飞出选定路线。恰好处于两格高顶头走廊(树下、隧道)时
  * 投影自动缩短为顶头连跳,且只使用路线本来就经过的顶盖。空中不指望转向:身体沿
@@ -41,8 +41,6 @@ public final class TravelJumpPolicy {
     private static final int MAX_PROJECTED_AIRBORNE_TICKS = 40;
     /** 原版普通地面的摩擦系数;更滑的支撑上起跳,速度投影不可信。 */
     private static final float NORMAL_GROUND_FRICTION = 0.6F;
-    /** 原版安全坠落距离:超过这个下落才开始掉血。 */
-    private static final double SAFE_FALL_DISTANCE = 3.0D;
 
     private TravelJumpPolicy() {}
 
@@ -128,7 +126,7 @@ public final class TravelJumpPolicy {
         }
 
         // 跳跃可达走廊:从玩家当前格沿移动方向逐列验证——投影距离已从实时速度
-        // 出发,余量只需覆盖身体半宽与落点方差。任何一列在无摔伤落点带里没有
+        // 出发,余量只需覆盖身体半宽与落点方差。任何一列在可承受落点带里没有
         // 干燥安全支撑(深洞、流体、立柱),这一跳就可能摔进它——不跳,走过去再说。
         double reach = projection.forwardDistance() + player.getBbWidth() * 0.5 + 0.25;
         int runwayMovements = (int) Math.ceil(reach / heading.stepLength());
@@ -136,9 +134,10 @@ public final class TravelJumpPolicy {
                 movements, pathPosition, direction, runwayMovements)) {
             return false;
         }
+        FallDamageBudget fallBudget = FallDamageBudget.capture(player);
         for (int offset = 0; offset < runwayMovements; offset++) {
             IMovement movement = movements.get(pathPosition + offset);
-            if (!safeFlightMovement(ctx, movement, projection.apexHeight(), headHit)) {
+            if (!safeFlightMovement(ctx, movement, projection.apexHeight(), headHit, fallBudget)) {
                 return false;
             }
         }
@@ -255,16 +254,17 @@ public final class TravelJumpPolicy {
     }
 
     /**
-     * 这一列上是否存在无摔伤的落点。落点带是 [抬升一格, 平, 落一格]:坠落距离
-     * = 投影弧顶 - 落点高度,不得超过原版安全坠落距离。要求落点两格可穿行、
+     * 这一列上是否存在可承受的落点。落点带是 [抬升一格, 平, 落一格]:坠落距离
+     * = 投影弧顶 - 落点高度,预计落地后生命值必须大于零。要求落点两格可穿行、
      * 干燥、不是危险格(仙人掌/岩浆块/火/浆果)、支撑是实心整块。
      */
-    private static boolean survivableColumn(IPlayerContext ctx, BlockPos column, double apexHeight) {
+    private static boolean survivableColumn(IPlayerContext ctx, BlockPos column, double apexHeight,
+                                            FallDamageBudget fallBudget) {
         for (int landing = 1; landing >= -1; landing--) {
-            if (apexHeight - landing > SAFE_FALL_DISTANCE) {
-                continue;
-            }
             BlockPos feetCell = column.above(landing);
+            if (!ctx.world().hasChunkAt(feetCell)
+                    || !fallBudget.survives(Math.max(0, apexHeight - landing),
+                    FallDamageBudget.Landing.of(ctx.world().getBlockState(feetCell.below())), false)) continue;
             if (!MovementHelper.fullyPassable(ctx, feetCell)
                     || !MovementHelper.fullyPassable(ctx, feetCell.above())) {
                 continue;
@@ -339,22 +339,22 @@ public final class TravelJumpPolicy {
 
     /** Every possible diagonal corner and landing column stays inside the selected dry runway. */
     private static boolean safeFlightMovement(
-            IPlayerContext ctx, IMovement movement, double apexHeight, boolean headHit) {
-        if (!safeFlightColumn(ctx, movement.getDest(), apexHeight, headHit)) return false;
+            IPlayerContext ctx, IMovement movement, double apexHeight, boolean headHit, FallDamageBudget fallBudget) {
+        if (!safeFlightColumn(ctx, movement.getDest(), apexHeight, headHit, fallBudget)) return false;
         if (movement instanceof MovementDiagonal) {
             BlockPos src = movement.getSrc();
             BlockPos dest = movement.getDest();
             return safeFlightColumn(ctx,
-                        new BlockPos(src.getX(), src.getY(), dest.getZ()), apexHeight, headHit)
+                        new BlockPos(src.getX(), src.getY(), dest.getZ()), apexHeight, headHit, fallBudget)
                     && safeFlightColumn(ctx,
-                        new BlockPos(dest.getX(), src.getY(), src.getZ()), apexHeight, headHit);
+                        new BlockPos(dest.getX(), src.getY(), src.getZ()), apexHeight, headHit, fallBudget);
         }
         return true;
     }
 
     private static boolean safeFlightColumn(
-            IPlayerContext ctx, BlockPos feet, double apexHeight, boolean headHit) {
-        if (!survivableColumn(ctx, feet, apexHeight)
+            IPlayerContext ctx, BlockPos feet, double apexHeight, boolean headHit, FallDamageBudget fallBudget) {
+        if (!survivableColumn(ctx, feet, apexHeight, fallBudget)
                 || !MovementHelper.fullyPassable(ctx, feet)
                 || !MovementHelper.fullyPassable(ctx, feet.above())) {
             return false;

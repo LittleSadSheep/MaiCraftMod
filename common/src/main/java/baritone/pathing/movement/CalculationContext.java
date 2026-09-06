@@ -25,6 +25,7 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.ToolSet;
 import baritone.utils.pathing.BetterWorldBorder;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
+import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -76,7 +77,9 @@ public class CalculationContext {
     public final boolean allowDiagonalAscend;
     public final boolean allowDownward;
     public int minFallHeight;
-    public int maxFallHeightNoWater;
+    public final FallDamageBudget fallDamageBudget;
+    private final BlockPos fallOrigin;
+    private final double fallOriginY;
     public final int maxFallHeightBucket;
     public final double waterWalkSpeed;
     public final double breakBlockAdditionalCost;
@@ -138,6 +141,9 @@ public class CalculationContext {
         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
         this.collisionGeometry = new CollisionGeometry(bsi.access, forUseOnAnotherThread,
                 player.position(), baritone.getPlayerContext().playerFeet());
+        this.fallDamageBudget = FallDamageBudget.capture(player);
+        this.fallOrigin = baritone.getPlayerContext().playerFeet().immutable();
+        this.fallOriginY = player.getY();
         this.toolSet = new ToolSet(player);
         this.hasThrowaway = forceTerrainMutation
                 || (Baritone.settings().allowPlace.value
@@ -180,7 +186,6 @@ public class CalculationContext {
         this.allowDiagonalAscend = Baritone.settings().allowDiagonalAscend.value;
         this.allowDownward = forceTerrainMutation || Baritone.settings().allowDownward.value;
         this.minFallHeight = 3; // Minimum fall height used by MovementFall
-        this.maxFallHeightNoWater = Baritone.settings().maxFallHeightNoWater.value;
         this.maxFallHeightBucket = Baritone.settings().maxFallHeightBucket.value;
         // WATER_MOVEMENT_EFFICIENCY is the fraction of the gap from normal water speed to land
         // speed that an enchantment closes. No enchantment therefore starts at 0, not 1; using 1
@@ -223,6 +228,25 @@ public class CalculationContext {
 
     public final IBaritone getBaritone() {
         return baritone;
+    }
+
+    /** A loaded, supported landing is admitted whenever the frozen damage estimate is nonfatal. */
+    public boolean canSurviveFall(int x, int y, int z, int effectiveStartHeight,
+                                 int destX, int supportY, int destZ, BlockState support) {
+        if (!bsi.worldContainsLoadedChunk(destX, destZ)) return false;
+        double supportHeight = CollisionGeometry.supportHeight(bsi.access, new BlockPos(destX, supportY, destZ));
+        if (!Double.isFinite(supportHeight) || supportHeight <= 0) return false;
+        double distance = effectiveStartHeight - supportY - Math.min(1, supportHeight);
+        boolean initial = effectiveStartHeight == y && fallOrigin.getX() == x
+                && fallOrigin.getY() == y && fallOrigin.getZ() == z;
+        if (initial) distance += Math.max(0, fallOriginY - y);
+        return fallDamageBudget.survives(Math.max(0, distance), FallDamageBudget.Landing.of(support), initial);
+    }
+
+    /** Include a fall already in progress when deciding whether a ladder can actually catch it. */
+    public double initialFallDistance(int x, int y, int z) {
+        return fallOrigin.getX() == x && fallOrigin.getY() == y && fallOrigin.getZ() == z
+                ? fallDamageBudget.accumulatedFallDistance() + Math.max(0, fallOriginY - y) : 0;
     }
 
     public BlockState get(int x, int y, int z) {

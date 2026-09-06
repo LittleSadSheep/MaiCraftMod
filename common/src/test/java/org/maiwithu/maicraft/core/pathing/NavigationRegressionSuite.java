@@ -10,6 +10,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest.main(args);
         org.maiwithu.maicraft.core.task.mine.MiningBatchTest.main(args);
         org.maiwithu.maicraft.core.task.mine.NaturalTreeSourceTest.main(args);
+        org.maiwithu.maicraft.core.task.mine.NoPathVerdictTest.main(args);
         org.maiwithu.maicraft.core.task.mine.MiningToolRequirementTest.main(args);
         org.maiwithu.maicraft.core.tools.perception.LocalFloorSenseTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BlueprintImportTest.main(args);
@@ -23,6 +24,8 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFallTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudgetTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.FallLandingTest.main(args);
         org.maiwithu.maicraft.client.actor.NativeConfirmationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest.main(args);
         org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeightTest.main(args);

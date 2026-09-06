@@ -119,6 +119,8 @@ public class MovementDescend extends Movement {
         if (MovementHelper.canUseFrostWalker(context, destDown)) { // no need to check assumeWalkOnWater
             return; // the water will freeze when we try to walk into it
         }
+        if (!MovementHelper.isWater(below)
+                && !context.canSurviveFall(x, y, z, y, destX, y - 2, destZ, below)) return;
 
         // we walk half the block plus 0.3 to get to the edge, then we walk the other 0.2 while simultaneously falling (math.max because of how it's in parallel)
         double walk = WALK_OFF_BLOCK_COST;
@@ -134,6 +136,8 @@ public class MovementDescend extends Movement {
     }
 
     public static boolean dynamicFallCost(CalculationContext context, int x, int y, int z, int destX, int destZ, double frontBreak, BlockState below, MutableMoveResult res) {
+        // A stale cache cannot establish a safe landing column for a deliberate drop.
+        if (!context.bsi.worldContainsLoadedChunk(destX, destZ)) return false;
         if (frontBreak != 0 && context.get(destX, y + 2, destZ).getBlock() instanceof FallingBlock) {
             // if frontBreak is 0 we can actually get through this without updating the falling block and making it actually fall
             // but if frontBreak is nonzero, we're breaking blocks in front, so don't let anything fall through this column,
@@ -185,7 +189,8 @@ public class MovementDescend extends Movement {
                 res.cost = tentativeCost;
                 return false;
             }
-            if (unprotectedFallHeight <= 11 && MovementHelper.isClimbable(ontoBlock.getBlock())) {
+            double alreadyFallen = effectiveStartHeight == y ? context.initialFallDistance(x, y, z) : 0;
+            if (unprotectedFallHeight + alreadyFallen <= 11 && MovementHelper.isClimbable(ontoBlock.getBlock())) {
                 // if fall height is greater than or equal to 11, we don't actually grab on to vines or ladders. the more you know
                 // this effectively "resets" our falling speed
                 costSoFar += FALL_N_BLOCKS_COST[unprotectedFallHeight - 1];// we fall until the top of this block (not including this block)
@@ -199,11 +204,8 @@ public class MovementDescend extends Movement {
             if (!MovementHelper.canWalkOn(context, destX, newY, destZ, ontoBlock)) {
                 return false;
             }
-            if (MovementHelper.isBottomSlab(ontoBlock)) {
-                return false; // falling onto a half slab is really glitchy, and can cause more fall damage than we'd expect
-            }
-            if (reachedMinimum && unprotectedFallHeight <= context.maxFallHeightNoWater + 1) {
-                // fallHeight = 4 means onto.up() is 3 blocks down, which is the max
+            if (reachedMinimum && context.canSurviveFall(x, y, z, effectiveStartHeight,
+                    destX, newY, destZ, ontoBlock)) {
                 res.x = destX;
                 res.y = newY + 1;
                 res.z = destZ;

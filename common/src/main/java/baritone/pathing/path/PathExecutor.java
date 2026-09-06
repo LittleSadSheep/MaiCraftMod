@@ -507,7 +507,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                             "Fall override at %s %s %s returned illegal destination %s %s %s",
                             current.getSrc(), fallDest));
                 }
-                if (ctx.playerFeet().equals(fallDest)) {
+                if (MovementFall.reachedLanding(ctx, fallDest, ctx.world().getBlockState(fallDest))) {
                     pathPosition = path.positions().indexOf(fallDest);
                     onChangeInPathPosition();
                     advanceAgain = true;
@@ -550,6 +550,10 @@ public class PathExecutor implements IPathExecutor, Helper {
             if (!MovementHelper.canWalkOn(ctx, next.getDest().below())) {
                 break;
             }
+            var source = movement.getSrc();
+            var support = next.getDest().below();
+            if (!behavior.secretInternalGetCalculationContext().canSurviveFall(source.x, source.y, source.z,
+                    source.y, support.getX(), support.getY(), support.getZ(), ctx.world().getBlockState(support))) break;
         }
         i--;
         if (i == pathPosition) {
