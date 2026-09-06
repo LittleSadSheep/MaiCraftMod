@@ -420,7 +420,8 @@ public final class SemanticBuildPlanner {
         int low = Integer.MAX_VALUE, high = Integer.MIN_VALUE;
         for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
             if (!loadedColumn(level, x, z, anchorY)) return null;
-            int y = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
+            int y = replace ? ClientSurfaceHeight.constructionGround(level, x, z)
+                    : ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
             if (y <= level.getMinBuildHeight() + 4
                     || y + size.wallHeight() + 22 >= level.getMaxBuildHeight()) return null;
             BlockPos ground = new BlockPos(x, y - 1, z);
@@ -432,10 +433,13 @@ public final class SemanticBuildPlanner {
             low = Math.min(low, y); high = Math.max(high, y);
         }
         int variation = high - low;
-        if (terrain.equals("surface") && variation > 1) return null;
+        if (terrain.equals("surface") && variation > (replace ? 3 : 1)) return null;
         if (!terrain.equals("surface") && (variation < 2 || variation > MAX_SLOPE
                 || !gentle(heights))) return null;
-        int baseY = terrain.equals("embedded") ? low : high;
+        // A cleared surface floor replaces the lowest ground layer, cutting shallow bumps
+        // instead of raising the entire house onto an inaccessible floating platform.
+        int baseY = terrain.equals("surface") && replace ? low - 1
+                : terrain.equals("embedded") ? low : high;
         int roofTop = baseY + size.wallHeight() + Math.max(size.width, size.depth) / 2 + 5;
         for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
             int columnY = heights[x - minX][z - minZ];
@@ -472,7 +476,8 @@ public final class SemanticBuildPlanner {
         for (int x = minX - 3; x <= maxX + 3; x++) for (int z = minZ - 3; z <= maxZ + 3; z++) {
             if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) continue;
             if (!loadedColumn(level, x, z, anchorY)) return false;
-            int y = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
+            int y = replace ? ClientSurfaceHeight.constructionGround(level, x, z)
+                    : ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
             BlockPos surface = new BlockPos(x, y - 1, z);
             BlockState state = level.getBlockState(surface);
             if (!state.getFluidState().isEmpty()) {
@@ -596,9 +601,9 @@ public final class SemanticBuildPlanner {
         BlockPos ladder = ladderPosition(s, floorY + 1);
         BlockPos cellarLadder = ladder.relative(s.front);
 
-        if (terrain.equals("embedded")) {
+        if (replace) {
             ops.add(box("minecraft:air", s.minX + 1, floorY + 1,
-                    s.minZ + 1, s.maxX - 1, wallTop + 2, s.maxZ - 1, false));
+                    s.minZ + 1, s.maxX - 1, wallTop, s.maxZ - 1, false));
         }
         if (features.contains("cellar") && replace) {
             ops.add(box(palette.foundation, s.minX + 1, floorY - 4, s.minZ + 1,
@@ -896,6 +901,9 @@ public final class SemanticBuildPlanner {
         int halfWidth = porch ? 2 : 1;
         BlockPos a = edge(s, s.front, s.baseY, 1);
         BlockPos b = edge(s, s.front, s.baseY, depth);
+        ops.add(box("minecraft:air", Math.min(a.getX(), b.getX()), s.baseY + 1,
+                Math.min(a.getZ(), b.getZ()), Math.max(a.getX(), b.getX()), s.baseY + 2,
+                Math.max(a.getZ(), b.getZ()), false));
         if (s.front.getAxis() == Direction.Axis.Z) {
             ops.add(box(palette.floor, a.getX() - halfWidth, s.baseY,
                     Math.min(a.getZ(), b.getZ()), a.getX() + halfWidth,
