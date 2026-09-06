@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.WeakHashMap;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -59,13 +60,13 @@ public final class MachineMenu {
         final List<WeakReference<Slot>> entries;
         final List<ItemStack> contents;
 
-        Inspection(LocalPlayer self, AbstractContainerMenu menu, Origin origin) {
-            var context = ClientRuntime.requireContext(self);
+        Inspection(LocalPlayer self, AbstractContainerMenu menu, Origin origin,
+                   org.maiwithu.maicraft.client.actor.ClientActorBoundary.ObservationStamp stamp) {
             this.player = new WeakReference<>(self);
             this.menu = new WeakReference<>(menu);
             this.origin = origin;
-            this.bodyEpoch = context.bodyEpoch();
-            this.expires = context.tickRevision() + RECEIPT_TICKS;
+            this.bodyEpoch = stamp.bodyEpoch();
+            this.expires = stamp.tickRevision() + RECEIPT_TICKS;
             this.stateId = menu.getStateId();
             this.entries = menu.slots.stream().map(WeakReference::new).toList();
             this.contents = menu.slots.stream().map(slot -> slot.getItem().copy()).toList();
@@ -103,12 +104,15 @@ public final class MachineMenu {
 
     /** Read the real current menu; only menus opened by this machine seam receive a transfer receipt. */
     public static JsonObject inspect(LocalPlayer self) {
-        var context = ClientRuntime.requireContext(self);
+        Minecraft minecraft = Minecraft.getInstance();
+        if (!minecraft.isSameThread() || minecraft.player != self)
+            throw new IllegalArgumentException("menu inspection requires the current client-thread player");
+        var stamp = ClientRuntime.actor().observationStamp(self).orElse(null);
         AbstractContainerMenu menu = self.containerMenu;
         JsonObject out = new JsonObject();
         out.addProperty("schema_version", 1);
         out.addProperty("menu_class", menu.getClass().getName());
-        boolean visible = MenuVisibility.matches(context.minecraft(), menu);
+        boolean visible = MenuVisibility.matches(minecraft, menu);
         out.addProperty("gui_visible", visible);
         out.addProperty("menu_state_revision", menu.getStateId());
         out.addProperty("evidence_source", "native_client_menu");
@@ -155,8 +159,8 @@ public final class MachineMenu {
         }
         out.add("data_values", values);
         Origin origin = ORIGINS.get(menu);
-        boolean validOrigin = origin != null && origin.player().get() == self
-                && origin.bodyEpoch() == context.bodyEpoch()
+        boolean validOrigin = stamp != null && origin != null && origin.player().get() == self
+                && origin.bodyEpoch() == stamp.bodyEpoch()
                 && origin.dimension().equals(self.level().dimension().location().toString());
         boolean canTransfer = visible && validOrigin && menu != self.inventoryMenu && menu.getCarried().isEmpty()
                 && menu.slots.size() <= MAX_ENTRIES && !virtualMenu(menu)
@@ -166,16 +170,18 @@ public final class MachineMenu {
         out.addProperty("transfer_receipt_available", canTransfer);
         if (canTransfer) {
             INSPECTIONS.entrySet().removeIf(entry -> entry.getValue().player.get() == null
-                    || entry.getValue().menu.get() == null || entry.getValue().expires < context.tickRevision());
+                    || entry.getValue().menu.get() == null || entry.getValue().expires < stamp.tickRevision());
             while (INSPECTIONS.size() >= MAX_RECEIPTS) INSPECTIONS.remove(INSPECTIONS.keySet().iterator().next());
             UUID id = UUID.randomUUID();
-            INSPECTIONS.put(id, new Inspection(self, menu, origin));
+            INSPECTIONS.put(id, new Inspection(self, menu, origin, stamp));
             out.addProperty("menu_receipt_id", id.toString());
         }
         out.addProperty("transfer_contract", "one receipt permits one exact deposit/withdraw of 1..64 items against one observed entry; no swaps, quick-move, ghost filters or recipe claims");
         if (!visible) out.addProperty("transfer_unavailable_reason", "the machine GUI must be visibly open before inspection can authorize a transfer");
         else if (!validOrigin) out.addProperty("transfer_unavailable_reason", "open this exact machine through the machine menu operation first");
         else if (virtualMenu(menu)) out.addProperty("transfer_unavailable_reason", "virtual storage uses a dedicated integration such as AE2 supply");
+        if (visible) org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply.observeOpenWaterInventory(menu)
+                .ifPresent(water -> out.add("ae2_water_inventory", water));
         return out;
     }
 

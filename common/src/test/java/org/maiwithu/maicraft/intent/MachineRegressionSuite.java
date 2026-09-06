@@ -19,6 +19,8 @@ public final class MachineRegressionSuite {
         MachineControlTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachineMenuPolicyTest.main(args);
         MachineBlueprintSpecTest.main(args);
+        try { org.maiwithu.maicraft.core.integration.machine.MachineMenuObservationTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("menu observation regression", failure); }
         MachineBlueprintStateTest.main(args);
         org.maiwithu.maicraft.core.task.build.MachineBlueprintGeometryTest.main(args);
         SemanticBuildPlannerTest.main(args);

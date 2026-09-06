@@ -215,6 +215,16 @@ public final class ClientActorBoundary {
                 : Optional.empty();
     }
 
+    /** Read-only identity/clock for observations made between actor ticks; grants no action lease. */
+    public record ObservationStamp(long bodyEpoch, long tickRevision) {}
+
+    public Optional<ObservationStamp> observationStamp(LocalPlayer player) {
+        requireClientThread();
+        if (player == null || observedPlayer != player || minecraft.player != player
+                || minecraft.level != player.clientLevel) return Optional.empty();
+        return Optional.of(new ObservationStamp(bodyEpoch, tickRevision));
+    }
+
     boolean isCurrent(DefaultLocalPlayerContext context) {
         return minecraft.isSameThread() && activeContext == context &&
                 context.tickRevision() == tickRevision &&
