@@ -2,9 +2,12 @@ package org.maiwithu.maicraft.core.task.mine;
 
 import org.maiwithu.maicraft.task.TaskRecord;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.block.Block;
 
 import java.util.Set;
+import java.util.List;
 
 /**
  * Typed task descriptor for the intent-level {@code mine} tool: "gather
@@ -32,6 +35,8 @@ public final class MineBlockTaskRecord extends TaskRecord {
      *  This lets terrain movements that mine a target contribute without exposing paths
      *  or individual blocks to the LLM. Empty keeps the generic direct-mine behavior. */
     public final Set<Item> progressItems;
+    /** A prepared work batch must return for another tool instead of degrading to bare hands. */
+    public final boolean requireEfficientTool;
 
     /** Live progress = matching ITEMS gathered since the task started (counted in the inventory,
      *  not blocks broken — multi-drop ores like redstone yield several items per block). Set each tick
@@ -46,11 +51,37 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public MineBlockTaskRecord(String toolCallId, long deadlineGameTime,
                                Set<Block> targets, int count, String label,
                                Set<Item> progressItems) {
+        this(toolCallId, deadlineGameTime, targets, count, label, progressItems, false);
+    }
+
+    public MineBlockTaskRecord(String toolCallId, long deadlineGameTime,
+                               Set<Block> targets, int count, String label,
+                               Set<Item> progressItems, boolean requireEfficientTool) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.targets = Set.copyOf(targets);
         this.count = count;
         this.label = label;
         this.progressItems = Set.copyOf(progressItems);
+        this.requireEfficientTool = requireEfficientTool;
+    }
+
+    /** Matches the native tool selector's main-inventory reach, including tools not yet staged. */
+    public static boolean hasEfficientTool(LocalPlayer player, Set<Block> targets) {
+        return hasEfficientTool(player.getInventory().items, targets);
+    }
+
+    static boolean hasEfficientTool(List<ItemStack> inventory, Set<Block> targets) {
+        for (int slot = 0; slot < Math.min(36, inventory.size()); slot++) {
+            ItemStack tool = inventory.get(slot);
+            if (tool.isEmpty() || (tool.isDamageableItem()
+                    && tool.getMaxDamage() - tool.getDamageValue() <= 0)) continue;
+            for (Block target : targets) {
+                var state = target.defaultBlockState();
+                if (tool.getDestroySpeed(state) > 1.0F
+                        && (!state.requiresCorrectToolForDrops() || tool.isCorrectToolForDrops(state))) return true;
+            }
+        }
+        return false;
     }
 
     public int getMined() {

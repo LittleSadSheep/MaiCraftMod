@@ -310,6 +310,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         long tDrops = NavProfiler.begin();
         drops = droppedItems();
         NavProfiler.end("mine.drops", tDrops);
+        boolean toolExhausted = r.requireEfficientTool && !WorkProfile.of(player).instaBreak()
+                && !MineBlockTaskRecord.hasEfficientTool(player, r.targets);
         if (drops.isEmpty()) pendingDropsSince = Long.MIN_VALUE;
         else if (pendingDropsSince == Long.MIN_VALUE) pendingDropsSince = level.getGameTime();
         if (gathered < r.count) {
@@ -323,7 +325,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (continuation != null && anticipatedDrops.keySet().stream()
                     .anyMatch(origin -> origin.distManhattan(continuation) == 1)) beginBatch(continuation);
         }
-        if (!drops.isEmpty() && !canDeferPickup(gathered)) {
+        if (!drops.isEmpty() && (toolExhausted || !canDeferPickup(gathered))) {
             if (activeTarget != null) {
                 digger.cancel();
                 activeTarget = null;
@@ -339,6 +341,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             progressNote = "gathered all requested and settled every loaded attributable matching drop";
             return TaskState.SUCCESS;
+        }
+
+        if (toolExhausted) {
+            if (unreachableDropCount > 0) return unreachableDropFailure();
+            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
+            fail("the prepared harvesting tool is exhausted; collected this batch's owned drops "
+                    + "and stopped before switching to bare-hand mining", FailureType.WRONG_TOOL);
+            return TaskState.FAILED;
         }
 
         // 0) Continue one requested target until it breaks or becomes unworkable.
