@@ -5,6 +5,7 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.lightnav.LightNavClient;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -18,6 +19,12 @@ public abstract class GameRendererCameraMixin {
     private void maicraft$advanceCamera(
             DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo callback) {
         ClientRuntime.renderFrame(Minecraft.getInstance());
+    }
+
+    @Inject(method = "render", at = @At("TAIL"))
+    private void maicraft$observeLightNavFrame(
+            DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo callback) {
+        LightNavClient.renderFrame(Minecraft.getInstance(), renderLevel);
     }
 
     /** Suppress only the automatic focus-loss pause; ESC still uses the native pause path. */

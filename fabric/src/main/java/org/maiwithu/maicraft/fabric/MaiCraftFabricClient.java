@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
+import org.maiwithu.maicraft.client.lightnav.LightNavCommands;
 import org.maiwithu.maicraft.core.MaiCraftCore;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 
@@ -30,6 +31,7 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
                 dispatcher.register(ClientCommandManager.literal("maicraft")
                         .then(ClientCommandManager.literal("status").executes(context ->
-                                MaiCraftStatus.showInChat()))));
+                                MaiCraftStatus.showInChat()))
+                        .then(LightNavCommands.tree())));
     }
 }

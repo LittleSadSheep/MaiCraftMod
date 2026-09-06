@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.lightnav.LightNavClient;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.pathing.cache.PathCaches;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
@@ -187,6 +188,7 @@ public final class ClientRuntime {
 
         Minecraft minecraft = Minecraft.getInstance();
         Runnable cleanup = () -> {
+            LightNavClient.shutdown();
             ACTOR.shutdown();
             IntentRuntime.get().shutdownPersistence();
             bodyGone(false);
