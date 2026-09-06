@@ -9,6 +9,8 @@ public final class GuiRegressionSuite {
         CompanionCancellationTest.main(args);
         org.maiwithu.maicraft.core.inventory.StockEvidenceTest.main(args);
         org.maiwithu.maicraft.core.integration.create.CreateStockObservationTest.main(args);
+        org.maiwithu.maicraft.core.integration.ae2.Ae2ScreenAccessTest.main(args);
+        org.maiwithu.maicraft.core.integration.ae2.Ae2WaterBucketFillTest.main(args);
         VisibleMenuSessionTest.main(args);
         LegacyInventoryBoundaryTest.main(args);
         GuiBoundaryAuditTest.main(args);
