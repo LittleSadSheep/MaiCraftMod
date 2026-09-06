@@ -127,3 +127,5 @@ MaiCraft 以 [GNU General Public License v3.0 only](LICENSE) 发布（SPDX：`GP
 - Minecraft 与 Mojang Studios
 - [minecraft-numen](https://github.com/Dwinovo/minecraft-numen)
 - [Baritone](https://github.com/cabaletta/baritone)
+
+本项目包含来自 Dwinovo/minecraft-numen 和 cabaletta/baritone 的部分源代码，该部分原以 LGPL-3.0 授权。本项目依据 GNU GPLv3 第 7 条移除该部分的 LGPLv3 额外许可，将其随本项目按 GPL-3.0 分发。
