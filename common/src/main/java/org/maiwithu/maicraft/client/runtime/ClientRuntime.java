@@ -65,6 +65,7 @@ public final class ClientRuntime {
     public static void tick(Minecraft minecraft) {
         requireClientThread(minecraft);
         tickStage = "observing";
+        org.maiwithu.maicraft.core.inventory.StockEvidence.observe(minecraft.player);
         PathCaches.clientTick(minecraft.player);
         Optional<LocalPlayerContext> opened = ACTOR.beginTick();
         if (opened.isEmpty()) {

@@ -11,6 +11,7 @@
     "ClientLevelBlockChangeMixin",
     "GameRendererCameraMixin",
     "MouseHandlerControlMixin",
+    "ContainerStockSyncMixin",
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin"
   ],

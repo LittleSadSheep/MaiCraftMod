@@ -7,6 +7,8 @@ public final class GuiRegressionSuite {
         MenuVisibilityTest.main(args);
         WindowControlTest.main(args);
         CompanionCancellationTest.main(args);
+        org.maiwithu.maicraft.core.inventory.StockEvidenceTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.CreateStockObservationTest.main(args);
         VisibleMenuSessionTest.main(args);
         LegacyInventoryBoundaryTest.main(args);
         GuiBoundaryAuditTest.main(args);
