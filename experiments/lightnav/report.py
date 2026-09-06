@@ -99,6 +99,7 @@ function drawTrajectory(data){
 }
 function render(){
   const index=Number(slider.value), record=records[index];active=record;
+  byId('instruction').textContent=record?.instruction??payload.instruction;
   byId('previous').disabled=!record||index===0;byId('next').disabled=!record||index===records.length-1;
   byId('position').textContent=record?`${index+1} / ${records.length}`:'0 / 0';
   byId('overlay').replaceChildren();
