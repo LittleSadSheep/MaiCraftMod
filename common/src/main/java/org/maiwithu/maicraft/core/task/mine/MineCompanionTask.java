@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.core.task.base.Precondition;
 import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
@@ -31,6 +32,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -158,6 +160,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private Map<Item, Integer> rawInventoryBaseline = Map.of();
     /** Matching loose items to walk over, refreshed every tick. */
     private List<BlockPos> drops = List.of();
+    private List<ItemEntity> liveOwnedDrops = List.of();
+    private MiningBatch batch;
+    private long pendingDropsSince = Long.MIN_VALUE;
     /** Recently broken target cells retained as temporary walk-over members. */
     private final Map<BlockPos, Long> anticipatedDrops = new HashMap<>();
     /** Target cells that vanished during navigation, retained only until the
@@ -294,16 +299,31 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         Level level = player.level();
 
-        // Pickup owns the body even if a second target has just started breaking.
-        // This matters for first-person execution: an en-route target can disappear,
-        // its item can synchronize one tick later, and a new reachable target may
-        // already have latched the digger. Cancel that partial swing and collect the
-        // completed physical result before doing more destructive work.
+        // Settle a confirmed break before changing jobs, so its new entity keeps the causal
+        // origin even when another batch's drop is already ready for collection.
+        BlockPos effective = digger.current();
+        if (activeTarget != null && effective != null && level.getBlockState(effective).isAir()) {
+            acceptDigResult(activeTarget, digger.settleGone(effective.equals(activeTarget)));
+            return TaskState.RUNNING;
+        }
         observeNavigationBreakOrigins();
         long tDrops = NavProfiler.begin();
         drops = droppedItems();
         NavProfiler.end("mine.drops", tDrops);
-        if (!drops.isEmpty()) {
+        if (drops.isEmpty()) pendingDropsSince = Long.MIN_VALUE;
+        else if (pendingDropsSince == Long.MIN_VALUE) pendingDropsSince = level.getGameTime();
+        if (gathered < r.count) {
+            long tUpkeep = NavProfiler.begin();
+            prune();
+            maybeQuery();
+            NavProfiler.end("mine.upkeep", tUpkeep);
+        }
+        if (batch == null && !navIsDrop && !drops.isEmpty()) {
+            BlockPos continuation = reachableTarget();
+            if (continuation != null && anticipatedDrops.keySet().stream()
+                    .anyMatch(origin -> origin.distManhattan(continuation) == 1)) beginBatch(continuation);
+        }
+        if (!drops.isEmpty() && !canDeferPickup(gathered)) {
             if (activeTarget != null) {
                 digger.cancel();
                 activeTarget = null;
@@ -321,16 +341,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return TaskState.SUCCESS;
         }
 
-        // Maintain the ore list every tick — INCLUDING while a dig below is latched:
-        // prune (cheap — knownOres is capped at 64) revalidates against the live world;
-        // the shared TargetIndex is queried on demand (list low / new chunk / slow
-        // heartbeat / cold area still building) instead of on a fixed rescan cadence —
-        // the block-change hook keeps the index itself current in between.
-        long tUpkeep = NavProfiler.begin();
-        prune();
-        maybeQuery();
-        NavProfiler.end("mine.upkeep", tUpkeep);
-
         // 0) Continue one requested target until it breaks or becomes unworkable.
         // BlockDigger.current() is the effective cell and may temporarily be an
         // occluder, so never replace the semantic target with that implementation detail.
@@ -338,7 +348,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (nav != null && !nav.yieldForExternalAction()) {
                 return TaskState.RUNNING;
             }
-            BlockPos effective = digger.current();
+            effective = digger.current();
             if (effective != null && level.getBlockState(effective).isAir()) {
                 acceptDigResult(activeTarget,
                         digger.settleGone(effective.equals(activeTarget)));
@@ -364,6 +374,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (nav != null && !nav.yieldForExternalAction()) {
                 return TaskState.RUNNING;
             }
+            beginBatch(reachable);
             activeTarget = reachable.immutable();
             mineProgress(reachable);
             return TaskState.RUNNING;
@@ -509,12 +520,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** The ore-only objective. Loose results are deliberately excluded: once an
      *  item exists, {@link #collectDrops()} owns movement until that result settles. */
     private GoalCompiler.Compiled oreFieldCompiled() {
-        if (knownOres.isEmpty()) {
+        List<BlockPos> targets = knownOres.stream().filter(this::inCurrentWorkBatch).toList();
+        if (targets.isEmpty()) {
             // Degenerate frame (targets vanished between ticks): stand where we are.
             return GoalCompiler.standOn(feet());
         }
         return GoalCompiler.mineField(
-                new ArrayList<>(knownOres), List.of());
+                targets, List.of());
     }
 
     /** Exact walk-over cells for loose items only. */
@@ -576,7 +588,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         Set<BlockPos> out = new LinkedHashSet<>();
         Set<BlockPos> materializedOrigins = new HashSet<>();
         Set<Integer> liveIds = new HashSet<>();
-        for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class, box)) {
+        List<ItemEntity> loaded = level.getEntitiesOfClass(ItemEntity.class, box);
+        for (ItemEntity entity : loaded) {
             int id = entity.getId();
             liveIds.add(id);
             BlockPos p = entity.blockPosition();
@@ -623,6 +636,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             }
         }
         attributedDropIds.removeIf(id -> !liveIds.contains(id));
+        liveOwnedDrops = loaded.stream().filter(entity -> !entity.isRemoved()
+                && attributedDropIds.contains(entity.getId()) && !unreachableDropIds.contains(entity.getId())
+                && dropItems.contains(entity.getItem().getItem())).toList();
         for (BlockPos p : anticipatedDrops.keySet()) {
             // A materialized live entity owns movement, but its break origin remains an open
             // attribution window until the existing synchronization expiry. Different output
@@ -641,29 +657,39 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      * another source can satisfy the request instead of being starved forever.
      */
     private TaskState collectDrops() {
+        batch = null;
+        if (nav != null && !nav.isSafeToCancel()) {
+            nav.pause();
+            return TaskState.RUNNING;
+        }
         ItemEntity close = nearestLiveDrop();
+        if (close == null && !anticipatedDrops.isEmpty()) {
+            // The existing attribution window is only 12 ticks. Let the server materialize or
+            // naturally absorb the drop instead of planning a walk into the freshly broken cell.
+            if (nav != null) nav.pause();
+            else InputDriver.halt(player);
+            return TaskState.RUNNING;
+        }
         if (close != null && NativePickupReceipt.insideVanillaTouchEnvelope(player, close)) {
             if (nav != null) nav.pause();
-            if (close.hasPickUpDelay()) {
-                dropCloseTicks = 0;
-                return TaskState.RUNNING;
-            }
-            if (!NativePickupReceipt.canAccept(player, close.getItem())) {
+            if (!close.hasPickUpDelay() && !NativePickupReceipt.canAccept(player, close.getItem())) {
                 fail("reached the mined drop, but no main-inventory slot can accept its "
                                 + "remaining stack",
                         FailureType.NO_SPACE);
                 return TaskState.FAILED;
             }
-            if (++dropCloseTicks >= DROP_CLOSE_WAIT_TICKS) {
-                fail("the body stayed inside vanilla's item-touch envelope with pickup delay "
-                                + "cleared and inventory capacity available, but the authoritative "
-                                + "inventory never accepted the mined drop",
+            if (++dropCloseTicks >= 2 * DROP_CLOSE_WAIT_TICKS) {
+                fail("the mined drop was not accepted after bounded natural pickup and exact "
+                                + "approach windows; pickup delay remains " + close.hasPickUpDelay(),
                         FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
-            return TaskState.RUNNING;
+            if (dropCloseTicks < DROP_CLOSE_WAIT_TICKS) return TaskState.RUNNING;
+            // Natural pickup did not arrive within one synchronization window. Try the ordinary
+            // exact approach below for one more bounded window before reporting its failure.
+        } else {
+            dropCloseTicks = 0;
         }
-        dropCloseTicks = 0;
 
         if (close != null && player.blockPosition().equals(close.blockPosition())) {
             stopNav();
@@ -705,15 +731,47 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     }
 
     private ItemEntity nearestLiveDrop() {
-        if (dropItems.isEmpty() || attributedDropIds.isEmpty()) return null;
-        AABB box = new AABB(feet()).inflate(128);
-        return player.level().getEntitiesOfClass(ItemEntity.class, box).stream()
-                .filter(entity -> !entity.isRemoved())
-                .filter(entity -> attributedDropIds.contains(entity.getId()))
-                .filter(entity -> !unreachableDropIds.contains(entity.getId()))
-                .filter(entity -> dropItems.contains(entity.getItem().getItem()))
+        return liveOwnedDrops.stream()
                 .min(Comparator.comparingDouble(player::distanceToSqr))
                 .orElse(null);
+    }
+
+    private boolean inCurrentWorkBatch(BlockPos target) {
+        return drops.isEmpty() || batch == null || batch.targets().contains(target);
+    }
+
+    private void beginBatch(BlockPos target) {
+        if (batch != null && batch.targets().contains(target)) return;
+        BlockState selected = player.level().getBlockState(target);
+        boolean logs = selected.is(BlockTags.LOGS);
+        Set<BlockPos> sameMaterial = new HashSet<>();
+        for (BlockPos candidate : knownOres) {
+            BlockState state = player.level().getBlockState(candidate);
+            if (state.getBlock() != selected.getBlock()) continue;
+            if (logs && (!state.hasProperty(RotatedPillarBlock.AXIS)
+                    || state.getValue(RotatedPillarBlock.AXIS) != Direction.Axis.Y)) continue;
+            sameMaterial.add(candidate);
+        }
+        MiningBatch connected = MiningBatch.connected(target, sameMaterial, logs, false);
+        boolean naturalTrunk = logs && MiningBatch.hasNaturalCrown(
+                connected.targets(), player.level(), player.level()::hasChunkAt);
+        batch = new MiningBatch(connected.targets(), naturalTrunk);
+    }
+
+    private boolean canDeferPickup(int gathered) {
+        if (batch == null) return false;
+        int loose = liveOwnedDrops.stream().mapToInt(entity -> entity.getItem().getCount()).sum();
+        boolean risky = liveOwnedDrops.stream().anyMatch(entity -> entity.isOnFire()
+                || entity.isInLava() || entity.isInWater() || entity.getAge() >= 20 * 60 * 4
+                || (!entity.onGround() && entity.getY() < player.getY() - 2
+                        && entity.getDeltaMovement().y < -0.1
+                        && !MiningBatch.safeDropLanding(entity.blockPosition(), player.level(), player.level()::hasChunkAt))
+                || !NativePickupReceipt.canAccept(player, entity.getItem()));
+        if (MiningBatch.shouldCollect(gathered, r.count, loose,
+                player.level().getGameTime() - pendingDropsSince, risky)) return false;
+        if (batch.followTrunk()) return knownOres.stream().anyMatch(batch.targets()::contains);
+        return activeTarget != null && batch.targets().contains(activeTarget)
+                || reachableTarget() != null;
     }
 
     /** A direct block drop spawns at its broken cell and may drift a little before
@@ -791,6 +849,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         for (BlockPos ore : knownOres) {
+            if (!inCurrentWorkBatch(ore)) continue;
             if (ore.distSqr(feet) > IN_PLACE_FILTER_SQR) {
                 break;   // sorted nearest-first — everything after this is farther still
             }
