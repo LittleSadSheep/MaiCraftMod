@@ -18,6 +18,8 @@ public enum TerrainPermit {
     PRESERVE,
     /** 仅允许落地水与回收本次放出的水；不允许挖掘、放块或搭路。 */
     WATER_ONLY,
+    /** 仅允许本次落地辅助及有归因的回收，不授权普通挖掘、架桥或搭路。 */
+    LANDING_ONLY,
     /** 可改地形:挖穿、垫路、搭柱、架桥都可入路,受总开关与硬禁挖标签约束。 */
     TERRAFORM;
 
@@ -26,6 +28,8 @@ public enum TerrainPermit {
     }
 
     public boolean mayUseWaterBucket() {
-        return this == WATER_ONLY || this == TERRAFORM;
+        return this == WATER_ONLY || this == LANDING_ONLY || this == TERRAFORM;
     }
+
+    public boolean mayUseLandingAssists() { return this == LANDING_ONLY || this == TERRAFORM; }
 }
