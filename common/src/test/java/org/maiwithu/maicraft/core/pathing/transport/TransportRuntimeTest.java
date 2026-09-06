@@ -26,6 +26,7 @@ public final class TransportRuntimeTest {
             controlLoss(memory);
             modalScreen(memory);
             throwingSessionCleanup(memory);
+            damageStopsFurtherTransport(memory);
             System.out.println("TransportRuntimeTest: passed");
         } finally { TransportRuntime.abandon(); }
     }
@@ -141,6 +142,18 @@ public final class TransportRuntimeTest {
         check(next.abandons == 1, "a cleanup error must not prevent later transport ownership");
     }
 
+    private static void damageStopsFurtherTransport(Unsafe memory) throws Exception {
+        var f = new Fixture(memory); var owner = new Object(); var session = new Session();
+        f.player.health = 20; f.player.absorption = 4;
+        f.acquire(owner, session); TransportRuntime.drive(owner, f.context);
+        f.nextTick(); f.player.health = 21; f.player.absorption = 2;
+        TransportRuntime.drive(owner, f.context);
+        check(session.stops == 1 && TransportRuntime.occupied(), "damage must request controlled cleanup instead of releasing an airborne body");
+        f.nextTick(); TransportRuntime.tickCleanup(f.context);
+        check(!TransportRuntime.occupied() && f.completed.uncertain() && f.completed.code().equals("transport_damage_observed"),
+                "healing must not mask absorption loss or permit another transport attempt after cleanup");
+    }
+
     private static final class Session implements TransportSession {
         int ticks, stops, abandons, cleanupTicks;
         boolean complete, throwAbandon, throwDiagnostics;
@@ -206,8 +219,11 @@ public final class TransportRuntimeTest {
     }
     private static final class AlivePlayer extends LocalPlayer {
         boolean alive;
+        float health = 20, absorption;
         private AlivePlayer() { super(null, null, null, null, null, false, false); }
         @Override public boolean isAlive() { return alive; }
+        @Override public float getHealth() { return health; }
+        @Override public float getAbsorptionAmount() { return absorption; }
     }
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }
 }

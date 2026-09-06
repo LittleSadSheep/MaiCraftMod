@@ -24,6 +24,8 @@ public final class TransportRuntime {
         final BodyControlPort body;
         long lastTick = Long.MIN_VALUE;
         boolean cancelling;
+        boolean damageObserved;
+        float health, absorption;
         int errors;
         TransportSession.Result result = TransportSession.Result.running("starting");
 
@@ -32,6 +34,7 @@ public final class TransportRuntime {
             this.owner = owner; this.mode = mode; this.session = session;
             this.bodyEpoch = context.bodyEpoch(); this.controlRevision = context.controlRevision();
             this.body = context.body(); this.completed = completed;
+            this.health = context.player().getHealth(); this.absorption = context.player().getAbsorptionAmount();
         }
     }
 
@@ -88,7 +91,17 @@ public final class TransportRuntime {
         }
         drivenBody = context.body(); drivenEpoch = context.bodyEpoch(); drivenTick = context.tickRevision();
         try {
+            float health = context.player().getHealth(), absorption = context.player().getAbsorptionAmount();
+            if (health < lease.health || absorption < lease.absorption) {
+                lease.damageObserved = true;
+                lease.cancelling = true;
+                lease.session.requestStop();
+            }
+            lease.health = health; lease.absorption = absorption;
             lease.result = lease.session.tick(context);
+            if (lease.result.terminal() && lease.damageObserved) lease.result = TransportSession.Result.failed(
+                    "transport_damage_observed", "health or absorption decreased during transport; stopped after controlled cleanup, inspect before retrying",
+                    true, true);
             lease.errors = 0;
         } catch (RuntimeException failure) {
             lease.cancelling = true;
@@ -132,6 +145,7 @@ public final class TransportRuntime {
         description.put("code", lease.result.code());
         description.put("detail", lease.result.detail());
         description.put("uncertain", lease.result.uncertain());
+        description.put("damage_observed", lease.damageObserved);
         last = Map.copyOf(description);
         try { lease.body.releaseAll(); }
         catch (RuntimeException failure) { org.maiwithu.maicraft.core.Constants.LOG.warn("Transport input cleanup failed", failure); }

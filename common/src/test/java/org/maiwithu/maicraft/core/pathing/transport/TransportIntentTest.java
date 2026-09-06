@@ -37,6 +37,10 @@ public final class TransportIntentTest {
                 "code", "no_proven_elevator_route", "detail", "no confirmed boarding doorway")), List.of());
         check(failure.contains("no_proven_elevator_route") && failure.contains("no confirmed boarding doorway"),
                 "an exhausted transport plan must preserve the actual session failure in the task result");
+        check(TransportNavigator.needsInspectionAfterFailure(TransportSession.Result.failed("corridor_changed", "landed", true, false)),
+                "a failed flight that moved the body must not automatically launch another candidate");
+        check(!TransportNavigator.needsInspectionAfterFailure(TransportSession.Result.failed("no_corridor", "no effect", false, false)),
+                "pure route rejection may still consider other observed candidates");
         System.out.println("TransportIntentTest: passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

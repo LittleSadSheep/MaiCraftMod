@@ -56,7 +56,22 @@ public final class JetpackFlightTest {
         var brake = JetpackSteering.toward(Vec3.ZERO, new Vec3(0,0,0.4), new Vec3(0,0,0.1), 0, false);
         check(brake.forward() < 0, "near target must counter measured momentum");
         var descend = JetpackSteering.toward(new Vec3(0,5,0), Vec3.ZERO, Vec3.ZERO, 0, true);
-        check(descend.sneaking() && !descend.jumping(), "controlled landing uses native Shift, never conflicting UP");
+        check(!descend.sneaking() && !descend.jumping(), "hover descent releases UP without dangerous airborne Shift");
+        var overshoot = JetpackSteering.toward(new Vec3(0, 5, 0), new Vec3(0, -0.02, 0), new Vec3(0, 4, 0), 0, false);
+        check(!overshoot.sneaking() && !overshoot.jumping(), "waypoint height correction must not select fast descent with Shift");
+        var hold = JetpackSteering.toward(new Vec3(0, 5, 0), new Vec3(0, -0.1, 0), new Vec3(2, 5, 0), 0, false);
+        check(hold.jumping(), "horizontal approach must anticipate native hover sinking before losing platform clearance");
+        Vec3 floorTarget = new Vec3(2, 115, 0);
+        Vec3 alignment = JetpackFlightSession.landingAim(new Vec3(1, 116.5, 0), floorTarget, 117, false);
+        check(alignment.y == 117, "alignment height must not follow the sinking body down to the platform edge");
+        check(JetpackFlightSession.landingAim(alignment, floorTarget, 117, true).equals(floorTarget),
+                "descent starts after centering over the observed support");
+        check(JetpackRoute.approachCell(floor, start).getY() == 2, "open arrival column must reserve height above the platform");
+        var lowCeiling = new TestSpace(false, false) {
+            public boolean clear(Vec3 from, Vec3 to) { return from.y <= 1 && to.y <= 1 && super.clear(from, to); }
+        };
+        check(JetpackRoute.approachCell(lowCeiling, start).getY() == 1, "lower ceiling must choose the verified lower approach");
+        check(JetpackRoute.descentSpeed(POWER) == 0.03, "fuel budgeting must use slow hover descent after removing Shift");
         System.out.println("JetpackFlightTest: passed");
     }
     private static JetpackRoute.Plan complete(JetpackRoute.Space space, Vec3 start, Vec3 target) {

@@ -83,6 +83,11 @@ public final class TransportNavigator {
                 failure = result.detail(); failureType = FailureType.UNKNOWN;
                 return PlayerNav.Status.FAILED;
             }
+            if (needsInspectionAfterFailure(result) && !paused && !replanning) {
+                failure = result.code() + ": " + result.detail() + "; transport changed the body or equipment, inspect before retrying";
+                failureType = FailureType.UNKNOWN;
+                return PlayerNav.Status.FAILED;
+            }
             if (replanning) {
                 replanning = false; paused = true;
             }
@@ -185,6 +190,10 @@ public final class TransportNavigator {
         reasons.addAll(unavailable);
         return "no available native transport reached the goal"
                 + (reasons.isEmpty() ? "; no transport endpoint was verified" : "; " + String.join("; ", reasons));
+    }
+
+    static boolean needsInspectionAfterFailure(TransportSession.Result result) {
+        return result.state() == TransportSession.State.FAILED && result.effectsStarted();
     }
 
     private String offerKey(TransportPlan.Offer offer) {

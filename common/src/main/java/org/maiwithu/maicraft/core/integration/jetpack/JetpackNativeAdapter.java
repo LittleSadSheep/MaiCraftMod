@@ -31,7 +31,7 @@ public final class JetpackNativeAdapter {
             return known && fuelTicks > 0 && Double.isFinite(horizontal) && horizontal > 0
                     && horizontal <= 0.1 && Double.isFinite(vertical) && vertical > gravity && vertical <= 1
                     && Double.isFinite(acceleration) && acceleration > gravity
-                    && Double.isFinite(hoverDescent) && hoverDescent <= 0 && hoverDescent >= -0.2
+                    && Double.isFinite(hoverDescent) && hoverDescent < 0 && hoverDescent >= -0.2
                     && Double.isFinite(gravity) && gravity > 0;
         }
     }
@@ -80,6 +80,62 @@ public final class JetpackNativeAdapter {
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
             return Snapshot.unavailable("native jetpack API unavailable: " + failure.getClass().getSimpleName());
         }
+    }
+
+    /** Native client evaluation, including the actual active-context gate. This is never a server ACK. */
+    public static Map<String, Object> activeEvidence(net.minecraft.client.player.LocalPlayer player) {
+        Map<String, Object> evidence = new java.util.LinkedHashMap<>();
+        evidence.put("known", false);
+        evidence.put("scope", "client_only_no_server_ack");
+        if (player == null) {
+            evidence.put("reason", "local player unavailable");
+            return Map.copyOf(evidence);
+        }
+        var minecraft = net.minecraft.client.Minecraft.getInstance();
+        if (minecraft == null || !minecraft.isSameThread()) throw new IllegalStateException("client-thread jetpack observation required");
+        try {
+            evidence.put("abilities_flying", player.getAbilities().flying);
+            evidence.put("passenger", player.isPassenger()); evidence.put("on_ground", player.onGround());
+            evidence.put("fall_flying", player.isFallFlying()); evidence.put("visually_swimming", player.isVisuallySwimming());
+            evidence.put("sprinting", player.isSprinting()); evidence.put("affected_by_fluids", player.isAffectedByFluids());
+            evidence.put("input_present", player.input != null);
+            if (player.input != null) evidence.put("input_jumping", player.input.jumping);
+            evidence.put("entity_shift_down", player.isShiftKeyDown());
+            evidence.put("velocity_y", player.getDeltaMovement().y); evidence.put("fall_distance", player.fallDistance);
+            Object api = call(Class.forName(FLIGHT + "api.IFlightApi").getField("Companion").get(null), "getINSTANCE");
+            evidence.put("native_up", (Boolean) call(key("UP"), "isPressed", player));
+            Object active = call(api, "findActiveJetpack", player);
+            Object context = active != null ? active : call(api, "findJetpack", player);
+            evidence.put("active_context_present", active != null);
+            evidence.put("active_source_matches_chest", false);
+            if (context != null) {
+                Object jetpack = call(context, "getJetpack"), source = call(context, "getSource");
+                evidence.put("native_pose", ((Enum<?>) call(context, "getPose")).name());
+                evidence.put("native_usable", (Boolean) call(jetpack, "isUsable", context));
+                evidence.put("native_source_disabled", (Boolean) call(source, "isDisabled", context));
+                evidence.put("native_hover", (Boolean) call(jetpack, "isHovering", context));
+                Class<?> equipment = Class.forName(FLIGHT + "api.sources.EquipmentSource");
+                ItemStack chest = player.getItemBySlot(EquipmentSlot.CHEST);
+                String id = BuiltInRegistries.ITEM.getKey(chest.getItem()).toString();
+                boolean supported = id.equals("create_jetpack:jetpack") || id.equals("create_jetpack:netherite_jetpack");
+                evidence.put("active_source_matches_chest", active != null && supported && jetpack == chest.getItem()
+                        && equipment.isInstance(source) && call(source, "getSlot") == EquipmentSlot.CHEST);
+            } else evidence.put("reason", "no native jetpack context");
+            evidence.put("known", true);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+            evidence.put("known", false);
+            evidence.put("reason", "native active-context observation failed: " + failure.getClass().getSimpleName());
+        }
+        return Map.copyOf(evidence);
+    }
+
+    /** A compatible native upright context, not a claim that the server cleared fall distance. */
+    public static boolean uprightActive(Map<String, Object> evidence) {
+        return evidence != null && "client_only_no_server_ack".equals(evidence.get("scope"))
+                && Boolean.TRUE.equals(evidence.get("known")) && Boolean.TRUE.equals(evidence.get("active_context_present"))
+                && Boolean.TRUE.equals(evidence.get("active_source_matches_chest")) && "UPRIGHT".equals(evidence.get("native_pose"))
+                && Boolean.TRUE.equals(evidence.get("native_usable")) && Boolean.FALSE.equals(evidence.get("native_source_disabled"))
+                && Boolean.FALSE.equals(evidence.get("abilities_flying")) && Boolean.FALSE.equals(evidence.get("passenger"));
     }
 
     /** Native isUsable uses float division; consumption uses floor integer division, minimum one.

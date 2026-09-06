@@ -15,9 +15,9 @@ final class JetpackSteering {
         double x = desiredX - velocity.x, z = desiredZ - velocity.z;
         double radians = Math.toRadians(yaw), sin = Math.sin(radians), cos = Math.cos(radians);
         float forward = pulse(-x * sin + z * cos), strafe = pulse(x * cos + z * sin);
-        boolean up = !landing && error.y - Math.max(0, velocity.y) * 3 > 0.12;
-        boolean down = error.y < -0.3 || landing;
-        return new BodyControlPort.Movement(forward, strafe, up, !up && down, false);
+        boolean up = !landing && error.y - velocity.y * 3 > 0.12;
+        // Shift selects native fast descent. Retain slow hover descent by releasing UP instead.
+        return new BodyControlPort.Movement(forward, strafe, up, false, false);
     }
     private static float pulse(double acceleration) { return acceleration > 0.015 ? 1 : acceleration < -0.015 ? -1 : 0; }
 }

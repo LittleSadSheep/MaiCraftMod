@@ -26,11 +26,15 @@ public final class JetpackFlightSession implements TransportSession {
     private JetpackNativeAdapter.Snapshot power;
     private NativeActionReceipt receipt;
     private Vec3 landing;
+    private double approachHeight;
     private boolean stopping, exiting, effects, uncertain, originalActive, originalHover, changedActive, changedHover, grounded;
     private long epoch = -1, revision, lastTick = Long.MIN_VALUE, waypointTick;
     private int waypoint = 1;
     private String failure = "", detail = "";
     private Result terminal;
+    private Map<String, Object> nativeEvidence = Map.of();
+    private final java.util.ArrayDeque<Map<String, Object>> trace = new java.util.ArrayDeque<>();
+    private long traceTick = Long.MIN_VALUE;
 
     public JetpackFlightSession(Vec3 target) { this(target, LongSets.emptySet()); }
     public JetpackFlightSession(Vec3 target, LongSet forbiddenBodyCells) {
@@ -67,6 +71,8 @@ public final class JetpackFlightSession implements TransportSession {
         grounded = ctx.player().onGround();
         ctx.body().applyMovement(BodyControlPort.Movement.STOPPED, ctx.tickRevision());
         power = JetpackNativeAdapter.inspect(ctx);
+        nativeEvidence = JetpackNativeAdapter.activeEvidence(ctx.player());
+        recordTrace(ctx, false);
         if (receipt != null) {
             ctx.actions().poll(ctx, receipt);
             if (!receipt.terminal()) return running();
@@ -106,6 +112,12 @@ public final class JetpackFlightSession implements TransportSession {
                 if (!ctx.mutationAvailable()) return running();
                 receipt = JetpackNativeAdapter.setMode(ctx, true, true); effects = changedHover = true; return running();
             }
+            if (!JetpackNativeAdapter.uprightActive(nativeEvidence)) {
+                failure = "jetpack_native_flight_unavailable";
+                detail = "native active upright context is unavailable after mode preparation: " + nativeEvidence;
+                stopping = true; phase = grounded ? Phase.RESTORE : Phase.LAND;
+                return grounded ? restore(ctx) : running();
+            }
             phase = Phase.FLY; waypointTick = lastTick;
         }
         if (phase == Phase.FLY) fly(ctx);
@@ -123,6 +135,7 @@ public final class JetpackFlightSession implements TransportSession {
         Vec3 exit = space.landingBelow(position.add(0, 0.1, 0));
         if (exit != null) landing = exit;
         if (!exiting && (stopping || !power.controllable() || !power.active() || !power.hover()
+                || !JetpackNativeAdapter.uprightActive(nativeEvidence)
                 || power.fuelTicks() < remaining || lastTick - waypointTick > 200)) {
             if (!stopping) { failure = "jetpack_landing_required"; detail = "fuel, mode or flight progress no longer supports the remaining route"; }
             escape(ctx, space); return;
@@ -135,7 +148,11 @@ public final class JetpackFlightSession implements TransportSession {
             detail = routeClear ? "projected body momentum enters an obstruction" : "route segment is no longer clear";
             escape(ctx, space); return;
         }
-        if (waypoint == route.points().size() - 1) { landing = next; phase = Phase.LAND; return; }
+        if (waypoint == route.points().size() - 1) {
+            landing = next;
+            approachHeight = Math.max(next.y, route.points().get(waypoint - 1).y);
+            phase = Phase.LAND; return;
+        }
         if (Math.hypot(position.x - next.x, position.z - next.z) < 0.2
                 && Math.abs(position.y - next.y) < 0.3 && velocity.horizontalDistance() < 0.08) {
             waypoint++; waypointTick = lastTick; next = route.points().get(waypoint);
@@ -154,7 +171,7 @@ public final class JetpackFlightSession implements TransportSession {
             var originalExit = JetpackEscape.choose(space, ctx.player().position(), originalRoute, nearest + 1, power);
             if (originalExit != null && (escape == null || originalExit.requiredTicks() < escape.requiredTicks())) escape = originalExit;
         }
-        if (escape == null) { phase = Phase.LAND; uncertain = true; return; }
+        if (escape == null) { approachHeight = ctx.player().getY(); phase = Phase.LAND; uncertain = true; return; }
         route = escape; waypoint = 1; waypointTick = lastTick; exiting = true; phase = Phase.FLY;
         landing = route.points().getLast();
         if (power.fuelTicks() < route.requiredTicks()) { uncertain = true; detail = "continuing toward the cheapest observed exit after fuel loss"; }
@@ -175,7 +192,18 @@ public final class JetpackFlightSession implements TransportSession {
         }
         boolean centered = Math.hypot(position.x - landing.x, position.z - landing.z) < 0.18
                 && ctx.player().getDeltaMovement().horizontalDistance() < 0.08;
-        steer(ctx, centered ? landing : new Vec3(landing.x, position.y, landing.z), centered);
+        // Hold the verified staging height while braking and crossing the platform edge.
+        // Using position.y here would continually lower the target as native hover sinks.
+        Vec3 approach = landingAim(position, landing, approachHeight, centered);
+        if (!space.clear(position, approach)) {
+            failure = "jetpack_landing_approach_obstructed"; detail = "cannot retain platform clearance while aligning";
+            escape(ctx, space); return;
+        }
+        steer(ctx, approach, centered);
+    }
+
+    static Vec3 landingAim(Vec3 position, Vec3 landing, double approachHeight, boolean centered) {
+        return centered ? landing : new Vec3(landing.x, Math.max(position.y, approachHeight), landing.z);
     }
 
     private void steer(LocalPlayerContext ctx, Vec3 aim, boolean landingNow) {
@@ -203,6 +231,7 @@ public final class JetpackFlightSession implements TransportSession {
         return finish(ctx, arrived);
     }
     private Result finish(LocalPlayerContext ctx, boolean success) {
+        recordTrace(ctx, true);
         ctx.body().releaseAll(); phase = Phase.DONE;
         terminal = success ? Result.success("native jetpack flight landed; observed original modes restored")
                 : Result.failed(failure.isEmpty() ? "jetpack_cancelled" : failure,
@@ -210,6 +239,16 @@ public final class JetpackFlightSession implements TransportSession {
         return terminal;
     }
     private Result running() { return new Result(State.RUNNING, phase(), detail, effects, uncertain); }
+    private void recordTrace(LocalPlayerContext ctx, boolean force) {
+        if (!force && traceTick != Long.MIN_VALUE && lastTick - traceTick < 10) return;
+        traceTick = lastTick;
+        var sample = new LinkedHashMap<String, Object>();
+        sample.put("tick", lastTick); sample.put("phase", phase()); sample.put("position", ctx.player().position().toString());
+        sample.put("health", ctx.player().getHealth()); sample.put("absorption", ctx.player().getAbsorptionAmount());
+        sample.put("native_client_evidence", nativeEvidence);
+        trace.addLast(Map.copyOf(sample));
+        while (trace.size() > 48) trace.removeFirst();
+    }
     @Override public void requestStop() { stopping = true; }
     @Override public void abandon() {
         ClientRuntime.actor().body().releaseAll(); phase = Phase.DONE;
@@ -224,6 +263,9 @@ public final class JetpackFlightSession implements TransportSession {
         result.put("target", target.toString()); result.put("landing", landing == null ? "unobserved" : landing.toString());
         result.put("effects_started", effects); result.put("uncertain", uncertain); result.put("detail", detail);
         result.put("grounded", grounded);
+        result.put("landing_approach_height", approachHeight);
+        result.put("native_client_evidence", nativeEvidence);
+        result.put("recent_flight_trace", java.util.List.copyOf(trace));
         result.put("search_radius", 64); result.put("search_node_limit", 6000);
         if (search != null) result.put("search_expanded", search.expanded());
         if (route != null) { result.put("route_points", route.points().size()); result.put("estimated_ticks_with_reserve", route.requiredTicks()); }

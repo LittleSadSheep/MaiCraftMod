@@ -56,7 +56,8 @@ public final class JetpackRoute {
                 landing = space.landingBelow(target.add(0, 0.1, 0));
                 if (landing == null || Math.abs(landing.y - target.y) > 1.01) { done = true; return; }
                 origin = BlockPos.containing(start.x, Math.ceil(start.y) + 1, start.z);
-                goal = BlockPos.containing(landing.x, Math.ceil(landing.y) + 1, landing.z);
+                goal = approachCell(space, landing);
+                if (goal == null) { done = true; return; }
                 if (!space.clear(start, center(origin))) { done = true; return; }
                 open.add(new Node(origin, 0, distance(origin, goal))); costs.put(origin, 0D);
             }
@@ -109,7 +110,16 @@ public final class JetpackRoute {
                 + vertical / (to.y > from.y ? Math.min(0.12, (power.vertical() - power.gravity()) * 0.5) : descentSpeed(power));
     }
     public static double descentSpeed(JetpackNativeAdapter.Snapshot power) {
-        return Math.max(0.01, Math.min(0.12, power.vertical() * 0.5));
+        return -power.hoverDescent();
+    }
+    static BlockPos approachCell(Space space, Vec3 landing) {
+        // Prefer a two-block reserve above the platform; a low ceiling may only admit one.
+        // The whole final descent column must be observed before choosing that staging height.
+        for (int clearance = 2; clearance >= 1; clearance--) {
+            BlockPos candidate = BlockPos.containing(landing.x, Math.ceil(landing.y) + clearance, landing.z);
+            if (space.clear(center(candidate), landing)) return candidate;
+        }
+        return null;
     }
     static Vec3 projectedPosition(Vec3 position, Vec3 velocity, boolean onGround) {
         // Gravity can leave downward delta movement after the floor has resolved contact.
