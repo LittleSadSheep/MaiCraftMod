@@ -69,7 +69,8 @@ class LMStudioClient:
             with self.opener.open(message, timeout=self.timeout) as response:
                 raw = json.loads(response.read(1024 * 1024))
         except urllib.error.HTTPError as failure:
-            detail = failure.read(4096).decode("utf-8", errors="replace")
+            with failure:
+                detail = failure.read(4096).decode("utf-8", errors="replace")
             raise RuntimeError(f"LM Studio HTTP {failure.code}: {detail}") from failure
         elapsed = (time.perf_counter() - started) * 1000
         choices = raw.get("choices")
