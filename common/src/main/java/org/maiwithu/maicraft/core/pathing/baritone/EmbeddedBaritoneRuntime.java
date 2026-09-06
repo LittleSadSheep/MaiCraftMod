@@ -13,6 +13,7 @@ import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.behavior.LookBehavior;
 import baritone.behavior.PathingBehavior;
 import baritone.pathing.path.PathExecutor;
+import baritone.pathing.movement.movements.MovementFall;
 import baritone.utils.InputOverrideHandler;
 import java.util.List;
 import java.util.function.BiFunction;
@@ -365,6 +366,16 @@ public final class EmbeddedBaritoneRuntime {
         return backend.getPlayerContext().objectMouseOver();
     }
 
+    static MovementFall currentFall(EmbeddedBaritoneNavigator navigator) {
+        if (owner != navigator || backend == null) return null;
+        var executor = backend.getPathingBehavior().getCurrent();
+        if (executor == null) return null;
+        int index = executor.getPosition();
+        var movements = executor.getPath().movements();
+        return index >= 0 && index < movements.size()
+                && movements.get(index) instanceof MovementFall fall ? fall : null;
+    }
+
     /** Called by the adapted upstream input behavior while the actor lease is open. */
     public static void applyActionState(InputOverrideHandler input) {
         LocalPlayerContext context = tickingContext;
@@ -532,6 +543,15 @@ public final class EmbeddedBaritoneRuntime {
         // 非放置型跑酷(跨洞跳跃)不改动地形,PRESERVE 下也安全;放置型跑酷仍由
         // permit 门控(allowParkourPlace)。
         settings.allowParkour.value = true;
+        configureTerrain(settings, permit);
+        settings.allowInventory.value = false;
+        settings.acceptableThrowawayItems.value = ScaffoldMaterials.of(
+                baritone.getPlayerContext().player());
+        settings.logger.value = message -> Constants.LOG.debug(
+                "[embedded-path] {}", message.getString());
+    }
+
+    static void configureTerrain(Settings settings, TerrainPermit permit) {
         settings.allowBreak.value = permit.mayAlter();
         settings.allowBreakAnyway.value = List.of();
         settings.allowPlace.value = permit.mayAlter();
@@ -539,12 +559,7 @@ public final class EmbeddedBaritoneRuntime {
         settings.allowDownward.value = permit.mayAlter();
         // A clutch is a block/fluid placement. Preserve navigation may swim or fall safely, but
         // it must never turn an unapproved route into a water-placement route.
-        settings.allowWaterBucketFall.value = permit.mayAlter();
-        settings.allowInventory.value = false;
-        settings.acceptableThrowawayItems.value = ScaffoldMaterials.of(
-                baritone.getPlayerContext().player());
-        settings.logger.value = message -> Constants.LOG.debug(
-                "[embedded-path] {}", message.getString());
+        settings.allowWaterBucketFall.value = permit.mayUseWaterBucket();
     }
 
     private static void syncWorld(IBaritone baritone, ClientLevel current) {

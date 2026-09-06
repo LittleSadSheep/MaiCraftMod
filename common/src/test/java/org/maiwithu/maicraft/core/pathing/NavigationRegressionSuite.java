@@ -19,6 +19,7 @@ public final class NavigationRegressionSuite {
         baritone.pathing.movement.DoorPassageTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFallTest.main(args);
         org.maiwithu.maicraft.client.actor.NativeConfirmationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest.main(args);
         org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeightTest.main(args);

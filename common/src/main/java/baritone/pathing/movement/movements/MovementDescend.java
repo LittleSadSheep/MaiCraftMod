@@ -210,7 +210,10 @@ public class MovementDescend extends Movement {
                 res.cost = tentativeCost;
                 return false;
             }
-            if (reachedMinimum && context.hasWaterBucket && unprotectedFallHeight <= context.maxFallHeightBucket + 1) {
+            if (reachedMinimum && context.hasWaterBucket && unprotectedFallHeight <= context.maxFallHeightBucket + 1
+                    && org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.canPlace(
+                            context.get(destX, newY + 1, destZ), ontoBlock,
+                            context.isPossiblyProtected(destX, newY + 1, destZ))) {
                 res.x = destX;
                 res.y = newY + 1;// this is the block we're falling onto, so dest is +1
                 res.z = destZ;

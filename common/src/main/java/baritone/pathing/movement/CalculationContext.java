@@ -139,7 +139,7 @@ public class CalculationContext {
         this.hasThrowaway = forceTerrainMutation
                 || (Baritone.settings().allowPlace.value
                 && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway());
-        this.hasWaterBucket = world.dimension() != Level.NETHER
+        this.hasWaterBucket = !world.dimensionType().ultraWarm()
                 && (forceTerrainMutation
                 || (Baritone.settings().allowWaterBucketFall.value
                 && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER))));

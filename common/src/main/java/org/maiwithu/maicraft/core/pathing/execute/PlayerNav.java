@@ -94,6 +94,7 @@ public final class PlayerNav {
     public interface ContextProvider {
         /** 缺省:只走不改。接近类动作全部用它,忘了指定也只会更保守。 */
         ContextProvider DEFAULT = of(TerrainPermit.PRESERVE);
+        ContextProvider WATER_ONLY = of(TerrainPermit.WATER_ONLY);
         /** 可改地形:挖矿、施工,以及模型显式授权的 goto。 */
         ContextProvider TERRAFORM = of(TerrainPermit.TERRAFORM);
 

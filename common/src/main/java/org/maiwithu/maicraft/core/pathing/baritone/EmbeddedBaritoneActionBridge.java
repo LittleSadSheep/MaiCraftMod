@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.utils.input.Input;
+import baritone.pathing.movement.movements.MovementFall;
 import baritone.utils.InputOverrideHandler;
 import baritone.utils.accessor.IPlayerControllerMP;
 import java.util.ArrayList;
@@ -13,6 +14,9 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -240,6 +244,17 @@ final class EmbeddedBaritoneActionBridge {
             EmbeddedBaritoneNavigator navigator,
             boolean sneakRequested) {
         if (context.player().isHandsBusy()) return;
+        MovementFall fall = EmbeddedBaritoneRuntime.currentFall(navigator);
+        if (fall != null && !fall.getSrc().equals(
+                org.maiwithu.maicraft.core.pathing.execute.PlayerNav.playerFeet(context.player()))) {
+            InteractionHand hand = context.player().getMainHandItem().getItem() instanceof BucketItem
+                    ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND;
+            ItemStack bucket = context.player().getItemInHand(hand);
+            if (bucket.is(Items.WATER_BUCKET) || bucket.is(Items.BUCKET)) {
+                startWaterUse(context, navigator, fall, hand, bucket.is(Items.BUCKET));
+                return;
+            }
+        }
         HitResult trace = navigator.objectMouseOver();
         if (!(trace instanceof BlockHitResult hit)
                 || trace.getType() != HitResult.Type.BLOCK) {
@@ -254,8 +269,7 @@ final class EmbeddedBaritoneActionBridge {
         InteractionHand hand = chooseUseHand(clickedState, sneakRequested,
                 context.player().getMainHandItem(), context.player().getOffhandItem());
         ItemStack held = context.player().getItemInHand(hand);
-        boolean terrainItem = held.getItem() instanceof BlockItem
-                || held.getItem() instanceof BucketItem;
+        boolean terrainItem = held.getItem() instanceof BlockItem;
 
         if (openable) {
             BlockPos otherHalf = otherDoorHalf(clicked, clickedState);
@@ -281,12 +295,32 @@ final class EmbeddedBaritoneActionBridge {
             return;
         }
         BlockState actualBefore = context.level().getBlockState(actual);
-        if (held.getItem() instanceof BucketItem) {
-            submitItemUse(context, navigator, hand, clicked, clickedState, actual, actualBefore);
-        } else {
-            submitBlockUse(context, navigator, hand, hit, clicked, clickedState,
-                    actual, actualBefore, true);
-        }
+        submitBlockUse(context, navigator, hand, hit, clicked, clickedState,
+                actual, actualBefore, true);
+    }
+
+    private void startWaterUse(LocalPlayerContext context, EmbeddedBaritoneNavigator navigator,
+                               MovementFall fall, InteractionHand hand, boolean pickup) {
+        if (!navigator.permit().mayUseWaterBucket()
+                || !BaritoneAPI.getSettings().allowWaterBucketFall.value
+                || context.level().dimensionType().ultraWarm()) return;
+        var player = context.player();
+        var eye = player.getEyePosition();
+        // Match BucketItem.use: an empty bucket traces source fluids, a filled one solid blocks.
+        BlockHitResult hit = context.level().clip(new ClipContext(eye,
+                eye.add(player.getViewVector(1F).scale(player.blockInteractionRange())),
+                ClipContext.Block.OUTLINE,
+                pickup ? ClipContext.Fluid.SOURCE_ONLY : ClipContext.Fluid.NONE, player));
+        if (hit.getType() != HitResult.Type.BLOCK) return;
+        BlockPos actual = WaterBucketFall.waterCell(hit,
+                context.level().getBlockState(hit.getBlockPos()), pickup);
+        if (!actual.equals(fall.getDest()) || !context.level().isLoaded(actual)) return;
+        BlockState before = context.level().getBlockState(actual);
+        boolean protectedTarget = EmbeddedBaritonePolicy.protects(actual);
+        if (pickup ? !WaterBucketFall.canRecover(before, fall.hasPlacedWater(), protectedTarget)
+                : !WaterBucketFall.canPlace(before, context.level().getBlockState(actual.below()),
+                        protectedTarget)) return;
+        submitItemUse(context, navigator, hand, actual, before, fall, pickup);
     }
 
     private void submitBlockUse(
@@ -325,18 +359,20 @@ final class EmbeddedBaritoneActionBridge {
             LocalPlayerContext context,
             EmbeddedBaritoneNavigator navigator,
             InteractionHand hand,
-            BlockPos clicked,
-            BlockState beforeClicked,
             BlockPos actual,
-            BlockState beforeActual) {
-        NativeConfirmation confirmation = NativeConfirmation.anyOf(
-                NativeConfirmation.blockChanged(clicked, beforeClicked),
-                NativeConfirmation.blockChanged(actual, beforeActual));
+            BlockState beforeActual,
+            MovementFall fall,
+            boolean pickup) {
+        NativeConfirmation confirmation = pickup
+                ? c -> c.player().getItemInHand(hand).is(Items.WATER_BUCKET)
+                        ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING
+                : NativeConfirmation.blockState(actual, beforeActual, Blocks.WATER.defaultBlockState());
         try {
-            rememberUse(navigator, clicked, beforeClicked, actual, beforeActual, true);
+            rememberUse(navigator, actual, beforeActual, actual, beforeActual, true);
             pendingKind = PendingKind.ITEM_USE;
             receipt = context.actions().useItem(
                     context, hand, confirmation, USE_CONFIRM_TICKS);
+            if (!pickup) fall.waterPlacementSubmitted(receipt);
             rightClickCooldown = Math.max(0,
                     BaritoneAPI.getSettings().rightClickSpeed.value - 1);
             settle(context);

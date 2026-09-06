@@ -16,10 +16,16 @@ package org.maiwithu.maicraft.core.pathing.moves;
 public enum TerrainPermit {
     /** 只走不改:任何挖掘与放置在成本模型里都是 INF。 */
     PRESERVE,
+    /** 仅允许落地水与回收本次放出的水；不允许挖掘、放块或搭路。 */
+    WATER_ONLY,
     /** 可改地形:挖穿、垫路、搭柱、架桥都可入路,受总开关与硬禁挖标签约束。 */
     TERRAFORM;
 
     public boolean mayAlter() {
         return this == TERRAFORM;
+    }
+
+    public boolean mayUseWaterBucket() {
+        return this == WATER_ONLY || this == TERRAFORM;
     }
 }

@@ -38,7 +38,6 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LadderBlock;
@@ -46,8 +45,19 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.WaterFluid;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 
 public class MovementFall extends Movement {
+    private NativeActionReceipt waterPlacement;
+
+    public void waterPlacementSubmitted(NativeActionReceipt receipt) {
+        waterPlacement = receipt;
+    }
+
+    public boolean hasPlacedWater() {
+        return waterPlacement != null && waterPlacement.status()
+                == NativeActionReceipt.Status.CONFIRMED_APPLIED;
+    }
 
     private static final ItemStack STACK_BUCKET_WATER = new ItemStack(Items.WATER_BUCKET);
     private static final ItemStack STACK_BUCKET_EMPTY = new ItemStack(Items.BUCKET);
@@ -101,7 +111,7 @@ public class MovementFall extends Movement {
 
         boolean isWater = destState.getFluidState().getType() instanceof WaterFluid;
         if (!isWater && willPlaceBucket() && !playerFeet.equals(dest)) {
-            if (!Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) || ctx.world().dimension() == Level.NETHER) {
+            if (!Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) || ctx.world().dimensionType().ultraWarm()) {
                 return state.setStatus(MovementStatus.UNREACHABLE);
             }
 
@@ -127,7 +137,8 @@ public class MovementFall extends Movement {
         }
         if (playerFeet.equals(dest) && (ctx.player().position().y - playerFeet.getY() < 0.094 || isWater)) { // 0.094 because lilypads
             if (isWater) { // only match water, not flowing water (which we cannot pick up with a bucket)
-                if (Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_EMPTY))) {
+                if (waterPlacement != null && !waterPlacement.terminal()) return state;
+                if (hasPlacedWater() && Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_EMPTY))) {
                     int emptyBucketSlot = ctx.player().getInventory().findSlotMatchingItem(
                             STACK_BUCKET_EMPTY);
                     if (!EmbeddedBaritoneRuntime.ensureHotbarSelected(
@@ -204,10 +215,14 @@ public class MovementFall extends Movement {
 
     @Override
     protected boolean prepared(MovementState state) {
+        if (ctx.playerFeet().equals(src) && calculateCost(new CalculationContext(baritone)) >= COST_INF) {
+            state.setStatus(MovementStatus.UNREACHABLE);
+            return true;
+        }
         // Select and confirm the clutch bucket while still standing on the source block. A
         // mid-air hotbar packet and water use cannot share MaiCraft's one mutation slot.
         if (ctx.playerFeet().equals(src) && willPlaceBucket()
-                && ctx.world().dimension() != Level.NETHER) {
+                && !ctx.world().dimensionType().ultraWarm()) {
             int waterBucketSlot = ctx.player().getInventory().findSlotMatchingItem(
                     STACK_BUCKET_WATER);
             if (!Inventory.isHotbarSlot(waterBucketSlot)) {
