@@ -128,7 +128,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     /** 这次 goto 的地形许可:模型点头了才开路,否则只走不改。四处建导航都从这儿取。 */
     private PlayerNav.ContextProvider terrain() {
-        return r.mayAlterTerrain ? PlayerNav.ContextProvider.TERRAFORM : PlayerNav.ContextProvider.DEFAULT;
+        return r.mayAlterTerrain ? PlayerNav.ContextProvider.TERRAFORM
+                : r.allowWaterBucketFall ? PlayerNav.ContextProvider.WATER_ONLY : PlayerNav.ContextProvider.DEFAULT;
     }
 
     /**

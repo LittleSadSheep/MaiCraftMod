@@ -41,13 +41,20 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     /** Namespaced block id to walk to the nearest of; null when coordinates drive. */
     public final String block;
     public final Kind kind;
-    /** Consent to dig / bridge / pillar en route. False = the walk leaves every block as it was. */
+    /** Consent to dig / bridge / pillar en route; temporary bucket water has a separate flag. */
     public final boolean mayAlterTerrain;
+    /** Permit temporary bucket water for a fall without authorizing excavation or scaffolding. */
+    public final boolean allowWaterBucketFall;
     /** Successful live body receipt; never copied into the public TaskResult. */
     private Position verifiedPosition;
 
     public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
                             Double x, Double y, Double z, String block, boolean mayAlterTerrain) {
+        this(toolCallId, deadlineGameTime, x, y, z, block, mayAlterTerrain, false);
+    }
+
+    public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
+                            Double x, Double y, Double z, String block, boolean mayAlterTerrain, boolean allowWaterBucketFall) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.x = x;
         this.y = y;
@@ -55,6 +62,7 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
         this.block = block == null || block.isBlank() ? null : block.trim();
         this.kind = resolveKind(x, y, z, this.block);
         this.mayAlterTerrain = mayAlterTerrain;
+        this.allowWaterBucketFall = allowWaterBucketFall;
     }
 
     /**
@@ -125,6 +133,6 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
             case YLEVEL -> "下到 y=" + (int) (double) y;
             case FIND -> "去找 " + block;
         };
-        return mayAlterTerrain ? where + "(可开路)" : where;
+        return mayAlterTerrain ? where + "(可开路)" : allowWaterBucketFall ? where + "(可落地水)" : where;
     }
 }

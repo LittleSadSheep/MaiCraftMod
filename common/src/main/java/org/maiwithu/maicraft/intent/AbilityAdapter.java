@@ -292,6 +292,11 @@ final class AbilityAdapter {
                                     option("cancel", "Cancel without moving.")));
                 }
                 String exploreTarget = exploreTarget(goal);
+                if (bool(goal.parameters(), "allow_water_bucket_fall", false)) {
+                    return decision(goal, "Bucket-fall travel needs an observed destination first.",
+                            List.of(option("replace_goal", "Choose coordinates or a remembered destination."),
+                                    option("cancel", "Cancel travel.")));
+                }
                 if (exploreTarget == null) {
                     return decision(goal,
                             "Travel needs coordinates, a remembered landmark, block_id, coast, biome id or biome tag.",
@@ -316,6 +321,8 @@ final class AbilityAdapter {
                 || bool(goal.preferences(), "may_alter_terrain", false)) {
             parameters.addProperty("may_alter_terrain", true);
         }
+        if (bool(goal.parameters(), "allow_water_bucket_fall", false))
+            parameters.addProperty("allow_water_bucket_fall", true);
         return new IntentAction.Tool("goto", parameters.toString());
     }
 

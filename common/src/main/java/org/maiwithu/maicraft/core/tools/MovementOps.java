@@ -20,10 +20,15 @@ public final class MovementOps {
      */
     public TaskRecord moveTo(Double x, Double y, Double z, String block, Boolean mayAlterTerrain,
                              ToolContext ctx) {
+        return moveTo(x, y, z, block, mayAlterTerrain, false, ctx);
+    }
+
+    public TaskRecord moveTo(Double x, Double y, Double z, String block, Boolean mayAlterTerrain,
+                             Boolean allowWaterBucketFall, ToolContext ctx) {
         // MoveToTaskRecord validates the x/y/z/block combination, throwing a
         // teaching error for an ambiguous one (e.g. only x given, or block
         // combined with coordinates).
         return new MoveToTaskRecord(ctx.toolCallId(), ctx.deadline(DEFAULT_TIMEOUT_TICKS),
-                x, y, z, block, Boolean.TRUE.equals(mayAlterTerrain));
+                x, y, z, block, Boolean.TRUE.equals(mayAlterTerrain), Boolean.TRUE.equals(allowWaterBucketFall));
     }
 }
