@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.client.actor.MenuVisibility;
  * itself unavailable instead of discovering the mismatch after a transaction has started.</p>
  */
 final class Ae2ReflectionBridge {
+    record FluidEntry(ResourceLocation fluidId, long serial, long storedAmount, long bucketUnits) {}
     record Entry(ResourceLocation itemId, long serial, long storedAmount,
                  boolean craftable, ItemStack sample) {
         Entry {
@@ -73,6 +74,9 @@ final class Ae2ReflectionBridge {
     private final Method submitResultSuccessful;
     private final Method submitResultErrorCode;
     private final Method cableBusGetPart;
+    private final Class<?> fluidKeyClass;
+    private final long fluidBucketUnits;
+    private final Object fillItemMoveToPlayer;
 
     private Ae2ReflectionBridge(
             Class<?> storageMenuClass,
@@ -103,7 +107,7 @@ final class Ae2ReflectionBridge {
             Method submitErrorResult,
             Method submitResultSuccessful,
             Method submitResultErrorCode,
-            Method cableBusGetPart) {
+            Method cableBusGetPart, Class<?> fluidKeyClass, long fluidBucketUnits, Object fillItemMoveToPlayer) {
         this.storageMenuClass = storageMenuClass;
         this.craftAmountMenuClass = craftAmountMenuClass;
         this.craftConfirmMenuClass = craftConfirmMenuClass;
@@ -133,6 +137,9 @@ final class Ae2ReflectionBridge {
         this.submitResultSuccessful = submitResultSuccessful;
         this.submitResultErrorCode = submitResultErrorCode;
         this.cableBusGetPart = cableBusGetPart;
+        this.fluidKeyClass = fluidKeyClass;
+        this.fluidBucketUnits = fluidBucketUnits;
+        this.fillItemMoveToPlayer = fillItemMoveToPlayer;
     }
 
     static Availability availability() {
@@ -206,6 +213,49 @@ final class Ae2ReflectionBridge {
         Object status = invoke(getLinkStatus, menu);
         if (status == null) throw new Ae2ProtocolException("AE2 storage menu returned no link status");
         return (Boolean) invoke(linkConnected, status);
+    }
+
+    /** AE uses different native fluid units across loaders; its bucket constant is authoritative. */
+    FluidEntry waterEntry(Object menu) {
+        requireStorageMenu(menu);
+        Object repository = invoke(getClientRepo, menu);
+        if (repository == null) return null;
+        Object raw = invoke(getAllEntries, repository);
+        if (!(raw instanceof Iterable<?> entries)) throw new Ae2ProtocolException("missing AE repository entries");
+        FluidEntry largest = null;
+        for (Object entry : entries) {
+            if (entry == null) continue;
+            Object key = invoke(entryGetWhat, entry);
+            if (!fluidKeyClass.isInstance(key)) continue;
+            Object id = invoke(keyGetId, key);
+            if (!ResourceLocation.parse("minecraft:water").equals(id)) continue;
+            long amount = Math.max(0, ((Number) invoke(entryGetStoredAmount, entry)).longValue());
+            if (largest == null || amount > largest.storedAmount())
+                largest = new FluidEntry((ResourceLocation) id,
+                        ((Number) invoke(entryGetSerial, entry)).longValue(), amount, fluidBucketUnits);
+        }
+        return largest;
+    }
+
+    void fillContainerToPlayer(Object menu, long fluidSerial) {
+        requireStorageMenu(menu);
+        requireVisibleMenu(menu);
+        invoke(handleInteraction, menu, fluidSerial, fillItemMoveToPlayer);
+    }
+
+    long fluidBucketUnits() { return fluidBucketUnits; }
+
+    Long storedAmount(Object menu, long serial) {
+        requireStorageMenu(menu);
+        Object repository = invoke(getClientRepo, menu);
+        if (repository == null) return null;
+        Object raw = invoke(getAllEntries, repository);
+        if (!(raw instanceof Iterable<?> entries)) throw new Ae2ProtocolException("missing AE repository entries");
+        for (Object entry : entries) {
+            if (entry != null && ((Number) invoke(entryGetSerial, entry)).longValue() == serial)
+                return Math.max(0, ((Number) invoke(entryGetStoredAmount, entry)).longValue());
+        }
+        return 0L;
     }
 
     void pickupSingle(Object menu, long serial) {
@@ -307,6 +357,10 @@ final class Ae2ReflectionBridge {
             Class<?> clientRepo = Class.forName("appeng.menu.me.common.IClientRepo");
             Class<?> entry = Class.forName("appeng.menu.me.common.GridInventoryEntry");
             Class<?> itemKey = Class.forName("appeng.api.stacks.AEItemKey");
+            Class<?> key = Class.forName("appeng.api.stacks.AEKey");
+            Class<?> fluidKey = Class.forName("appeng.api.stacks.AEFluidKey");
+            long bucketUnits = fluidKey.getField("AMOUNT_BUCKET").getLong(null);
+            if (bucketUnits <= 0) throw new Ae2ProtocolException("AE fluid bucket unit must be positive");
             Class<?> inventoryAction = Class.forName("appeng.helpers.InventoryAction");
             Class<?> linkStatus = Class.forName("appeng.api.storage.ILinkStatus");
             Class<?> craftAmount = Class.forName("appeng.menu.me.crafting.CraftAmountMenu");
@@ -334,7 +388,7 @@ final class Ae2ReflectionBridge {
                     entry.getMethod("getWhat"),
                     entry.getMethod("getStoredAmount"),
                     entry.getMethod("isCraftable"),
-                    itemKey.getMethod("getId"),
+                    key.getMethod("getId"),
                     itemKey.getMethod("toStack", Integer.TYPE),
                     storageMenu.getMethod("handleInteraction", Long.TYPE, inventoryAction),
                     requireAction(actions, "PICKUP_SINGLE"),
@@ -349,7 +403,8 @@ final class Ae2ReflectionBridge {
                     syncableSubmitResult.getMethod("result"),
                     craftingSubmitResult.getMethod("successful"),
                     craftingSubmitResult.getMethod("errorCode"),
-                    cableBus.getMethod("getPart", Direction.class));
+                    cableBus.getMethod("getPart", Direction.class), fluidKey, bucketUnits,
+                    requireAction(actions, "FILL_ITEM_MOVE_TO_PLAYER"));
             return new Availability(Optional.of(bridge), "available");
         } catch (ReflectiveOperationException | LinkageError | RuntimeException failure) {
             String detail = failure.getClass().getSimpleName();

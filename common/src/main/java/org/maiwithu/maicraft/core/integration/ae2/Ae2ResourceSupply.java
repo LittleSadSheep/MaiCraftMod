@@ -184,7 +184,8 @@ public final class Ae2ResourceSupply {
             int craftingJobsSubmitted,
             boolean effectsStarted,
             boolean uncertain,
-            String terminalAccess) {
+            String terminalAccess,
+            List<Map<String, Object>> containerFillReceipts) {
         public Outcome {
             Objects.requireNonNull(status, "status");
             Objects.requireNonNull(operation, "operation");
@@ -192,6 +193,7 @@ public final class Ae2ResourceSupply {
             message = message == null ? "" : message;
             groups = List.copyOf(groups);
             terminalAccess = terminalAccess == null ? "unavailable" : terminalAccess;
+            containerFillReceipts = List.copyOf(containerFillReceipts);
         }
 
         public boolean terminal() {
@@ -245,6 +247,7 @@ public final class Ae2ResourceSupply {
             data.put("outcome_uncertain", uncertain);
             data.put("mechanical_retry_allowed", !effectsStarted && !uncertain);
             data.put("terminal_access", terminalAccess);
+            if (!containerFillReceipts.isEmpty()) data.put("container_fill_receipts", containerFillReceipts);
             return Map.copyOf(data);
         }
     }
@@ -300,6 +303,37 @@ public final class Ae2ResourceSupply {
             return Optional.of(new StockEvidence.Snapshot(
                     StockEvidence.Source.AE2,
                     stored, craftable, observedGameTick));
+        } catch (RuntimeException | LinkageError unavailable) {
+            return Optional.empty();
+        }
+    }
+
+    /** Read-only water acquisition evidence; absent entries cannot prove an unfinished sync is empty. */
+    public static Optional<com.google.gson.JsonObject> observeOpenWaterInventory(
+            net.minecraft.world.inventory.AbstractContainerMenu menu) {
+        try {
+            var available = Ae2ReflectionBridge.availability().bridge();
+            if (available.isEmpty()) return Optional.empty();
+            var bridge = available.orElseThrow();
+            if (!bridge.isStorageMenu(menu) || !org.maiwithu.maicraft.client.actor.MenuVisibility.matches(
+                    net.minecraft.client.Minecraft.getInstance(), menu)) return Optional.empty();
+            var out = new com.google.gson.JsonObject();
+            out.addProperty("connected", bridge.connected(menu));
+            var entries = bridge.entries(menu);
+            out.addProperty("repository_available", entries != null);
+            out.add("synchronization_complete", com.google.gson.JsonNull.INSTANCE);
+            out.addProperty("absence_is_authoritative", false);
+            out.addProperty("evidence_source", "ae2_synchronized_client_repository");
+            if (entries == null) return Optional.of(out);
+            var water = bridge.waterEntry(menu);
+            out.addProperty("water_entry_observed", water != null);
+            out.addProperty("water_native_units", water == null ? 0 : water.storedAmount());
+            out.addProperty("units_per_bucket", bridge.fluidBucketUnits());
+            out.addProperty("network_empty_buckets", Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.EMPTY_BUCKET));
+            out.addProperty("network_water_buckets", Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.WATER_BUCKET));
+            var level = net.minecraft.client.Minecraft.getInstance().level;
+            if (level != null) out.addProperty("observed_game_tick", level.getGameTime());
+            return Optional.of(out);
         } catch (RuntimeException | LinkageError unavailable) {
             return Optional.empty();
         }
