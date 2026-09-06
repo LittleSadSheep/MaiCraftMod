@@ -13,6 +13,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 
@@ -270,6 +271,8 @@ final class AbilityAdapter {
 
     private static IntentAction travel(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         JsonObject parameters = new JsonObject();
+        TransportMode mode = TransportMode.parse(string(goal.parameters(), "transport_mode"));
+        parameters.addProperty("transport_mode", mode.name().toLowerCase(java.util.Locale.ROOT));
         String block = string(goal.parameters(), "block_id");
         if (block == null) block = string(goal.parameters(), "block");
         if (block != null) {
@@ -292,8 +295,16 @@ final class AbilityAdapter {
                                     option("cancel", "Cancel without moving.")));
                 }
                 String exploreTarget = exploreTarget(goal);
-                if (bool(goal.parameters(), "allow_water_bucket_fall", false)) {
-                    return decision(goal, "Bucket-fall travel needs an observed destination first.",
+                if (mode == TransportMode.JETPACK || mode == TransportMode.ELEVATOR) {
+                    return decision(goal, "Jetpack or elevator travel needs a located destination first; "
+                                    + "an undiscovered coast or biome cannot supply a verified transport endpoint.",
+                            List.of(option("replace_goal", "Choose coordinates or a remembered destination, "
+                                            + "or use transport_mode=ground/auto to discover it first."),
+                                    option("cancel", "Cancel travel.")));
+                }
+                if (bool(goal.parameters(), "allow_water_bucket_fall", false)
+                        || bool(goal.parameters(), "allow_landing_assists", false)) {
+                    return decision(goal, "Landing-assisted travel needs an observed destination first.",
                             List.of(option("replace_goal", "Choose coordinates or a remembered destination."),
                                     option("cancel", "Cancel travel.")));
                 }
@@ -305,6 +316,7 @@ final class AbilityAdapter {
                 }
                 JsonObject explore = new JsonObject();
                 explore.addProperty("target", exploreTarget);
+                explore.addProperty("transport_mode", mode.name().toLowerCase(java.util.Locale.ROOT));
                 explore.addProperty("max_distance",
                         integer(goal.parameters(), "max_distance", 768, 64, 2_048));
                 if (bool(goal.parameters(), "may_alter_terrain", false)
@@ -323,6 +335,8 @@ final class AbilityAdapter {
         }
         if (bool(goal.parameters(), "allow_water_bucket_fall", false))
             parameters.addProperty("allow_water_bucket_fall", true);
+        if (bool(goal.parameters(), "allow_landing_assists", false))
+            parameters.addProperty("allow_landing_assists", true);
         return new IntentAction.Tool("goto", parameters.toString());
     }
 

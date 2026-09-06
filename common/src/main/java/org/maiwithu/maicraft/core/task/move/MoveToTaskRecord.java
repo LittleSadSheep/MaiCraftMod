@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.move;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
 /**
  * Typed task descriptor for the {@code goto} tool. The goal type is chosen
@@ -45,6 +46,10 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     public final boolean mayAlterTerrain;
     /** Permit temporary bucket water for a fall without authorizing excavation or scaffolding. */
     public final boolean allowWaterBucketFall;
+    /** Temporary landing items only; independent of excavation and scaffolding permission. */
+    public final boolean allowLandingAssists;
+    /** Transport preference is independent of terrain and temporary water permission. */
+    public final TransportMode transportMode;
     /** Successful live body receipt; never copied into the public TaskResult. */
     private Position verifiedPosition;
 
@@ -55,6 +60,18 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
 
     public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
                             Double x, Double y, Double z, String block, boolean mayAlterTerrain, boolean allowWaterBucketFall) {
+        this(toolCallId, deadlineGameTime, x, y, z, block, mayAlterTerrain, allowWaterBucketFall, TransportMode.AUTO);
+    }
+
+    public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
+                            Double x, Double y, Double z, String block, boolean mayAlterTerrain,
+                            boolean allowWaterBucketFall, TransportMode transportMode) {
+        this(toolCallId, deadlineGameTime, x, y, z, block, mayAlterTerrain, allowWaterBucketFall, transportMode, false);
+    }
+
+    public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
+                            Double x, Double y, Double z, String block, boolean mayAlterTerrain,
+                            boolean allowWaterBucketFall, TransportMode transportMode, boolean allowLandingAssists) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.x = x;
         this.y = y;
@@ -63,6 +80,8 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
         this.kind = resolveKind(x, y, z, this.block);
         this.mayAlterTerrain = mayAlterTerrain;
         this.allowWaterBucketFall = allowWaterBucketFall;
+        this.allowLandingAssists = allowLandingAssists;
+        this.transportMode = transportMode == null ? TransportMode.AUTO : transportMode;
     }
 
     /**
@@ -71,10 +90,15 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
      */
     public static MoveToTaskRecord strictStance(
             String toolCallId, long deadlineGameTime, BlockPos target, boolean mayAlterTerrain) {
+        return strictStance(toolCallId, deadlineGameTime, target, mayAlterTerrain, TransportMode.AUTO);
+    }
+
+    public static MoveToTaskRecord strictStance(
+            String toolCallId, long deadlineGameTime, BlockPos target, boolean mayAlterTerrain, TransportMode transportMode) {
         if (target == null) throw new IllegalArgumentException("strict stance target is required");
         return new MoveToTaskRecord(toolCallId, deadlineGameTime,
                 (double) target.getX(), (double) target.getY(), (double) target.getZ(), null,
-                mayAlterTerrain);
+                mayAlterTerrain, false, transportMode);
     }
 
     boolean requiresStrictStance() {

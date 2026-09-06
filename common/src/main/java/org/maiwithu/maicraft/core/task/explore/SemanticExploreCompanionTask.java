@@ -399,12 +399,12 @@ public final class SemanticExploreCompanionTask
         // the original stand-or-swim contract (an ocean-biome cell cannot be onGround).
         moveRecord = targetKind.frontierSurfacePreference == FrontierSurfacePreference.DRY_LAND
                 ? MoveToTaskRecord.strictStance(
-                        childCall, now + INITIAL_LEG_LEASE_TICKS, target, r.mayAlterTerrain)
+                        childCall, now + INITIAL_LEG_LEASE_TICKS, target, r.mayAlterTerrain, r.transportMode)
                 : new MoveToTaskRecord(
                         childCall, now + INITIAL_LEG_LEASE_TICKS,
                         (double) target.getX(), exact ? (double) target.getY() : null,
                         (double) target.getZ(), null,
-                        r.mayAlterTerrain);
+                        r.mayAlterTerrain, false, r.transportMode);
         moveChild = new MoveToCompanionTask(player, moveRecord);
     }
 

@@ -88,6 +88,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // 靠岸后接步行(见 tickBoatLeg)。其余情况(矿车没有舵、马的寻路仍按步行
         // 物理算、FIND 要先扫描)直接走步行段;下座驾是步行导航自己的事(PlayerNav)。
         if (player.isPassenger()
+                && (r.transportMode == org.maiwithu.maicraft.core.pathing.transport.TransportMode.AUTO
+                    || r.transportMode == org.maiwithu.maicraft.core.pathing.transport.TransportMode.GROUND)
                 && player.getVehicle() instanceof net.minecraft.world.entity.vehicle.Boat
                 && (r.kind == MoveToTaskRecord.Kind.BLOCK || r.kind == MoveToTaskRecord.Kind.COLUMN)
                 && !reached()) {
@@ -129,6 +131,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 这次 goto 的地形许可:模型点头了才开路,否则只走不改。四处建导航都从这儿取。 */
     private PlayerNav.ContextProvider terrain() {
         return r.mayAlterTerrain ? PlayerNav.ContextProvider.TERRAFORM
+                : r.allowLandingAssists ? PlayerNav.ContextProvider.LANDING_ONLY
                 : r.allowWaterBucketFall ? PlayerNav.ContextProvider.WATER_ONLY : PlayerNav.ContextProvider.DEFAULT;
     }
 
@@ -147,7 +150,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         nav = (r.kind == MoveToTaskRecord.Kind.BLOCK
                 ? PlayerNav.to(player, this::blockCompiled, WALK_SPEED, this::reached, terrain())
                 : PlayerNav.toGoal(player, this::goal, WALK_SPEED, this::reached, terrain()))
-                .withTerrainProbe();
+                .withTransportMode(r.transportMode).withTerrainProbe();
         org.maiwithu.maicraft.core.Constants.LOG.info(
                 "[maicraft-task] goto start kind={} target={},{},{} solid={}",
                 r.kind, bx, by, bz,
@@ -329,7 +332,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 if (r.kind == MoveToTaskRecord.Kind.FIND && finder.rotateAfterFailure()) {
                     stopNav();
                     nav = PlayerNav.to(player, finder::contract, WALK_SPEED, this::reached, terrain())
-                            .withTerrainProbe();
+                            .withTransportMode(r.transportMode).withTerrainProbe();
                     yield TaskState.RUNNING;
                 }
                 // The planner can't get closer. In water, keep waiting while the body is
@@ -358,7 +361,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     stopNav();
                     NavGoal retry = nearRetryGoal();
                     nav = PlayerNav.toGoal(player, () -> retry, WALK_SPEED, this::closeEnoughToSucceed,
-                            terrain()).withTerrainProbe();
+                            terrain()).withTransportMode(r.transportMode).withTerrainProbe();
                     yield TaskState.RUNNING;
                 }
                 String also = nearRetried
@@ -494,7 +497,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         finder.drain();
         if (finder.hasCandidates()) {
             nav = PlayerNav.to(player, finder::contract, WALK_SPEED, this::reached, terrain())
-                    .withTerrainProbe();
+                    .withTransportMode(r.transportMode).withTerrainProbe();
             return null;
         }
         if (finder.exhausted()) {

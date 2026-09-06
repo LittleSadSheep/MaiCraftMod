@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 /** High-level semantic exploration; all concrete route decisions remain inside the Mod. */
 public final class SemanticExploreTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
-    private record Args(String target, Integer max_distance, Boolean may_alter_terrain) {}
+    private record Args(String target, Integer max_distance, Boolean may_alter_terrain, String transport_mode) {}
 
     @Override public String name() { return "explore"; }
 
@@ -37,6 +37,8 @@ public final class SemanticExploreTool implements MaiCraftTool {
                         SemanticExploreTaskRecord.MAX_DISTANCE)
                 .optionalBool("may_alter_terrain", "Explicit consent for route pathing to dig, bridge or "
                         + "pillar. Default false; target detection itself never changes blocks.")
+                .optionalEnum("transport_mode", "Default auto may choose available native transport to observed internal destinations. Ground disables jetpack/elevator use. A forced jetpack/elevator journey needs a located destination through goto.",
+                        "auto", "ground")
                 .build();
     }
 
@@ -47,7 +49,8 @@ public final class SemanticExploreTool implements MaiCraftTool {
                 ctx(toolCallId, player),
                 parsed == null ? null : parsed.target(),
                 parsed == null ? null : parsed.max_distance(),
-                parsed == null ? null : parsed.may_alter_terrain());
+                parsed == null ? null : parsed.may_alter_terrain(),
+                parsed == null ? null : parsed.transport_mode());
         setTask(player, record, args, reply);
     }
 }

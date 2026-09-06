@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.tools;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
 /**
  * Movement tool implementation — the business half of {@code MoveToTool}
@@ -25,10 +26,21 @@ public final class MovementOps {
 
     public TaskRecord moveTo(Double x, Double y, Double z, String block, Boolean mayAlterTerrain,
                              Boolean allowWaterBucketFall, ToolContext ctx) {
+        return moveTo(x, y, z, block, mayAlterTerrain, allowWaterBucketFall, null, ctx);
+    }
+
+    public TaskRecord moveTo(Double x, Double y, Double z, String block, Boolean mayAlterTerrain,
+                             Boolean allowWaterBucketFall, String transportMode, ToolContext ctx) {
+        return moveTo(x, y, z, block, mayAlterTerrain, allowWaterBucketFall, transportMode, false, ctx);
+    }
+
+    public TaskRecord moveTo(Double x, Double y, Double z, String block, Boolean mayAlterTerrain,
+                             Boolean allowWaterBucketFall, String transportMode, Boolean allowLandingAssists, ToolContext ctx) {
         // MoveToTaskRecord validates the x/y/z/block combination, throwing a
         // teaching error for an ambiguous one (e.g. only x given, or block
         // combined with coordinates).
         return new MoveToTaskRecord(ctx.toolCallId(), ctx.deadline(DEFAULT_TIMEOUT_TICKS),
-                x, y, z, block, Boolean.TRUE.equals(mayAlterTerrain), Boolean.TRUE.equals(allowWaterBucketFall));
+                x, y, z, block, Boolean.TRUE.equals(mayAlterTerrain), Boolean.TRUE.equals(allowWaterBucketFall),
+                TransportMode.parse(transportMode), Boolean.TRUE.equals(allowLandingAssists));
     }
 }

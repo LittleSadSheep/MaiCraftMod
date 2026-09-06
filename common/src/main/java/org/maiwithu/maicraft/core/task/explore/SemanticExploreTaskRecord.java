@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.explore;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
 /** One bounded semantic search-and-travel goal. */
 public final class SemanticExploreTaskRecord extends TaskRecord
@@ -21,12 +22,24 @@ public final class SemanticExploreTaskRecord extends TaskRecord
     public final int maxDistance;
     public final int maxWaypoints;
     public final boolean mayAlterTerrain;
+    public final TransportMode transportMode;
     private Position verifiedPosition;
 
     public SemanticExploreTaskRecord(
             String toolCallId, long deadlineGameTime, String target,
             int maxDistance, boolean mayAlterTerrain) {
+        this(toolCallId, deadlineGameTime, target, maxDistance, mayAlterTerrain, TransportMode.AUTO);
+    }
+
+    public SemanticExploreTaskRecord(
+            String toolCallId, long deadlineGameTime, String target,
+            int maxDistance, boolean mayAlterTerrain, TransportMode transportMode) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
+        this.transportMode = transportMode == null ? TransportMode.AUTO : transportMode;
+        if (this.transportMode == TransportMode.JETPACK || this.transportMode == TransportMode.ELEVATOR) {
+            throw new IllegalArgumentException("explore transport_mode must be auto or ground; "
+                    + "jetpack/elevator travel needs a located destination first.");
+        }
         if (target == null || target.isBlank()) {
             throw new IllegalArgumentException(
                     "explore target is required: coast, a namespaced biome id, or #biome_tag");

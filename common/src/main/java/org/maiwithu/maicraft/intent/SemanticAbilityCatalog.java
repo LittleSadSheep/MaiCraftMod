@@ -166,7 +166,9 @@ public final class SemanticAbilityCatalog {
                     targets("coordinates", "landmark", "player", "entity", "nearest", "area", "prior_result"),
                     fields(
                             field("exact", "boolean", "Whether the exact Y cell matters."),
+                            field("transport_mode", "auto|ground|jetpack|elevator", "Default auto selects available native travel. Ground uses ordinary navigation; jetpack/elevator require usable Create equipment or a native elevator and a located destination. Undiscovered coast/biome goals support ground/auto exploration. This grants no terrain-alteration permission."),
                             field("allow_water_bucket_fall", "boolean", "Allow temporary bucket water for falls to a located destination, without granting digging or scaffold placement. Default false."),
+                            field("allow_landing_assists", "boolean", "Allow verified temporary landing aids from carried items, including water and boats, without granting excavation or scaffolding. Requires a located destination; default false."),
                             field("semantic_target", "string", "Coast, biome id or #biome_tag when the destination must be discovered."),
                             field("biome_id", "resource_id", "Optional exact biome to discover."),
                             field("biome_tag", "resource_id", "Optional biome tag to discover."),

@@ -18,7 +18,8 @@ public final class MoveToTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
     private final MovementOps impl = new MovementOps();
 
-    private record Args(Double x, Double y, Double z, String block, Boolean may_alter_terrain, Boolean allow_water_bucket_fall) {}
+    private record Args(Double x, Double y, Double z, String block, Boolean may_alter_terrain,
+                        Boolean allow_water_bucket_fall, String transport_mode, Boolean allow_landing_assists) {}
 
     @Override
     public String name() {
@@ -62,6 +63,9 @@ public final class MoveToTool implements MaiCraftTool {
                         + "goto listed the blocks a route would alter and you judge that acceptable, or "
                         + "when you already know the way is underground/through natural terrain.")
                 .optionalBool("allow_water_bucket_fall", "Allow temporary bucket water for falls without allowing digging or scaffold placement. Requires a carried water bucket; default false.")
+                .optionalBool("allow_landing_assists", "Allow verified temporary water, boats or landing blocks from carried items during falls, with recovery where supported. Does not permit excavation or scaffolding; default false.")
+                .optionalEnum("transport_mode", "Travel mode: auto selects available native transport, ground uses ordinary navigation, jetpack requires usable Create jetpack equipment, elevator requires a usable Create elevator. Default auto; no mode grants terrain alteration.",
+                        "auto", "ground", "jetpack", "elevator")
                 .build();
     }
 
@@ -69,6 +73,6 @@ public final class MoveToTool implements MaiCraftTool {
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         setTask(companion, impl.moveTo(a.x(), a.y(), a.z(),
-                a.block(), a.may_alter_terrain(), a.allow_water_bucket_fall(), ctx(toolCallId, companion)), args, reply);
+                a.block(), a.may_alter_terrain(), a.allow_water_bucket_fall(), a.transport_mode(), a.allow_landing_assists(), ctx(toolCallId, companion)), args, reply);
     }
 }
