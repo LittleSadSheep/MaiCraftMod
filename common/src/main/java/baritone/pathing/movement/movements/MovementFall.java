@@ -36,28 +36,21 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.WaterFluid;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
-import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 
 public class MovementFall extends Movement {
-    private NativeActionReceipt waterPlacement;
+    private org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession landingAssist;
+    private org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist landingBoat;
+    private org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.State boatState;
 
-    public void waterPlacementSubmitted(NativeActionReceipt receipt) {
-        waterPlacement = receipt;
-    }
-
-    public boolean hasPlacedWater() {
-        return waterPlacement != null && waterPlacement.status()
-                == NativeActionReceipt.Status.CONFIRMED_APPLIED;
+    public org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession landingAssist() { return landingAssist; }
+    public org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist landingBoat() { return landingBoat; }
+    public void tickLandingBoat(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
+        boatState = landingBoat.tick(context);
     }
 
     /** Shared by ordinary execution and the executor's optional straight-line fall extension. */
@@ -65,9 +58,6 @@ public class MovementFall extends Movement {
         return context.playerFeet().equals(destination)
                 && (context.player().onGround() || MovementHelper.isWater(state));
     }
-
-    private static final ItemStack STACK_BUCKET_WATER = new ItemStack(Items.WATER_BUCKET);
-    private static final ItemStack STACK_BUCKET_EMPTY = new ItemStack(Items.BUCKET);
 
     public MovementFall(IBaritone baritone, BetterBlockPos src, BetterBlockPos dest) {
         super(baritone, src, dest, MovementFall.buildPositionsToBreak(src, dest));
@@ -93,10 +83,11 @@ public class MovementFall extends Movement {
         return set;
     }
 
-    private boolean willPlaceBucket() {
+    private boolean needsLandingAssist() {
         CalculationContext context = new CalculationContext(baritone);
         MutableMoveResult result = new MutableMoveResult();
-        return MovementDescend.dynamicFallCost(context, src.x, src.y, src.z, dest.x, dest.z, 0, context.get(dest.x, src.y - 2, dest.z), result);
+        return MovementDescend.dynamicFallCost(context, src.x, src.y, src.z, dest.x, dest.z, 0,
+                context.get(dest.x, src.y - 2, dest.z), result) && result.y == dest.y;
     }
 
     @Override
@@ -105,68 +96,64 @@ public class MovementFall extends Movement {
         if (state.getStatus() != MovementStatus.RUNNING) {
             return state;
         }
+        if (landingAssist == null && landingBoat == null && !ctx.player().onGround()
+                && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(ctx.player()).damage(
+                        Math.max(0, ctx.player().getY() - dest.getY()),
+                        org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.of(ctx.world().getBlockState(dest.below())), true) > 0) {
+            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
+            var permit = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.current();
+            var inventory = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot.capture(
+                    ctx.player(), permit, ctx.world().dimensionType().ultraWarm());
+            for (var plan : inventory.plans(ctx.world(), dest,
+                    org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy::protects)) {
+                var opportunity = new org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession(plan);
+                if (opportunity.prepareAlreadyHeld(context)) { landingAssist = opportunity; break; }
+            }
+            if (landingAssist == null && permit.mayUseLandingAssists()
+                    && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(ctx.player()).survives(
+                            Math.max(0, ctx.player().getY() - dest.getY()),
+                            org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.ORDINARY, true)) {
+                var boat = org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.airbornePlan(context, dest);
+                if (boat != null) landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boat);
+            }
+        }
+        if (landingAssist != null && landingAssist.complete() && ctx.player().onGround()) {
+            return state.setStatus(!landingAssist.failed() && ctx.playerFeet().equals(dest)
+                    ? MovementStatus.SUCCESS : MovementStatus.UNREACHABLE);
+        }
+        if (landingBoat != null) {
+            state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
+                    ctx.playerHead(), landingBoat.aimPoint(), ctx.playerRotations()), true));
+            state.setInput(Input.SNEAK, landingBoat.wantsSneak());
+            if (boatState == org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.State.SETTLED)
+                return state.setStatus(ctx.playerFeet().equals(dest) ? MovementStatus.SUCCESS : MovementStatus.UNREACHABLE);
+            if (!landingBoat.failed()) return state;
+            if (ctx.player().onGround()) return state.setStatus(MovementStatus.UNREACHABLE);
+            // A failed opportunistic mount leaves the proven ordinary fall's steering active.
+        }
 
         BlockPos playerFeet = ctx.playerFeet();
         Rotation toDest = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(dest), ctx.playerRotations());
-        Rotation targetRotation = null;
         BlockState destState = ctx.world().getBlockState(dest);
-        Block destBlock = destState.getBlock();
 
         if (ctx.world().getBlockState(dest.below()).is(Blocks.MAGMA_BLOCK) && MovementHelper.steppingOnBlocks(ctx).stream().allMatch(block -> MovementHelper.canWalkThrough(ctx, block))) {
             state.setInput(Input.SNEAK, true);
         }
 
         boolean isWater = destState.getFluidState().getType() instanceof WaterFluid;
-        if (!isWater && willPlaceBucket() && !playerFeet.equals(dest)) {
-            if (!Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) || ctx.world().dimensionType().ultraWarm()) {
-                return state.setStatus(MovementStatus.UNREACHABLE);
-            }
-
-            if (ctx.player().position().y - dest.getY() < ctx.playerController().getBlockReachDistance() && !ctx.player().onGround()) {
-                int waterBucketSlot = ctx.player().getInventory().findSlotMatchingItem(
-                        STACK_BUCKET_WATER);
-                if (!EmbeddedBaritoneRuntime.ensureHotbarSelected(
-                        ctx.player(), waterBucketSlot)) {
-                    return state;
-                }
-
-                targetRotation = new Rotation(toDest.getYaw(), 90.0F);
-
-                if (ctx.isLookingAt(dest) || ctx.isLookingAt(dest.below())) {
-                    state.setInput(Input.CLICK_RIGHT, true);
-                }
-            }
-        }
-        if (targetRotation != null) {
-            state.setTarget(new MovementTarget(targetRotation, true));
-        } else {
-            state.setTarget(new MovementTarget(toDest, false));
-        }
+        state.setTarget(new MovementTarget(toDest, false));
         // Slab feet are represented by the cell above the half-height support. Matching that
         // cell is not a landing until collision has actually put the player on the ground.
         if (reachedLanding(ctx, dest, destState)) {
-            if (isWater) { // only match water, not flowing water (which we cannot pick up with a bucket)
-                if (waterPlacement != null && !waterPlacement.terminal()) return state;
-                if (hasPlacedWater() && Inventory.isHotbarSlot(ctx.player().getInventory().findSlotMatchingItem(STACK_BUCKET_EMPTY))) {
-                    int emptyBucketSlot = ctx.player().getInventory().findSlotMatchingItem(
-                            STACK_BUCKET_EMPTY);
-                    if (!EmbeddedBaritoneRuntime.ensureHotbarSelected(
-                            ctx.player(), emptyBucketSlot)) {
-                        return state;
-                    }
-                    if (ctx.player().getDeltaMovement().y >= 0) {
-                        return state.setInput(Input.CLICK_RIGHT, true);
-                    } else {
-                        return state;
-                    }
-                } else {
-                    if (ctx.player().getDeltaMovement().y >= 0) {
-                        return state.setStatus(MovementStatus.SUCCESS);
-                    } // don't else return state; we need to stay centered because this water might be flowing under the surface
-                }
-            } else {
-                return state.setStatus(MovementStatus.SUCCESS);
+            if (landingAssist != null) {
+                var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
+                state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
+                        ctx.playerHead(), landingAssist.aimPoint(), ctx.playerRotations()), true));
+                state.setInput(Input.SNEAK, landingAssist.wantsSneak(context));
+                if (!landingAssist.complete()) return state;
+                return state.setStatus(landingAssist.failed() ? MovementStatus.UNREACHABLE : MovementStatus.SUCCESS);
             }
+            if (!isWater || ctx.player().getDeltaMovement().y >= 0) return state.setStatus(MovementStatus.SUCCESS);
         }
         Vec3 destCenter = VecUtils.getBlockPosCenter(dest); // we are moving to the 0.5 center not the edge (like if we were falling on a ladder)
         if (Math.abs(ctx.player().position().x + ctx.player().getDeltaMovement().x - destCenter.x) > 0.1 || Math.abs(ctx.player().position().z + ctx.player().getDeltaMovement().z - destCenter.z) > 0.1) {
@@ -186,9 +173,13 @@ public class MovementFall extends Movement {
                 state.setInput(Input.SNEAK, false);
             }
         }
-        if (targetRotation == null) {
-            Vec3 destCenterOffset = new Vec3(destCenter.x + 0.125 * avoid.getX(), destCenter.y, destCenter.z + 0.125 * avoid.getZ());
-            state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), destCenterOffset, ctx.playerRotations()), false));
+        Vec3 destCenterOffset = new Vec3(destCenter.x + 0.125 * avoid.getX(), destCenter.y, destCenter.z + 0.125 * avoid.getZ());
+        state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), destCenterOffset, ctx.playerRotations()), false));
+        if (landingAssist != null) {
+            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
+            state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
+                    ctx.playerHead(), landingAssist.aimPoint(), ctx.playerRotations()), true));
+            state.setInput(Input.SNEAK, landingAssist.wantsSneak(context));
         }
         return state;
     }
@@ -207,7 +198,7 @@ public class MovementFall extends Movement {
     public boolean safeToCancel(MovementState state) {
         // if we haven't started walking off the edge yet, or if we're in the process of breaking blocks before doing the fall
         // then it's safe to cancel this
-        return ctx.playerFeet().equals(src) || state.getStatus() != MovementStatus.RUNNING;
+        return ctx.player().onGround() && ctx.playerFeet().equals(src) || state.getStatus() != MovementStatus.RUNNING;
     }
 
     private static BetterBlockPos[] buildPositionsToBreak(BetterBlockPos src, BetterBlockPos dest) {
@@ -224,6 +215,33 @@ public class MovementFall extends Movement {
 
     @Override
     protected boolean prepared(MovementState state) {
+        if (landingAssist == null && ctx.player().onGround() && ctx.playerFeet().equals(src) && needsLandingAssist()) {
+            var calculation = new CalculationContext(baritone);
+            var plans = calculation.landingPlans(dest, src.y - dest.y);
+            if (!plans.isEmpty()) landingAssist = new org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession(plans.getFirst());
+            else if (landingBoat == null) {
+                var boatPlan = calculation.landingBoatPlan(src, dest);
+                if (boatPlan != null) landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boatPlan);
+            }
+        }
+        if (landingBoat != null) {
+            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
+            // PREPPING is cancellable upstream. An in-air opportunity or a native mount
+            // must remain RUNNING until the boat session observes a supported exit.
+            if (!ctx.player().onGround()) return true;
+            if (!landingBoat.prepare(context)) {
+                if (landingBoat.failed() && ctx.player().onGround()) state.setStatus(MovementStatus.UNREACHABLE);
+                return false;
+            }
+            return true;
+        }
+        if (landingAssist != null && ctx.playerFeet().equals(src)) {
+            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
+            if (!landingAssist.prepare(context)) {
+                if (landingAssist.failed() && !landingAssist.cleanupPending()) state.setStatus(MovementStatus.UNREACHABLE);
+                return false;
+            }
+        }
         // Runs before every tick that could leave the source, including RUNNING. A prior fall,
         // incoming damage, an expired buff or removed boots must invalidate the stale A* budget.
         // Once airborne retain steering toward the already selected landing.
@@ -232,27 +250,13 @@ public class MovementFall extends Movement {
             state.setStatus(MovementStatus.UNREACHABLE);
             return true;
         }
-        // Select and confirm the clutch bucket while still standing on the source block. A
-        // mid-air hotbar packet and water use cannot share MaiCraft's one mutation slot.
-        if (ctx.playerFeet().equals(src) && willPlaceBucket()
-                && !ctx.world().dimensionType().ultraWarm()) {
-            int waterBucketSlot = ctx.player().getInventory().findSlotMatchingItem(
-                    STACK_BUCKET_WATER);
-            if (!Inventory.isHotbarSlot(waterBucketSlot)) {
-                state.setStatus(MovementStatus.UNREACHABLE);
-                return true;
-            }
-            if (!EmbeddedBaritoneRuntime.ensureHotbarSelected(
-                    ctx.player(), waterBucketSlot)) {
-                return false;
-            }
-        }
         if (state.getStatus() == MovementStatus.WAITING) {
             return true;
         }
         // only break if one of the first three needs to be broken
         // specifically ignore the last one which might be water
         for (int i = 0; i < 4 && i < positionsToBreak.length; i++) {
+            if (landingAssist != null && positionsToBreak[i].equals(landingAssist.plan().cell())) continue;
             if (!MovementHelper.canWalkThrough(ctx, positionsToBreak[i])) {
                 return super.prepared(state);
             }

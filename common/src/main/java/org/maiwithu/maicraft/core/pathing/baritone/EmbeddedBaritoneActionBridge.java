@@ -14,9 +14,6 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -40,7 +37,7 @@ final class EmbeddedBaritoneActionBridge {
     private static final int USE_CONFIRM_TICKS = 20;
     private static final int HOTBAR_CONFIRM_TICKS = 10;
 
-    private enum PendingKind { BREAK, BLOCK_USE, ITEM_USE, HOTBAR }
+    private enum PendingKind { BREAK, BLOCK_USE, HOTBAR }
 
     private NativeActionReceipt receipt;
     private PendingKind pendingKind;
@@ -69,6 +66,28 @@ final class EmbeddedBaritoneActionBridge {
 
         settle(context);
         if (rightClickCooldown > 0) rightClickCooldown--;
+        MovementFall activeFall = EmbeddedBaritoneRuntime.currentFall(navigator);
+        if (receipt == null && activeFall != null && activeFall.landingBoat() != null) {
+            activeFall.tickLandingBoat(context);
+            var boat = activeFall.landingBoat();
+            input.setInputForceState(Input.SNEAK, boat.wantsSneak());
+            org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(boat.diagnostics());
+            return;
+        }
+        if (receipt == null && activeFall != null && activeFall.landingAssist() != null) {
+            var assist = activeFall.landingAssist();
+            assist.tick(context);
+            // Placement may need secondary use, but a newly placed slime must release it
+            // before the next physical landing, without waiting for the receipt's dwell.
+            input.setInputForceState(Input.SNEAK, assist.wantsSneak(context));
+            org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(assist.diagnostics());
+            for (var change : assist.drainChanges()) {
+                navigator.recordConfirmedNativeAction();
+                if (!change.before().isAir()) navigator.recordConfirmedBreak(change.position(), change.before());
+                if (!change.after().isAir()) navigator.recordConfirmedPlace(change.position(), change.after());
+            }
+            return;
+        }
 
         boolean left = input.isInputForcedDown(Input.CLICK_LEFT);
         boolean right = input.isInputForcedDown(Input.CLICK_RIGHT) && !left;
@@ -149,18 +168,6 @@ final class EmbeddedBaritoneActionBridge {
                     receipt = context.actions().retireOneShotForTaskBoundary(
                             context, receipt, reason);
                     settle(context);
-                }
-                case ITEM_USE -> {
-                    // Buckets are instant uses, but USE_ITEM is conservatively stoppable. Observe
-                    // the world first; only submit a physical release when it is still pending and
-                    // this tick owns the mutation slot.
-                    if (!receipt.terminal() && context.mutationAvailable()) {
-                        NativeActionReceipt release = context.actions().releaseUsingItem(
-                                context, receipt);
-                        receipt = context.actions().retireOneShotForTaskBoundary(
-                                context, release, reason + " after physically releasing item use");
-                        clearReceipt();
-                    }
                 }
             }
         } catch (RuntimeException unavailable) {
@@ -244,17 +251,6 @@ final class EmbeddedBaritoneActionBridge {
             EmbeddedBaritoneNavigator navigator,
             boolean sneakRequested) {
         if (context.player().isHandsBusy()) return;
-        MovementFall fall = EmbeddedBaritoneRuntime.currentFall(navigator);
-        if (fall != null && !fall.getSrc().equals(
-                org.maiwithu.maicraft.core.pathing.execute.PlayerNav.playerFeet(context.player()))) {
-            InteractionHand hand = context.player().getMainHandItem().getItem() instanceof BucketItem
-                    ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND;
-            ItemStack bucket = context.player().getItemInHand(hand);
-            if (bucket.is(Items.WATER_BUCKET) || bucket.is(Items.BUCKET)) {
-                startWaterUse(context, navigator, fall, hand, bucket.is(Items.BUCKET));
-                return;
-            }
-        }
         HitResult trace = navigator.objectMouseOver();
         if (!(trace instanceof BlockHitResult hit)
                 || trace.getType() != HitResult.Type.BLOCK) {
@@ -299,30 +295,6 @@ final class EmbeddedBaritoneActionBridge {
                 actual, actualBefore, true);
     }
 
-    private void startWaterUse(LocalPlayerContext context, EmbeddedBaritoneNavigator navigator,
-                               MovementFall fall, InteractionHand hand, boolean pickup) {
-        if (!navigator.permit().mayUseWaterBucket()
-                || !BaritoneAPI.getSettings().allowWaterBucketFall.value
-                || context.level().dimensionType().ultraWarm()) return;
-        var player = context.player();
-        var eye = player.getEyePosition();
-        // Match BucketItem.use: an empty bucket traces source fluids, a filled one solid blocks.
-        BlockHitResult hit = context.level().clip(new ClipContext(eye,
-                eye.add(player.getViewVector(1F).scale(player.blockInteractionRange())),
-                ClipContext.Block.OUTLINE,
-                pickup ? ClipContext.Fluid.SOURCE_ONLY : ClipContext.Fluid.NONE, player));
-        if (hit.getType() != HitResult.Type.BLOCK) return;
-        BlockPos actual = WaterBucketFall.waterCell(hit,
-                context.level().getBlockState(hit.getBlockPos()), pickup);
-        if (!actual.equals(fall.getDest()) || !context.level().isLoaded(actual)) return;
-        BlockState before = context.level().getBlockState(actual);
-        boolean protectedTarget = EmbeddedBaritonePolicy.protects(actual);
-        if (pickup ? !WaterBucketFall.canRecover(before, fall.hasPlacedWater(), protectedTarget)
-                : !WaterBucketFall.canPlace(before, context.level().getBlockState(actual.below()),
-                        protectedTarget)) return;
-        submitItemUse(context, navigator, hand, actual, before, fall, pickup);
-    }
-
     private void submitBlockUse(
             LocalPlayerContext context,
             EmbeddedBaritoneNavigator navigator,
@@ -347,32 +319,6 @@ final class EmbeddedBaritoneActionBridge {
                     hit,
                     NativeConfirmation.anyOf(confirmations.toArray(NativeConfirmation[]::new)),
                     USE_CONFIRM_TICKS);
-            rightClickCooldown = Math.max(0,
-                    BaritoneAPI.getSettings().rightClickSpeed.value - 1);
-            settle(context);
-        } catch (RuntimeException unavailable) {
-            clearReceipt();
-        }
-    }
-
-    private void submitItemUse(
-            LocalPlayerContext context,
-            EmbeddedBaritoneNavigator navigator,
-            InteractionHand hand,
-            BlockPos actual,
-            BlockState beforeActual,
-            MovementFall fall,
-            boolean pickup) {
-        NativeConfirmation confirmation = pickup
-                ? c -> c.player().getItemInHand(hand).is(Items.WATER_BUCKET)
-                        ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING
-                : NativeConfirmation.blockState(actual, beforeActual, Blocks.WATER.defaultBlockState());
-        try {
-            rememberUse(navigator, actual, beforeActual, actual, beforeActual, true);
-            pendingKind = PendingKind.ITEM_USE;
-            receipt = context.actions().useItem(
-                    context, hand, confirmation, USE_CONFIRM_TICKS);
-            if (!pickup) fall.waterPlacementSubmitted(receipt);
             rightClickCooldown = Math.max(0,
                     BaritoneAPI.getSettings().rightClickSpeed.value - 1);
             settle(context);
@@ -422,9 +368,7 @@ final class EmbeddedBaritoneActionBridge {
         if (!current.terminal()) return;
         if (current.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED
                 && receiptOwner != null) {
-            if (pendingKind == PendingKind.BREAK
-                    || pendingKind == PendingKind.BLOCK_USE
-                    || pendingKind == PendingKind.ITEM_USE) {
+            if (pendingKind == PendingKind.BREAK || pendingKind == PendingKind.BLOCK_USE) {
                 receiptOwner.recordConfirmedNativeAction();
             }
             if (pendingKind == PendingKind.BREAK
@@ -433,8 +377,7 @@ final class EmbeddedBaritoneActionBridge {
                 // A later replacement at the same coordinate starts a new excavation. Failed
                 // attempts retain their high-water mark, but a confirmed break ends that episode.
                 breakProgress.reset();
-            } else if ((pendingKind == PendingKind.BLOCK_USE
-                    || pendingKind == PendingKind.ITEM_USE) && terrainUse) {
+            } else if (pendingKind == PendingKind.BLOCK_USE && terrainUse) {
                 recordWorldDelta(context, receiptOwner, clickedCell, clickedBefore);
                 if (placedCell != null && !placedCell.equals(clickedCell)) {
                     recordWorldDelta(context, receiptOwner, placedCell, placedBefore);
