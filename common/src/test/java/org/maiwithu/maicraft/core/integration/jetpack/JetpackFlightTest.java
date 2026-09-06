@@ -15,6 +15,17 @@ public final class JetpackFlightTest {
         check(!new JetpackNativeAdapter.Snapshot(true, "empty", "", true, true, 0, 0,
                 0.016, 0.32, 0.6, -0.03, 0.08).controllable(), "empty tank must refuse takeoff");
         var start = new Vec3(0.5, 0, 0.5); var target = new Vec3(4.5, 0, 0.5);
+        var floor = new TestSpace(false, false);
+        Vec3 restingGravity = new Vec3(0, -0.0784, 0);
+        check(!floor.clear(start, start.add(restingGravity.scale(3))), "fixture must expose the fictitious floor collision");
+        check(floor.clear(start, JetpackRoute.projectedPosition(start, restingGravity, true)),
+                "supported gravity must not reject an otherwise clear takeoff");
+        check(!floor.clear(start, JetpackRoute.projectedPosition(start, restingGravity, false)),
+                "airborne downward momentum must retain collision validation");
+        check(!floor.clear(start, JetpackRoute.projectedPosition(start, new Vec3(-1, -0.0784, 0), true)),
+                "ground support must not waive horizontal collision validation");
+        check(JetpackRoute.projectedPosition(start, new Vec3(0, 0.4, 0), true).y > 1,
+                "upward takeoff momentum must still be predicted");
         var obstacle = new TestSpace(true, false);
         var search = new JetpackRoute.Search(start, target, POWER);
         search.advance(obstacle, 2, Long.MAX_VALUE);

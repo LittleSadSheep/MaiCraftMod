@@ -111,6 +111,12 @@ public final class JetpackRoute {
     public static double descentSpeed(JetpackNativeAdapter.Snapshot power) {
         return Math.max(0.01, Math.min(0.12, power.vertical() * 0.5));
     }
+    static Vec3 projectedPosition(Vec3 position, Vec3 velocity, boolean onGround) {
+        // Gravity can leave downward delta movement after the floor has resolved contact.
+        // Predict the supported body's motion, not a fictitious sweep through that floor.
+        double vertical = onGround ? Math.max(0, velocity.y) : velocity.y;
+        return position.add(velocity.x * 3, vertical * 3, velocity.z * 3);
+    }
     private static Vec3 center(BlockPos p) { return new Vec3(p.getX() + 0.5, p.getY(), p.getZ() + 0.5); }
     private static double distance(BlockPos a, BlockPos b) {
         return Math.abs(a.getX()-b.getX()) + Math.abs(a.getY()-b.getY()) + Math.abs(a.getZ()-b.getZ());

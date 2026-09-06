@@ -128,8 +128,12 @@ public final class JetpackFlightSession implements TransportSession {
             escape(ctx, space); return;
         }
         Vec3 next = route.points().get(waypoint);
-        if (!space.clear(position, next) || !space.clear(position, position.add(velocity.scale(3)))) {
-            failure = "jetpack_corridor_changed"; detail = "live swept body corridor became obstructed"; escape(ctx, space); return;
+        boolean routeClear = space.clear(position, next);
+        boolean momentumClear = space.clear(position, JetpackRoute.projectedPosition(position, velocity, grounded));
+        if (!routeClear || !momentumClear) {
+            failure = "jetpack_corridor_changed";
+            detail = routeClear ? "projected body momentum enters an obstruction" : "route segment is no longer clear";
+            escape(ctx, space); return;
         }
         if (waypoint == route.points().size() - 1) { landing = next; phase = Phase.LAND; return; }
         if (Math.hypot(position.x - next.x, position.z - next.z) < 0.2
@@ -219,6 +223,7 @@ public final class JetpackFlightSession implements TransportSession {
         result.put("phase", phase()); result.put("stopping", stopping); result.put("waypoint", waypoint);
         result.put("target", target.toString()); result.put("landing", landing == null ? "unobserved" : landing.toString());
         result.put("effects_started", effects); result.put("uncertain", uncertain); result.put("detail", detail);
+        result.put("grounded", grounded);
         result.put("search_radius", 64); result.put("search_node_limit", 6000);
         if (search != null) result.put("search_expanded", search.expanded());
         if (route != null) { result.put("route_points", route.points().size()); result.put("estimated_ticks_with_reserve", route.requiredTicks()); }
