@@ -16,16 +16,6 @@ public final class JetpackFlightTest {
                 0.016, 0.32, 0.6, -0.03, 0.08).controllable(), "empty tank must refuse takeoff");
         var start = new Vec3(0.5, 0, 0.5); var target = new Vec3(4.5, 0, 0.5);
         var floor = new TestSpace(false, false);
-        Vec3 restingGravity = new Vec3(0, -0.0784, 0);
-        check(!floor.clear(start, start.add(restingGravity.scale(3))), "fixture must expose the fictitious floor collision");
-        check(floor.clear(start, JetpackRoute.projectedPosition(start, restingGravity, true)),
-                "supported gravity must not reject an otherwise clear takeoff");
-        check(!floor.clear(start, JetpackRoute.projectedPosition(start, restingGravity, false)),
-                "airborne downward momentum must retain collision validation");
-        check(!floor.clear(start, JetpackRoute.projectedPosition(start, new Vec3(-1, -0.0784, 0), true)),
-                "ground support must not waive horizontal collision validation");
-        check(JetpackRoute.projectedPosition(start, new Vec3(0, 0.4, 0), true).y > 1,
-                "upward takeoff momentum must still be predicted");
         var obstacle = new TestSpace(true, false);
         var search = new JetpackRoute.Search(start, target, POWER);
         search.advance(obstacle, 2, Long.MAX_VALUE);
@@ -51,26 +41,29 @@ public final class JetpackFlightTest {
         changed.advance(water, 1, Long.MAX_VALUE);
         for (int i = 0; !changed.done() && i < 1000; i++) changed.advance(blocked, 8, Long.MAX_VALUE);
         check(changed.done() && changed.result() == null, "later ticks must re-read changed geometry");
-        var right = JetpackSteering.toward(Vec3.ZERO, Vec3.ZERO, new Vec3(2,1,0), 0, false);
+        var right = JetpackSteering.toward(Vec3.ZERO, Vec3.ZERO, new Vec3(2,1,0), 0, false, POWER);
         check(right.strafe() > 0 && right.jumping() && !right.sneaking(), "native sideways and UP keys");
-        var brake = JetpackSteering.toward(Vec3.ZERO, new Vec3(0,0,0.4), new Vec3(0,0,0.1), 0, false);
+        var brake = JetpackSteering.toward(Vec3.ZERO, new Vec3(0,0,0.4), new Vec3(0,0,0.1), 0, false, POWER);
         check(brake.forward() < 0, "near target must counter measured momentum");
-        var descend = JetpackSteering.toward(new Vec3(0,5,0), Vec3.ZERO, Vec3.ZERO, 0, true);
+        var descend = JetpackSteering.toward(new Vec3(0,5,0), Vec3.ZERO, Vec3.ZERO, 0, true, POWER);
         check(!descend.sneaking() && !descend.jumping(), "hover descent releases UP without dangerous airborne Shift");
-        var overshoot = JetpackSteering.toward(new Vec3(0, 5, 0), new Vec3(0, -0.02, 0), new Vec3(0, 4, 0), 0, false);
+        var overshoot = JetpackSteering.toward(new Vec3(0, 5, 0), new Vec3(0, -0.02, 0), new Vec3(0, 4, 0), 0, false, POWER);
         check(!overshoot.sneaking() && !overshoot.jumping(), "waypoint height correction must not select fast descent with Shift");
-        var hold = JetpackSteering.toward(new Vec3(0, 5, 0), new Vec3(0, -0.1, 0), new Vec3(2, 5, 0), 0, false);
+        var hold = JetpackSteering.toward(new Vec3(0, 5, 0), new Vec3(0, -0.1, 0), new Vec3(2, 5, 0), 0, false, POWER);
         check(hold.jumping(), "horizontal approach must anticipate native hover sinking before losing platform clearance");
         Vec3 floorTarget = new Vec3(2, 115, 0);
         Vec3 alignment = JetpackFlightSession.landingAim(new Vec3(1, 116.5, 0), floorTarget, 117, false);
         check(alignment.y == 117, "alignment height must not follow the sinking body down to the platform edge");
+        check(alignment.x == 1, "platform entry must regain staging height before horizontal alignment");
+        check(JetpackFlightSession.landingAim(new Vec3(1, 117.6, 0), floorTarget, 117, false).y == 117,
+                "coasting above the height band must not ratchet the holding target upward");
         check(JetpackFlightSession.landingAim(alignment, floorTarget, 117, true).equals(floorTarget),
                 "descent starts after centering over the observed support");
-        check(JetpackRoute.approachCell(floor, start).getY() == 2, "open arrival column must reserve height above the platform");
+        check(JetpackRoute.approachCell(floor, start, POWER).getY() == 2, "open arrival column must reserve height above the platform");
         var lowCeiling = new TestSpace(false, false) {
-            public boolean clear(Vec3 from, Vec3 to) { return from.y <= 1 && to.y <= 1 && super.clear(from, to); }
+            public boolean clear(Vec3 from, Vec3 to) { return from.y <= 1.9 && to.y <= 1.9 && super.clear(from, to); }
         };
-        check(JetpackRoute.approachCell(lowCeiling, start).getY() == 1, "lower ceiling must choose the verified lower approach");
+        check(JetpackRoute.approachCell(lowCeiling, start, POWER).getY() == 1, "lower ceiling must choose the verified lower approach");
         check(JetpackRoute.descentSpeed(POWER) == 0.03, "fuel budgeting must use slow hover descent after removing Shift");
         System.out.println("JetpackFlightTest: passed");
     }

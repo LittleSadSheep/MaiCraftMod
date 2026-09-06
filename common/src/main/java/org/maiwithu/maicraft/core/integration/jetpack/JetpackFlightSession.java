@@ -16,8 +16,9 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 /** Controlled short flight with native mode receipts, loaded 3-D route and retained landing on cancel. */
 public final class JetpackFlightSession implements TransportSession {
     public record Probe(boolean available, String reason, int estimatedTicks) {}
-    private enum Phase { PLAN, ACTIVE, HOVER, FLY, LAND, RESTORE, DONE }
+    private enum Phase { PLAN, ACTIVE, HOVER, FLY, REPLAN, LAND, RESTORE, DONE }
     private final Vec3 target;
+    private final java.util.List<Vec3> platform;
     private final LongSet forbidden;
     private Phase phase = Phase.PLAN;
     private JetpackRoute.Plan route;
@@ -27,21 +28,32 @@ public final class JetpackFlightSession implements TransportSession {
     private NativeActionReceipt receipt;
     private Vec3 landing;
     private double approachHeight;
+    private Vec3 holdPoint;
+    private Float flightYaw;
+    private boolean repaired;
     private boolean stopping, exiting, effects, uncertain, originalActive, originalHover, changedActive, changedHover, grounded;
     private long epoch = -1, revision, lastTick = Long.MIN_VALUE, waypointTick;
     private int waypoint = 1;
+    private double waypointDistance = Double.POSITIVE_INFINITY;
     private String failure = "", detail = "";
     private Result terminal;
     private Map<String, Object> nativeEvidence = Map.of();
     private final java.util.ArrayDeque<Map<String, Object>> trace = new java.util.ArrayDeque<>();
     private long traceTick = Long.MIN_VALUE;
+    private Phase recordedPhase;
+    private Map<String, Object> departure = Map.of(), lastObstacle = Map.of();
+    private final java.util.ArrayDeque<Map<String, Object>> events = new java.util.ArrayDeque<>();
 
     public JetpackFlightSession(Vec3 target) { this(target, LongSets.emptySet()); }
     public JetpackFlightSession(Vec3 target, LongSet forbiddenBodyCells) {
+        this(target, forbiddenBodyCells, java.util.List.of(target));
+    }
+    public JetpackFlightSession(Vec3 target, LongSet forbiddenBodyCells, java.util.List<Vec3> platform) {
         if (target == null || !Double.isFinite(target.x) || !Double.isFinite(target.y) || !Double.isFinite(target.z)) {
             throw new IllegalArgumentException("finite jetpack target required");
         }
         this.target = target;
+        this.platform = java.util.List.copyOf(platform);
         this.forbidden = LongSets.unmodifiable(new LongOpenHashSet(forbiddenBodyCells));
     }
     public static Probe probe(LocalPlayerContext ctx, Vec3 target) { return probe(ctx, target, LongSets.emptySet()); }
@@ -97,7 +109,7 @@ public final class JetpackFlightSession implements TransportSession {
             }
             originalActive = power.active(); originalHover = power.hover();
             originalRoute = route;
-            landing = route.emergencyLandings().getFirst(); phase = Phase.ACTIVE;
+            landing = target; phase = Phase.ACTIVE;
         }
         if (stopping && grounded && phase != Phase.RESTORE) phase = Phase.RESTORE;
         if (phase == Phase.ACTIVE) {
@@ -120,6 +132,7 @@ public final class JetpackFlightSession implements TransportSession {
             }
             phase = Phase.FLY; waypointTick = lastTick;
         }
+        if (phase == Phase.REPLAN) repair(ctx);
         if (phase == Phase.FLY) fly(ctx);
         if (phase == Phase.LAND) land(ctx);
         if (phase == Phase.RESTORE) return restore(ctx);
@@ -132,32 +145,54 @@ public final class JetpackFlightSession implements TransportSession {
         double remaining = 60;
         for (int i = waypoint; i < route.points().size(); i++) remaining += JetpackRoute.edgeTicks(
                 i == waypoint ? position : route.points().get(i - 1), route.points().get(i), power);
-        Vec3 exit = space.landingBelow(position.add(0, 0.1, 0));
-        if (exit != null) landing = exit;
         if (!exiting && (stopping || !power.controllable() || !power.active() || !power.hover()
                 || !JetpackNativeAdapter.uprightActive(nativeEvidence)
                 || power.fuelTicks() < remaining || lastTick - waypointTick > 200)) {
             if (!stopping) { failure = "jetpack_landing_required"; detail = "fuel, mode or flight progress no longer supports the remaining route"; }
             escape(ctx, space); return;
         }
-        Vec3 next = route.points().get(waypoint);
-        boolean routeClear = space.clear(position, next);
-        boolean momentumClear = space.clear(position, JetpackRoute.projectedPosition(position, velocity, grounded));
-        if (!routeClear || !momentumClear) {
-            failure = "jetpack_corridor_changed";
-            detail = routeClear ? "projected body momentum enters an obstruction" : "route segment is no longer clear";
-            escape(ctx, space); return;
-        }
-        if (waypoint == route.points().size() - 1) {
-            landing = next;
-            approachHeight = Math.max(next.y, route.points().get(waypoint - 1).y);
+        if (route.points().size() == 2) {
+            landing = route.points().getLast(); approachHeight = Math.max(position.y, landing.y);
             phase = Phase.LAND; return;
         }
-        if (Math.hypot(position.x - next.x, position.z - next.z) < 0.2
-                && Math.abs(position.y - next.y) < 0.3 && velocity.horizontalDistance() < 0.08) {
-            waypoint++; waypointTick = lastTick; next = route.points().get(waypoint);
+        int selected = JetpackRoute.nextWaypoint(space, route, position, waypoint);
+        if (selected != waypoint) { waypoint = selected; waypointTick = lastTick; waypointDistance = Double.POSITIVE_INFINITY; }
+        Vec3 next = route.points().get(waypoint);
+        double distance = position.distanceToSqr(next);
+        if (distance < waypointDistance - 0.01) { waypointDistance = distance; waypointTick = lastTick; }
+        if (!space.clear(position, next)) { obstruction(ctx, space, next); return; }
+        if (waypoint == route.points().size() - 2 && position.y >= next.y - 0.1
+                && Math.hypot(position.x - next.x, position.z - next.z) < 0.4) {
+            landing = route.points().getLast(); approachHeight = next.y;
+            phase = Phase.LAND; return;
         }
-        steer(ctx, next, false);
+        if (!steer(ctx, next, false)) obstruction(ctx, space,
+                position.add(0, JetpackDynamics.riseEnvelope(velocity.y, true, power), 0));
+    }
+
+    private void obstruction(LocalPlayerContext ctx, JetpackRoute.Space space, Vec3 next) {
+        lastObstacle = space.obstruction(ctx.player().position(), next);
+        failure = "jetpack_corridor_changed"; detail = "verified flight segment changed: " + lastObstacle;
+        recordTrace(ctx, true);
+        if (!repaired && !stopping && !exiting && power.controllable() && JetpackNativeAdapter.uprightActive(nativeEvidence)
+                && space.clear(ctx.player().position(), ctx.player().position())) {
+            repaired = true; holdPoint = ctx.player().position();
+            search = new JetpackRoute.Search(holdPoint, target, power); phase = Phase.REPLAN;
+            brake(ctx);
+        } else escape(ctx, space);
+    }
+
+    private void repair(LocalPlayerContext ctx) {
+        var space = JetpackRoute.observed(ctx, forbidden);
+        if (stopping || !power.controllable() || !JetpackNativeAdapter.uprightActive(nativeEvidence)
+                || !space.clear(ctx.player().position(), holdPoint)) { escape(ctx, space); return; }
+        if (!steer(ctx, holdPoint, false)) { escape(ctx, space); return; }
+        search.advance(space, 128, 1_000_000);
+        if (!search.done()) return;
+        var replacement = search.result();
+        if (replacement == null || replacement.requiredTicks() > power.fuelTicks()) { escape(ctx, space); return; }
+        route = replacement; waypoint = 1; waypointTick = lastTick; waypointDistance = Double.POSITIVE_INFINITY;
+        failure = ""; detail = "hovered and replanned the changed flight corridor"; phase = Phase.FLY;
     }
 
     private void escape(LocalPlayerContext ctx, JetpackRoute.Space space) {
@@ -172,23 +207,27 @@ public final class JetpackFlightSession implements TransportSession {
             if (originalExit != null && (escape == null || originalExit.requiredTicks() < escape.requiredTicks())) escape = originalExit;
         }
         if (escape == null) { approachHeight = ctx.player().getY(); phase = Phase.LAND; uncertain = true; return; }
-        route = escape; waypoint = 1; waypointTick = lastTick; exiting = true; phase = Phase.FLY;
+        route = escape; waypoint = 1; waypointTick = lastTick; waypointDistance = Double.POSITIVE_INFINITY; exiting = true; phase = Phase.FLY;
         landing = route.points().getLast();
         if (power.fuelTicks() < route.requiredTicks()) { uncertain = true; detail = "continuing toward the cheapest observed exit after fuel loss"; }
-        steer(ctx, route.points().get(waypoint), false);
+        brake(ctx); // the next tick validates the exit segment before producing its motion
     }
 
     private void land(LocalPlayerContext ctx) {
         if (grounded) { phase = Phase.RESTORE; return; }
         Vec3 position = ctx.player().position();
         var space = JetpackRoute.observed(ctx, forbidden);
-        Vec3 below = space.landingBelow(position.add(0, 0.1, 0));
-        if (below != null && (stopping || !failure.isEmpty())) landing = below;
-        if (landing == null || !space.clear(position, landing)) {
+        if (!exiting && !stopping && failure.isEmpty()) {
+            landing = platform.stream().filter(p -> Math.abs(p.y - target.y) < 0.01)
+                    .filter(p -> JetpackRoute.supportsLanding(space, p))
+                    .filter(p -> space.clear(new Vec3(p.x, approachHeight, p.z), p))
+                    .min(java.util.Comparator.comparingDouble(p -> Math.hypot(p.x - position.x, p.z - position.z))).orElse(null);
+        }
+        if (landing == null || !JetpackRoute.supportsLanding(space, landing)) {
             // Retain native hover and braking while searching next tick, instead of releasing an airborne body.
-            uncertain = true; detail = "awaiting a newly observed clear landing column";
+            failure = "jetpack_landing_support_changed"; detail = "the selected platform no longer has its observed support";
             if (power.controllable()) { escape(ctx, space); if (phase == Phase.FLY) return; }
-            steer(ctx, position, false); return;
+            steer(ctx, new Vec3(position.x, approachHeight, position.z), false); return;
         }
         boolean centered = Math.hypot(position.x - landing.x, position.z - landing.z) < 0.18
                 && ctx.player().getDeltaMovement().horizontalDistance() < 0.08;
@@ -196,23 +235,39 @@ public final class JetpackFlightSession implements TransportSession {
         // Using position.y here would continually lower the target as native hover sinks.
         Vec3 approach = landingAim(position, landing, approachHeight, centered);
         if (!space.clear(position, approach)) {
-            failure = "jetpack_landing_approach_obstructed"; detail = "cannot retain platform clearance while aligning";
-            escape(ctx, space); return;
+            obstruction(ctx, space, approach); return;
         }
-        steer(ctx, approach, centered);
+        if (!steer(ctx, approach, centered)) obstruction(ctx, space,
+                position.add(0, JetpackDynamics.riseEnvelope(ctx.player().getDeltaMovement().y, true, power), 0));
     }
 
     static Vec3 landingAim(Vec3 position, Vec3 landing, double approachHeight, boolean centered) {
-        return centered ? landing : new Vec3(landing.x, Math.max(position.y, approachHeight), landing.z);
+        if (centered) return landing;
+        return position.y < approachHeight - 0.1 ? new Vec3(position.x, approachHeight, position.z)
+                : new Vec3(landing.x, approachHeight, landing.z);
     }
 
-    private void steer(LocalPlayerContext ctx, Vec3 aim, boolean landingNow) {
+    private boolean steer(LocalPlayerContext ctx, Vec3 aim, boolean landingNow) {
         var player = ctx.player();
-        Vec3 delta = aim.subtract(player.position());
-        if (delta.horizontalDistance() > 0.3) ctx.body().requestLook(
-                (float) (Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90), 8, ctx.tickRevision());
-        ctx.body().applyMovement(JetpackSteering.toward(player.position(), player.getDeltaMovement(), aim,
-                player.getYRot(), landingNow), ctx.tickRevision());
+        // Keep the input reference frame stable; the body port applies camera easing after these commands.
+        if (flightYaw == null) flightYaw = player.getYRot();
+        ctx.body().requestLook(flightYaw, 8, ctx.tickRevision());
+        var command = JetpackSteering.toward(player.position(), player.getDeltaMovement(), aim, player.getYRot(), landingNow, power);
+        if (command.jumping()) {
+            double rise = JetpackDynamics.riseEnvelope(player.getDeltaMovement().y, true, power);
+            if (!JetpackRoute.observed(ctx, forbidden).clear(player.position(), player.position().add(0, rise, 0))) {
+                brake(ctx); return false;
+            }
+        }
+        ctx.body().applyMovement(command, ctx.tickRevision());
+        effects = true;
+        return true;
+    }
+
+    private void brake(LocalPlayerContext ctx) {
+        var player = ctx.player();
+        var brake = JetpackSteering.toward(player.position(), player.getDeltaMovement(), player.position(), player.getYRot(), true, power);
+        ctx.body().applyMovement(brake, ctx.tickRevision());
         effects = true;
     }
 
@@ -227,7 +282,7 @@ public final class JetpackFlightSession implements TransportSession {
             if (!ctx.mutationAvailable()) return running();
             receipt = JetpackNativeAdapter.setMode(ctx, false, originalActive); changedActive = false; return running();
         }
-        boolean arrived = !stopping && failure.isEmpty() && ctx.player().position().distanceTo(target) < 0.75;
+        boolean arrived = !stopping && failure.isEmpty() && platform.stream().anyMatch(p -> ctx.player().position().distanceTo(p) < 0.75);
         return finish(ctx, arrived);
     }
     private Result finish(LocalPlayerContext ctx, boolean success) {
@@ -240,12 +295,18 @@ public final class JetpackFlightSession implements TransportSession {
     }
     private Result running() { return new Result(State.RUNNING, phase(), detail, effects, uncertain); }
     private void recordTrace(LocalPlayerContext ctx, boolean force) {
-        if (!force && traceTick != Long.MIN_VALUE && lastTick - traceTick < 10) return;
+        boolean transition = recordedPhase != phase;
+        if (!force && !transition && traceTick != Long.MIN_VALUE && lastTick - traceTick < 10) return;
         traceTick = lastTick;
         var sample = new LinkedHashMap<String, Object>();
         sample.put("tick", lastTick); sample.put("phase", phase()); sample.put("position", ctx.player().position().toString());
         sample.put("health", ctx.player().getHealth()); sample.put("absorption", ctx.player().getAbsorptionAmount());
         sample.put("native_client_evidence", nativeEvidence);
+        sample.put("waypoint", waypoint); sample.put("detail", detail);
+        if (!lastObstacle.isEmpty()) sample.put("obstruction", lastObstacle);
+        if (departure.isEmpty()) departure = Map.copyOf(sample);
+        if (force || transition) { events.addLast(Map.copyOf(sample)); while (events.size() > 24) events.removeFirst(); }
+        recordedPhase = phase;
         trace.addLast(Map.copyOf(sample));
         while (trace.size() > 48) trace.removeFirst();
     }
@@ -266,6 +327,8 @@ public final class JetpackFlightSession implements TransportSession {
         result.put("landing_approach_height", approachHeight);
         result.put("native_client_evidence", nativeEvidence);
         result.put("recent_flight_trace", java.util.List.copyOf(trace));
+        result.put("departure", departure); result.put("flight_events", java.util.List.copyOf(events));
+        result.put("last_obstruction", lastObstacle); result.put("platform_cells", platform.size());
         result.put("search_radius", 64); result.put("search_node_limit", 6000);
         if (search != null) result.put("search_expanded", search.expanded());
         if (route != null) { result.put("route_points", route.points().size()); result.put("estimated_ticks_with_reserve", route.requiredTicks()); }

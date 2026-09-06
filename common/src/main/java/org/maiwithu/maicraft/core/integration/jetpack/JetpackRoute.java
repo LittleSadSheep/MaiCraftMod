@@ -20,6 +20,9 @@ public final class JetpackRoute {
     public interface Space {
         boolean clear(Vec3 from, Vec3 to);
         Vec3 landingBelow(Vec3 point);
+        default Map<String, Object> obstruction(Vec3 from, Vec3 to) {
+            return Map.of("from", from.toString(), "to", to.toString(), "reason", "swept body corridor obstructed");
+        }
     }
     public record Plan(List<Vec3> points, List<Vec3> emergencyLandings, int requiredTicks) {
         public Plan { points = List.copyOf(points); emergencyLandings = List.copyOf(emergencyLandings); }
@@ -56,9 +59,14 @@ public final class JetpackRoute {
                 landing = space.landingBelow(target.add(0, 0.1, 0));
                 if (landing == null || Math.abs(landing.y - target.y) > 1.01) { done = true; return; }
                 origin = BlockPos.containing(start.x, Math.ceil(start.y) + 1, start.z);
-                goal = approachCell(space, landing);
+                goal = approachCell(space, landing, power);
                 if (goal == null) { done = true; return; }
-                if (!space.clear(start, center(origin))) { done = true; return; }
+                if (!flightClear(space, start, center(origin), power)) { done = true; return; }
+                // Prefer a stable climb, horizontal cruise and platform descent when the room admits it.
+                Vec3 lift = new Vec3(start.x, Math.max(origin.getY(), goal.getY()), start.z);
+                Vec3 overPlatform = new Vec3(landing.x, lift.y, landing.z);
+                if (flightClear(space, start, lift, power) && flightClear(space, lift, overPlatform, power)
+                        && space.clear(overPlatform, landing)) points = new ArrayList<>(List.of(start, lift, overPlatform, landing));
                 open.add(new Node(origin, 0, distance(origin, goal))); costs.put(origin, 0D);
             }
             int operations = 0;
@@ -70,7 +78,8 @@ public final class JetpackRoute {
                         done = true; return;
                     }
                     Vec3 point = points.get(i), exit = space.landingBelow(point.add(0, 0.1, 0));
-                    if (i > 0 && !space.clear(points.get(i - 1), point)) { done = true; return; }
+                    if (i > 0 && !(i == points.size() - 1 ? space.clear(points.get(i - 1), point)
+                            : flightClear(space, points.get(i - 1), point, power))) { done = true; return; }
                     if (exit != null) exits.add(exit);
                     validatedPoints++;
                     if (i > 0) ticks += edgeTicks(points.get(i - 1), point, power);
@@ -94,7 +103,7 @@ public final class JetpackRoute {
                             || next.getY() > Math.max(origin.getY(), goal.getY()) + 8) continue;
                     double cost = node.cost() + 1;
                     if (cost >= costs.getOrDefault(next, Double.POSITIVE_INFINITY)
-                            || !space.clear(center(node.pos()), center(next))) continue;
+                            || !flightClear(space, center(node.pos()), center(next), power)) continue;
                     costs.put(next, cost); previous.put(next, node.pos());
                     open.add(new Node(next, cost, cost + distance(next, goal)));
                 }
@@ -112,20 +121,43 @@ public final class JetpackRoute {
     public static double descentSpeed(JetpackNativeAdapter.Snapshot power) {
         return -power.hoverDescent();
     }
-    static BlockPos approachCell(Space space, Vec3 landing) {
+    static BlockPos approachCell(Space space, Vec3 landing, JetpackNativeAdapter.Snapshot power) {
         // Prefer a two-block reserve above the platform; a low ceiling may only admit one.
         // The whole final descent column must be observed before choosing that staging height.
         for (int clearance = 2; clearance >= 1; clearance--) {
             BlockPos candidate = BlockPos.containing(landing.x, Math.ceil(landing.y) + clearance, landing.z);
-            if (space.clear(center(candidate), landing)) return candidate;
+            if (space.clear(center(candidate), landing) && flightClear(space, center(candidate), center(candidate), power)) return candidate;
         }
         return null;
     }
-    static Vec3 projectedPosition(Vec3 position, Vec3 velocity, boolean onGround) {
-        // Gravity can leave downward delta movement after the floor has resolved contact.
-        // Predict the supported body's motion, not a fictitious sweep through that floor.
-        double vertical = onGround ? Math.max(0, velocity.y) : velocity.y;
-        return position.add(velocity.x * 3, vertical * 3, velocity.z * 3);
+
+    static boolean flightClear(Space space, Vec3 from, Vec3 to, JetpackNativeAdapter.Snapshot power) {
+        double hoverVelocity = JetpackDynamics.rawAfterStep(power.hoverDescent(), power);
+        double reserve = JetpackDynamics.riseEnvelope(hoverVelocity, true, power);
+        return space.clear(from, to) && space.clear(from.add(0, reserve, 0), to.add(0, reserve, 0));
+    }
+
+    static boolean supportsLanding(Space space, Vec3 landing) {
+        Vec3 observed = space.landingBelow(landing.add(0, 0.1, 0));
+        return observed != null && observed.distanceToSqr(landing) < 0.01;
+    }
+
+    /** Look ahead only inside the current clear height band or ascent column; never skip into touchdown. */
+    static int nextWaypoint(Space space, Plan route, Vec3 position, int current) {
+        int last = route.points().size() - 2;
+        current = Math.min(current, last);
+        Vec3 point = route.points().get(current);
+        if (current < last && Math.hypot(position.x - point.x, position.z - point.z) < 0.45
+                && position.y >= point.y - 0.1) current++;
+        point = route.points().get(current);
+        for (int i = current + 1; i <= last; i++) {
+            Vec3 candidate = route.points().get(i);
+            boolean level = Math.abs(candidate.y - point.y) < 0.01 && position.y >= point.y - 0.1;
+            boolean vertical = Math.hypot(candidate.x - point.x, candidate.z - point.z) < 0.01;
+            if ((!level && !vertical) || position.distanceTo(candidate) > 6 || !space.clear(position, candidate)) break;
+            current = i;
+        }
+        return current;
     }
     private static Vec3 center(BlockPos p) { return new Vec3(p.getX() + 0.5, p.getY(), p.getZ() + 0.5); }
     private static double distance(BlockPos a, BlockPos b) {
@@ -173,6 +205,9 @@ public final class JetpackRoute {
                     return clear(point, feet) ? feet : null;
                 }
                 return null;
+            }
+            public Map<String, Object> obstruction(Vec3 from, Vec3 to) {
+                return JetpackObstruction.inspect(ctx, forbidden, from, to);
             }
         };
     }

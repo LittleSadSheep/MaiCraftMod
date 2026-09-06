@@ -25,13 +25,16 @@ final class TransportPlan {
         List<String> unavailable = new ArrayList<>();
         if (targets.destinations().isEmpty()) unavailable.add("no supported, unobstructed landing satisfies the destination; " + targets.diagnostic());
         var floors = new HashSet<Integer>();
-        for (var destination : targets.destinations()) {
-            if (mode != TransportMode.ELEVATOR && mode != TransportMode.GROUND) {
+        if (mode != TransportMode.ELEVATOR && mode != TransportMode.GROUND) {
+            for (var platform : org.maiwithu.maicraft.core.integration.jetpack.JetpackPlatform.collect(targets.destinations())) {
+                var destination = platform.anchor();
                 var flight = JetpackFlightSession.probe(context, destination.landingPoint(), forbidden);
                 if (flight.available()) offers.add(new Offer("jetpack", destination.feet(), flight.estimatedTicks(),
-                        () -> new JetpackFlightSession(destination.landingPoint(), forbidden)));
+                        () -> new JetpackFlightSession(destination.landingPoint(), forbidden, platform.landings())));
                 else if (unavailable.size() < 8) unavailable.add("jetpack: " + flight.reason());
             }
+        }
+        for (var destination : targets.destinations()) {
             if (mode != TransportMode.JETPACK && mode != TransportMode.GROUND
                     && floors.add(destination.feet().getY())) {
                 elevator(context, destination.feet(), forbidden, offers, unavailable);
