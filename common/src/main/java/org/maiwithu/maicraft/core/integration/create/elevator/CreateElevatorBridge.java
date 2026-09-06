@@ -32,6 +32,7 @@ final class CreateElevatorBridge {
     private final Class<?> elevatorType = type(ROOT + "contraptions.elevator.ElevatorContraption");
     private final Class<?> controlsType = type(ROOT + "contraptions.actors.contraptionControls.ContraptionControlsBlock");
     private final Class<?> contactType = type(ROOT + "contraptions.elevator.ElevatorContactBlockEntity");
+    private final Class<?> slidingDoorType = type(ROOT + "decoration.slidingDoor.SlidingDoorBlock");
     private final Class<?> handler = type(ROOT + "contraptions.ContraptionHandlerClient");
     private final Class<?> scrolling = type(ROOT + "contraptions.elevator.ElevatorControlsHandler");
     private final Class<?> selectionType = type(ROOT + "contraptions.actors.contraptionControls.ContraptionControlsMovement$ElevatorFloorSelection");
@@ -112,6 +113,31 @@ final class CreateElevatorBridge {
         BlockState state = cabin.blocks.get(control).state();
         Vec3 offset = (Vec3) call(controlsSlot, "getLocalOffset", cabin.view, control, state);
         return cabin.global(Vec3.atLowerCornerOf(control).add(offset));
+    }
+
+    record ArrivalDoors(String mode, Map<BlockPos, Direction> pairs) {}
+    ArrivalDoors arrivalDoors(LocalPlayer player, Cabin cabin, int floor) {
+        BlockPos contact = cabin.column().at(floor);
+        if (!player.clientLevel.hasChunkAt(contact)) return new ArrivalDoors("unloaded", Map.of());
+        Object entity = player.clientLevel.getBlockEntity(contact);
+        var state = player.clientLevel.getBlockState(contact);
+        if (!contactType.isInstance(entity) || !state.hasProperty(BlockStateProperties.FACING)
+                || state.getValue(BlockStateProperties.FACING) != cabin.column().side()) return new ArrivalDoors("unverified_contact", Map.of());
+        Object controls = value(entity, "doorControls");
+        Object mode = controls == null ? null : value(controls, "mode");
+        if (mode == null) return new ArrivalDoors("unsynchronized", Map.of());
+        Map<BlockPos, Direction> pairs = new java.util.LinkedHashMap<>();
+        Vec3 center = ((net.minecraft.world.phys.AABB) value(cabin.contraption(), "bounds")).getCenter();
+        for (var entry : cabin.blocks().entrySet()) {
+            if (!slidingDoorType.isInstance(entry.getValue().state().getBlock())) continue;
+            Object actor = call(cabin.contraption(), "getActorAt", entry.getKey());
+            Object movement = actor == null ? null : call(actor, "getRight");
+            if (movement == null || Boolean.TRUE.equals(value(movement, "disabled"))) continue;
+            Direction facing = ElevatorArrivalView.outward(entry.getKey(), entry.getValue().state().getValue(BlockStateProperties.HORIZONTAL_FACING), center);
+            if (!Boolean.TRUE.equals(call(mode, "matches", facing))) continue;
+            pairs.put(BlockPos.containing(Vec3.atCenterOf(entry.getKey()).add(cabin.originAt(floor))).relative(facing), facing);
+        }
+        return new ArrivalDoors(String.valueOf(mode), Map.copyOf(pairs));
     }
 
     BlockHitResult hit(LocalPlayerContext ctx, Cabin cabin, BlockPos localPos) {

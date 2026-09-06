@@ -25,64 +25,97 @@ final class ElevatorSurvey {
     record Plan(UUID cabin, int fromFloor, int toFloor, BlockPos control, Vec3 controlStance,
                 Landing board, Landing exit, CallInput call, boolean aboard, double score) {}
 
-    static Plan find(LocalPlayerContext ctx, BlockPos destination, LongSet forbidden, CreateElevatorBridge bridge, Cabin cabin) {
-        if (cabin.floors().isEmpty()) return null;
+    static Plan find(LocalPlayerContext ctx, BlockPos destination, LongSet forbidden, CreateElevatorBridge bridge, Cabin cabin, Map<String, Object> evidence) {
+        evidence.put("cabin_uuid", cabin.entity().getUUID().toString());
+        Map<String, Integer> rejected = new java.util.LinkedHashMap<>();
+        evidence.put("rejected_candidates", rejected);
+        if (cabin.floors().isEmpty()) { reject(rejected, "floor_list_missing"); return null; }
         double width = ctx.player().getBbWidth(), height = ctx.player().getBbHeight(), step = ctx.player().maxUpStep();
         ElevatorGeometry geometry = new ElevatorGeometry(cabin.blocks(), cabin.view(), width, height);
         Vec3 player = ctx.player().position();
         boolean aboard = geometry.carries(cabin.local(player));
-        double deck = deckHeight(geometry.stances);
-        if (!Double.isFinite(deck)) return null;
+        evidence.put("support_layers", supportLayers(geometry.stances));
+        evidence.put("source_feet_y", player.y); evidence.put("destination_feet_y", destination.getY());
+        evidence.put("floor_projections", cabin.floors().stream().map(f -> Map.of("contact_y", f.contactY(),
+                "origin_y", cabin.originAt(f.contactY()).y, "source_decks", deckCandidates(geometry.stances, cabin.originAt(f.contactY()).y, player.y),
+                "target_decks", deckCandidates(geometry.stances, cabin.originAt(f.contactY()).y, destination.getY()))).toList());
+        Map<Integer, ElevatorArrivalView> arrivals = new HashMap<>();
+        Map<Integer, Object> doorEvidence = new java.util.LinkedHashMap<>();
+        evidence.put("floor_doors", doorEvidence);
+        if (geometry.stances.isEmpty()) { reject(rejected, "no_supported_body_clearance"); return null; }
         List<Plan> plans = new ArrayList<>();
         for (var target : cabin.floors()) {
-            if (!cabin.serves(target.contactY()) || Math.abs(target.contactY() - cabin.offset() + deck - destination.getY()) > 1.25) continue;
+            if (!cabin.serves(target.contactY())) continue;
             Vec3 targetOrigin = cabin.originAt(target.contactY());
-            Landing exit = geometry.landings(ctx.level(), ctx.level()::hasChunkAt, targetOrigin, step, forbidden).stream()
-                    .filter(l -> Math.abs(l.inside().y - deck) <= step)
-                    .min(Comparator.comparingDouble(l -> l.outside().distanceToSqr(Vec3.atBottomCenterOf(destination)))).orElse(null);
-            if (exit == null) continue;
-            for (var source : cabin.floors()) {
-                if (!aboard && Math.abs(source.contactY() - cabin.offset() + deck - player.y) > 1.25) continue;
-                if (!cabin.serves(source.contactY())) continue;
-                Vec3 sourceOrigin = cabin.originAt(source.contactY());
-                Landing board = aboard ? null : geometry.landings(ctx.level(), ctx.level()::hasChunkAt, sourceOrigin, step, forbidden).stream()
-                        .filter(l -> Math.abs(l.inside().y - deck) <= step)
-                        .min(Comparator.comparingDouble(l -> l.outside().distanceToSqr(player))).orElse(null);
-                if (!aboard && board == null) continue;
-                Vec3 localStart = aboard ? cabin.local(player) : board.inside();
-                if ((aboard && cabin.aligned(target.contactY()) || !aboard && source.contactY() == target.contactY())
-                        && !geometry.path(localStart, exit.inside(), targetOrigin, step, forbidden).isEmpty()) {
-                    CallInput call = aboard || cabin.targetY() == source.contactY() ? null : callInput(ctx, bridge, cabin, source.contactY());
-                    if (aboard || cabin.targetY() == source.contactY() || call != null) plans.add(new Plan(cabin.entity().getUUID(),
-                            source.contactY(), target.contactY(), null, exit.inside(), board, exit, call, aboard,
-                            (board == null ? 0 : board.outside().distanceToSqr(player)) + exit.outside().distanceToSqr(Vec3.atBottomCenterOf(destination))));
-                    continue;
-                }
-                for (BlockPos controller : cabin.controls()) {
-                    Vec3 dial = bridge.controlAim(cabin, controller).subtract(cabin.origin());
-                    List<Vec3> path = geometry.pathTo(localStart,
-                            p -> Math.abs(p.y - deck) <= step && p.add(0, ctx.player().getEyeHeight(), 0).distanceTo(dial) <= ctx.player().blockInteractionRange()
-                                    && visible(cabin, controller, p.add(0, ctx.player().getEyeHeight(), 0), dial), sourceOrigin, step, forbidden);
-                    Vec3 controlStance = path.isEmpty() ? null : path.getLast();
-                    if (controlStance == null || geometry.path(controlStance, exit.inside(), targetOrigin, step, forbidden).isEmpty()) continue;
-                    CallInput call = aboard || cabin.aligned(source.contactY()) ? null : callInput(ctx, bridge, cabin, source.contactY());
-                    if (!aboard && !cabin.aligned(source.contactY()) && cabin.targetY() != source.contactY() && call == null) continue;
-                    if (!rideAllowed(controlStance, sourceOrigin, targetOrigin, width, height, forbidden)) continue;
-                    double score = (board == null ? 0 : board.outside().distanceToSqr(player))
-                            + exit.outside().distanceToSqr(Vec3.atBottomCenterOf(destination));
-                    plans.add(new Plan(cabin.entity().getUUID(), source.contactY(), target.contactY(), controller.immutable(),
-                            controlStance, board, exit, call, aboard, score));
+            List<Double> decks = deckCandidates(geometry.stances, targetOrigin.y, destination.getY());
+            if (decks.isEmpty()) { reject(rejected, "target_height_has_no_supported_layer"); continue; }
+            for (double deck : decks) {
+                ElevatorArrivalView targetView = arrivals.computeIfAbsent(target.contactY(), y -> arrival(ctx, bridge, cabin, y, doorEvidence));
+                Landing exit = geometry.landings(targetView, ctx.level()::hasChunkAt, targetOrigin, step, forbidden, deck).stream()
+                        .min(Comparator.comparingDouble(l -> l.outside().distanceToSqr(Vec3.atBottomCenterOf(destination)))).orElse(null);
+                if (exit == null) { reject(rejected, "target_landing_missing_or_obstructed"); continue; }
+                var sources = cabin.floors().stream().filter(f -> cabin.serves(f.contactY())
+                        && (aboard || Math.abs(cabin.originAt(f.contactY()).y + deck - player.y) <= 1.25)).toList();
+                if (sources.isEmpty()) { reject(rejected, "source_height_has_no_supported_layer"); continue; }
+                for (var source : sources) {
+                    Vec3 sourceOrigin = cabin.originAt(source.contactY());
+                    ElevatorArrivalView sourceView = arrivals.computeIfAbsent(source.contactY(), y -> arrival(ctx, bridge, cabin, y, doorEvidence));
+                    Landing board = aboard ? null : geometry.landings(sourceView, ctx.level()::hasChunkAt, sourceOrigin, step, forbidden, deck).stream()
+                            .min(Comparator.comparingDouble(l -> l.outside().distanceToSqr(player))).orElse(null);
+                    if (!aboard && board == null) { reject(rejected, "source_landing_missing_or_obstructed"); continue; }
+                    Vec3 localStart = aboard ? cabin.local(player) : board.inside();
+                    if ((aboard && cabin.aligned(target.contactY()) || !aboard && source.contactY() == target.contactY())
+                            && !geometry.path(localStart, exit.inside(), targetOrigin, step, forbidden).isEmpty()) {
+                        CallInput call = aboard || cabin.targetY() == source.contactY() ? null : callInput(ctx, bridge, cabin, source.contactY());
+                        if (aboard || cabin.targetY() == source.contactY() || call != null) plans.add(new Plan(cabin.entity().getUUID(),
+                                source.contactY(), target.contactY(), null, exit.inside(), board, exit, call, aboard,
+                                (board == null ? 0 : board.outside().distanceToSqr(player)) + exit.outside().distanceToSqr(Vec3.atBottomCenterOf(destination))));
+                        else reject(rejected, "no_proven_native_call_input");
+                        continue;
+                    }
+                    if (cabin.controls().isEmpty()) reject(rejected, "no_native_controller");
+                    for (BlockPos controller : cabin.controls()) {
+                        Vec3 dial = bridge.controlAim(cabin, controller).subtract(cabin.origin());
+                        List<Vec3> path = geometry.pathTo(localStart,
+                                p -> Math.abs(p.y - deck) <= step && p.add(0, ctx.player().getEyeHeight(), 0).distanceTo(dial) <= ctx.player().blockInteractionRange()
+                                        && visible(cabin, controller, p.add(0, ctx.player().getEyeHeight(), 0), dial), sourceOrigin, step, forbidden);
+                        Vec3 controlStance = path.isEmpty() ? null : path.getLast();
+                        if (controlStance == null) { reject(rejected, "no_reachable_visible_controller"); continue; }
+                        if (geometry.path(controlStance, exit.inside(), targetOrigin, step, forbidden).isEmpty()) { reject(rejected, "no_supported_walkway_to_exit"); continue; }
+                        CallInput call = aboard || cabin.aligned(source.contactY()) ? null : callInput(ctx, bridge, cabin, source.contactY());
+                        if (!aboard && !cabin.aligned(source.contactY()) && cabin.targetY() != source.contactY() && call == null) { reject(rejected, "no_proven_native_call_input"); continue; }
+                        if (!rideAllowed(controlStance, sourceOrigin, targetOrigin, width, height, forbidden)) { reject(rejected, "forbidden_body_cells_during_ride"); continue; }
+                        double score = (board == null ? 0 : board.outside().distanceToSqr(player))
+                                + exit.outside().distanceToSqr(Vec3.atBottomCenterOf(destination));
+                        plans.add(new Plan(cabin.entity().getUUID(), source.contactY(), target.contactY(), controller.immutable(),
+                                controlStance, board, exit, call, aboard, score));
+                    }
                 }
             }
         }
+        evidence.put("plans_found", plans.size());
         return plans.stream().min(Comparator.comparingDouble(Plan::score)).orElse(null);
     }
 
-    static double deckHeight(List<Vec3> stances) {
+    static List<Map<String, Object>> supportLayers(List<Vec3> stances) {
         Map<Double, Integer> counts = new HashMap<>();
         for (Vec3 stance : stances) counts.merge(stance.y, 1, Integer::sum);
-        return counts.entrySet().stream().min(Comparator.<Map.Entry<Double, Integer>>comparingInt(e -> -e.getValue())
-                .thenComparingDouble(Map.Entry::getKey)).map(Map.Entry::getKey).orElse(Double.NaN);
+        return counts.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                .map(e -> Map.<String, Object>of("local_feet_y", e.getKey(), "stance_count", e.getValue())).toList();
+    }
+
+    static List<Double> deckCandidates(List<Vec3> stances, double originY, double feetY) {
+        return stances.stream().map(p -> p.y).distinct().filter(y -> Math.abs(originY + y - feetY) <= 1.25).sorted().toList();
+    }
+
+    private static void reject(Map<String, Integer> rejected, String reason) { rejected.merge(reason, 1, Integer::sum); }
+
+    private static ElevatorArrivalView arrival(LocalPlayerContext ctx, CreateElevatorBridge bridge, Cabin cabin, int floor, Map<Integer, Object> evidence) {
+        var doors = bridge.arrivalDoors(ctx.player(), cabin, floor);
+        var view = ElevatorArrivalView.predict(ctx.level(), ctx.level()::hasChunkAt, doors.pairs());
+        evidence.put(floor, Map.of("mode", doors.mode(), "predicted_open_cells", view.predictedDoors().keySet().stream()
+                .map(p -> Map.of("x", p.getX(), "y", p.getY(), "z", p.getZ())).toList()));
+        return view;
     }
 
     static boolean rideAllowed(Vec3 local, Vec3 fromOrigin, Vec3 toOrigin, double width, double height, LongSet forbidden) {

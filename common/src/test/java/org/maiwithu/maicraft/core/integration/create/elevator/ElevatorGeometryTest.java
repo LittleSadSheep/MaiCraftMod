@@ -51,7 +51,7 @@ public final class ElevatorGeometryTest {
         check(open.canStep(world, p -> true, origin, outside, porch.add(origin), 0.6, LongSets.emptySet())
                 && open.canStep(world, p -> true, origin, porch.add(origin), inside.add(origin), 0.6, LongSets.emptySet()), "open door retained stale collision");
         check(!open.canStep(world, p -> false, origin, outside, porch.add(origin), 0.6, LongSets.emptySet()), "unloaded exit geometry was accepted");
-        callConnections();
+        callConnections(); supportLayers(); arrivingDoors();
         System.out.println("ElevatorGeometryTest: passed");
     }
 
@@ -66,6 +66,43 @@ public final class ElevatorGeometryTest {
         check(!ElevatorSurvey.feeds(world, contact, button, state, true), "non-conducting support inferred a circuit");
         check(ElevatorSurvey.feeds(world, contact, contact.above(), state, true)
                 && ElevatorSurvey.feeds(world, contact.above(2), contact.above(), state, true), "multi-floor input must be detectable as ambiguous");
+    }
+
+    private static void supportLayers() {
+        Scene cabin = new Scene();
+        for (int x = -2; x <= 2; x++) for (int z = -2; z <= 2; z++) cabin.put(new BlockPos(x, 0, z), Blocks.IRON_BLOCK.defaultBlockState());
+        for (int x = -1; x <= 1; x++) for (int z = -1; z <= 1; z++) cabin.put(new BlockPos(x, -4, z), Blocks.IRON_BLOCK.defaultBlockState());
+        var stances = cabin.geometry().stances;
+        check(stances.stream().filter(p -> p.y == 1).count() > stances.stream().filter(p -> p.y == -3).count(), "fixture roof must be larger than its cabin floor");
+        check(ElevatorSurvey.deckCandidates(stances, 118, 115).equals(java.util.List.of(-3.0)), "larger roof hid the source cabin floor");
+        check(ElevatorSurvey.deckCandidates(stances, 106, 103).equals(java.util.List.of(-3.0)), "contact offset failed to project destination floor");
+        check(ElevatorSurvey.deckCandidates(stances, 106, 110).isEmpty(), "invented unsupported deck height");
+    }
+
+    private static void arrivingDoors() {
+        Scene cabin = new Scene(), world = new Scene();
+        cabin.put(BlockPos.ZERO, Blocks.IRON_BLOCK.defaultBlockState());
+        world.put(new BlockPos(0, 100, -1), Blocks.STONE.defaultBlockState());
+        BlockPos lower = new BlockPos(0, 101, -1);
+        var door = Blocks.IRON_DOOR.defaultBlockState().setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH);
+        world.put(lower, door.setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER));
+        world.put(lower.above(), door.setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER));
+        var geometry = cabin.geometry();
+        Vec3 origin = new Vec3(0, 100, 0), inside = new Vec3(0.5, 101, 0.5), outside = new Vec3(0.5, 101, -0.5);
+        check(geometry.landings(world, p -> true, origin, 0.6, LongSets.emptySet(), 1).isEmpty(), "closed static door between clear endpoints escaped survey collision");
+        var predicted = ElevatorArrivalView.predict(world, p -> true, Map.of(lower, Direction.NORTH));
+        check(!geometry.landings(predicted, p -> true, origin, 0.6, LongSets.emptySet(), 1).isEmpty(), "native paired arrival door permanently rejected a valid landing");
+        check(!geometry.canStep(world, p -> true, origin, outside, inside, 0.6, LongSets.emptySet()), "prediction authorized movement through a still-closed actual door");
+        check(geometry.canStep(predicted, p -> true, origin, outside, inside, 0.6, LongSets.emptySet()), "open native doorway retained stale collision");
+        check(!world.getBlockState(lower).getValue(BlockStateProperties.OPEN) && predicted.predictedDoors().size() == 2, "prediction mutated world or omitted the second half");
+        check(ElevatorArrivalView.predict(world, p -> true, Map.of()).predictedDoors().isEmpty(), "unassociated door was predicted open");
+        check(ElevatorArrivalView.predict(world, p -> true, Map.of(lower, Direction.EAST)).predictedDoors().isEmpty(), "wrong facing axis inferred native pairing");
+        check(ElevatorArrivalView.predict(world, p -> false, Map.of(lower, Direction.NORTH)).predictedDoors().isEmpty(), "unloaded door state became evidence");
+        world.put(lower, Blocks.STONE.defaultBlockState());
+        check(geometry.landings(ElevatorArrivalView.predict(world, p -> true, Map.of(lower, Direction.NORTH)), p -> true,
+                origin, 0.6, LongSets.emptySet(), 1).isEmpty(), "door prediction erased an actual wall");
+        check(ElevatorArrivalView.outward(new BlockPos(0, 1, -1), Direction.NORTH, new Vec3(0.5, 1.5, 0.5)) == Direction.NORTH,
+                "native cabin bounds did not determine the outward face");
     }
 
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }

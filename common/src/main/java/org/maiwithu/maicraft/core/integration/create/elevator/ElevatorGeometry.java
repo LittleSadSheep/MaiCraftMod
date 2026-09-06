@@ -65,8 +65,13 @@ final class ElevatorGeometry {
     boolean carries(Vec3 localFeet) { return supported(localFeet, actual, width); }
 
     List<Landing> landings(BlockGetter world, Predicate<BlockPos> loaded, Vec3 origin, double step, LongSet forbidden) {
+        return landings(world, loaded, origin, step, forbidden, Double.NaN);
+    }
+
+    List<Landing> landings(BlockGetter world, Predicate<BlockPos> loaded, Vec3 origin, double step, LongSet forbidden, double deck) {
         List<Landing> result = new ArrayList<>();
         for (Vec3 inside : stances) {
+            if (Double.isFinite(deck) && Math.abs(inside.y - deck) > step) continue;
             for (Direction side : Direction.Plane.HORIZONTAL) {
                 Vec3 adjacent = inside.add(side.getStepX(), 0, side.getStepZ());
                 if (supported(adjacent, doorsOpen, width)) continue;
@@ -75,6 +80,9 @@ final class ElevatorGeometry {
                 Vec3 localOutside = outside.subtract(origin);
                 if (Math.abs(localOutside.y - inside.y) > step + EPS || !clearStep(localOutside, inside, doorsOpen)) continue;
                 if (!worldClear(world, loaded, body(outside)) || !worldClear(world, loaded, body(inside.add(origin)))) continue;
+                double high = Math.max(outside.y, inside.y + origin.y);
+                AABB crossing = body(new Vec3(outside.x, high, outside.z)).minmax(body(new Vec3(inside.x + origin.x, high, inside.z + origin.z)));
+                if (!worldClear(world, loaded, crossing)) continue;
                 result.add(new Landing(outside, inside));
                 if (result.size() == 64) return List.copyOf(result);
             }

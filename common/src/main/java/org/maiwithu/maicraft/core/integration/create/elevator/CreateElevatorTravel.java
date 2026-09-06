@@ -32,6 +32,7 @@ public final class CreateElevatorTravel implements TransportSession {
     private final ElevatorActions actions = new ElevatorActions();
     private final ElevatorMotion motion = new ElevatorMotion();
     private final Set<UUID> requestedLists = new HashSet<>();
+    private Map<String, Object> surveyEvidence = Map.of();
     private Phase phase = Phase.DISCOVER;
     private Plan plan, best;
     private Landing exit;
@@ -138,7 +139,7 @@ public final class CreateElevatorTravel implements TransportSession {
                         .sorted(Comparator.comparingInt(c -> c.entity().getId())).toList();
                 if (scanned >= cabins.size()) {
                     if (best == null) return terminal = Result.failed("no_proven_elevator_route",
-                            "no loaded cabin, served landing, controller walkway and associated call input were jointly verified", effects, false);
+                            "no jointly verified elevator route; rejected candidates: " + surveyEvidence.getOrDefault("rejected_candidates", "no loaded cabin"), effects, false);
                     plan = best; exit = plan.exit();
                     exitFloor = plan.toFloor();
                     setPhase(plan.aboard() ? plan.control() == null ? Phase.WALK_EXIT : Phase.WALK_CONTROL : Phase.APPROACH_CALL); return running();
@@ -152,7 +153,9 @@ public final class CreateElevatorTravel implements TransportSession {
                     })) requestedLists.add(id);
                     return running();
                 }
-                Plan found = ElevatorSurvey.find(ctx, destination, forbidden, bridge, candidate);
+                Map<String, Object> evidence = new LinkedHashMap<>();
+                Plan found = ElevatorSurvey.find(ctx, destination, forbidden, bridge, candidate, evidence);
+                surveyEvidence = Map.copyOf(evidence);
                 if (found != null && (best == null || found.score() < best.score())) best = found;
                 scanned++; lastProgress = now;
             }
@@ -311,6 +314,7 @@ public final class CreateElevatorTravel implements TransportSession {
         data.put("phase", phase()); data.put("aboard", aboard); data.put("safe_to_interrupt", safeToInterrupt());
         data.put("stop_requested", stopRequested); data.put("effects_started", effects); data.put("remote_input_held", actions.remoteHeld);
         data.put("needs_attention", needsAttention);
+        data.put("survey", surveyEvidence);
         if (plan != null) { data.put("cabin_uuid", plan.cabin().toString()); data.put("from_contact_y", plan.fromFloor()); data.put("to_contact_y", plan.toFloor()); }
         if (pendingFailure != null) data.put("detail", pendingFailure);
         return Map.copyOf(data);

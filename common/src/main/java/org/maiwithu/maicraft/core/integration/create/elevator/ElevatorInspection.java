@@ -26,6 +26,15 @@ final class ElevatorInspection {
                 data.put("aligned_at_target", cabin.aligned(cabin.targetY())); data.put("origin", point(cabin.origin()));
                 data.put("body_supported_by_cabin", supports(cabin, player));
                 data.put("recent_native_surface_contact", BRIDGE.recentSupport(cabin, player));
+                var geometry = new ElevatorGeometry(cabin.blocks(), cabin.view(), player.getBbWidth(), player.getBbHeight());
+                data.put("support_layers", ElevatorSurvey.supportLayers(geometry.stances));
+                data.put("floor_geometry", cabin.floors().stream().map(f -> {
+                    var doors = BRIDGE.arrivalDoors(player, cabin, f.contactY());
+                    var arrival = ElevatorArrivalView.predict(player.clientLevel, player.clientLevel::hasChunkAt, doors.pairs());
+                    return Map.of("contact_y", f.contactY(), "origin_y", cabin.originAt(f.contactY()).y,
+                            "source_decks", ElevatorSurvey.deckCandidates(geometry.stances, cabin.originAt(f.contactY()).y, player.getY()),
+                            "door_control_mode", doors.mode(), "predicted_open_cells", arrival.predictedDoors().keySet().stream().map(p -> point(Vec3.atLowerCornerOf(p))).toList());
+                }).toList());
                 data.put("floors", cabin.floors().stream().map(f -> Map.of("contact_y", f.contactY(), "short_name", f.shortName(),
                         "long_name", f.longName(), "in_rope_range", cabin.serves(f.contactY()))).toList());
                 data.put("controls", cabin.controls().stream().map(p -> Map.of("local_position", point(Vec3.atLowerCornerOf(p)),
