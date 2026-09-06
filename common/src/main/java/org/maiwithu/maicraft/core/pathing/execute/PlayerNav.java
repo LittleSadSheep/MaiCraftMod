@@ -7,7 +7,8 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.FailureType;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
+import org.maiwithu.maicraft.core.pathing.transport.TransportNavigator;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.pathing.bridge.ContextFactory;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
@@ -18,7 +19,7 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 public final class PlayerNav {
     public enum Status { RUNNING, ARRIVED, FAILED }
 
-    private final EmbeddedBaritoneNavigator navigator;
+    private final TransportNavigator navigator;
 
     public PlayerNav(LocalPlayer player, BlockPos goal, double speed, BooleanSupplier reached) {
         this(player, speed, reached, () -> GoalCompiler.block(player.level(), goal), ContextProvider.DEFAULT);
@@ -82,7 +83,7 @@ public final class PlayerNav {
 
     private PlayerNav(LocalPlayer player, double speed, BooleanSupplier reached,
                       Supplier<GoalCompiler.Compiled> compiledSupplier, ContextProvider contextProvider) {
-        navigator = new EmbeddedBaritoneNavigator(player, compiledSupplier, reached,
+        navigator = new TransportNavigator(player, compiledSupplier, reached,
                 contextProvider == null ? ContextProvider.DEFAULT : contextProvider, speed >= 1.0);
     }
 
@@ -91,10 +92,19 @@ public final class PlayerNav {
         return this;
     }
 
+    public PlayerNav withTransportMode(TransportMode mode) {
+        navigator.mode(mode == null ? TransportMode.AUTO : mode);
+        return this;
+    }
+
+    /** Transport adapters use this for their own ground approach, avoiding recursive boarding. */
+    public PlayerNav walkingOnly() { return withTransportMode(TransportMode.GROUND); }
+
     public interface ContextProvider {
         /** 缺省:只走不改。接近类动作全部用它,忘了指定也只会更保守。 */
         ContextProvider DEFAULT = of(TerrainPermit.PRESERVE);
         ContextProvider WATER_ONLY = of(TerrainPermit.WATER_ONLY);
+        ContextProvider LANDING_ONLY = of(TerrainPermit.LANDING_ONLY);
         /** 可改地形:挖矿、施工,以及模型显式授权的 goto。 */
         ContextProvider TERRAFORM = of(TerrainPermit.TERRAFORM);
 
@@ -162,5 +172,7 @@ public final class PlayerNav {
     public boolean planningInFlight() { return navigator.planningInFlight(); }
     public void stop() { navigator.stop(); }
     public void pause() { navigator.pause(); }
+    public void abandon() { navigator.abandon(); }
+    public java.util.Map<String, Object> transportDiagnostics() { return navigator.diagnostics(); }
     public boolean yieldForExternalAction() { return navigator.yieldForExternalAction(); }
 }
