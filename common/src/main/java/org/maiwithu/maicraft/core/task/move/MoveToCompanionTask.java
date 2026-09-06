@@ -163,22 +163,21 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private NavGoal goal() {
         return switch (r.kind) {
             case BLOCK -> blockGoal();
-            case COLUMN -> NavGoal.column(bx, bz);
+            case COLUMN -> r.coordinateGoal();
             case YLEVEL -> NavGoal.yLevel(by);
             case FIND -> finder.contract() == null ? null : finder.contract().goal();
         };
     }
 
-    /** Full coordinates always mean the supported feet cell, never a nearby fallback. */
+    /** The same coordinate region drives planning and live arrival. */
     private NavGoal blockGoal() {
         return blockCompiled().goal();
     }
 
-    /** The BLOCK kind's navigation contract: bare coordinates mean occupy
-     *  exactly that cell, digging out whatever is there (the block form is
-     *  the way to say "walk up beside it instead"). */
+    /** Exact internal stances and tolerant public destinations keep their own membership. */
     private org.maiwithu.maicraft.core.pathing.goal.GoalCompiler.Compiled blockCompiled() {
-        return org.maiwithu.maicraft.core.pathing.goal.GoalCompiler.standOn(blockTarget);
+        return new org.maiwithu.maicraft.core.pathing.goal.GoalCompiler.Compiled(
+                r.coordinateGoal(), it.unimi.dsi.fastutil.longs.LongSets.emptySet());
     }
 
     /** Does a collision shape occupy the target cell (feet can't go there)? */
@@ -214,7 +213,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // An exact stance is a fact about the live body, not just two pathing cells.
         // During a jump both cells can briefly name the destination before vanilla physics has
         // actually put the player on its support. Every full-coordinate target has this contract.
-        return supportedGoalMembership && (!r.requiresStrictStance() || player.onGround());
+        return supportedGoalMembership && (player.onGround() || !r.requiresStrictStance() && player.isInWater());
     }
 
     /**
@@ -256,7 +255,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private boolean inGoalCell(BlockPos cell) {
         return switch (r.kind) {
             case BLOCK -> blockGoal().isAt(cell);
-            case COLUMN -> cell.getX() == bx && cell.getZ() == bz;
+            case COLUMN -> r.coordinateGoal().isAt(cell);
             case YLEVEL -> cell.getY() == by && player.onGround();
             case FIND -> finder.contract() != null && finder.contract().goal().isAt(cell);
         };
@@ -325,6 +324,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                             FailureType.NO_PATH);
                     yield TaskState.FAILED;
                 }
+                if (!reached()) {
+                    if (!player.onGround() && !player.isInWater()) yield TaskState.RUNNING;
+                    fail(blockedMessage("the route ended outside the supported destination region"), FailureType.NO_PATH);
+                    yield TaskState.FAILED;
+                }
                 yield successAtBody();
             }
             case FAILED -> {
@@ -354,7 +358,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 // (closeEnoughToSucceed above), the retry just lets the SEARCH aim for it.
                 // YLEVEL has no looser near-equivalent (its goal is already any-x/z), and
                 // the water-settle path above is untouched.
-                if (!r.requiresStrictStance() && !nearRetried && !player.isInWater()
+                if (!r.requiresStrictStance() && r.horizontalRadius == 0 && !nearRetried && !player.isInWater()
                         && r.kind != MoveToTaskRecord.Kind.YLEVEL
                         && r.kind != MoveToTaskRecord.Kind.FIND) {
                     nearRetried = true;
@@ -414,7 +418,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
      *  already counts as arrival ({@link #NEAR_SUCCESS_RADIUS}), never wider. */
     private NavGoal nearRetryGoal() {
         if (r.kind == MoveToTaskRecord.Kind.BLOCK) {
-            return NavGoal.near(blockTarget, NEAR_SUCCESS_RADIUS);
+            return blockGoal();
         }
         // COLUMN: within the radius HORIZONTALLY at any height (NavGoal.near is 3D and
         // needs a Y this kind doesn't have; heuristic/center reuse the column's own).
@@ -446,7 +450,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             return false;
         }
         return switch (r.kind) {
-            case BLOCK, COLUMN -> horizontalDistSqr(bx, bz) <= NEAR_SUCCESS_RADIUS * NEAR_SUCCESS_RADIUS;
+            case BLOCK -> blockGoal().isAt(feet());
+            case COLUMN -> r.horizontalRadius > 0 ? r.coordinateGoal().isAt(feet())
+                    : horizontalDistSqr(bx, bz) <= NEAR_SUCCESS_RADIUS * NEAR_SUCCESS_RADIUS;
             case YLEVEL -> Math.abs(feet().getY() - by) <= 1;
             // FIND 候选众多,失败梯已在候选间轮换过,不设贴近成功档
             case FIND -> false;
@@ -525,7 +531,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected String successMessage() {
         int gy = player.blockPosition().getY();
         return switch (r.kind) {
-            case BLOCK -> "reached the exact cell " + bx + "," + by + "," + bz + ".";
+            case BLOCK -> r.requiresStrictStance() ? "reached the exact cell " + bx + "," + by + "," + bz + "."
+                    : "arrived within " + r.horizontalRadius + " blocks horizontally and " + r.verticalTolerance
+                            + " blocks vertically of the destination; supported at y=" + gy + ".";
             case COLUMN -> "arrived at location x=" + bx + " z=" + bz
                     + (player.isInWater() ? ", in water at y=" : ", standing on the ground at y=") + gy + ".";
             case YLEVEL -> "reached elevation y=" + gy
@@ -586,13 +594,17 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // 地形封路的验尸自带下一步,不再叠几何建议;策略挡路时出路是授权或垫料,
         // 其余无路才是几何问题:换近一点的路点或扫描。
         String advice = "";
-        if (nav.failType() == FailureType.TERRAIN_BLOCKED) {
+        if (r.transportMode == org.maiwithu.maicraft.core.pathing.transport.TransportMode.JETPACK
+                || r.transportMode == org.maiwithu.maicraft.core.pathing.transport.TransportMode.ELEVATOR) {
+            advice = " Inspect the reported transport failure and destination support before choosing another transport goal.";
+        } else if (nav.failType() == FailureType.TERRAIN_BLOCKED) {
             advice = " This route is only walkable with terrain alteration permitted"
                     + " (may_alter_terrain), or with scaffolding blocks to pillar or bridge up.";
         } else {
-            advice = ScaffoldMaterials.shortageAdvice(player);
+            advice = r.mayAlterTerrain && nav.failType() == FailureType.NO_MATERIAL
+                    ? ScaffoldMaterials.shortageAdvice(player) : null;
             if (advice == null) {
-                advice = " Try a nearer waypoint or scan_blocks for a way through.";
+                advice = " Inspect the destination support and nearby obstacles before selecting a new route.";
             }
         }
         return "blocked: got within " + String.format("%.1f", remaining) + " blocks of " + where

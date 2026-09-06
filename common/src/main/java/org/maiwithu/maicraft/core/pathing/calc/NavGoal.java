@@ -78,7 +78,7 @@ public interface NavGoal {
                 return key("exact", g.goal.asLong());
             }
             if (goal instanceof Column g) {
-                return key("column", g.x, g.z);
+                return key("column", g.x, g.z, g.radius);
             }
             if (goal instanceof YLevel g) {
                 return key("y_level", g.level);
@@ -90,7 +90,7 @@ public interface NavGoal {
                 return key("ring", g.goal.asLong(), g.inner, g.outer);
             }
             if (goal instanceof NearGround g) {
-                return key("near_ground", g.goal.asLong(), g.radius);
+                return key("near_ground", g.goal.asLong(), g.radius, g.verticalTolerance);
             }
             if (goal instanceof Adjacent g) {
                 return key("adjacent", g.goal.asLong());
@@ -236,7 +236,15 @@ public interface NavGoal {
      * beside its target.
      */
     static NavGoal nearGround(BlockPos pos, double radius) {
-        return new NearGround(pos, radius);
+        return new NearGround(pos, radius, 1);
+    }
+
+    static NavGoal nearGround(BlockPos pos, double radius, double verticalTolerance) {
+        return new NearGround(pos, radius, verticalTolerance);
+    }
+
+    static NavGoal column(int x, int z, double radius) {
+        return new Column(x, z, radius);
     }
 
     /**
@@ -379,20 +387,27 @@ public interface NavGoal {
     final class Column implements NavGoal {
         public final int x;
         public final int z;
+        public final double radius;
 
         Column(int x, int z) {
+            this(x, z, 0);
+        }
+
+        Column(int x, int z, double radius) {
             this.x = x;
             this.z = z;
+            this.radius = radius;
         }
 
         @Override public boolean isAt(BlockPos feet) {
-            return feet.getX() == x && feet.getZ() == z;
+            double dx = (double) feet.getX() - x, dz = (double) feet.getZ() - z;
+            return dx * dx + dz * dz <= radius * radius;
         }
 
         @Override public double heuristic(BlockPos from) {
             double dx = Math.abs(x - from.getX());
             double dz = Math.abs(z - from.getZ());
-            return (Math.min(dx, dz) * SQRT_2 + Math.abs(dx - dz))
+            return Math.max(0, Math.min(dx, dz) * SQRT_2 + Math.abs(dx - dz) - radius * SQRT_2)
                     * COST_HEURISTIC;
         }
 
@@ -494,16 +509,18 @@ public interface NavGoal {
         public final BlockPos goal;
         public final double radius;
         public final double radiusSqr;
+        public final double verticalTolerance;
 
-        NearGround(BlockPos pos, double radius) {
+        NearGround(BlockPos pos, double radius, double verticalTolerance) {
             this.goal = pos.immutable();
             this.radius = radius;
             this.radiusSqr = radius * radius;
+            this.verticalTolerance = verticalTolerance;
         }
 
         @Override public boolean isAt(BlockPos feet) {
             int dy = feet.getY() - goal.getY();
-            if (dy < -1 || dy > 1) return false;
+            if (Math.abs((double) dy) > verticalTolerance) return false;
             double dx = feet.getX() - goal.getX();
             double dz = feet.getZ() - goal.getZ();
             return dx * dx + dz * dz <= radiusSqr;

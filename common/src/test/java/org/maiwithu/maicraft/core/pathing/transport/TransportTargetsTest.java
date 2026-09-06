@@ -43,6 +43,15 @@ public final class TransportTargetsTest {
         var exact = scan(scene, NavGoal.exact(BlockPos.ZERO));
         check(exact.destinations().size() == 1 && exact.destinations().getFirst().landingPoint().y == 0,
                 "exact empty feet has a real support endpoint");
+        check(scan(scene, NavGoal.exact(new BlockPos(0, 2, 0))).destinations().isEmpty(),
+                "an exact target above the real floor has no static landing");
+        var vicinity = scan(scene, NavGoal.nearGround(new BlockPos(0, 2, 0), 3, 2));
+        check(!vicinity.destinations().isEmpty() && vicinity.destinations().stream().allMatch(d -> d.feet().getY() == 0),
+                "approximate height must contribute the actual supported layer to flight candidates");
+        check(scan(scene, NavGoal.nearGround(new BlockPos(0, 3, 0), 3, 2)).destinations().isEmpty(),
+                "candidate enumeration must enforce the requested height tolerance");
+        check(!NavGoal.nearGround(BlockPos.ZERO, 3, 1).semanticFingerprint().equals(
+                NavGoal.nearGround(BlockPos.ZERO, 3, 2).semanticFingerprint()), "height tolerance changes must invalidate live route intent");
         scene.blocks.put(BlockPos.ZERO, Blocks.CRAFTING_TABLE.defaultBlockState());
         check(scan(scene, NavGoal.exact(BlockPos.ZERO)).destinations().isEmpty(),
                 "an occupied exact goal must never become its block center or an invented nearby landing");

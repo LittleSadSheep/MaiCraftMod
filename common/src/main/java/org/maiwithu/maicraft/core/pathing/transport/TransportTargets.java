@@ -115,7 +115,9 @@ public final class TransportTargets {
         if (goal instanceof NavGoal.Exact exact) {
             region(goal, exact.goal, 0, exact.goal.getY(), exact.goal.getY());
         } else if (goal instanceof NavGoal.Column column) {
-            region(goal, new BlockPos(column.x, currentY, column.z), 0, minY + 1, maxY - 1);
+            int radius = (int) Math.min(MAX_RADIUS, Math.ceil(column.radius));
+            truncated |= column.radius > MAX_RADIUS;
+            region(goal, new BlockPos(column.x, currentY, column.z), radius, minY + 1, maxY - 1);
         } else if (goal instanceof NavGoal.YLevel level) {
             region(goal, BlockPos.containing(origin.x, level.level, origin.z), MAX_RADIUS, level.level, level.level);
             truncated = true; // A Y plane has no finite exhaustive neighborhood.
@@ -131,17 +133,22 @@ public final class TransportTargets {
         } else if (goal instanceof NavGoal.Near near) {
             near(goal, near.radius, false);
         } else if (goal instanceof NavGoal.NearGround near) {
-            near(goal, near.radius, true);
+            int vertical = (int) Math.min(512, Math.ceil(near.verticalTolerance));
+            truncated |= near.verticalTolerance > 512;
+            near(goal, near.radius, vertical);
         } else {
             unknown = true; // Custom/moving/avoidance goals cannot become a guessed static center.
         }
     }
 
     private void near(NavGoal goal, double radius, boolean ground) {
+        near(goal, radius, ground ? 1 : (int) Math.min(MAX_RADIUS, Math.ceil(radius)));
+    }
+
+    private void near(NavGoal goal, double radius, int vertical) {
         if (!Double.isFinite(radius) || radius < 0) { unknown = true; return; }
         int bounded = (int) Math.min(MAX_RADIUS, Math.ceil(radius));
         truncated |= radius > MAX_RADIUS;
-        int vertical = ground ? 1 : bounded;
         region(goal, goal.center(), bounded, goal.center().getY() - vertical, goal.center().getY() + vertical);
     }
 

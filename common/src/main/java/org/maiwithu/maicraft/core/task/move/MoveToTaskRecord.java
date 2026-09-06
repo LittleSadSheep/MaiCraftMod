@@ -50,6 +50,10 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     public final boolean allowLandingAssists;
     /** Transport preference is independent of terrain and temporary water permission. */
     public final TransportMode transportMode;
+    /** Public travel may accept a region; internal workstation/build stances remain exact. */
+    public final boolean exact;
+    public final double horizontalRadius;
+    public final double verticalTolerance;
     /** Successful live body receipt; never copied into the public TaskResult. */
     private Position verifiedPosition;
 
@@ -72,7 +76,18 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
                             Double x, Double y, Double z, String block, boolean mayAlterTerrain,
                             boolean allowWaterBucketFall, TransportMode transportMode, boolean allowLandingAssists) {
+        this(toolCallId, deadlineGameTime, x, y, z, block, mayAlterTerrain, allowWaterBucketFall,
+                transportMode, allowLandingAssists, true, 0, 0);
+    }
+
+    public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
+                            Double x, Double y, Double z, String block, boolean mayAlterTerrain,
+                            boolean allowWaterBucketFall, TransportMode transportMode, boolean allowLandingAssists,
+                            boolean exact, double horizontalRadius, double verticalTolerance) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
+        if (!Double.isFinite(horizontalRadius) || horizontalRadius < 0
+                || !Double.isFinite(verticalTolerance) || verticalTolerance < 0)
+            throw new IllegalArgumentException("arrival tolerances must be finite and non-negative");
         this.x = x;
         this.y = y;
         this.z = z;
@@ -82,6 +97,9 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
         this.allowWaterBucketFall = allowWaterBucketFall;
         this.allowLandingAssists = allowLandingAssists;
         this.transportMode = transportMode == null ? TransportMode.AUTO : transportMode;
+        this.exact = exact;
+        this.horizontalRadius = horizontalRadius;
+        this.verticalTolerance = verticalTolerance;
     }
 
     /**
@@ -102,9 +120,19 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     }
 
     boolean requiresStrictStance() {
-        // Supplying Y is an exact destination contract, including the public semantic exact=true
-        // adapter. A failed climb must never succeed just because the body is below its target.
-        return kind == Kind.BLOCK;
+        return kind == Kind.BLOCK && exact;
+    }
+
+    org.maiwithu.maicraft.core.pathing.calc.NavGoal coordinateGoal() {
+        var target = new BlockPos(x == null ? 0 : (int) Math.floor(x), y == null ? 0 : (int) Math.floor(y),
+                z == null ? 0 : (int) Math.floor(z));
+        return switch (kind) {
+            case BLOCK -> exact ? org.maiwithu.maicraft.core.pathing.calc.NavGoal.exact(target)
+                    : org.maiwithu.maicraft.core.pathing.calc.NavGoal.nearGround(target, horizontalRadius, verticalTolerance);
+            case COLUMN -> org.maiwithu.maicraft.core.pathing.calc.NavGoal.column(target.getX(), target.getZ(), horizontalRadius);
+            case YLEVEL -> org.maiwithu.maicraft.core.pathing.calc.NavGoal.yLevel(target.getY());
+            case FIND -> throw new IllegalStateException("block discovery supplies its own observed goal");
+        };
     }
 
     void retainVerifiedPosition(Position position) {

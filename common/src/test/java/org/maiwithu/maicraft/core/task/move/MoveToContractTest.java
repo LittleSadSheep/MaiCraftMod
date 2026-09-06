@@ -11,6 +11,21 @@ public final class MoveToContractTest {
         var internal = MoveToTaskRecord.strictStance("internal", 600, new BlockPos(-399, 65, 330), true);
         if (internal.kind != exact.kind || !internal.requiresStrictStance()) throw new AssertionError("Internal and public exact goals diverged");
         var column = new MoveToTaskRecord("column", 600, -399D, null, 330D, null, false);
+        var nearby = new MoveToTaskRecord("nearby", 600, -72D, 103D, -4D, null, false, false,
+                TransportMode.JETPACK, false, false, 3, 2);
+        if (nearby.requiresStrictStance() || !nearby.coordinateGoal().isAt(new BlockPos(-73, 103, -4))
+                || !nearby.coordinateGoal().isAt(new BlockPos(-72, 102, -4)))
+            throw new AssertionError("ordinary travel must accept nearby supported candidates within its height tolerance");
+        if (nearby.coordinateGoal().isAt(new BlockPos(-72, 115, -4))
+                || nearby.coordinateGoal().isAt(new BlockPos(-72, 100, -4)))
+            throw new AssertionError("horizontal proximity must not erase the destination floor");
+        var vicinity = new MoveToTaskRecord("xz", 600, -72D, null, -4D, null, false, false,
+                TransportMode.AUTO, false, false, 3, 2);
+        if (!vicinity.coordinateGoal().isAt(new BlockPos(-73, 150, -4))
+                || vicinity.coordinateGoal().isAt(new BlockPos(-80, 103, -4)))
+            throw new AssertionError("omitted Y admits horizontal vicinity without inventing a floor");
+        if (exact.coordinateGoal().isAt(new BlockPos(-398, 65, 330)))
+            throw new AssertionError("internal exact stances must retain exact membership");
         if (column.requiresStrictStance() || column.kind != MoveToTaskRecord.Kind.COLUMN) throw new AssertionError("Omitted height must remain a column goal");
         if (column.allowWaterBucketFall || exact.allowWaterBucketFall)
             throw new AssertionError("legacy navigation must not acquire new water permission");
