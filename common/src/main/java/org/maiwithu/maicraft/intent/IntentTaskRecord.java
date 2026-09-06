@@ -93,8 +93,9 @@ public final class IntentTaskRecord extends TaskRecord {
         }
         record.attempts.addAll(attempts.stream().skip(
                 Math.max(0, attempts.size() - MAX_ATTEMPTS)).toList());
-        record.decision = decision;
-        record.pendingAnswer = pendingAnswer;
+        // Older checkpoints could retain a pending decision beside a terminal receipt.
+        record.decision = terminal == null ? decision : null;
+        record.pendingAnswer = terminal == null ? pendingAnswer : null;
         record.terminal = terminal;
         if (terminal == null) {
             record.pause = new PauseSnapshot(
@@ -246,6 +247,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     public boolean answer(UUID decisionId, String choice, JsonObject details) {
+        if (getState().isTerminal() || terminal != null) return false;
         if (decision == null || !decision.id().equals(decisionId) || !decision.accepts(choice)) return false;
         pendingAnswer = new DecisionAnswer(decisionId, choice,
                 details == null ? "{}" : details.toString());
@@ -263,7 +265,12 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     void terminal(TaskState state, TaskResult result, long gameTime) {
+        if (!state.isTerminal()) throw new IllegalArgumentException("terminal receipt requires a terminal state");
         terminal = new TerminalSnapshot(state, result == null ? "{}" : result.toJson(), gameTime);
+        setState(state);
+        pause = null;
+        decision = null;
+        pendingAnswer = null;
         changed();
     }
 

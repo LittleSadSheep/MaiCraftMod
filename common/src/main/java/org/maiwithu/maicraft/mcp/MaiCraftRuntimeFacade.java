@@ -400,7 +400,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    private JsonObject taskSnapshot(IntentTaskRecord record) {
+    private static JsonObject taskSnapshot(IntentTaskRecord record) {
         JsonObject result = new JsonObject();
         result.addProperty("task_id", record.externalId().toString());
         if (record.planId() != null) result.addProperty("plan_id", record.planId().toString());
@@ -436,13 +436,14 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         }
         result.add("attempts", attempts);
 
-        if (record.pauseSnapshot() != null) {
+        boolean terminalState = record.getState().isTerminal() || record.terminalSnapshot() != null;
+        if (!terminalState && record.pauseSnapshot() != null) {
             JsonObject pause = new JsonObject();
             pause.addProperty("reason", record.pauseSnapshot().reason());
             pause.addProperty("game_time", record.pauseSnapshot().gameTime());
             result.add("pause", pause);
         }
-        if (record.decisionSnapshot() != null) {
+        if (!terminalState && record.decisionSnapshot() != null) {
             JsonObject decision = decision(record.decisionSnapshot());
             result.add("decision", decision);
             copyEffectLedger(result, decision.getAsJsonObject("context"));
@@ -559,6 +560,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private static String publicState(IntentTaskRecord record) {
+        if (record.terminalSnapshot() != null) return record.terminalSnapshot().state().name().toLowerCase();
+        if (record.getState().isTerminal()) return record.getState().name().toLowerCase();
         if (record.decisionSnapshot() != null) return "waiting_for_decision";
         if (record.pauseSnapshot() != null) return "paused";
         return record.getState().name().toLowerCase();
