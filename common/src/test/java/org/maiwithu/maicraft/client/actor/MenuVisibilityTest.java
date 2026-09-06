@@ -5,11 +5,13 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.InventoryMenu;
+import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import sun.misc.Unsafe;
 
 /** Exercises the production visibility state machine without creating a graphics window. */
@@ -26,12 +28,14 @@ public final class MenuVisibilityTest {
         assign(Player.class, player, "inventoryMenu", inventory);
         player.containerMenu = inventory;
         long[] tick = {0};
+        boolean[] mutationAvailable = {true};
         LocalPlayerContext context = (LocalPlayerContext) Proxy.newProxyInstance(
                 LocalPlayerContext.class.getClassLoader(), new Class<?>[]{LocalPlayerContext.class},
                 (proxy, method, values) -> switch (method.getName()) {
                     case "minecraft" -> minecraft;
                     case "player" -> player;
                     case "tickRevision" -> tick[0];
+                    case "mutationAvailable" -> mutationAvailable[0];
                     default -> throw new AssertionError("Unexpected context access: " + method);
                 });
         MenuVisibility visibility = new MenuVisibility();
@@ -49,6 +53,17 @@ public final class MenuVisibilityTest {
                 memory.allocateInstance(net.minecraft.client.gui.screens.ChatScreen.class);
         check(DefaultBodyControlPort.permitsWorldMovement(chat), "chat must not silently zero navigation input");
         check(!DefaultBodyControlPort.permitsWorldMovement(screen), "inventory still suppresses world movement");
+        VisibleMenuSession worldSession = new VisibleMenuSession();
+        minecraft.screen = chat;
+        check(worldSession.worldReady(context), "chat permits selecting a carried hotbar item");
+        check(!visibility.ready(context), "chat is never a visible crafting or inventory GUI");
+        mutationAvailable[0] = false;
+        check(!worldSession.worldReady(context), "chat cannot bypass the per-tick mutation limit");
+        mutationAvailable[0] = true;
+        minecraft.screen = (PauseScreen) memory.allocateInstance(PauseScreen.class);
+        check(!DefaultBodyControlPort.permitsWorldMovement(minecraft.screen), "other user dialogs still block movement");
+        check(!worldSession.worldReady(context), "other user dialogs cannot be closed to select an item");
+        check(worldSession.close(context), "unused world session needs no menu cleanup");
         minecraft.screen = screen;
         check(MenuVisibility.inventoryVisible(minecraft, player), "inventory screen identity matches");
         check(!visibility.ready(context), "opening the GUI does not permit a same-tick mutation");

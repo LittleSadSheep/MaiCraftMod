@@ -31,6 +31,13 @@ public final class GuiBoundaryAuditTest {
         before(method(parent, "result"), "cleanup();", "return switch", "every terminal result runs GUI cleanup", "");
 
         String port = Files.readString(root.resolve(base + "client/actor/DefaultMenuPort.java"));
+        String opening = method(port, "ensureVisible");
+        before(opening, "DefaultBodyControlPort.permitsWorldMovement(", ".minecraft().setScreen(",
+                "the same world/chat policy allows tasks to open their visible inventory", "");
+        before(opening, "current.claimMutation()", ".minecraft().setScreen(",
+                "opening from chat still claims the per-tick mutation", "");
+        check(opening.contains("visibility.ready(current)"),
+                "opening from chat must still wait for the matching GUI to render");
         for (String name : new String[]{"click", "swapInventoryToHotbar", "placeRecipe"}) {
             before(method(port, name), "requireVisible(", ".gameMode().handle",
                     name + " cannot submit a native menu mutation while hidden", "");

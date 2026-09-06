@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.menu;
 
 import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
@@ -32,7 +33,7 @@ public final class VisibleMenuSession {
     /** A hotbar item still cannot be used in the world while a container screen is open. */
     public boolean worldReady(LocalPlayerContext context) {
         if (!settleSwitch(context)) return false;
-        if (context.minecraft().screen == null
+        if (DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen)
                 && context.player().containerMenu == context.player().inventoryMenu) {
             return context.mutationAvailable();
         }

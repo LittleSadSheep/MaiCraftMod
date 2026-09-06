@@ -22,7 +22,10 @@ public final class DefaultMenuPort implements MenuPort {
         DefaultLocalPlayerContext current = requireSubmission(context);
         current.body().releaseAll();
         if (closingMenu != null) return false;
-        if (current.minecraft().screen == null && current.player().containerMenu == current.player().inventoryMenu) {
+        // Chat coexists with automation; replace it with the real inventory before any clicks.
+        // Other user dialogs remain untouched, and the new inventory still needs a rendered frame.
+        if (DefaultBodyControlPort.permitsWorldMovement(current.minecraft().screen)
+                && current.player().containerMenu == current.player().inventoryMenu) {
             if (!current.mutationAvailable()) return false;
             current.claimMutation();
             current.minecraft().setScreen(new MenuVisibility.PlayerInventoryScreen(current.player()));
