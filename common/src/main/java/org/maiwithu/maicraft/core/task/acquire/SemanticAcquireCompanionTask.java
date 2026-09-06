@@ -33,6 +33,7 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.combat.Swing;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
@@ -48,7 +49,6 @@ import org.maiwithu.maicraft.core.task.trade.SemanticTradeTaskRecord;
 import org.maiwithu.maicraft.core.tools.CraftOps;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
 import org.maiwithu.maicraft.core.tools.ToolParse;
-import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
@@ -67,8 +67,6 @@ public final class SemanticAcquireCompanionTask
     private static final int MAX_REPORTED_ISSUES = 64;
     private static final int PLANNER_STEPS_PER_TICK = 1;
     private static final long PROGRESS_LEASE_TICKS = 60L * 20L;
-    private static final int LANDMARK_PROTECTION_RADIUS = 12;
-    private static final int MINE_TASK_SEARCH_REACH = 32 * 16 + 16;
     private static final long COLLECT_TICKS = 60L * 20L;
     private static final long MINE_MIN_TICKS = 60L * 20L;
     private static final long MINE_PER_UNIT_TICKS = 30L * 20L;
@@ -233,6 +231,16 @@ public final class SemanticAcquireCompanionTask
 
     @Override
     protected TaskState onTick() {
+        AcquisitionProtection protection = AcquisitionProtection.resolve(r.protectedLabels,
+                IntentRuntime.get().landmarks(), player.level().dimension().location().toString());
+        if (!protection.problems().isEmpty()) {
+            return failAcquisition("unresolved_protected_label",
+                    String.join("; ", protection.problems()), FailureType.TARGET_LOST);
+        }
+        return protection.run(this::tickAcquisition);
+    }
+
+    private TaskState tickAcquisition() {
         plannerStepsThisTick = 0;
         // This check deliberately precedes child advancement. A child may have made the semantic
         // fact true on the previous tick; no menu cleanup, recipe branch or mining swing is allowed
@@ -594,16 +602,6 @@ public final class SemanticAcquireCompanionTask
                             "acceptable_tool_count", tool.acceptableItemIds().size()));
             needs.push(toolNeed);
             renewProgressLease();
-            return TaskState.RUNNING;
-        }
-        List<String> protectionProblems = worldSourceProtectionProblems(MINE_TASK_SEARCH_REACH);
-        if (!protectionProblems.isEmpty()) {
-            addIssue("mine", "protected_area_scope_ambiguous",
-                    "the generic mining child can search a wider loaded field than the protected "
-                            + "areas it would need to exclude, so mining was not started",
-                    Map.of("protection_evidence", protectionProblems,
-                            "source_blocks", blockStrings(blocks)));
-            advanceSource(need);
             return TaskState.RUNNING;
         }
         if (!takePlannerStep()) return TaskState.RUNNING;
@@ -2065,56 +2063,10 @@ public final class SemanticAcquireCompanionTask
         return new NearbySurvey(safe, protectedCount, List.copyOf(samples));
     }
 
-    private List<String> worldSourceProtectionProblems(int reach) {
-        List<String> result = new ArrayList<>();
-        IntentRuntime runtime = IntentRuntime.get();
-        for (String label : r.protectedLabels) {
-            if (runtime.landmark(label) == null) result.add("unknown protected label: " + label);
-        }
-        String dimension = player.level().dimension().location().toString();
-        BlockPos feet = player.blockPosition();
-        for (IntentRuntime.Landmark landmark : runtime.landmarks()) {
-            Goal.WorldPosition position = landmark.position();
-            if (position.dimension() != null && !position.dimension().equals(dimension)) continue;
-            long dx = (long) position.x() - feet.getX();
-            long dz = (long) position.z() - feet.getZ();
-            if (dx * dx + dz * dz <= (long) reach * reach) {
-                result.add("remembered landmark inside child search scope: " + landmark.label());
-            }
-        }
-        return List.copyOf(result);
-    }
-
     private List<String> landmarkReasons(BlockPos position) {
-        List<String> result = new ArrayList<>();
-        IntentRuntime runtime = IntentRuntime.get();
-        String dimension = player.level().dimension().location().toString();
-        for (String label : r.protectedLabels) {
-            IntentRuntime.Landmark landmark = runtime.landmark(label);
-            if (landmark == null) {
-                result.add("unknown_protected_label:" + label);
-                continue;
-            }
-            if (insideLandmark(position, landmark, dimension)) {
-                result.add("protected_landmark:" + landmark.label());
-            }
-        }
-        for (IntentRuntime.Landmark landmark : runtime.landmarks()) {
-            if (insideLandmark(position, landmark, dimension)) {
-                result.add("remembered_landmark:" + landmark.label());
-            }
-        }
-        return result.stream().distinct().toList();
-    }
-
-    private static boolean insideLandmark(
-            BlockPos position, IntentRuntime.Landmark landmark, String dimension) {
-        Goal.WorldPosition center = landmark.position();
-        if (center.dimension() != null && !center.dimension().equals(dimension)) return false;
-        long dx = (long) position.getX() - center.x();
-        long dz = (long) position.getZ() - center.z();
-        return dx * dx + dz * dz
-                <= (long) LANDMARK_PROTECTION_RADIUS * LANDMARK_PROTECTION_RADIUS;
+        return NavigationSafetyContext.protectsMutation(position)
+                || NavigationSafetyContext.forbidsBody(position)
+                ? List.of("protected_area_cell") : List.of();
     }
 
     private int count(List<ResourceLocation> ids) {
