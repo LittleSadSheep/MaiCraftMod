@@ -34,6 +34,7 @@ final class PublicToolCatalog {
             {
               "worldPosition": {
                 "type":"object",
+                "description":"Full world coordinates. For travel with unknown height, omit target and use parameters.destination={x,z}; an optional y there is a height hint.",
                 "properties": {
                   "x":{"type":"integer"}, "y":{"type":"integer"}, "z":{"type":"integer"},
                   "dimension":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"}

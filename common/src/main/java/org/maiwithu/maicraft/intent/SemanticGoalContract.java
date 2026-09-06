@@ -30,6 +30,14 @@ final class SemanticGoalContract {
                 path + ".preferences", ability, "unknown_preference");
         validateTarget(goal, path, ability);
         validateConstraints(goal, path, ability);
+        if ("maicraft:travel".equals(ability)) {
+            try {
+                TravelDestination.validatePrecision(goal.parameters());
+                TravelDestination.fromGoal(goal);
+            } catch (IllegalArgumentException invalid) {
+                throw violation("invalid_travel_contract", path + ".parameters", ability, invalid.getMessage());
+            }
+        }
         if (MachineAbilityAdapter.supports(ability)) {
             try {
                 MachineAbilityAdapter.validate(goal);

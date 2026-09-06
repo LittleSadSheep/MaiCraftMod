@@ -162,10 +162,13 @@ public final class SemanticAbilityCatalog {
                             field("area_role", "ordinary|managed_settlement",
                                     "Optional typed policy, default ordinary. Use managed_settlement only when the player explicitly identifies this area as a managed base, city or settlement; labels themselves never imply this role.")));
             case "maicraft:travel" -> contract(
-                    "Reach a semantic destination; MaiCraft resolves and follows the route.",
+                    "Reach a destination area; ordinary travel accepts nearby reachable ground, while an explicit exact request requires one cell. Biome/coast discovery verifies the requested region rather than an invented precise point.",
                     targets("coordinates", "landmark", "player", "entity", "nearest", "area", "prior_result"),
                     fields(
-                            field("exact", "boolean", "Whether the exact Y cell matters."),
+                            field("destination", "object", "Travel-only coordinates {x,z,y?,dimension?}; omit target and other destination fields. Omit y only when height is unknown. Supplied y remains a height hint. Existing coordinates targets still require all three axes."),
+                            field("exact", "boolean", "Default false. True requires the exact x/y/z cell and a supplied or resolved height; use only when precise standing position matters."),
+                            field("horizontal_radius", "number", "Nonnegative arrival radius in X/Z blocks; default 3 for ordinary travel. Ignored when exact=true."),
+                            field("vertical_tolerance", "number", "Nonnegative allowed distance from a supplied Y hint; default 2. Omitted Y leaves elevation open. Ignored when exact=true."),
                             field("transport_mode", "auto|ground|jetpack|elevator", "Default auto selects available native travel. Ground uses ordinary navigation; jetpack/elevator require usable Create equipment or a native elevator and a located destination. Undiscovered coast/biome goals support ground/auto exploration. This grants no terrain-alteration permission."),
                             field("allow_water_bucket_fall", "boolean", "Allow temporary bucket water for falls to a located destination, without granting digging or scaffold placement. Default false."),
                             field("allow_landing_assists", "boolean", "Allow verified temporary landing aids from carried items, including water and boats, without granting excavation or scaffolding. Requires a located destination; default false."),

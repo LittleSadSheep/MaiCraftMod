@@ -74,6 +74,13 @@ public final class Schema {
             return this;
         }
 
+        public Builder optionalNumber(String name, String desc, double min) {
+            Map<String, Object> p = base("number", desc);
+            p.put("minimum", min);
+            props.put(name, p);
+            return this;
+        }
+
         /** Optional enum string — dropped from {@code required}. */
         public Builder optionalEnum(String name, String desc, String... values) {
             Map<String, Object> p = base("string", desc);

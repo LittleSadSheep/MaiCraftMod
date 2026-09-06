@@ -271,12 +271,24 @@ final class AbilityAdapter {
 
     private static IntentAction travel(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         JsonObject parameters = new JsonObject();
+        TravelDestination.validatePrecision(goal.parameters());
+        TravelDestination destination = TravelDestination.fromGoal(goal);
         TransportMode mode = TransportMode.parse(string(goal.parameters(), "transport_mode"));
         parameters.addProperty("transport_mode", mode.name().toLowerCase(java.util.Locale.ROOT));
         String block = string(goal.parameters(), "block_id");
         if (block == null) block = string(goal.parameters(), "block");
         if (block != null) {
+            if (bool(goal.parameters(), "exact", false))
+                throw new IllegalArgumentException("exact=true needs located x/y/z coordinates; a block search only selects an approach stance");
             parameters.addProperty("block", block);
+        } else if (destination != null) {
+            if (destination.dimension() != null
+                    && !destination.dimension().equals(player.level().dimension().location().toString())) {
+                return decision(goal, "Travel destination is in another dimension; reach that dimension first.",
+                        List.of(option("recover", "Use maicraft:travel_dimension to reach the destination dimension."),
+                                option("cancel", "Cancel travel.")));
+            }
+            destination.addCoordinates(parameters);
         } else {
             Goal.WorldPosition position = position(goal, player, runtime);
             if (position == null) {
@@ -295,6 +307,12 @@ final class AbilityAdapter {
                                     option("cancel", "Cancel without moving.")));
                 }
                 String exploreTarget = exploreTarget(goal);
+                if (bool(goal.parameters(), "exact", false)) {
+                    return decision(goal, "Exact travel needs a located destination with a known height first; "
+                                    + "discovery reaches a matching region without guessing one exact cell.",
+                            List.of(option("replace_goal", "Use exact=false for region discovery or provide a located destination."),
+                                    option("cancel", "Cancel travel.")));
+                }
                 if (mode == TransportMode.JETPACK || mode == TransportMode.ELEVATOR) {
                     return decision(goal, "Jetpack or elevator travel needs a located destination first; "
                                     + "an undiscovered coast or biome cannot supply a verified transport endpoint.",
@@ -326,8 +344,15 @@ final class AbilityAdapter {
                 return new IntentAction.Tool("explore", explore.toString());
             }
             parameters.addProperty("x", position.x());
-            if (bool(goal.parameters(), "exact", false)) parameters.addProperty("y", position.y());
+            parameters.addProperty("y", position.y());
             parameters.addProperty("z", position.z());
+        }
+        if (parameters.has("x")) {
+            parameters.addProperty("exact", bool(goal.parameters(), "exact", false));
+            for (String precision : List.of("horizontal_radius", "vertical_tolerance")) {
+                if (goal.parameters().has(precision))
+                    parameters.add(precision, goal.parameters().get(precision).deepCopy());
+            }
         }
         if (bool(goal.parameters(), "may_alter_terrain", false)
                 || bool(goal.preferences(), "may_alter_terrain", false)) {

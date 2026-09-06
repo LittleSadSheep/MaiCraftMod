@@ -43,4 +43,16 @@ public final class MovementOps {
                 x, y, z, block, Boolean.TRUE.equals(mayAlterTerrain), Boolean.TRUE.equals(allowWaterBucketFall),
                 TransportMode.parse(transportMode), Boolean.TRUE.equals(allowLandingAssists));
     }
+
+    /** Public travel keeps any supplied height as a hint unless exact standing was requested. */
+    public TaskRecord moveTo(Double x, Double y, Double z, String block, Boolean mayAlterTerrain,
+                             Boolean allowWaterBucketFall, String transportMode, Boolean allowLandingAssists,
+                             Boolean exact, Double horizontalRadius, Double verticalTolerance, ToolContext ctx) {
+        if (Boolean.TRUE.equals(exact) && (x == null || y == null || z == null))
+            throw new IllegalArgumentException("exact=true requires x, y and z; destination height cannot be guessed");
+        return new MoveToTaskRecord(ctx.toolCallId(), ctx.deadline(DEFAULT_TIMEOUT_TICKS),
+                x, y, z, block, Boolean.TRUE.equals(mayAlterTerrain), Boolean.TRUE.equals(allowWaterBucketFall),
+                TransportMode.parse(transportMode), Boolean.TRUE.equals(allowLandingAssists), Boolean.TRUE.equals(exact),
+                horizontalRadius == null ? 3 : horizontalRadius, verticalTolerance == null ? 2 : verticalTolerance);
+    }
 }
