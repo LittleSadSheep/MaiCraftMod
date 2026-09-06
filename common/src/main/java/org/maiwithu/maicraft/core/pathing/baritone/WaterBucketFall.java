@@ -17,12 +17,12 @@ public final class WaterBucketFall {
                 && !(support.getBlock() instanceof LiquidBlockContainer);
     }
 
-    static BlockPos waterCell(BlockHitResult hit, BlockState clicked, boolean pickup) {
+    public static BlockPos waterCell(BlockHitResult hit, BlockState clicked, boolean pickup) {
         return (pickup || clicked.getBlock() instanceof LiquidBlockContainer
                 ? hit.getBlockPos() : hit.getBlockPos().relative(hit.getDirection())).immutable();
     }
 
-    static boolean canRecover(BlockState water, boolean placedByThisFall, boolean protectedTarget) {
+    public static boolean canRecover(BlockState water, boolean placedByThisFall, boolean protectedTarget) {
         return placedByThisFall && !protectedTarget && water.is(Blocks.WATER)
                 && water.getFluidState().isSource();
     }

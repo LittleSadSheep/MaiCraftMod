@@ -1,9 +1,9 @@
 package org.maiwithu.maicraft.core.pathing.baritone;
 
 import baritone.api.Settings;
-import baritone.pathing.movement.movements.MovementFall;
 import it.unimi.dsi.fastutil.longs.LongSets;
-import java.lang.reflect.Proxy;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -18,13 +18,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
-import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
-import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
-import sun.misc.Unsafe;
 
 /** Production permission wiring, native bucket geometry and confirmed clutch ownership. */
 public final class WaterBucketFallTest {
@@ -60,7 +56,7 @@ public final class WaterBucketFallTest {
         check(!WaterBucketFall.canRecover(water, false, false), "never remove a pre-existing pool");
         check(!WaterBucketFall.canRecover(water, true, true), "explicit protection also guards recovery");
         check(WaterBucketFall.canRecover(water, true, false), "confirmed own clutch water is recoverable");
-        ownership();
+        singleStrategyBoundary();
         System.out.println("WaterBucketFallTest: passed");
     }
 
@@ -78,26 +74,19 @@ public final class WaterBucketFallTest {
         check(PlayerNav.ContextProvider.WATER_ONLY.permit() == TerrainPermit.WATER_ONLY, "public navigation provider");
     }
 
-    private static void ownership() throws Exception {
-        var memoryField = Unsafe.class.getDeclaredField("theUnsafe"); memoryField.setAccessible(true);
-        var memory = (Unsafe) memoryField.get(null);
-        MovementFall fall = (MovementFall) memory.allocateInstance(MovementFall.class);
-        check(!fall.hasPlacedWater(), "an existing pool has no owned placement receipt");
-        var ctor = NativeActionReceipt.class.getDeclaredConstructors()[0]; ctor.setAccessible(true);
-        var context = proxy(LocalPlayerContext.class, (p, m, a) -> 1L);
-        var finish = NativeActionReceipt.class.getDeclaredMethod("finish", NativeActionReceipt.Status.class, String.class);
-        finish.setAccessible(true);
-        for (var status : new NativeActionReceipt.Status[]{NativeActionReceipt.Status.UNCERTAIN, NativeActionReceipt.Status.CONFIRMED_APPLIED}) {
-            var receipt = (NativeActionReceipt) ctor.newInstance(NativeActionReceipt.Kind.USE_ITEM, context, 20, 2, NativeConfirmation.pending(), null, null);
-            fall.waterPlacementSubmitted(receipt);
-            check(!fall.hasPlacedWater(), "an unconfirmed submission is not ownership evidence");
-            finish.invoke(receipt, status, "test native outcome");
-            check(fall.hasPlacedWater() == (status == NativeActionReceipt.Status.CONFIRMED_APPLIED), "only confirmed placement owns recovery");
-        }
-    }
-
-    private static <T> T proxy(Class<T> type, java.lang.reflect.InvocationHandler handler) {
-        return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type}, handler));
+    private static void singleStrategyBoundary() throws Exception {
+        Path root = Path.of(System.getProperty("user.dir")).toAbsolutePath();
+        while (root != null && !Files.isDirectory(root.resolve("common/src/main/java/baritone"))) root = root.getParent();
+        check(root != null, "run from the repository");
+        String base = "common/src/main/java/";
+        String fall = Files.readString(root.resolve(base + "baritone/pathing/movement/movements/MovementFall.java"));
+        String cost = Files.readString(root.resolve(base + "baritone/pathing/movement/movements/MovementDescend.java"));
+        String bridge = Files.readString(root.resolve(base + "org/maiwithu/maicraft/core/pathing/baritone/EmbeddedBaritoneActionBridge.java"));
+        check(fall.contains("LandingAssistSession") && cost.contains("landingPlans(")
+                        && !fall.contains("willPlaceBucket") && !fall.contains("waterPlacement")
+                        && !cost.contains("hasWaterBucket") && !bridge.contains("startWaterUse")
+                        && !bridge.contains("submitItemUse"),
+                "water must use the same guarded plan/session, never a second legacy admission or receipt path");
     }
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }
     private record Pool(BlockPos source) implements BlockGetter {

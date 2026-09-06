@@ -31,9 +31,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.*;
 import net.minecraft.world.item.enchantment.effects.EnchantmentAttributeEffect;
 import net.minecraft.world.level.Level;
@@ -52,7 +49,6 @@ import static baritone.api.pathing.movement.ActionCosts.COST_INF;
  */
 public class CalculationContext {
 
-    private static final ItemStack STACK_BUCKET_WATER = new ItemStack(Items.WATER_BUCKET);
 
     public final boolean safeForThreadedUse;
     public final IBaritone baritone;
@@ -60,7 +56,8 @@ public class CalculationContext {
     public final WorldData worldData;
     public final BlockStateInterface bsi;
     public final ToolSet toolSet;
-    public final boolean hasWaterBucket;
+    public final org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot landingInventory;
+    public final org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot landingBoats;
     public final boolean hasThrowaway;
     public final boolean canSprint;
     protected final double placeBlockCost; // protected because you should call the function instead
@@ -148,10 +145,11 @@ public class CalculationContext {
         this.hasThrowaway = forceTerrainMutation
                 || (Baritone.settings().allowPlace.value
                 && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway());
-        this.hasWaterBucket = !world.dimensionType().ultraWarm()
-                && (forceTerrainMutation
-                || (Baritone.settings().allowWaterBucketFall.value
-                && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER))));
+        this.landingInventory = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot.capture(
+                player, org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.current(),
+                world.dimensionType().ultraWarm());
+        this.landingBoats = landingInventory.othersAllowed()
+                ? org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.capture(player) : null;
         this.canSprint = Baritone.settings().allowSprint.value && player.getFoodData().getFoodLevel() > 6;
         this.placeBlockCost = Baritone.settings().blockPlacementPenalty.value;
         this.allowBreak = forceTerrainMutation || Baritone.settings().allowBreak.value;
@@ -228,6 +226,32 @@ public class CalculationContext {
 
     public final IBaritone getBaritone() {
         return baritone;
+    }
+
+    public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet) {
+        if (!bsi.worldContainsLoadedChunk(feet.getX(), feet.getZ())) return List.of();
+        return landingInventory.plans(bsi.access, feet,
+                pos -> isPossiblyProtected(pos.getX(), pos.getY(), pos.getZ())).stream()
+                .filter(plan -> org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistGeometry.safe(
+                        bsi.access, pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()), plan,
+                        landingInventory.width(), landingInventory.height(), maicraftPolicy.forbiddenBodyCells())).toList();
+    }
+
+    public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet, int drop) {
+        return landingPlans(feet).stream().filter(plan -> plan.existing()
+                || plan.kind() != org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.WATER
+                || drop <= maxFallHeightBucket).toList();
+    }
+
+    public boolean canLandWithoutDamage(int startY, int supportY, BlockState support) {
+        return fallDamageBudget.damage(Math.max(0, startY - supportY - 1),
+                FallDamageBudget.Landing.of(support), true) == 0;
+    }
+
+    public org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot.Plan landingBoatPlan(BlockPos source, BlockPos feet) {
+        if (landingBoats == null || isPossiblyProtected(feet.getX(), feet.getY(), feet.getZ())) return null;
+        return landingBoats.plan(bsi.access, source, feet,
+                pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()));
     }
 
     /** A loaded, supported landing is admitted whenever the frozen damage estimate is nonfatal. */

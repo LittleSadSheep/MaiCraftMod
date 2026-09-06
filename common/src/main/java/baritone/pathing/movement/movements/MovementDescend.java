@@ -144,7 +144,9 @@ public class MovementDescend extends Movement {
             // and potentially replace the water we're going to fall into
             return false;
         }
-        if (!MovementHelper.canWalkThrough(context, destX, y - 2, destZ, below)) {
+        if (!MovementHelper.canWalkThrough(context, destX, y - 2, destZ, below)
+                && context.landingPlans(new BlockPos(destX, y - 2, destZ)).stream()
+                        .noneMatch(org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan::existing)) {
             return false;
         }
         double costSoFar = 0;
@@ -160,6 +162,12 @@ public class MovementDescend extends Movement {
             BlockState ontoBlock = context.get(destX, newY, destZ);
             int unprotectedFallHeight = fallHeight - (y - effectiveStartHeight); // equal to fallHeight - y + effectiveFallHeight, which is equal to -newY + effectiveFallHeight, which is equal to effectiveFallHeight - newY
             double tentativeCost = WALK_OFF_BLOCK_COST + FALL_N_BLOCKS_COST[unprotectedFallHeight] + frontBreak + costSoFar;
+            if (reachedMinimum && context.landingPlans(new BlockPos(destX, newY, destZ)).stream()
+                    .anyMatch(org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan::existing)
+                    && MovementHelper.canWalkOn(context, destX, newY - 1, destZ)) {
+                res.x = destX; res.y = newY; res.z = destZ; res.cost = tentativeCost;
+                return true;
+            }
             if (reachedMinimum && MovementHelper.isWater(ontoBlock)) {
                 if (!MovementHelper.canWalkThrough(context, destX, newY, destZ, ontoBlock)) {
                     return false;
@@ -204,6 +212,13 @@ public class MovementDescend extends Movement {
             if (!MovementHelper.canWalkOn(context, destX, newY, destZ, ontoBlock)) {
                 return false;
             }
+            if (reachedMinimum && !context.canLandWithoutDamage(effectiveStartHeight, newY, ontoBlock)
+                    && (!context.landingPlans(new BlockPos(destX, newY + 1, destZ), effectiveStartHeight - newY - 1).isEmpty()
+                        || context.landingBoatPlan(new BlockPos(x, y, z), new BlockPos(destX, newY + 1, destZ)) != null)) {
+                res.x = destX; res.y = newY + 1; res.z = destZ;
+                res.cost = tentativeCost + context.placeBucketCost();
+                return true;
+            }
             if (reachedMinimum && context.canSurviveFall(x, y, z, effectiveStartHeight,
                     destX, newY, destZ, ontoBlock)) {
                 res.x = destX;
@@ -212,18 +227,7 @@ public class MovementDescend extends Movement {
                 res.cost = tentativeCost;
                 return false;
             }
-            if (reachedMinimum && context.hasWaterBucket && unprotectedFallHeight <= context.maxFallHeightBucket + 1
-                    && org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.canPlace(
-                            context.get(destX, newY + 1, destZ), ontoBlock,
-                            context.isPossiblyProtected(destX, newY + 1, destZ))) {
-                res.x = destX;
-                res.y = newY + 1;// this is the block we're falling onto, so dest is +1
-                res.z = destZ;
-                res.cost = tentativeCost + context.placeBucketCost();
-                return true;
-            } else {
-                return false;
-            }
+            return false;
         }
     }
 
