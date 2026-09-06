@@ -7,6 +7,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.entity.InputDriverTest.main(args);
         org.maiwithu.maicraft.core.pathing.util.SwimAirBudgetTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicyTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BlueprintImportTest.main(args);
         org.maiwithu.maicraft.intent.persistence.IntentStateStoreTest.main(args);
         org.maiwithu.maicraft.core.task.move.MoveToContractTest.main(args);

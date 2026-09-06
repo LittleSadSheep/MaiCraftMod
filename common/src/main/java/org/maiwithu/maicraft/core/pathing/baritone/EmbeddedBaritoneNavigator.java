@@ -478,8 +478,10 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public boolean yieldForExternalAction() {
-        if (!isSafeToCancel()) return false;
+        // The caller may only poll this method until it can dig/use an item. Register the
+        // pending pause first so an unsafe movement keeps receiving ticks until it can yield.
         pause();
+        if (!isSafeToCancel()) return false;
         var context = ClientRuntime.requireContext(player);
         return context.permitsNativeActions() && context.mutationAvailable();
     }
