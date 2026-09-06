@@ -1,65 +1,129 @@
 # MaiCraft
 
-MaiCraft 是一个 Minecraft 1.21.1 客户端 Mod：LLM 表达游玩意图、分析环境并提出机器的组件、连接、风格与约束，Mod 内的规划器、任务系统和游戏 API 负责具体布局、校验、寻路、操作、建造与结果确认。
+![Minecraft 1.21.1](https://img.shields.io/badge/Minecraft-1.21.1-62b47a)
+![Java 21](https://img.shields.io/badge/Java-21-e76f00)
+![Fabric & NeoForge](https://img.shields.io/badge/Loader-Fabric%20%7C%20NeoForge-6f4cbb)
+![License GPL-3.0-only](https://img.shields.io/badge/License-GPL--3.0--only-blue)
 
-当前正在进行首次完整迁移，尚未通过实机验收；在真实 Minecraft 测试通过前，不把它标记为可用版本。
+> 让支持 MCP 的 AI 代理在 Minecraft 中感知环境、规划目标，并通过真实的第一人称操作完成任务。
 
-## 架构
+MaiCraft 是一个仅客户端运行的 Minecraft Mod。它在游戏进程内提供本地
+[Model Context Protocol（MCP）](https://modelcontextprotocol.io/) 服务，把大模型给出的语义目标转换为寻路、采集、合成、交互、建造等具体游戏行为。
 
-- 玩家只安装一个 MaiCraft Mod，不需要 Python 项目或伴随进程。
-- Mod 在 JVM 内嵌 Streamable HTTP MCP，默认地址为 `http://127.0.0.1:8766/mcp`。
-- MCP 使用四个入口：`maicraft_perceive`、`maicraft_plan`、`maicraft_execute`、`maicraft_task`；能力契约可以扩展。
-- LLM 可提交机器的组件图、连接意图、风格、高层约束和来自真实菜单观察的条目引用；精确方块位置、状态、施工顺序、路径和点击全部由 Mod 负责，公开 MCP 不接受逐格蓝图。
-- 所有身体动作共用一个 `LocalPlayer` 任务调度器，并通过第一人称输入与原生客户端交互完成。
-- `common`, `fabric`, and `neoforge` are platform source modules in this repository; each loader build produces one installable Mod jar.
+MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需准备一个支持 Streamable HTTP MCP 的 AI 客户端和可用模型。服务端无需安装 MaiCraft。
 
-## 支持平台
+> [!WARNING]
+> MaiCraft 目前处于 `0.1.0` 预览阶段，尚未发布稳定构建，也没有完成覆盖模组整合包的实机验收。请只在备份过的测试世界中使用，不要把它当作无人值守的生产级代理。
 
-- Fabric 1.21.1
-- NeoForge 1.21.1
-- Java 21
+## 主要能力
 
-## 机器理解、设计与操作
+- **感知与记忆**：读取当前状态、周边环境、任务进度、地标和机器快照。
+- **移动与探索**：前往坐标或语义地点、寻找结构和实体、跨维度旅行，并处理游泳、开门和受限地形改造。
+- **生存流程**：采集物品、合成、烹饪、交易、整理容器、进食、装备、钓鱼、睡觉和照明。
+- **建造与进度目标**：根据用途、尺寸、风格和材料策略生成并执行建筑计划，也可组合多个目标形成连续任务。
+- **战斗与里程碑**：处理防御或明确授权的战斗任务，并支持末影龙、鞘翅等长流程目标。
+- **模组机器**：观察和分析 Create、AE2、Mekanism 等机器结构；基于真实菜单证据操作已支持的接口，并可规划 Create 机械动力连接。
+- **任务控制**：异步查询、暂停、恢复和取消任务；遇到歧义、风险或缺失条件时返回可处理的决策请求。
 
-采用“标记 → 勘察 → LLM 分析／表达设计意图 → Mod 编译布局并原生执行 → 再观察”的闭环，支持地图内已有机器和新设计。观察是通用的；施工必须由 Mod 内已有的通用规划器或专用适配器编译，不能编译的任意模组机器会明确返回 `semantic_machine_layout_compiler_unavailable`，不会反过来要求 LLM 逐格放置。
+与逐格蓝图或远程点击脚本不同，MCP 客户端只描述“要达成什么”。方块位置、路径、施工顺序、菜单操作、重试和结果校验由 MaiCraft 在游戏内负责。
 
-- `maicraft:inspect_machine`：按地标或当前位置标记机器，返回注册名、方块属性、相对结构、可见部件证据、候选邻接及快照。相邻不代表连通；未知状态和截断会明确标出。
-- `maicraft:design_machine`：校验 LLM 提出的组件连接图、风格、高层空间／维护／吞吐约束与物料数量；按目标产物读取当前客户端同步的配方证据。它不接收方块坐标、状态或施工脚本。
-- `maicraft:build_machine`：请求 Mod 把同一份语义设计编译成实体机器。当前没有匹配的原生布局编译器时会明确返回“不支持”，保持现场不变；逐格蓝图不是恢复选项。
-- `maicraft:modify_machine`：调用已有的高层专用修改能力；当前包括由 Mod 自动规划 Create 机械动力连接的 `connect_mechanical_power`。
-- `maicraft:operate_machine`：打开指定机器的原生菜单，根据菜单观察执行投入／取出、控制现有拉杆，或通过 AE2 终端取料与提交已有合成模式。
+## MCP 入口与语义能力
 
-结构观察不等于知道机器的所有设置，建造完成也不等于产线已通过运行测试。AE2 部件、化学品／流体接口、侧面配置、过滤器和特殊 GUI 控件需要相应原生接口的真实证据；未覆盖的接口会说明技术缺口，不伪造配置或产量。
+MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
-首先用 `maicraft_perceive(view="abilities", focus="maicraft:inspect_machine")` 读取契约，例如提交：
+| 工具 | 用途 |
+| --- | --- |
+| `maicraft_perceive` | 读取游戏状态、能力契约、任务、地标和机器证据 |
+| `maicraft_plan` | 将语义目标编译为计划，但不立即执行 |
+| `maicraft_execute` | 启动语义目标或已编译计划，并返回任务 ID |
+| `maicraft_task` | 查询、暂停、恢复、取消任务，或回答任务提出的问题 |
 
-```json
-{
-  "goal": {
-    "ability": "maicraft:inspect_machine",
-    "outcome": "观察这套加工线的结构、输入输出和动力关系",
-    "target": {"kind": "current_place"},
-    "parameters": {"label": "加工线", "radius": 4}
-  }
-}
-```
+四个入口不等于只有四种功能。当前运行时注册了 32 项 `maicraft:*` 语义能力，包括 `inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `maicraft_plan` 或 `maicraft_execute`。
 
-把它传给 `maicraft_execute` 后，用返回的 `task_id` 查询 `maicraft_task(action="get")`。完整机器信息在 `completed_steps[].result.data.machine`；`maicraft_perceive(view="machines")` 返回当前会话的快照摘要。LLM 可以据此解释现有结构、提出缺失证据，并描述组件、连接、风格与高层约束；Mod 决定具体布局和动作。原生菜单打开后，`maicraft_perceive(view="machine_menu")` 提供菜单证据与事务凭据。
+每项能力的参数和限制由 `maicraft_perceive(view="abilities")` 动态公开。AI 客户端应先读取能力契约，再提交目标，而不是猜测方块坐标、物品栏槽位或内部动作。
 
-快照只在当前世界会话内有效，修改前复查，使用后重新观察。单次范围与输出上限用于控制客户端工作量；大型机器可分区域勘察与施工。已有用户授权可以贯穿整个流程，标记位置本身不会自动授予更改其他玩家机器的权限。
+## 快速开始
 
-设计原则、语义／执行边界和实机验收矩阵见 [机器能力 ADR](docs/adr/0009-machine-evidence-design-and-execution.md)。
+### 运行要求
 
-## 构建
+| 项目 | 要求 |
+| --- | --- |
+| Minecraft | `1.21.1` |
+| Java | `21` |
+| Fabric | Fabric Loader `0.18.1+`，并安装 Fabric API |
+| NeoForge | `21.1.233+` |
+| 安装位置 | 客户端 |
 
-为避免占满机器资源，构建必须禁用并行并只使用一个 worker：
+### 从源码构建
+
+当前没有稳定版下载，请克隆仓库后自行构建：
 
 ```powershell
-.\gradlew.bat build --no-parallel --max-workers=1 --no-daemon
+git clone https://github.com/LittleSadSheep/MaiCraftMod.git
+cd MaiCraftMod
+.\gradlew.bat build --no-daemon --no-parallel --max-workers=1
 ```
 
-`common:check` 包含 `machineRegression`，覆盖结构推断、设计验证、原生请求边界与机器能力参数。编译和回归测试不能替代装有目标模组的实机验收。
+Linux 或 macOS 使用：
+
+```bash
+./gradlew build --no-daemon --no-parallel --max-workers=1
+```
+
+构建产物位于：
+
+- Fabric：`fabric/build/libs/maicraft-fabric-1.21.1-<version>.jar`
+- NeoForge：`neoforge/build/libs/maicraft-neoforge-1.21.1-<version>.jar`
+
+将与你的加载器匹配、文件名不含 `sources` 的 JAR 放入客户端 `mods` 目录。Fabric 版本还需要 Fabric API。
+
+### 连接 MCP 客户端
+
+1. 启动装有 MaiCraft 的 Minecraft 客户端。
+2. 在游戏中执行 `/maicraft status`，确认 MCP 显示为可用。
+3. 在支持 Streamable HTTP 的 MCP 客户端中添加以下地址：
+
+```text
+http://127.0.0.1:8766/mcp
+```
+
+4. 进入世界后，让 AI 客户端先读取 `maicraft_perceive` 提供的能力，再开始任务。
+
+默认服务只监听本机回环地址，但当前默认配置不启用 Bearer Token。**不要通过端口转发、反向代理或隧道将 `8766` 端口暴露给其他设备或公网。**
+
+## 当前限制
+
+- 所有执行依赖客户端实际加载到的世界状态；未观察到的信息会保持未知，不会被假定为事实。
+- 自动化会操作本地玩家的真实身体、物品和方块。破坏地形、攻击、丢弃物品或修改机器等行为需要明确授权，但测试世界和备份仍然必不可少。
+- 通用机器观察不代表通用机器施工。没有原生布局编译器或菜单适配器时，任务会明确返回不支持，而不会让大模型临时生成逐格操作。
+- AE2、Create、Mekanism 及其他模组的兼容能力仍在扩展；特殊 GUI、过滤器、侧面配置和动态配方可能无法操作。
+- Fabric 与 NeoForge 构建可以通过自动回归测试，但这不能替代真实客户端、服务器和整合包测试。
+
+## 开发
+
+仓库采用多加载器结构：
+
+| 目录 | 内容 |
+| --- | --- |
+| `common/` | MCP、语义任务、第一人称执行、寻路与共享游戏逻辑 |
+| `fabric/` | Fabric 客户端入口和加载器配置 |
+| `neoforge/` | NeoForge 客户端入口和加载器配置 |
+| `third_party/baritone/` | 内嵌寻路代码及其许可证 |
+
+完整验证：
+
+```powershell
+.\gradlew.bat check --no-daemon --no-parallel --max-workers=1
+```
+
+提交问题时请附上 Minecraft 版本、加载器及版本、相关模组列表、复现步骤，以及日志中与 `MaiCraft` 有关的片段。欢迎提交聚焦单一问题的 Issue 和 Pull Request。
 
 ## 许可证
 
-MaiCraft 全部代码采用 GNU General Public License v3.0 only（SPDX：`GPL-3.0-only`），详见 [LICENSE](LICENSE)。
+MaiCraft 以 [GNU General Public License v3.0 only](LICENSE) 发布（SPDX：`GPL-3.0-only`）。仓库包含的第三方代码仍适用各自的许可证；Baritone 相关声明见 [`third_party/baritone/`](third_party/baritone/)。
+
+## 鸣谢
+
+- Minecraft 与 Mojang Studios
+- [minecraft-numen](https://github.com/Dwinovo/minecraft-numen)
+- [Baritone](https://github.com/cabaletta/baritone)
