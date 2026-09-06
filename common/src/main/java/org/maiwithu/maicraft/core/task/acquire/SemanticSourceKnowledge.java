@@ -263,13 +263,15 @@ public final class SemanticSourceKnowledge {
     }
 
     private static boolean hasCorrectTool(LocalPlayer player, BlockState state) {
-        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
-            if (player.getInventory().getItem(slot).isCorrectToolForDrops(state)) return true;
+        for (int slot = 0; slot < Math.min(36, player.getInventory().getContainerSize()); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if ((!stack.isDamageableItem() || stack.getDamageValue() < stack.getMaxDamage())
+                    && stack.isCorrectToolForDrops(state)) return true;
         }
         return false;
     }
 
-    private static int tierRank(BlockState state) {
+    static int tierRank(BlockState state) {
         if (state.is(BlockTags.NEEDS_DIAMOND_TOOL)) return 3;
         if (state.is(BlockTags.NEEDS_IRON_TOOL)) return 2;
         if (state.is(BlockTags.NEEDS_STONE_TOOL)) return 1;
@@ -298,7 +300,7 @@ public final class SemanticSourceKnowledge {
         };
     }
 
-    private static String toolFamily(BlockState state) {
+    static String toolFamily(BlockState state) {
         if (state.is(BlockTags.MINEABLE_WITH_PICKAXE)) return "pickaxe";
         if (state.is(BlockTags.MINEABLE_WITH_AXE)) return "axe";
         if (state.is(BlockTags.MINEABLE_WITH_SHOVEL)) return "shovel";

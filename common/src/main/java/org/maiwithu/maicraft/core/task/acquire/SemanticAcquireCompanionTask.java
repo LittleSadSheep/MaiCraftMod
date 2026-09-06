@@ -21,6 +21,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -33,6 +34,7 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.combat.Swing;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
@@ -102,6 +104,10 @@ public final class SemanticAcquireCompanionTask
         int huntSearchAttempts;
         boolean huntSearchExpandedView;
         boolean miningToolPrerequisitePushed;
+        int preferredToolTierCap = 3;
+        boolean stockOnlyTool;
+        boolean toolPrerequisite;
+        boolean efficientBatchStarted;
         boolean effectsObserved;
         boolean decisionRequired;
         ResourceLocation preferredTradeOutput;
@@ -562,8 +568,15 @@ public final class SemanticAcquireCompanionTask
             advanceSource(need);
             return TaskState.RUNNING;
         }
-        SemanticSourceKnowledge.ToolRequirement tool =
-                SemanticSourceKnowledge.missingTool(player, blocks);
+        WorkToolPreparation.Choice workTool = WorkToolPreparation.missing(player, blocks,
+                need.efficientBatchStarted ? Math.max(WorkToolPreparation.BATCH_SIZE, missing(need)) : missing(need),
+                toolMaterialBudget(Items.IRON_INGOT), toolMaterialBudget(Items.DIAMOND),
+                need.preferredToolTierCap);
+        int bootstrap = workTool != null && !workTool.stockOnly()
+                ? WorkToolPreparation.bootstrapLimit(player, blocks) : 0;
+        SemanticSourceKnowledge.ToolRequirement tool = SemanticSourceKnowledge.missingTool(player, blocks);
+        if (tool == null && bootstrap == 0 && workTool != null) tool = workTool.requirement();
+        boolean stockOnlyUpgrade = workTool != null && tool == workTool.requirement() && workTool.stockOnly();
         if (tool != null) {
             if (need.miningToolPrerequisitePushed) {
                 addIssue("mine", "wrong_tool_prerequisite_unmet",
@@ -588,15 +601,27 @@ public final class SemanticAcquireCompanionTask
             }
             Set<ResourceLocation> lineage = new LinkedHashSet<>(need.lineageItems);
             lineage.addAll(toolItems);
+            List<SemanticAcquireTaskRecord.Source> toolSources = new ArrayList<>(need.allowedSources);
+            // Source restrictions describe how to obtain the requested material. Making its
+            // work tool remains a prerequisite, even for a mine-only material request.
+            if (!toolSources.contains(SemanticAcquireTaskRecord.Source.CRAFT))
+                toolSources.add(SemanticAcquireTaskRecord.Source.CRAFT);
+            if (stockOnlyUpgrade) {
+                toolSources = new ArrayList<>(List.of(SemanticAcquireTaskRecord.Source.INVENTORY,
+                        SemanticAcquireTaskRecord.Source.CRAFT));
+                if (StockEvidence.latest(player).map(StockEvidence.Snapshot::supportsToolSupply).orElse(false))
+                    toolSources.add(SemanticAcquireTaskRecord.Source.STORAGE);
+            }
             Need toolNeed = new Need(
                     toolItems, count(toolItems) + 1,
                     need.depth + 1, lineage, need.lineageRecipes, Set.of(),
-                    need.allowedSources);
+                    toolSources);
+            toolNeed.stockOnlyTool = stockOnlyUpgrade;
+            toolNeed.toolPrerequisite = true;
             toolNeed.lastObservedCount = count(toolNeed.itemIds);
             need.miningToolPrerequisitePushed = true;
             addIssue("mine", "preparing_harvesting_tool",
-                    "a suitable harvesting tool is a semantic prerequisite for the observed "
-                            + "source block family",
+                    "prepare a durable efficient tool before this batch, using available materials",
                     Map.of("tool_family", tool.toolFamily(),
                             "minimum_tier", tool.minimumTier(),
                             "acceptable_tool_count", tool.acceptableItemIds().size()));
@@ -606,17 +631,30 @@ public final class SemanticAcquireCompanionTask
         }
         if (!takePlannerStep()) return TaskState.RUNNING;
         need.attempted(SemanticAcquireTaskRecord.Source.MINE);
-        int deficit = Math.min(256, missing(need));
+        need.miningToolPrerequisitePushed = false;
+        int deficit = WorkToolPreparation.batchLimit(player, blocks, Math.min(256, missing(need)));
+        if (bootstrap > 0) deficit = Math.min(deficit, bootstrap);
         long now = player.level().getGameTime();
         long budget = Math.max(MINE_MIN_TICKS, deficit * MINE_PER_UNIT_TICKS);
         Set<Item> progressItems = need.itemIds.stream()
                 .map(BuiltInRegistries.ITEM::get)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        boolean efficient = MineBlockTaskRecord.hasEfficientTool(player, blocks);
+        need.efficientBatchStarted |= efficient && bootstrap == 0 && missing(need) >= WorkToolPreparation.BATCH_SIZE;
         MineBlockTaskRecord record = new MineBlockTaskRecord(
                 childId("mine"), now + budget, blocks, deficit, blockLabel(blocks),
-                progressItems);
+                progressItems, efficient);
         return startChild(need, SemanticAcquireTaskRecord.Source.MINE,
                 record, "mine BlockItem-derived or semantic source blocks");
+    }
+
+    private long toolMaterialBudget(Item item) {
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
+        int reserved = needs.stream().filter(need -> need.itemIds.contains(id))
+                .mapToInt(need -> need.requiredFinalCount).max().orElse(0);
+        long carried = PlayerInv.buildableCount(player.getInventory(), item);
+        long external = StockEvidence.latest(player).map(stock -> stock.storedCount(id)).orElse(0L);
+        return Math.max(0, carried + Math.min(external, Long.MAX_VALUE - carried) - reserved);
     }
 
     private TaskState attemptCook(Need need) {
@@ -924,6 +962,14 @@ public final class SemanticAcquireCompanionTask
         if (completedSource == SemanticAcquireTaskRecord.Source.MINE
                 && result != null && result.data() != null
                 && "wrong_tool".equals(result.data().get("failure_type"))) {
+            if (completedRecord instanceof MineBlockTaskRecord mine && mine.requireEfficientTool) {
+                completedNeed.miningToolPrerequisitePushed = false;
+                completedNeed.plannedSourceOrder = null;
+                completedNeed.exhaustedSources.remove(SemanticAcquireTaskRecord.Source.MINE);
+                addIssue("mine", "work_tool_exhausted", "settled the batch's drops; prepare a replacement work tool",
+                        Map.of("gathered", progress));
+                return TaskState.RUNNING;
+            }
             addIssue("mine", "wrong_tool",
                     "the mining child rejected the current harvesting tools; the next source "
                             + "decision is based on structured failure_type evidence",
@@ -1488,6 +1534,15 @@ public final class SemanticAcquireCompanionTask
                     "a recursive recipe need ended without its parent",
                     FailureType.INTERNAL);
         }
+        if (need.stockOnlyTool && !need.decisionRequired) {
+            parent.preferredToolTierCap = 1;
+            parent.miningToolPrerequisitePushed = false;
+            parent.effectsObserved |= need.effectsObserved;
+            addIssue("mine", "tool_upgrade_stock_unavailable",
+                    "the upgrade could not be supplied from existing stock; prepare the ordinary work tool instead",
+                    Map.of("attempted_tool_ids", itemStrings(need.itemIds)));
+            return TaskState.RUNNING;
+        }
         if (need.decisionRequired) {
             addIssue("planner", "prerequisite_decision_required",
                     "a recursive prerequisite exhausted every non-decision source and reached a "
@@ -1542,6 +1597,7 @@ public final class SemanticAcquireCompanionTask
         if (needs.isEmpty()) return;
         Need parent = needs.peek();
         parent.effectsObserved |= satisfied.effectsObserved;
+        if (satisfied.toolPrerequisite) parent.miningToolPrerequisitePushed = false;
         if (satisfied.effectsObserved && satisfied.parentRecipeIds.stream()
                 .anyMatch(parent.committedRecipeIds::contains)) {
             parent.committedRecipeEffectsObserved = true;
