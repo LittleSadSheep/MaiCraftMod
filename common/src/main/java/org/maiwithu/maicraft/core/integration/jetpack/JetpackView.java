@@ -30,6 +30,15 @@ final class JetpackView {
         return new Look(yaw, Mth.clamp(pitch, -55, landing ? 75 : 45));
     }
 
+    static Vec3 focus(Vec3 position, Vec3 aim, Vec3 ahead) {
+        Vec3 step = aim.subtract(position), glance = ahead.subtract(position);
+        if (step.horizontalDistance() < 0.3) return ahead;
+        // Keep the current leg inside the 55-degree steering gate until we reach the corner.
+        double dot = step.x * glance.x + step.z * glance.z;
+        return dot >= Math.cos(Math.PI / 4) * step.horizontalDistance() * glance.horizontalDistance()
+                && glance.horizontalDistance() > 0.3 ? ahead : aim;
+    }
+
     static BodyControlPort.Movement command(Vec3 position, Vec3 velocity, Vec3 aim, float actualYaw,
                                             boolean landing, JetpackNativeAdapter.Snapshot power) {
         Vec3 delta = aim.subtract(position);

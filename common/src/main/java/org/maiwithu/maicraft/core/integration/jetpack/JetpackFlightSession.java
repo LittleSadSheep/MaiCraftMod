@@ -29,7 +29,9 @@ public final class JetpackFlightSession implements TransportSession {
     private Vec3 landing;
     private double approachHeight;
     private Vec3 holdPoint;
-    private Float flightYaw;
+    private Vec3 steeringTarget;
+    private JetpackFastDescent fastDescent;
+    private Vec3 fastDescentTarget;
     private boolean repaired;
     private boolean stopping, exiting, effects, uncertain, originalActive, originalHover, changedActive, changedHover, grounded;
     private long epoch = -1, revision, lastTick = Long.MIN_VALUE, waypointTick;
@@ -55,6 +57,7 @@ public final class JetpackFlightSession implements TransportSession {
         this.target = target;
         this.platform = java.util.List.copyOf(platform);
         this.forbidden = LongSets.unmodifiable(new LongOpenHashSet(forbiddenBodyCells));
+        fastDescent = new JetpackFastDescent(this.forbidden);
     }
     public static Probe probe(LocalPlayerContext ctx, Vec3 target) { return probe(ctx, target, LongSets.emptySet()); }
     public static Probe probe(LocalPlayerContext ctx, Vec3 target, LongSet forbidden) {
@@ -85,6 +88,13 @@ public final class JetpackFlightSession implements TransportSession {
         power = JetpackNativeAdapter.inspect(ctx);
         nativeEvidence = JetpackNativeAdapter.activeEvidence(ctx.player());
         recordTrace(ctx, false);
+        if (fastDescent.active()) {
+            updateLook(ctx, fastDescentTarget, true);
+            if (stopping) fastDescent.requestStop();
+            boolean handled = fastDescent.tick(ctx, fastDescentTarget, power, false);
+            if (fastDescent.hasEffects()) effects = changedActive = true;
+            if (handled) return running();
+        }
         if (receipt != null) {
             ctx.actions().poll(ctx, receipt);
             if (!receipt.terminal()) return running();
@@ -161,7 +171,8 @@ public final class JetpackFlightSession implements TransportSession {
         double distance = position.distanceToSqr(next);
         if (distance < waypointDistance - 0.01) { waypointDistance = distance; waypointTick = lastTick; }
         if (!space.clear(position, next)) { obstruction(ctx, space, next); return; }
-        if (waypoint == route.points().size() - 2 && position.y >= next.y - 0.1
+        if (!stopping && !exiting && position.y > next.y + 3 && tryFastDescent(ctx, next, false)) return;
+        if (waypoint == route.points().size() - 2 && JetpackRoute.atWaypointHeight(route, waypoint, position.y)
                 && Math.hypot(position.x - next.x, position.z - next.z) < 0.4) {
             landing = route.points().getLast(); approachHeight = next.y;
             phase = Phase.LAND; return;
@@ -237,6 +248,7 @@ public final class JetpackFlightSession implements TransportSession {
         if (!space.clear(position, approach)) {
             obstruction(ctx, space, approach); return;
         }
+        if (!stopping && !exiting && centered && tryFastDescent(ctx, landing, true)) return;
         if (!steer(ctx, approach, centered)) obstruction(ctx, space,
                 position.add(0, JetpackDynamics.riseEnvelope(ctx.player().getDeltaMovement().y, true, power), 0));
     }
@@ -247,28 +259,55 @@ public final class JetpackFlightSession implements TransportSession {
                 : new Vec3(landing.x, approachHeight, landing.z);
     }
 
+    private boolean tryFastDescent(LocalPlayerContext ctx, Vec3 target, boolean touchdown) {
+        if (fastDescent.finished() && fastDescentTarget != null && fastDescentTarget.distanceToSqr(target) > 0.01)
+            fastDescent = new JetpackFastDescent(forbidden);
+        if (fastDescent.finished()) return false;
+        updateLook(ctx, target, true);
+        if (!fastDescent.tick(ctx, target, power, true, touchdown)) return false;
+        fastDescentTarget = target;
+        if (fastDescent.hasEffects()) effects = changedActive = true;
+        return true;
+    }
+
     private boolean steer(LocalPlayerContext ctx, Vec3 aim, boolean landingNow) {
         var player = ctx.player();
-        // Keep the input reference frame stable; the body port applies camera easing after these commands.
-        if (flightYaw == null) flightYaw = player.getYRot();
-        ctx.body().requestLook(flightYaw, 8, ctx.tickRevision());
-        var command = JetpackSteering.toward(player.position(), player.getDeltaMovement(), aim, player.getYRot(), landingNow, power);
+        updateLook(ctx, aim, landingNow);
+        Vec3 position = player.position(), velocity = player.getDeltaMovement();
+        var settings = power;
+        var command = JetpackView.command(position, velocity, aim, player.getYRot(), landingNow, settings);
         if (command.jumping()) {
             double rise = JetpackDynamics.riseEnvelope(player.getDeltaMovement().y, true, power);
             if (!JetpackRoute.observed(ctx, forbidden).clear(player.position(), player.position().add(0, rise, 0))) {
                 brake(ctx); return false;
             }
         }
-        ctx.body().applyMovement(command, ctx.tickRevision());
+        ctx.body().applySteering(yaw -> JetpackView.command(position, velocity, aim, yaw, landingNow, settings),
+                player.getYRot(), ctx.tickRevision());
         effects = true;
         return true;
     }
 
     private void brake(LocalPlayerContext ctx) {
         var player = ctx.player();
-        var brake = JetpackSteering.toward(player.position(), player.getDeltaMovement(), player.position(), player.getYRot(), true, power);
-        ctx.body().applyMovement(brake, ctx.tickRevision());
+        Vec3 position = player.position(), velocity = player.getDeltaMovement();
+        var settings = power;
+        ctx.body().applySteering(yaw -> JetpackSteering.toward(position, velocity, position, yaw, true, settings),
+                player.getYRot(), ctx.tickRevision());
         effects = true;
+    }
+
+    private void updateLook(LocalPlayerContext ctx, Vec3 aim, boolean landingNow) {
+        if (aim == null) return;
+        steeringTarget = aim;
+        Vec3 focus = aim;
+        if (phase == Phase.FLY && route != null && !landingNow) {
+            Vec3 ahead = JetpackView.lookAhead(route.points(), waypoint, ctx.player().position(), 6);
+            if (JetpackRoute.observed(ctx, forbidden).clear(ctx.player().position(), ahead))
+                focus = JetpackView.focus(ctx.player().position(), aim, ahead);
+        }
+        var look = JetpackView.toward(ctx.player().position(), ctx.player().getEyeHeight(), focus, ctx.player().getYRot(), landingNow);
+        ctx.body().requestLook(look.yaw(), look.pitch(), ctx.tickRevision());
     }
 
     private Result restore(LocalPlayerContext ctx) {
@@ -310,14 +349,20 @@ public final class JetpackFlightSession implements TransportSession {
         trace.addLast(Map.copyOf(sample));
         while (trace.size() > 48) trace.removeFirst();
     }
-    @Override public void requestStop() { stopping = true; }
+    @Override public void requestStop() { stopping = true; fastDescent.requestStop(); }
     @Override public void abandon() {
+        fastDescent.abandon();
         ClientRuntime.actor().body().releaseAll(); phase = Phase.DONE;
         terminal = Result.failed("jetpack_abandoned", "body ownership ended; no further mode or flight actions", effects, effects);
     }
     @Override public boolean safeToInterrupt() { return terminal != null || grounded && !effects; }
     @Override public boolean livenessActive() { return terminal == null && (receipt != null || effects || search != null && !search.done()); }
-    @Override public String phase() { return "jetpack_" + phase.name().toLowerCase(java.util.Locale.ROOT); }
+    @Override public String phase() { return fastDescent.active() ? "jetpack_drop_" + fastDescent.phase()
+            : "jetpack_" + phase.name().toLowerCase(java.util.Locale.ROOT); }
+    @Override public org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() {
+        return route == null ? null : new org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot(
+                route.points(), waypoint, landing, steeringTarget);
+    }
     @Override public Map<String, Object> diagnostics() {
         var result = new LinkedHashMap<String, Object>();
         result.put("phase", phase()); result.put("stopping", stopping); result.put("waypoint", waypoint);
@@ -329,6 +374,7 @@ public final class JetpackFlightSession implements TransportSession {
         result.put("recent_flight_trace", java.util.List.copyOf(trace));
         result.put("departure", departure); result.put("flight_events", java.util.List.copyOf(events));
         result.put("last_obstruction", lastObstacle); result.put("platform_cells", platform.size());
+        result.put("fast_descent", fastDescent.diagnostics());
         result.put("search_radius", 64); result.put("search_node_limit", 6000);
         if (search != null) result.put("search_expanded", search.expanded());
         if (route != null) { result.put("route_points", route.points().size()); result.put("estimated_ticks_with_reserve", route.requiredTicks()); }

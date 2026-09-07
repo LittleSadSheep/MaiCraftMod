@@ -12,6 +12,7 @@ public final class JetpackCourseTest {
             true, "fixture", "create_jetpack:netherite_jetpack", true, true, 900, 17000, 0.016, 0.32, 0.6, -0.03, 0.08);
 
     public static void main(String[] args) {
+        descendingCorner();
         var cells = new ArrayList<Destination>();
         for (int x = 0; x < 3; x++) for (int z = 0; z < 3; z++) cells.add(new Destination(new BlockPos(x, 8, z), new Vec3(x + .5, 8, z + .5)));
         var platforms = JetpackPlatform.collect(cells);
@@ -72,6 +73,48 @@ public final class JetpackCourseTest {
         }
         check(arrived && position.distanceTo(target) < .3, "flight must align above the platform and settle, rather than drift back below it");
         System.out.println("JetpackCourseTest: passed");
+    }
+    private static void descendingCorner() {
+        JetpackRoute.Space open = new JetpackRoute.Space() {
+            public boolean clear(Vec3 a, Vec3 b) { return true; }
+            public Vec3 landingBelow(Vec3 p) { return new Vec3(p.x, 0, p.z); }
+        };
+        var route = new JetpackRoute.Plan(List.of(new Vec3(0, 12, 0), new Vec3(0, 11, 0),
+                new Vec3(0, 10, 0), new Vec3(1, 10, 0), new Vec3(1, 10, 1), new Vec3(1, 8, 1)), List.of(), 200);
+        check(JetpackRoute.nextWaypoint(open, route, new Vec3(0, 11.05, 0), 1) == 2,
+                "descending a column must finish the lower height before a horizontal turn");
+        check(JetpackRoute.nextWaypoint(open, route, new Vec3(.5, 11.05, 0), 2) == 2,
+                "level lookahead must not bypass an unfinished descent when outside the arrival radius");
+        check(JetpackRoute.nextWaypoint(open, route, new Vec3(0, 10.05, 0), 2) >= 3,
+                "a completed descent must allow the next horizontal course");
+        var descendingApproach = new JetpackRoute.Plan(List.of(new Vec3(0, 12, 0), new Vec3(0, 10, 0), new Vec3(0, 8, 0)), List.of(), 100);
+        check(!JetpackRoute.atWaypointHeight(descendingApproach, 1, 12),
+                "the landing phase must not bypass a descent to the planned approach height");
+        var ascending = new JetpackRoute.Plan(List.of(new Vec3(0, 10, 0), new Vec3(0, 12, 0),
+                new Vec3(1, 12, 0), new Vec3(1, 10, 0)), List.of(), 100);
+        check(JetpackRoute.nextWaypoint(open, ascending, new Vec3(0, 12.8, 0), 1) == 2,
+                "native upward coasting above the cruise minimum remains an arrived ascent");
+        // Actual failed sweep from the cross-floor trial: turning early intersected the Y114 floor.
+        var floor = new net.minecraft.world.phys.AABB(-78, 114, -13, -77, 115, -12);
+        JetpackRoute.Space scene = new JetpackRoute.Space() {
+            public boolean clear(Vec3 a, Vec3 b) {
+                int steps = Math.max(1, (int) Math.ceil(a.distanceTo(b) / .2));
+                for (int i = 0; i <= steps; i++) {
+                    Vec3 p = a.lerp(b, (double) i / steps);
+                    if (new net.minecraft.world.phys.AABB(p.x - .38, p.y + .001, p.z - .38,
+                            p.x + .38, p.y + 1.88, p.z + .38).intersects(floor)) return false;
+                }
+                return true;
+            }
+            public Vec3 landingBelow(Vec3 p) { return null; }
+        };
+        Vec3 actual = new Vec3(-77.68648930205119, 117.7985766625052, -13.499507934036888);
+        Vec3 column = new Vec3(-77.5, 110, -13.5), turn = new Vec3(-77.5, 110, -12.5);
+        var observed = new JetpackRoute.Plan(List.of(new Vec3(-77.5, 118, -13.5), column, turn,
+                new Vec3(-77.5, 105, -12.5)), List.of(), 300);
+        check(scene.clear(actual, column) && !scene.clear(actual, turn), "fixture must reproduce the observed premature floor crossing");
+        check(JetpackRoute.nextWaypoint(scene, observed, actual, 1) == 1,
+                "stay in the clear descent column until below the floor before turning underneath it");
     }
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }
 }

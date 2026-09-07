@@ -148,16 +148,23 @@ public final class JetpackRoute {
         current = Math.min(current, last);
         Vec3 point = route.points().get(current);
         if (current < last && Math.hypot(position.x - point.x, position.z - point.z) < 0.45
-                && position.y >= point.y - 0.1) current++;
+                && atWaypointHeight(route, current, position.y)
+                && space.clear(position, route.points().get(current + 1))) current++;
         point = route.points().get(current);
+        boolean atHeight = atWaypointHeight(route, current, position.y);
         for (int i = current + 1; i <= last; i++) {
             Vec3 candidate = route.points().get(i);
-            boolean level = Math.abs(candidate.y - point.y) < 0.01 && position.y >= point.y - 0.1;
+            boolean level = Math.abs(candidate.y - point.y) < 0.01 && atHeight;
             boolean vertical = Math.hypot(candidate.x - point.x, candidate.z - point.z) < 0.01;
             if ((!level && !vertical) || position.distanceTo(candidate) > 6 || !space.clear(position, candidate)) break;
             current = i;
         }
         return current;
+    }
+    static boolean atWaypointHeight(Plan route, int index, double height) {
+        double target = route.points().get(index).y;
+        boolean descending = index > 0 && target < route.points().get(index - 1).y - 0.01;
+        return height >= target - 0.1 && (!descending || height <= target + 0.1);
     }
     private static Vec3 center(BlockPos p) { return new Vec3(p.getX() + 0.5, p.getY(), p.getZ() + 0.5); }
     private static double distance(BlockPos a, BlockPos b) {

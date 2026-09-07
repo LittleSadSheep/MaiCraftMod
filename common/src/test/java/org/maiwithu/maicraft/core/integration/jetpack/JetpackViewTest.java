@@ -19,6 +19,26 @@ public final class JetpackViewTest {
         check(landing.yaw() == 37 && landing.pitch() == 75, "vertical landing must show the platform without yaw jitter");
         Vec3 ahead = JetpackView.lookAhead(List.of(Vec3.ZERO, new Vec3(0, 0, 3), new Vec3(3, 0, 3)), 1, Vec3.ZERO, 4);
         check(ahead.distanceTo(new Vec3(1, 0, 3)) < 1e-9, "lookahead follows a short course distance around the upcoming turn");
+        var course = new JetpackRoute.Plan(List.of(Vec3.ZERO, new Vec3(0, 2, 0),
+                new Vec3(10, 2, 0), new Vec3(10, 0, 0)), List.of(), 200);
+        JetpackRoute.Space open = new JetpackRoute.Space() {
+            public boolean clear(Vec3 from, Vec3 to) { return true; }
+            public Vec3 landingBelow(Vec3 point) { return point; }
+        };
+        Vec3 offset = new Vec3(0, 2, -1);
+        int index = JetpackRoute.nextWaypoint(open, course, offset, 1);
+        check(index == 1, "residual takeoff drift must still approach the uncompleted lift corner");
+        Vec3 aim = course.points().get(index);
+        Vec3 glance = JetpackView.lookAhead(course.points(), index, offset, 6);
+        Vec3 focus = JetpackView.focus(offset, aim, glance);
+        var cornerLook = JetpackView.toward(offset, 1.62, focus, 0, false);
+        var progress = JetpackView.command(offset, Vec3.ZERO, aim, cornerLook.yaw(), false, power);
+        check(focus.equals(aim) && progress.forward() > 0,
+                "looking past a sharp corner must not permanently close the current leg's steering gate");
+        check(JetpackView.focus(Vec3.ZERO, new Vec3(0, 0, 3), new Vec3(1, 0, 4)).equals(new Vec3(1, 0, 4)),
+                "a shallow upcoming turn should remain visible");
+        check(JetpackView.focus(Vec3.ZERO, new Vec3(0, 0, 3), new Vec3(0, 0, .2)).equals(new Vec3(0, 0, 3)),
+                "a near-vertical glance must not leave the camera's yaw pointing away from the current leg");
         System.out.println("JetpackViewTest: passed");
     }
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }
