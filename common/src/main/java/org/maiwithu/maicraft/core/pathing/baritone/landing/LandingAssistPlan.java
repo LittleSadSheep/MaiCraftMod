@@ -46,6 +46,17 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         return Vec3.atCenterOf(clicked).add(Vec3.atLowerCornerOf(face.getNormal()).scale(0.5));
     }
 
+    /** Native outline height of the face used by the bucket, including plants and partial blocks. */
+    public double placementHeight(BlockGetter view) {
+        var shape = view.getBlockState(clicked).getShape(view,clicked);
+        if (shape.isEmpty()) return Double.NaN;
+        return clicked.getY() + switch (face) {
+            case UP -> shape.max(Direction.Axis.Y);
+            case DOWN -> shape.min(Direction.Axis.Y);
+            default -> shape.bounds().getCenter().y;
+        };
+    }
+
     public record InventorySnapshot(Set<Kind> available, boolean waterAllowed, boolean othersAllowed, boolean ultraWarm,
                                     double width, double height) {
         public InventorySnapshot { available = Set.copyOf(available); }

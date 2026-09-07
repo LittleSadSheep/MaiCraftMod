@@ -69,6 +69,17 @@ public final class AutomaticFallAdmissionTest {
                 "a harmless three-block descent still needs no aid or supply request");
 
         field(CalculationContext.class, "automaticLandingSupply").setBoolean(context, true);
+        var grassFeet = new BlockPos(1,0,0);
+        var fast = new WaterLandingWindow(0.08,4.5,1.62,2.603278959908224);
+        field(CalculationContext.class, "waterLandingWindow").set(context,fast);
+        f.world.scene.blocks.put(grassFeet,Blocks.TALL_GRASS.defaultBlockState());
+        f.world.scene.blocks.put(grassFeet.above(),Blocks.TALL_GRASS.defaultBlockState().setValue(
+                net.minecraft.world.level.block.state.properties.BlockStateProperties.DOUBLE_BLOCK_HALF,
+                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER));
+        check(!fast.permits(28) && context.landingPlans(grassFeet,28).stream().anyMatch(plan -> plan.kind() == LandingAssistPlan.Kind.WATER),
+                "planned bucket window uses the elevated grass hit face instead of the dry ground height");
+        f.world.scene.blocks.remove(grassFeet); f.world.scene.blocks.remove(grassFeet.above());
+        field(CalculationContext.class, "waterLandingWindow").set(context,new WaterLandingWindow(0.08,4.5,1.62,0));
         field(CalculationContext.class, "maicraftPolicy").set(context,
                 EmbeddedBaritonePolicy.capture(null, LongSets.singleton(new BlockPos(1, 0, 0).asLong()), null));
         check(!fall(context, 6, result) && result.cost == ActionCosts.COST_INF,

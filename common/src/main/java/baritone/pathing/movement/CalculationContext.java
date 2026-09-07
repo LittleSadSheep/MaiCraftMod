@@ -247,8 +247,7 @@ public class CalculationContext {
         return landingPlans(feet).stream().filter(plan -> plan.survives(fallDamageBudget, feet.getY() + drop, true))
                 .filter(plan -> plan.existing()
                 || plan.kind() != org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.WATER
-                || waterLandingWindow.permits(drop + 1
-                        - CollisionGeometry.supportHeight(bsi.access, feet.below()))).toList();
+                || waterLandingWindow.permits(feet.getY() + drop - plan.placementHeight(bsi.access))).toList();
     }
 
     public boolean canLandWithoutDamage(int x, int y, int z, int effectiveStartHeight,

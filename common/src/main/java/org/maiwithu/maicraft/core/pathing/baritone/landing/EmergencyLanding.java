@@ -43,10 +43,6 @@ public final class EmergencyLanding {
         var candidates = new java.util.ArrayList<LandingAssistPlan>();
         var rejected = new java.util.LinkedHashMap<String,String>();
         var player = context.player();
-        var window = new WaterLandingWindow(player.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.GRAVITY),
-                player.blockInteractionRange(), Math.max(1.62, player.getEyeHeight()), Math.max(0, -player.getDeltaMovement().y));
-        double drop = Math.max(0, player.getY() - feet.getY() + 1
-                - baritone.pathing.movement.CollisionGeometry.supportHeight(context.level(), feet.below()));
         // A new physical fall gets its own bounded supply attempt; a previous route's failed
         // search must not suppress emergency access after the player's situation changes.
         var offered = inventory.automaticCandidates(context.level(), feet, EmbeddedBaritonePolicy::protects, true);
@@ -62,9 +58,9 @@ public final class EmergencyLanding {
                     && !plan.survives(FallDamageBudget.capture(player), player.getY(), true)) {
                 rejected.put("HAY","remaining damage would be fatal"); continue;
             }
-            if (!plan.existing() && plan.kind() == LandingAssistPlan.Kind.WATER && !window.permits(drop)) {
-                rejected.put("WATER","downward speed leaves no reliable native bucket-use window"); continue;
-            }
+            // The fall has already happened: a useful native bucket-use tick need not be
+            // guaranteed for every possible departure phase. The session tests the actual
+            // ray and reach each tick; planned departures retain their stricter admission.
             candidates.add(plan);
         }
         return candidates.isEmpty() ? null : LandingAssistSession.automatic(candidates, true).rejectedCandidates(rejected);
@@ -91,23 +87,33 @@ public final class EmergencyLanding {
     }
     /** Center plus four body corners, preserving the original closest native-collider probe. */
     private static BlockPos groundBelow(LocalPlayer player) {
+        var level = player.level();
+        double top = Math.min(player.getY(), level.getMaxBuildHeight());
+        double bottom = level.getMinBuildHeight();
+        double span = top - bottom;
+        if (!Double.isFinite(span) || span <= 0) return null;
         var box = player.getBoundingBox();
-        Vec3[] origins = {player.position(), new Vec3(box.minX, player.getY(), box.minZ),
-                new Vec3(box.maxX, player.getY(), box.minZ), new Vec3(box.minX, player.getY(), box.maxZ),
-                new Vec3(box.maxX, player.getY(), box.maxZ)};
+        // Skip world-exterior air even when a mod places the player far above build height.
+        // Vertical rays stay in one loaded column and cover its effective build range.
+        Vec3[] origins = {new Vec3(player.getX(), top, player.getZ()), new Vec3(box.minX, top, box.minZ),
+                new Vec3(box.maxX, top, box.minZ), new Vec3(box.minX, top, box.maxZ),
+                new Vec3(box.maxX, top, box.maxZ)};
         BlockPos best = null; double nearest = Double.POSITIVE_INFINITY;
         for (Vec3 from : origins) {
-            var hit = player.level().clip(new ClipContext(from, from.add(0, -40, 0),
+            if (!level.isLoaded(BlockPos.containing(from.x, Math.min(top, level.getMaxBuildHeight() - 1), from.z)))
+                return null;
+            var hit = level.clip(new ClipContext(from, new Vec3(from.x, bottom, from.z),
                     ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
             if (hit.getType() != HitResult.Type.BLOCK) continue;
-            double drop = player.getY() - hit.getLocation().y;
+            double drop = from.y - hit.getLocation().y;
             // Sable's native clip may return plot-storage coordinates. Neither its location nor
             // its block cell may be treated as a world-space landing without a matching world ray.
-            if (!Double.isFinite(drop) || drop < -1.0E-5 || drop > 40.00001
+            if (!Double.isFinite(drop) || drop < -1.0E-5 || drop > span + 1.0E-5
                     || Math.abs(hit.getLocation().x - from.x) > 1.0E-5
                     || Math.abs(hit.getLocation().z - from.z) > 1.0E-5
                     || !new net.minecraft.world.phys.AABB(hit.getBlockPos()).inflate(1.0E-5).contains(hit.getLocation()))
                 return unsupportedSupport();
+            if (!level.isLoaded(hit.getBlockPos())) return null;
             if (drop < nearest) { nearest = drop; best = hit.getBlockPos(); }
         }
         return best;
