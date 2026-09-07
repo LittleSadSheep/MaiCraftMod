@@ -120,6 +120,61 @@ final class ElevatorGeometry {
         return List.of();
     }
 
+    /** Prefer the connected cabin interior while keeping both boarding and arrival paths valid. */
+    List<Vec3> interiorPath(Vec3 from, Vec3 entrance, Vec3 exit, Predicate<Vec3> usable,
+                            Vec3 sourceOrigin, Vec3 targetOrigin, double deck, double step, LongSet forbidden) {
+        if (forbidden(exit.add(targetOrigin), width, height, forbidden)) return List.of();
+        WalkTree source = cabinWalk(from, sourceOrigin, step, forbidden);
+        WalkTree arrival = cabinWalk(exit, targetOrigin, step, forbidden);
+        Vec3 center = Vec3.ZERO; int count = 0;
+        for (int i = 0; i < stances.size(); i++) {
+            if (source.previous[i] == -2 || arrival.previous[i] == -2 || Math.abs(stances.get(i).y - deck) >= EPS) continue;
+            center = center.add(stances.get(i)); count++;
+        }
+        center = count == 0 ? from : center.scale(1.0 / count);
+        int best = -1; double bestScore = Double.MAX_VALUE; boolean bestOnDeck = false;
+        for (int i = 0; i < stances.size(); i++) {
+            Vec3 p = stances.get(i);
+            if (source.previous[i] == -2 || arrival.previous[i] == -2 || Math.abs(p.y - deck) > step + EPS || !usable.test(p)) continue;
+            boolean onDeck = Math.abs(p.y - deck) < EPS;
+            // Center dominates; equally central positions favor space away from either threshold.
+            double threshold = Math.min(p.distanceTo(entrance), p.distanceTo(exit));
+            double score = p.distanceToSqr(center) - 0.05 * threshold + 0.001 * source.length[i];
+            if (best < 0 || onDeck && !bestOnDeck || onDeck == bestOnDeck && score < bestScore) {
+                best = i; bestScore = score; bestOnDeck = onDeck;
+            }
+        }
+        if (best < 0) return List.of();
+        ArrayDeque<Vec3> result = new ArrayDeque<>();
+        for (int at = best; at >= 0; at = source.previous[at]) result.addFirst(stances.get(at));
+        return List.copyOf(result);
+    }
+
+    private record WalkTree(int[] previous, int[] length) {}
+
+    private WalkTree cabinWalk(Vec3 from, Vec3 origin, double step, LongSet forbidden) {
+        int count = stances.size();
+        int[] previous = new int[count], length = new int[count]; Arrays.fill(previous, -2);
+        boolean[] allowed = new boolean[count];
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        for (int i = 0; i < count; i++) {
+            Vec3 p = stances.get(i);
+            allowed[i] = !forbidden(p.add(origin), width, height, forbidden);
+            if (allowed[i] && nearStep(from, p, step) && clearStep(from, p, doorsOpen)) {
+                previous[i] = -1; queue.add(i);
+            }
+        }
+        while (!queue.isEmpty()) {
+            int index = queue.removeFirst(); Vec3 p = stances.get(index);
+            for (int i = 0; i < count; i++) {
+                Vec3 next = stances.get(i);
+                if (!allowed[i] || previous[i] != -2 || !nearStep(p, next, step) || !clearStep(p, next, doorsOpen)) continue;
+                previous[i] = index; length[i] = length[index] + 1; queue.addLast(i);
+            }
+        }
+        return new WalkTree(previous, length);
+    }
+
     boolean canStep(BlockGetter world, Predicate<BlockPos> loaded, Vec3 origin, Vec3 from, Vec3 to, double step, LongSet forbidden) {
         if (!nearStep(from, to, step) || forbidden(to, width, height, forbidden)) return false;
         if (!clearStep(from.subtract(origin), to.subtract(origin), actual)) return false;

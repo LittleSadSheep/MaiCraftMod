@@ -96,15 +96,15 @@ final class ElevatorSurvey {
                     if (cabin.controls().isEmpty()) reject(rejected, "no_native_controller");
                     for (BlockPos controller : cabin.controls()) {
                         Vec3 dial = bridge.controlAim(cabin, controller).subtract(cabin.origin());
-                        List<Vec3> path = geometry.pathTo(localStart,
-                                p -> Math.abs(p.y - deck) <= step && p.add(0, ctx.player().getEyeHeight(), 0).distanceTo(dial) <= ctx.player().blockInteractionRange()
-                                        && visible(cabin, controller, p.add(0, ctx.player().getEyeHeight(), 0), dial), sourceOrigin, step, forbidden);
+                        List<Vec3> path = geometry.interiorPath(localStart, board == null ? exit.inside() : board.inside(), exit.inside(),
+                                p -> p.add(0, ctx.player().getEyeHeight(), 0).distanceTo(dial) <= ctx.player().blockInteractionRange()
+                                        && visible(cabin, controller, p.add(0, ctx.player().getEyeHeight(), 0), dial)
+                                        && rideAllowed(p, sourceOrigin, targetOrigin, width, height, forbidden),
+                                sourceOrigin, targetOrigin, deck, step, forbidden);
                         Vec3 controlStance = path.isEmpty() ? null : path.getLast();
                         if (controlStance == null) { reject(rejected, "no_reachable_visible_controller"); continue; }
-                        if (geometry.path(controlStance, exit.inside(), targetOrigin, step, forbidden).isEmpty()) { reject(rejected, "no_supported_walkway_to_exit"); continue; }
                         CallInput call = aboard || cabin.aligned(source.contactY()) ? null : calls.apply(source.contactY());
                         if (!aboard && !cabin.aligned(source.contactY()) && cabin.targetY() != source.contactY() && call == null) { reject(rejected, "no_proven_native_call_input"); continue; }
-                        if (!rideAllowed(controlStance, sourceOrigin, targetOrigin, width, height, forbidden)) { reject(rejected, "forbidden_body_cells_during_ride"); continue; }
                         double score = (board == null ? 0 : board.outside().distanceToSqr(player))
                                 + exit.outside().distanceToSqr(Vec3.atBottomCenterOf(destination));
                         plans.add(new Plan(cabin.entity().getUUID(), source.contactY(), target.contactY(), controller.immutable(),

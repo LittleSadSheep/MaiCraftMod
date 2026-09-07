@@ -51,7 +51,7 @@ public final class ElevatorGeometryTest {
         check(open.canStep(world, p -> true, origin, outside, porch.add(origin), 0.6, LongSets.emptySet())
                 && open.canStep(world, p -> true, origin, porch.add(origin), inside.add(origin), 0.6, LongSets.emptySet()), "open door retained stale collision");
         check(!open.canStep(world, p -> false, origin, outside, porch.add(origin), 0.6, LongSets.emptySet()), "unloaded exit geometry was accepted");
-        callConnections(); supportLayers(); arrivingDoors();
+        callConnections(); supportLayers(); arrivingDoors(); interiorStance();
         System.out.println("ElevatorGeometryTest: passed");
     }
 
@@ -77,6 +77,63 @@ public final class ElevatorGeometryTest {
         check(ElevatorSurvey.deckCandidates(stances, 118, 115).equals(java.util.List.of(-3.0)), "larger roof hid the source cabin floor");
         check(ElevatorSurvey.deckCandidates(stances, 106, 103).equals(java.util.List.of(-3.0)), "contact offset failed to project destination floor");
         check(ElevatorSurvey.deckCandidates(stances, 106, 110).isEmpty(), "invented unsupported deck height");
+    }
+
+    private static void interiorStance() {
+        Scene cabin = new Scene();
+        for (int x = -3; x <= -1; x++) for (int z = -2; z <= -1; z++)
+            cabin.put(new BlockPos(x, -4, z), Blocks.IRON_BLOCK.defaultBlockState());
+        // A low fixture occupies one floor cell and offers a separate, step-reachable top.
+        cabin.put(new BlockPos(-1, -3, -2), Blocks.STONE_SLAB.defaultBlockState());
+        for (int x = -3; x <= 0; x++) for (int z = -2; z <= 1; z++)
+            cabin.put(new BlockPos(x, 0, z), Blocks.IRON_BLOCK.defaultBlockState());
+        var geometry = cabin.geometry();
+        Vec3 entrance = new Vec3(-2.5, -3, -1.5), center = new Vec3(-1.5, -3, -0.5);
+        var route = geometry.interiorPath(entrance, entrance, entrance, p -> true,
+                Vec3.ZERO, Vec3.ZERO, -3, 0.6, LongSets.emptySet());
+        check(!route.isEmpty() && route.getLast().equals(center), "usable doorway prevented walking farther into the cabin");
+        check(geometry.carries(route.getLast()), "interior preference selected unsupported feet");
+        check(geometry.stances.stream().anyMatch(p -> p.y == -2.5)
+                && geometry.stances.stream().filter(p -> p.y == 1).count() == 16, "fixture must expose the higher controller top and larger roof");
+        check(route.stream().allMatch(p -> p.y == -3), "interior route climbed onto another support layer");
+        Vec3 fixtureTop = new Vec3(-0.5, -2.5, -1.5);
+        var onlyRaisedControl = geometry.interiorPath(entrance, entrance, entrance, fixtureTop::equals,
+                Vec3.ZERO, Vec3.ZERO, -3, 0.6, LongSets.emptySet());
+        check(!onlyRaisedControl.isEmpty() && onlyRaisedControl.getLast().equals(fixtureTop), "sole legal raised controller stance lost its fallback");
+
+        Scene stepped = new Scene();
+        for (int x = 0; x <= 2; x++) stepped.put(new BlockPos(x, 0, 0), Blocks.IRON_BLOCK.defaultBlockState());
+        stepped.put(new BlockPos(1, 1, 0), Blocks.STONE_SLAB.defaultBlockState());
+        Vec3 beforeStep = new Vec3(0.5, 1, 0.5), afterStep = new Vec3(2.5, 1, 0.5);
+        var acrossStep = stepped.geometry().interiorPath(beforeStep, beforeStep, beforeStep, afterStep::equals,
+                Vec3.ZERO, Vec3.ZERO, 1, 0.6, LongSets.emptySet());
+        check(!acrossStep.isEmpty() && acrossStep.getLast().equals(afterStep)
+                && acrossStep.stream().anyMatch(p -> p.y == 1.5), "same-deck preference rejected a legal intermediate half-step");
+
+        Scene narrow = new Scene();
+        narrow.put(BlockPos.ZERO, Blocks.IRON_BLOCK.defaultBlockState());
+        narrow.put(new BlockPos(0, 0, 1), Blocks.IRON_BLOCK.defaultBlockState());
+        Vec3 doorway = new Vec3(0.5, 1, 0.5);
+        var onlyDoor = narrow.geometry().interiorPath(doorway, doorway, doorway, doorway::equals,
+                Vec3.ZERO, Vec3.ZERO, 1, 0.6, LongSets.emptySet());
+        check(!onlyDoor.isEmpty() && onlyDoor.getLast().equals(doorway), "small cabin lost its only usable controller position");
+
+        Scene corridor = new Scene();
+        for (int x = 0; x < 5; x++) corridor.put(new BlockPos(x, 0, 0), Blocks.IRON_BLOCK.defaultBlockState());
+        var corridorGeometry = corridor.geometry();
+        Vec3 targetOrigin = new Vec3(0, 10, 0);
+        var openRoute = corridorGeometry.interiorPath(doorway, doorway, doorway, p -> true,
+                Vec3.ZERO, targetOrigin, 1, 0.6, LongSets.emptySet());
+        check(openRoute.getLast().equals(new Vec3(2.5, 1, 0.5)), "cabin center was not preferred over the door or far wall");
+        var blockedArrival = new LongOpenHashSet(); blockedArrival.add(BlockPos.asLong(1, 11, 0));
+        var exitSafe = corridorGeometry.interiorPath(doorway, doorway, doorway, p -> true,
+                Vec3.ZERO, targetOrigin, 1, 0.6, blockedArrival);
+        check(!exitSafe.isEmpty() && exitSafe.getLast().equals(doorway), "deeper stance without an arrival exit path was selected");
+        check(corridorGeometry.interiorPath(doorway, doorway, doorway, p -> p.x > 1,
+                Vec3.ZERO, targetOrigin, 1, 0.6, blockedArrival).isEmpty(), "controller behind an arrival barrier was accepted");
+        blockedArrival.clear(); blockedArrival.add(BlockPos.asLong(0, 11, 0));
+        check(corridorGeometry.interiorPath(doorway, doorway, doorway, p -> true,
+                Vec3.ZERO, targetOrigin, 1, 0.6, blockedArrival).isEmpty(), "reverse search bypassed a forbidden exit itself");
     }
 
     private static void arrivingDoors() {
