@@ -52,6 +52,7 @@ final class BuildCalculationContext extends CalculationContext {
                 return COST_INF;
             }
             if (target.block() instanceof net.minecraft.world.level.block.AirBlock) {
+                if (!hasThrowaway || !current.isAir()) return COST_INF;
                 // 目标应为空气却被问能否在此放置(脚手架):恒计"放错块"有限成本,迟早还要挖掉。
                 return placeBlockCost * NavSettings.get().placeIncorrectBlockPenaltyMultiplier;
             }

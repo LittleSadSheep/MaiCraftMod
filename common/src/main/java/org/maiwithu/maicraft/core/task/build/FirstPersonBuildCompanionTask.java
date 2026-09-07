@@ -77,6 +77,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BlockDigger digger;
     private final Map<Long, BuildTaskRecord.Target> targets = new LinkedHashMap<>();
     private final LongOpenHashSet protectedCells = new LongOpenHashSet();
+    private final LongOpenHashSet scaffoldAirCells = new LongOpenHashSet();
     private final LongOpenHashSet forbiddenBodyCells = new LongOpenHashSet();
     /** Area cells inherited from earlier semantic steps; unlike blueprint sacred cells, mutable targets here are rejected. */
     private final LongOpenHashSet inheritedProtectedMutationCells = new LongOpenHashSet();
@@ -125,6 +126,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         for (BuildTaskRecord.Target target : record.targets) {
             targets.put(target.pos().asLong(), target);
             protectedCells.add(target.pos().asLong());
+            if (BuildCellRules.isAirTarget(target)) scaffoldAirCells.add(target.pos().asLong());
             preflightOrder.add(target);
         }
         inheritedProtectedMutationCells.addAll(
@@ -132,6 +134,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         protectedCells.addAll(inheritedProtectedMutationCells);
         forbiddenBodyCells.addAll(NavigationSafetyContext.forbiddenBodyCells());
         addProtectedNavigationCells(record.protectedNavigationCells());
+        scaffolds.addAll(record.scaffoldLedger().snapshot().keySet());
         preflightOrder.sort(BuildOrder.BUILD_ORDER);
     }
 
@@ -149,7 +152,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         for (BlockPos cell : cells) {
             if (cell != null) {
                 protectedCells.add(cell.asLong());
-                forbiddenBodyCells.add(cell.asLong());
+                inheritedProtectedMutationCells.add(cell.asLong());
+                // A protected target still has to be entered while it is empty in an earlier
+                // construction layer. Live collision prevents entering it after it is built.
+                if (!targets.containsKey(cell.asLong())) forbiddenBodyCells.add(cell.asLong());
             }
         }
     }
@@ -171,6 +177,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override protected TaskState onTick() {
+        var preview = BuildPreviewGate.await(r, r);
+        if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.WAITING)
+            return TaskState.RUNNING;
+        if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
+            return TaskState.CANCELLED;
         if (preflightDone) registerProvider();
         drainScaffolds();
         return switch (phase) {
@@ -239,6 +250,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private void inspectPrimary(BuildTaskRecord.Target target) {
         BlockState live = player.level().getBlockState(target.pos());
+        if (live.isAir()) r.scaffoldLedger().cleared(target.pos());
         List<BuildPlacementGeometry.GeneratedCell> generated = BuildPlacementGeometry.generatedBy(target);
         if (!target.matches(live)
                 && inheritedProtectedMutationCells.contains(target.pos().asLong())) {
@@ -246,7 +258,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     "a previously observed protected semantic area occupies this cell");
         }
         if (!target.matches(live)) {
-            if (rules.blockedByMode(target)) addBlocked("replacement_policy", target.pos(),
+            if (rules.blockedByMode(target) && !ownedAirScaffold(target, live)) addBlocked("replacement_policy", target.pos(),
                     "existing block is protected by replacement policy");
             else if (rules.hopeless(target)) addBlocked("unbreakable_or_outside_world", target.pos(),
                     "cell is outside the world or has an unbreakable obstruction");
@@ -341,6 +353,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         while (queueAt < queue.size()) {
             cell = queue.get(queueAt);
             if (matches(cell.target(), cell.generated())) { markComplete(cell); queueAt++; continue; }
+            // Retain a previous material batch's confirmed support until every permanent cell
+            // is finished. It stays incomplete in accounting and enters final scaffold cleanup.
+            if (player.level().isLoaded(cell.target().pos()) && ownedAirScaffold(cell.target(),
+                    player.level().getBlockState(cell.target().pos()))) { queueAt++; continue; }
             clearQueue = clearCells(cell); clearAt = 0;
             if (!clearQueue.isEmpty()) { clearing = clearQueue.get(0); phase = Phase.CLEAR_NAV; }
             else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
@@ -440,6 +456,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState nextClear() {
+        if (clearing != null && player.level().isLoaded(clearing)
+                && player.level().getBlockState(clearing).isAir()) r.scaffoldLedger().cleared(clearing);
         clearAt++; stopNav();
         if (clearAt < clearQueue.size()) { clearing = clearQueue.get(clearAt); phase = Phase.CLEAR_NAV; }
         else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
@@ -743,11 +761,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             BuildTaskRecord.Target target = r.targets.get(verifyAt);
             if (!player.level().isLoaded(target.pos())) return travelToLoad(target.pos(), false);
             BlockState state = player.level().getBlockState(target.pos());
+            if (r.scaffoldLedger().contains(target.pos()) && !state.isAir()
+                    && !r.scaffoldLedger().owns(target.pos(), state)) {
+                failAt(target.pos(), "a confirmed temporary scaffold changed before final verification",
+                        FailureType.TARGET_LOST, "scaffold_verification_changed", true);
+                return TaskState.FAILED;
+            }
             if (target.matches(state)) completed.add(target.pos().asLong());
             else {
                 completed.remove(target.pos().asLong());
-                verifyFailed.add(BuildPlacementGeometry.primaryOf(target).asLong());
-                verifyFailureStates.add(new ObservedCell(target.pos().asLong(), state));
+                if (!ownedAirScaffold(target, state)) {
+                    verifyFailed.add(BuildPlacementGeometry.primaryOf(target).asLong());
+                    verifyFailureStates.add(new ObservedCell(target.pos().asLong(), state));
+                }
             }
             verifyAt++;
         }
@@ -777,7 +803,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.RUNNING;
         }
         drainScaffolds(); unregisterProvider();
-        scaffoldQueue = scaffolds.stream().filter(p -> !targets.containsKey(p.asLong()))
+        scaffoldQueue = scaffolds.stream().filter(p -> !targets.containsKey(p.asLong())
+                        || BuildCellRules.isAirTarget(targets.get(p.asLong())))
                 .sorted(Comparator.comparingInt((BlockPos position) -> position.getY()).reversed()
                         .thenComparingDouble(p -> p.distSqr(player.blockPosition()))).toList();
         scaffoldAt = 0; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
@@ -794,7 +821,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 failAt(scaffold, "path scaffold unloaded before cleanup", FailureType.TARGET_LOST,
                         "scaffold_unloaded", false); return TaskState.FAILED;
             }
-            if (player.level().getBlockState(scaffold).isAir()) { scaffoldAt++; continue; }
+            if (player.level().getBlockState(scaffold).isAir()) {
+                r.scaffoldLedger().cleared(scaffold); scaffoldAt++; continue;
+            }
             phase = Phase.SCAFFOLD_NAV; return TaskState.RUNNING;
         }
         r.completed(countMatching());
@@ -855,12 +884,22 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState scaffoldBreakTick() {
-        if (player.level().getBlockState(scaffold).isAir()) {
+        BlockState live = player.level().getBlockState(scaffold);
+        if (live.isAir()) {
+            r.scaffoldLedger().cleared(scaffold);
             scaffoldAt++; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
+        }
+        if (inheritedProtectedMutationCells.contains(scaffold.asLong())
+                || NavigationSafetyContext.protectsMutation(scaffold) || NavigationSafetyContext.forbidsBody(scaffold)
+                || r.scaffoldLedger().contains(scaffold) && !r.scaffoldLedger().owns(scaffold, live)) {
+            failAt(scaffold, "temporary scaffold changed or gained protection before cleanup",
+                    FailureType.TARGET_LOST, "scaffold_cleanup_guard_changed", true);
+            return TaskState.FAILED;
         }
         return switch (digger.digTargetStep(scaffold)) {
             case PROGRESSING -> TaskState.RUNNING;
             case BROKE_TARGET -> {
+                r.scaffoldLedger().cleared(scaffold);
                 r.brokeOne(); renewBuildProgress(); scaffoldAt++;
                 phase = Phase.SCAFFOLD_SELECT; yield TaskState.RUNNING;
             }
@@ -998,6 +1037,39 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (!targets.containsKey(pos.asLong())) added |= scaffolds.add(pos.immutable());
         if (added) renewBuildProgress();
     }
+
+    private boolean ownedAirScaffold(BuildTaskRecord.Target target, BlockState live) {
+        return BuildCellRules.isAirTarget(target) && r.scaffoldLedger().owns(target.pos(), live);
+    }
+
+    @Override public void confirmedScaffold(BlockPos placeAt, BlockState state) {
+        // The embedded native receipt, rather than an attempted click, grants cleanup ownership.
+        BuildTaskRecord.Target target = targets.get(placeAt.asLong());
+        if (target != null && !BuildCellRules.isAirTarget(target)) return;
+        if (!state.isAir() && state.getFluidState().isEmpty()) {
+            r.scaffoldLedger().confirmed(placeAt, state); scaffolds.add(placeAt.immutable());
+            renewBuildProgress();
+        }
+    }
+
+    @Override public void confirmedScaffoldRemoval(BlockPos pos) { r.scaffoldLedger().cleared(pos); }
+
+    @Override public boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState support) {
+        BuildTaskRecord.Target target = targets.get(clicked.asLong());
+        return preflightDone && target != null && !BuildCellRules.isAirTarget(target) && target.matches(support)
+                && !inheritedProtectedMutationCells.contains(clicked.asLong())
+                && !NavigationSafetyContext.protectsMutation(clicked) && !NavigationSafetyContext.forbidsBody(clicked)
+                && player.level().isLoaded(placeAt) && scaffoldPermitted(placeAt, null);
+    }
+
+    private boolean scaffoldPermitted(BlockPos pos, LongSet additionalProtection) {
+        if (!player.level().isLoaded(pos)) return false;
+        boolean hard = inheritedProtectedMutationCells.contains(pos.asLong())
+                || forbiddenBodyCells.contains(pos.asLong())
+                || additionalProtection != null && additionalProtection.contains(pos.asLong())
+                || NavigationSafetyContext.protectsMutation(pos) || NavigationSafetyContext.forbidsBody(pos);
+        return r.scaffoldLedger().permits(targets.get(pos.asLong()), player.level().getBlockState(pos), hard);
+    }
     private void registerProvider() {
         if (!providerRegistered) { BuildPlacementRegistry.register(player, this); providerRegistered = true; }
     }
@@ -1041,8 +1113,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return unionForbidden(NavigationSafetyContext.forbiddenBodyCells());
     }
     private LongSet union(LongSet other) {
-        if (other == null || other.isEmpty()) return protectedCells;
-        LongOpenHashSet out = new LongOpenHashSet(protectedCells); out.addAll(other); return out;
+        LongOpenHashSet hard = new LongOpenHashSet(inheritedProtectedMutationCells);
+        hard.addAll(forbiddenBodyCells);
+        hard.addAll(NavigationSafetyContext.protectedMutationCells());
+        hard.addAll(NavigationSafetyContext.forbiddenBodyCells());
+        return r.scaffoldLedger().navigationProtection(protectedCells, hard, other, scaffoldAirCells,
+                targets, player.level(), player.level()::isLoaded, preflightDone);
     }
     private LongSet unionForbidden(LongSet other) {
         if (other == null || other.isEmpty()) return forbiddenBodyCells;
@@ -1056,6 +1132,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         drainScaffolds(); unregisterProvider(); super.stop(companion, why); InputDriver.halt(player);
     }
     @Override protected void cleanup() {
+        BuildPreviewGate.release(r);
         if (digger.current() != null) digger.cancel();
         drainScaffolds(); unregisterProvider(); InputDriver.halt(player); selection.reset();
         aimConvergence.reset();
@@ -1105,8 +1182,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
 
         List<Map<String, Object>> remainingScaffolds = scaffolds.stream()
-                .filter(pos -> player.level().isLoaded(pos)
-                        && !player.level().getBlockState(pos).isAir())
+                .filter(pos -> !player.level().isLoaded(pos)
+                        || !player.level().getBlockState(pos).isAir())
                 .map(this::position).toList();
         if (!remainingScaffolds.isEmpty()) data.put("remaining_scaffolds", remainingScaffolds);
 

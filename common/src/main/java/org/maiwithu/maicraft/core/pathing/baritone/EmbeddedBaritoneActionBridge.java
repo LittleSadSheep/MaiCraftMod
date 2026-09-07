@@ -286,13 +286,15 @@ final class EmbeddedBaritoneActionBridge {
             return;
         }
         BlockPos actual = placementCell(clicked, clickedState, hit);
-        if (EmbeddedBaritonePolicy.protects(clicked)
-                || EmbeddedBaritonePolicy.protects(actual)) {
+        boolean protectedSupport = EmbeddedBaritonePolicy.protects(clicked);
+        if (EmbeddedBaritonePolicy.protects(actual) || protectedSupport
+                && (!context.player().isSecondaryUseActive() || actual.equals(clicked)
+                || !navigator.permitsScaffoldSupport(clicked, actual, clickedState))) {
             return;
         }
         BlockState actualBefore = context.level().getBlockState(actual);
         submitBlockUse(context, navigator, hand, hit, clicked, clickedState,
-                actual, actualBefore, true);
+                actual, actualBefore, true, protectedSupport);
     }
 
     private void submitBlockUse(
@@ -305,6 +307,13 @@ final class EmbeddedBaritoneActionBridge {
             BlockPos actual,
             BlockState beforeActual,
             boolean mutatesTerrain) {
+        submitBlockUse(context, navigator, hand, hit, clicked, beforeClicked,
+                actual, beforeActual, mutatesTerrain, false);
+    }
+
+    private void submitBlockUse(LocalPlayerContext context, EmbeddedBaritoneNavigator navigator,
+            InteractionHand hand, BlockHitResult hit, BlockPos clicked, BlockState beforeClicked,
+            BlockPos actual, BlockState beforeActual, boolean mutatesTerrain, boolean preserveSupport) {
         List<NativeConfirmation> confirmations = new ArrayList<>();
         confirmations.add(NativeConfirmation.blockChanged(clicked, beforeClicked));
         if (actual != null && !actual.equals(clicked) && beforeActual != null) {
@@ -317,7 +326,14 @@ final class EmbeddedBaritoneActionBridge {
                     context,
                     hand,
                     hit,
-                    NativeConfirmation.anyOf(confirmations.toArray(NativeConfirmation[]::new)),
+                    preserveSupport ? fresh -> {
+                        if (!fresh.level().isLoaded(clicked) || !fresh.level().isLoaded(actual))
+                            return NativeConfirmation.Verdict.PENDING;
+                        if (!fresh.level().getBlockState(clicked).equals(beforeClicked))
+                            return NativeConfirmation.Verdict.DIVERGED;
+                        return fresh.level().getBlockState(actual).equals(beforeActual)
+                                ? NativeConfirmation.Verdict.PENDING : NativeConfirmation.Verdict.APPLIED;
+                    } : NativeConfirmation.anyOf(confirmations.toArray(NativeConfirmation[]::new)),
                     USE_CONFIRM_TICKS);
             rightClickCooldown = Math.max(0,
                     BaritoneAPI.getSettings().rightClickSpeed.value - 1);

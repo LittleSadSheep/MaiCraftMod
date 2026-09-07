@@ -97,10 +97,19 @@ public final class EmbeddedBaritoneNavigator {
 
     void recordConfirmedBreak(BlockPos pos, BlockState before) {
         ledger.addBreak(pos, before);
+        if (contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider)
+            org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.recordConfirmedScaffoldRemoval(provider, pos);
     }
 
     void recordConfirmedPlace(BlockPos pos, BlockState placed) {
         ledger.addPlace(pos, placed.getBlock());
+        if (contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider)
+            org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.recordConfirmedScaffold(provider, pos, placed);
+    }
+
+    boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState state) {
+        return contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider
+                && provider.permitsScaffoldSupport(clicked, placeAt, state);
     }
 
     void recordConfirmedNativeAction() {

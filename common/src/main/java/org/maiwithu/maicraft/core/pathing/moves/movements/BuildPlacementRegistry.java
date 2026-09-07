@@ -31,6 +31,13 @@ public final class BuildPlacementRegistry {
             BlockState desired = desiredState(placeAt);
             return desired != null && BuildValidity.valid(state, desired, true);
         }
+
+        /** Narrow native exception for a build's temporary support against its own finished block. */
+        default boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState support) { return false; }
+
+        /** Called only after the owning embedded navigator obtains a confirmed placement receipt. */
+        default void confirmedScaffold(BlockPos placeAt, BlockState state) {}
+        default void confirmedScaffoldRemoval(BlockPos placeAt) {}
     }
 
     /** One first-person client body exists in a process; never retain that LocalPlayer here. */
@@ -45,6 +52,14 @@ public final class BuildPlacementRegistry {
             return;   // 无建造任务在册:挖矿等场景的搭桥不记账,防集合无界生长
         }
         SCAFFOLD.add(placeAt.immutable());
+    }
+
+    public static void recordConfirmedScaffold(Provider owner, BlockPos placeAt, BlockState state) {
+        if (activeProvider == owner) owner.confirmedScaffold(placeAt, state);
+    }
+
+    public static void recordConfirmedScaffoldRemoval(Provider owner, BlockPos placeAt) {
+        if (activeProvider == owner) owner.confirmedScaffoldRemoval(placeAt);
     }
 
     /** 领走该玩家累计的放置回执(领后清空)。 */
