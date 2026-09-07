@@ -57,8 +57,8 @@ public final class SemanticInteractionToolTest {
             json.add("parameters", parameters);
             Goal goal = Goal.fromJson(json);
             SemanticGoalContract.validate(goal, java.util.Set.of(GeneralAbilityAdapter.EQUIP));
-            IntentAction result = GeneralAbilityAdapter.adapt(goal, null, null);
-            check(result instanceof IntentAction.Tool, "the declared equipment location must compile without asking for a forbidden slot field");
+            IntentAction result = AbilityAdapter.adapt(goal, null, null);
+            check(result instanceof IntentAction.Tool, "the complete ability entry point must preserve equipment_location until native compilation");
             var command = (IntentAction.Tool) result;
             check(command.toolName().equals("equip_item") && command.arguments().get("action").getAsString().equals("unequip")
                     && command.arguments().get("slot").getAsString().equals(location),

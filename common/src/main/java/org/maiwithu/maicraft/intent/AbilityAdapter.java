@@ -35,16 +35,7 @@ final class AbilityAdapter {
             return MachineAbilityAdapter.adapt(goal, player, runtime, continuationToken);
         }
         if (GeneralAbilityAdapter.supports(goal.ability())) {
-            Goal executable = goal;
-            if (GeneralAbilityAdapter.EQUIP.equals(goal.ability())) {
-                JsonObject parameters = goal.parameters();
-                if (parameters.has("equipment_location") && !parameters.has("slot")) {
-                    parameters.add("slot", parameters.get("equipment_location").deepCopy());
-                }
-                parameters.remove("equipment_location");
-                executable = goal.withParameters(parameters);
-            }
-            return GeneralAbilityAdapter.adapt(executable, player, runtime);
+            return GeneralAbilityAdapter.adapt(goal, player, runtime);
         }
         return switch (goal.ability()) {
             case "maicraft:remember_place" -> remember(goal, player, runtime);
