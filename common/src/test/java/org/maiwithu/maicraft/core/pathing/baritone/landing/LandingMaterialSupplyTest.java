@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 /** Reflex policy executes the real coordinator across native supply receipt boundaries. */
 public final class LandingMaterialSupplyTest {
     private static final ResourceLocation WATER = ResourceLocation.parse("minecraft:water_bucket");
+    private static final ResourceLocation HAY = ResourceLocation.parse("minecraft:hay_block");
     private static final List<ResourceLocation> ACCEPTED = List.of(WATER, ResourceLocation.parse("minecraft:cobweb"));
 
     public static void main(String[] args) throws Exception {
@@ -90,7 +91,53 @@ public final class LandingMaterialSupplyTest {
             world.nextTick(); absent.tick(context(world), 99);
             check(unavailableCalls[0] == 1, "an unavailable integration is bounded and is not mechanically retried");
         }
+        hayIsOnlyFallback();
         System.out.println("LandingMaterialSupplyTest: passed");
+    }
+
+    private static void hayIsOnlyFallback() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            field(AbstractContainerMenu.class,"carried").set(world.player.inventoryMenu,ItemStack.EMPTY);
+            world.inventory.setItem(0,new ItemStack(Items.HAY_BLOCK));
+            var pending = new Supply(); int[] begins = {0};
+            var supply = new LandingMaterialSupply(List.of(HAY,WATER),(player,request) -> {
+                begins[0]++;
+                check(request.acceptedItemIds().equals(java.util.Set.of(WATER)),
+                        "carried hay stays a fallback instead of being requested again from AE");
+                return pending;
+            });
+            check(supply.tick(context(world),30).state() == LandingMaterialSupply.State.ACQUIRING,
+                    "carried hay does not hide an obtainable damage-free water bucket");
+            world.nextTick(); supply.tick(context(world),29);
+            check(pending.ticks == 2 && pending.finishes == 0,
+                    "observing the retained hay cannot prematurely stop the water transaction");
+            world.nextTick();
+            check(supply.tick(context(world),6).state() == LandingMaterialSupply.State.CLEANING,
+                    "time pressure closes AE before releasing the carried hay fallback");
+            pending.completed = true; world.nextTick();
+            check(HAY.equals(supply.tick(context(world),5).itemId()) && begins[0] == 1,
+                    "settled AE cleanup permits actual carried mitigation without a second request");
+            world.inventory.setItem(1,new ItemStack(Items.WATER_BUCKET));
+            var both = new LandingMaterialSupply(List.of(HAY,WATER),(player,request) -> {
+                throw new AssertionError("carried damage-free material must not open AE");
+            });
+            check(WATER.equals(both.tick(context(world),0).itemId()),
+                    "water wins over hay regardless of the incoming candidate order");
+            world.inventory.setItem(1,ItemStack.EMPTY);
+            var urgent = new LandingMaterialSupply(List.of(HAY,WATER),(player,request) -> {
+                throw new AssertionError("an exhausted action window cannot begin network access");
+            });
+            check(HAY.equals(urgent.tick(context(world),5).itemId()),
+                    "urgent falls use carried hay when no acquisition window remains");
+            int[] attempts = {0};
+            var absent = new LandingMaterialSupply(List.of(HAY,WATER),(player,request) -> {
+                attempts[0]++; throw new IllegalStateException("AE unavailable");
+            });
+            check(HAY.equals(absent.tick(context(world),30).itemId()),
+                    "missing AE leaves the actual hay available as mitigation");
+            world.nextTick(); absent.tick(context(world),29);
+            check(attempts[0] == 1,"an unavailable AE adapter is not retried after fallback selection");
+        }
     }
 
     private static LocalPlayerContext context(InteractionWorldTestHarness world) {

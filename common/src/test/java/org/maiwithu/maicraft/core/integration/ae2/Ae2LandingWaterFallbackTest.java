@@ -22,6 +22,7 @@ import sun.misc.Unsafe;
 public final class Ae2LandingWaterFallbackTest {
     private static final ResourceLocation WEB = ResourceLocation.parse("minecraft:cobweb");
     private static final ResourceLocation WATER = ResourceLocation.parse("minecraft:water_bucket");
+    private static final ResourceLocation HAY = ResourceLocation.parse("minecraft:hay_block");
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
@@ -32,15 +33,27 @@ public final class Ae2LandingWaterFallbackTest {
             ClientRuntime.requireContext(world.player).minecraft().screen = screen;
             var bridge = bridge(memory);
             var request = new Ae2ResourceSupply.Request(List.of(new Ae2ResourceSupply.Group(
-                    WEB, List.of(WEB, WATER), 1, Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT)), false);
+                    WEB, List.of(WEB, WATER, HAY), 1, Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT)), false);
             var bucket = new RawEntry(new ItemKey(ResourceLocation.parse("minecraft:bucket")), 1, 5, false);
             var fluid = new RawEntry(new FluidKey(ResourceLocation.parse("minecraft:water")), 2, 9000, false);
-            Repository.values = List.of(bucket, fluid, new RawEntry(new ItemKey(WEB), 3, 1, false));
+            var web = new RawEntry(new ItemKey(WEB), 3, 1, false);
+            var hay = new RawEntry(new ItemKey(HAY), 4, 9000, false);
+            Repository.values = List.of(bucket, fluid, web, hay, new RawEntry(new ItemKey(WATER), 5, 1, false));
             var stock = observe(world, bridge, request);
-            var plan = (Ae2SupplyPlanner.Plan) field(Ae2SupplySession.class, "plan").get(stock);
             check(stock.phase().equals("process_item") && !waterRoute(stock)
-                            && plan.groups().getFirst().allocations().getFirst().itemId().equals(WEB),
-                    "a stored rescue item outranks converting network fluid even when water is available");
+                            && selected(stock).equals(WATER),
+                    "one stored water bucket outranks abundant hay, web and fluid conversion");
+            check(selected(observe(world,bridge,request,false)).equals(HAY),
+                    "ordinary AE requests retain their original stock/capacity optimization");
+            Repository.values = List.of(bucket,fluid,web,hay);
+            check(waterRoute(observe(world,bridge,request)),
+                    "native water filling outranks stocked web and abundant hay");
+            Repository.values = List.of(fluid,web,hay);
+            check(selected(observe(world,bridge,request)).equals(WEB),
+                    "without a network empty bucket, another damage-free aid outranks hay");
+            Repository.values = List.of(hay);
+            check(selected(observe(world,bridge,request)).equals(HAY),
+                    "hay is selected only after the allowed damage-free options are unavailable");
 
             Repository.values = List.of(bucket, fluid, new RawEntry(new ItemKey(WEB), 3, 0, true));
             var fill = observe(world, bridge, request);
@@ -74,10 +87,18 @@ public final class Ae2LandingWaterFallbackTest {
     }
     private static Ae2SupplySession observe(InteractionWorldTestHarness world,
             Ae2ReflectionBridge bridge, Ae2ResourceSupply.Request request) throws Exception {
-        var session = new Ae2SupplySession(world.player, request, bridge, true);
+        return observe(world,bridge,request,true);
+    }
+    private static Ae2SupplySession observe(InteractionWorldTestHarness world,
+            Ae2ReflectionBridge bridge, Ae2ResourceSupply.Request request, boolean inPlace) throws Exception {
+        var session = new Ae2SupplySession(world.player, request, bridge, inPlace);
         world.nextTick(); session.tick(ClientRuntime.requireContext(world.player));
         world.nextTick(); session.tick(ClientRuntime.requireContext(world.player));
         return session;
+    }
+    private static ResourceLocation selected(Ae2SupplySession session) throws Exception {
+        var plan = (Ae2SupplyPlanner.Plan) field(Ae2SupplySession.class,"plan").get(session);
+        return plan.groups().getFirst().allocations().getFirst().itemId();
     }
     private static boolean waterRoute(Ae2SupplySession session) throws Exception {
         return field(Ae2SupplySession.class, "waterBucketRoute").getBoolean(session);

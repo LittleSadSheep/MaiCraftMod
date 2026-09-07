@@ -762,11 +762,14 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             }
             return;
         }
-        if (canUseStoredWater(entries)
-                && Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.WATER_BUCKET) < request.groups().getFirst().count()) {
+        if (canUseStoredWater()
+                && (reflexRequest() ? stockPlan(entries, 0).failure() != null
+                    : Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.WATER_BUCKET) < request.groups().getFirst().count())) {
             var water = bridge.waterEntry(menu);
             if (water != null && water.storedAmount() >= water.bucketUnits()
-                    && Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.EMPTY_BUCKET) > 0) {
+                    && Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.EMPTY_BUCKET) > 0
+                    && (!reflexRequest() || player.getInventory().getFreeSlot() >= 0
+                        && !reservedInventorySlots().contains(player.getInventory().getFreeSlot()))) {
                 waterBucketRoute = true;
                 baseline = inventoryCounts();
                 lockedVariantByGroup.put(request.groups().getFirst().itemId(), Ae2WaterBucketFill.WATER_BUCKET);
@@ -780,13 +783,34 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(Phase.PROCESS_ITEM);
     }
 
-    private boolean canUseStoredWater(List<Ae2ReflectionBridge.Entry> entries) {
+    private boolean canUseStoredWater() {
         if (Ae2WaterBucketFill.supports(request)) return true;
-        if (!inPlace || request.groups().size() != 1) return false;
-        var group = request.groups().getFirst();
-        return group.count() == 1 && group.acceptableItemIds().contains(Ae2WaterBucketFill.WATER_BUCKET)
-                && entries.stream().noneMatch(entry -> entry.storedAmount() > 0
-                        && group.acceptableItemIds().contains(entry.itemId()));
+        return reflexRequest() && request.groups().getFirst().acceptableItemIds().contains(Ae2WaterBucketFill.WATER_BUCKET);
+    }
+
+    private boolean reflexRequest() {
+        return inPlace && request.groups().size() == 1 && request.groups().getFirst().count() == 1;
+    }
+
+    /** Rescue semantics stay outside the general-purpose inventory/capacity planner. */
+    private Ae2SupplyPlanner.Result stockPlan(List<Ae2ReflectionBridge.Entry> entries, int tier) {
+        return Ae2SupplyPlanner.build(player, request,
+                entries.stream().filter(entry -> landingTier(entry.itemId()) == tier).toList(), reservedInventorySlots());
+    }
+
+    private Ae2SupplyPlanner.Result preferredStockPlan(List<Ae2ReflectionBridge.Entry> entries) {
+        if (reflexRequest()) {
+            for (int tier = 0; tier <= 2; tier++) {
+                var candidate = stockPlan(entries, tier);
+                if (candidate.failure() == null) return candidate;
+            }
+        }
+        return Ae2SupplyPlanner.build(player, request, entries, reservedInventorySlots());
+    }
+
+    private static int landingTier(ResourceLocation item) {
+        if (item.equals(Ae2WaterBucketFill.WATER_BUCKET)) return 0;
+        return item.equals(ResourceLocation.parse("minecraft:hay_block")) ? 2 : 1;
     }
 
     private void fillWaterBucket(LocalPlayerContext context) {
@@ -853,7 +877,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         baseline = inventoryCounts();
         Ae2SupplyPlanner.Result built = request.operation() == Ae2ResourceSupply.Operation.PREPARE
                 ? Ae2SupplyPlanner.prepare(request, entries)
-                : Ae2SupplyPlanner.build(player, request, entries, reservedInventorySlots());
+                : preferredStockPlan(entries);
         if (built.failure() != null) {
             Ae2SupplyPlanner.Failure failure = built.failure();
             beginFinish(Ae2ResourceSupply.Status.FAILED, failure.code(), failure.message());

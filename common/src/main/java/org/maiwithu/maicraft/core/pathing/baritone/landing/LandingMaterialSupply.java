@@ -21,6 +21,8 @@ public final class LandingMaterialSupply {
     }
     private static final int ACTION_RESERVE_TICKS = 6;
     private static final int MAX_SUPPLY_TICKS = 240;
+    private static final ResourceLocation WATER = ResourceLocation.parse("minecraft:water_bucket");
+    private static final ResourceLocation HAY = ResourceLocation.parse("minecraft:hay_block");
     private final List<ResourceLocation> accepted;
     private final BiFunction<LocalPlayer, Ae2ResourceSupply.Request, Ae2ResourceSupply.Session> begin;
     private Ae2ResourceSupply.Session session;
@@ -29,6 +31,7 @@ public final class LandingMaterialSupply {
     private Object world;
     private UUID playerId;
     private boolean stopping;
+    private boolean acquisitionAttempted;
     private String stopReason = "landing action window reached";
 
     public LandingMaterialSupply(List<ResourceLocation> acceptableIds) {
@@ -37,7 +40,8 @@ public final class LandingMaterialSupply {
 
     LandingMaterialSupply(List<ResourceLocation> acceptableIds,
             BiFunction<LocalPlayer, Ae2ResourceSupply.Request, Ae2ResourceSupply.Session> begin) {
-        accepted = List.copyOf(Objects.requireNonNull(acceptableIds)).stream().distinct().toList();
+        accepted = List.copyOf(Objects.requireNonNull(acceptableIds)).stream().distinct()
+                .sorted(java.util.Comparator.comparingInt(id -> id.equals(WATER) ? 0 : id.equals(HAY) ? 2 : 1)).toList();
         if (accepted.size() > 256) throw new IllegalArgumentException("too many landing material candidates");
         this.begin = Objects.requireNonNull(begin);
     }
@@ -49,16 +53,28 @@ public final class LandingMaterialSupply {
         if (lastTick == context.tickRevision()) return result;
         lastTick = context.tickRevision();
         ResourceLocation carried = carried(context);
-        if (session == null && carried != null) return available(carried, "landing material already carried; AE was not used");
+        if (session == null && carried != null && (!carried.equals(HAY)
+                || remainingTicks <= ACTION_RESERVE_TICKS || accepted.stream().allMatch(HAY::equals)))
+            return available(carried, carried.equals(HAY)
+                    ? "carried hay is the remaining mitigation fallback; no further supply window"
+                    : "damage-free landing material already carried; AE was not used");
         if (session == null && (accepted.isEmpty() || remainingTicks <= ACTION_RESERVE_TICKS))
             return unavailable("no carried landing material before the native action window");
+        if (session == null && acquisitionAttempted) return carried != null
+                ? available(carried,"carried fallback retained after the bounded supply attempt")
+                : unavailable("the bounded supply attempt already ended; no retry");
         try {
             if (session == null) {
-                var group = new Ae2ResourceSupply.Group(accepted.getFirst(), accepted, 1,
+                // Existing hay is retained as a fallback, never duplicated or allowed to hide
+                // an obtainable damage-free aid in the network.
+                var requested = carried != null && carried.equals(HAY)
+                        ? accepted.stream().filter(id -> !id.equals(HAY)).toList() : accepted;
+                var group = new Ae2ResourceSupply.Group(requested.getFirst(), requested, 1,
                         Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT);
+                acquisitionAttempted = true;
                 session = begin.apply(context.player(), new Ae2ResourceSupply.Request(List.of(group), false));
             }
-            stopping |= carried != null || remainingTicks <= ACTION_RESERVE_TICKS
+            stopping |= carried != null && !carried.equals(HAY) || remainingTicks <= ACTION_RESERVE_TICKS
                     || context.tickRevision() - started >= MAX_SUPPLY_TICKS;
             Optional<Ae2ResourceSupply.Outcome> outcome = stopping
                     ? session.finishInPlace(context, stopReason) : session.tick(context);
@@ -72,7 +88,8 @@ public final class LandingMaterialSupply {
             var receipt = outcome.orElseThrow();
             carried = carried(context);
             if (carried != null && worldReady(context)) return available(carried,
-                    "landing material observed in inventory; AE receipt=" + receipt.code()
+                    (carried.equals(HAY) ? "carried hay mitigation fallback" : "damage-free landing material observed in inventory")
+                            + "; AE receipt=" + receipt.code()
                             + (receipt.uncertain() ? "; transaction uncertain, never retried" : ""));
             return unavailable("landing material not ready: " + receipt.code()
                     + (worldReady(context) ? "" : "; native menu cleanup unconfirmed"));
@@ -89,6 +106,9 @@ public final class LandingMaterialSupply {
                     stopReason += "; native cleanup unavailable: " + changedOwner.getMessage();
                 }
             }
+            carried = carried(context);
+            if (carried != null && worldReady(context))
+                return available(carried, "carried material retained after supply ended: " + stopReason);
             return unavailable(stopReason);
         }
     }
