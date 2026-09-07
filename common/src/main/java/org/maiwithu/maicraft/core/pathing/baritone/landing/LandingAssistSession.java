@@ -24,12 +24,17 @@ import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 /** Native placement, observed protection, stable touchdown and attributable cleanup for one fall. */
 public final class LandingAssistSession {
     public record Change(BlockPos position, BlockState before, BlockState after) {}
-    private final LandingAssistPlan plan;
+    private LandingAssistPlan plan;
+    private List<LandingAssistPlan> automaticCandidates;
+    private LandingMaterialSupply materialSupply;
+    private boolean materialBound;
     private LandingPreparation preparation;
     private NativeActionReceipt receipt;
+    private NativeActionReceipt stopRelease;
+    private String stopReason;
     private BlockState placed;
     private boolean submitted, failed, complete, cleaning, removed, damageObserved, waterContactObserved;
-    private boolean emergency, hayContactObserved;
+    private boolean emergency, hayContactObserved, airborneObserved;
     private float healthLost, absorptionLost;
     private int stableTicks;
     private int displacedStableTicks;
@@ -47,8 +52,54 @@ public final class LandingAssistSession {
     public LandingAssistPlan plan() { return plan; }
     public static LandingAssistSession emergency(LandingAssistPlan plan) {
         var session = new LandingAssistSession(plan);
-        session.emergency = true;
+        session.emergency = true; session.airborneObserved = true;
         return session;
+    }
+    public static LandingAssistSession automatic(List<LandingAssistPlan> candidates, boolean airborne) {
+        if (candidates.isEmpty()) throw new IllegalArgumentException("automatic landing needs observed candidates");
+        var session = new LandingAssistSession(candidates.getFirst());
+        session.automaticCandidates = List.copyOf(candidates); session.emergency = airborne; session.airborneObserved = airborne;
+        return session;
+    }
+    private boolean materialReady(LocalPlayerContext context) {
+        if (automaticCandidates == null || materialBound) return true;
+        for (var candidate : automaticCandidates) {
+            if (candidate.existing()) { bindMaterial(candidate); return true; }
+            if (java.util.stream.IntStream.range(0,context.player().getInventory().getContainerSize()).anyMatch(i ->
+                    context.player().getInventory().getItem(i).is(candidate.kind().item)) && materialSupply == null) {
+                bindMaterial(candidate); return true;
+            }
+        }
+        if (materialSupply == null) materialSupply = new LandingMaterialSupply(automaticCandidates.stream()
+                .map(p -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(p.kind().item)).distinct().toList());
+        var supplied = materialSupply.tick(context,remainingActionTicks(context));
+        detail = supplied.detail();
+        if (supplied.state() == LandingMaterialSupply.State.AVAILABLE) {
+            for (var candidate : automaticCandidates) {
+                if (net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(candidate.kind().item).equals(supplied.itemId())) {
+                    bindMaterial(candidate); return true;
+                }
+            }
+        }
+        if (supplied.state() == LandingMaterialSupply.State.UNAVAILABLE) {
+            LandingAssistPolicy.automaticSupplyFailed(); fail("automatic landing material unavailable: " + supplied.detail());
+        }
+        return false;
+    }
+    private void bindMaterial(LandingAssistPlan selected) {
+        plan = selected; preparation = selected.existing() ? null : new LandingPreparation(selected.kind().item);
+        materialBound = true;
+    }
+    private int remainingActionTicks(LocalPlayerContext context) {
+        if (context.player().onGround()) return Integer.MAX_VALUE;
+        double actionHeight = plan.feet().getY() + Math.max(0,context.player().blockInteractionRange()-context.player().getEyeHeight());
+        double y = context.player().getY(), velocity = context.player().getDeltaMovement().y;
+        double gravity = context.player().getAttributeValue(Attributes.GRAVITY);
+        for (int ticks=0;ticks<200;ticks++) {
+            if (y <= actionHeight) return ticks;
+            y += velocity; velocity = (velocity-gravity)*.98;
+        }
+        return 200;
     }
     public boolean prepareAlreadyHeld(LocalPlayerContext context) {
         rememberHealth(context);
@@ -60,8 +111,9 @@ public final class LandingAssistSession {
                 : preparation.acceptHeld(context) && LandingAssistPlan.canPlace(plan.kind(), context.level(), plan.cell());
     }
     public boolean prepare(LocalPlayerContext context) {
-        if (failed) { if (preparation != null) preparation.continueCleanup(context); return false; }
+        if (failed) { continuePreparationCleanup(context); return false; }
         if (Float.isNaN(previousHealth)) rememberHealth(context);
+        if (!materialReady(context)) return false;
         if (!survivesHay(context)) { fail("hay would not reduce the observed fall to survivable damage"); return false; }
         if (!context.level().isLoaded(plan.cell()) || !context.level().isLoaded(plan.clicked())) return false;
         if (!LandingAssistGeometry.safe(context.level(), context.level()::isLoaded, plan,
@@ -90,6 +142,7 @@ public final class LandingAssistSession {
     public void tick(LocalPlayerContext context) {
         if (complete || lastTick == context.tickRevision()) return;
         lastTick = context.tickRevision();
+        airborneObserved |= !context.player().onGround();
         if (healthDecreased(previousHealth, previousAbsorption,
                 context.player().getHealth(), context.player().getAbsorptionAmount())) damageObserved = true;
         if (Float.isFinite(previousHealth)) healthLost += Math.max(0, previousHealth - context.player().getHealth());
@@ -107,13 +160,30 @@ public final class LandingAssistSession {
                 && context.player().getBoundingBox().intersects(new net.minecraft.world.phys.AABB(plan.cell()).inflate(0.001)))
             hayContactObserved = true;
         if (!context.permitsNativeActions()) { fail("control authority changed during landing assistance"); return; }
+        if (stopReason != null) {
+            continueStop(context);
+            if (cleanupPending()) return;
+        }
+        if (airborneObserved && context.player().onGround() && !submitted && !plan.existing()) {
+            if (materialSupply != null && !materialSupply.result().finished()) materialSupply.finish(context,"ground contact preceded landing protection");
+            if (preparation != null) preparation.closeForFailure(context);
+            fail("ground contact occurred before native landing protection was submitted");
+        }
+        if (materialSupply != null && materialSupply.cleanupPending()) {
+            materialSupply.finish(context,"settling landing material access");
+            if (materialSupply.cleanupPending()) return;
+        }
         if (preparation != null && preparation.cleanupPending()) {
             preparation.continueCleanup(context);
             if (preparation.cleanupPending()) return;
         }
         // Ending an off-target fall is independent of proving this plan succeeded. Water flow,
         // knockback or a missed aid can leave the body safely supported elsewhere indefinitely.
-        if (!nearLanding(context) && settledElsewhere(context)) {
+        if (airborneObserved && !nearLanding(context) && settledElsewhere(context)) {
+            if (materialSupply != null && !materialSupply.result().finished()) {
+                materialSupply.finish(context,"fall ended away from the planned landing");
+                if (materialSupply.cleanupPending()) return;
+            }
             if (receipt != null) {
                 settle(context);
                 if (receipt != null) return;
@@ -126,8 +196,10 @@ public final class LandingAssistSession {
             return;
         }
         displacedStableTicks = 0;
+        if (!failed && !materialReady(context)) return;
         if (!failed && preparation != null && !preparation.ready()) {
-            boolean ready = emergency ? preparation.tickEmergency(context) : preparation.tick(context);
+            boolean ready = emergency || automaticCandidates != null && !context.player().onGround()
+                    ? preparation.tickEmergency(context,remainingActionTicks(context)) : preparation.tick(context);
             if (!ready) {
                 if (!preparation.failed()) return;
                 LandingPreparation held = new LandingPreparation(plan.kind().item);
@@ -283,23 +355,56 @@ public final class LandingAssistSession {
     }
     public boolean complete() { return complete; }
     public boolean failed() { return failed || complete && damageObserved && plan.kind() != LandingAssistPlan.Kind.HAY; }
-    public boolean cleanupPending() { return preparation != null && preparation.cleanupPending(); }
+    public boolean cleanupPending() { return stopReason != null || stopRelease != null
+            || preparation != null && preparation.cleanupPending()
+            || materialSupply != null && materialSupply.cleanupPending(); }
+    private void continuePreparationCleanup(LocalPlayerContext context) {
+        if (preparation != null) preparation.continueCleanup(context);
+        if (materialSupply != null && materialSupply.cleanupPending()) materialSupply.finish(context,"landing preparation ended");
+    }
     /** Retire native receipts at an explicit body/task boundary; never assume a pickup happened. */
     public void stop(LocalPlayerContext context, String reason) {
         if (complete) return;
-        if (receipt != null && !receipt.terminal()) {
-            receipt = receipt.kind() == NativeActionReceipt.Kind.BREAK_BLOCK
-                    ? context.actions().cancelBreakingForTaskBoundary(context, receipt, reason)
-                    : context.actions().retireOneShotForTaskBoundary(context, receipt, reason);
-            settle(context);
-        }
+        stopReason = reason == null ? "landing session interrupted" : reason;
+        fail(stopReason);
+        continueStop(context);
+    }
+    private void continueStop(LocalPlayerContext context) {
+        if (!context.permitsNativeActions()) return;
         if (preparation != null) preparation.closeForFailure(context);
-        fail(reason);
+        if (materialSupply != null) materialSupply.finish(context,stopReason);
+        if (receipt != null) {
+            receipt = context.actions().poll(context,receipt);
+            if (!receipt.terminal()) {
+                if (receipt.kind() == NativeActionReceipt.Kind.USE_ITEM) {
+                    if (!context.mutationAvailable()) return;
+                    stopRelease = context.actions().releaseUsingItem(context,receipt);
+                    receipt = null;
+                } else receipt = receipt.kind() == NativeActionReceipt.Kind.BREAK_BLOCK
+                        ? context.actions().cancelBreakingForTaskBoundary(context,receipt,stopReason)
+                        : context.actions().retireOneShotForTaskBoundary(context,receipt,stopReason);
+            }
+            if (receipt != null) settle(context);
+        }
+        if (stopRelease != null) {
+            stopRelease = context.actions().poll(context,stopRelease);
+            if (stopRelease.terminal()) {
+                if (stopRelease.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED)
+                    fail("landing item release unconfirmed: " + stopRelease.detail());
+                stopRelease = null;
+            }
+        }
+        if (receipt == null && stopRelease == null
+                && (preparation == null || !preparation.cleanupPending())
+                && (materialSupply == null || !materialSupply.cleanupPending())) stopReason = null;
     }
     public List<Change> drainChanges() { var result = List.copyOf(changes); changes.clear(); return result; }
     public Map<String, Object> diagnostics() {
         var result = new LinkedHashMap<String, Object>();
         result.put("strategy", plan.kind().name()); result.put("phase", detail);
+        result.put("automatic",automaticCandidates != null);
+        if (materialSupply != null) result.put("material_supply",java.util.Map.of("state",materialSupply.result().state().name(),"detail",materialSupply.result().detail()));
+        result.put("landing_feet",java.util.Map.of("x",plan.feet().getX(),"y",plan.feet().getY(),"z",plan.feet().getZ()));
         result.put("submitted", submitted); result.put("confirmed_own_placement", placed != null);
         result.put("existing_environment", plan.existing()); result.put("complete", complete);
         result.put("failed", failed()); result.put("damage_observed", damageObserved);

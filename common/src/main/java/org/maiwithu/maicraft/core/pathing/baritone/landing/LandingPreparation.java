@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 
-/** Stage a real carried item through a visible inventory before a fall may leave its source. */
+/** Stage a carried item through native inventory actions before departure or within the fall window. */
 public final class LandingPreparation {
     private final Item item;
     private final VisibleMenuSession menus = new VisibleMenuSession();
@@ -15,12 +15,13 @@ public final class LandingPreparation {
     private MenuReceipt interruptedClose;
     private NativeActionReceipt selection;
     private boolean failed, ready, inventoryTouched, interrupted;
+    private boolean airborneAllowed;
     private long startedTick = Long.MIN_VALUE;
     private String detail = "preparing carried landing item on stable ground";
     private InteractionHand hand = InteractionHand.MAIN_HAND;
 
     public LandingPreparation(Item item) { this.item = item; }
-    /** Airborne opportunities may use an already held item, never an inventory or hotbar mutation. */
+    /** Fast path for a held item; preparation and hotbar changes use the tick methods. */
     public boolean acceptHeld(LocalPlayerContext context) {
         if (selection != null || swap != null || inventoryTouched || interruptedClose != null || failed) return false;
         if (!context.permitsNativeActions()
@@ -37,7 +38,7 @@ public final class LandingPreparation {
         // not let a changed hotbar selection send the player off the edge without the bucket.
         ready = false;
         if (!context.permitsNativeActions()) return false;
-        interrupted |= !context.player().onGround();
+        interrupted |= !airborneAllowed && !context.player().onGround();
         try {
             if (startedTick == Long.MIN_VALUE) startedTick = context.tickRevision();
             if (context.tickRevision() - startedTick > 200) return fail("landing item preparation exceeded its bounded window");
@@ -86,8 +87,20 @@ public final class LandingPreparation {
             }
         }
     }
-    /** Emergency falls may select a carried hotbar item, but never open an airborne inventory. */
+    /** A carried inventory item remains first choice in flight; use native visible inventory actions. */
     public boolean tickEmergency(LocalPlayerContext context) {
+        return tickEmergency(context,Integer.MAX_VALUE);
+    }
+    public boolean tickEmergency(LocalPlayerContext context, int remainingTicks) {
+        airborneAllowed = true;
+        if (remainingTicks <= 3 && !ready) {
+            if (inventoryTouched) { closeForFailure(context); return false; }
+            boolean quick = context.player().getMainHandItem().is(item) || context.player().getOffhandItem().is(item)
+                    || java.util.stream.IntStream.range(0,9).anyMatch(slot -> context.player().getInventory().getItem(slot).is(item));
+            if (!quick) return fail("carried inventory transfer cannot finish before the landing action window");
+        }
+        if (inventoryTouched || java.util.stream.IntStream.range(9,36).anyMatch(slot ->
+                context.player().getInventory().getItem(slot).is(item))) return tick(context);
         if (failed) return false;
         try {
             if (selection != null) {

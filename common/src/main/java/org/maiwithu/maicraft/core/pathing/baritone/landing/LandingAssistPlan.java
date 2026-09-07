@@ -84,6 +84,19 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             }
             return List.copyOf(plans);
         }
+
+        /** Carried aids come first; missing supplies remain conditional plans, never inventory evidence. */
+        public List<LandingAssistPlan> automaticCandidates(BlockGetter view, BlockPos feet,
+                                                          Predicate<BlockPos> protectedCell, boolean maySupply) {
+            var result = new ArrayList<>(plans(view, feet, protectedCell));
+            if (maySupply) {
+                var potential = new InventorySnapshot(Set.of(Kind.values()), waterAllowed, othersAllowed,
+                        ultraWarm, width, height);
+                for (var plan : potential.plans(view, feet, protectedCell))
+                    if (!result.contains(plan)) result.add(plan);
+            }
+            return List.copyOf(result);
+        }
     }
 
     public static boolean existingSafe(Kind kind, BlockState state) {

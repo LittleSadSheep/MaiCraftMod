@@ -35,7 +35,7 @@ import sun.misc.Unsafe;
 public final class WaterLandingReplayTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        for (int drop : new int[]{4, 12, 20}) replay(drop);
+        for (int drop : new int[]{4, 12, 20, 24}) replay(drop);
         missingEvidence(); existingWater(); postRemovalSupport(); stalePreparation(); window();
         System.out.println("WaterLandingReplayTest: passed");
     }
@@ -113,7 +113,7 @@ public final class WaterLandingReplayTest {
 
     private static void window() {
         var normal = new WaterLandingWindow(0.08, 4.5, 1.62, 0);
-        check(normal.permits(20) && !normal.permits(200), "native reach and dry velocity bound the action window");
+        check(normal.permits(20) && normal.permits(24) && !normal.permits(200), "native reach and dry velocity bound the action window");
         check(new WaterLandingWindow(0.08, 6, 1.62, 0).permits(200), "real extended reach permits tall falls");
         check(new WaterLandingWindow(0.01, 4.5, 1.62, 0).permits(200), "real lower gravity changes the admissible window");
         check(!new WaterLandingWindow(0.08, 4.5, 1.62, 3.9).permits(4), "ongoing high speed cannot be treated as a fresh fall");
@@ -140,11 +140,16 @@ public final class WaterLandingReplayTest {
         final DefaultNativeActionPort receipts = new DefaultNativeActionPort();
         final LocalPlayerContext context;
         final LandingAssistSession session;
-        long time; int uses, selections; boolean blockEvidence = true, inventoryEvidence = true;
+        long time; int uses, selections, bodyWrites; boolean blockEvidence = true, inventoryEvidence = true;
+        org.maiwithu.maicraft.client.actor.BodyControlPort.Movement steering;
         Fixture(boolean existing) throws Exception {
             world.scene = new Scene(); world.water = existing;
             world.dimension = (net.minecraft.world.level.dimension.DimensionType) memory.allocateInstance(net.minecraft.world.level.dimension.DimensionType.class);
             player.health = 20;
+            player.sources = (net.minecraft.world.damagesource.DamageSources) memory.allocateInstance(net.minecraft.world.damagesource.DamageSources.class);
+            field(net.minecraft.world.damagesource.DamageSources.class, "fall").set(player.sources,
+                    new net.minecraft.world.damagesource.DamageSource(net.minecraft.core.Holder.direct(
+                            new net.minecraft.world.damagesource.DamageType("fall", 0))));
             player.inventory = new Inventory(player); player.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET));
             field(LocalPlayer.class, "abilities").set(player, new Abilities());
             field(LocalPlayer.class, "dimensions").set(player, EntityDimensions.scalable(0.6F, 1.8F));
@@ -154,7 +159,9 @@ public final class WaterLandingReplayTest {
                     org.maiwithu.maicraft.client.actor.BodyControlPort.class.getClassLoader(),
                     new Class<?>[]{org.maiwithu.maicraft.client.actor.BodyControlPort.class}, (proxy, method, args) -> {
                         if (method.getName().equals("requestLook")) { player.setYRot((Float) args[0]); player.setXRot((Float) args[1]); }
-                        if (method.getName().equals("applySteering")) ((org.maiwithu.maicraft.client.actor.BodyControlPort.Steering) args[0]).atYaw((Float) args[1]);
+                        if (method.getName().equals("applySteering")) {
+                            bodyWrites++; steering = ((org.maiwithu.maicraft.client.actor.BodyControlPort.Steering) args[0]).atYaw((Float) args[1]);
+                        }
                         return null;
                     });
             NativeActionPort actions = (NativeActionPort) Proxy.newProxyInstance(NativeActionPort.class.getClassLoader(),
@@ -212,6 +219,7 @@ public final class WaterLandingReplayTest {
     }
     static final class TestPlayer extends LocalPlayer {
         Inventory inventory; boolean wet; float health, hayMultiplier;
+        net.minecraft.world.damagesource.DamageSources sources;
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         public float getHealth() { return health; } public float getAbsorptionAmount() { return 0; }
         public boolean isSwimming() { return false; } public boolean onClimbable() { return false; }
@@ -224,20 +232,41 @@ public final class WaterLandingReplayTest {
         public ItemStack getOffhandItem() { return ItemStack.EMPTY; }
         public ItemStack getItemInHand(InteractionHand hand) { return hand == InteractionHand.MAIN_HAND ? getMainHandItem() : getOffhandItem(); }
         public double blockInteractionRange() { return 4.5; }
+        public double entityInteractionRange() { return 3; }
+        public net.minecraft.world.entity.EntityType<?> getType() { return net.minecraft.world.entity.EntityType.PLAYER; }
+        public net.minecraft.world.damagesource.DamageSources damageSources() { return sources; }
+        public net.minecraft.world.effect.MobEffectInstance getEffect(net.minecraft.core.Holder<net.minecraft.world.effect.MobEffect> effect) { return null; }
+        public boolean hasEffect(net.minecraft.core.Holder<net.minecraft.world.effect.MobEffect> effect) { return false; }
+        public ItemStack getItemBySlot(net.minecraft.world.entity.EquipmentSlot slot) { return ItemStack.EMPTY; }
+        public double getAttributeValue(net.minecraft.core.Holder<net.minecraft.world.entity.ai.attributes.Attribute> attribute) {
+            var key = attribute.unwrapKey().orElseThrow();
+            if (key.equals(net.minecraft.world.entity.ai.attributes.Attributes.GRAVITY.unwrapKey().orElseThrow())) return 0.08;
+            if (key.equals(net.minecraft.world.entity.ai.attributes.Attributes.SAFE_FALL_DISTANCE.unwrapKey().orElseThrow())) return 3;
+            if (key.equals(net.minecraft.world.entity.ai.attributes.Attributes.FALL_DAMAGE_MULTIPLIER.unwrapKey().orElseThrow())) return 1;
+            throw new AssertionError("unexpected attribute " + key);
+        }
     }
     static final class FlatLevel extends ClientLevel {
         Scene scene; boolean water; BlockHitResult nativeHit; net.minecraft.world.level.dimension.DimensionType dimension;
+        java.util.List<net.minecraft.world.entity.Entity> observedEntities;
         private FlatLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
         public boolean isLoaded(BlockPos pos) { return true; }
         public net.minecraft.world.level.dimension.DimensionType dimensionType() { return dimension; }
         public BlockState getBlockState(BlockPos pos) { scene.water = water; return scene.getBlockState(pos); }
         public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
         public BlockHitResult clip(ClipContext context) { scene.water = water; return nativeHit != null ? nativeHit : scene.clip(context); }
+        public <T extends net.minecraft.world.entity.Entity> java.util.List<T> getEntitiesOfClass(Class<T> type,
+                net.minecraft.world.phys.AABB bounds, java.util.function.Predicate<? super T> predicate) {
+            return observedEntities == null ? java.util.List.of() : observedEntities.stream().filter(type::isInstance)
+                    .map(type::cast).filter(entity -> entity.getBoundingBox().intersects(bounds)).filter(predicate).toList();
+        }
         public int getHeight() { return 384; } public int getMinBuildHeight() { return -64; }
     }
     static final class Scene implements BlockGetter {
         boolean water; BlockState aid;
+        final java.util.Map<BlockPos, BlockState> blocks = new java.util.HashMap<>();
         public BlockState getBlockState(BlockPos pos) {
+            if (blocks.containsKey(pos)) return blocks.get(pos);
             if (aid != null && pos.equals(BlockPos.ZERO)) return aid;
             return (water && pos.equals(BlockPos.ZERO) ? Blocks.WATER : pos.getY() < 0 ? Blocks.STONE : Blocks.AIR).defaultBlockState();
         }
