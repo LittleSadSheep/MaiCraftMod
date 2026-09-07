@@ -93,6 +93,25 @@ public final class EmbeddedBaritoneRuntime {
         return result;
     }
 
+    /** The developer overlay observes only the selected executor, never the search worker. */
+    public static org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() {
+        requireClientThread();
+        if (owner == null || backend == null || world != Minecraft.getInstance().level) return null;
+        var executor = ((PathingBehavior) backend.getPathingBehavior()).getCurrent();
+        if (executor == null) return null;
+        var positions = executor.getPath().positions();
+        if (positions.isEmpty()) return null;
+        int cursor = Math.clamp(executor.getPosition(), 0, positions.size() - 1);
+        int start = Math.max(0, cursor - 1);
+        var points = positions.subList(start, Math.min(positions.size(), start + 512)).stream()
+                .map(pos -> net.minecraft.world.phys.Vec3.atBottomCenterOf(pos).add(0, 0.08, 0)).toList();
+        var destination = net.minecraft.world.phys.Vec3.atBottomCenterOf(positions.getLast()).add(0, 0.08, 0);
+        var next = net.minecraft.world.phys.Vec3.atBottomCenterOf(
+                positions.get(Math.min(cursor + 1, positions.size() - 1))).add(0, 0.08, 0);
+        return new org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot(
+                points, cursor - start, destination, next);
+    }
+
     static void startOrUpdate(
             EmbeddedBaritoneNavigator navigator,
             GoalCompiler.Compiled compiled,

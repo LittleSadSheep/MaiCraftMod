@@ -40,6 +40,9 @@ public interface TransportSession {
     /** Current measured state and limitations; an estimate must not claim a completed journey. */
     Map<String, Object> diagnostics();
 
+    /** Selected route for the optional developer overlay; null means no route is active. */
+    default org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() { return null; }
+
     /** Only an adapter's own staged inventory transaction may temporarily use a non-world GUI. */
     default boolean allowsCurrentScreen(LocalPlayerContext context) {
         return org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen);

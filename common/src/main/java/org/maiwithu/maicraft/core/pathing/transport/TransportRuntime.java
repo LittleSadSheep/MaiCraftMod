@@ -51,6 +51,12 @@ public final class TransportRuntime {
 
     public static boolean owns(Object owner) { return active != null && active.owner == owner; }
     public static boolean occupied() { return active != null; }
+
+    /** Client-thread observation only; never acquires or ticks a transport. */
+    public static org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() {
+        return active == null ? null : active.session.debugPath();
+    }
+
     public static boolean canSafelySuspendActive() {
         if (active == null) return true;
         try { return active.session.safeToInterrupt(); } catch (RuntimeException unknown) { return false; }

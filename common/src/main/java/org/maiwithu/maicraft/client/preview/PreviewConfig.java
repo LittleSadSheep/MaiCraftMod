@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 /** Small loader-independent client configuration. Dev is opt-in and never alters server config. */
-final class PreviewConfig {
+public final class PreviewConfig {
     private static Path file;
     private static boolean enabled;
     private PreviewConfig() {}
@@ -25,6 +25,10 @@ final class PreviewConfig {
     }
 
     static boolean enabled() { return enabled; }
+    public static boolean enabled(Path gameDirectory) {
+        if (file == null) load(gameDirectory);
+        return enabled;
+    }
     static void enabled(boolean value) throws IOException {
         enabled = value;
         if (file == null) return;
