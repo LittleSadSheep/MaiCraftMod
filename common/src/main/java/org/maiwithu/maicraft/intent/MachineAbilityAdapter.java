@@ -13,6 +13,9 @@ import org.maiwithu.maicraft.core.integration.machine.MachineDesignReview;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
 import org.maiwithu.maicraft.core.integration.machine.MachineRecipeEvidence;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
+import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
+import org.maiwithu.maicraft.core.integration.machine.MachineBuildTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskResult;
 
@@ -135,11 +138,13 @@ final class MachineAbilityAdapter {
                 requireMachineTarget(goal);
             }
             case BUILD -> {
-                only(p, "snapshot_id", "design", "allow_modify");
+                only(p, "snapshot_id", "design", "allow_modify", "material_policy", "replace_existing", "protected_labels");
                 requiredString(p, "snapshot_id", 36);
                 if (!p.has("design") || !p.get("design").isJsonObject()) throw bad("design must be a semantic component graph object");
                 validateSemanticDesign(p.getAsJsonObject("design"));
                 bool(p, "allow_modify", false);
+                bool(p, "replace_existing", false);
+                SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p, "material_policy", 64));
                 requireMachineTarget(goal);
             }
             default -> { }
@@ -162,6 +167,8 @@ final class MachineAbilityAdapter {
     }
 
     private static IntentAction design(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        var layout = MachineLayoutJobs.poll(player, goal.parameters().getAsJsonObject("design"));
+        if (layout == null) return IntentAction.Pending.INSTANCE;
         MachineSnapshots.Snapshot snapshot = goal.parameters().has("snapshot_id")
                 ? boundSnapshot(goal, player, runtime) : null;
         JsonObject report = MachineDesignReview.review(goal.parameters().getAsJsonObject("design"),
@@ -178,12 +185,8 @@ final class MachineAbilityAdapter {
             context.addProperty("structure_fingerprint", snapshot.fingerprint());
             context.addProperty("scope", "fresh site identity; graph roles/connections remain proposals until separately verified");
             report.add("observed_context", context);
-            JsonObject compiler = new JsonObject();
-            compiler.addProperty("supported", false);
-            compiler.addProperty("code", "semantic_machine_layout_compiler_unavailable");
-            compiler.addProperty("message", "The site is observed, but no Mod-side compiler currently turns this arbitrary semantic graph into exact placements. Use a dedicated high-level machine ability when one exists; do not provide cells, offsets, block states or clicks.");
-            report.add("layout_compiler", compiler);
         }
+        report.add("layout_compiler", layout.report());
         // Completing a review never asserts that the design is valid or that it was constructed.
         return new IntentAction.Report(TaskResult.ok("Machine design review completed; inspect validation and unresolved obligations before proposing work.",
                 Map.of("design_review", report)), null);
@@ -265,21 +268,36 @@ final class MachineAbilityAdapter {
     private static IntentAction build(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         JsonObject p = goal.parameters();
         if (!bool(p, "allow_modify", false)) throw bad("machine_build_not_authorized: the player's instructions must authorize building this machine");
+        var layout = MachineLayoutJobs.poll(player, p.getAsJsonObject("design"));
+        if (layout == null) return IntentAction.Pending.INSTANCE;
         MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
-        JsonObject review = MachineDesignReview.review(p.getAsJsonObject("design"),
-                id -> registered(id, true), id -> registered(id, false));
-        if (!review.getAsJsonObject("validation").get("valid").getAsBoolean()) {
-            throw bad("machine_design_invalid: inspect design_machine validation errors before requesting construction");
+        if (layout.buildable()) {
+            boolean replace = bool(p, "replace_existing", false);
+            JsonObject design = p.getAsJsonObject("design");
+            if (replace && design.has("constraints") && design.getAsJsonObject("constraints").has("preserve_existing")
+                    && design.getAsJsonObject("constraints").get("preserve_existing").getAsBoolean())
+                throw bad("replace_existing conflicts with the design's preserve_existing constraint");
+            var plan = MachineConstructionPlan.compile(MachineConstructionPlan.floorAnchor(snapshot.center(), layout), layout, replace);
+            List<String> protectedLabels = p.has("protected_labels")
+                    ? java.util.stream.StreamSupport.stream(p.getAsJsonArray("protected_labels").spliterator(), false)
+                        .map(com.google.gson.JsonElement::getAsString).toList() : List.of();
+            long deadline = player.level().getGameTime() + Math.max(45L * 60 * 20,
+                    (long) (plan.blocks().size() + plan.parts().size()) * 100);
+            var task = new MachineBuildTaskRecord("machine-" + UUID.randomUUID(), deadline, plan,
+                    snapshot.dimension(), SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(
+                            optionalString(p, "material_policy", 64)), protectedLabels);
+            MachineSnapshots.consume(snapshot);
+            return new IntentAction.Native(task);
         }
         JsonObject context = new JsonObject();
         context.addProperty("ability", BUILD);
-        context.addProperty("failure_code", "semantic_machine_layout_compiler_unavailable");
+        context.addProperty("failure_code", "machine_layout_unresolved");
         context.addProperty("snapshot_id", snapshot.id());
         context.addProperty("target_label", snapshot.label());
-        context.add("design_review", review);
+        context.add("layout_compiler", layout.report());
         context.addProperty("boundary", "The Mod must derive exact positions, states, build order, routes and native gestures. Supplying a blueprint, cells, offsets or clicks is not a recovery option.");
         return new IntentAction.Decision(new IntentTaskRecord.DecisionSnapshot(UUID.randomUUID(),
-                "This arbitrary machine design has no matching Mod-side layout compiler yet. Use a supported dedicated high-level ability, or add a native compiler for this machine family; MaiCraft will not ask the LLM for block-by-block instructions.",
+                "The machine layout could not be compiled. Inspect the specific unsupported component, interface or routing constraints and revise the semantic design.",
                 List.of(
                         new IntentTaskRecord.DecisionOption("replace_goal", "Choose an available semantic ability such as connect_mechanical_power, or request an outcome that already has a Mod-side planner."),
                         new IntentTaskRecord.DecisionOption("cancel", "Leave the observed site unchanged.")),

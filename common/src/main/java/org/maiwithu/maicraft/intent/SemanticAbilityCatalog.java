@@ -13,6 +13,20 @@ public final class SemanticAbilityCatalog {
     private SemanticAbilityCatalog() {}
 
     public static JsonObject describe(String ability) {
+        JsonObject description = describeContract(ability);
+        if (MachineAbilityAdapter.DESIGN.equals(ability) || MachineAbilityAdapter.BUILD.equals(ability)) {
+            var budget = org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget.current();
+            JsonObject limits = new JsonObject();
+            limits.addProperty("max_targets", budget.maxTargets()); limits.addProperty("max_components", budget.maxComponents());
+            limits.addProperty("max_connections", budget.maxConnections()); limits.addProperty("max_radius", budget.maxRadius());
+            limits.addProperty("search_visited_budget", budget.searchVisitedBudget());
+            limits.addProperty("configuration", "Owner-adjustable JVM properties: maicraft.machine.planning.*");
+            description.add("planning_budget", limits);
+        }
+        return description;
+    }
+
+    private static JsonObject describeContract(String ability) {
         return switch (ability) {
             case MachineAbilityAdapter.INSPECT -> contract(
                     "Mark and inspect an existing machine, including Create, AE2, Mekanism and mixed assemblies. Returns bounded relative structure, state, candidate connections, evidence limits and an expiring snapshot_id for LLM analysis. Complete means the requested volume was observed, not that an entire network was discovered.",
@@ -21,18 +35,21 @@ public final class SemanticAbilityCatalog {
                             field("label", "string", "Short durable machine label; required unless the target already supplies one. Stored as a landmark; observing grants no mutation authority."),
                             field("radius", "integer", "Survey cube radius 0-8, default 4; larger machines need multiple labeled surveys. Unloaded or truncated evidence cannot authorize operations.")));
             case MachineAbilityAdapter.DESIGN -> contract(
-                    "Review an LLM-designed semantic machine graph against live block/item IDs. The LLM may choose components, intended connections, style and high-level constraints, but never cells, offsets, block states, build order or clicks. Returns material estimates and unresolved layout/interface/recipe/power obligations. expected_output also queries bounded client-synchronized recipe evidence; custom chemistry and dynamic recipe fields remain explicit unknowns.",
+                    "Review and physically compile a semantic machine graph against installed block/item IDs. MaiCraft arranges equipment and process modules, routes compatible transports and generates native configuration operations. Reports exact material estimates, supported interfaces and unresolved operating evidence. expected_output queries client-synchronized recipes; construction alone does not prove production.",
                     targets("landmark", "area"),
                     fields(field("design", "object",
-                            "Shape: {components:[{name,block_id,count,role}],connections:[{from,to,medium,purpose}],expected_output?:item_id,style?:string,constraints?:{max_width?,max_depth?,max_height?,terrain_fit?,maintenance_access?,preserve_existing?,throughput?}}. At most 64 components, 128 connections, count 1-64 and 512 declared component blocks per work unit. Media: kinetic, items, fluids, energy, chemicals, ae_network, redstone, heat or a namespaced custom resource (addon:mana). This is a logical proposal; the Mod must compile any executable physical layout."),
+                            "Shape: {components:[{name,block_id,count,role,module?,module_tier?,module_options?}],connections:[{from,to,medium,purpose}],expected_output?:item_id,style?:string,constraints?:{max_width?,max_depth?,max_height?,terrain_fit?,maintenance_access?,preserve_existing?,throughput?}}. Planning budgets: 1024 component groups, 4096 connections, 32768 physical targets. Modules: create:press_station, create:press_basin_station, create:mixer_station, ae2:storage_cluster, ae2:crafting_cluster, mekanism:induction_matrix. Matrix options: width/height/depth/cell_count/provider_count, tier basic/advanced/elite/ultimate. AE options: storage_tier and storage_cells. Media include kinetic, items, fluids, energy, chemicals and ae_network; unsupported interfaces produce specific compiler issues."),
                             field("snapshot_id", "string", "Optional fresh site/machine observation that grounds site-specific analysis; requires the exact surveyed target label. It does not expose layout compilation to the LLM.")));
             case MachineAbilityAdapter.BUILD -> contract(
-                    "Ask MaiCraft to compile and construct a semantic machine design at an observed site. The request contains only components, intended connections, style and high-level constraints. Exact layout, states, clearances, build order, routes and gestures are Mod-owned. If no native compiler supports the requested installed machine family, MaiCraft returns semantic_machine_layout_compiler_unavailable and leaves the site unchanged instead of asking for a per-block plan.",
+                    "Compile and construct a semantic machine design at an observed anchor. The native task progressively loads its larger footprint, supplies exact materials in batches, places registered blocks and AE2 parts, configures supported Mekanism interfaces, and verifies final geometry and synchronized operating evidence. Dev mode displays the frozen blueprint and waits for the player's local preview confirmation. Unsupported layouts report concrete compiler issues before construction.",
                     targets("landmark", "area"),
                     fields(
-                            field("snapshot_id", "string", "Fresh complete inspect_machine receipt for the marked build site, including an empty site. Unsupported compilation does not consume it."),
+                            field("snapshot_id", "string", "Fresh complete inspect_machine receipt identifying the build anchor. The complete construction footprint is subsequently inspected by the native task and is not limited to the anchor survey radius."),
                             field("design", "object", "Same semantic graph as design_machine: components, connections, optional expected_output, style and high-level constraints. Blueprint, blocks, cells, offsets, state properties and action scripts are forbidden."),
-                            field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site. No repeated confirmation is needed for already authorized work.")));
+                            field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site."),
+                            field("material_policy", "string", "ordinary, storage_available (including an existing AE2 network), or inventory_only; exact machine items are never substituted."),
+                            field("replace_existing", "boolean", "Allow removing ordinary obstructing blocks in the compiled footprint; existing block entities stay protected. Default false."),
+                            field("protected_labels", "array<string>", "Remembered areas that construction and material acquisition must preserve.")));
             case MachineAbilityAdapter.OPERATE -> contract(
                     "Use existing machines through native evidence: open_menu on a surveyed block, perceive(machine_menu), then deposit/withdraw an exact observed entry. Transfers bind a fresh menu receipt, validate native slot rules and verify inventory/cursor effects. set_control observes one exact vanilla lever state. ae2_supply uses an accessible AE2 terminal, including already configured mixed-mod patterns. Success identifies the observed effect; it never invents production or the meaning of undocumented menu controls.",
                     targets("landmark", "area", "nearest"),
