@@ -108,6 +108,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private List<BlockPos> materialSupplyProtection = List.of();
 
     public boolean previewManaged() { return previewManaged; }
+    public boolean hasTrackedScaffolds() { return !scaffoldLedger.isEmpty(); }
     public void previewManaged(boolean value) { previewManaged = value; }
     public List<BlockPos> materialSupplyProtection() { return materialSupplyProtection; }
     public void materialSupplyProtection(List<BlockPos> cells) {

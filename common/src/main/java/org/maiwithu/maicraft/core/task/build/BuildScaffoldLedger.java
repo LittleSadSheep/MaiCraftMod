@@ -19,6 +19,7 @@ final class BuildScaffoldLedger {
     }
     void cleared(BlockPos pos) { placed.remove(pos); }
     boolean contains(BlockPos pos) { return placed.containsKey(pos); }
+    boolean isEmpty() { return placed.isEmpty(); }
     boolean owns(BlockPos pos, BlockState current) { return current.equals(placed.get(pos)); }
     Map<BlockPos, BlockState> snapshot() { return Map.copyOf(placed); }
 

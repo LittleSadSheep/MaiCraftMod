@@ -42,6 +42,7 @@ final class SemanticBuildSupplyCompanionTask
     private ChildKind activeKind;
     private int childSerial;
     private int buildRounds;
+    private boolean batchVerified;
     private int remainingCellsBeforeBuild;
     private boolean prepared;
     private String failureCode;
@@ -106,7 +107,7 @@ final class SemanticBuildSupplyCompanionTask
         if (traversabilityScan != null) return finishMatched();
         // Let the first-person child finish its receipt checks and scaffold cleanup before the
         // outer coordinator performs aggregate route verification.
-        if (allMatched()) return finishMatched();
+        if (allMatched() && !activePlan.hasTrackedScaffolds() && (buildRounds == 0 || batchVerified)) return finishMatched();
         if (!prepared) {
             advanceMaterialBinding();
             return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
@@ -161,7 +162,8 @@ final class SemanticBuildSupplyCompanionTask
         activeKind = null;
 
         if (result != null && result.data() != null) finalBuildData = Map.copyOf(result.data());
-        if (allMatched()) return finishMatched();
+        batchVerified = batchCompleted(terminal, result);
+        if (batchVerified && allMatched() && !activePlan.hasTrackedScaffolds()) return finishMatched();
         String childCode = result == null || result.data() == null
                 ? null : String.valueOf(result.data().get("failure_code"));
         int remainingNow = remainingCellCount();
@@ -186,6 +188,12 @@ final class SemanticBuildSupplyCompanionTask
      * only when authorized, otherwise the cheapest live recipe/world branch (whose block child is
      * nearest-first). The selected concrete item is locked before any build cell changes.
      */
+    static boolean batchCompleted(TaskState terminal, TaskResult result) {
+        if (terminal != TaskState.SUCCESS || result == null || !result.success()) return false;
+        Object remaining = result.data() == null ? null : result.data().get("remaining_scaffolds");
+        return remaining == null || remaining instanceof java.util.Collection<?> cells && cells.isEmpty();
+    }
+
     private void advanceMaterialBinding() {
         while (failureCode == null && materialFamilyIndex < materialProposal.families().size()) {
             SemanticBuildMaterialBinding.Family family =
@@ -304,6 +312,7 @@ final class SemanticBuildSupplyCompanionTask
 
     private void startBuild() {
         buildRounds++;
+        batchVerified = false;
         long now = player.level().getGameTime();
         BuildTaskRecord source = activePlan;
         BuildTaskRecord batch = new BuildTaskRecord(
@@ -500,7 +509,9 @@ final class SemanticBuildSupplyCompanionTask
         data.put("remaining_cells", remainingCellCount());
         boolean traversalSatisfied = activePlan.traversabilityContract() == null
                 || traversabilityResult != null && traversabilityResult.valid();
-        data.put("goal_satisfied", allMatched() && traversalSatisfied);
+        boolean complete = allMatched() && traversalSatisfied && !activePlan.hasTrackedScaffolds()
+                && failureCode == null && (buildRounds == 0 || batchVerified);
+        data.put("goal_satisfied", complete);
         data.put("batches", List.copyOf(rounds));
         if (!issues.isEmpty()) data.put("issues", List.copyOf(issues));
         if (failureCode != null) {
@@ -515,7 +526,7 @@ final class SemanticBuildSupplyCompanionTask
         if (traversabilityResult != null) {
             data.put("traversability_verification", traversabilityResult.evidence());
         }
-        if (allMatched() && traversalSatisfied) {
+        if (complete) {
             data.put("verified_position", verifiedCenter());
             if (!activePlan.semanticFacts().isEmpty()) {
                 data.put("aggregate_verification", Map.of(
