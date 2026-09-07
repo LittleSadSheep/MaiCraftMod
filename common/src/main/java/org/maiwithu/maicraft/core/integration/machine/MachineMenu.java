@@ -235,6 +235,14 @@ public final class MachineMenu {
             if (getter == Slot.class && slot.getContainerSlot() >= 0
                     && slot.getContainerSlot() < slot.container.getContainerSize()) return "native_container_backing";
             String owner = getter.getName();
+            if (owner.equals("appeng.menu.slot.AppEngSlot")
+                    && slot.getClass().getName().equals("appeng.menu.slot.RestrictedInputSlot")) {
+                Object backing = slot.getClass().getMethod("getSlotInv").invoke(slot);
+                Class<?> api = Class.forName("appeng.api.inventories.InternalInventory", false, slot.getClass().getClassLoader());
+                if (api.isInstance(backing) && ((Number) api.getMethod("size").invoke(backing)).intValue() == 1
+                        && api.getMethod("getStackInSlot", int.class).invoke(backing, 0) instanceof ItemStack stack
+                        && same(stack, slot.getItem())) return "ae2_physical_inventory_slot_backing";
+            }
             if (owner.equals("mekanism.common.inventory.container.slot.InventoryContainerSlot")) {
                 Object backing = slot.getClass().getMethod("getInventorySlot").invoke(slot);
                 Class<?> api = Class.forName("mekanism.api.inventory.IInventorySlot", false, slot.getClass().getClassLoader());
@@ -266,7 +274,8 @@ public final class MachineMenu {
 
     static boolean transferable(Slot slot) {
         return switch (backingEvidence(slot)) {
-            case "native_container_backing", "mekanism_inventory_slot_backing", "item_handler_backing" -> true;
+            case "native_container_backing", "mekanism_inventory_slot_backing", "item_handler_backing",
+                    "ae2_physical_inventory_slot_backing" -> true;
             default -> false;
         };
     }

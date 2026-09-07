@@ -10,6 +10,8 @@ public final class MachineMenuPolicyTest {
 
     public static void main(String[] args) {
         check(MachineMenuPolicy.dedicatedStorageMenu("appeng.menu.me.items.ItemTerminalMenu"), "AE2 uses its dedicated supply path");
+        check(!MachineMenuPolicy.dedicatedStorageMenu("appeng.menu.implementations.DriveMenu"), "AE2 physical storage-cell slots use observed native inventory transfers");
+        check(MachineMenuPolicy.dedicatedStorageMenu("appeng.menu.implementations.SomeDriveMenu"), "unknown AE2 menus do not inherit the drive exception");
         check(MachineMenuPolicy.dedicatedStorageMenu("com.refinedmods.refinedstorage.api.Menu"), "RS virtual inventory is not raw slot storage");
         check(!MachineMenuPolicy.dedicatedStorageMenu("some.mod.TerminalMachineMenu"), "terminal word alone does not reject a real menu");
         check(!MachineMenuPolicy.dedicatedStorageMenu("some.mod.CraftingMachineMenu"), "crafting word alone does not reject a real menu");

@@ -12,6 +12,8 @@ public final class MachineMenuPolicy {
 
     public static boolean dedicatedStorageMenu(String className) {
         String name = className.toLowerCase(Locale.ROOT);
+        // DriveMenu contains ten physical storage-cell slots, not the terminal's virtual network entries.
+        if (name.equals("appeng.menu.implementations.drivemenu")) return false;
         return name.startsWith("appeng.") || name.startsWith("com.refinedmods.");
     }
 
