@@ -13,7 +13,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.StandingAndWallBlockItem;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
@@ -139,6 +138,8 @@ final class BuildPlacementGeometry {
         }
         List<Gesture> out = new ArrayList<>();
         BlockPos placeAt = target.pos();
+        BuildPlacementStage stage = new BuildPlacementStage(player.level(), player.level()::isLoaded,
+                targets, target, firstOnly);
 
         // Replaceable blocks with their own outline (grass, snow layers, an existing slab being
         // doubled) can be clicked directly.  Adjacent support faces cover ordinary placement.
@@ -147,15 +148,15 @@ final class BuildPlacementGeometry {
         if (live != null && !live.isAir()
                 && (live.canBeReplaced()
                 || (live.is(target.block()) && maximumUses(target) > 1))) {
-            enumerateForClicked(player, target, targets, placeAt, Direction.UP, true,
+            enumerateForClicked(player, target, stage, placeAt, Direction.UP, true,
                     firstOnly, stanceAllowed, out);
             if (firstOnly && !out.isEmpty()) return List.copyOf(out);
         }
         for (Direction towardSupport : SUPPORT_ORDER) {
             BlockPos clicked = placeAt.relative(towardSupport);
             Direction face = towardSupport.getOpposite();
-            if (!hasPlannedSupport(player, clicked, face, targets)) continue;
-            enumerateForClicked(player, target, targets, clicked, face, false,
+            if (!stage.support(clicked, face)) continue;
+            enumerateForClicked(player, target, stage, clicked, face, false,
                     firstOnly, stanceAllowed, out);
             if (firstOnly && !out.isEmpty()) break;
         }
@@ -211,7 +212,7 @@ final class BuildPlacementGeometry {
     }
 
     private static void enumerateForClicked(LocalPlayer player, BuildTaskRecord.Target target,
-                                             Map<Long, BuildTaskRecord.Target> targets,
+                                             BuildPlacementStage stage,
                                              BlockPos clicked, Direction face, boolean direct,
                                              boolean firstOnly,
                                              Predicate<BlockPos> stanceAllowed,
@@ -220,14 +221,14 @@ final class BuildPlacementGeometry {
         for (BlockPos stance : candidateStances(placeAt)) {
             if (firstOnly && !out.isEmpty()) return;
             if (!stanceAllowed.test(stance)
-                    || !bodyCellAvailable(player, stance, targets, placeAt)) continue;
+                    || !stage.bodyCellAvailable(stance)) continue;
             Vec3 eye = new Vec3(stance.getX() + 0.5, stance.getY() + CROUCH_EYE_HEIGHT,
                     stance.getZ() + 0.5);
             for (double a : FACE_SAMPLES) {
                 for (double b : FACE_SAMPLES) {
                     Vec3 point = facePoint(clicked, face, a, b);
                     if (eye.distanceToSqr(point) > REACH * REACH) continue;
-                    if (!plannedRayClear(player, eye, point, clicked, placeAt, targets)) continue;
+                    if (!stage.rayClear(eye, point, clicked)) continue;
                     float yaw = AimGeometry.yawTo(eye, point);
                     float pitch = AimGeometry.pitchTo(eye, point);
                     Gesture gesture = new Gesture(stance, clicked, face, point, yaw, pitch,
@@ -298,24 +299,7 @@ final class BuildPlacementGeometry {
         return BuildValidity.sameBlockState(adjusted, desired);
     }
 
-    private static boolean hasPlannedSupport(LocalPlayer player, BlockPos pos, Direction face,
-                                             Map<Long, BuildTaskRecord.Target> targets) {
-        BuildTaskRecord.Target planned = targets.get(pos.asLong());
-        if (planned != null) {
-            BlockState state = planned.desiredState();
-            if (state.isAir()) return false;
-            try {
-                return state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, face);
-            } catch (RuntimeException ignored) {
-                return state.isCollisionShapeFullBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
-            }
-        }
-        if (!player.level().isLoaded(pos)) return false;
-        BlockState live = player.level().getBlockState(pos);
-        return !live.isAir() && !live.canBeReplaced();
-    }
-
-    private static List<BlockPos> candidateStances(BlockPos target) {
+    static List<BlockPos> candidateStances(BlockPos target) {
         List<BlockPos> out = new ArrayList<>();
         for (int dy : new int[]{-1, 0, -2, 1}) {
             int y = target.getY() + dy;
@@ -330,49 +314,6 @@ final class BuildPlacementGeometry {
         }
         out.sort(Comparator.comparingDouble(p -> p.distSqr(target)));
         return out;
-    }
-
-    private static boolean bodyCellAvailable(LocalPlayer player, BlockPos feet,
-                                             Map<Long, BuildTaskRecord.Target> targets,
-                                             BlockPos activeTarget) {
-        if (feet.equals(activeTarget) || feet.above().equals(activeTarget)) return false;
-        BlockState feetState = finalState(player, feet, targets);
-        BlockState headState = finalState(player, feet.above(), targets);
-        if (!feetState.getCollisionShape(player.level(), feet).isEmpty()
-                || !headState.getCollisionShape(player.level(), feet.above()).isEmpty()) {
-            return false;
-        }
-        // A missing floor is allowed: the terraform path can erect a real, accounted scaffold.
-        // Fluids and known hazardous occupied cells are not accepted as hypothetical stances.
-        BlockState floor = finalState(player, feet.below(), targets);
-        return floor.getFluidState().isEmpty();
-    }
-
-    private static BlockState finalState(LocalPlayer player, BlockPos pos,
-                                         Map<Long, BuildTaskRecord.Target> targets) {
-        BuildTaskRecord.Target target = targets.get(pos.asLong());
-        if (target != null) return target.desiredState();
-        return player.level().isLoaded(pos)
-                ? player.level().getBlockState(pos)
-                : net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
-    }
-
-    /** Conservative cell-sampling ray check against the final planned structure. */
-    private static boolean plannedRayClear(LocalPlayer player, Vec3 from, Vec3 to,
-                                           BlockPos clicked, BlockPos placeAt,
-                                           Map<Long, BuildTaskRecord.Target> targets) {
-        Vec3 delta = to.subtract(from);
-        int samples = Math.max(2, (int) Math.ceil(delta.length() * 12.0));
-        BlockPos previous = null;
-        for (int i = 1; i < samples; i++) {
-            Vec3 at = from.add(delta.scale(i / (double) samples));
-            BlockPos cell = BlockPos.containing(at);
-            if (cell.equals(clicked) || cell.equals(placeAt) || cell.equals(previous)) continue;
-            previous = cell;
-            BlockState state = finalState(player, cell, targets);
-            if (!state.getShape(player.level(), cell).isEmpty()) return false;
-        }
-        return true;
     }
 
     private static Vec3 facePoint(BlockPos clicked, Direction face, double a, double b) {
