@@ -34,7 +34,10 @@ public final class JetpackRoute {
     public static final class Search {
         private final Vec3 start, target;
         private final JetpackNativeAdapter.Snapshot power;
-        private final PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble(Node::score));
+        // Manhattan distance is exact in open six-axis space: thousands of cells can share f.
+        // Break that plateau toward the goal instead of flood-filling the whole intervening volume.
+        private final PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble(Node::score)
+                .thenComparing(Comparator.comparingDouble(Node::cost).reversed()));
         private final Map<BlockPos, Double> costs = new HashMap<>();
         private final Map<BlockPos, BlockPos> previous = new HashMap<>();
         private final Map<BlockPos, Double> clearanceCosts = new HashMap<>();
@@ -43,37 +46,37 @@ public final class JetpackRoute {
         private List<Vec3> points;
         private final List<Vec3> exits = new ArrayList<>();
         private double ticks = 80;
-        private int expanded, validatedPoints;
+        private final int nodeLimit;
+        private int expanded, validatedPoints, initialization, templatePoint = 1;
+        private List<Vec3> template;
         private boolean done;
         private Plan result;
+        private String failureReason;
         public Search(Vec3 start, Vec3 target, JetpackNativeAdapter.Snapshot power) {
+            this(start, target, power, 6000);
+        }
+        public Search(Vec3 start, Vec3 target, JetpackNativeAdapter.Snapshot power, int nodeLimit) {
+            if (nodeLimit < 0) throw new IllegalArgumentException("negative search node limit");
             this.start = start; this.target = target; this.power = power;
+            this.nodeLimit = nodeLimit;
         }
         public boolean done() { return done; }
         public Plan result() { return result; }
+        /** Null while running or successful; budget exhaustion does not prove a corridor absent. */
+        public String failureReason() { return failureReason; }
+        /** Valid nodes whose neighbors were expanded; stale queue entries and templates cost no nodes. */
         public int expanded() { return expanded; }
         public void advance(Space space, int nodeBudget, long timeBudgetNanos) {
             if (done) return;
             long began = System.nanoTime();
-            if (origin == null) {
-                if (!power.controllable() || start.distanceTo(target) > 64) { done = true; return; }
-                landing = space.landingBelow(target.add(0, 0.1, 0));
-                if (landing == null || Math.abs(landing.y - target.y) > 1.01) { done = true; return; }
-                origin = BlockPos.containing(start.x, Math.ceil(start.y) + 1, start.z);
-                goal = approachCell(space, landing, power);
-                if (goal == null) { done = true; return; }
-                if (!flightClear(space, start, center(origin), power)) { done = true; return; }
-                // Prefer a stable climb, horizontal cruise and platform descent when the room admits it.
-                Vec3 lift = new Vec3(start.x, Math.max(origin.getY(), goal.getY()), start.z);
-                Vec3 overPlatform = new Vec3(landing.x, lift.y, landing.z);
-                if (flightClear(space, start, lift, power) && flightClear(space, lift, overPlatform, power)
-                        && space.clear(overPlatform, landing)
-                        && JetpackClearancePolicy.edgePenalty(space, lift, overPlatform, power) == 0)
-                    points = new ArrayList<>(List.of(start, lift, overPlatform, landing));
-                open.add(new Node(origin, 0, distance(origin, goal))); costs.put(origin, 0D);
-            }
             int operations = 0;
             while (operations++ < nodeBudget && System.nanoTime() - began < timeBudgetNanos) {
+                // Initial body sweeps and the optional template also yield between operations.
+                if (initialization < 4) {
+                    initialize(space);
+                    if (done) return;
+                    continue;
+                }
                 if (points != null) {
                     int i = validatedPoints;
                     if (i == points.size()) {
@@ -82,13 +85,13 @@ public final class JetpackRoute {
                     }
                     Vec3 point = points.get(i), exit = space.landingBelow(point.add(0, 0.1, 0));
                     if (i > 0 && !(i == points.size() - 1 ? space.clear(points.get(i - 1), point)
-                            : flightClear(space, points.get(i - 1), point, power))) { done = true; return; }
+                            : flightClear(space, points.get(i - 1), point, power))) { fail("corridor_changed"); return; }
                     if (exit != null) exits.add(exit);
                     validatedPoints++;
                     if (i > 0) ticks += edgeTicks(points.get(i - 1), point, power);
                     continue;
                 }
-                if (open.isEmpty() || expanded++ >= 6000) { done = true; return; }
+                if (open.isEmpty()) { fail("no_corridor"); return; }
                 Node node = open.poll();
                 if (node.cost() != costs.getOrDefault(node.pos(), Double.POSITIVE_INFINITY)) continue;
                 if (node.pos().equals(goal)) {
@@ -99,6 +102,8 @@ public final class JetpackRoute {
                     for (int i = 1; i < cells.size(); i++) points.add(center(cells.get(i)));
                     points.add(landing); continue;
                 }
+                if (expanded >= nodeLimit) { fail("budget_exhausted"); return; }
+                expanded++;
                 for (int[] direction : DIRECTIONS) {
                     BlockPos next = node.pos().offset(direction[0], direction[1], direction[2]);
                     if (Math.abs(next.getX() - origin.getX()) > 64 || Math.abs(next.getZ() - origin.getZ()) > 64
@@ -112,6 +117,38 @@ public final class JetpackRoute {
                     if (cost >= costs.getOrDefault(next, Double.POSITIVE_INFINITY)) continue;
                     costs.put(next, cost); previous.put(next, node.pos());
                     open.add(new Node(next, cost, cost + distance(next, goal)));
+                }
+            }
+        }
+        private void fail(String reason) { failureReason = reason; done = true; }
+        private void initialize(Space space) {
+            if (initialization == 0) {
+                if (!power.controllable()) { fail("uncontrollable"); return; }
+                if (start.distanceTo(target) > 64) { fail("out_of_range"); return; }
+                landing = space.landingBelow(target.add(0, 0.1, 0));
+                if (landing == null || Math.abs(landing.y - target.y) > 1.01) { fail("no_landing"); return; }
+                origin = BlockPos.containing(start.x, Math.ceil(start.y) + 1, start.z);
+                initialization++;
+            } else if (initialization == 1) {
+                goal = approachCell(space, landing, power);
+                if (goal == null) { fail("no_approach"); return; }
+                initialization++;
+            } else if (initialization == 2) {
+                if (!flightClear(space, start, center(origin), power)) { fail("departure_blocked"); return; }
+                Vec3 lift = new Vec3(start.x, Math.max(origin.getY(), goal.getY()), start.z);
+                template = List.of(start, lift, new Vec3(landing.x, lift.y, landing.z), landing);
+                open.add(new Node(origin, 0, distance(origin, goal))); costs.put(origin, 0D);
+                initialization++;
+            } else {
+                // Prefer climb/cruise/descent only when its optional cruise margin is also clear.
+                Vec3 from = template.get(templatePoint - 1), to = template.get(templatePoint);
+                boolean clear = templatePoint == 3 ? space.clear(from, to) : flightClear(space, from, to, power);
+                if (clear && templatePoint == 2)
+                    clear = JetpackClearancePolicy.edgePenalty(space, from, to, power) == 0;
+                if (!clear || ++templatePoint == template.size()) {
+                    if (clear) points = new ArrayList<>(template);
+                    template = null;
+                    initialization++;
                 }
             }
         }
@@ -202,7 +239,8 @@ public final class JetpackRoute {
                     if (!state.getFluidState().isEmpty() || hazard(state)
                             || forbidden.contains(p.asLong())) return false;
                 }
-                return ctx.level().noCollision(ctx.player(), box);
+                return ctx.level().noCollision(ctx.player(), box)
+                        && org.maiwithu.maicraft.core.integration.physics.SableStructureBridge.clearBody(ctx.level(), box);
             }
             public boolean clear(Vec3 from, Vec3 to) {
                 int samples = Math.max(1, (int) Math.ceil(from.distanceTo(to) / 0.2));

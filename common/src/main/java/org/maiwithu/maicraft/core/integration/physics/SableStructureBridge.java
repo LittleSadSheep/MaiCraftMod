@@ -31,6 +31,30 @@ public final class SableStructureBridge {
 
     private SableStructureBridge() {}
 
+    /** Vanilla noCollision does not include Sable voxels; use Sable's own player-fit query. */
+    public static boolean clearBody(Level level, AABB body) {
+        var api = BodyApiHolder.API;
+        if (!api.installed()) return true;
+        if (api.method() == null) return false;
+        try {
+            // The native helper removes 0.1 from X/Z size; retain the requested whole body.
+            return api.method().invoke(null, level, body.inflate(.05,0,.05)) == null;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError unknown) { return false; }
+    }
+    private record BodyApi(boolean installed, Method method) {
+        static BodyApi load() {
+            try { Class.forName(CONTAINER, false, SableStructureBridge.class.getClassLoader()); }
+            catch (ClassNotFoundException absent) { return new BodyApi(false,null); }
+            catch (LinkageError unavailable) { return new BodyApi(true,null); }
+            try {
+                Class<?> type = Class.forName("dev.ryanhcode.sable.mixinhelpers.CanFallAtleastHelper", false,
+                        SableStructureBridge.class.getClassLoader());
+                return new BodyApi(true,type.getMethod("canFallAtleastWithSubLevels",Level.class,AABB.class));
+            } catch (ReflectiveOperationException | LinkageError unavailable) { return new BodyApi(true,null); }
+        }
+    }
+    private static final class BodyApiHolder { static final BodyApi API = BodyApi.load(); }
+
     /** Direct native UUID lookup; tracking one vessel never depends on the nearby-list budget. */
     public static Structure find(ClientLevel level, UUID id) {
         try {

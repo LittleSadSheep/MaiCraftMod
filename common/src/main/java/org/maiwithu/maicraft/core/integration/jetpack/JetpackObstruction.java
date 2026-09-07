@@ -50,7 +50,13 @@ public final class JetpackObstruction {
                     String type = !state.getFluidState().isEmpty() ? "fluid" : hazard(state) ? "hazard" : forbidden.contains(pos.asLong()) ? "forbidden" : null;
                     if (type != null) { block(result, pos, state); return found(result, type); }
                 }
-                if (level.noCollision(player, box)) continue;
+                if (level.noCollision(player, box)) {
+                    if (!org.maiwithu.maicraft.core.integration.physics.SableStructureBridge.clearBody(level, box)) {
+                        result.put("reason", "sable_body_collision_or_native_query_unavailable");
+                        return found(result, "physical_structure_check");
+                    }
+                    continue;
+                }
                 // Include neighbour-owned protruding shapes (fences and modded blocks), without loading chunks.
                 for (BlockPos pos : BlockPos.betweenClosed(low.offset(-1, -1, -1), high.offset(1, 1, 1))) {
                     if (!level.hasChunkAt(pos)) continue;
