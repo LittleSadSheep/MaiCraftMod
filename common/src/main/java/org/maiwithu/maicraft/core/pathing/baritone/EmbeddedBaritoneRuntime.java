@@ -319,6 +319,33 @@ public final class EmbeddedBaritoneRuntime {
                 || ((PathingBehavior) backend.getPathingBehavior()).isSafeToCancel();
     }
 
+    /** A normal jump keeps its trajectory until its feet have actually missed the target support. */
+    public static boolean canHandOffMissedLanding(LocalPlayer player) {
+        requireClientThread();
+        if (player == null || owner == null || backend == null || world != player.clientLevel
+                || backend.getPlayerContext().player() != player || player.onGround()
+                || player.getDeltaMovement().y >= 0
+                || org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.occupied()) return false;
+        var executor = backend.getPathingBehavior().getCurrent();
+        if (executor == null) return false;
+        var movements = executor.getPath().movements();
+        int cursor = executor.getPosition();
+        if (cursor < 0 || cursor >= movements.size() || movements.get(cursor) instanceof MovementFall) return false;
+        var support = movements.get(cursor).getDest().below();
+        if (!world.isLoaded(support)) return false;
+        double height = baritone.pathing.movement.CollisionGeometry.supportHeight(world, support);
+        return Double.isFinite(height) && height > 0 && player.getBoundingBox().minY < support.getY() + height - 0.01;
+    }
+
+    /** Called only after MLG has resolved a legal continuation, before it writes this tick's inputs. */
+    public static boolean handOffMissedLanding(LocalPlayer player) {
+        if (!canHandOffMissedLanding(player)) return false;
+        var previous = owner;
+        previous.detachForLandingRescue();
+        release(previous);
+        return true;
+    }
+
     static void release(EmbeddedBaritoneNavigator navigator) {
         requireClientThread();
         if (owner != navigator) return;
@@ -641,8 +668,8 @@ public final class EmbeddedBaritoneRuntime {
         settings.allowPlace.value = permit.mayAlter();
         settings.allowParkourPlace.value = permit.mayAlter();
         settings.allowDownward.value = permit.mayAlter();
-        // A clutch is a block/fluid placement. Preserve navigation may swim or fall safely, but
-        // it must never turn an unapproved route into a water-placement route.
+        // Keep the legacy setting aligned with the route request. Automatic self-rescue captures
+        // its separate landing-only policy and does not authorize general terrain modification.
         settings.allowWaterBucketFall.value = permit.mayUseWaterBucket();
     }
 

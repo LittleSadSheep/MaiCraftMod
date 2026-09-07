@@ -45,7 +45,11 @@ final class CompanionBrain {
         // continuation controller; clearing the route's keys is never a safe approximation.
         if (holder != winner && (!EmbeddedBaritoneRuntime.canSafelySuspendActive()
                 || !org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.canSafelySuspendActive())) {
-            winner = holder;
+            boolean rescue = winner instanceof org.maiwithu.maicraft.core.task.chain.MLGChain mlg
+                    && EmbeddedBaritoneRuntime.canHandOffMissedLanding(player)
+                    && mlg.prepareMissedLandingTakeover(player)
+                    && EmbeddedBaritoneRuntime.handOffMissedLanding(player);
+            if (!rescue) winner = holder;
         }
         if (holder != null && holder != winner) {
             // A composite holder may keep its active navigator inside a child task, so stopping

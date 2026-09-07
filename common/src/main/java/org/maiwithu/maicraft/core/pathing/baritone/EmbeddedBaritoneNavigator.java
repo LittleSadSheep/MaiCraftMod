@@ -57,6 +57,7 @@ public final class EmbeddedBaritoneNavigator {
     private boolean terrainProbeRequested;
     private boolean pendingArrival;
     private boolean pendingPause;
+    private boolean rescueDetached;
     private FailureType pendingFailureType;
     private String pendingFailureReason;
     private EmbeddedBaritoneTerrainProbe.ProbeFuture terrainProbe;
@@ -122,6 +123,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public PlayerNav.Status tick() {
+        rescueDetached = false;
         if (terminalFailure) return PlayerNav.Status.FAILED;
         if (pendingFailureType != null) return finishPendingFailureWhenSafe();
         if (stopped) {
@@ -315,7 +317,17 @@ public final class EmbeddedBaritoneNavigator {
 
     /** Runtime continuation for callers that released their last PlayerNav reference mid-air. */
     boolean requiresOrphanContinuation() {
-        return pendingFailureType != null || pendingPause;
+        return !rescueDetached && (pendingFailureType != null || pendingPause);
+    }
+
+    /** Retain task meaning, discard the missed route and prevent frame-final orphan steering. */
+    void detachForLandingRescue() {
+        cancelTerrainProbe();
+        started = false;
+        driveRequested = false;
+        pendingPause = false;
+        pendingArrival = false;
+        rescueDetached = true;
     }
 
     /** Finish a latched failure once the movement itself declares hand-off safe. */

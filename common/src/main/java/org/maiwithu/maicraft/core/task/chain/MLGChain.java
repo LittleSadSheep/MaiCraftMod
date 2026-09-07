@@ -3,12 +3,10 @@ package org.maiwithu.maicraft.core.task.chain;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
-import org.maiwithu.maicraft.core.WorkProfile;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession;
-import org.maiwithu.maicraft.core.task.survival.SurvivalDecisions;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
@@ -24,14 +22,17 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
     public boolean canRun(LocalPlayer companion) {
         if (EmbeddedBaritoneRuntime.ownsActiveLandingAssist(companion)) return false;
         if (session != null) return !session.complete();
-        boolean grounded = companion.onGround() || companion.isInWater()
-                || companion.isSwimming() || companion.onClimbable();
-        return !WorkProfile.of(companion).fearless()
-                && SurvivalDecisions.mlgTriggered(grounded, companion.getDeltaMovement().y, EmergencyLanding.hasItem(companion));
+        return EmergencyLanding.triggered(companion);
     }
 
     @Override
     public TaskState tick(LocalPlayer companion) { return tick(ClientRuntime.requireContext(companion)); }
+
+    /** Resolve a continuation before the scheduler retires an irrecoverably missed jump. */
+    public boolean prepareMissedLandingTakeover(LocalPlayer player) {
+        if (session == null) session = EmergencyLanding.find(ClientRuntime.requireContext(player));
+        return session != null && !session.failed() && !session.complete();
+    }
 
     public TaskState tick(LocalPlayerContext context) {
         var player = context.player();
@@ -41,6 +42,8 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
                 context.body().requestLook(player.getYRot(), 90, context.tickRevision());
                 return TaskState.RUNNING;
             }
+        }
+        if (!attentionActive) {
             attentionActive = true;
             attentionStartHealth = player.getHealth();
             attentionActions = 0;
