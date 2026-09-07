@@ -31,20 +31,63 @@ public final class SableStructureBridge {
 
     private SableStructureBridge() {}
 
+    /** Direct native UUID lookup; tracking one vessel never depends on the nearby-list budget. */
+    public static Structure find(ClientLevel level, UUID id) {
+        try {
+            Class<?> type = Class.forName(CONTAINER, false, SableStructureBridge.class.getClassLoader());
+            Object container = method(type, "getContainer", Level.class).invoke(null, level);
+            Object ship = method(container.getClass(), "getSubLevel", UUID.class).invoke(container, id);
+            if (ship == null || required((Boolean) call(ship, "isRemoved"))) return null;
+            Map<String, String> errors = new LinkedHashMap<>();
+            Structure result = snapshot(ship, read("world_bounds", errors, () -> bounds(call(ship, "boundingBox"), false)), errors);
+            return id.equals(result.id()) ? result : null;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return null; }
+    }
+
+    public record Contact(UUID trackingId, UUID collisionId, boolean below, boolean known) {
+        public boolean supportedBy(UUID id) { return known && below && id.equals(trackingId) && id.equals(collisionId); }
+    }
+
+    /** Current native collision, not the historical last-tracked UUID or a nearby hull box. */
+    public static Contact contact(Object entity) {
+        try {
+            Object tracked = call(entity, "sable$getTrackingSubLevel");
+            Object collision = call(entity, "sable$getCollisionInfo");
+            Object support = collision == null ? null : collision.getClass().getField("trackingSubLevel").get(collision);
+            boolean below = collision != null && collision.getClass().getField("verticalCollisionBelow").getBoolean(collision);
+            return new Contact(tracked == null ? null : (UUID) call(tracked, "getUniqueId"),
+                    support == null ? null : (UUID) call(support, "getUniqueId"), below, true);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+            return new Contact(null, null, false, false);
+        }
+    }
+
     public static Frame open(ClientLevel level) {
         return open(level, null, null);
     }
 
     public static Frame open(ClientLevel level, Vec3 eye, BlockPos preferredStorageHit) {
+        return open(level, eye, preferredStorageHit, false);
+    }
+
+    public static Frame openForPerception(ClientLevel level, Vec3 eye, BlockPos preferredStorageHit) {
+        return open(level, eye, preferredStorageHit, true);
+    }
+
+    private static Frame open(ClientLevel level, Vec3 eye, BlockPos preferredStorageHit, boolean presentation) {
         if (level == null) return failed("no_client_level", "no client level is loaded");
         return openBound(() -> {
             Class<?> type = Class.forName(CONTAINER, false, SableStructureBridge.class.getClassLoader());
             return method(type, "getContainer", Level.class).invoke(null, level);
-        }, eye, preferredStorageHit);
+        }, eye, preferredStorageHit, presentation);
     }
 
     /** Injectable native source keeps offline tests outside Minecraft and Sable initialization. */
     static Frame openBound(NativeContainerSource source, Vec3 eye, BlockPos preferredStorageHit) {
+        return openBound(source, eye, preferredStorageHit, false);
+    }
+
+    static Frame openBound(NativeContainerSource source, Vec3 eye, BlockPos preferredStorageHit, boolean presentation) {
         try {
             if (eye != null && (!Double.isFinite(eye.x) || !Double.isFinite(eye.y) || !Double.isFinite(eye.z))) {
                 return failed("unknown", "eye position must be finite");
@@ -72,7 +115,9 @@ public final class SableStructureBridge {
                     candidates.add(new Candidate(nativeStructure, box, errors, priority ? -1 : distance));
                 }
             }
-            candidates.sort(Comparator.comparingDouble(Candidate::distance));
+            candidates.sort(Comparator.<Candidate>comparingInt(c -> c.distance() < 0 ? 0
+                            : presentation && StructurePresentation.small(c.bounds()) ? 2 : 1)
+                    .thenComparingDouble(Candidate::distance));
             List<Structure> structures = new ArrayList<>();
             Map<Object, Structure> identities = new IdentityHashMap<>();
             for (Candidate candidate : candidates.subList(0, Math.min(candidates.size(), MAX_STRUCTURES))) {

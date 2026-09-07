@@ -26,6 +26,7 @@ public final class SableStructureBridgeTest {
         availabilityAndFields();
         identityAndRemoval();
         boundedSelection();
+        presentationSelection();
         loadedChunkBudget();
         System.out.println("SableStructureBridgeTest: passed");
     }
@@ -131,6 +132,19 @@ public final class SableStructureBridgeTest {
         return SableStructureBridge.openBound(() -> container, eye, hit);
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
+    private static void presentationSelection() {
+        Counts counts = new Counts();
+        var nativeList = new java.util.ArrayList<NativeShip>();
+        for (int i = 0; i < 30; i++) {
+            var small = new NativeShip(counts); small.world = new NativeBounds(i,0,0,i+1,1,1); nativeList.add(small);
+        }
+        var ship = new NativeShip(counts); ship.world = new NativeBounds(50,10,0,72,24,12); nativeList.add(ship);
+        var container = new NativeContainer(nativeList);
+        var frame = SableStructureBridge.openBound(() -> container,Vec3.ZERO,null,true);
+        check(frame.structures().stream().anyMatch(s -> ship.id.equals(s.id())),
+                "small nearby objects cannot fill the full-snapshot budget before the vessel");
+        check(frame.metadataProbes() <= 128 && frame.structures().size() <= 16, "presentation retains native observation budgets");
+    }
     private static final class Counts { int listReads, metadata, snapshots, chunkReads; }
 
     public static final class NativeContainer {

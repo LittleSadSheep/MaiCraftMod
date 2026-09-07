@@ -38,7 +38,7 @@ final class PhysicalStructurePerception {
         } catch (RuntimeException | LinkageError failure) {
             return StructurePerceptionJson.state("unknown", "native view ray unavailable: " + failure.getClass().getSimpleName());
         }
-        var frame = SableStructureBridge.open(player.clientLevel, eye,
+        var frame = SableStructureBridge.openForPerception(player.clientLevel, eye,
                 hit.getType() == HitResult.Type.BLOCK ? hit.getBlockPos() : null);
         JsonObject out = new JsonObject();
         out.addProperty("engine", "sable"); out.addProperty("state", frame.state());
@@ -62,7 +62,25 @@ final class PhysicalStructurePerception {
         }
         JsonArray structures = new JsonArray();
         boolean detailed = false;
-        for (Structure structure : frame.structures()) {
+        var candidates = new java.util.ArrayList<>(frame.structures());
+        java.util.UUID targetId = null;
+        var transport = org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.diagnosticState();
+        if (Boolean.TRUE.equals(transport.get("active")) && transport.get("moving_target") instanceof java.util.Map<?,?> target) {
+            try { targetId = java.util.UUID.fromString(String.valueOf(target.get("structure_id"))); }
+            catch (IllegalArgumentException ignored) { }
+        }
+        if (targetId != null) {
+            java.util.UUID wanted = targetId;
+            if (candidates.stream().noneMatch(s -> wanted.equals(s.id()))) {
+                Structure active = SableStructureBridge.find(player.clientLevel, wanted);
+                if (active != null) candidates.add(active);
+            }
+        }
+        var presentation = org.maiwithu.maicraft.core.integration.physics.StructurePresentation.select(
+                candidates, resolution.structureId(), targetId, player.getBoundingBox());
+        out.addProperty("small_structures_collapsed", presentation.smallCollapsed());
+        out.addProperty("other_details_omitted", presentation.otherOmitted());
+        for (Structure structure : presentation.shown()) {
             JsonObject row;
             try { row = describe(structure); }
             catch (RuntimeException | LinkageError invalidPose) {
@@ -71,8 +89,10 @@ final class PhysicalStructurePerception {
                 structures.add(row); continue;
             }
             boolean selected = looked != null && looked == structure;
+            boolean activeTarget = targetId != null && targetId.equals(structure.id());
             row.addProperty("looked_at", selected);
-            if (!detailed && (selected || looked == null) && Boolean.TRUE.equals(structure.ready())
+            row.addProperty("boarding_target", activeTarget);
+            if ((selected || activeTarget || !detailed && looked == null) && Boolean.TRUE.equals(structure.ready())
                     && structure.pose() != null && structure.storageBounds() != null && structure.plotCenter() != null) {
                 try {
                     Vec3 focus = selected ? hit.getLocation() : structure.pose().toStorage(eye);
@@ -98,7 +118,7 @@ final class PhysicalStructurePerception {
         }
         out.add("structures", structures);
         out.addProperty("identity_rule", "UUID identifies a physical structure; re-observe its current pose. Missing from this bounded frame does not mean destroyed.");
-        out.addProperty("navigation_rule", "support candidates are not a flight route or verified touchdown; do not send plot storage positions as main-world travel goals");
+        out.addProperty("navigation_rule", "use travel structure_id to board an observed vessel; native boarding selects and tracks its local deck. Never use plot storage coordinates as world travel goals. Small structures remain collision obstacles even when collapsed here.");
         return out;
     }
 
