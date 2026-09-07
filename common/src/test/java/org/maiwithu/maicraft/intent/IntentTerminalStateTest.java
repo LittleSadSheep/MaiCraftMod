@@ -72,6 +72,32 @@ public final class IntentTerminalStateTest {
                 List.of(), Map.of(), Map.of(), List.of(), decision, null, null, 30);
         check(read(snapshot, activeRestore).get("state").getAsString().equals("waiting_for_decision") && activeRestore.paused(),
                 "restoration must preserve a genuinely active decision");
+        var replacement = new Goal("maicraft:travel", "Reach the newly observed lower floor", null,
+                "{\"destination\":{\"x\":-71,\"y\":107,\"z\":1}}", "{}", List.of(), List.of());
+        var changed = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        changed.setState(TaskState.RUNNING);
+        changed.addAttempt(new IntentTaskRecord.AttemptSnapshot(0, goal, TaskState.FAILED,
+                "old destination had no path", TaskResult.fail("old destination had no path").toJson(), 10));
+        changed.replaceCurrent(replacement);
+        JsonObject updated = read(snapshot, changed);
+        check(updated.getAsJsonObject("goal").equals(goal.toJson())
+                        && updated.getAsJsonObject("current_goal").equals(replacement.toJson())
+                        && updated.getAsJsonArray("attempts").size() == 1,
+                "replacement must expose the actual current goal without rewriting request or attempt history");
+        check(read(summary, changed).get("current_outcome").getAsString().equals(replacement.outcome()),
+                "task list must identify the replacement currently being executed");
+        Goal recovery = new Goal("maicraft:acquire_items", "Obtain a water bucket", null,
+                "{\"item_id\":\"minecraft:water_bucket\",\"count\":1}", "{}", List.of(), List.of());
+        changed.insertRecovery(recovery);
+        check(read(snapshot, changed).getAsJsonObject("current_goal").equals(recovery.toJson()),
+                "a recovery prerequisite is the active goal while the replacement waits behind it");
+        changed.addStepResult(new IntentTaskRecord.StepSnapshot(0, recovery.ability(), true,
+                "bucket obtained", TaskResult.ok("bucket obtained").toJson()));
+        check(read(snapshot, changed).getAsJsonObject("current_goal").equals(replacement.toJson()),
+                "completing recovery must expose the resumed replacement");
+        changed.terminal(TaskState.CANCELLED, TaskResult.cancelled("test ended"), 30);
+        check(!read(snapshot, changed).has("current_goal") && !read(summary, changed).has("current_outcome"),
+                "a terminal task must not advertise active work");
         System.out.println("IntentTerminalStateTest: passed");
     }
 

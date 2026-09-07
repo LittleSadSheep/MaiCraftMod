@@ -415,6 +415,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("step_index", record.stepIndex());
         result.addProperty("step_count", record.steps().size());
         result.add("goal", record.goal().toJson());
+        Goal current = currentGoal(record);
+        if (current != null) result.add("current_goal", current.toJson());
 
         JsonArray steps = new JsonArray();
         for (IntentTaskRecord.StepSnapshot step : record.stepResults()) {
@@ -483,9 +485,18 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("task_id", record.externalId().toString());
         result.addProperty("state", publicState(record));
         result.addProperty("outcome", record.goal().outcome());
+        Goal current = currentGoal(record);
+        if (current != null) result.addProperty("current_outcome", current.outcome());
         result.addProperty("step_index", record.stepIndex());
         result.addProperty("step_count", record.steps().size());
         return result;
+    }
+
+    /** The request stays immutable; replacements and recovery steps live in the execution plan. */
+    private static Goal currentGoal(IntentTaskRecord record) {
+        int index = record.stepIndex();
+        return !record.getState().isTerminal() && record.terminalSnapshot() == null
+                && index >= 0 && index < record.steps().size() ? record.steps().get(index) : null;
     }
 
     private static JsonObject decision(IntentTaskRecord.DecisionSnapshot decision) {
