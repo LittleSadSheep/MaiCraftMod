@@ -27,6 +27,8 @@ public final class ElevatorSessionTest {
         var unsafeField = Unsafe.class.getDeclaredField("theUnsafe"); unsafeField.setAccessible(true);
         var memory = (Unsafe) unsafeField.get(null);
         LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
+        set(net.minecraft.world.entity.LivingEntity.class, player, "attributes",
+                new net.minecraft.world.entity.ai.attributes.AttributeMap(net.minecraft.world.entity.player.Player.createAttributes().build()));
         set(Entity.class, player, "position", new Vec3(0.5, 100, 0.5));
         var cabin = new CreateElevatorBridge.Cabin(player, null, new CreateElevatorBridge.Column(0, 0, Direction.NORTH),
                 2, 102, true, new Vec3(0, 100, 0), Map.of(), null, List.of(),

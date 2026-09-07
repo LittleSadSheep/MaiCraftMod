@@ -23,6 +23,7 @@ final class ElevatorMotion {
     private EmbeddedBaritoneNavigator walking;
     private Vec3 staticGoal;
     private Vec3 localGoal;
+    private ElevatorGeometry routeGeometry;
     private final ArrayDeque<Vec3> route = new ArrayDeque<>();
     private Vec3 lastStepTarget;
     private Progress lastStepProgress;
@@ -53,10 +54,16 @@ final class ElevatorMotion {
         if (!releaseNavigation()) return Progress.MOVING;
         Vec3 position = ctx.player().position();
         Vec3 local = cabin.local(position);
-        if (!destination.equals(localGoal)) {
-            localGoal = destination; route.clear();
+        // A dock/door update or a transient failed search must not pin an empty or stale route.
+        if (!destination.equals(localGoal) || geometry != routeGeometry || route.isEmpty()) {
+            localGoal = destination; routeGeometry = geometry; route.clear();
             route.addAll(geometry.path(local, destination, cabin.origin(), ctx.player().maxUpStep(), forbidden));
-            if (route.isEmpty()) { failure = "no continuous supported cabin walkway"; return Progress.BLOCKED; }
+            if (route.isEmpty()) {
+                stop(ctx); failure = "no continuous supported cabin walkway";
+                lastStepTarget = cabin.global(destination); lastStepTick = ctx.tickRevision();
+                return lastStepProgress = Progress.BLOCKED;
+            }
+            failure = "";
         }
         while (!route.isEmpty() && close(local, route.getFirst())) route.removeFirst();
         if (route.isEmpty()) { stop(ctx); return close(local, destination) && geometry.carries(local) ? Progress.REACHED : Progress.BLOCKED; }
@@ -65,7 +72,9 @@ final class ElevatorMotion {
 
     Progress step(LocalPlayerContext ctx, Cabin cabin, ElevatorGeometry geometry, Vec3 target, LongSet forbidden) {
         lastStepTarget = target; lastStepTick = ctx.tickRevision();
-        return lastStepProgress = stepChecked(ctx, cabin, geometry, target, forbidden);
+        lastStepProgress = stepChecked(ctx, cabin, geometry, target, forbidden);
+        if (lastStepProgress != Progress.BLOCKED) failure = "";
+        return lastStepProgress;
     }
 
     private Progress stepChecked(LocalPlayerContext ctx, Cabin cabin, ElevatorGeometry geometry, Vec3 target, LongSet forbidden) {
@@ -108,7 +117,7 @@ final class ElevatorMotion {
         return true;
     }
 
-    void resetLocalPath() { localGoal = null; route.clear(); }
+    void resetLocalPath() { localGoal = null; routeGeometry = null; route.clear(); }
     boolean planning() { return walking != null && walking.planningInFlight(); }
     boolean active() { return walking != null && (walking.planningInFlight() || walking.hasRecentPhysicalProgress(60)); }
     void abandon() { if (walking != null) walking.abandon(); walking = null; resetLocalPath(); }
