@@ -37,6 +37,7 @@ public final class JetpackRoute {
         private final PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble(Node::score));
         private final Map<BlockPos, Double> costs = new HashMap<>();
         private final Map<BlockPos, BlockPos> previous = new HashMap<>();
+        private final Map<BlockPos, Double> clearanceCosts = new HashMap<>();
         private BlockPos origin, goal;
         private Vec3 landing;
         private List<Vec3> points;
@@ -66,7 +67,9 @@ public final class JetpackRoute {
                 Vec3 lift = new Vec3(start.x, Math.max(origin.getY(), goal.getY()), start.z);
                 Vec3 overPlatform = new Vec3(landing.x, lift.y, landing.z);
                 if (flightClear(space, start, lift, power) && flightClear(space, lift, overPlatform, power)
-                        && space.clear(overPlatform, landing)) points = new ArrayList<>(List.of(start, lift, overPlatform, landing));
+                        && space.clear(overPlatform, landing)
+                        && JetpackClearancePolicy.edgePenalty(space, lift, overPlatform, power) == 0)
+                    points = new ArrayList<>(List.of(start, lift, overPlatform, landing));
                 open.add(new Node(origin, 0, distance(origin, goal))); costs.put(origin, 0D);
             }
             int operations = 0;
@@ -104,6 +107,9 @@ public final class JetpackRoute {
                     double cost = node.cost() + 1;
                     if (cost >= costs.getOrDefault(next, Double.POSITIVE_INFINITY)
                             || !flightClear(space, center(node.pos()), center(next), power)) continue;
+                    cost += clearanceCosts.computeIfAbsent(next,
+                            p -> JetpackClearancePolicy.clearancePenalty(space, center(p), power));
+                    if (cost >= costs.getOrDefault(next, Double.POSITIVE_INFINITY)) continue;
                     costs.put(next, cost); previous.put(next, node.pos());
                     open.add(new Node(next, cost, cost + distance(next, goal)));
                 }
@@ -157,6 +163,9 @@ public final class JetpackRoute {
             boolean level = Math.abs(candidate.y - point.y) < 0.01 && atHeight;
             boolean vertical = Math.hypot(candidate.x - point.x, candidate.z - point.z) < 0.01;
             if ((!level && !vertical) || position.distanceTo(candidate) > 6 || !flightClear(space, position, candidate, power)) break;
+            // Near an opening, keep its interior waypoint instead of shaving off a clear but tight corner.
+            // Normal arrival advancement above still admits narrow passages.
+            if (level && JetpackClearancePolicy.edgePenalty(space, position, candidate, power) > 0) break;
             current = i;
         }
         return current;
