@@ -28,6 +28,26 @@ public final class BodyControlInputTest {
         h.nextTick(true);
         h.body.endTick(h.context);
         expect(h, 0, 0, false, false, false);
+        h.minecraft.screen = null;
+        h.nextTick(true);
+        h.player.setYRot(0);
+        float[] evaluatedYaw = {Float.NaN};
+        h.body.applySteering(yaw -> {
+            evaluatedYaw[0] = yaw;
+            double angle = Math.toRadians(yaw);
+            return new BodyControlPort.Movement((float) -Math.sin(angle), (float) Math.cos(angle), false, false, false);
+        }, 0, h.tick);
+        h.body.requestLook(90, 0, h.tick);
+        h.body.endTick(h.context);
+        check(evaluatedYaw[0] == h.player.getYRot() && evaluatedYaw[0] > 0,
+                "steering must use the physical yaw after camera smoothing, not the previous heading");
+        double angle = Math.toRadians(h.player.getYRot());
+        double worldX = -h.player.input.forwardImpulse * Math.sin(angle) + h.player.input.leftImpulse * Math.cos(angle);
+        double worldZ = h.player.input.forwardImpulse * Math.cos(angle) + h.player.input.leftImpulse * Math.sin(angle);
+        check(Math.abs(worldX - 1) < 1e-6 && Math.abs(worldZ) < 1e-6, "turning the camera must not rotate the intended world motion");
+        h.nextTick(true);
+        h.body.endTick(h.context);
+        expect(h, 0, 0, false, false, false);
         move(h);
         h.minecraft.screen = h.allocate(PauseScreen.class);
         h.body.endTick(h.context);

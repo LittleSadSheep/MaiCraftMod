@@ -20,6 +20,14 @@ public interface BodyControlPort {
 
     void applyMovement(Movement movement, long leaseTickRevision);
 
+    /** Re-evaluated against the physical camera yaw while its one-tick lease remains valid. */
+    @FunctionalInterface
+    interface Steering { Movement atYaw(float yaw); }
+
+    default void applySteering(Steering steering, float currentYaw, long leaseTickRevision) {
+        applyMovement(steering.atYaw(currentYaw), leaseTickRevision);
+    }
+
     void requestLook(float yaw, float pitch, long leaseTickRevision);
 
     void clearLook();
