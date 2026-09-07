@@ -156,6 +156,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                     situation.add("elevators", gson.toJsonTree(
                             org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorTravel.inspect(player)));
                 }
+                if ("maicraft:physical_structures".equals(focus) || "maicraft:navigation".equals(focus)
+                        || "maicraft:transport".equals(focus))
+                    situation.add("physical_structures", PhysicalStructurePerception.observe(player));
                 yield situation;
             }
             case "surroundings" -> surroundings(player, nullableString(arguments, "focus"),
@@ -289,6 +292,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         JsonObject result = new JsonObject();
         result.addProperty("dimension", player.level().dimension().location().toString());
         result.add("position", position(player));
+        result.add("view", PhysicalStructurePerception.view(player));
         result.addProperty("health", player.getHealth());
         result.addProperty("max_health", player.getMaxHealth());
         result.addProperty("food", player.getFoodData().getFoodLevel());
@@ -341,6 +345,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("nearby_signs", signs.remove("signs"));
         result.add("sign_observation", signs);
         result.add("local_decision_summary", localDecisionSummary(player, hostileCount));
+        result.add("view", PhysicalStructurePerception.view(player));
+        result.add("physical_structures", PhysicalStructurePerception.observe(player));
         return result;
     }
 
