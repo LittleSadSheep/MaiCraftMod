@@ -24,6 +24,9 @@ final class ElevatorMotion {
     private Vec3 staticGoal;
     private Vec3 localGoal;
     private final ArrayDeque<Vec3> route = new ArrayDeque<>();
+    private Vec3 lastStepTarget;
+    private Progress lastStepProgress;
+    private long lastStepTick;
     String failure = "";
 
     Progress approach(LocalPlayerContext ctx, Vec3 target, LongSet forbidden) {
@@ -61,6 +64,11 @@ final class ElevatorMotion {
     }
 
     Progress step(LocalPlayerContext ctx, Cabin cabin, ElevatorGeometry geometry, Vec3 target, LongSet forbidden) {
+        lastStepTarget = target; lastStepTick = ctx.tickRevision();
+        return lastStepProgress = stepChecked(ctx, cabin, geometry, target, forbidden);
+    }
+
+    private Progress stepChecked(LocalPlayerContext ctx, Cabin cabin, ElevatorGeometry geometry, Vec3 target, LongSet forbidden) {
         if (!releaseNavigation()) return Progress.MOVING;
         Vec3 position = ctx.player().position();
         if (close(position, target)) { stop(ctx); return Progress.REACHED; }
@@ -73,11 +81,24 @@ final class ElevatorMotion {
         double flat = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
         if (flat < 0.02) { stop(ctx); return Progress.MOVING; }
         InputDriver.look(ctx.player(), (float) (Mth.atan2(delta.z, delta.x) * Mth.RAD_TO_DEG) - 90, 10);
-        double yaw = Math.toRadians(ctx.player().getYRot());
-        float forward = (float) ((-delta.x * Math.sin(yaw) + delta.z * Math.cos(yaw)) / flat * 0.5);
-        float strafe = (float) ((delta.x * Math.cos(yaw) + delta.z * Math.sin(yaw)) / flat * 0.5);
-        ctx.body().applyMovement(new BodyControlPort.Movement(forward, strafe, false, false, false), ctx.tickRevision());
+        ctx.body().applySteering(heading -> {
+            double yaw = Math.toRadians(heading);
+            float forward = (float) ((-delta.x * Math.sin(yaw) + delta.z * Math.cos(yaw)) / flat * 0.5);
+            float strafe = (float) ((delta.x * Math.cos(yaw) + delta.z * Math.sin(yaw)) / flat * 0.5);
+            return new BodyControlPort.Movement(forward, strafe, false, false, false);
+        }, ctx.player().getYRot(), ctx.tickRevision());
         return Progress.MOVING;
+    }
+
+    java.util.Map<String, Object> diagnostics() {
+        var data = new java.util.LinkedHashMap<String, Object>();
+        data.put("last_motion_failure", failure);
+        if (lastStepTarget != null) {
+            data.put("motion_target", ElevatorInspection.point(lastStepTarget));
+            data.put("motion_tick", lastStepTick);
+            data.put("motion_progress", lastStepProgress == null ? "unknown" : lastStepProgress.name().toLowerCase(java.util.Locale.ROOT));
+        }
+        return data;
     }
 
     boolean releaseNavigation() {

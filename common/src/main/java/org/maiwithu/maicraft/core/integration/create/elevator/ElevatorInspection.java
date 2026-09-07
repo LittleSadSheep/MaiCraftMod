@@ -28,6 +28,22 @@ final class ElevatorInspection {
                 data.put("recent_native_surface_contact", BRIDGE.recentSupport(cabin, player));
                 var geometry = new ElevatorGeometry(cabin.blocks(), cabin.view(), player.getBbWidth(), player.getBbHeight());
                 data.put("support_layers", ElevatorSurvey.supportLayers(geometry.stances));
+                // Static surroundings cannot show a contraption's open doors or protruding collision boxes.
+                Vec3 localFeet = cabin.local(player.position());
+                var nearby = cabin.blocks().entrySet().stream()
+                        .filter(e -> e.getKey().distToCenterSqr(localFeet) < 4 * 4)
+                        .sorted(java.util.Comparator.comparingDouble(e -> e.getKey().distToCenterSqr(localFeet))).toList();
+                data.put("nearby_cabin_blocks_truncated", nearby.size() > 16);
+                data.put("nearby_cabin_blocks", nearby.stream().limit(16).map(e -> {
+                    var state = e.getValue().state();
+                    var boxes = state.getCollisionShape(cabin.view(), e.getKey()).toAabbs();
+                    return Map.of("local_position", point(Vec3.atLowerCornerOf(e.getKey())),
+                            "world_position", point(cabin.global(Vec3.atLowerCornerOf(e.getKey()))),
+                            "block_id", net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
+                            "state", state.toString(), "block_local_collision_boxes", boxes.stream().limit(8).map(b ->
+                                    java.util.List.of(b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ)).toList(),
+                            "boxes_truncated", boxes.size() > 8);
+                }).toList());
                 data.put("floor_geometry", cabin.floors().stream().map(f -> {
                     var doors = BRIDGE.arrivalDoors(player, cabin, f.contactY());
                     var arrival = ElevatorArrivalView.predict(player.clientLevel, player.clientLevel::hasChunkAt, doors.pairs());

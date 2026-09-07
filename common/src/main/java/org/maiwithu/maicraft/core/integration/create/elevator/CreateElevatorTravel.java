@@ -315,6 +315,13 @@ public final class CreateElevatorTravel implements TransportSession {
         data.put("stop_requested", stopRequested); data.put("effects_started", effects); data.put("remote_input_held", actions.remoteHeld);
         data.put("needs_attention", needsAttention);
         data.put("survey", surveyEvidence);
+        data.putAll(motion.diagnostics());
+        if (plan != null && plan.board() != null) data.put("boarding", Map.of(
+                "outside_world", ElevatorInspection.point(plan.board().outside()),
+                "inside_local", ElevatorInspection.point(plan.board().inside())));
+        if (plan != null) data.put("planned_exit", Map.of("outside_world", ElevatorInspection.point(plan.exit().outside()),
+                "inside_local", ElevatorInspection.point(plan.exit().inside()),
+                "control_stance_local", ElevatorInspection.point(plan.controlStance())));
         if (plan != null) { data.put("cabin_uuid", plan.cabin().toString()); data.put("from_contact_y", plan.fromFloor()); data.put("to_contact_y", plan.toFloor()); }
         if (pendingFailure != null) data.put("detail", pendingFailure);
         return Map.copyOf(data);
