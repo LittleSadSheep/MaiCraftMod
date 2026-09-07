@@ -30,6 +30,8 @@ public final class JetpackFlightSession implements TransportSession {
     private double approachHeight;
     private Vec3 holdPoint;
     private Vec3 steeringTarget;
+    private float requestedYaw;
+    private boolean clearanceBraking;
     private JetpackFastDescent fastDescent;
     private Vec3 fastDescentTarget;
     private boolean repaired;
@@ -88,6 +90,7 @@ public final class JetpackFlightSession implements TransportSession {
         power = JetpackNativeAdapter.inspect(ctx);
         nativeEvidence = JetpackNativeAdapter.activeEvidence(ctx.player());
         recordTrace(ctx, false);
+        clearanceBraking = false;
         if (fastDescent.active()) {
             updateLook(ctx, fastDescentTarget, true);
             if (stopping) fastDescent.requestStop();
@@ -275,14 +278,26 @@ public final class JetpackFlightSession implements TransportSession {
         updateLook(ctx, aim, landingNow);
         Vec3 position = player.position(), velocity = player.getDeltaMovement();
         var settings = power;
-        var command = JetpackView.command(position, velocity, aim, player.getYRot(), landingNow, settings);
+        clearanceBraking = phase == Phase.FLY && !grounded && !landingNow
+                && !JetpackMotion.clearTrajectory(JetpackRoute.observed(ctx, forbidden), position, velocity,
+                        aim, player.getYRot(), requestedYaw, settings);
+        if (clearanceBraking) {
+            // At a narrow aperture, looking around the next corner can quantize input toward its rim.
+            // Face this leg and reassess before braking; otherwise a stopped body can never resume.
+            lookAt(ctx, aim, landingNow);
+            clearanceBraking = !JetpackMotion.clearTrajectory(JetpackRoute.observed(ctx, forbidden), position, velocity,
+                    aim, player.getYRot(), requestedYaw, settings);
+        }
+        Vec3 motionAim = clearanceBraking ? new Vec3(position.x, aim.y, position.z) : aim;
+        steeringTarget = motionAim;
+        var command = JetpackView.command(position, velocity, motionAim, player.getYRot(), landingNow, settings);
         if (command.jumping()) {
             double rise = JetpackDynamics.riseEnvelope(player.getDeltaMovement().y, true, power);
             if (!JetpackRoute.observed(ctx, forbidden).clear(player.position(), player.position().add(0, rise, 0))) {
                 brake(ctx); return false;
             }
         }
-        ctx.body().applySteering(yaw -> JetpackView.command(position, velocity, aim, yaw, landingNow, settings),
+        ctx.body().applySteering(yaw -> JetpackView.command(position, velocity, motionAim, yaw, landingNow, settings),
                 player.getYRot(), ctx.tickRevision());
         effects = true;
         return true;
@@ -306,7 +321,12 @@ public final class JetpackFlightSession implements TransportSession {
             if (JetpackRoute.observed(ctx, forbidden).clear(ctx.player().position(), ahead))
                 focus = JetpackView.focus(ctx.player().position(), aim, ahead);
         }
+        lookAt(ctx, focus, landingNow);
+    }
+
+    private void lookAt(LocalPlayerContext ctx, Vec3 focus, boolean landingNow) {
         var look = JetpackView.toward(ctx.player().position(), ctx.player().getEyeHeight(), focus, ctx.player().getYRot(), landingNow);
+        requestedYaw = look.yaw();
         ctx.body().requestLook(look.yaw(), look.pitch(), ctx.tickRevision());
     }
 
@@ -342,6 +362,7 @@ public final class JetpackFlightSession implements TransportSession {
         sample.put("health", ctx.player().getHealth()); sample.put("absorption", ctx.player().getAbsorptionAmount());
         sample.put("native_client_evidence", nativeEvidence);
         sample.put("waypoint", waypoint); sample.put("detail", detail);
+        sample.put("clearance_braking", clearanceBraking);
         if (route != null && waypoint < route.points().size())
             sample.put("waypoint_target", route.points().get(waypoint).toString());
         if (!lastObstacle.isEmpty()) sample.put("obstruction", lastObstacle);
@@ -377,6 +398,7 @@ public final class JetpackFlightSession implements TransportSession {
         result.put("departure", departure); result.put("flight_events", java.util.List.copyOf(events));
         result.put("last_obstruction", lastObstacle); result.put("platform_cells", platform.size());
         result.put("fast_descent", fastDescent.diagnostics());
+        result.put("clearance_braking", clearanceBraking);
         result.put("search_radius", 64); result.put("search_node_limit", 6000);
         if (search != null) result.put("search_expanded", search.expanded());
         if (route != null) { result.put("route_points", route.points().size()); result.put("estimated_ticks_with_reserve", route.requiredTicks()); }
