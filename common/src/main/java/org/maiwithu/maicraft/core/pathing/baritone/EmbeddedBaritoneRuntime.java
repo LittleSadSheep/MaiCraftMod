@@ -413,6 +413,18 @@ public final class EmbeddedBaritoneRuntime {
                 && movements.get(index) instanceof MovementFall fall ? fall : null;
     }
 
+    /** The scheduled fall retains its item and recovery ownership until the movement has settled. */
+    public static boolean ownsActiveLandingAssist(LocalPlayer player) {
+        if (player == null || owner == null || backend == null || world != player.clientLevel
+                || backend.getPlayerContext().player() != player) return false;
+        MovementFall fall = currentFall(owner);
+        if (fall == null) return false;
+        var assist = fall.landingAssist();
+        if (assist != null && (!assist.complete() || assist.cleanupPending())) return true;
+        var boat = fall.landingBoat();
+        return boat != null && (!boat.failed() || boat.cleanupPending());
+    }
+
     /** Called by the adapted upstream input behavior while the actor lease is open. */
     public static void applyActionState(InputOverrideHandler input) {
         LocalPlayerContext context = tickingContext;
@@ -473,6 +485,11 @@ public final class EmbeddedBaritoneRuntime {
             }
         }
         MovementFall assistedFall = currentFall(owner);
+        if (tickingContext != null && assistedFall != null && assistedFall.landingAssist() != null
+                && assistedFall.landingAssist().holdingForRecovery(tickingContext)) {
+            // Generic swimming must not jump out of the clutch water or fight its recovery aim.
+            forward = 0; strafe = 0; jump = false; sneak = false; sprint = false;
+        }
         var landingMovement = assistedFall != null && assistedFall.landingBoat() != null
                 ? assistedFall.landingBoat().movementOverride() : null;
         if (landingMovement != null) {

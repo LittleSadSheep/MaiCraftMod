@@ -1,5 +1,10 @@
 package org.maiwithu.maicraft.core.task.chain;
 
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
 import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.WorkProfile;
 import org.maiwithu.maicraft.task.Task;
@@ -47,6 +52,7 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
 
     /** 向下探地的最大深度。 */
     private static final double PROBE_DEPTH = 40.0;
+    private LandingAssistSession session;
 
     /**
      * 放完水之后收桶的窗口(刻)。这条链压过自卫、脱困等一切,所以窗口只够动作本身:
@@ -75,21 +81,16 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
 
     @Override
     public boolean canRun(LocalPlayer companion) {
-        if (WorkProfile.of(companion).fearless()) {
-            return false;
-        }
-        return falling(companion) || reclaiming(companion);
+        if (org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.ownsActiveLandingAssist(companion)) return false;
+        if (session != null) return !session.complete();
+        return !WorkProfile.of(companion).fearless() && falling(companion);
     }
-
     /** 正在快速下落,而且身上有能救自己的东西。 */
     private static boolean falling(LocalPlayer companion) {
         boolean grounded = companion.onGround() || companion.isInWater()
                 || companion.isSwimming() || companion.onClimbable();
-        boolean canSave = waterBucketSlot(companion) >= 0 || softBlockSlot(companion) >= 0;
-        return SurvivalDecisions.mlgTriggered(grounded,
-                companion.getDeltaMovement().y, canSave);
+        return SurvivalDecisions.mlgTriggered(grounded, companion.getDeltaMovement().y, EmergencyLanding.hasItem(companion));
     }
-
     /** 水还在那儿、手上有空桶、窗口没到点 —— 该去收。 */
     private boolean reclaiming(LocalPlayer companion) {
         if (placed == null || reclaimTicks <= 0) {
@@ -104,20 +105,26 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
     }
 
     @Override
-    public TaskState tick(LocalPlayer companion) {
-        if (falling(companion)) {
-            return clutch(companion);
-        }
-        if (placed != null) {
-            if (--reclaimTicks <= 0 || !reclaiming(companion)) {
-                placed = null;
+    public TaskState tick(LocalPlayer companion) { return tick(ClientRuntime.requireContext(companion)); }
+
+    public TaskState tick(LocalPlayerContext context) {
+        var player = context.player();
+        if (session == null) {
+            session = EmergencyLanding.find(context);
+            if (session == null) {
+                context.body().requestLook(player.getYRot(), 90, context.tickRevision());
                 return TaskState.RUNNING;
             }
-            return reclaim(companion);
+            beginAttention(player, session.plan().kind() == org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.WATER
+                    ? "water_bucket" : session.plan().kind().name().toLowerCase(java.util.Locale.ROOT),
+                    "temporary landing aid; attributable recovery is attempted after supported touchdown");
         }
+        EmergencyLanding.tick(context, session);
+        attentionActions += session.drainChanges().size();
+        LandingAssistPolicy.report(session.diagnostics());
+        if (session.complete()) finishAttention(player, session.failed() ? "landing protection unverified" : "landing protection verified");
         return TaskState.RUNNING;
     }
-
     /** 摔落中:瞄住落点,够得着就倒水/垫块。 */
     private TaskState clutch(LocalPlayer companion) {
         if (action != null) return tickAction(companion);
@@ -238,17 +245,16 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
 
     @Override
     public void stop(LocalPlayer companion, StopReason why) {
-        finishAttention(companion, why == StopReason.BODY_GONE
-                ? "body unavailable; result unconfirmed" : "fall episode ended");
-        if (action != null) action.stop();
-        action = null;
-        selection.reset();
-        org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(companion).body().releaseAll();
-        notedThisFall = false;     // the fall episode is over — the next fall diaries anew
-        placed = null;
-        reclaimTicks = 0;
+        try {
+            ClientRuntime.actor().activeContext().filter(c -> c.player() == companion && c.isCurrent()).ifPresent(context -> {
+                if (session != null && !session.complete()) session.stop(context, "emergency landing owner ended: " + why);
+                context.body().releaseAll();
+            });
+        } finally {
+            finishAttention(companion, why == StopReason.BODY_GONE ? "body unavailable; result unconfirmed" : "fall episode ended");
+            session = null;
+        }
     }
-
     @Override
     public String name() {
         return "mlg";
