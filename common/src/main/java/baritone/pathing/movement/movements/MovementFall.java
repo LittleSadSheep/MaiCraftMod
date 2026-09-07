@@ -99,10 +99,6 @@ public class MovementFall extends Movement {
             return state.setStatus(!landingAssist.failed() && ctx.playerFeet().equals(dest)
                     ? MovementStatus.SUCCESS : MovementStatus.UNREACHABLE);
         }
-        super.updateState(state);
-        if (state.getStatus() != MovementStatus.RUNNING) {
-            return state;
-        }
         if (landingAssist == null && landingBoat == null && !ctx.player().onGround()
                 && (org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding.triggered(ctx.player())
                     || org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(ctx.player()).damage(
@@ -110,6 +106,10 @@ public class MovementFall extends Movement {
                         org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.of(ctx.world().getBlockState(dest.below())), true) > 0)) {
             var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
             adoptEmergencyLanding(context);
+        }
+        super.updateState(state);
+        if (state.getStatus() != MovementStatus.RUNNING) {
+            return state;
         }
         if (landingBoat != null) {
             state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
@@ -227,9 +227,11 @@ public class MovementFall extends Movement {
 
     @Override
     protected boolean prepared(MovementState state) {
-        boolean atDeparture = ctx.player().onGround() && ctx.playerFeet().equals(src);
-        departureObserved |= !atDeparture;
-        if (landingAssist == null && !departureObserved && atDeparture && needsLandingAssist()) {
+        boolean atDeparture = groundedBeforeDeparture();
+        // Once airborne, source-column doors or mining cannot delay the owned rescue. Its
+        // native placement/recovery session and fall steering run until a supported outcome.
+        if (departureObserved) return true;
+        if (landingAssist == null && atDeparture && needsLandingAssist()) {
             var calculation = new CalculationContext(baritone);
             var plans = calculation.landingPlans(dest, src.y - dest.y);
             var boatPlan = plans.stream().anyMatch(plan -> plan.existing() || calculation.landingInventory.available().contains(plan.kind()))
@@ -248,18 +250,15 @@ public class MovementFall extends Movement {
             }
             return true;
         }
-        if (landingAssist != null && !departureObserved && atDeparture) {
+        if (landingAssist != null && atDeparture) {
             var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
-            if (!landingAssist.prepare(context)) {
-                if (landingAssist.failed() && !landingAssist.cleanupPending()) state.setStatus(MovementStatus.UNREACHABLE);
-                return false;
-            }
+            if (!prepareLanding(state, context)) return false;
         }
         // Runs before every tick that could leave the source, including RUNNING. A prior fall,
         // incoming damage, an expired buff or removed boots must invalidate the stale A* budget.
         // After departure retain the selected landing through cleanup, including a neighboring
         // supported cell: the bucket consumed by this fall cannot invalidate its own recovery.
-        if (!departureObserved && atDeparture
+        if (atDeparture
                 && calculateCost(new CalculationContext(baritone)) >= COST_INF) {
             state.setStatus(MovementStatus.UNREACHABLE);
             return true;
@@ -275,6 +274,28 @@ public class MovementFall extends Movement {
                 return super.prepared(state);
             }
         }
+        return true;
+    }
+
+    private boolean groundedBeforeDeparture() {
+        departureObserved |= !ctx.player().onGround();
+        return !departureObserved;
+    }
+
+    private boolean prepareLanding(MovementState state, org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
+        state.setInput(Input.SNEAK, true); // Native edge restraint while equipment and aim become ready.
+        if (!landingAssist.prepare(context)) {
+            if (landingAssist.failed() && !landingAssist.cleanupPending()) state.setStatus(MovementStatus.UNREACHABLE);
+            return false;
+        }
+        // Material access can need the view for a fixed terminal. Only take the camera after
+        // preparation has confirmed the item and closed its inventory/terminal transaction.
+        var eye = context.player().getEyePosition();
+        var aim = landingAssist.aimPoint();
+        state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(eye, aim,
+                new Rotation(context.player().getYRot(), context.player().getXRot())), true));
+        if (aim.subtract(eye).normalize().dot(context.player().getViewVector(1)) < Math.cos(Math.toRadians(2))) return false;
+        state.setInput(Input.SNEAK, false);
         return true;
     }
 }
