@@ -23,6 +23,9 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.integration.create.CreateStockObservationTest.main(args);
         org.maiwithu.maicraft.core.integration.ae2.Ae2ScreenAccessTest.main(args);
         org.maiwithu.maicraft.core.integration.ae2.Ae2WaterBucketFillTest.main(args);
+        org.maiwithu.maicraft.core.integration.ae2.Ae2InPlaceSupplyTest.main(args);
+        org.maiwithu.maicraft.core.integration.ae2.Ae2LandingWaterFallbackTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest.main(args);
         org.maiwithu.maicraft.core.integration.ae2.Ae2FixedTerminalDiscoveryTest.main(args);
         VisibleMenuSessionTest.main(args);
         LegacyInventoryBoundaryTest.main(args);
