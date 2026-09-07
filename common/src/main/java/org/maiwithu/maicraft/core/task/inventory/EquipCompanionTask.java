@@ -13,7 +13,6 @@ import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
-import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
@@ -26,7 +25,7 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
     private final FirstPersonActionGate selection = new FirstPersonActionGate();
     private int sourceSlot;
     private Item item;
-    private int carriedBefore;
+    private EquipmentSlot targetSlot;
     private Interaction use;
     private MenuReceipt menuReceipt;
     private boolean offhandApplied;
@@ -44,24 +43,31 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
 
     @Override protected void onStart() {
         sourceSlot = findItem(player.getInventory());
-        item = player.getInventory().getItem(sourceSlot).getItem();
-        carriedBefore = PlayerInv.carriedCount(player.getInventory(), item);
+        var stack = player.getInventory().getItem(sourceSlot);
+        item = stack.getItem();
+        EquipmentSlot naturalSlot = player.getEquipmentSlotForItem(stack);
+        targetSlot = r.slot == null ? naturalSlot : r.slot;
+        if (!player.canUseSlot(targetSlot) || targetSlot != EquipmentSlot.MAINHAND
+                && targetSlot != EquipmentSlot.OFFHAND && targetSlot != naturalSlot) {
+            fail(r.label + " cannot be equipped in " + targetSlot.getName(), FailureType.UNKNOWN);
+        }
     }
 
     @Override protected TaskState onTick() {
-        if (r.slot == EquipmentSlot.OFFHAND) return equipOffhand();
+        if (targetSlot == EquipmentSlot.OFFHAND) return equipOffhand();
         FirstPersonActionGate.Status selected = selection.select(player, sourceSlot);
         if (selected == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;
         if (selected == FirstPersonActionGate.Status.FAILED) {
             fail("couldn't select " + r.label + ": " + selection.failure(), FailureType.UNKNOWN);
             return TaskState.FAILED;
         }
-        if (r.slot == EquipmentSlot.MAINHAND) {
-            message = "holding " + r.label + " in main hand";
-            slotName = "mainhand";
-            return TaskState.SUCCESS;
-        }
+        if (targetSlot == EquipmentSlot.MAINHAND) return verifyEquipped();
         if (use == null) {
+            var held = player.getMainHandItem();
+            if (!held.is(item) || player.getEquipmentSlotForItem(held) != targetSlot) {
+                fail("the selected item no longer matches the requested equipment slot", FailureType.TARGET_LOST);
+                return TaskState.FAILED;
+            }
             use = Interaction.useInAir(player, InteractionHand.MAIN_HAND, Interaction.Timing.once());
         }
         return switch (use.tick()) {
@@ -84,8 +90,7 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
                 return TaskState.FAILED;
             }
             menuReceipt = null;
-            message = "equipped " + r.label + " in offhand";
-            slotName = "offhand";
+            if (verifyEquipped() == TaskState.FAILED) return TaskState.FAILED;
             offhandApplied = true;
             return TaskState.RUNNING;
         }
@@ -106,13 +111,14 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
     }
 
     private TaskState verifyEquipped() {
-        if (PlayerInv.carriedCount(player.getInventory(), item) >= carriedBefore) {
-            fail(r.label + " did not enter an equipment/accessory slot after native use",
+        if (!player.getItemBySlot(targetSlot).is(item)) {
+            fail(r.label + " was not observed in " + targetSlot.getName(),
                     FailureType.UNKNOWN);
             return TaskState.FAILED;
         }
-        slotName = foundVanillaSlot();
-        message = "equipped " + r.label + (slotName.isEmpty() ? " (accessory slot)" : " in " + slotName);
+        slotName = targetSlot.getName();
+        message = targetSlot == EquipmentSlot.MAINHAND ? "holding " + r.label + " in main hand"
+                : "equipped " + r.label + " in " + slotName;
         return TaskState.SUCCESS;
     }
 
@@ -121,12 +127,6 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
             if (!inv.getItem(i).isEmpty() && inv.getItem(i).is(r.item)) return i;
         }
         return -1;
-    }
-    private String foundVanillaSlot() {
-        for (EquipmentSlot slot : EquipmentSlot.values()) {
-            if (slot != EquipmentSlot.MAINHAND && player.getItemBySlot(slot).is(item)) return slot.getName();
-        }
-        return "";
     }
     private static boolean same(net.minecraft.world.item.ItemStack a, net.minecraft.world.item.ItemStack b) {
         return a.getCount() == b.getCount() && net.minecraft.world.item.ItemStack.isSameItemSameComponents(a, b);

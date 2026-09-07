@@ -27,8 +27,8 @@ public final class EquipItemTool implements MaiCraftTool {
 
     @Override
     public String description() {
-        return "Equip an item from your OWN inventory: tool/weapon to the main hand, armor and modded "
-                + "accessories (Curios/Trinkets) auto-routed to their slots; the previous item is "
+        return "Equip an item from your OWN inventory: native armor to its equipment slot, "
+                + "other items to the main hand; holding an item does not use it. The previous item is "
                 + "stowed back. Or take gear OFF: action=unequip with a slot stows it into the "
                 + "inventory ('armor' strips all four pieces, 'mainhand' frees your hand); fails if "
                 + "there is no room.";

@@ -614,7 +614,7 @@ public final class GeneralAbilityAdapter {
         JsonObject p = goal.parameters();
         String action = lower(string(p, "action"));
         if (action == null) action = "equip";
-        String slot = lower(string(p, "slot"));
+        String slot = lower(string(p, "equipment_location"));
         if (slot != null && !EQUIPMENT_SLOTS.contains(slot)) {
             return decision(goal, "Unknown semantic equipment slot: " + slot,
                     List.of(option("retry", "Use mainhand, offhand, head, chest, legs, feet, or armor."),
@@ -623,7 +623,7 @@ public final class GeneralAbilityAdapter {
         if ("unequip".equals(action)) {
             if (slot == null) {
                 return decision(goal, "Which equipment slot should be cleared?",
-                        List.of(option("retry", "Provide a semantic slot; armor means all four armor pieces."),
+                        List.of(option("retry", "Provide equipment_location; armor means all four armor pieces."),
                                 option("cancel", "Cancel equipment change.")), null);
             }
             JsonObject args = new JsonObject();
@@ -637,8 +637,8 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel equipment change.")), null);
         }
         if ("armor".equals(slot)) {
-            return decision(goal, "slot=armor is only meaningful when unequipping all armor.",
-                    List.of(option("retry", "Choose one armor slot or omit slot for automatic routing."),
+            return decision(goal, "equipment_location=armor is only meaningful when unequipping all armor.",
+                    List.of(option("retry", "Choose one equipment_location or omit it for automatic routing."),
                             option("cancel", "Cancel equipment change.")), null);
         }
 
@@ -649,7 +649,7 @@ public final class GeneralAbilityAdapter {
         if (itemId == null) {
             if (slot == null) {
                 return decision(goal, "Which item should be equipped?",
-                        List.of(option("retry", "Provide item_id, or a slot with exactly one compatible inventory item."),
+                        List.of(option("retry", "Provide item_id, or equipment_location with exactly one compatible inventory item."),
                                 option("cancel", "Cancel equipment change.")), null);
             }
             EquipmentSlot equipmentSlot = equipmentSlot(slot);

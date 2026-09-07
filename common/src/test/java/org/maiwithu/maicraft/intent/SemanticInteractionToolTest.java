@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.core.tools.BlockActionOps;
 
 public final class SemanticInteractionToolTest {
     public static void main(String[] args) {
+        equipmentLocationContract();
         var use = new IntentAction.Tool("interact_at", "{}");
         var walk = new IntentAction.Tool("goto", "{}");
         UseTool stone = new UseTool(ResourceLocation.withDefaultNamespace("stone_hoe"), false, false);
@@ -43,6 +44,26 @@ public final class SemanticInteractionToolTest {
             throw new AssertionError("a world postcondition needs a concrete target");
         } catch (IllegalArgumentException expected) { }
         System.out.println("SemanticInteractionToolTest: passed");
+    }
+
+    private static void equipmentLocationContract() {
+        for (String location : List.of("mainhand", "offhand", "head", "chest", "legs", "feet", "armor")) {
+            var json = new com.google.gson.JsonObject();
+            json.addProperty("ability", GeneralAbilityAdapter.EQUIP);
+            json.addProperty("outcome", "remove the requested equipment");
+            var parameters = new com.google.gson.JsonObject();
+            parameters.addProperty("action", "unequip");
+            parameters.addProperty("equipment_location", location);
+            json.add("parameters", parameters);
+            Goal goal = Goal.fromJson(json);
+            SemanticGoalContract.validate(goal, java.util.Set.of(GeneralAbilityAdapter.EQUIP));
+            IntentAction result = GeneralAbilityAdapter.adapt(goal, null, null);
+            check(result instanceof IntentAction.Tool, "the declared equipment location must compile without asking for a forbidden slot field");
+            var command = (IntentAction.Tool) result;
+            check(command.toolName().equals("equip_item") && command.arguments().get("action").getAsString().equals("unequip")
+                    && command.arguments().get("slot").getAsString().equals(location),
+                    "semantic location must reach the internal native equipment action unchanged");
+        }
     }
 
     private static void check(boolean condition, String message) {
