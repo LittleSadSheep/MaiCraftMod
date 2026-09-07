@@ -33,6 +33,8 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public final int holdTicks;
     public final Item item;        // null → use whatever is already in hand; else equip this first
     public final Block expectedBlock;
+    /** Optional identity assertion immediately before native use, distinct from its world outcome. */
+    public final Block requiredBlock;
 
     public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,
                                 MouseButton button, BlockPos aim, int holdTicks, Item item) {
@@ -41,12 +43,19 @@ public final class InteractAtTaskRecord extends TaskRecord {
 
     public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,
                                 MouseButton button, BlockPos aim, int holdTicks, Item item, Block expectedBlock) {
+        this(toolCallId, deadlineGameTime, button, aim, holdTicks, item, expectedBlock, null);
+    }
+
+    public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,
+                                MouseButton button, BlockPos aim, int holdTicks, Item item, Block expectedBlock, Block requiredBlock) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
+        if (requiredBlock != null && aim == null) throw new IllegalArgumentException("required block needs an explicit aim");
         this.button = button;
         this.aim = aim != null ? aim.immutable() : null;
         this.holdTicks = holdTicks;
         this.item = item;
         this.expectedBlock = expectedBlock;
+        this.requiredBlock = requiredBlock;
     }
 
     @Override

@@ -6,9 +6,15 @@ import net.minecraft.core.Direction;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.BucketItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.MobBucketItem;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BucketPickup;
 import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.LiquidBlockContainer;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -26,6 +32,48 @@ public final class FirstPersonInteractionTargeting {
     private static final double FACE_INSET = 1.0e-3D;
 
     private FirstPersonInteractionTargeting() {}
+
+    /** Buckets use their own native POV ray, then USE_ITEM; a backing machine is never clicked. */
+    public static boolean usesBucketRay(Item item) {
+        return item instanceof BucketItem;
+    }
+
+    public static BlockHitResult bucketRay(
+            Level level, Entity observer, Vec3 eye, Vec3 end, Item item) {
+        return level.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE,
+                item == Items.BUCKET ? ClipContext.Fluid.SOURCE_ONLY : ClipContext.Fluid.NONE, observer));
+    }
+
+    /** Validate the actual bucket hit and its placement face against the requested cell. */
+    public static boolean acceptsBucketHit(Level level, BlockPos target, Item item, BlockHitResult hit) {
+        if (!level.isLoaded(target) || hit.getType() != HitResult.Type.BLOCK
+                || !level.isLoaded(hit.getBlockPos())) return false;
+        var state = level.getBlockState(target);
+        if (item == Items.BUCKET) {
+            return hit.getBlockPos().equals(target) && state.getBlock() instanceof BucketPickup
+                    && (!(state.getBlock() instanceof LiquidBlock) || state.getFluidState().isSource());
+        }
+        if (!state.isAir() && !(state.getBlock() instanceof LiquidBlock)) return hit.getBlockPos().equals(target);
+        boolean waterlogs = (item == Items.WATER_BUCKET || item instanceof MobBucketItem)
+                && level.getBlockState(hit.getBlockPos()).getBlock() instanceof LiquidBlockContainer;
+        BlockPos placement = waterlogs ? hit.getBlockPos() : hit.getBlockPos().relative(hit.getDirection());
+        return placement.equals(target);
+    }
+
+    /** Preflight for the same item ray the final converged camera must produce. */
+    public static BlockHitResult visibleBucketHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Item item) {
+        if (!Double.isFinite(reach) || reach <= 0.0D
+                || !level.isLoaded(BlockPos.containing(eye)) || !level.isLoaded(target)) return null;
+        var state = level.getBlockState(target);
+        if (item != Items.BUCKET && !state.isAir() && !(state.getBlock() instanceof LiquidBlock)) {
+            return visibleBlockHit(level, observer, eye, target, reach);
+        }
+        Vec3 delta = Vec3.atCenterOf(target).subtract(eye);
+        if (delta.lengthSqr() < EPSILON) return null;
+        BlockHitResult hit = bucketRay(level, observer, eye, eye.add(delta.normalize().scale(reach)), item);
+        return acceptsBucketHit(level, target, item, hit) ? hit : null;
+    }
 
     /**
      * Rehearse the same block ray a converged first-person camera will cast: aim at the target
@@ -178,8 +226,8 @@ public final class FirstPersonInteractionTargeting {
 
     /**
      * The common obstruction verdict used both before travel and after the real camera converges.
-     * Air aims intentionally pass through. Liquid targets use vanilla's Fluid.NONE crosshair ray,
-     * so a hit beyond the liquid remains valid item-use geometry; a hit before it is a real wall.
+     * Air aims intentionally pass through. Non-bucket liquid use keeps the Fluid.NONE crosshair
+     * policy; buckets instead require {@link #acceptsBucketHit} on their own item ray.
      */
     public static boolean blockedByWorld(
             Level level, Vec3 eye, BlockPos target, Vec3 rayEnd, HitResult hit) {

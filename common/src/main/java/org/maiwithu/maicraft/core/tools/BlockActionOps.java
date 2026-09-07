@@ -62,6 +62,11 @@ Integer hold_ticks,
 String item_id,
 String expected_block_id,
             ToolContext ctx) {
+        return interactAt(button, x, y, z, hold_ticks, item_id, expected_block_id, null, ctx);
+    }
+
+    public TaskRecord interactAt(String button, Integer x, Integer y, Integer z, Integer hold_ticks,
+                                 String item_id, String expected_block_id, String required_block_id, ToolContext ctx) {
         MouseButton buttonVal = ToolParse.parseButton(button);
         int holdTicks = hold_ticks == null ? 0 : hold_ticks;
 
@@ -81,8 +86,15 @@ String expected_block_id,
                 throw new IllegalArgumentException("expected_block_id needs a valid block and an explicit aim");
             expected = BuiltInRegistries.BLOCK.get(id);
         }
+        Block required = null;
+        if (required_block_id != null) {
+            var id = net.minecraft.resources.ResourceLocation.tryParse(required_block_id);
+            if (aim == null || id == null || !BuiltInRegistries.BLOCK.containsKey(id))
+                throw new IllegalArgumentException("required_block_id needs a valid block and an explicit aim");
+            required = BuiltInRegistries.BLOCK.get(id);
+        }
         return new InteractAtTaskRecord(ctx.toolCallId(), ctx.deadline(INTERACT_AT_TIMEOUT_TICKS),
-                buttonVal, aim, holdTicks, item, expected);
+                buttonVal, aim, holdTicks, item, expected, required);
     }
 
     public TaskRecord interactEntity(

@@ -391,7 +391,7 @@ public final class GeneralAbilityAdapter {
 
         EntitySelector selector = selector(goal, p);
         String blockId = blockId(goal, p);
-        if (!selector.empty() && blockId != null) {
+        if (!selector.empty() && (blockId != null || exactBlockTarget(goal))) {
             return decision(goal, "The target names both an entity and a block. Which one should be used?",
                     List.of(option("retry", "Retry with exactly one semantic target kind."),
                             option("cancel", "Cancel interaction.")), null);
@@ -420,7 +420,7 @@ public final class GeneralAbilityAdapter {
             if (itemId != null) args.addProperty("item_id", itemId);
             return new IntentAction.Tool("interact_entity", args.toString());
         }
-        if (blockId == null) {
+        if (blockId == null && !exactBlockTarget(goal)) {
             return decision(goal, containerOnly ? "Which loaded container block should be opened?"
                             : "Which block or entity should be used?",
                     List.of(option("retry", containerOnly
@@ -462,6 +462,9 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction interactBlock(
             Goal goal, LocalPlayer player, IntentRuntime runtime, String rawBlockId, String itemId, boolean prepareTool) {
+        if (exactBlockTarget(goal)) {
+            return interactExactBlock(goal, player, rawBlockId, itemId, prepareTool);
+        }
         ResourceLocation id = ResourceLocation.tryParse(rawBlockId);
         if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
             return decision(goal, "Unknown block id: " + rawBlockId,
@@ -520,19 +523,75 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel interaction.")), facts);
         }
 
-        BlockPos target = hits.getFirst();
+        return compileBlockInteraction(goal, player, hits.getFirst(), id, itemId, prepareTool);
+    }
+
+    private static boolean exactBlockTarget(Goal goal) {
+        return goal.target() != null && "coordinates".equals(lower(goal.target().kind()));
+    }
+
+    /** Coordinates identify one synchronized cell; a type is an assertion, never a search hint. */
+    private static IntentAction interactExactBlock(
+            Goal goal, LocalPlayer player, String rawBlockId, String itemId, boolean prepareTool) {
+        Goal.WorldPosition position = goal.target().position();
+        if (!sameDimension(position, player)) {
+            return exactBlockUnavailable(goal, "The exact block target needs coordinates in the current dimension.", null);
+        }
+        BlockPos target = new BlockPos(position.x(), position.y(), position.z());
+        ClientLevel level = player.clientLevel;
+        JsonObject facts = new JsonObject();
+        facts.addProperty("x", target.getX());
+        facts.addProperty("y", target.getY());
+        facts.addProperty("z", target.getZ());
+        if (!level.isLoaded(target)) {
+            return exactBlockUnavailable(goal, "The exact block target is not loaded; no substitute was selected.", facts);
+        }
+        var state = level.getBlockState(target);
+        ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        facts.addProperty("observed_block_id", actualId.toString());
+        if (state.isAir()) {
+            return exactBlockUnavailable(goal, "The exact block target is now empty.", facts);
+        }
+        if (rawBlockId != null) {
+            ResourceLocation requested = ResourceLocation.tryParse(rawBlockId);
+            facts.addProperty("requested_block_id", rawBlockId);
+            if (requested == null || !BuiltInRegistries.BLOCK.containsKey(requested)) {
+                return exactBlockUnavailable(goal, "Unknown block id: " + rawBlockId, facts);
+            }
+            if (!state.is(BuiltInRegistries.BLOCK.get(requested))) {
+                return exactBlockUnavailable(goal, "The exact block target does not match the requested block_id.", facts);
+            }
+        }
+        IntentAction missingItem = prepareTool ? null : requireInventoryItem(goal, player, itemId);
+        if (missingItem != null) return missingItem;
+        return compileBlockInteraction(goal, player, target, actualId, itemId, prepareTool);
+    }
+
+    private static IntentAction exactBlockUnavailable(Goal goal, String reason, JsonObject facts) {
+        return decision(goal, reason,
+                List.of(option("recover", "Observe or load the exact target, then retry."),
+                        option("replace_goal", "Choose an explicitly different target."),
+                        option("cancel", "Cancel interaction.")), facts);
+    }
+
+    private static IntentAction compileBlockInteraction(
+            Goal goal, LocalPlayer player, BlockPos target, ResourceLocation id, String itemId, boolean prepareTool) {
+        ClientLevel level = player.clientLevel;
         JsonObject use = new JsonObject();
         use.addProperty("button", "right");
         use.addProperty("x", target.getX());
         use.addProperty("y", target.getY());
         use.addProperty("z", target.getZ());
+        use.addProperty("required_block_id", id.toString());
         if ("till".equals(lower(string(goal.parameters(), "purpose"))))
             use.addProperty("expected_block_id", "minecraft:farmland");
         if (itemId != null) use.addProperty("item_id", itemId);
-        if (!prepareTool && hasLoadedInteractionLine(level, player, player.getEyePosition(), target)) {
+        Item useItem = itemId == null ? player.getMainHandItem().getItem()
+                : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
+        if (!prepareTool && hasLoadedInteractionLine(level, player, player.getEyePosition(), target, useItem)) {
             return new IntentAction.Tool("interact_at", use.toString());
         }
-        BlockPos stand = interactionStand(level, player, target, player.blockPosition());
+        BlockPos stand = interactionStand(level, player, target, player.blockPosition(), useItem);
         if (stand == null) {
             JsonObject facts = new JsonObject();
             facts.addProperty("block_id", id.toString());
@@ -868,7 +927,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static BlockPos interactionStand(
-            ClientLevel level, LocalPlayer player, BlockPos target, BlockPos current) {
+            ClientLevel level, LocalPlayer player, BlockPos target, BlockPos current, Item item) {
         List<BlockPos> candidates = new ArrayList<>();
         for (int radius = 1; radius <= 3; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -882,7 +941,7 @@ public final class GeneralAbilityAdapter {
                                         player,
                                         Vec3.atBottomCenterOf(feet)
                                                 .add(0.0D, player.getEyeHeight(), 0.0D),
-                                        target)) {
+                                        target, item)) {
                             candidates.add(feet.immutable());
                         }
                     }
@@ -908,7 +967,11 @@ public final class GeneralAbilityAdapter {
      * target policy. Distance alone is not interaction reach through a wall.
      */
     private static boolean hasLoadedInteractionLine(
-            ClientLevel level, LocalPlayer player, Vec3 eye, BlockPos target) {
+            ClientLevel level, LocalPlayer player, Vec3 eye, BlockPos target, Item item) {
+        if (FirstPersonInteractionTargeting.usesBucketRay(item)) {
+            return FirstPersonInteractionTargeting.visibleBucketHit(
+                    level, player, eye, target, player.blockInteractionRange(), item) != null;
+        }
         return FirstPersonInteractionTargeting.hasLoadedReachLine(
                 level, player, eye, target, 4.5D);
     }

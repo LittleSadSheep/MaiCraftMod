@@ -93,6 +93,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected TaskState act() {
         // Resolve the crosshair once we're in position, then drive the action.
         if (interaction == null) {
+            if (r.requiredBlock != null && (!player.level().isLoaded(r.aim)
+                    || !player.level().getBlockState(r.aim).is(r.requiredBlock))) {
+                fail("the required interaction target changed or unloaded before aiming", FailureType.TARGET_LOST);
+                return TaskState.FAILED;
+            }
             if (r.item != null && !itemSelected) {
                 var selected = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
                 if (selected == org.maiwithu.maicraft.core.task.FirstPersonActionGate.Status.RUNNING) {
@@ -104,10 +109,16 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 }
                 itemSelected = true;
             }
+            var useItem = player.getMainHandItem().getItem();
+            boolean bucket = button() == Interaction.Button.USE
+                    && FirstPersonInteractionTargeting.usesBucketRay(useItem);
             if (r.aim != null) {
                 if (aimPoint == null) {
                     var state = player.level().getBlockState(r.aim);
-                    var visible = state.isAir()
+                    var visible = bucket
+                            ? FirstPersonInteractionTargeting.visibleBucketHit(
+                                    player.level(), player, player.getEyePosition(), r.aim, player.blockInteractionRange(), useItem)
+                            : state.isAir()
                             ? null
                             : FirstPersonInteractionTargeting.visibleBlockHit(
                                     player.level(), player, player.getEyePosition(), r.aim, REACH);
@@ -123,15 +134,20 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     return TaskState.RUNNING;
                 }
             }
-            HitResult hit = Interaction.nativeRaytrace(player, REACH);
+            Vec3 rayEnd = player.getEyePosition().add(player.getViewVector(1.0F)
+                    .scale(bucket ? player.blockInteractionRange() : REACH));
+            HitResult hit = bucket
+                    ? FirstPersonInteractionTargeting.bucketRay(player.level(), player,
+                            player.getEyePosition(), rayEnd, useItem)
+                    : Interaction.nativeRaytrace(player, REACH);
             // 与语义预检共用同一套遮挡口径:普通目标命中更近的别块就是被挡住;
-            // 空气保持穿透语义;流体用原版 Fluid.NONE 射线,允许命中水后方的块
-            // (桶、船会在方块未消费后落到物品自用),但水前面的墙仍是真遮挡。
+            // 桶使用物品自己的源流体/放置面判据，不把水后方的机器当作点击目标。
             if (r.aim != null
-                    && FirstPersonInteractionTargeting.blockedByWorld(
+                    && (bucket ? !FirstPersonInteractionTargeting.acceptsBucketHit(
+                            player.level(), r.aim, useItem, (net.minecraft.world.phys.BlockHitResult) hit)
+                    : FirstPersonInteractionTargeting.blockedByWorld(
                             player.level(), player.getEyePosition(), r.aim,
-                            player.getEyePosition().add(
-                                    player.getViewVector(1.0F).scale(REACH)), hit)) {
+                            rayEnd, hit))) {
                 String landing;
                 if (hit instanceof net.minecraft.world.phys.BlockHitResult blockedHit
                         && hit.getType() == HitResult.Type.BLOCK) {
@@ -154,7 +170,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             // flips a switch, …). Remember the block we touched so <known_blocks> can
             // walk us back to stations we've used, not just ones we placed. The harvest
             // filters to tracked station types; doors/buttons fall away there.
-            if (button() == Interaction.Button.USE && hit instanceof net.minecraft.world.phys.BlockHitResult bhr) {
+            if (!bucket && button() == Interaction.Button.USE && hit instanceof net.minecraft.world.phys.BlockHitResult bhr) {
                 activatedBlock = bhr.getBlockPos();
                 activatedBlockId = BuiltInRegistries.BLOCK
                         .getKey(player.level().getBlockState(activatedBlock).getBlock()).getPath();
@@ -162,7 +178,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             receipt = PressReceipt.before(player, r.aim);
             // This is the real LocalPlayer. Preserve vanilla's ordinary fall-through from an
             // unhandled block/entity use to the held item (food, pearls and modded items included).
-            interaction = Interaction.forHit(player, hit, button(), r.holdTicks, true);
+            interaction = bucket ? Interaction.useInAir(player, net.minecraft.world.InteractionHand.MAIN_HAND,
+                    r.holdTicks == 0 ? Interaction.Timing.once()
+                            : r.holdTicks > 0 ? Interaction.Timing.hold(r.holdTicks) : Interaction.Timing.hold())
+                    : Interaction.forHit(player, hit, button(), r.holdTicks, true);
+            if (interaction != null) interaction.requireBlock(r.aim, r.requiredBlock);
             if (interaction == null) {       // left-click on air — a swing, nothing to do
                 successMsg = "nothing under the aim (left-click in the air)";
                 return TaskState.SUCCESS;
@@ -184,7 +204,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 yield verifiedOutcome();
             }
             case FAILED -> {
-                fail(interaction.failReason(), FailureType.UNKNOWN);
+                fail(interaction.failReason(), interaction.failType());
                 yield TaskState.FAILED;
             }
             case RUNNING -> TaskState.RUNNING;
@@ -213,6 +233,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     }
 
     private boolean withinReach() {
+        var item = r.item == null ? player.getMainHandItem().getItem() : r.item;
+        if (button() == Interaction.Button.USE && FirstPersonInteractionTargeting.usesBucketRay(item)) {
+            return bodySettled() && FirstPersonInteractionTargeting.visibleBucketHit(
+                    player.level(), player, player.getEyePosition(), r.aim, player.blockInteractionRange(), item) != null;
+        }
         return bodySettled() && player.distanceToSqr(Vec3.atCenterOf(r.aim)) <= REACH_SQR;
     }
 

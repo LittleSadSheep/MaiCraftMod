@@ -16,6 +16,7 @@ import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -109,6 +110,8 @@ public final class Interaction {
 
     private final BlockDigger digger; // only for ATTACK + block
     private BlockHitResult presetHit; // USE+block: an exact hit the caller already resolved (placement)
+    private BlockPos requiredBlockPos;
+    private Block requiredBlock;
     /**
      * 准星语义的 USE 才有的兜底:方块/实体没吃掉点击时,同一次按键落到物品自用
      * ——真客户端也是方块/实体未消费点击后再尝试物品自用；桶找水、船找水面、
@@ -262,6 +265,23 @@ public final class Interaction {
         return failReason;
     }
 
+    /** Freeze semantic target identity without mistaking an expected resulting block for an input. */
+    public Interaction requireBlock(BlockPos position, Block required) {
+        if (required != null && position == null) throw new IllegalArgumentException("required block needs a position");
+        requiredBlockPos = position == null ? null : position.immutable();
+        requiredBlock = required;
+        return this;
+    }
+
+    private boolean requiredBlockPresent() {
+        if (requiredBlock == null || player.level().isLoaded(requiredBlockPos)
+                && player.level().getBlockState(requiredBlockPos).is(requiredBlock)) return true;
+        failReason = "the required interaction target changed or unloaded before native use";
+        failType = FailureType.TARGET_LOST;
+        hardFail = true;
+        return false;
+    }
+
     /** Structured cause of a {@link Status#FAILED}, for the reactive task layer to branch on. */
     public FailureType failType() {
         return failType;
@@ -340,6 +360,7 @@ public final class Interaction {
         InputDriver.halt(player);
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (receipt == null) {
+            if (!requiredBlockPresent()) return Status.FAILED;
             ItemStack before = player.getItemInHand(hand).copy();
             int beforeMenu = player.containerMenu.containerId;
             NativeConfirmation confirmation = NativeConfirmation.anyOf(
@@ -454,6 +475,7 @@ public final class Interaction {
         if (receipt != null) {
             return settleUseReceipt(context, "block use");
         }
+        if (!requiredBlockPresent()) return false;
         if (!player.level().isLoaded(block)) {
             failReason = "the target block is outside the local client's loaded world";
             failType = FailureType.TARGET_LOST;
