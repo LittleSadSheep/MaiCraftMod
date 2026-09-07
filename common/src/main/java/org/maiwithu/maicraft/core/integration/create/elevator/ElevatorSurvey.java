@@ -21,7 +21,23 @@ import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorGeometry.L
 
 /** Associations come from synchronized cabin floor lists and real local redstone connections. */
 final class ElevatorSurvey {
-    record CallInput(BlockPos position, Vec3 stance, int inventorySlot, int channel) { boolean remote() { return channel >= 0; } }
+    record CallInput(BlockPos position, Vec3 stance, int inventorySlot, int channel,
+                     BlockPos transmitter, BlockPos receiver, List<Map<String, Object>> frequencyItems) {
+        CallInput(BlockPos position, Vec3 stance, int inventorySlot, int channel) {
+            this(position, stance, inventorySlot, channel, null, null, List.of());
+        }
+        boolean remote() { return channel >= 0; }
+        Map<String, Object> evidence() {
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("source", remote() ? "handheld_linked_controller" : transmitter == null ? "direct_button" : "world_redstone_link_button");
+            result.put("position", coordinates(position));
+            if (transmitter != null) result.put("transmitter", coordinates(transmitter));
+            if (receiver != null) result.put("receiver", coordinates(receiver));
+            if (!frequencyItems.isEmpty()) result.put("frequency_items", frequencyItems);
+            result.put("scope", "loaded_client_state_no_server_ack");
+            return Map.copyOf(result);
+        }
+    }
     record Plan(UUID cabin, int fromFloor, int toFloor, BlockPos control, Vec3 controlStance,
                 Landing board, Landing exit, CallInput call, boolean aboard, double score) {}
 
@@ -44,6 +60,10 @@ final class ElevatorSurvey {
         evidence.put("floor_doors", doorEvidence);
         if (geometry.stances.isEmpty()) { reject(rejected, "no_supported_body_clearance"); return null; }
         List<Plan> plans = new ArrayList<>();
+        var radio = new ElevatorCallLinks(ctx, bridge);
+        Map<Integer, java.util.Optional<CallInput>> callCache = new HashMap<>();
+        java.util.function.IntFunction<CallInput> calls = floor -> callCache.computeIfAbsent(floor,
+                y -> java.util.Optional.ofNullable(callInput(ctx, bridge, cabin, y, radio))).orElse(null);
         for (var target : cabin.floors()) {
             if (!cabin.serves(target.contactY())) continue;
             Vec3 targetOrigin = cabin.originAt(target.contactY());
@@ -66,7 +86,7 @@ final class ElevatorSurvey {
                     Vec3 localStart = aboard ? cabin.local(player) : board.inside();
                     if ((aboard && cabin.aligned(target.contactY()) || !aboard && source.contactY() == target.contactY())
                             && !geometry.path(localStart, exit.inside(), targetOrigin, step, forbidden).isEmpty()) {
-                        CallInput call = aboard || cabin.targetY() == source.contactY() ? null : callInput(ctx, bridge, cabin, source.contactY());
+                        CallInput call = aboard || cabin.targetY() == source.contactY() ? null : calls.apply(source.contactY());
                         if (aboard || cabin.targetY() == source.contactY() || call != null) plans.add(new Plan(cabin.entity().getUUID(),
                                 source.contactY(), target.contactY(), null, exit.inside(), board, exit, call, aboard,
                                 (board == null ? 0 : board.outside().distanceToSqr(player)) + exit.outside().distanceToSqr(Vec3.atBottomCenterOf(destination))));
@@ -82,7 +102,7 @@ final class ElevatorSurvey {
                         Vec3 controlStance = path.isEmpty() ? null : path.getLast();
                         if (controlStance == null) { reject(rejected, "no_reachable_visible_controller"); continue; }
                         if (geometry.path(controlStance, exit.inside(), targetOrigin, step, forbidden).isEmpty()) { reject(rejected, "no_supported_walkway_to_exit"); continue; }
-                        CallInput call = aboard || cabin.aligned(source.contactY()) ? null : callInput(ctx, bridge, cabin, source.contactY());
+                        CallInput call = aboard || cabin.aligned(source.contactY()) ? null : calls.apply(source.contactY());
                         if (!aboard && !cabin.aligned(source.contactY()) && cabin.targetY() != source.contactY() && call == null) { reject(rejected, "no_proven_native_call_input"); continue; }
                         if (!rideAllowed(controlStance, sourceOrigin, targetOrigin, width, height, forbidden)) { reject(rejected, "forbidden_body_cells_during_ride"); continue; }
                         double score = (board == null ? 0 : board.outside().distanceToSqr(player))
@@ -94,7 +114,10 @@ final class ElevatorSurvey {
             }
         }
         evidence.put("plans_found", plans.size());
-        return plans.stream().min(Comparator.comparingDouble(Plan::score)).orElse(null);
+        evidence.put("call_search", radio.evidence());
+        Plan selected = plans.stream().min(Comparator.comparingDouble(Plan::score)).orElse(null);
+        if (selected != null && selected.call() != null) evidence.put("call_input", selected.call().evidence());
+        return selected;
     }
 
     static List<Map<String, Object>> supportLayers(List<Vec3> stances) {
@@ -131,7 +154,7 @@ final class ElevatorSurvey {
         return hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK || hit.getBlockPos().equals(controller);
     }
 
-    private static CallInput callInput(LocalPlayerContext ctx, CreateElevatorBridge bridge, Cabin cabin, int floor) {
+    private static CallInput callInput(LocalPlayerContext ctx, CreateElevatorBridge bridge, Cabin cabin, int floor, ElevatorCallLinks radio) {
         BlockPos contact = cabin.column().at(floor);
         if (!bridge.isContact(ctx, contact, cabin.column())) return null;
         List<BlockPos> buttons = new ArrayList<>(), receivers = new ArrayList<>();
@@ -153,13 +176,36 @@ final class ElevatorSurvey {
             if (stance != null) return new CallInput(button, stance, -1, -1);
         }
         for (BlockPos receiver : receivers) {
+            var link = bridge.worldLink(ctx, receiver);
+            if (link == null || !link.receiver()) continue;
             for (int slot = 0; slot < 36; slot++) {
                 int channel = bridge.remoteChannel(ctx, receiver, ctx.player().getInventory().getItem(slot));
-                if (channel >= 0) return new CallInput(receiver, ctx.player().position(), slot, channel);
+                if (channel >= 0) return new CallInput(receiver, ctx.player().position(), slot, channel,
+                        null, receiver, link.frequencyItems());
+            }
+            for (var transmitter : radio.matching(link)) for (BlockPos button : radio.buttons(transmitter)) {
+                Vec3 stance = callStance(ctx, button);
+                if (stance != null) return new CallInput(button, stance, -1, -1,
+                        transmitter.position(), receiver, link.frequencyItems());
             }
         }
         return null;
     }
+
+    /** Re-read the actual two-ended association immediately before the normal native button gesture. */
+    static boolean callStillAssociated(LocalPlayerContext ctx, CreateElevatorBridge bridge, Cabin cabin, int floor, CallInput input) {
+        BlockPos contact = cabin.column().at(floor);
+        if (!bridge.isContact(ctx, contact, cabin.column()) || !ctx.level().hasChunkAt(input.position())) return false;
+        if (input.transmitter() == null) return feeds(ctx.level(), contact, input.position(),
+                ctx.level().getBlockState(input.position()), !input.remote());
+        var transmitter = bridge.worldLink(ctx, input.transmitter());
+        var receiver = bridge.worldLink(ctx, input.receiver());
+        return bridge.linksMatch(transmitter, receiver) && receiver.frequencyItems().equals(input.frequencyItems())
+                && ElevatorCallLinks.buttonFeeds(ctx.level(), input.transmitter(), input.position())
+                && feeds(ctx.level(), contact, input.receiver(), ctx.level().getBlockState(input.receiver()), false);
+    }
+
+    private static Map<String, Integer> coordinates(BlockPos pos) { return Map.of("x", pos.getX(), "y", pos.getY(), "z", pos.getZ()); }
 
     private static Vec3 callStance(LocalPlayerContext ctx, BlockPos button) {
         var shape = ctx.level().getBlockState(button).getShape(ctx.level(), button);

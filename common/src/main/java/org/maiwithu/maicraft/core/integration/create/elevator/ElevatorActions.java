@@ -43,9 +43,7 @@ final class ElevatorActions {
 
     boolean call(LocalPlayerContext ctx, CreateElevatorBridge bridge, Cabin cabin, CallInput input, int floor) {
         var identity = cabin.entity().getUUID();
-        if (!bridge.isContact(ctx, cabin.column().at(floor), cabin.column())
-                || !ElevatorSurvey.feeds(ctx.level(), cabin.column().at(floor), input.position(),
-                        ctx.level().getBlockState(input.position()), !input.remote())) {
+        if (!ElevatorSurvey.callStillAssociated(ctx, bridge, cabin, floor, input)) {
             failure = "the call input is no longer connected to the selected floor contact"; return false;
         }
         NativeConfirmation confirmation = c -> {

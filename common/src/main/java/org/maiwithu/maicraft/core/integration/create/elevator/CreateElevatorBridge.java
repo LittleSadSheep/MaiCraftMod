@@ -32,6 +32,7 @@ final class CreateElevatorBridge {
     private final Class<?> elevatorType = type(ROOT + "contraptions.elevator.ElevatorContraption");
     private final Class<?> controlsType = type(ROOT + "contraptions.actors.contraptionControls.ContraptionControlsBlock");
     private final Class<?> contactType = type(ROOT + "contraptions.elevator.ElevatorContactBlockEntity");
+    private final Class<?> redstoneLinkType = type(ROOT + "redstone.link.RedstoneLinkBlockEntity");
     private final Class<?> slidingDoorType = type(ROOT + "decoration.slidingDoor.SlidingDoorBlock");
     private final Class<?> handler = type(ROOT + "contraptions.ContraptionHandlerClient");
     private final Class<?> scrolling = type(ROOT + "contraptions.elevator.ElevatorControlsHandler");
@@ -224,6 +225,34 @@ final class CreateElevatorBridge {
                 && ((ItemStack) call(call(frequency, "getSecond"), "getStack")).isEmpty()) return -1;
         for (int slot = 0; slot < 6; slot++) if (frequency.equals(call(item, "toFrequency", controller, slot))) return slot;
         return -1;
+    }
+
+    record WorldLink(BlockPos position, Object behaviour, boolean receiver, Object frequency,
+                     List<Map<String, Object>> frequencyItems) {}
+
+    boolean isWorldLink(Object blockEntity) { return redstoneLinkType.isInstance(blockEntity); }
+
+    WorldLink worldLink(LocalPlayerContext ctx, BlockPos position) {
+        if (!ctx.level().hasChunkAt(position) || !isWorldLink(ctx.level().getBlockEntity(position))) return null;
+        Object behaviour = call(type("com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour"),
+                "get", ctx.level(), position, value(type(ROOT + "redstone.link.LinkBehaviour"), "TYPE"));
+        if (behaviour == null) return null;
+        Object frequency = call(behaviour, "getNetworkKey");
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (String half : List.of("getFirst", "getSecond")) {
+            ItemStack stack = (ItemStack) call(call(frequency, half), "getStack");
+            var color = stack.get(net.minecraft.core.component.DataComponents.DYED_COLOR);
+            items.add(Map.of("item", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                    "dyed_color", color == null ? -1 : color.rgb()));
+        }
+        return new WorldLink(position.immutable(), behaviour, Boolean.TRUE.equals(call(behaviour, "isListening")),
+                frequency, List.copyOf(items));
+    }
+
+    boolean linksMatch(WorldLink transmitter, WorldLink receiver) {
+        return transmitter != null && receiver != null && ElevatorCallLinks.matches(transmitter, receiver,
+                Boolean.TRUE.equals(call(type(ROOT + "redstone.link.RedstoneLinkNetworkHandler"),
+                        "withinRange", transmitter.behaviour(), receiver.behaviour())));
     }
 
     void remoteInput(int channel, boolean press) {
