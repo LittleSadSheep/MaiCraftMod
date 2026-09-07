@@ -43,6 +43,11 @@ public final class StockEvidence {
         }
     }
 
+    /** Exact menu-instance evidence; an unsynchronized freshly constructed GUI is not empty stock. */
+    public static boolean isContainerSynchronized(LocalPlayer player, AbstractContainerMenu menu) {
+        return player != null && synchronizedPlayer == player && synchronizedMenu == menu && player.containerMenu == menu;
+    }
+
     /** Passive client-tick observation. This opens no screens and submits no packets. */
     public static void observe(LocalPlayer player) {
         if (player == null || player.clientLevel != Minecraft.getInstance().level) {
