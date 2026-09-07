@@ -200,7 +200,7 @@ public final class MachineBlueprint {
     }
 
     /** Mekanism bounding machines alter extra cells that the generic block-item builder cannot receipt. */
-    private static void requireModeledEffects(Block block) {
+    static void requireModeledEffects(Block block) {
         ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
         String namespace = id.getNamespace();
         if (namespace.equals("create") && (id.getPath().equals("large_water_wheel")
