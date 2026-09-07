@@ -9,6 +9,8 @@ public final class GuiRegressionSuite {
         ControlProtocolTest.main(args);
         BodyControlInputTest.main(args);
         EquipRoutingTest.main(args);
+        org.maiwithu.maicraft.intent.ExactInteractionTargetTest.main(args);
+        BucketInteractionRayTest.main(args);
         PreviewControlTest.main(args);
         org.maiwithu.maicraft.client.preview.PreviewSessionTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPreviewCancellationTest.main(args);
