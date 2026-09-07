@@ -14,12 +14,14 @@ public final class BuildExecutionContextTest {
         original.executionGuards(List.of(protectedCell), player -> generation.get() == 0,
                 (player, position) -> position.getX() == generation.get(),
                 (player, position) -> generation.incrementAndGet());
+        original.materialSupplyProtection(List.of(protectedCell));
         BuildTaskRecord rebound = new BuildTaskRecord("rebound", 100, List.of(), false, true);
         BuildTaskRecord batch = new BuildTaskRecord("batch", 100, List.of(), false, true);
         original.copyExecutionContextTo(rebound);
         rebound.copyExecutionContextTo(batch);
         check(batch.hasExecutionGuards(), "batch lost guards");
         check(batch.protectedNavigationCells().equals(List.of(protectedCell)), "batch lost protection");
+        check(batch.materialSupplyProtection().equals(List.of(protectedCell)), "supply lost multipart protection");
         check(batch.preflightGuardMatches(null), "initial receipt should match");
         batch.confirmedMutation(null, BlockPos.ZERO);
         check(!original.preflightGuardMatches(null), "receipt ledger was copied instead of shared");

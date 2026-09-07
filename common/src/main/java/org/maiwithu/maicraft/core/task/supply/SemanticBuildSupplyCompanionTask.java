@@ -77,6 +77,7 @@ final class SemanticBuildSupplyCompanionTask
         refreshLedgers();
         activePlan.targets.stream().map(BuildTaskRecord.Target::pos)
                 .map(BlockPos::immutable).distinct().forEach(plannedMutationCells::add);
+        plannedMutationCells.addAll(activePlan.materialSupplyProtection());
         if (allMatched()) {
             prepared = true;
             return;
@@ -110,6 +111,12 @@ final class SemanticBuildSupplyCompanionTask
             advanceMaterialBinding();
             return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
         }
+
+        var preview = org.maiwithu.maicraft.core.task.build.BuildPreviewGate.await(r, activePlan);
+        if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.WAITING)
+            return TaskState.RUNNING;
+        if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
+            return TaskState.CANCELLED;
 
         BatchNeed need = nextNeed();
         if (need == null) {
@@ -307,6 +314,8 @@ final class SemanticBuildSupplyCompanionTask
         batch.droppedAtLoad(source.droppedAtLoad());
         batch.semanticFacts(source.semanticFacts());
         batch.traversabilityContract(source.traversabilityContract());
+        source.copyExecutionContextTo(batch);
+        batch.previewManaged(true);
         remainingCellsBeforeBuild = remainingCellCount();
         startChild(ChildKind.BUILD, batch);
     }
@@ -548,6 +557,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     @Override protected void cleanup() {
+        org.maiwithu.maicraft.core.task.build.BuildPreviewGate.release(r);
         if (supply.active()) supply.cancel(player);
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
