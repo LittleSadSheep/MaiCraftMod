@@ -272,6 +272,11 @@ public final class Ae2ResourceSupply {
 
         /** Best-effort first-person handoff for replacement/body loss; never claims success. */
         Outcome cancel(LocalPlayerContext context, String reason);
+
+        /** Stop acquiring and reconcile the native menu close before returning control to a reflex. */
+        default Optional<Outcome> finishInPlace(LocalPlayerContext context, String reason) {
+            return Optional.of(cancel(context, reason));
+        }
     }
 
     private Ae2ResourceSupply() {}
@@ -383,6 +388,17 @@ public final class Ae2ResourceSupply {
                 () -> new IllegalStateException(
                         "AE2 client integration is unavailable: " + availabilityDetail()));
         return new Ae2SupplySession(player, request, bridge);
+    }
+
+    /** Available while falling: use wireless/currently reachable access; never start navigation. */
+    public static Session beginInPlace(LocalPlayer player, Request request) {
+        Objects.requireNonNull(player, "player");
+        Objects.requireNonNull(request, "request");
+        if (request.allowCrafting() || request.operation() != Operation.SUPPLY)
+            throw new IllegalArgumentException("in-place reflex supply only extracts existing stock");
+        Ae2ReflectionBridge bridge = Ae2ReflectionBridge.availability().bridge().orElseThrow(
+                () -> new IllegalStateException("AE2 client integration is unavailable: " + availabilityDetail()));
+        return new Ae2SupplySession(player, request, bridge, true);
     }
 
     /** Task-runtime convenience used by the acquire adapter. */

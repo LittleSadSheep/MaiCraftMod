@@ -17,7 +17,9 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
@@ -127,6 +129,12 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private final int originalSelected;
     private final BlockPos callerOrigin;
     private final ResourceLocation callerDimension;
+    private final boolean inPlace;
+    private boolean stoppingInPlace;
+    private MenuReceipt inPlaceClose;
+    private long inPlaceStopTick;
+    private boolean stopUncertain;
+    private Ae2ResourceSupply.Outcome beforeInPlaceStop;
 
     private Phase phase = Phase.START;
     private Phase afterSelect = Phase.START;
@@ -170,9 +178,15 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     Ae2SupplySession(
             LocalPlayer player, Ae2ResourceSupply.Request request, Ae2ReflectionBridge bridge) {
+        this(player, request, bridge, false);
+    }
+
+    Ae2SupplySession(LocalPlayer player, Ae2ResourceSupply.Request request,
+            Ae2ReflectionBridge bridge, boolean inPlace) {
         this.player = player;
         this.request = request;
         this.bridge = bridge;
+        this.inPlace = inPlace;
         this.originalSelected = Mth.clamp(player.getInventory().selected, 0, 8);
         this.callerOrigin = player.blockPosition().immutable();
         this.callerDimension = player.level().dimension().location();
@@ -181,6 +195,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     @Override
     public Optional<Ae2ResourceSupply.Outcome> tick(LocalPlayerContext context) {
+        if (stoppingInPlace) return finishInPlace(context, "landing action deadline reached");
         if (terminal != null) return Optional.of(terminal);
         validateContext(context);
         phaseTicks++;
@@ -252,11 +267,12 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     @Override
     public String phase() {
-        return phase.name().toLowerCase();
+        return stoppingInPlace && terminal == null ? "in_place_cleanup" : phase.name().toLowerCase();
     }
 
     @Override
     public boolean livenessActive() {
+        if (stoppingInPlace && terminal == null) return true;
         if (craftingJobEffectPending
                 || nativeReceipt != null && !nativeReceipt.terminal()
                 || menuReceipt != null && !menuReceipt.terminal()) {
@@ -302,6 +318,85 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return terminal;
     }
 
+    @Override
+    public Optional<Ae2ResourceSupply.Outcome> finishInPlace(LocalPlayerContext context, String reason) {
+        if (!inPlace) return Ae2ResourceSupply.Session.super.finishInPlace(context, reason);
+        if (terminal != null && stoppingInPlace) return Optional.of(terminal);
+        validateContext(context);
+        if (terminal != null) {
+            if ((menuReceipt == null || menuReceipt.terminal()) && !ownsOpenMenu(context))
+                return Optional.of(terminal);
+            beforeInPlaceStop = terminal;
+            terminal = null;
+        }
+        if (!stoppingInPlace) {
+            stoppingInPlace = true;
+            inPlaceStopTick = context.tickRevision();
+            stopUncertain = effectsStarted || nativeReceipt != null && !nativeReceipt.terminal()
+                    || menuReceipt != null && !menuReceipt.terminal();
+            stopNavigation();
+            if (menuReceipt != null && menuReceipt.kind() == MenuReceipt.Kind.CLOSE)
+                inPlaceClose = menuReceipt;
+        }
+        if (!context.permitsNativeActions()) {
+            finishNow(Ae2ResourceSupply.Status.UNCERTAIN, "in_place_control_lost", reason, true);
+            return Optional.of(terminal);
+        }
+        if (context.tickRevision() - inPlaceStopTick > 20) {
+            finishNow(Ae2ResourceSupply.Status.UNCERTAIN, "in_place_cleanup_deadline", reason, true);
+            return Optional.of(terminal);
+        }
+        if (nativeReceipt != null && !nativeReceipt.terminal()) {
+            nativeReceipt = context.actions().poll(context, nativeReceipt);
+            if (!nativeReceipt.terminal()) {
+                if (nativeReceipt.kind() == NativeActionReceipt.Kind.USE_ITEM) {
+                    if (!context.mutationAvailable()) return Optional.empty();
+                    nativeReceipt = context.actions().releaseUsingItem(context, nativeReceipt);
+                    return Optional.empty();
+                }
+                nativeReceipt = context.actions().retireOneShotForTaskBoundary(context, nativeReceipt, reason);
+            }
+        }
+        // Closing the authoritative menu returns a carried extraction stack to inventory. Never
+        // repeat an already submitted AE packet or spend the remaining fall on slot restoration.
+        if (inPlaceClose == null) {
+            if (worldAccessAvailable(context) && player.containerMenu.getCarried().isEmpty()) {
+                finishStopped(reason);
+                return Optional.of(terminal);
+            }
+            if (!ownsOpenMenu(context)) {
+                finishNow(Ae2ResourceSupply.Status.UNCERTAIN, "in_place_screen_changed", reason, true);
+                return Optional.of(terminal);
+            }
+            if (!context.mutationAvailable()) {
+                if (context.tickRevision() - inPlaceStopTick > 20)
+                    finishNow(Ae2ResourceSupply.Status.UNCERTAIN, "in_place_close_unavailable", reason, true);
+                return Optional.ofNullable(terminal);
+            }
+            inPlaceClose = context.menus().closeForTaskBoundary(context, 20, reason);
+            menuReceipt = inPlaceClose;
+            return Optional.empty();
+        }
+        inPlaceClose = context.menus().poll(context, inPlaceClose);
+        menuReceipt = inPlaceClose;
+        if (!inPlaceClose.terminal()) return Optional.empty();
+        if (inPlaceClose.status() == MenuReceipt.Status.CONFIRMED_APPLIED
+                && worldAccessAvailable(context) && player.containerMenu.getCarried().isEmpty()) {
+            finishStopped(reason);
+        } else finishNow(Ae2ResourceSupply.Status.UNCERTAIN, "in_place_close_unconfirmed", reason, true);
+        return Optional.of(terminal);
+    }
+
+    private void finishStopped(String reason) {
+        if (beforeInPlaceStop != null) {
+            finishNow(beforeInPlaceStop.status(), beforeInPlaceStop.code(),
+                    beforeInPlaceStop.message(), beforeInPlaceStop.uncertain());
+            return;
+        }
+        finishNow(stopUncertain ? Ae2ResourceSupply.Status.UNCERTAIN : Ae2ResourceSupply.Status.CANCELLED,
+                "in_place_supply_stopped", reason, stopUncertain);
+    }
+
     private void start(LocalPlayerContext context) {
         if (!player.containerMenu.getCarried().isEmpty()) {
             finishNow(Ae2ResourceSupply.Status.FAILED, "inventory_cursor_busy",
@@ -330,6 +425,12 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 if (hotbar < 0) hotbar = originalSelected;
                 beginStage(context, wireless.inventorySlot(), hotbar, Phase.OPEN_WIRELESS);
             }
+            return;
+        }
+
+        if (inPlace) {
+            fixedCandidates = inPlaceTargets();
+            prepareFixedAccess(context);
             return;
         }
 
@@ -377,10 +478,12 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         terminalAccess = "fixed_terminal";
+        Phase next = inPlace ? Phase.FACE_FIXED : Phase.NAVIGATE_FIXED;
+        if (inPlace) fixedTarget = fixedCandidates.getFirst();
         int emptyHotbar = firstEmpty(0, 8);
         if (emptyHotbar >= 0) {
             selectedTerminalSlot = emptyHotbar;
-            requestSelect(context, emptyHotbar, Phase.NAVIGATE_FIXED);
+            requestSelect(context, emptyHotbar, next);
             return;
         }
         int emptyStorage = firstEmpty(9, 35);
@@ -389,7 +492,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     "opening a fixed AE2 terminal requires an empty hand and no slot can stage one");
             return;
         }
-        beginStage(context, emptyStorage, originalSelected, Phase.NAVIGATE_FIXED);
+        beginStage(context, emptyStorage, originalSelected, next);
     }
 
     private void beginStage(
@@ -454,6 +557,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     private void navigateFixed() {
+        if (inPlace) throw new IllegalStateException("in-place AE supply cannot navigate");
         if (fixedCandidates.isEmpty()) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_unreachable",
                     "no fixed-terminal approach remains");
@@ -504,6 +608,41 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return NavGoal.composite(candidates.stream().map(target -> NavGoal.exact(target.approach())).toList());
     }
 
+    /** A small native-reach cube, queried only through already loaded chunks. */
+    private List<Ae2TerminalAccess.FixedTarget> inPlaceTargets() {
+        double reach = player.blockInteractionRange();
+        int radius = Math.min(6, Math.max(0, (int) Math.ceil(reach)));
+        BlockPos center = BlockPos.containing(player.getEyePosition());
+        List<Ae2TerminalAccess.FixedTarget> targets = new ArrayList<>();
+        for (BlockPos position : BlockPos.betweenClosed(center.offset(-radius, -radius, -radius),
+                center.offset(radius, radius, radius))) {
+            var chunk = ((net.minecraft.client.multiplayer.ClientLevel) player.level())
+                    .getChunkSource().getChunkNow(position.getX() >> 4, position.getZ() >> 4);
+            if (chunk == null) continue;
+            var entity = chunk.getBlockEntities().get(position);
+            if (entity == null) continue;
+            for (var side : bridge.fixedTerminalSides(entity)) {
+                Vec3 hit = Vec3.atCenterOf(position).add(side.getStepX() * .45,
+                        side.getStepY() * .45, side.getStepZ() * .45);
+                var target = new Ae2TerminalAccess.FixedTarget("in_place", position, side, player.blockPosition(), hit);
+                if (inPlaceHit(player, target) != null) targets.add(target);
+            }
+        }
+        return targets.stream().sorted(Comparator.comparingDouble(
+                target -> target.hit().distanceToSqr(player.getEyePosition()))).limit(16).toList();
+    }
+
+    static BlockHitResult inPlaceHit(LocalPlayer player, Ae2TerminalAccess.FixedTarget target) {
+        Vec3 eye = player.getEyePosition(), delta = target.hit().subtract(eye);
+        double reach = player.blockInteractionRange();
+        if (!Double.isFinite(reach) || reach <= 0 || delta.lengthSqr() < 1e-9
+                || delta.lengthSqr() > reach * reach || !player.level().isLoaded(target.position())) return null;
+        var hit = player.level().clip(new ClipContext(eye, eye.add(delta.normalize().scale(reach)),
+                ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(target.position())
+                && hit.getDirection() == target.side() ? hit : null;
+    }
+
     private void faceFixed(LocalPlayerContext context) {
         Ae2TerminalAccess.FixedTarget target = fixedTarget;
         if (target == null || !Ae2TerminalAccess.stillPresent(
@@ -547,11 +686,29 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     "the selected hand is no longer empty for fixed-terminal interaction");
             return;
         }
+        BlockHitResult currentHit = inPlace ? inPlaceHit(player, target) : null;
+        if (inPlace && currentHit == null) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_left_reach",
+                    "falling player can no longer natively reach the selected terminal");
+            return;
+        }
+        if (inPlace) {
+            Vec3 eye = player.getEyePosition();
+            currentHit = player.level().clip(new ClipContext(eye,
+                    eye.add(player.getLookAngle().scale(player.blockInteractionRange())),
+                    ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+            if (currentHit.getType() != HitResult.Type.BLOCK
+                    || !currentHit.getBlockPos().equals(target.position())
+                    || currentHit.getDirection() != target.side()) {
+                setPhase(Phase.FACE_FIXED);
+                return;
+            }
+        }
         int beforeContainer = player.containerMenu.containerId;
         nativeReceipt = context.actions().useBlock(
                 context,
                 InteractionHand.MAIN_HAND,
-                new BlockHitResult(target.hit(), target.side(), target.position(), false),
+                inPlace ? currentHit : new BlockHitResult(target.hit(), target.side(), target.position(), false),
                 NativeConfirmation.menuChanged(beforeContainer),
                 TERMINAL_OPEN_TICKS);
         setPhase(Phase.WAIT_OPEN);
@@ -605,14 +762,14 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             }
             return;
         }
-        if (Ae2WaterBucketFill.supports(request)
+        if (canUseStoredWater(entries)
                 && Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.WATER_BUCKET) < request.groups().getFirst().count()) {
             var water = bridge.waterEntry(menu);
             if (water != null && water.storedAmount() >= water.bucketUnits()
                     && Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.EMPTY_BUCKET) > 0) {
                 waterBucketRoute = true;
                 baseline = inventoryCounts();
-                lockedVariantByGroup.put(Ae2WaterBucketFill.WATER_BUCKET, Ae2WaterBucketFill.WATER_BUCKET);
+                lockedVariantByGroup.put(request.groups().getFirst().itemId(), Ae2WaterBucketFill.WATER_BUCKET);
                 if (fixedTarget != null) Ae2TerminalAccess.remember(player, fixedTarget);
                 setPhase(Phase.FILL_WATER_BUCKET);
                 return;
@@ -621,6 +778,15 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (!installPlan(entries)) return;
         if (fixedTarget != null) Ae2TerminalAccess.remember(player, fixedTarget);
         setPhase(Phase.PROCESS_ITEM);
+    }
+
+    private boolean canUseStoredWater(List<Ae2ReflectionBridge.Entry> entries) {
+        if (Ae2WaterBucketFill.supports(request)) return true;
+        if (!inPlace || request.groups().size() != 1) return false;
+        var group = request.groups().getFirst();
+        return group.count() == 1 && group.acceptableItemIds().contains(Ae2WaterBucketFill.WATER_BUCKET)
+                && entries.stream().noneMatch(entry -> entry.storedAmount() > 0
+                        && group.acceptableItemIds().contains(entry.itemId()));
     }
 
     private void fillWaterBucket(LocalPlayerContext context) {
@@ -1327,6 +1493,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     private void cleanRestore(LocalPlayerContext context) {
+        if (inPlace) { setPhase(Phase.CLEAN_SELECT); return; }
         InventorySwap swap = inventorySwap;
         if (swap == null) {
             setPhase(Phase.CLEAN_SELECT);
@@ -1447,7 +1614,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (terminal != null) return;
         try {
             var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
-            if (ownsOpenMenu(context) && (menuReceipt == null || menuReceipt.terminal()
+            if (!stoppingInPlace && ownsOpenMenu(context) && (menuReceipt == null || menuReceipt.terminal()
                     || menuReceipt.kind() != MenuReceipt.Kind.CLOSE)) {
                 context.menus().closeForTaskBoundary(context, INVENTORY_CONFIRM_TICKS,
                         "AE2 supply session ended: " + code);
@@ -1576,8 +1743,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         for (int slot = 0; slot <= 35; slot++) if (!reserved.contains(slot)) ordered.add(slot);
         ordered.sort(Comparator.comparingInt(slot -> {
             ItemStack stack = player.getInventory().getItem(slot);
-            if (!stack.isEmpty() && sameKind(stack, sample)) return 0;
-            return stack.isEmpty() ? 1 : 2;
+            int location = inPlace && slot >= 9 ? 3 : 0;
+            if (!stack.isEmpty() && sameKind(stack, sample)) return location;
+            return location + (stack.isEmpty() ? 1 : 2);
         }));
         for (int inventorySlot : ordered) {
             ItemStack before = player.getInventory().getItem(inventorySlot);
