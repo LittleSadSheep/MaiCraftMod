@@ -49,6 +49,7 @@ public final class MoveToTransportCompletionTest {
         transportFailure(memory, false, 8.5);
         discoveryFailure(memory);
         ordinaryNearArrival(memory);
+        automaticLandingResult(memory);
         System.out.println("MoveToTransportCompletionTest: passed");
     }
 
@@ -136,6 +137,23 @@ public final class MoveToTransportCompletionTest {
         public boolean livenessActive() { return true; }
         public String phase() { return result.code(); }
         public Map<String, Object> diagnostics() { return Map.of("ticks", ticks); }
+    }
+
+    private static void automaticLandingResult(Unsafe memory) throws Exception {
+        var failed = Map.<String,Object>of("strategy","WATER","complete",true,"failed",true,"native_water_contact",false);
+        org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(failed);
+        try (var f = new Fixture(memory,.5)) {
+            var task = f.task(coordinates(0D,0D),true); task.onStart();
+            check(task.onTick()==TaskState.SUCCESS,"an old landing failure must not contaminate a new move");
+            check(!task.result(TaskState.SUCCESS).data().containsKey("landing_assist"),"old diagnostics must not be attributed to this task");
+        }
+        try (var f = new Fixture(memory,.5)) {
+            var record=coordinates(0D,0D); var task=f.task(record,true); task.onStart();
+            org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(failed);
+            check(task.onTick()==TaskState.FAILED && record.internalVerifiedPosition()==null,
+                    "arrival cannot overwrite this move's failed automatic protection");
+            check(task.result(TaskState.FAILED).data().get("landing_assist").equals(failed),"failure receipt must retain actual rescue evidence");
+        }
     }
 
     private static final class Fixture implements AutoCloseable {

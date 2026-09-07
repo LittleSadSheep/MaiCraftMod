@@ -68,6 +68,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private int settleTicks = 0;                  // ticks of no progress after the planner gave up
     /** The one near-retry recovery rung has been consumed (ladder state — survives suspend). */
     private boolean nearRetried;
+    private long landingBaseline = Long.MAX_VALUE;
+    private Map<String,Object> landingFacts = Map.of();
     /** FIND(就近方块)子系统:扫描/入册/契约/轮换全在组件里,此处只驱动。 */
     private NearestBlockFinder finder;
 
@@ -84,6 +86,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     @Override
     protected void onStart() {
+        landingBaseline = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.observation().revision();
         // 载具处置:坐在船上且有明确去处,先驾船——船腿走到离目标最近的水格,
         // 靠岸后接步行(见 tickBoatLeg)。其余情况(矿车没有舵、马的寻路仍按步行
         // 物理算、FIND 要先扫描)直接走步行段;下座驾是步行导航自己的事(PlayerNav)。
@@ -263,6 +266,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     @Override
     protected TaskState onTick() {
+        observeLanding();
         // An existing nav must consume its native completion before task cleanup can stop it.
         // Cabin floor contact or jetpack touchdown alone does not finish exit/mode restoration.
         if (nav == null && reached()) return successAtBody();
@@ -474,6 +478,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     /** Capture only a terminal verified arrival; failed/cancelled movement has no handoff receipt. */
     private TaskState successAtBody() {
+        observeLanding();
+        if (Boolean.TRUE.equals(landingFacts.get("complete")) && Boolean.TRUE.equals(landingFacts.get("failed"))) {
+            fail("destination reached after unverified or failed automatic landing protection",FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
         BlockPos body = player.blockPosition();
         // 到达即留痕:最终脚位与请求格同框——"报 exact 成功却站在别处"这类悬案,
         // 下一轮实机的第一现场就在这一行。
@@ -484,6 +493,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 body.getX(), body.getY(), body.getZ(),
                 player.level().dimension().location().toString()));
         return TaskState.SUCCESS;
+    }
+
+    private void observeLanding() {
+        var observation = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.observation();
+        if (observation.revision() > landingBaseline) landingFacts = observation.facts();
     }
 
     /** Representative remaining distance (blocks) for the deadline estimate. */
@@ -530,6 +544,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         data.put("final_y", player.getY());
         data.put("final_z", player.getZ());
         data.put("ground_y", gy);
+        observeLanding();
+        data.put("landing_assist_observed",!landingFacts.isEmpty());
+        if (!landingFacts.isEmpty()) data.put("landing_assist",landingFacts);
         return data;
     }
 

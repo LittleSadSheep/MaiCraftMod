@@ -59,7 +59,7 @@ public final class IntentRuntime {
             "waterfront_required", "max_distance", "farthest_body_distance",
             "target", "requested", "gathered", "confirmed_target_breaks", "scope",
             "last_probe", "suggestions", "recovery_options", "decision", "recovery", "steps",
-            "completed_effects", "remaining_effects");
+            "completed_effects", "remaining_effects", "landing_assist", "landing_assist_observed");
     private static final Set<String> ATTENTION_ISSUE_FACT_KEYS = Set.of(
             "failure_type", "recipe_id", "missing", "item_ids", "required_final_count",
             "observed_final_count", "target", "requested",
