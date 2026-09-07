@@ -15,6 +15,8 @@ import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
+import org.maiwithu.maicraft.client.preview.PreviewCommands;
+import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.MaiCraftCore;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
@@ -39,6 +41,7 @@ public final class MaiCraftNeoForgeClient {
 
     private void onClientTick(ClientTickEvent.Post event) {
         ClientRuntime.tick(Minecraft.getInstance());
+        PreviewController.tick(Minecraft.getInstance());
     }
 
     private void onChatReceived(ClientChatReceivedEvent event) {
@@ -53,9 +56,9 @@ public final class MaiCraftNeoForgeClient {
     }
 
     private void onRegisterClientCommands(RegisterClientCommandsEvent event) {
-        event.getDispatcher().register(Commands.literal("maicraft")
+        event.getDispatcher().register(PreviewCommands.attach(Commands.literal("maicraft")
                 .then(Commands.literal("status").executes(context ->
-                        MaiCraftStatus.showInChat())));
+                        MaiCraftStatus.showInChat()))));
     }
 
     private void onGameShuttingDown(GameShuttingDownEvent event) {

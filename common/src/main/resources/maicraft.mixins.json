@@ -9,8 +9,11 @@
   ],
   "client": [
     "ClientLevelBlockChangeMixin",
+    "MachineBlockEntityReceiptMixin",
+    "MekanismContainerSyncMixin",
     "GameRendererCameraMixin",
     "NavigationPathRenderMixin",
+    "BuildPreviewRenderMixin",
     "MouseHandlerControlMixin",
     "ContainerStockSyncMixin",
     "ScreenVisibilityMixin",

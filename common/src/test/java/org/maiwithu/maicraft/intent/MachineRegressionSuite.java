@@ -22,13 +22,23 @@ public final class MachineRegressionSuite {
         org.maiwithu.maicraft.core.scan.SearchGeometryTest.main(args);
         MachineSurveyModelTest.main(args);
         MachineDesignReviewTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayoutTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutModulesTest.main(args);
+        MachineLayoutJobsTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudgetTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutAeNetworksTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutItemOutputsTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.assembly.MachineAssemblyTest.main(args);
         MachineControlTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachineMenuPolicyTest.main(args);
         MachineBlueprintSpecTest.main(args);
         try { org.maiwithu.maicraft.core.integration.machine.MachineMenuObservationTest.main(args); }
         catch (Exception failure) { throw new AssertionError("menu observation regression", failure); }
         MachineBlueprintStateTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlanTest.main(args);
         org.maiwithu.maicraft.core.task.build.MachineBlueprintGeometryTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildExecutionContextTest.main(args);
+        org.maiwithu.maicraft.core.task.supply.BuildBatchCompletionTest.main(args);
         SemanticBuildPlannerTest.main(args);
         accepts("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"label\":\"factory\",\"radius\":4}");
         rejects("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"radius\":4.5}");
