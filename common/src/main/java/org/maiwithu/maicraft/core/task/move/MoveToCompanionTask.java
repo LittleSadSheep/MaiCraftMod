@@ -263,9 +263,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     @Override
     protected TaskState onTick() {
-        // reached() is checked BEFORE the nav==null guard so an already-at-target start
-        // (which never builds a nav) lands on SUCCESS rather than the defensive FAILED.
-        if (reached()) return successAtBody();
+        // An existing nav must consume its native completion before task cleanup can stop it.
+        // Cabin floor contact or jetpack touchdown alone does not finish exit/mode restoration.
+        if (nav == null && reached()) return successAtBody();
         if (boatLeg != null) {
             return tickBoatLeg();
         }
@@ -305,6 +305,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
+                if (!nav.isSafeToCancel()) yield TaskState.RUNNING;
                 // PlayerNav also reports ARRIVED when its search goal is satisfied but the live
                 // supported-body predicate is not. Full coordinates must reject that candidate
                 // rather than hand a nearby body position downstream.
@@ -332,6 +333,12 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 yield successAtBody();
             }
             case FAILED -> {
+                // Transport failures with effects or uncertain receipts are reported as UNKNOWN.
+                // Proximity must not turn those failures into arrival, another candidate, or a retry.
+                if (nav.failType() == FailureType.UNKNOWN) {
+                    fail(blockedMessage(nav.failReason()), nav.failType());
+                    yield TaskState.FAILED;
+                }
                 // FIND:打不通就近候选 -> 除名,朝余下候选重开导航
                 if (r.kind == MoveToTaskRecord.Kind.FIND && finder.rotateAfterFailure()) {
                     stopNav();
