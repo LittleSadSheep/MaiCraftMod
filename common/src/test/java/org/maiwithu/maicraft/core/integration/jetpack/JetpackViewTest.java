@@ -26,7 +26,7 @@ public final class JetpackViewTest {
             public Vec3 landingBelow(Vec3 point) { return point; }
         };
         Vec3 offset = new Vec3(0, 2, -1);
-        int index = JetpackRoute.nextWaypoint(open, course, offset, 1);
+        int index = JetpackRoute.nextWaypoint(open, course, offset, 1, power);
         check(index == 1, "residual takeoff drift must still approach the uncompleted lift corner");
         Vec3 aim = course.points().get(index);
         Vec3 glance = JetpackView.lookAhead(course.points(), index, offset, 6);

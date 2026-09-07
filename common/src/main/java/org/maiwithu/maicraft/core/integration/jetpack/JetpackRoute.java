@@ -143,20 +143,20 @@ public final class JetpackRoute {
     }
 
     /** Look ahead only inside the current clear height band or ascent column; never skip into touchdown. */
-    static int nextWaypoint(Space space, Plan route, Vec3 position, int current) {
+    static int nextWaypoint(Space space, Plan route, Vec3 position, int current, JetpackNativeAdapter.Snapshot power) {
         int last = route.points().size() - 2;
         current = Math.min(current, last);
         Vec3 point = route.points().get(current);
         if (current < last && Math.hypot(position.x - point.x, position.z - point.z) < 0.45
                 && atWaypointHeight(route, current, position.y)
-                && space.clear(position, route.points().get(current + 1))) current++;
+                && flightClear(space, position, route.points().get(current + 1), power)) current++;
         point = route.points().get(current);
         boolean atHeight = atWaypointHeight(route, current, position.y);
         for (int i = current + 1; i <= last; i++) {
             Vec3 candidate = route.points().get(i);
             boolean level = Math.abs(candidate.y - point.y) < 0.01 && atHeight;
             boolean vertical = Math.hypot(candidate.x - point.x, candidate.z - point.z) < 0.01;
-            if ((!level && !vertical) || position.distanceTo(candidate) > 6 || !space.clear(position, candidate)) break;
+            if ((!level && !vertical) || position.distanceTo(candidate) > 6 || !flightClear(space, position, candidate, power)) break;
             current = i;
         }
         return current;

@@ -13,6 +13,7 @@ public final class JetpackCourseTest {
 
     public static void main(String[] args) {
         descendingCorner();
+        lowCeilingShortcut();
         var cells = new ArrayList<Destination>();
         for (int x = 0; x < 3; x++) for (int z = 0; z < 3; z++) cells.add(new Destination(new BlockPos(x, 8, z), new Vec3(x + .5, 8, z + .5)));
         var platforms = JetpackPlatform.collect(cells);
@@ -51,7 +52,7 @@ public final class JetpackCourseTest {
         for (int tick = 0; tick < 1800; tick++) {
             Vec3 aim;
             if (!landing) {
-                waypoint = JetpackRoute.nextWaypoint(room, route, position, waypoint);
+                waypoint = JetpackRoute.nextWaypoint(room, route, position, waypoint, POWER);
                 aim = route.points().get(waypoint);
                 check(room.clear(position, aim), "selected new segment must be checked before moving");
                 if (waypoint == 2 && position.y >= aim.y - .1 && Math.hypot(position.x - aim.x, position.z - aim.z) < .4) landing = true;
@@ -81,18 +82,18 @@ public final class JetpackCourseTest {
         };
         var route = new JetpackRoute.Plan(List.of(new Vec3(0, 12, 0), new Vec3(0, 11, 0),
                 new Vec3(0, 10, 0), new Vec3(1, 10, 0), new Vec3(1, 10, 1), new Vec3(1, 8, 1)), List.of(), 200);
-        check(JetpackRoute.nextWaypoint(open, route, new Vec3(0, 11.05, 0), 1) == 2,
+        check(JetpackRoute.nextWaypoint(open, route, new Vec3(0, 11.05, 0), 1, POWER) == 2,
                 "descending a column must finish the lower height before a horizontal turn");
-        check(JetpackRoute.nextWaypoint(open, route, new Vec3(.5, 11.05, 0), 2) == 2,
+        check(JetpackRoute.nextWaypoint(open, route, new Vec3(.5, 11.05, 0), 2, POWER) == 2,
                 "level lookahead must not bypass an unfinished descent when outside the arrival radius");
-        check(JetpackRoute.nextWaypoint(open, route, new Vec3(0, 10.05, 0), 2) >= 3,
+        check(JetpackRoute.nextWaypoint(open, route, new Vec3(0, 10.05, 0), 2, POWER) >= 3,
                 "a completed descent must allow the next horizontal course");
         var descendingApproach = new JetpackRoute.Plan(List.of(new Vec3(0, 12, 0), new Vec3(0, 10, 0), new Vec3(0, 8, 0)), List.of(), 100);
         check(!JetpackRoute.atWaypointHeight(descendingApproach, 1, 12),
                 "the landing phase must not bypass a descent to the planned approach height");
         var ascending = new JetpackRoute.Plan(List.of(new Vec3(0, 10, 0), new Vec3(0, 12, 0),
                 new Vec3(1, 12, 0), new Vec3(1, 10, 0)), List.of(), 100);
-        check(JetpackRoute.nextWaypoint(open, ascending, new Vec3(0, 12.8, 0), 1) == 2,
+        check(JetpackRoute.nextWaypoint(open, ascending, new Vec3(0, 12.8, 0), 1, POWER) == 2,
                 "native upward coasting above the cruise minimum remains an arrived ascent");
         // Actual failed sweep from the cross-floor trial: turning early intersected the Y114 floor.
         var floor = new net.minecraft.world.phys.AABB(-78, 114, -13, -77, 115, -12);
@@ -113,8 +114,42 @@ public final class JetpackCourseTest {
         var observed = new JetpackRoute.Plan(List.of(new Vec3(-77.5, 118, -13.5), column, turn,
                 new Vec3(-77.5, 105, -12.5)), List.of(), 300);
         check(scene.clear(actual, column) && !scene.clear(actual, turn), "fixture must reproduce the observed premature floor crossing");
-        check(JetpackRoute.nextWaypoint(scene, observed, actual, 1) == 1,
+        check(JetpackRoute.nextWaypoint(scene, observed, actual, 1, POWER) == 1,
                 "stay in the clear descent column until below the floor before turning underneath it");
+    }
+    private static void lowCeilingShortcut() {
+        var slab = new net.minecraft.world.phys.AABB(0, 2, 0, 1, 3, 1);
+        JetpackRoute.Space room = new JetpackRoute.Space() {
+            public boolean clear(Vec3 from, Vec3 to) {
+                int steps = Math.max(1, (int)Math.ceil(from.distanceTo(to) / .1));
+                for (int i = 0; i <= steps; i++) {
+                    Vec3 p = from.lerp(to, (double)i / steps);
+                    if (new net.minecraft.world.phys.AABB(p.x - .38, p.y + .001, p.z - .38,
+                            p.x + .38, p.y + 1.88, p.z + .38).intersects(slab)) return false;
+                }
+                return true;
+            }
+            public Vec3 landingBelow(Vec3 point) { return new Vec3(point.x, 0, point.z); }
+        };
+        var route = new JetpackRoute.Plan(List.of(new Vec3(-.5, .1, 2.5), new Vec3(-.5, .1, -.5),
+                new Vec3(1.5, .1, -.5), new Vec3(1.5, 0, -.5)), List.of(), 200);
+        Vec3 start = route.points().getFirst(), corner = route.points().get(1), next = route.points().get(2);
+        check(JetpackRoute.flightClear(room, start, corner, POWER) && JetpackRoute.flightClear(room, corner, next, POWER),
+                "the planned detour must retain the native hover pulse clearance");
+        check(room.clear(start, next) && !JetpackRoute.flightClear(room, start, next, POWER),
+                "the shortcut fits the body but loses the reserve needed to hold altitude under the slab");
+        check(JetpackRoute.nextWaypoint(room, route, start, 1, POWER) == 1,
+                "level lookahead must not cut a flight detour into an unusable low-ceiling corridor");
+        Vec3 nearCorner = new Vec3(-.5, .1, -.15);
+        check(room.clear(nearCorner, next) && !JetpackRoute.flightClear(room, nearCorner, next, POWER),
+                "arrival-radius advancement reproduces the same clipped corner");
+        check(JetpackRoute.nextWaypoint(room, route, nearCorner, 1, POWER) == 1,
+                "stay with the corner until the next leg has usable flight clearance");
+        check(JetpackRoute.nextWaypoint(room, route, corner, 1, POWER) == 2,
+                "the completed corner must still advance without a stop or replan");
+        var high = new JetpackRoute.Plan(route.points().stream().map(p -> p.add(0, 4, 0)).toList(), List.of(), 200);
+        check(JetpackRoute.nextWaypoint(room, high, start.add(0, 4, 0), 1, POWER) == 2,
+                "unobstructed flight bands should keep their continuous shortcut");
     }
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }
 }

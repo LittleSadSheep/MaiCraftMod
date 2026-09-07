@@ -165,7 +165,7 @@ public final class JetpackFlightSession implements TransportSession {
             landing = route.points().getLast(); approachHeight = Math.max(position.y, landing.y);
             phase = Phase.LAND; return;
         }
-        int selected = JetpackRoute.nextWaypoint(space, route, position, waypoint);
+        int selected = JetpackRoute.nextWaypoint(space, route, position, waypoint, power);
         if (selected != waypoint) { waypoint = selected; waypointTick = lastTick; waypointDistance = Double.POSITIVE_INFINITY; }
         Vec3 next = route.points().get(waypoint);
         double distance = position.distanceToSqr(next);
@@ -342,6 +342,8 @@ public final class JetpackFlightSession implements TransportSession {
         sample.put("health", ctx.player().getHealth()); sample.put("absorption", ctx.player().getAbsorptionAmount());
         sample.put("native_client_evidence", nativeEvidence);
         sample.put("waypoint", waypoint); sample.put("detail", detail);
+        if (route != null && waypoint < route.points().size())
+            sample.put("waypoint_target", route.points().get(waypoint).toString());
         if (!lastObstacle.isEmpty()) sample.put("obstruction", lastObstacle);
         if (departure.isEmpty()) departure = Map.copyOf(sample);
         if (force || transition) { events.addLast(Map.copyOf(sample)); while (events.size() > 24) events.removeFirst(); }
