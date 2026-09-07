@@ -101,6 +101,17 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private java.util.function.BiPredicate<net.minecraft.client.player.LocalPlayer, BlockPos> mutationGuard = (player, pos) -> true;
     private java.util.function.BiConsumer<net.minecraft.client.player.LocalPlayer, BlockPos> confirmedMutation = (player, pos) -> {};
     private boolean hasExecutionGuards;
+    private boolean previewManaged;
+
+    public boolean previewManaged() { return previewManaged; }
+    public void previewManaged(boolean value) { previewManaged = value; }
+
+    /** Preserve the reviewed site's live guards when supply creates another construction batch. */
+    public void copyExecutionContextTo(BuildTaskRecord destination) {
+        destination.previewManaged = previewManaged;
+        if (hasExecutionGuards) destination.executionGuards(protectedNavigationCells,
+                preflightGuard, mutationGuard, confirmedMutation);
+    }
 
     /** Optional externally observed structure constraints; ordinary build records keep no guards. */
     public void executionGuards(List<BlockPos> protectedCells,

@@ -174,6 +174,7 @@ final class SemanticBuildMaterialBinding {
         result.droppedAtLoad(source.droppedAtLoad());
         result.semanticFacts(source.semanticFacts());
         result.traversabilityContract(source.traversabilityContract());
+        source.copyExecutionContextTo(result);
         return result;
     }
 
