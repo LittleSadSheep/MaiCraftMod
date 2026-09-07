@@ -21,14 +21,28 @@ public final class CollisionGeometry {
     private final boolean frozen;
     private final Vec3 initialPosition;
     private final BlockPos initialCell;
+    private final java.util.function.Supplier<org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot> physical;
+    private final double bodyWidth, bodyHeight;
     private final Long2ObjectOpenHashMap<List<AABB>> protrusions = new Long2ObjectOpenHashMap<>();
 
     public CollisionGeometry(BlockGetter view, boolean frozen, Vec3 initialPosition, BlockPos initialCell) {
+        this(view, frozen, initialPosition, initialCell,
+                () -> org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY, .6, 1.8);
+    }
+
+    public CollisionGeometry(BlockGetter view, boolean frozen, Vec3 initialPosition, BlockPos initialCell,
+            java.util.function.Supplier<org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot> physical,
+            double bodyWidth, double bodyHeight) {
         this.view = view;
         this.frozen = frozen;
         this.initialPosition = initialPosition;
         this.initialCell = initialCell;
+        this.physical = frozen ? constant(physical.get()) : physical;
+        this.bodyWidth = bodyWidth; this.bodyHeight = bodyHeight;
     }
+
+    private static java.util.function.Supplier<org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot> constant(
+            org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot snapshot) { return () -> snapshot; }
 
     public boolean clear(int x, int y, int z, int toX, int toY, int toZ) {
         Vec3 from = initialCell != null && initialCell.getX() == x && initialCell.getY() == y && initialCell.getZ() == z
@@ -62,6 +76,7 @@ public final class CollisionGeometry {
     }
 
     private boolean clearSegment(Vec3 from, Vec3 to) {
+        if (!physical.get().clearSegment(from, to, bodyWidth, bodyHeight)) return false;
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         // The same one-cell owner margin used by vanilla block collision lookup; no entities.
         for (int x = Mth.floor(Math.min(from.x, to.x) - 0.3) - 1; x <= Mth.floor(Math.max(from.x, to.x) + 0.3) + 1; x++) {

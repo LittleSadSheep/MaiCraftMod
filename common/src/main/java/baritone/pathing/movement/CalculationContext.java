@@ -137,7 +137,9 @@ public class CalculationContext {
         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
         this.collisionGeometry = new CollisionGeometry(bsi.access, forUseOnAnotherThread,
-                player.position(), baritone.getPlayerContext().playerFeet());
+                player.position(), baritone.getPlayerContext().playerFeet(),
+                org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime::physicalObstacles,
+                player.getBbWidth(), player.getBbHeight());
         this.fallDamageBudget = FallDamageBudget.capture(player);
         this.fallOrigin = baritone.getPlayerContext().playerFeet().immutable();
         this.fallOriginY = player.getY();

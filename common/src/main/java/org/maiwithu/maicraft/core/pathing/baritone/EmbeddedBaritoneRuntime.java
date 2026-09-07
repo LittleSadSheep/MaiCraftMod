@@ -49,6 +49,24 @@ public final class EmbeddedBaritoneRuntime {
     private static EmbeddedBaritoneNavigator pendingPolicyOwner;
     private static GoalCompiler.Compiled pendingPolicyGoal;
     private static PendingStart pendingStart;
+    private static volatile org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot physicalObstacles =
+            org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY;
+    private static long physicalObservationTick = Long.MIN_VALUE;
+    private static net.minecraft.world.phys.Vec3 physicalObservationOrigin;
+
+    public static org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot physicalObstacles() {
+        return physicalObstacles;
+    }
+
+    private static void refreshPhysicalObstacles(LocalPlayer player) {
+        long tick = player.level().getGameTime();
+        if (physicalObservationOrigin != null && tick >= physicalObservationTick
+                && tick - physicalObservationTick < 5 && physicalObservationOrigin.distanceToSqr(player.position()) < 16) return;
+        physicalObstacles = org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.capture(
+                player.clientLevel, player.position());
+        physicalObservationTick = tick;
+        physicalObservationOrigin = player.position();
+    }
 
     private record PendingStart(
             EmbeddedBaritoneNavigator navigator,
@@ -73,6 +91,9 @@ public final class EmbeddedBaritoneRuntime {
         result.put("has_owner", owner != null);
         result.put("pending_owner", pendingStart != null);
         result.put("last_drive_tick", lastSwimDriveTick);
+        result.put("physical_obstacles", java.util.Map.of("state", physicalObstacles.state(),
+                "boxes", physicalObstacles.boxes().size(), "block_reads", physicalObstacles.blockReads(),
+                "conservative_structures", physicalObstacles.conservativeStructures(), "game_time", physicalObservationTick));
         if (backend == null) return result;
         var pathing = (PathingBehavior) backend.getPathingBehavior();
         result.put("planning", pathing.getInProgress().isPresent());
@@ -244,6 +265,7 @@ public final class EmbeddedBaritoneRuntime {
         }
 
         try {
+            refreshPhysicalObstacles(context.player());
             lastSwimDriveTick = context.level().getGameTime();
             tickingContext = context;
             BiFunction<EventState, TickEvent.Type, TickEvent> events =
@@ -626,6 +648,8 @@ public final class EmbeddedBaritoneRuntime {
 
     private static void syncWorld(IBaritone baritone, ClientLevel current) {
         if (world == current) return;
+        physicalObstacles = org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY;
+        physicalObservationOrigin = null;
         baritone.getGameEventHandler().onWorldEvent(
                 new WorldEvent(current, EventState.POST));
         world = current;
@@ -668,6 +692,7 @@ public final class EmbeddedBaritoneRuntime {
         pendingPolicyGoal = null;
         courseCommitted = false;
         courseTurning = false;
+        refreshPhysicalObstacles(baritone.getPlayerContext().player());
         baritone.getCustomGoalProcess().setGoalAndPath(
                 new MaiCraftGoalAdapter(next.compiled().goal()));
     }

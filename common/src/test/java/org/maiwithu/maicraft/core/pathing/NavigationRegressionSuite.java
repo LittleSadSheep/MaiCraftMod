@@ -42,6 +42,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.integration.jetpack.JetpackMotionTest.main(args);
         org.maiwithu.maicraft.core.integration.physics.StructurePoseTest.main(args);
         org.maiwithu.maicraft.core.integration.physics.SableStructureBridgeTest.main(args);
+        org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshotTest.main(args);
         org.maiwithu.maicraft.mcp.PhysicalStructurePerceptionTest.main(args);
         org.maiwithu.maicraft.mcp.PhysicalDeckSamplerTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackViewTest.main(args);
