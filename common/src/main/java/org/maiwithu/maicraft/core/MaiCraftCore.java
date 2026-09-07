@@ -145,6 +145,7 @@ public final class MaiCraftCore {
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.perception.GetWorldInfoTool());
         org.maiwithu.maicraft.core.tools.work.SemanticEntitySearchApi.register();
         org.maiwithu.maicraft.core.tools.work.SemanticExploreApi.register();
+        ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.BoardStructureTool());
         org.maiwithu.maicraft.core.tools.work.SemanticAcquireApi.register();
         org.maiwithu.maicraft.core.tools.work.SemanticLightAreaApi.register();
         org.maiwithu.maicraft.core.tools.work.SemanticBuildSiteInvestigationApi.register();

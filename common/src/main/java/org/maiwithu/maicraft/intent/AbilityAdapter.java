@@ -262,6 +262,16 @@ final class AbilityAdapter {
 
     private static IntentAction travel(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         JsonObject parameters = new JsonObject();
+        if (goal.parameters().has("structure_id")) {
+            if (goal.target() != null || goal.parameters().has("destination") || goal.parameters().has("semantic_target")
+                    || goal.parameters().has("biome_id") || goal.parameters().has("biome_tag"))
+                throw new IllegalArgumentException("structure_id names one physical vessel; do not combine it with another destination");
+            TransportMode transport = TransportMode.parse(string(goal.parameters(), "transport_mode"));
+            if (transport != TransportMode.AUTO && transport != TransportMode.JETPACK)
+                throw new IllegalArgumentException("physical boarding uses transport_mode=auto or jetpack");
+            parameters.addProperty("structure_id", java.util.UUID.fromString(string(goal.parameters(), "structure_id")).toString());
+            return new IntentAction.Tool("board_structure",parameters.toString());
+        }
         TravelDestination.validatePrecision(goal.parameters());
         TravelDestination destination = TravelDestination.fromGoal(goal);
         TransportMode mode = TransportMode.parse(string(goal.parameters(), "transport_mode"));

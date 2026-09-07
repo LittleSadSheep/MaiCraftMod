@@ -183,6 +183,7 @@ public final class SemanticAbilityCatalog {
                     targets("coordinates", "landmark", "player", "entity", "nearest", "area", "prior_result"),
                     fields(
                             field("destination", "object", "Travel-only coordinates {x,z,y?,dimension?}; omit target and other destination fields. Omit y only when height is unknown. Supplied y remains a height hint. Existing coordinates targets still require all three axes."),
+                            field("structure_id", "string", "Observed physical-structure UUID to board using an equipped Create jetpack. Omit target/destination/discovery fields; transport_mode must be auto or jetpack. MaiCraft selects a native deck face, follows its changing pose and confirms actual support on that vessel."),
                             field("exact", "boolean", "Default false. True requires the exact x/y/z cell and a supplied or resolved height; use only when precise standing position matters."),
                             field("horizontal_radius", "number", "Nonnegative arrival radius in X/Z blocks; default 3 for ordinary travel. Ignored when exact=true."),
                             field("vertical_tolerance", "number", "Nonnegative allowed distance from a supplied Y hint; default 2. Omitted Y leaves elevation open. Ignored when exact=true."),
