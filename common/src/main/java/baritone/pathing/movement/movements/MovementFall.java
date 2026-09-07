@@ -46,6 +46,7 @@ public class MovementFall extends Movement {
     private org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession landingAssist;
     private org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist landingBoat;
     private org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.State boatState;
+    private boolean departureObserved;
 
     public org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession landingAssist() { return landingAssist; }
     public org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist landingBoat() { return landingBoat; }
@@ -92,6 +93,12 @@ public class MovementFall extends Movement {
 
     @Override
     public MovementState updateState(MovementState state) {
+        // Completion already includes supported ground, water or climbable stability evidence.
+        // Requiring onGround again strands safely failed sessions that finished in another cell.
+        if (landingAssist != null && landingAssist.complete()) {
+            return state.setStatus(!landingAssist.failed() && ctx.playerFeet().equals(dest)
+                    ? MovementStatus.SUCCESS : MovementStatus.UNREACHABLE);
+        }
         super.updateState(state);
         if (state.getStatus() != MovementStatus.RUNNING) {
             return state;
@@ -116,10 +123,6 @@ public class MovementFall extends Movement {
                 var boat = org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.airbornePlan(context, dest);
                 if (boat != null) landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boat);
             }
-        }
-        if (landingAssist != null && landingAssist.complete() && ctx.player().onGround()) {
-            return state.setStatus(!landingAssist.failed() && ctx.playerFeet().equals(dest)
-                    ? MovementStatus.SUCCESS : MovementStatus.UNREACHABLE);
         }
         if (landingBoat != null) {
             state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
@@ -198,7 +201,8 @@ public class MovementFall extends Movement {
     public boolean safeToCancel(MovementState state) {
         // if we haven't started walking off the edge yet, or if we're in the process of breaking blocks before doing the fall
         // then it's safe to cancel this
-        return ctx.player().onGround() && ctx.playerFeet().equals(src) || state.getStatus() != MovementStatus.RUNNING;
+        return !departureObserved && ctx.player().onGround() && ctx.playerFeet().equals(src)
+                || state.getStatus() != MovementStatus.RUNNING;
     }
 
     private static BetterBlockPos[] buildPositionsToBreak(BetterBlockPos src, BetterBlockPos dest) {
@@ -215,7 +219,9 @@ public class MovementFall extends Movement {
 
     @Override
     protected boolean prepared(MovementState state) {
-        if (landingAssist == null && ctx.player().onGround() && ctx.playerFeet().equals(src) && needsLandingAssist()) {
+        boolean atDeparture = ctx.player().onGround() && ctx.playerFeet().equals(src);
+        departureObserved |= !atDeparture;
+        if (landingAssist == null && !departureObserved && atDeparture && needsLandingAssist()) {
             var calculation = new CalculationContext(baritone);
             var plans = calculation.landingPlans(dest, src.y - dest.y);
             if (!plans.isEmpty()) landingAssist = new org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession(plans.getFirst());
@@ -235,7 +241,7 @@ public class MovementFall extends Movement {
             }
             return true;
         }
-        if (landingAssist != null && ctx.playerFeet().equals(src)) {
+        if (landingAssist != null && !departureObserved && atDeparture) {
             var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
             if (!landingAssist.prepare(context)) {
                 if (landingAssist.failed() && !landingAssist.cleanupPending()) state.setStatus(MovementStatus.UNREACHABLE);
@@ -244,8 +250,9 @@ public class MovementFall extends Movement {
         }
         // Runs before every tick that could leave the source, including RUNNING. A prior fall,
         // incoming damage, an expired buff or removed boots must invalidate the stale A* budget.
-        // Once airborne retain steering toward the already selected landing.
-        if (ctx.player().onGround() && !ctx.playerFeet().equals(dest)
+        // After departure retain the selected landing through cleanup, including a neighboring
+        // supported cell: the bucket consumed by this fall cannot invalidate its own recovery.
+        if (!departureObserved && atDeparture
                 && calculateCost(new CalculationContext(baritone)) >= COST_INF) {
             state.setStatus(MovementStatus.UNREACHABLE);
             return true;

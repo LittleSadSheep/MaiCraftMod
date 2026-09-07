@@ -130,7 +130,7 @@ public class PathExecutor implements IPathExecutor, Helper {
         Movement movement = (Movement) path.movements().get(pathPosition);
         waterTravel.update(pathPosition);
         BetterBlockPos whereAmI = waterTravel.routeFeet(ctx.playerFeet());
-        if (!movement.getValidPositions().contains(whereAmI)) {
+        if (!ownsUnsettledLanding(movement) && !movement.getValidPositions().contains(whereAmI)) {
             for (int i = pathPosition - 1; i >= 0; i--) {// prefer the nearest matching movement after knockback
                 if (((Movement) path.movements().get(i)).getValidPositions().contains(whereAmI)) {
                     int previousPos = pathPosition;
@@ -158,7 +158,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             }
         }
         Tuple<Double, BlockPos> status = closestPathPos(path);
-        if (possiblyOffPath(status, MAX_DIST_FROM_PATH)) {
+        if (!ownsUnsettledLanding(movement) && possiblyOffPath(status, MAX_DIST_FROM_PATH)) {
             ticksAway++;
             System.out.println("FAR AWAY FROM PATH FOR " + ticksAway + " TICKS. Current distance: " + status.getA() + ". Threshold: " + MAX_DIST_FROM_PATH);
             if (ticksAway > MAX_TICKS_AWAY) {
@@ -169,7 +169,7 @@ public class PathExecutor implements IPathExecutor, Helper {
         } else {
             ticksAway = 0;
         }
-        if (possiblyOffPath(status, MAX_MAX_DIST_FROM_PATH)) { // ok, stop right away, we're way too far.
+        if (!ownsUnsettledLanding(movement) && possiblyOffPath(status, MAX_MAX_DIST_FROM_PATH)) {
             logDebug("too far from path");
             cancel();
             return false;
@@ -214,14 +214,7 @@ public class PathExecutor implements IPathExecutor, Helper {
         if (end - start > 0) {
             System.out.println("Recalculating break and place took " + (end - start) + "ms");
         }*/
-        if (pathPosition < path.movements().size() - 1) {
-            IMovement next = path.movements().get(pathPosition + 1);
-            if (!behavior.baritone.bsi.worldContainsLoadedChunk(next.getDest().x, next.getDest().z)) {
-                logDebug("Pausing since destination is at edge of loaded chunks");
-                clearKeys();
-                return true;
-            }
-        }
+        if (pauseAtUnloadedNext(movement)) return true;
         boolean canCancel = movement.safeToCancel();
         if (costEstimateIndex == null || costEstimateIndex != pathPosition) {
             costEstimateIndex = pathPosition;
@@ -272,17 +265,37 @@ public class PathExecutor implements IPathExecutor, Helper {
                 ctx.player().setSprinting(false); // letting go of control doesn't make you stop sprinting actually
             }
             ticksOnCurrent++;
-            if (ticksOnCurrent > currentMovementOriginalCostEstimate + Baritone.settings().movementTimeoutTicks.value) {
-                // only cancel if the total time has exceeded the initial estimate
-                // as you break the blocks required, the remaining cost goes down, to the point where
-                // ticksOnCurrent is greater than recalculateCost + 100
-                // this is why we cache cost at the beginning, and don't recalculate for this comparison every tick
-                logDebug("This movement has taken too long (" + ticksOnCurrent + " ticks, expected " + currentMovementOriginalCostEstimate + "). Cancelling.");
-                cancel();
+            if (cancelIfTimedOut(movement)) return true;
+        }
+        return canCancel; // movement is in progress, but if it reports cancellable, PathingBehavior is good to cut onto the next path
+    }
+
+    private boolean pauseAtUnloadedNext(Movement movement) {
+        // The next segment's chunks cannot suspend this fall's already chosen steering/recovery.
+        if (!ownsUnsettledLanding(movement) && pathPosition < path.movements().size() - 1) {
+            IMovement next = path.movements().get(pathPosition + 1);
+            if (!behavior.baritone.bsi.worldContainsLoadedChunk(next.getDest().x, next.getDest().z)) {
+                logDebug("Pausing since destination is at edge of loaded chunks");
+                clearKeys();
                 return true;
             }
         }
-        return canCancel; // movement is in progress, but if it reports cancellable, PathingBehavior is good to cut onto the next path
+        return false;
+    }
+
+    private static boolean ownsUnsettledLanding(Movement movement) {
+        return movement instanceof MovementFall fall
+                && (fall.landingAssist() != null || fall.landingBoat() != null) && !movement.safeToCancel();
+    }
+
+    private boolean cancelIfTimedOut(Movement movement) {
+        // An airborne aid owns finite native receipt/recovery windows. The generic timeout
+        // cannot discard that owner while it still has to land or account for its own water.
+        if (ownsUnsettledLanding(movement)
+                || ticksOnCurrent <= currentMovementOriginalCostEstimate + Baritone.settings().movementTimeoutTicks.value) return false;
+        logDebug("This movement has taken too long (" + ticksOnCurrent + " ticks, expected " + currentMovementOriginalCostEstimate + "). Cancelling.");
+        cancel();
+        return true;
     }
 
     private Tuple<Double, BlockPos> closestPathPos(IPath path) {
@@ -357,6 +370,8 @@ public class PathExecutor implements IPathExecutor, Helper {
      * @return Whether or not it was possible to snap to the current player feet
      */
     public boolean snipsnapifpossible() {
+        if (pathPosition < path.movements().size()
+                && ownsUnsettledLanding((Movement) path.movements().get(pathPosition))) return false;
         if (!ctx.player().onGround() && ctx.world().getFluidState(ctx.playerFeet()).isEmpty()) {
             // if we're falling in the air, and not in water, don't splice
             return false;
@@ -523,6 +538,8 @@ public class PathExecutor implements IPathExecutor, Helper {
     }
 
     private Tuple<Vec3, BlockPos> overrideFall(MovementFall movement) {
+        // A longer landing skips the selected aid and its receipt/recovery owner.
+        if (movement.landingAssist() != null || movement.landingBoat() != null) return null;
         Vec3i dir = movement.getDirection();
         if (dir.getY() < -3) {
             return null;

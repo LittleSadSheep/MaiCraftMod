@@ -25,6 +25,11 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFallTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingReplayTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.landing.SharedLandingExecutionTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistDisplacementTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.landing.PlannedWaterReflexTest.main(args);
+        baritone.pathing.path.AssistedFallOwnershipTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudgetTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.FallLandingTest.main(args);
         org.maiwithu.maicraft.core.pathing.transport.TransportTargetsTest.main(args);
@@ -35,6 +40,10 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.integration.jetpack.JetpackCourseTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackClearancePolicyTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackMotionTest.main(args);
+        org.maiwithu.maicraft.core.integration.physics.StructurePoseTest.main(args);
+        org.maiwithu.maicraft.core.integration.physics.SableStructureBridgeTest.main(args);
+        org.maiwithu.maicraft.mcp.PhysicalStructurePerceptionTest.main(args);
+        org.maiwithu.maicraft.mcp.PhysicalDeckSamplerTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackViewTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackFastDescentTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeEvidenceTest.main(args);
