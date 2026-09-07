@@ -192,6 +192,9 @@ public final class JetpackRoute {
                         feet.x+half, feet.y+ctx.player().getBbHeight()+0.08, feet.z+half);
                 if (box.minY < ctx.level().getMinBuildHeight() || box.maxY >= ctx.level().getMaxBuildHeight()
                         || !ctx.level().getWorldBorder().isWithinBounds(box)) return false;
+                AABB origins = box.inflate(1.0000001);
+                if (!ctx.level().hasChunksAt(BlockPos.containing(origins.minX,origins.minY,origins.minZ),
+                        BlockPos.containing(origins.maxX,origins.maxY,origins.maxZ))) return false;
                 for (BlockPos p : BlockPos.betweenClosed(BlockPos.containing(box.minX, box.minY, box.minZ),
                         BlockPos.containing(box.maxX, box.maxY, box.maxZ))) {
                     if (!ctx.level().hasChunkAt(p)) return false;
