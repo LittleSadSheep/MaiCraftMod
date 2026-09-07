@@ -74,7 +74,7 @@ public final class MachineDesignReviewTest {
         JsonObject missingCount = mixedDesign();
         missingCount.getAsJsonArray("components").get(0).getAsJsonObject().remove("count");
         expectError(missingCount, "invalid_count");
-        for (String raw : new String[]{"\"2\"", "2.5", "2e-1", "0", "-1", "65", "2147483649", "null", "true", "[]", "{}"}) {
+        for (String raw : new String[]{"\"2\"", "2.5", "2e-1", "0", "-1", "32769", "2147483649", "null", "true", "[]", "{}"}) {
             JsonObject design = mixedDesign();
             design.getAsJsonArray("components").get(0).getAsJsonObject().add("count", JsonParser.parseString(raw));
             expectError(design, "invalid_count");
@@ -141,15 +141,14 @@ public final class MachineDesignReviewTest {
     private static void enforcesAllBounds() {
         JsonObject maximumTotal = singleDesign();
         JsonArray components = maximumTotal.getAsJsonArray("components");
-        components.get(0).getAsJsonObject().addProperty("count", 64);
-        for (int i = 1; i < 8; i++) components.add(component("chest" + i, "minecraft:chest", 64));
-        check(valid(review(maximumTotal)), "accepts 512 total blocks");
+        components.get(0).getAsJsonObject().addProperty("count", MachineDesignReview.MAX_COMPONENT_COUNT);
+        check(valid(review(maximumTotal)), "accepts the 32768-block physical planning budget");
         components.add(component("overflow", "minecraft:chest", 1));
         expectError(maximumTotal, "total_count_exceeded");
         JsonObject maximumComponents = singleDesign();
         JsonArray list = maximumComponents.getAsJsonArray("components");
-        for (int i = 1; i < 64; i++) list.add(component("chest" + i, "minecraft:chest", 1));
-        check(valid(review(maximumComponents)), "accepts 64 components");
+        for (int i = 1; i < MachineDesignReview.MAX_COMPONENTS; i++) list.add(component("chest" + i, "minecraft:chest", 1));
+        check(valid(review(maximumComponents)), "accepts the 1024 named component budget");
         list.add(component("overflow", "minecraft:chest", 1));
         AtomicInteger registryCalls = new AtomicInteger();
         JsonObject oversized = MachineDesignReview.review(maximumComponents, id -> { registryCalls.incrementAndGet(); return true; }, id -> true);
@@ -158,16 +157,21 @@ public final class MachineDesignReviewTest {
         empty.add("components", new JsonArray());
         expectError(empty, "array_size");
         JsonObject maximumEdges = singleDesign();
-        for (int i = 1; i < 17; i++) maximumEdges.getAsJsonArray("components").add(component("chest" + i, "minecraft:chest", 1));
+        for (int i = 1; i < 65; i++) maximumEdges.getAsJsonArray("components").add(component("chest" + i, "minecraft:chest", 1));
         JsonArray edges = maximumEdges.getAsJsonArray("connections");
-        for (int i = 0; i < 17 && edges.size() < 128; i++) {
-            for (int j = 0; j < 17 && edges.size() < 128; j++) {
+        for (int i = 0; i < 65 && edges.size() < MachineDesignReview.MAX_CONNECTIONS; i++) {
+            for (int j = 0; j < 65 && edges.size() < MachineDesignReview.MAX_CONNECTIONS; j++) {
                 if (i != j) edges.add(connection(i == 0 ? "chest" : "chest" + i, j == 0 ? "chest" : "chest" + j, "items"));
             }
         }
-        check(valid(review(maximumEdges)), "accepts 128 unique directed connections");
+        check(valid(review(maximumEdges)), "accepts 4096 unique directed connections");
         edges.add(connection("chest15", "chest16", "fluids"));
         expectError(maximumEdges, "array_size");
+        JsonObject largeSite = singleDesign();
+        largeSite.add("constraints", JsonParser.parseString("{\"max_width\":257,\"max_depth\":257,\"max_height\":257}"));
+        check(valid(review(largeSite)), "accepts a 128-radius site diameter");
+        largeSite.getAsJsonObject("constraints").addProperty("max_width", 258);
+        expectError(largeSite, "invalid_dimension");
     }
 
     private static void reviewsEveryMediumConservatively() {

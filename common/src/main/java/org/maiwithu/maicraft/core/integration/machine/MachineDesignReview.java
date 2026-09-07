@@ -21,24 +21,25 @@ import java.util.regex.Pattern;
  * Minecraft registry access is injected so structural validation remains independently testable.
  */
 public final class MachineDesignReview {
-    public static final int MAX_COMPONENTS = 64;
-    public static final int MAX_CONNECTIONS = 128;
-    public static final int MAX_COMPONENT_COUNT = 64;
-    public static final int MAX_TOTAL_BLOCKS = 512;
+    // Planning budgets bound JSON traversal and physical expansion, independently of survey radius.
+    public static final int MAX_COMPONENTS = MachinePlanningBudget.current().maxComponents();
+    public static final int MAX_CONNECTIONS = MachinePlanningBudget.current().maxConnections();
+    public static final int MAX_COMPONENT_COUNT = MachinePlanningBudget.current().maxTargets();
+    public static final int MAX_TOTAL_BLOCKS = MachinePlanningBudget.current().maxTargets();
     private static final int MAX_ERRORS = 64;
     private static final Set<String> DESIGN_FIELDS = Set.of("components", "connections", "expected_output", "style", "constraints");
     private static final Set<String> CONSTRAINT_FIELDS = Set.of(
             "max_width", "max_depth", "max_height", "terrain_fit",
             "maintenance_access", "preserve_existing", "throughput");
-    private static final Set<String> COMPONENT_FIELDS = Set.of("name", "block_id", "count", "role");
-    private static final Set<String> CONNECTION_FIELDS = Set.of("from", "to", "medium", "purpose");
+    private static final Set<String> COMPONENT_FIELDS = Set.of("name", "block_id", "count", "role", "module", "module_tier", "module_options");
+    private static final Set<String> CONNECTION_FIELDS = Set.of("from", "to", "medium", "purpose", "item_id", "resource");
     private static final Set<String> MEDIA = Set.of("kinetic", "items", "fluids", "energy", "chemicals", "ae_network", "redstone", "heat");
     private static final Pattern ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
 
     private MachineDesignReview() {}
 
-    private record Component(String name, String blockId, int count, String role) {}
-    private record Connection(String from, String to, String medium, String purpose) {}
+    private record Component(String name, String blockId, int count, String role, JsonObject module) {}
+    private record Connection(String from, String to, String medium, String purpose, JsonObject resource) {}
     private record EdgeKey(String from, String to, String medium) {}
 
     /**
@@ -68,7 +69,7 @@ public final class MachineDesignReview {
         if (componentsJson == null || connectionsJson == null) return invalid(errors);
         List<Component> components = new ArrayList<>();
         Map<String, Component> byName = new LinkedHashMap<>();
-        int total = 0;
+        long total = 0;
         for (int i = 0; i < componentsJson.size(); i++) {
             String path = "$.components[" + i + "]";
             JsonObject component = object(componentsJson.get(i), path, errors);
@@ -78,15 +79,16 @@ public final class MachineDesignReview {
             String blockId = identifier(component, "block_id", path, errors);
             String role = string(component, "role", path, 160, errors);
             int count = count(component, path, errors);
+            JsonObject module = module(component, path, errors);
             if (blockId != null) {
                 checkRegistry(blockExists, blockId, path + ".block_id", "block", errors);
                 if (Set.of("minecraft:air", "minecraft:cave_air", "minecraft:void_air").contains(blockId)) {
                     error(errors, path + ".block_id", "air_component", "Air is not a machine component.");
                 }
             }
-            if (count > 0) total += count;
+            if (count > 0) total = Math.addExact(total, count);
             if (name == null || blockId == null || role == null || count < 1) continue;
-            Component entry = new Component(name, blockId, count, role);
+            Component entry = new Component(name, blockId, count, role, module);
             if (byName.putIfAbsent(name, entry) != null) {
                 error(errors, path + ".name", "duplicate_component", "Component names must be unique.");
             } else {
@@ -105,6 +107,13 @@ public final class MachineDesignReview {
             String to = string(connection, "to", path, 64, errors);
             String medium = string(connection, "medium", path, 256, errors);
             String purpose = string(connection, "purpose", path, 256, errors);
+            JsonObject resource = new JsonObject();
+            for (String key : List.of("item_id", "resource")) if (connection.has(key)) {
+                String id = identifier(connection, key, path, errors);
+                if (id != null) { resource.addProperty(key,id); if ("items".equals(medium)) checkRegistry(itemExists,id,path+'.'+key,"item",errors); }
+            }
+            if (connection.has("item_id") && !"items".equals(medium)) error(errors,path+".item_id","invalid_resource_medium","item_id applies to item connections only.");
+            if (resource.has("item_id") && resource.has("resource") && !resource.get("item_id").equals(resource.get("resource"))) error(errors,path,"conflicting_resource_identity","item_id and resource must name the same intended item.");
             if (medium != null && !MEDIA.contains(medium) && !ID.matcher(medium).matches()) {
                 error(errors, path + ".medium", "unsupported_medium", "Use kinetic, items, fluids, energy, chemicals, ae_network, redstone, heat or a namespaced custom resource such as addon:mana.");
             }
@@ -115,10 +124,10 @@ public final class MachineDesignReview {
             if (!edges.add(new EdgeKey(from, to, medium))) {
                 error(errors, path, "duplicate_connection", "Each directed endpoint pair may declare a medium only once.");
             }
-            connections.add(new Connection(from, to, medium, purpose));
+            connections.add(new Connection(from, to, medium, purpose, resource));
         }
         if (!errors.isEmpty()) return invalid(errors);
-        return report(components, connections, expectedOutput, style, constraints, total);
+        return report(components, connections, expectedOutput, style, constraints, (int) total);
     }
 
     private static JsonObject report(
@@ -143,8 +152,9 @@ public final class MachineDesignReview {
             row.addProperty("block_id", component.blockId());
             row.addProperty("count", component.count());
             row.addProperty("role", component.role());
+            component.module().entrySet().forEach(e -> row.add(e.getKey(), e.getValue().deepCopy()));
             componentRows.add(row);
-            required.merge(component.blockId(), component.count(), Integer::sum);
+            required.merge(component.blockId(), component.count(), Math::addExact);
             byName.put(component.name(), component);
             namespaces.add(namespace(component.blockId()));
         }
@@ -166,6 +176,7 @@ public final class MachineDesignReview {
             row.addProperty("to", connection.to());
             row.addProperty("medium", connection.medium());
             row.addProperty("purpose", connection.purpose());
+            connection.resource().entrySet().forEach(e -> row.add(e.getKey(),e.getValue().deepCopy()));
             row.addProperty("evidence", "design_claim_only");
             connectionRows.add(row);
             media.add(connection.medium());
@@ -298,6 +309,43 @@ public final class MachineDesignReview {
         return result;
     }
 
+    private static JsonObject module(JsonObject component, String path, JsonArray errors) {
+        JsonObject result = new JsonObject();
+        if (component.has("module")) {
+            String id = identifier(component, "module", path, errors);
+            if (id != null) result.addProperty("module", id);
+        } else if (component.has("module_tier") || component.has("module_options")) {
+            error(errors, path, "module_required", "module_tier and module_options require a named module.");
+        }
+        if (component.has("module_tier")) {
+            String tier = string(component, "module_tier", path, 64, errors);
+            if (tier != null) result.addProperty("module_tier", tier);
+        }
+        if (component.has("module_options")) {
+            JsonObject options = object(component.get("module_options"), path + ".module_options", errors);
+            if (options != null) {
+                checkFields(options, Set.of("width", "height", "depth", "cell_count", "provider_count", "storage_tier", "storage_cells"), path + ".module_options", errors);
+                for (var entry : options.entrySet()) {
+                    if (entry.getKey().equals("storage_tier")) {
+                        String tier = string(options, "storage_tier", path + ".module_options", 16, errors);
+                        if (tier != null && !Set.of("1k", "4k", "16k", "64k", "256k").contains(tier)) error(errors, path + ".module_options.storage_tier", "invalid_storage_tier", "Use an installed AE item-cell tier: 1k, 4k, 16k, 64k or 256k.");
+                        continue;
+                    }
+                    try {
+                        JsonElement v = entry.getValue();
+                        if (!v.isJsonPrimitive() || !v.getAsJsonPrimitive().isNumber()) throw new ArithmeticException();
+                        int n = v.getAsBigDecimal().intValueExact();
+                        if (n < 1 || n > MAX_TOTAL_BLOCKS) throw new ArithmeticException();
+                    } catch (ArithmeticException | NumberFormatException invalid) {
+                        error(errors, path + ".module_options." + entry.getKey(), "invalid_module_option", "Module sizes and counts must be positive integers within the physical planning budget.");
+                    }
+                }
+                result.add("module_options", options.deepCopy());
+            }
+        }
+        return result;
+    }
+
     private static JsonObject constraints(JsonElement value, JsonArray errors) {
         JsonObject input = object(value, "$.constraints", errors);
         if (input == null) return null;
@@ -309,10 +357,10 @@ public final class MachineDesignReview {
             try {
                 if (!raw.isJsonPrimitive() || !raw.getAsJsonPrimitive().isNumber()) throw new ArithmeticException();
                 int limit = raw.getAsBigDecimal().intValueExact();
-                if (limit < 1 || limit > 128) throw new ArithmeticException();
+                if (limit < 1 || limit > 2 * MachinePlanningBudget.current().maxRadius() + 1) throw new ArithmeticException();
                 normalized.addProperty(key, limit);
             } catch (ArithmeticException | NumberFormatException invalid) {
-                error(errors, "$.constraints." + key, "invalid_dimension", "Expected an integer from 1 to 128.");
+                error(errors, "$.constraints." + key, "invalid_dimension", "Expected an integer from 1 to " + (2 * MachinePlanningBudget.current().maxRadius() + 1) + '.');
             }
         }
         for (String key : List.of("terrain_fit", "throughput")) {
