@@ -20,6 +20,9 @@ public final class JetpackFlightSession implements TransportSession {
     private Vec3 target;
     private final MovingFlightTarget movingTarget;
     private Vec3 planningTarget;
+    private int departureNodes;
+    private boolean searchCharged, searchBudgetExhausted;
+    private final java.util.List<Map<String,Object>> preflightAttempts = new java.util.ArrayList<>();
     private java.util.List<Vec3> platform;
     private final LongSet forbidden;
     private Phase phase = Phase.PLAN;
@@ -131,14 +134,26 @@ public final class JetpackFlightSession implements TransportSession {
                 failure = "jetpack_unavailable"; detail = power.reason(); return finish(ctx, false);
             }
             if (search == null || movingTarget != null && planningTarget.distanceTo(target) > 1) {
-                planningTarget = target; search = new JetpackRoute.Search(ctx.player().position(), target, power);
+                chargeDepartureSearch();
+                planningTarget = target;
+                search = new JetpackRoute.Search(ctx.player().position(), target, power, Math.max(0,6000-departureNodes));
+                searchCharged = false;
             }
             search.advance(space(ctx), 128, 1_000_000);
             if (!search.done()) return running();
+            chargeDepartureSearch();
             route = search.result();
             if (route == null || power.fuelTicks() < route.requiredTicks()) {
-                failure = route == null ? "jetpack_no_corridor" : "jetpack_insufficient_air";
-                detail = "departure refused before native effects; landing reserve included"; return finish(ctx, false);
+                String reason = route == null ? search.failureReason() : "insufficient_air";
+                searchBudgetExhausted |= "budget_exhausted".equals(reason);
+                preflightAttempts.add(Map.of("target",target.toString(),"reason",reason,"expanded",search.expanded()));
+                if (movingTarget != null && movingTarget.nextLanding()) {
+                    search = null; detail = "checking another observed deck face before takeoff"; return running();
+                }
+                failure = "jetpack_" + (searchBudgetExhausted ? "search_budget_exhausted" : reason);
+                detail = searchBudgetExhausted ? "initial flight search budget exhausted; an unreachable corridor has not been proven"
+                        : "departure refused before native flight effects: " + reason;
+                return finish(ctx, false);
             }
             originalActive = power.active(); originalHover = power.hover();
             originalRoute = route;
@@ -176,6 +191,10 @@ public final class JetpackFlightSession implements TransportSession {
     private JetpackRoute.Space space(LocalPlayerContext ctx) {
         return movingTarget != null && !stopping && !exiting
                 ? movingTarget.space(ctx, forbidden) : JetpackRoute.observed(ctx, forbidden);
+    }
+
+    private void chargeDepartureSearch() {
+        if (search != null && !searchCharged) { departureNodes += search.expanded(); searchCharged = true; }
     }
 
     private void retarget(LocalPlayerContext ctx) {
@@ -457,18 +476,44 @@ public final class JetpackFlightSession implements TransportSession {
         result.put("grounded", grounded);
         result.put("landing_approach_height", approachHeight);
         result.put("native_client_evidence", nativeEvidence);
-        result.put("recent_flight_trace", java.util.List.copyOf(trace));
-        result.put("departure", departure); result.put("flight_events", java.util.List.copyOf(events));
+        result.put("recent_flight_trace", compactTrace(trace));
+        result.put("departure", departure); result.put("flight_events", compactTrace(events));
+        result.put("preflight_attempts",java.util.List.copyOf(preflightAttempts));
         result.put("last_obstruction", lastObstacle); result.put("platform_cells", platform.size());
         result.put("fast_descent", fastDescent.diagnostics());
         result.put("clearance_braking", clearanceBraking);
         result.put("search_radius", 64); result.put("search_node_limit", 6000);
         if (search != null) result.put("search_expanded", search.expanded());
+        result.put("departure_search_nodes",departureNodes + (phase == Phase.PLAN && search != null && !searchCharged ? search.expanded() : 0));
+        if (search != null && search.failureReason() != null) result.put("search_result",search.failureReason());
         if (route != null) { result.put("route_points", route.points().size()); result.put("estimated_ticks_with_reserve", route.requiredTicks()); }
         if (power != null) { result.put("native_state", power.reason()); result.put("active", power.active()); result.put("hover", power.hover());
             result.put("priority_tank_air", power.air()); result.put("conservative_fuel_ticks", power.fuelTicks()); }
         if (receipt != null) { result.put("mode_receipt", receipt.status().name()); result.put("mode_confirmation", "observed client mode; no server acknowledgement"); }
         return result;
+    }
+    /** Keep changes and their time spans; repeated per-tick native dictionaries do not fill MCP context. */
+    static java.util.List<Map<String,Object>> compactTrace(java.util.Collection<Map<String,Object>> source) {
+        var rows = new java.util.ArrayList<Map<String,Object>>();
+        Map<String,Object> previous = null;
+        for (var entry : source) {
+            var state = new LinkedHashMap<>(entry); Object tick = state.remove("tick");
+            Object nativeState = state.remove("native_client_evidence");
+            if (nativeState instanceof Map<?,?> evidence) {
+                var motion = new LinkedHashMap<String,Object>();
+                for (String key : java.util.List.of("native_up","on_ground","native_pose","fall_distance","velocity_y"))
+                    if (evidence.get(key) != null) motion.put(key,evidence.get(key));
+                state.put("motion",Map.copyOf(motion));
+            }
+            if (state.equals(previous)) {
+                var row = rows.getLast(); row.put("last_tick",tick); row.put("samples",((Number)row.get("samples")).intValue()+1);
+            } else {
+                var row = new LinkedHashMap<>(state); row.put("first_tick",tick); row.put("last_tick",tick); row.put("samples",1);
+                rows.add(row); previous = state;
+                if (rows.size()>8) rows.removeFirst();
+            }
+        }
+        return rows.stream().map(Map::copyOf).toList();
     }
     public static Map<String, Object> inspect(net.minecraft.client.player.LocalPlayer player) {
         var power = JetpackNativeAdapter.observe(player);

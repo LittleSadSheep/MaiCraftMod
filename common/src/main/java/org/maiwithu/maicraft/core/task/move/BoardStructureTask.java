@@ -33,7 +33,8 @@ public final class BoardStructureTask extends AbstractCompanionTask<BoardStructu
         }
         if (result != null) {
             if (result.state() == TransportSession.State.SUCCEEDED) return TaskState.SUCCESS;
-            fail(result.code() + ": " + result.detail(), FailureType.NO_PATH); return TaskState.FAILED;
+            fail(result.code() + ": " + result.detail(), result.uncertain() || result.code().equals("jetpack_search_budget_exhausted")
+                    ? FailureType.UNKNOWN : FailureType.NO_PATH); return TaskState.FAILED;
         }
         if (flight == null) {
             if (!target.update(context)) { fail(target.diagnostics().toString(), FailureType.TARGET_LOST); return TaskState.FAILED; }

@@ -15,6 +15,8 @@ import org.maiwithu.maicraft.core.integration.jetpack.MovingFlightTarget;
 public final class ShipLandingTarget implements MovingFlightTarget {
     private final UUID id;
     private StructureDeckGeometry.Surface site;
+    private List<StructureDeckGeometry.Surface> candidates = List.of();
+    private int candidateIndex;
     private Vec3 point, velocity = Vec3.ZERO;
     private boolean available, contact;
     private final SupportDwell support = new SupportDwell();
@@ -36,12 +38,15 @@ public final class ShipLandingTarget implements MovingFlightTarget {
         try {
             if (site == null) {
                 var geometry = StructureDeckGeometry.sample(context.level(), ship::isLoaded, ship.pose(),
-                        ship.storageBounds(), ship.plotCenter(), ship.storageBounds().getCenter(), width, height);
+                        ship.storageBounds(), ship.plotCenter(), ship.pose().toStorage(context.player().position()), width, height);
                 var world = JetpackRoute.observed(context, LongSets.emptySet());
-                var candidates = geometry.surfaces().stream().filter(s -> world.clear(s.feet(), s.feet())).toList();
+                var clear = geometry.surfaces().stream().filter(s -> world.clear(s.feet(), s.feet())).toList();
+                var power = org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeAdapter.inspect(context);
+                candidates = alternatives(rank(clear, ship.storageBounds().getCenter(), p -> power.controllable()
+                        ? JetpackRoute.edgeTicks(context.player().position(),p,power) : p.distanceTo(context.player().position())));
                 site = nativeContact.supportedBy(id) && context.player().onGround()
-                        ? candidates.stream().min(Comparator.comparingDouble(s -> s.feet().distanceToSqr(context.player().position()))).orElse(null)
-                        : choose(candidates, ship.storageBounds().getCenter(), context.player().position());
+                        ? clear.stream().min(Comparator.comparingDouble(s -> s.feet().distanceToSqr(context.player().position()))).orElse(null)
+                        : candidates.isEmpty() ? null : candidates.getFirst();
             } else site = StructureDeckGeometry.probe(context.level(), ship::isLoaded, ship.pose(),
                     ship.storageBounds(), site, width, height);
             if (site == null) return unavailable("no usable native deck face, or the selected deck changed");
@@ -61,11 +66,36 @@ public final class ShipLandingTarget implements MovingFlightTarget {
 
     /** Prefer a broad usable patch and its interior, then reduce approach distance. */
     static StructureDeckGeometry.Surface choose(List<StructureDeckGeometry.Surface> sites, Vec3 center, Vec3 player) {
-        return sites.stream().min(Comparator.comparingDouble(site -> {
-            long neighbors = sites.stream().filter(s -> Math.abs(s.storage().y - site.storage().y) < .05
-                    && s.storage().distanceToSqr(site.storage()) < 6.5).count();
-            return -neighbors * 4 + .02 * site.storage().distanceToSqr(center) + .01 * site.world().distanceToSqr(player);
-        })).orElse(null);
+        return rank(sites,center,p -> p.distanceTo(player)).stream().findFirst().orElse(null);
+    }
+    static List<StructureDeckGeometry.Surface> rank(List<StructureDeckGeometry.Surface> sites, Vec3 center,
+            java.util.function.ToDoubleFunction<Vec3> travelCost) {
+        return sites.stream().sorted(Comparator.comparingDouble(site -> {
+            int exposed = 0;
+            for (Vec3 offset : List.of(new Vec3(1,0,0),new Vec3(-1,0,0),new Vec3(0,0,1),new Vec3(0,0,-1)))
+                if (sites.stream().noneMatch(s -> s.storage().distanceToSqr(site.storage().add(offset)) < .0625)) exposed++;
+            // Prefer room for horizontal braking, but never discard a narrower legal deck.
+            return travelCost.applyAsDouble(site.feet()) + exposed * 24 + .001 * site.storage().distanceToSqr(center);
+        })).toList();
+    }
+    static List<StructureDeckGeometry.Surface> alternatives(List<StructureDeckGeometry.Surface> ranked) {
+        var result = new java.util.ArrayList<StructureDeckGeometry.Surface>();
+        if (ranked.isEmpty()) return List.of();
+        result.add(ranked.getFirst());
+        ranked.stream().filter(s -> Math.abs(s.storage().y-ranked.getFirst().storage().y)>=.75)
+                .findFirst().ifPresent(result::add);
+        for (var candidate : ranked) {
+            if (result.stream().anyMatch(s -> Math.abs(s.storage().y-candidate.storage().y)<.75
+                    && Math.hypot(s.storage().x-candidate.storage().x,s.storage().z-candidate.storage().z)<3)) continue;
+            result.add(candidate);
+            if (result.size() == 3) break;
+        }
+        return List.copyOf(result);
+    }
+    @Override public boolean nextLanding() {
+        if (candidateIndex + 1 >= candidates.size()) return false;
+        site = candidates.get(++candidateIndex); support.reset(); available = false; contact = false;
+        return true;
     }
 
     private boolean unavailable(String reason) {
@@ -106,6 +136,8 @@ public final class ShipLandingTarget implements MovingFlightTarget {
         out.put("structure_id",id.toString()); out.put("available",available); out.put("detail",detail);
         out.put("native_contact",contact); out.put("stable_contact_ticks",support.ticks); out.put("boarded",touchdown());
         out.put("velocity_blocks_per_tick",velocity.toString());
+        out.put("candidate_index",candidateIndex); out.put("candidate_count",candidates.size());
+        if (site != null) out.put("deck_block_id",net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(site.state().getBlock()).toString());
         if (site != null) { out.put("deck_storage",site.storage().toString()); out.put("deck_world",point.toString()); }
         return out;
     }

@@ -25,7 +25,9 @@ public final class ShipBoardingGeometryTest {
         var pose = new StructurePose(new Vec3(10,100,20),0,0,0,1,Vec3.atLowerCornerOf(origin),new Vec3(1,1,1));
         var sample = StructureDeckGeometry.sample(world,p->true,pose,bounds,origin,bounds.getCenter(),.76,1.88);
         var selected = ShipLandingTarget.choose(sample.surfaces(),bounds.getCenter(),new Vec3(0,90,20));
-        check(selected != null && selected.block().equals(origin.offset(2,0,2)), "a broad deck should choose an interior face, not its nearest rim");
+        check(selected != null && selected.block().getX() > origin.getX() && selected.block().getX() < origin.getX()+4
+                        && selected.block().getZ() > origin.getZ() && selected.block().getZ() < origin.getZ()+4,
+                "a broad deck should choose a reachable interior face, not its nearest rim");
         var yaw = new Quaterniond().rotateY(Math.PI/2);
         var moved = new StructurePose(new Vec3(14,102,23),yaw.x,yaw.y,yaw.z,yaw.w,pose.pivot(),new Vec3(1,1,1));
         var tracked = StructureDeckGeometry.probe(world,p->true,moved,bounds,selected,.76,1.88);
@@ -38,6 +40,31 @@ public final class ShipBoardingGeometryTest {
         world.blocks.remove(selected.block().above(2)); world.blocks.remove(selected.block());
         check(StructureDeckGeometry.probe(world,p->true,moved,bounds,selected,.76,1.88)==null,"removed support cannot retain an old landing promise");
         check(StructureDeckGeometry.probe(world,p->false,moved,bounds,selected,.76,1.88)==null,"unloaded support cannot be accepted");
+        for (int x=0;x<5;x++) for (int z=0;z<5;z++) {
+            world.blocks.put(origin.offset(x,0,z),Blocks.OAK_PLANKS.defaultBlockState());
+            world.blocks.put(origin.offset(x,12,z),Blocks.WHITE_WOOL.defaultBlockState());
+        }
+        var tallBounds = new AABB(Vec3.atLowerCornerOf(origin),Vec3.atLowerCornerOf(origin.offset(5,13,5)));
+        var multiDeck = StructureDeckGeometry.sample(world,p->true,pose,tallBounds,origin,Vec3.atCenterOf(origin),.76,1.88);
+        var power = new org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeAdapter.Snapshot(true,"fixture","pack",true,true,
+                900,17000,.016,.32,.6,-.03,.08);
+        var ranked = ShipLandingTarget.rank(multiDeck.surfaces(),tallBounds.getCenter(),point ->
+                org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute.edgeTicks(new Vec3(0,90,20),point,power));
+        check(!ranked.isEmpty() && ranked.getFirst().world().y < 110,
+                "a lower usable deck must beat a much higher broad roof when its native flight cost is lower");
+        var alternatives = ShipLandingTarget.alternatives(ranked);
+        check(alternatives.size() <= 3 && alternatives.size() > 1,"bounded alternatives must include genuinely different deck positions");
+        for (int i=0;i<alternatives.size();i++) for (int j=i+1;j<alternatives.size();j++)
+            check(alternatives.get(i).storage().distanceToSqr(alternatives.get(j).storage()) >= 9,
+                    "adjacent cells must not consume all alternate-corridor attempts");
+        var wideRoof = multiDeck.surfaces().stream().filter(s -> s.block().getY()==origin.getY()+12).toList();
+        var narrowDeck = multiDeck.surfaces().stream().filter(s -> s.block().getY()==origin.getY()
+                && s.block().getX()==origin.getX()).toList();
+        var mixed = new java.util.ArrayList<>(wideRoof); mixed.addAll(narrowDeck);
+        var mixedRank = ShipLandingTarget.rank(mixed,tallBounds.getCenter(),p -> 0);
+        check(mixedRank.size()==mixed.size(),"wide interior faces cannot discard a narrower but body-clear lower deck");
+        check(ShipLandingTarget.alternatives(mixedRank).stream().anyMatch(narrowDeck::contains),
+                "an alternate elevation must remain available if the preferred wide deck's approach is blocked");
         NativePlayer player = new NativePlayer(); UUID id=player.ship.id;
         check(SableStructureBridge.contact(player).supportedBy(id),"native below-contact and matching tracking UUID prove support");
         player.info.verticalCollisionBelow=false;

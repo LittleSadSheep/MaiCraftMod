@@ -12,6 +12,8 @@ public interface MovingFlightTarget {
     Vec3 velocity();
     boolean contact();
     boolean touchdown();
+    /** Before native flight effects only: try a different observed landing face on the same identity. */
+    default boolean nextLanding() { return false; }
     JetpackRoute.Space space(LocalPlayerContext context, LongSet forbidden);
     Map<String, Object> diagnostics();
 }

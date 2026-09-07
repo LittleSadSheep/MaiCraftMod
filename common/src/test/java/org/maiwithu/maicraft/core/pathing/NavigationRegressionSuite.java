@@ -36,6 +36,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.pathing.transport.TransportRuntimeTest.main(args);
         org.maiwithu.maicraft.core.pathing.transport.TransportIntentTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightTest.main(args);
+        org.maiwithu.maicraft.core.integration.jetpack.JetpackSearchTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackDynamicsTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackCourseTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackClearancePolicyTest.main(args);
@@ -51,6 +52,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.integration.jetpack.JetpackFastDescentTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeEvidenceTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.MovingFlightSessionTest.main(args);
+        org.maiwithu.maicraft.core.integration.jetpack.FlightTraceTest.main(args);
         org.maiwithu.maicraft.core.integration.create.elevator.ElevatorGeometryTest.main(args);
         org.maiwithu.maicraft.core.integration.create.elevator.ElevatorCallLinksTest.main(args);
         org.maiwithu.maicraft.core.integration.create.elevator.ElevatorSessionTest.main(args);
