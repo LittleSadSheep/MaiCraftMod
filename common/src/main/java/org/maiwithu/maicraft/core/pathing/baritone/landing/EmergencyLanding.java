@@ -41,6 +41,7 @@ public final class EmergencyLanding {
         var inventory = LandingAssistPlan.InventorySnapshot.capture(context.player(), TerrainPermit.LANDING_ONLY,
                 context.level().dimensionType().ultraWarm());
         var candidates = new java.util.ArrayList<LandingAssistPlan>();
+        var rejected = new java.util.LinkedHashMap<String,String>();
         var player = context.player();
         var window = new WaterLandingWindow(player.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.GRAVITY),
                 player.blockInteractionRange(), Math.max(1.62, player.getEyeHeight()), Math.max(0, -player.getDeltaMovement().y));
@@ -48,16 +49,25 @@ public final class EmergencyLanding {
                 - baritone.pathing.movement.CollisionGeometry.supportHeight(context.level(), feet.below()));
         // A new physical fall gets its own bounded supply attempt; a previous route's failed
         // search must not suppress emergency access after the player's situation changes.
-        for (var plan : inventory.automaticCandidates(context.level(), feet, EmbeddedBaritonePolicy::protects, true)) {
+        var offered = inventory.automaticCandidates(context.level(), feet, EmbeddedBaritonePolicy::protects, true);
+        if (offered.stream().noneMatch(plan -> plan.kind() == LandingAssistPlan.Kind.WATER))
+            rejected.put("WATER",inventory.ultraWarm() ? "water evaporates in this dimension" : "native water placement or support is unavailable");
+        for (var plan : offered) {
             if (!LandingAssistGeometry.safe(context.level(), context.level()::isLoaded, plan,
                     player.getBbWidth(), Math.max(1.8, player.getBbHeight()),
-                    EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) continue;
+                    EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) {
+                rejected.put(plan.kind().name(),"body clearance or native support does not permit this landing"); continue;
+            }
             if (plan.kind() == LandingAssistPlan.Kind.HAY
-                    && !plan.survives(FallDamageBudget.capture(player), player.getY(), true)) continue;
-            if (!plan.existing() && plan.kind() == LandingAssistPlan.Kind.WATER && !window.permits(drop)) continue;
+                    && !plan.survives(FallDamageBudget.capture(player), player.getY(), true)) {
+                rejected.put("HAY","remaining damage would be fatal"); continue;
+            }
+            if (!plan.existing() && plan.kind() == LandingAssistPlan.Kind.WATER && !window.permits(drop)) {
+                rejected.put("WATER","downward speed leaves no reliable native bucket-use window"); continue;
+            }
             candidates.add(plan);
         }
-        return candidates.isEmpty() ? null : LandingAssistSession.automatic(candidates, true);
+        return candidates.isEmpty() ? null : LandingAssistSession.automatic(candidates, true).rejectedCandidates(rejected);
     }
     /** Apply the shared session's aim and fall steering through the same native body lease. */
     public static void tick(LocalPlayerContext context, LandingAssistSession session) {

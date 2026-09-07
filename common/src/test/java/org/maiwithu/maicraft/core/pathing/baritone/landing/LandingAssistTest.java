@@ -86,7 +86,10 @@ public final class LandingAssistTest {
         check(!LandingAssistPlan.canPlace(LandingAssistPlan.Kind.WATER, scene, BlockPos.ZERO), "waterlogging cannot masquerade as water in the landing cell");
         scene.blocks.clear();
         scene.blocks.put(BlockPos.ZERO, Blocks.SHORT_GRASS.defaultBlockState());
-        check(all.plans(scene, BlockPos.ZERO, pos -> false).isEmpty(), "no aid replaces an existing plant or block");
+        check(all.plans(scene, BlockPos.ZERO, pos -> false).stream().anyMatch(plan ->
+                        plan.kind() == LandingAssistPlan.Kind.WATER && plan.clicked().equals(BlockPos.ZERO)
+                                && plan.cell().equals(BlockPos.ZERO.above())),
+                "grass uses its native outline as the bucket target and places source water above it");
         var young = Blocks.SWEET_BERRY_BUSH.defaultBlockState();
         var grown = young.setValue(BlockStateProperties.AGE_3, 1);
         check(LandingAssistPlan.existingSafe(LandingAssistPlan.Kind.BERRIES, young)

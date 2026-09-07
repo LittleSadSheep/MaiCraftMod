@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
 
 /** Logical native landing mechanism, never a claim that a held item has already prevented damage. */
 public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPos clicked,
@@ -35,6 +36,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         Kind(Item item, Block block) { this.item = item; this.block = block; }
         public boolean solidSupport() { return this == SLIME || this == HAY; }
         public boolean matches(BlockState state) {
+            if (this == WATER) return state.getFluidState().getType() instanceof net.minecraft.world.level.material.WaterFluid;
             return state.is(block) || this == TWISTING_VINES && state.is(Blocks.TWISTING_VINES_PLANT)
                     || this == WEEPING_VINES && state.is(Blocks.WEEPING_VINES_PLANT);
         }
@@ -68,6 +70,11 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             BlockState support = view.getBlockState(feet.below());
             for (Kind kind : Kind.values()) {
                 if (kind == Kind.WATER ? !waterAllowed || ultraWarm : !othersAllowed) continue;
+                if (kind == Kind.WATER) {
+                    LandingAssistPlan water = waterPlan(view,feet,protectedCell,available.contains(Kind.WATER));
+                    if (water != null) plans.add(water);
+                    continue;
+                }
                 if (!kind.solidSupport() && kind.matches(target) && existingSafe(kind, target)) {
                     plans.add(new LandingAssistPlan(kind, feet, feet, feet.below(), Direction.UP, true));
                     continue;
@@ -76,13 +83,38 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
                     plans.add(new LandingAssistPlan(kind, feet, feet.below(), feet.below(2), Direction.UP, true));
                     continue;
                 }
-                if (!available.contains(kind) || !target.isAir() || protectedCell.test(feet)) continue;
+                if (!available.contains(kind) || !target.canBeReplaced() || protectedCell.test(feet)) continue;
+                if (target.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)) {
+                    BlockPos paired = target.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)
+                            == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER ? feet.above() : feet.below();
+                    if (view.getBlockState(paired).is(target.getBlock()) && protectedCell.test(paired)) continue;
+                }
                 BlockPos anchor = kind == Kind.WEEPING_VINES ? feet.above() : feet.below();
                 Direction face = kind == Kind.WEEPING_VINES ? Direction.DOWN : Direction.UP;
                 if (!canPlace(kind, view, feet)) continue;
+                if (!target.isAir() && !target.getShape(view,feet).isEmpty()) {
+                    anchor = feet; face = Direction.UP;
+                }
                 plans.add(new LandingAssistPlan(kind, feet, feet, anchor, face, false));
             }
             return List.copyOf(plans);
+        }
+
+        private static LandingAssistPlan waterPlan(BlockGetter view, BlockPos feet,
+                Predicate<BlockPos> protectedCell, boolean carried) {
+            BlockPos source = WaterBucketFall.exposedWaterCell(view,feet);
+            BlockPos clicked = source.below();
+            if (WaterBucketFall.sourceWater(view.getBlockState(source)))
+                return new LandingAssistPlan(Kind.WATER,feet,source,clicked,Direction.UP,true);
+            if (source.equals(feet) && WaterBucketFall.acceptsWater(view,clicked)) source = clicked;
+            if (WaterBucketFall.sourceWater(view.getBlockState(source)))
+                return new LandingAssistPlan(Kind.WATER,feet,source,clicked,Direction.UP,true);
+            if (!carried || protectedCell.test(source) || !canPlace(Kind.WATER,view,source)) return null;
+            // Replacing/flowing through one half of a tall plant can remove its paired half.
+            // Keep the whole observed plant column under the same terrain authorization.
+            for (int y=feet.getY();y<source.getY();y++)
+                if (protectedCell.test(new BlockPos(feet.getX(),y,feet.getZ()))) return null;
+            return new LandingAssistPlan(Kind.WATER,feet,source,clicked,Direction.UP,false);
         }
 
         /** Carried aids come first; missing supplies remain conditional plans, never inventory evidence. */
@@ -110,22 +142,29 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
     }
 
     public static boolean canPlace(Kind kind, BlockGetter view, BlockPos feet) {
-        if (!view.getBlockState(feet).isAir()) return false;
+        if (kind == Kind.WATER) {
+            if (WaterBucketFall.canWaterlog(view,feet)) return true;
+            BlockState support = view.getBlockState(feet.below());
+            return WaterBucketFall.replaceableByWater(view.getBlockState(feet))
+                    && !WaterBucketFall.acceptsWater(view,feet.below())
+                    && !support.getShape(view,feet.below()).isEmpty();
+        }
+        if (!view.getBlockState(feet).canBeReplaced()) return false;
         if (kind != Kind.WATER && !kind.solidSupport() && !kind.block.defaultBlockState().is(BlockTags.FALL_DAMAGE_RESETTING)) return false;
+        if (view instanceof net.minecraft.world.level.LevelReader level)
+            return kind.block.defaultBlockState().canSurvive(level,feet);
+        // Vanilla Block.canSurvive is unconditional for web/slime/hay. BushBlock and
+        // GrowingPlantBlock use these neighboring-block rules, also available in A* snapshots.
         BlockState support = view.getBlockState(feet.below());
-        if (!support.getFluidState().isEmpty()) return false;
         return switch (kind) {
-            case WATER -> org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.canPlace(
-                    view.getBlockState(feet), support, false)
-                    && !support.getCollisionShape(view, feet.below()).isEmpty();
-            case BERRIES -> (support.is(BlockTags.DIRT) || support.is(Blocks.FARMLAND));
+            case COBWEB, SLIME, HAY -> true;
+            case BERRIES -> support.is(BlockTags.DIRT) || support.is(Blocks.FARMLAND);
             case TWISTING_VINES -> support.is(Blocks.TWISTING_VINES) || support.is(Blocks.TWISTING_VINES_PLANT)
-                    || support.isFaceSturdy(view, feet.below(), Direction.UP);
-            // A solid ceiling one cell above this landing obstructs the player's full body.
-            // Extending an existing hanging vine has a native upward anchor without that collision.
+                    || support.isFaceSturdy(view,feet.below(),Direction.UP);
             case WEEPING_VINES -> view.getBlockState(feet.above()).is(Blocks.WEEPING_VINES)
-                    || view.getBlockState(feet.above()).is(Blocks.WEEPING_VINES_PLANT);
-            case COBWEB, SLIME, HAY -> support.isFaceSturdy(view, feet.below(), Direction.UP);
+                    || view.getBlockState(feet.above()).is(Blocks.WEEPING_VINES_PLANT)
+                    || view.getBlockState(feet.above()).isFaceSturdy(view,feet.above(),Direction.DOWN);
+            case WATER -> throw new IllegalStateException("water uses bucket placement rules");
         };
     }
 

@@ -81,6 +81,7 @@ public final class LandingAssistDisplacementTest {
 
     private static void position(LocalPlayer player, boolean settled, String support) throws Exception {
         field(LocalPlayer.class, "position").set(player, new Vec3(4.5, settled ? 0 : 4, .5));
+        field(LocalPlayer.class, "bb").set(player, new net.minecraft.world.phys.AABB(4.2,settled ? 0 : 4,.2,4.8,settled ? 1.8 : 5.8,.8));
         field(LocalPlayer.class, "blockPosition").set(player, new BlockPos(4, settled ? 0 : 4, 0));
         field(LocalPlayer.class, "deltaMovement").set(player, new Vec3(0, settled ? 0 : -0.8, 0));
         field(LocalPlayer.class, "onGround").setBoolean(player, settled && support.equals("ground"));

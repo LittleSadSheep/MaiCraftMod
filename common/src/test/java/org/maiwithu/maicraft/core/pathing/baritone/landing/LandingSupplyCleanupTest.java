@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 public final class LandingSupplyCleanupTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        groundedPreparationKeepsSupplying(); offTargetWaterRetainsSupply(); pendingBucketUsesPhysicalRelease();
+        groundedPreparationKeepsSupplying(); carriedHayKeepsTryingWater(); offTargetWaterRetainsSupply(); pendingBucketUsesPhysicalRelease();
         System.out.println("LandingSupplyCleanupTest: passed");
     }
 
@@ -62,6 +62,22 @@ public final class LandingSupplyCleanupTest {
         for (int tick=0;tick<15;tick++) f.tick();
         check(!supply.cleanupPending() && f.session.complete() && f.session.failed(),
                 "unverified landing finishes only after AE cleanup settles");
+    }
+
+    private static void carriedHayKeepsTryingWater() throws Exception {
+        var f = new WaterLandingReplayTest.Fixture(false);
+        f.position(12,0,true); f.player.inventory.setItem(0,new ItemStack(net.minecraft.world.item.Items.HAY_BLOCK));
+        var water = f.session.plan();
+        var hay = new LandingAssistPlan(LandingAssistPlan.Kind.HAY,water.feet(),water.cell(),water.clicked(),water.face(),false);
+        var session = LandingAssistSession.automatic(List.of(hay,water),false);
+        var transaction = new Supply();
+        var supply = new LandingMaterialSupply(List.of(ResourceLocation.parse("minecraft:hay_block"),
+                ResourceLocation.parse("minecraft:water_bucket")),(player,request) -> transaction);
+        field(LandingAssistSession.class,"materialSupply").set(session,supply);
+        f.time++; session.tick(f.context);
+        check(transaction.ticks == 1 && transaction.finishes == 0 && !session.failed()
+                        && session.plan().kind() == LandingAssistPlan.Kind.WATER,
+                "the shared landing session keeps carried hay as fallback while acquiring damage-free water");
     }
 
     private static void pendingBucketUsesPhysicalRelease() throws Exception {

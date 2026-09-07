@@ -83,8 +83,10 @@ final class EmbeddedBaritoneActionBridge {
             org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(assist.diagnostics());
             for (var change : assist.drainChanges()) {
                 navigator.recordConfirmedNativeAction();
-                if (!change.before().isAir()) navigator.recordConfirmedBreak(change.position(), change.before());
-                if (!change.after().isAir()) navigator.recordConfirmedPlace(change.position(), change.after());
+                if (change.before().getBlock() != change.after().getBlock()) {
+                    if (!change.before().isAir()) navigator.recordConfirmedBreak(change.position(), change.before());
+                    if (!change.after().isAir()) navigator.recordConfirmedPlace(change.position(), change.after());
+                }
             }
             return;
         }

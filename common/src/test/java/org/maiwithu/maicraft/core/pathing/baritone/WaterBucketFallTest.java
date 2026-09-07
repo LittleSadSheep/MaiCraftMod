@@ -21,6 +21,7 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan;
 
 /** Production permission wiring, native bucket geometry and confirmed clutch ownership. */
 public final class WaterBucketFallTest {
@@ -32,25 +33,28 @@ public final class WaterBucketFallTest {
         var stone = Blocks.STONE.defaultBlockState();
         var policy = EmbeddedBaritonePolicy.capture(GoalCompiler.standOn(landing).sacred(),
                 LongSets.singleton(landing.below().asLong()), LongSets.emptySet());
-        check(WaterBucketFall.canPlace(air, stone,
-                policy.protects(landing.getX(), landing.getY(), landing.getZ())),
+        var ground = new Pool(landing,air,stone);
+        var inventory = new LandingAssistPlan.InventorySnapshot(java.util.Set.of(LandingAssistPlan.Kind.WATER),true,false,false);
+        check(!inventory.plans(ground,landing,pos -> policy.protects(pos.getX(),pos.getY(),pos.getZ())).isEmpty(),
                 "a protected support was mistaken for the water mutation cell");
-        check(!WaterBucketFall.canPlace(air, stone, true), "protected water cell must fail before falling");
-        check(!WaterBucketFall.canPlace(stone, stone, false), "clutch may not replace a building block");
-        check(!WaterBucketFall.canPlace(Blocks.SHORT_GRASS.defaultBlockState(), stone, false),
-                "water-only must not destroy the occupied landing cell");
+        check(inventory.plans(ground,landing,landing::equals).isEmpty(), "protected water cell must fail before falling");
+        check(!WaterBucketFall.replaceableByWater(stone), "clutch may not replace a building block");
+        check(WaterBucketFall.replaceableByWater(Blocks.SHORT_GRASS.defaultBlockState()),
+                "native fluid replacement admits ordinary grass during self-rescue");
         var stair = Blocks.STONE_STAIRS.defaultBlockState();
-        check(!WaterBucketFall.canPlace(air, stair, false), "waterlogging support cannot cushion the air cell above");
+        var stairWorld = new Pool(landing,air,stair);
+        check(inventory.plans(stairWorld,landing,pos -> false).getFirst().cell().equals(landing.below()),
+                "waterlogged support is the actual water cell, never the air above");
         var groundHit = new BlockHitResult(Vec3.atBottomCenterOf(landing), Direction.UP, landing.below(), false);
-        check(WaterBucketFall.waterCell(groundHit, stone, false).equals(landing), "filled bucket actual water cell");
-        check(WaterBucketFall.waterCell(groundHit, stair, false).equals(landing.below()), "native waterlogging target");
+        check(WaterBucketFall.waterCell(ground,groundHit,false).equals(landing), "filled bucket actual water cell");
+        check(WaterBucketFall.waterCell(stairWorld,groundHit,false).equals(landing.below()), "native waterlogging target");
         var pool = new Pool(landing);
         Vec3 eye = Vec3.atCenterOf(landing.above(2)), end = eye.add(0, -4, 0);
         var solid = pool.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, CollisionContext.empty()));
         var source = pool.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.SOURCE_ONLY, CollisionContext.empty()));
         check(solid.getType() == HitResult.Type.MISS && source.getType() == HitResult.Type.BLOCK,
                 "empty bucket must trace source fluids even with no solid floor in reach");
-        check(WaterBucketFall.waterCell(source, pool.getBlockState(source.getBlockPos()), true).equals(landing),
+        check(WaterBucketFall.waterCell(pool,source,true).equals(landing),
                 "pickup confirmation must observe the source water, not its distant support");
         var water = Blocks.WATER.defaultBlockState();
         check(!WaterBucketFall.canRecover(water, false, false), "never remove a pre-existing pool");
@@ -89,8 +93,9 @@ public final class WaterBucketFallTest {
                 "water must use the same guarded plan/session, never a second legacy admission or receipt path");
     }
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }
-    private record Pool(BlockPos source) implements BlockGetter {
-        public BlockState getBlockState(BlockPos pos) { return pos.equals(source) ? Blocks.WATER.defaultBlockState() : Blocks.AIR.defaultBlockState(); }
+    private record Pool(BlockPos source, BlockState sourceState, BlockState support) implements BlockGetter {
+        private Pool(BlockPos source) { this(source,Blocks.WATER.defaultBlockState(),Blocks.AIR.defaultBlockState()); }
+        public BlockState getBlockState(BlockPos pos) { return pos.equals(source) ? sourceState : pos.equals(source.below()) ? support : Blocks.AIR.defaultBlockState(); }
         public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
         public BlockEntity getBlockEntity(BlockPos pos) { return null; }
         public int getHeight() { return 384; }

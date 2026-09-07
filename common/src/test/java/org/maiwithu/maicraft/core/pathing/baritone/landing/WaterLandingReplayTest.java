@@ -36,7 +36,7 @@ public final class WaterLandingReplayTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         for (int drop : new int[]{4, 12, 20, 24}) replay(drop);
-        missingEvidence(); existingWater(); postRemovalSupport(); stalePreparation(); window();
+        missingEvidence(); existingWater(); postRemovalSupport(); stalePreparation(); delayedFailedHealth(); window();
         System.out.println("WaterLandingReplayTest: passed");
     }
 
@@ -109,6 +109,20 @@ public final class WaterLandingReplayTest {
         f.player.inventory.setItem(0, ItemStack.EMPTY);
         check(!f.session.prepare(f.context) && f.session.failed() && f.uses == 0,
                 "losing the selected bucket revokes departure readiness on supported ground");
+    }
+
+    private static void delayedFailedHealth() throws Exception {
+        Fixture f = new Fixture(false); f.position(12, 0, true);
+        check(f.session.prepareAlreadyHeld(f.context), "remember health before a failed fall");
+        f.position(4, -1, false); f.player.setXRot(0); f.tick();
+        f.position(0, 0, true); f.player.fallDistance = 0; f.tick();
+        check(f.session.failed() && !f.session.complete() && f.uses == 0,
+                "first dry contact cannot finalize before synchronized health arrives");
+        f.tick(); f.player.health = 1.52F; f.tick();
+        for (int i = 0; i < 15 && !f.session.complete(); i++) f.tick();
+        check(f.session.complete() && f.session.failed()
+                        && ((Number) f.session.diagnostics().get("health_lost")).floatValue() > 18.47F,
+                "the failed-touchdown dwell observes delayed native injury instead of freezing health_lost at zero");
     }
 
     private static void window() {
