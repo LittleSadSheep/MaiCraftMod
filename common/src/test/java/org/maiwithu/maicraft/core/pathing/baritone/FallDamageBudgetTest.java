@@ -52,7 +52,21 @@ public final class FallDamageBudgetTest {
         check(FallDamageBudget.Landing.of(Blocks.RED_BED.defaultBlockState()) == FallDamageBudget.Landing.BED,
                 "bed distance reduction is a collision property, with no bed use");
         compareNativeFormula();
+        nativeFlightImmunity();
         System.out.println("FallDamageBudgetTest: passed");
+    }
+
+    private static void nativeFlightImmunity() throws Exception {
+        var memoryField = Unsafe.class.getDeclaredField("theUnsafe"); memoryField.setAccessible(true);
+        var player = (net.minecraft.client.player.LocalPlayer) ((Unsafe) memoryField.get(null))
+                .allocateInstance(net.minecraft.client.player.LocalPlayer.class);
+        var abilities = new net.minecraft.world.entity.player.Abilities(); abilities.mayfly = true;
+        var field = net.minecraft.world.entity.player.Player.class.getDeclaredField("abilities"); field.setAccessible(true);
+        field.set(player, abilities);
+        check(!player.causeFallDamage(24, 1, null), "native Player.causeFallDamage grants mayfly immunity even while not flying");
+        var immune = new FallDamageBudget(20, 0, 3, 1, 0, 0, 0, 0, 0.08, 0, true);
+        check(immune.damage(24, FallDamageBudget.Landing.ORDINARY, false) == 0,
+                "prediction must retain the proven vanilla flight immunity rule");
     }
 
     private static void compareNativeFormula() throws Exception {

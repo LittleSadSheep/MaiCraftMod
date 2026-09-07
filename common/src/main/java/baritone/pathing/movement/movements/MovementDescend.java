@@ -120,7 +120,7 @@ public class MovementDescend extends Movement {
             return; // the water will freeze when we try to walk into it
         }
         if (!MovementHelper.isWater(below)
-                && !context.canSurviveFall(x, y, z, y, destX, y - 2, destZ, below)) return;
+                && !context.canLandWithoutDamage(x, y, z, y, destX, y - 2, destZ, below)) return;
 
         // we walk half the block plus 0.3 to get to the edge, then we walk the other 0.2 while simultaneously falling (math.max because of how it's in parallel)
         double walk = WALK_OFF_BLOCK_COST;
@@ -162,7 +162,7 @@ public class MovementDescend extends Movement {
             BlockState ontoBlock = context.get(destX, newY, destZ);
             int unprotectedFallHeight = fallHeight - (y - effectiveStartHeight); // equal to fallHeight - y + effectiveFallHeight, which is equal to -newY + effectiveFallHeight, which is equal to effectiveFallHeight - newY
             double tentativeCost = WALK_OFF_BLOCK_COST + FALL_N_BLOCKS_COST[unprotectedFallHeight] + frontBreak + costSoFar;
-            if (reachedMinimum && context.landingPlans(new BlockPos(destX, newY, destZ)).stream()
+            if (reachedMinimum && context.landingPlans(new BlockPos(destX, newY, destZ), effectiveStartHeight - newY).stream()
                     .anyMatch(org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan::existing)
                     && MovementHelper.canWalkOn(context, destX, newY - 1, destZ)) {
                 res.x = destX; res.y = newY; res.z = destZ; res.cost = tentativeCost;
@@ -212,14 +212,15 @@ public class MovementDescend extends Movement {
             if (!MovementHelper.canWalkOn(context, destX, newY, destZ, ontoBlock)) {
                 return false;
             }
-            if (reachedMinimum && !context.canLandWithoutDamage(effectiveStartHeight, newY, ontoBlock)
+            boolean harmless = context.canLandWithoutDamage(x, y, z, effectiveStartHeight, destX, newY, destZ, ontoBlock);
+            if (reachedMinimum && !harmless
                     && (!context.landingPlans(new BlockPos(destX, newY + 1, destZ), effectiveStartHeight - newY - 1).isEmpty()
                         || context.landingBoatPlan(new BlockPos(x, y, z), new BlockPos(destX, newY + 1, destZ)) != null)) {
                 res.x = destX; res.y = newY + 1; res.z = destZ;
                 res.cost = tentativeCost + context.placeBucketCost();
                 return true;
             }
-            if (reachedMinimum && context.canSurviveFall(x, y, z, effectiveStartHeight,
+            if (reachedMinimum && harmless && context.canSurviveFall(x, y, z, effectiveStartHeight,
                     destX, newY, destZ, ontoBlock)) {
                 res.x = destX;
                 res.y = newY + 1;

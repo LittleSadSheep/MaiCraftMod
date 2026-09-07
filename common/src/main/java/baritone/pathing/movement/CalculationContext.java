@@ -59,6 +59,7 @@ public class CalculationContext {
     public final org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot landingInventory;
     public final org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot landingBoats;
     private final org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingWindow waterLandingWindow;
+    private final boolean automaticLandingSupply;
     public final boolean hasThrowaway;
     public final boolean canSprint;
     protected final double placeBlockCost; // protected because you should call the function instead
@@ -151,8 +152,9 @@ public class CalculationContext {
                 || (Baritone.settings().allowPlace.value
                 && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway());
         this.landingInventory = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot.capture(
-                player, org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.current(),
+                player, org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.LANDING_ONLY,
                 world.dimensionType().ultraWarm());
+        this.automaticLandingSupply = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.automaticSupplyAllowed();
         this.landingBoats = landingInventory.othersAllowed()
                 ? org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.capture(player) : null;
         this.canSprint = Baritone.settings().allowSprint.value && player.getFoodData().getFoodLevel() > 6;
@@ -234,8 +236,8 @@ public class CalculationContext {
 
     public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet) {
         if (!bsi.worldContainsLoadedChunk(feet.getX(), feet.getZ())) return List.of();
-        return landingInventory.plans(bsi.access, feet,
-                pos -> isPossiblyProtected(pos.getX(), pos.getY(), pos.getZ())).stream()
+        return landingInventory.automaticCandidates(bsi.access, feet,
+                pos -> isPossiblyProtected(pos.getX(), pos.getY(), pos.getZ()), automaticLandingSupply).stream()
                 .filter(plan -> org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistGeometry.safe(
                         bsi.access, pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()), plan,
                         landingInventory.width(), landingInventory.height(), maicraftPolicy.forbiddenBodyCells())).toList();
@@ -249,9 +251,10 @@ public class CalculationContext {
                         - CollisionGeometry.supportHeight(bsi.access, feet.below()))).toList();
     }
 
-    public boolean canLandWithoutDamage(int startY, int supportY, BlockState support) {
-        return fallDamageBudget.damage(Math.max(0, startY - supportY - 1),
-                FallDamageBudget.Landing.of(support), true) == 0;
+    public boolean canLandWithoutDamage(int x, int y, int z, int effectiveStartHeight,
+                                       int destX, int supportY, int destZ, BlockState support) {
+        return fallDamageBudget.damage(fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
+                FallDamageBudget.Landing.of(support), initialFall(x, y, z, effectiveStartHeight)) == 0;
     }
 
     public org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot.Plan landingBoatPlan(BlockPos source, BlockPos feet) {
@@ -260,17 +263,24 @@ public class CalculationContext {
                 pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()));
     }
 
-    /** A loaded, supported landing is admitted whenever the frozen damage estimate is nonfatal. */
+    /** Survival estimate; route admission separately requires protecting any predicted injury. */
     public boolean canSurviveFall(int x, int y, int z, int effectiveStartHeight,
                                  int destX, int supportY, int destZ, BlockState support) {
-        if (!bsi.worldContainsLoadedChunk(destX, destZ)) return false;
+        return fallDamageBudget.survives(fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
+                FallDamageBudget.Landing.of(support), initialFall(x, y, z, effectiveStartHeight));
+    }
+
+    private double fallDistance(int x, int y, int z, int effectiveStartHeight, int destX, int supportY, int destZ) {
+        if (!bsi.worldContainsLoadedChunk(destX, destZ)) return Double.NaN;
         double supportHeight = CollisionGeometry.supportHeight(bsi.access, new BlockPos(destX, supportY, destZ));
-        if (!Double.isFinite(supportHeight) || supportHeight <= 0) return false;
+        if (!Double.isFinite(supportHeight) || supportHeight <= 0) return Double.NaN;
         double distance = effectiveStartHeight - supportY - Math.min(1, supportHeight);
-        boolean initial = effectiveStartHeight == y && fallOrigin.getX() == x
-                && fallOrigin.getY() == y && fallOrigin.getZ() == z;
-        if (initial) distance += Math.max(0, fallOriginY - y);
-        return fallDamageBudget.survives(Math.max(0, distance), FallDamageBudget.Landing.of(support), initial);
+        if (initialFall(x, y, z, effectiveStartHeight)) distance += Math.max(0, fallOriginY - y);
+        return Math.max(0, distance);
+    }
+
+    private boolean initialFall(int x, int y, int z, int effectiveStartHeight) {
+        return effectiveStartHeight == y && fallOrigin.getX() == x && fallOrigin.getY() == y && fallOrigin.getZ() == z;
     }
 
     /** Include a fall already in progress when deciding whether a ladder can actually catch it. */

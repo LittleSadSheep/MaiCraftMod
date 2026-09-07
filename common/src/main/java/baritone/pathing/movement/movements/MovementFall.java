@@ -104,25 +104,12 @@ public class MovementFall extends Movement {
             return state;
         }
         if (landingAssist == null && landingBoat == null && !ctx.player().onGround()
-                && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(ctx.player()).damage(
+                && (org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding.triggered(ctx.player())
+                    || org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(ctx.player()).damage(
                         Math.max(0, ctx.player().getY() - dest.getY()),
-                        org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.of(ctx.world().getBlockState(dest.below())), true) > 0) {
+                        org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.of(ctx.world().getBlockState(dest.below())), true) > 0)) {
             var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
-            var permit = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.current();
-            var inventory = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot.capture(
-                    ctx.player(), permit, ctx.world().dimensionType().ultraWarm());
-            for (var plan : inventory.plans(ctx.world(), dest,
-                    org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy::protects)) {
-                var opportunity = new org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession(plan);
-                if (opportunity.prepareAlreadyHeld(context)) { landingAssist = opportunity; break; }
-            }
-            if (landingAssist == null && permit.mayUseLandingAssists()
-                    && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(ctx.player()).survives(
-                            Math.max(0, ctx.player().getY() - dest.getY()),
-                            org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.ORDINARY, true)) {
-                var boat = org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.airbornePlan(context, dest);
-                if (boat != null) landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boat);
-            }
+            adoptEmergencyLanding(context);
         }
         if (landingBoat != null) {
             state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
@@ -187,6 +174,27 @@ public class MovementFall extends Movement {
         return state;
     }
 
+    private void adoptEmergencyLanding(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
+        // The scheduler cannot safely suspend a launched fall. Adopt its rescue in this owner
+        // instead of waiting for a reflex hand-off that cannot occur until after impact.
+        if (landingAssist != null || landingBoat != null) return;
+        var candidate = org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding.find(context, dest);
+        var inventory = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot.capture(
+                context.player(), org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.LANDING_ONLY,
+                context.level().dimensionType().ultraWarm());
+        boolean available = candidate != null && (candidate.plan().existing() || inventory.available().contains(candidate.plan().kind()));
+        if (!available && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(context.player()).survives(
+                Math.max(0, context.player().getY() - dest.getY()),
+                org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.ORDINARY, true)) {
+            var boat = org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.airbornePlan(context, dest);
+            if (boat != null) {
+                landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boat);
+                return;
+            }
+        }
+        landingAssist = candidate;
+    }
+
     private Direction avoid() {
         for (int i = 0; i < 15; i++) {
             BlockState state = ctx.world().getBlockState(ctx.playerFeet().below(i));
@@ -224,11 +232,10 @@ public class MovementFall extends Movement {
         if (landingAssist == null && !departureObserved && atDeparture && needsLandingAssist()) {
             var calculation = new CalculationContext(baritone);
             var plans = calculation.landingPlans(dest, src.y - dest.y);
-            if (!plans.isEmpty()) landingAssist = new org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession(plans.getFirst());
-            else if (landingBoat == null) {
-                var boatPlan = calculation.landingBoatPlan(src, dest);
-                if (boatPlan != null) landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boatPlan);
-            }
+            var boatPlan = plans.stream().anyMatch(plan -> plan.existing() || calculation.landingInventory.available().contains(plan.kind()))
+                    ? null : calculation.landingBoatPlan(src, dest);
+            if (boatPlan != null) landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boatPlan);
+            else if (!plans.isEmpty()) landingAssist = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession.automatic(plans, false);
         }
         if (landingBoat != null) {
             var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());

@@ -49,6 +49,12 @@ public final class FallLandingTest {
         check(!allows(context, 2, 7, scene), "half-slab extra distance can make a landing fatal");
         scene.support = Blocks.STONE.defaultBlockState();
         check(allows(context, 2, 7, scene), "full support at the same cell remains survivable");
+        check(!context.canLandWithoutDamage(2, 7, 0, 7, 1, 0, 0, scene.support),
+                "survivable damage still requires automatic protection");
+        check(context.canLandWithoutDamage(2, 4, 0, 4, 1, 0, 0, scene.support), "three-block full support is harmless");
+        scene.support = Blocks.STONE_SLAB.defaultBlockState();
+        check(!context.canLandWithoutDamage(2, 4, 0, 4, 1, 0, 0, scene.support),
+                "the extra half-slab drop also requires protection");
         blocks.loaded = false;
         check(!allows(context, 2, 7, scene), "cached or unknown landing column cannot authorize a drop");
         blocks.loaded = true;

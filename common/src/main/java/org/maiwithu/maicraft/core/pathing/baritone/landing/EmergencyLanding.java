@@ -14,30 +14,50 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 /** Unexpected-fall trigger support; all preparation, placement and recovery stay in the shared session. */
 public final class EmergencyLanding {
     private EmergencyLanding() {}
-    public static boolean hasItem(LocalPlayer player) {
-        for (var kind : LandingAssistPlan.Kind.values()) if (hasItem(player, kind)) return true;
-        return false;
+    public static boolean triggered(LocalPlayer player) {
+        boolean grounded = player.onGround() || player.isInWater() || player.isSwimming() || player.onClimbable();
+        if (grounded || org.maiwithu.maicraft.core.WorkProfile.of(player).fearless()
+                || player.getDeltaMovement().y >= 0) return false;
+        // Start acquiring protection on the first descending tick when impact would hurt.
+        // Fast descent remains an independent fallback if a synced/modded estimate is stale.
+        if (org.maiwithu.maicraft.core.task.survival.SurvivalDecisions.mlgTriggered(false,
+                player.getDeltaMovement().y, true)) return true;
+        BlockPos ground = groundBelow(player);
+        return ground != null && predictedDamage(player, ground) > 0;
     }
-    private static boolean hasItem(LocalPlayer player, LandingAssistPlan.Kind kind) {
-        if (player.getMainHandItem().is(kind.item) || player.getOffhandItem().is(kind.item)) return true;
-        for (int slot = 0; slot < 9; slot++) if (player.getInventory().getItem(slot).is(kind.item)) return true;
-        return false;
+    private static float predictedDamage(LocalPlayer player, BlockPos support) {
+        double height = baritone.pathing.movement.CollisionGeometry.supportHeight(player.level(), support);
+        return FallDamageBudget.capture(player).damage(Math.max(0, player.getY() - support.getY() - height),
+                FallDamageBudget.Landing.of(player.level().getBlockState(support)), true);
     }
     public static LandingAssistSession find(LocalPlayerContext context) {
         BlockPos ground = groundBelow(context.player());
         if (ground == null) return null;
+        return find(context, ground.above());
+    }
+    /** A running fall keeps its already selected support and steering while adopting self-rescue. */
+    public static LandingAssistSession find(LocalPlayerContext context, BlockPos feet) {
+        if (!context.level().isLoaded(feet) || !context.level().isLoaded(feet.below())) return null;
         var inventory = LandingAssistPlan.InventorySnapshot.capture(context.player(), TerrainPermit.LANDING_ONLY,
                 context.level().dimensionType().ultraWarm());
-        for (var plan : inventory.plans(context.level(), ground.above(), EmbeddedBaritonePolicy::protects)) {
-            if (!plan.existing() && !hasItem(context.player(), plan.kind())) continue;
+        var candidates = new java.util.ArrayList<LandingAssistPlan>();
+        var player = context.player();
+        var window = new WaterLandingWindow(player.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.GRAVITY),
+                player.blockInteractionRange(), Math.max(1.62, player.getEyeHeight()), Math.max(0, -player.getDeltaMovement().y));
+        double drop = Math.max(0, player.getY() - feet.getY() + 1
+                - baritone.pathing.movement.CollisionGeometry.supportHeight(context.level(), feet.below()));
+        // A new physical fall gets its own bounded supply attempt; a previous route's failed
+        // search must not suppress emergency access after the player's situation changes.
+        for (var plan : inventory.automaticCandidates(context.level(), feet, EmbeddedBaritonePolicy::protects, true)) {
             if (!LandingAssistGeometry.safe(context.level(), context.level()::isLoaded, plan,
-                    context.player().getBbWidth(), Math.max(1.8, context.player().getBbHeight()),
+                    player.getBbWidth(), Math.max(1.8, player.getBbHeight()),
                     EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) continue;
             if (plan.kind() == LandingAssistPlan.Kind.HAY
-                    && !plan.survives(FallDamageBudget.capture(context.player()), context.player().getY(), true)) continue;
-            return LandingAssistSession.emergency(plan);
+                    && !plan.survives(FallDamageBudget.capture(player), player.getY(), true)) continue;
+            if (!plan.existing() && plan.kind() == LandingAssistPlan.Kind.WATER && !window.permits(drop)) continue;
+            candidates.add(plan);
         }
-        return null;
+        return candidates.isEmpty() ? null : LandingAssistSession.automatic(candidates, true);
     }
     /** Apply the shared session's aim and fall steering through the same native body lease. */
     public static void tick(LocalPlayerContext context, LandingAssistSession session) {

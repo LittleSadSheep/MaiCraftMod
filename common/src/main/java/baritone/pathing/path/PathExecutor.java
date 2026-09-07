@@ -569,7 +569,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             }
             var source = movement.getSrc();
             var support = next.getDest().below();
-            if (!behavior.secretInternalGetCalculationContext().canSurviveFall(source.x, source.y, source.z,
+            if (!behavior.secretInternalGetCalculationContext().canLandWithoutDamage(source.x, source.y, source.z,
                     source.y, support.getX(), support.getY(), support.getZ(), ctx.world().getBlockState(support))) break;
         }
         i--;
