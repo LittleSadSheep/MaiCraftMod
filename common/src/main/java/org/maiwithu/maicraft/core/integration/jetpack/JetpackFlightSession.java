@@ -291,11 +291,9 @@ public final class JetpackFlightSession implements TransportSession {
         Vec3 motionAim = clearanceBraking ? new Vec3(position.x, aim.y, position.z) : aim;
         steeringTarget = motionAim;
         var command = JetpackView.command(position, velocity, motionAim, player.getYRot(), landingNow, settings);
-        if (command.jumping()) {
-            double rise = JetpackDynamics.riseEnvelope(player.getDeltaMovement().y, true, power);
-            if (!JetpackRoute.observed(ctx, forbidden).clear(player.position(), player.position().add(0, rise, 0))) {
-                brake(ctx); return false;
-            }
+        if (command.jumping() && !JetpackMotion.canRise(JetpackRoute.observed(ctx, forbidden), position, velocity,
+                motionAim, player.getYRot(), requestedYaw, grounded, settings)) {
+            brake(ctx); return false;
         }
         ctx.body().applySteering(yaw -> JetpackView.command(position, velocity, motionAim, yaw, landingNow, settings),
                 player.getYRot(), ctx.tickRevision());

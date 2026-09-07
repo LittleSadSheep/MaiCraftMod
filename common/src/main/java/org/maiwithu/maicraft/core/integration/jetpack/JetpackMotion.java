@@ -10,13 +10,31 @@ final class JetpackMotion {
     record Step(Vec3 position, Vec3 velocity) {}
     private JetpackMotion() {}
 
+    static boolean canRise(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
+                           float yaw, float requestedYaw, boolean grounded, JetpackNativeAdapter.Snapshot power) {
+        double rise = JetpackDynamics.riseEnvelope(velocity.y, true, power);
+        if (space.clear(position, position.add(0, rise, 0))) return true;
+        if (grounded) return false; // Native ground jumps are outside the dry-air model.
+        // A moving body can leave a slab's footprint before reaching its UP peak.
+        // Include the full pulse/coast duration, even when configured thrust exceeds the usual five-tick forecast.
+        double raw = JetpackDynamics.rawAfterStep(JetpackDynamics.nextVertical(velocity.y, true, power), power);
+        int ticks = 1;
+        while (raw > 0 && ticks < 32) { raw = JetpackDynamics.rawAfterStep(raw, power); ticks++; }
+        return raw <= 0 && clearTrajectory(space, position, velocity, aim, yaw, requestedYaw, power, Math.max(5, ticks));
+    }
+
     static boolean clearTrajectory(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
                                    float yaw, float requestedYaw, JetpackNativeAdapter.Snapshot power) {
+        return clearTrajectory(space, position, velocity, aim, yaw, requestedYaw, power, 5);
+    }
+
+    private static boolean clearTrajectory(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
+                                           float yaw, float requestedYaw, JetpackNativeAdapter.Snapshot power, int ticks) {
         // Cover both a stationary camera and its maximum next-tick turn (240 degrees/second).
         for (boolean turning : new boolean[]{false, true}) {
             Vec3 p = position, v = velocity;
             float heading = yaw;
-            for (int tick = 0; tick < 5; tick++) {
+            for (int tick = 0; tick < ticks; tick++) {
                 if (turning) heading += Mth.clamp(Mth.wrapDegrees(requestedYaw - heading), -12, 12);
                 var command = JetpackView.command(p, v, aim, heading, false, power);
                 Step next = step(p, v, command, heading, power);

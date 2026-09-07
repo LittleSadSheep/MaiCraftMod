@@ -48,6 +48,7 @@ public final class JetpackMotionTest {
                 "unobstructed camera turns must allow ordinary flight");
         check(open.queries <= 10, "real-time motion lookahead must have a fixed ten-sweep budget");
         faceApertureBeforeLookingAroundCorner();
+        movingRisePastSlab();
         System.out.println("JetpackMotionTest: passed");
     }
 
@@ -74,6 +75,37 @@ public final class JetpackMotionTest {
             position = next.position(); velocity = next.velocity();
         }
         check(refocused && position.z >= .7, "refocusing and rechecking must exit the aperture instead of hovering permanently");
+    }
+
+    private static void movingRisePastSlab() {
+        var slab = new Volume(List.of(new AABB(-86, 114, -6, -85, 115, -5)));
+        Vec3 position = new Vec3(-86.26641760057763, 111.38928709996215, -5.4772518971564885);
+        Vec3 velocity = new Vec3(-.17, .23520000457763676, 0), target = new Vec3(-87.5, 112, -5.5);
+        double rise = JetpackDynamics.riseEnvelope(velocity.y, true, POWER);
+        check(!slab.clear(position, position.add(0, rise, 0)), "live fixture must reproduce the static slab-envelope veto");
+        check(JetpackMotion.canRise(slab, position, velocity, target, 90, 90, false, POWER),
+                "westward flight leaves the slab before the UP peak and must not be treated as an in-place jump");
+        check(!JetpackMotion.canRise(slab, position, velocity, target, 90, 90, true, POWER),
+                "a grounded native jump must retain its separate clearance gate");
+        Vec3 stopped = new Vec3(0, velocity.y, 0), overhead = new Vec3(position.x, target.y, position.z);
+        check(!JetpackMotion.canRise(slab, position, stopped, overhead, 90, 90, false, POWER),
+                "an in-place rise under the same slab must still be rejected");
+        check(!JetpackMotion.canRise(slab, position, new Vec3(.17, velocity.y, 0), new Vec3(-85, 112, -5.5),
+                        -90, -90, false, POWER), "motion farther under the slab must not bypass the body sweep");
+        Vec3 p = position, v = velocity;
+        for (int tick = 0; tick < 5; tick++) {
+            var next = JetpackMotion.step(p, v, JetpackView.command(p, v, target, 90, false, POWER), 90, POWER);
+            check(slab.clear(p, next.position()), "the accepted moving UP pulse must keep the full body clear through its peak");
+            p = next.position(); v = next.velocity();
+        }
+        var open = new Volume(List.of());
+        check(JetpackMotion.canRise(open, position, velocity, target, 90, 90, false, POWER) && open.queries == 1,
+                "unobstructed rise must not pay for a second trajectory forecast");
+        var stronger = new JetpackNativeAdapter.Snapshot(true, "configured thrust", POWER.item(), true, true,
+                900, 17000, .016, .8, .8, -.03, .08);
+        var ceiling = new Volume(List.of(new AABB(-2, 6, -2, 2, 8, 2)));
+        check(!JetpackMotion.canRise(ceiling, new Vec3(0, 1, 0), Vec3.ZERO, new Vec3(0, 1.5, 0), 0, 0, false, stronger),
+                "a stronger UP pulse must inspect its coasting peak beyond the default five-tick horizon");
     }
 
     private static final class Volume implements JetpackRoute.Space {
