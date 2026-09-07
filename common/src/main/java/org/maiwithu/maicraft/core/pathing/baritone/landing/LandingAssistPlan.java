@@ -28,10 +28,12 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         WATER(Items.WATER_BUCKET, Blocks.WATER), COBWEB(Items.COBWEB, Blocks.COBWEB),
         BERRIES(Items.SWEET_BERRIES, Blocks.SWEET_BERRY_BUSH),
         TWISTING_VINES(Items.TWISTING_VINES, Blocks.TWISTING_VINES),
-        WEEPING_VINES(Items.WEEPING_VINES, Blocks.WEEPING_VINES), SLIME(Items.SLIME_BLOCK, Blocks.SLIME_BLOCK);
+        WEEPING_VINES(Items.WEEPING_VINES, Blocks.WEEPING_VINES), SLIME(Items.SLIME_BLOCK, Blocks.SLIME_BLOCK),
+        HAY(Items.HAY_BLOCK, Blocks.HAY_BLOCK);
         public final Item item;
         public final Block block;
         Kind(Item item, Block block) { this.item = item; this.block = block; }
+        public boolean solidSupport() { return this == SLIME || this == HAY; }
         public boolean matches(BlockState state) {
             return state.is(block) || this == TWISTING_VINES && state.is(Blocks.TWISTING_VINES_PLANT)
                     || this == WEEPING_VINES && state.is(Blocks.WEEPING_VINES_PLANT);
@@ -66,11 +68,11 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             BlockState support = view.getBlockState(feet.below());
             for (Kind kind : Kind.values()) {
                 if (kind == Kind.WATER ? !waterAllowed || ultraWarm : !othersAllowed) continue;
-                if (kind != Kind.SLIME && kind.matches(target) && existingSafe(kind, target)) {
+                if (!kind.solidSupport() && kind.matches(target) && existingSafe(kind, target)) {
                     plans.add(new LandingAssistPlan(kind, feet, feet, feet.below(), Direction.UP, true));
                     continue;
                 }
-                if (kind == Kind.SLIME && support.is(Blocks.SLIME_BLOCK)) {
+                if (kind.solidSupport() && kind.matches(support)) {
                     plans.add(new LandingAssistPlan(kind, feet, feet.below(), feet.below(2), Direction.UP, true));
                     continue;
                 }
@@ -90,13 +92,13 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             case WATER -> state.getFluidState().isSource();
             case BERRIES -> state.getValue(BlockStateProperties.AGE_3) == 0;
             case COBWEB, TWISTING_VINES, WEEPING_VINES -> state.is(BlockTags.FALL_DAMAGE_RESETTING);
-            case SLIME -> true; // Execution must keep sneak released and finish the rebound safely.
+            case SLIME, HAY -> true; // Slime needs a safe rebound; hay needs a nonfatal damage budget.
         };
     }
 
     public static boolean canPlace(Kind kind, BlockGetter view, BlockPos feet) {
         if (!view.getBlockState(feet).isAir()) return false;
-        if (kind != Kind.WATER && kind != Kind.SLIME && !kind.block.defaultBlockState().is(BlockTags.FALL_DAMAGE_RESETTING)) return false;
+        if (kind != Kind.WATER && !kind.solidSupport() && !kind.block.defaultBlockState().is(BlockTags.FALL_DAMAGE_RESETTING)) return false;
         BlockState support = view.getBlockState(feet.below());
         if (!support.getFluidState().isEmpty()) return false;
         return switch (kind) {
@@ -110,8 +112,14 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             // Extending an existing hanging vine has a native upward anchor without that collision.
             case WEEPING_VINES -> view.getBlockState(feet.above()).is(Blocks.WEEPING_VINES)
                     || view.getBlockState(feet.above()).is(Blocks.WEEPING_VINES_PLANT);
-            case COBWEB, SLIME -> support.isFaceSturdy(view, feet.below(), Direction.UP);
+            case COBWEB, SLIME, HAY -> support.isFaceSturdy(view, feet.below(), Direction.UP);
         };
+    }
+
+    public boolean survives(org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget budget,
+                            double playerY, boolean includeAccumulated) {
+        return kind != Kind.HAY || budget.survives(Math.max(0, playerY - cell.getY() - 1),
+                org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.of(kind.block.defaultBlockState()), includeAccumulated);
     }
 
     public static boolean canRecover(boolean confirmedOwnPlacement, BlockState recorded,

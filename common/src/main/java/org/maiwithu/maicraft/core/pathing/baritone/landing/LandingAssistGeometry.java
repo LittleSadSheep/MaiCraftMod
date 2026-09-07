@@ -21,12 +21,12 @@ public final class LandingAssistGeometry {
     }
     public static boolean safe(BlockGetter world, Predicate<BlockPos> loaded, LandingAssistPlan plan,
                                double width, double height, LongSet forbiddenBody) {
-        boolean raisedSlime = plan.kind() == LandingAssistPlan.Kind.SLIME && !plan.existing();
-        BlockPos physicalFeet = raisedSlime ? plan.feet().above() : plan.feet();
+        boolean raisedSupport = plan.kind().solidSupport() && !plan.existing();
+        BlockPos physicalFeet = raisedSupport ? plan.feet().above() : plan.feet();
         BlockGetter geometry = new BlockGetter() {
             public BlockState getBlockState(BlockPos pos) {
-                if (pos.equals(plan.cell())) return raisedSlime ? Blocks.SLIME_BLOCK.defaultBlockState()
-                        : plan.kind() == LandingAssistPlan.Kind.SLIME ? world.getBlockState(pos) : Blocks.AIR.defaultBlockState();
+                if (pos.equals(plan.cell())) return raisedSupport ? plan.kind().block.defaultBlockState()
+                        : plan.kind().solidSupport() ? world.getBlockState(pos) : Blocks.AIR.defaultBlockState();
                 return world.getBlockState(pos);
             }
             public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }

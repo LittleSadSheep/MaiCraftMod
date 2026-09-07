@@ -58,6 +58,7 @@ public class CalculationContext {
     public final ToolSet toolSet;
     public final org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot landingInventory;
     public final org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot landingBoats;
+    private final org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingWindow waterLandingWindow;
     public final boolean hasThrowaway;
     public final boolean canSprint;
     protected final double placeBlockCost; // protected because you should call the function instead
@@ -77,7 +78,6 @@ public class CalculationContext {
     public final FallDamageBudget fallDamageBudget;
     private final BlockPos fallOrigin;
     private final double fallOriginY;
-    public final int maxFallHeightBucket;
     public final double waterWalkSpeed;
     public final double breakBlockAdditionalCost;
     public double backtrackCostFavoringCoefficient;
@@ -141,6 +141,9 @@ public class CalculationContext {
         this.fallDamageBudget = FallDamageBudget.capture(player);
         this.fallOrigin = baritone.getPlayerContext().playerFeet().immutable();
         this.fallOriginY = player.getY();
+        this.waterLandingWindow = new org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingWindow(
+                player.getAttributeValue(Attributes.GRAVITY), player.blockInteractionRange(),
+                Math.max(1.62, player.getEyeHeight()), Math.max(0, -player.getDeltaMovement().y));
         this.toolSet = new ToolSet(player);
         this.hasThrowaway = forceTerrainMutation
                 || (Baritone.settings().allowPlace.value
@@ -184,7 +187,6 @@ public class CalculationContext {
         this.allowDiagonalAscend = Baritone.settings().allowDiagonalAscend.value;
         this.allowDownward = forceTerrainMutation || Baritone.settings().allowDownward.value;
         this.minFallHeight = 3; // Minimum fall height used by MovementFall
-        this.maxFallHeightBucket = Baritone.settings().maxFallHeightBucket.value;
         // WATER_MOVEMENT_EFFICIENCY is the fraction of the gap from normal water speed to land
         // speed that an enchantment closes. No enchantment therefore starts at 0, not 1; using 1
         // made ordinary surface swimming look as cheap as walking and sent ground searches across
@@ -238,9 +240,11 @@ public class CalculationContext {
     }
 
     public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet, int drop) {
-        return landingPlans(feet).stream().filter(plan -> plan.existing()
+        return landingPlans(feet).stream().filter(plan -> plan.survives(fallDamageBudget, feet.getY() + drop, true))
+                .filter(plan -> plan.existing()
                 || plan.kind() != org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.WATER
-                || drop <= maxFallHeightBucket).toList();
+                || waterLandingWindow.permits(drop + 1
+                        - CollisionGeometry.supportHeight(bsi.access, feet.below()))).toList();
     }
 
     public boolean canLandWithoutDamage(int startY, int supportY, BlockState support) {

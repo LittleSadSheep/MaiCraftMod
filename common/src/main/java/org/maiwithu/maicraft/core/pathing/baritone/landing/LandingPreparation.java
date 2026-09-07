@@ -31,7 +31,11 @@ public final class LandingPreparation {
         ready = true; detail = "landing item already held; no airborne inventory changes"; return true;
     }
     public boolean tick(LocalPlayerContext context) {
-        if (ready || failed) return ready;
+        if (failed) return false;
+        if (ready && context.player().getItemInHand(hand).is(item)) return true;
+        // Preparation is rechecked on each supported departure tick. A stale ready flag must
+        // not let a changed hotbar selection send the player off the edge without the bucket.
+        ready = false;
         if (!context.permitsNativeActions()) return false;
         interrupted |= !context.player().onGround();
         try {
@@ -81,6 +85,28 @@ public final class LandingPreparation {
                 catch (RuntimeException unavailable) { detail += "; owned inventory closure could not be submitted"; }
             }
         }
+    }
+    /** Emergency falls may select a carried hotbar item, but never open an airborne inventory. */
+    public boolean tickEmergency(LocalPlayerContext context) {
+        if (failed) return false;
+        try {
+            if (selection != null) {
+                selection = context.actions().poll(context, selection);
+                if (!selection.terminal()) return false;
+                if (selection.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) return fail(selection.detail());
+                selection = null;
+            }
+            if (acceptHeld(context)) return true;
+            if (!context.permitsNativeActions()
+                    || !org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen))
+                return fail("emergency item selection lost world control");
+            for (int slot = 0; slot < 9; slot++) {
+                if (!context.player().getInventory().getItem(slot).is(item)) continue;
+                if (context.mutationAvailable()) selection = context.actions().selectHotbar(context, slot, 10);
+                return false;
+            }
+            return fail("emergency landing item is not in either hand or the hotbar");
+        } catch (RuntimeException unavailable) { return fail("emergency selection failed: " + unavailable.getMessage()); }
     }
     public void closeForFailure(LocalPlayerContext context) {
         interrupted = true;

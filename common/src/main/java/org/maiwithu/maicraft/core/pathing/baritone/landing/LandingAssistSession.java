@@ -28,8 +28,11 @@ public final class LandingAssistSession {
     private LandingPreparation preparation;
     private NativeActionReceipt receipt;
     private BlockState placed;
-    private boolean submitted, failed, complete, cleaning, removed, damageObserved;
+    private boolean submitted, failed, complete, cleaning, removed, damageObserved, waterContactObserved;
+    private boolean emergency, hayContactObserved;
+    private float healthLost, absorptionLost;
     private int stableTicks;
+    private int displacedStableTicks;
     private long lastTick = Long.MIN_VALUE;
     private long cleanupStarted = Long.MIN_VALUE;
     private float previousHealth = Float.NaN;
@@ -42,8 +45,14 @@ public final class LandingAssistSession {
         if (!plan.existing()) preparation = new LandingPreparation(plan.kind().item);
     }
     public LandingAssistPlan plan() { return plan; }
+    public static LandingAssistSession emergency(LandingAssistPlan plan) {
+        var session = new LandingAssistSession(plan);
+        session.emergency = true;
+        return session;
+    }
     public boolean prepareAlreadyHeld(LocalPlayerContext context) {
         rememberHealth(context);
+        if (!survivesHay(context)) return false;
         if (!LandingAssistGeometry.safe(context.level(), context.level()::isLoaded, plan,
                 context.player().getBbWidth(), Math.max(1.8, context.player().getBbHeight()),
                 EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) return false;
@@ -53,6 +62,7 @@ public final class LandingAssistSession {
     public boolean prepare(LocalPlayerContext context) {
         if (failed) { if (preparation != null) preparation.continueCleanup(context); return false; }
         if (Float.isNaN(previousHealth)) rememberHealth(context);
+        if (!survivesHay(context)) { fail("hay would not reduce the observed fall to survivable damage"); return false; }
         if (!context.level().isLoaded(plan.cell()) || !context.level().isLoaded(plan.clicked())) return false;
         if (!LandingAssistGeometry.safe(context.level(), context.level()::isLoaded, plan,
                 context.player().getBbWidth(), Math.max(1.8, context.player().getBbHeight()),
@@ -82,18 +92,48 @@ public final class LandingAssistSession {
         lastTick = context.tickRevision();
         if (healthDecreased(previousHealth, previousAbsorption,
                 context.player().getHealth(), context.player().getAbsorptionAmount())) damageObserved = true;
+        if (Float.isFinite(previousHealth)) healthLost += Math.max(0, previousHealth - context.player().getHealth());
+        if (Float.isFinite(previousAbsorption)) absorptionLost += Math.max(0, previousAbsorption - context.player().getAbsorptionAmount());
         rememberHealth(context);
+        // Receipt polling can span the physical impact. Sample native fluid contact even while
+        // awaiting placement evidence, so a dry, damage-free touchdown cannot prove a clutch.
+        if (plan.kind() == LandingAssistPlan.Kind.WATER && nearLanding(context)
+                && context.player().isInWater() && context.player().fallDistance == 0
+                && touchesPlannedWater(context))
+            waterContactObserved = true;
+        if (plan.kind() == LandingAssistPlan.Kind.HAY && context.player().onGround()
+                && context.level().getBlockState(plan.cell()).is(Blocks.HAY_BLOCK)
+                && Math.abs(context.player().getBoundingBox().minY - plan.cell().getY() - 1) < 0.01
+                && context.player().getBoundingBox().intersects(new net.minecraft.world.phys.AABB(plan.cell()).inflate(0.001)))
+            hayContactObserved = true;
         if (!context.permitsNativeActions()) { fail("control authority changed during landing assistance"); return; }
         if (preparation != null && preparation.cleanupPending()) {
             preparation.continueCleanup(context);
             if (preparation.cleanupPending()) return;
         }
+        // Ending an off-target fall is independent of proving this plan succeeded. Water flow,
+        // knockback or a missed aid can leave the body safely supported elsewhere indefinitely.
+        if (!nearLanding(context) && settledElsewhere(context)) {
+            if (receipt != null) {
+                settle(context);
+                if (receipt != null) return;
+            }
+            if (++displacedStableTicks >= confirmationDwell(context)) {
+                if (preparation != null) preparation.closeForFailure(context);
+                fail("fall ended away from the planned landing; protection unverified and any remaining aid retained");
+                if (!cleanupPending()) complete = true;
+            }
+            return;
+        }
+        displacedStableTicks = 0;
         if (!failed && preparation != null && !preparation.ready()) {
-            preparation.tick(context);
-            if (!preparation.failed()) return;
-            LandingPreparation held = new LandingPreparation(plan.kind().item);
-            if (!context.player().onGround() && held.acceptHeld(context)) preparation = held;
-            else { fail(preparation.diagnostic()); return; }
+            boolean ready = emergency ? preparation.tickEmergency(context) : preparation.tick(context);
+            if (!ready) {
+                if (!preparation.failed()) return;
+                LandingPreparation held = new LandingPreparation(plan.kind().item);
+                if (!context.player().onGround() && held.acceptHeld(context)) preparation = held;
+                else { fail(preparation.diagnostic()); return; }
+            }
         }
         if (receipt != null) {
             settle(context);
@@ -113,9 +153,7 @@ public final class LandingAssistSession {
         if (stable) {
             if (++stableTicks < confirmationDwell(context)) { detail = "verifying supported touchdown and synchronized health"; return; }
             if (plan.existing() || removed) {
-                complete = true;
-                if (damageObserved) fail("landing finished but health or absorption decreased; no-damage success is unverified");
-                else detail = "native protection and supported touchdown verified without observed damage";
+                finish("native protection and supported touchdown verified without observed damage");
                 return;
             }
             if (placed != null) { clean(context); return; }
@@ -124,6 +162,7 @@ public final class LandingAssistSession {
         }
         stableTicks = 0;
         if (plan.existing() || submitted || context.player().onGround() || !context.mutationAvailable()) return;
+        if (!survivesHay(context)) { fail("hay no longer makes this fall survivable"); return; }
         if (preparation == null || !preparation.ready()) { fail("landing item was not prepared before departure"); return; }
         if (plan.kind() != LandingAssistPlan.Kind.WATER && !context.player().isSecondaryUseActive()) return;
         if (EmbeddedBaritonePolicy.protects(plan.cell()) || !LandingAssistPlan.canPlace(plan.kind(), context.level(), plan.cell())) {
@@ -171,6 +210,7 @@ public final class LandingAssistSession {
             } else if (cleaning) {
                 changes.add(new Change(plan.cell(), placed, context.level().getBlockState(plan.cell())));
                 removed = true;
+                stableTicks = 0;
                 detail = "own temporary aid removed; waiting for supported feet after removal";
             } else {
                 placed = context.level().getBlockState(plan.cell());
@@ -184,31 +224,28 @@ public final class LandingAssistSession {
     private void clean(LocalPlayerContext context) {
         if (cleanupStarted == Long.MIN_VALUE) cleanupStarted = context.tickRevision();
         if (context.tickRevision() - cleanupStarted >= 80) {
-            complete = true; detail = "landed; own aid retained after the bounded native recovery aiming window"; return;
+            finish("landed; own aid retained after the bounded native recovery aiming window"); return;
         }
         if (!LandingAssistGeometry.safeAfterRemoval(context.level(), context.level()::isLoaded, plan,
                 context.player().getBbWidth(), Math.max(1.8, context.player().getBbHeight()),
                 EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) {
-            complete = true; detail = "landed; own aid retained because safe support for removal is no longer verified"; return;
+            finish("landed; own aid retained because safe support for removal is no longer verified"); return;
         }
         if (!LandingAssistPlan.canRecover(submitted && !plan.existing() && placed != null, placed,
                 context.level().getBlockState(plan.cell()), EmbeddedBaritonePolicy.protects(plan.cell()))) {
             // Growth, replacement or a new protection claim revokes attribution for removal.
-            complete = true;
-            detail = "landed; temporary aid left because its exact state or protection changed";
-            if (damageObserved) fail("health changed during landing; the changed aid was left untouched");
+            finish("landed; temporary aid left because its exact state or protection changed");
             return;
         }
         if (!context.mutationAvailable()) return;
         if (plan.kind() == LandingAssistPlan.Kind.WATER) {
             if (!org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.canRecover(
                     context.level().getBlockState(plan.cell()), placed != null, EmbeddedBaritonePolicy.protects(plan.cell()))) {
-                complete = true; detail = "landed; only the confirmed original source water may be recovered"; return;
+                finish("landed; only the confirmed original source water may be recovered"); return;
             }
             InteractionHand hand = preparation.hand();
             if (!context.player().getItemInHand(hand).is(Items.BUCKET)) {
-                complete = true; detail = "landed; own water left because its empty bucket is unavailable";
-                if (damageObserved) fail("health changed during landing; no damage-free outcome was verified");
+                finish("landed; own water left because its empty bucket is unavailable");
                 return;
             }
             BlockHitResult hit = trace(context, true);
@@ -222,7 +259,7 @@ public final class LandingAssistSession {
             if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(plan.cell())) return;
             float progress = placed.getDestroyProgress(context.player(), context.level(), plan.cell());
             if (!(progress > 0) || !Float.isFinite(progress)) {
-                complete = true; detail = "landed; own aid left because native removal cannot progress"; return;
+                finish("landed; own aid left because native removal cannot progress"); return;
             }
             cleaning = true;
             receipt = context.actions().startBreaking(context, hit, (int) Math.clamp(Math.ceil(1D / progress) + 40, 20, 1200));
@@ -230,6 +267,12 @@ public final class LandingAssistSession {
     }
 
     public Vec3 aimPoint() { return placed == null ? plan.aimPoint() : Vec3.atCenterOf(plan.cell()); }
+    /** Hold the landing cell against generic water bobbing while its source is being recovered. */
+    public boolean holdingForRecovery(LocalPlayerContext context) {
+        return !complete && plan.kind() == LandingAssistPlan.Kind.WATER && nearLanding(context)
+                && (context.player().isInWater() && context.player().fallDistance == 0
+                    || submitted && context.player().onGround());
+    }
     public boolean wantsSneak(LocalPlayerContext context) {
         if (!submitted && !plan.existing() && plan.kind() != LandingAssistPlan.Kind.WATER
                 && !context.player().onGround()) return true;
@@ -239,8 +282,20 @@ public final class LandingAssistSession {
                 && context.player().fallDistance + 1 < context.player().getAttributeValue(Attributes.SAFE_FALL_DISTANCE);
     }
     public boolean complete() { return complete; }
-    public boolean failed() { return failed || complete && damageObserved; }
+    public boolean failed() { return failed || complete && damageObserved && plan.kind() != LandingAssistPlan.Kind.HAY; }
     public boolean cleanupPending() { return preparation != null && preparation.cleanupPending(); }
+    /** Retire native receipts at an explicit body/task boundary; never assume a pickup happened. */
+    public void stop(LocalPlayerContext context, String reason) {
+        if (complete) return;
+        if (receipt != null && !receipt.terminal()) {
+            receipt = receipt.kind() == NativeActionReceipt.Kind.BREAK_BLOCK
+                    ? context.actions().cancelBreakingForTaskBoundary(context, receipt, reason)
+                    : context.actions().retireOneShotForTaskBoundary(context, receipt, reason);
+            settle(context);
+        }
+        if (preparation != null) preparation.closeForFailure(context);
+        fail(reason);
+    }
     public List<Change> drainChanges() { var result = List.copyOf(changes); changes.clear(); return result; }
     public Map<String, Object> diagnostics() {
         var result = new LinkedHashMap<String, Object>();
@@ -249,14 +304,32 @@ public final class LandingAssistSession {
         result.put("existing_environment", plan.existing()); result.put("complete", complete);
         result.put("failed", failed()); result.put("damage_observed", damageObserved);
         result.put("removed_own_aid", removed);
+        result.put("native_water_contact", waterContactObserved);
+        result.put("native_hay_contact", hayContactObserved);
+        result.put("health_lost", healthLost); result.put("absorption_lost", absorptionLost);
+        result.put("mitigated_with_damage", complete && !failed() && plan.kind() == LandingAssistPlan.Kind.HAY && damageObserved);
         if (receipt != null) result.put("receipt", receipt.status().name());
         return result;
     }
     private boolean stable(LocalPlayerContext c) {
         var player = c.player();
-        boolean near = player.position().distanceToSqr(Vec3.atBottomCenterOf(plan.feet())) < 4;
-        return near && (player.onGround() && Math.abs(player.getDeltaMovement().y) < 0.1
-                || player.isInWater() && player.fallDistance == 0 && player.getDeltaMovement().y >= 0);
+        return nearLanding(c) && (player.onGround() && Math.abs(player.getDeltaMovement().y) < 0.1
+                || !removed && player.isInWater() && player.fallDistance == 0 && player.getDeltaMovement().y >= 0);
+    }
+    private boolean nearLanding(LocalPlayerContext c) {
+        return c.player().position().distanceToSqr(Vec3.atBottomCenterOf(plan.feet())) < 4;
+    }
+    private boolean settledElsewhere(LocalPlayerContext context) {
+        var player = context.player();
+        double vertical = Math.abs(player.getDeltaMovement().y);
+        return player.onGround() && vertical < 0.1
+                || (player.isInWater() || player.onClimbable()) && player.fallDistance == 0 && vertical <= 0.2;
+    }
+    private boolean touchesPlannedWater(LocalPlayerContext c) {
+        BlockState source = c.level().getBlockState(plan.cell());
+        return LandingAssistPlan.existingSafe(LandingAssistPlan.Kind.WATER, source)
+                && c.player().getBoundingBox().intersects(source.getFluidState()
+                        .getShape(c.level(), plan.cell()).bounds().move(plan.cell()));
     }
     private boolean matchesPlacement(BlockHitResult hit) {
         return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(plan.clicked()) && hit.getDirection() == plan.face();
@@ -276,6 +349,22 @@ public final class LandingAssistSession {
     private static int confirmationDwell(LocalPlayerContext context) {
         var info = context.connection() == null ? null : context.connection().getPlayerInfo(context.player().getUUID());
         return info == null ? 10 : Math.clamp(4 + (info.getLatency() + 49) / 50, 4, 40);
+    }
+    private boolean survivesHay(LocalPlayerContext context) {
+        return plan.kind() != LandingAssistPlan.Kind.HAY
+                || plan.survives(FallDamageBudget.capture(context.player()), context.player().getY(), true);
+    }
+    private void finish(String outcome) {
+        complete = true;
+        if (plan.kind() == LandingAssistPlan.Kind.HAY) {
+            if (!(previousHealth > 0)) fail("hay landing did not preserve survival");
+            else if (!hayContactObserved) fail("landing finished without observed collision support from the hay");
+            else detail = damageObserved ? "native hay cushioning and supported survival verified; observed damage recorded" : outcome;
+        }
+        else if (damageObserved) fail("landing finished but health or absorption decreased; no-damage success is unverified");
+        else if (plan.kind() == LandingAssistPlan.Kind.WATER && !waterContactObserved)
+            fail("landing finished without observed native water contact and fall reset");
+        else detail = outcome;
     }
     private void fail(String reason) { failed = true; detail = reason; }
 }
