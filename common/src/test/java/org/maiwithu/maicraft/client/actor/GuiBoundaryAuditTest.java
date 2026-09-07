@@ -44,8 +44,8 @@ public final class GuiBoundaryAuditTest {
         }
         String renderer = Files.readString(root.resolve(base + "core/mixin/GameRendererCameraMixin.java"));
         check(renderer.contains("Lnet/minecraft/client/Minecraft;pauseGame(Z)V")
-                        && renderer.contains("!ClientRuntime.actor().automationControlRequested()"),
-                "only the renderer's automatic focus-loss pause is suppressed while controlled");
+                        && renderer.contains("!ClientRuntime.actor().effectiveAutomationControlRequested()"),
+                "automatic focus-loss pause follows effective control, allowing native pause during human review");
         check(!renderer.contains("pauseOnLostFocus ="), "takeover cannot persist or overwrite user pause settings");
         String mouse = Files.readString(root.resolve(base + "core/mixin/MouseHandlerControlMixin.java"));
         check(mouse.contains("method = \"grabMouse\"") && mouse.contains("cancellable = true")

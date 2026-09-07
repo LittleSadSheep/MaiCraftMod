@@ -16,12 +16,14 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     private Input humanInput;
     private BotInput botInput;
     private boolean automationRequested;
+    private boolean reviewSuspended;
     private boolean toggleWasDown;
     private long requestRevision;
     private long activeTick;
     private long movementLease = Long.MIN_VALUE;
     private long lookLease = Long.MIN_VALUE;
     private Movement movement = Movement.STOPPED;
+    private Steering steering;
     private Float targetYaw;
     private Float targetPitch;
     private float cameraYaw;
@@ -33,18 +35,34 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     @Override
     public boolean automationOwnsControls() {
-        return automationRequested && controlledPlayer != null && controlledPlayer.input == botInput;
+        return effectiveAutomationRequested() && controlledPlayer != null && controlledPlayer.input == botInput;
     }
 
     boolean automationControlRequested() {
         return automationRequested;
     }
 
+    boolean effectiveAutomationRequested() { return automationRequested && !reviewSuspended; }
+
+    /** Human inspection releases input without creating a fresh grant on confirmation. */
+    void suspendForReview(boolean suspended) {
+        if (reviewSuspended == suspended) return;
+        reviewSuspended = suspended;
+        if (suspended) detachBody();
+    }
+
     @Override
     public void applyMovement(Movement movement, long leaseTickRevision) {
         requireLease(leaseTickRevision);
         this.movement = movement;
+        this.steering = null;
         this.movementLease = leaseTickRevision;
+    }
+
+    @Override
+    public void applySteering(Steering steering, float currentYaw, long leaseTickRevision) {
+        applyMovement(steering.atYaw(currentYaw), leaseTickRevision);
+        this.steering = steering;
     }
 
     @Override
@@ -68,6 +86,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     @Override
     public void releaseAll() {
         movement = Movement.STOPPED;
+        steering = null;
         movementLease = Long.MIN_VALUE;
         clearLook();
         writeStoppedInput();
@@ -76,7 +95,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     void beginTick(long tickRevision) {
         activeTick = tickRevision;
         // A command from an earlier tick is never allowed to stick.
-        if (movementLease != tickRevision) movement = Movement.STOPPED;
+        if (movementLease != tickRevision) { movement = Movement.STOPPED; steering = null; }
         if (lookLease != tickRevision) {
             targetYaw = null;
             targetPitch = null;
@@ -131,7 +150,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     /** Attach a pending explicit request. Returns true only when a new BotInput was installed. */
     boolean fulfillAutomationRequest(LocalPlayer player) {
-        if (!automationRequested || automationOwnsControls()) return false;
+        if (!effectiveAutomationRequested() || automationOwnsControls()) return false;
         if (player == null || player.input == null
                 || (requestedPlayer != null && requestedPlayer != player)) {
             return false;
@@ -147,11 +166,10 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         toggleWasDown = down;
         if (!toggled) return false;
 
-        if (automationRequested) {
-            cancelAutomationRequest();
+        boolean requested = toggleHumanRequest(player);
+        if (!requested) {
             player.displayClientMessage(Component.literal("已归还玩家控制"), true);
         } else {
-            requestAutomation(player);
             if (fulfillAutomationRequest(player)) {
                 player.displayClientMessage(Component.literal("已交给自动控制"), true);
             } else {
@@ -161,23 +179,18 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return true;
     }
 
+    /** F8's logical operation is separate from GLFW polling so revocation can be regression tested. */
+    boolean toggleHumanRequest(LocalPlayer player) {
+        if (automationRequested) cancelAutomationRequest();
+        else requestAutomation(player);
+        return automationRequested;
+    }
+
     void endTick(DefaultLocalPlayerContext context) {
         if (!context.isCurrent() || !automationOwnsControls() || controlledPlayer != context.player()) return;
         BotInput input = botInput;
         LocalPlayer player = controlledPlayer;
         if (input == null || player == null) return;
-
-        Movement command = movementLease == context.tickRevision() && permitsWorldMovement(context.minecraft().screen)
-                ? movement : Movement.STOPPED;
-        input.forwardImpulse = command.forward();
-        input.leftImpulse = command.strafe();
-        input.up = command.forward() > 0.0f;
-        input.down = command.forward() < 0.0f;
-        input.left = command.strafe() > 0.0f;
-        input.right = command.strafe() < 0.0f;
-        input.jumping = command.jumping();
-        input.shiftKeyDown = command.sneaking();
-        player.setSprinting(command.sprinting());
 
         if (lookLease == context.tickRevision() && targetYaw != null && targetPitch != null) {
             advanceLook(player, System.nanoTime());
@@ -187,6 +200,21 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             pitchVelocity = 0.0f;
             lastLookUpdateNanos = 0L;
         }
+        writeMovement(player, input, context.minecraft().screen);
+    }
+
+    private void writeMovement(LocalPlayer player, BotInput input, Screen screen) {
+        Movement command = movementLease == activeTick && permitsWorldMovement(screen)
+                ? steering == null ? movement : steering.atYaw(player.getYRot()) : Movement.STOPPED;
+        input.forwardImpulse = command.forward();
+        input.leftImpulse = command.strafe();
+        input.up = command.forward() > 0;
+        input.down = command.forward() < 0;
+        input.left = command.strafe() > 0;
+        input.right = command.strafe() < 0;
+        input.jumping = command.jumping();
+        input.shiftKeyDown = command.sneaking();
+        player.setSprinting(command.sprinting());
     }
 
     /** Screens that can coexist with leased world movement. */
@@ -203,10 +231,13 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             return;
         }
         advanceLook(player, System.nanoTime());
+        if (steering != null && botInput != null)
+            writeMovement(player, botInput, net.minecraft.client.Minecraft.getInstance().screen);
     }
 
     void shutdown() {
         cancelAutomationRequest();
+        reviewSuspended = false;
         toggleWasDown = false;
     }
 

@@ -24,6 +24,6 @@ public abstract class GameRendererCameraMixin {
     @Redirect(method = "render", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/Minecraft;pauseGame(Z)V"))
     private void maicraft$pauseWhenHumanControlled(Minecraft minecraft, boolean pauseOnly) {
-        if (!ClientRuntime.actor().automationControlRequested()) minecraft.pauseGame(pauseOnly);
+        if (!ClientRuntime.actor().effectiveAutomationControlRequested()) minecraft.pauseGame(pauseOnly);
     }
 }

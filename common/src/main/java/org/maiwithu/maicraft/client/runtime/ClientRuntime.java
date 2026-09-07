@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.mcp.McpConfig;
 import org.maiwithu.maicraft.mcp.RuntimeFacade;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
+import org.maiwithu.maicraft.client.preview.PreviewController;
+import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
 
 /**
  * The single in-process runtime shared by the embedded MCP endpoint and the real local-player body.
@@ -67,6 +69,8 @@ public final class ClientRuntime {
         tickStage = "observing";
         org.maiwithu.maicraft.core.inventory.StockEvidence.observe(minecraft.player);
         PathCaches.clientTick(minecraft.player);
+        PreviewController.tick(minecraft);
+        ACTOR.previewReview(PreviewController.waitingReview());
         Optional<LocalPlayerContext> opened = ACTOR.beginTick();
         if (opened.isEmpty()) {
             tickStage = "no_body";
@@ -89,6 +93,14 @@ public final class ClientRuntime {
             // Binding is lifecycle-only. It may cancel a stale body or complete an authorised
             // portal handoff, but never advances timers or task logic without control authority.
             CompanionTickDispatcher.observeBody(context.player());
+            BuildPreviewGate.settleCancellation();
+            if (PreviewController.waitingReview()) {
+                tickStage = "preview_review";
+                BuildPreviewGate.freezeWaitingDeadline();
+                intents.tickPersistence(minecraft, context.player());
+                GameplayAttentionMonitor.afterSemanticBind(context.player());
+                return;
+            }
             if (GameplayAttentionMonitor.blocksAutomation(context.player())) {
                 tickStage = "attention_required";
                 intents.tickPersistence(minecraft, context.player());
@@ -126,7 +138,7 @@ public final class ClientRuntime {
             CompanionTickDispatcher.tick(context.player());
             // A semantic action may have consumed this tick's one native-mutation slot. Do not
             // let the embedded path executor append a break/place gesture after it.
-            pathingMayDrive = context.mutationAvailable();
+            pathingMayDrive = context.mutationAvailable() && !PreviewController.waitingReview();
             intents.tickPersistence(minecraft, context.player());
             GameplayAttentionMonitor.afterSemanticBind(context.player());
         } finally {
@@ -188,6 +200,7 @@ public final class ClientRuntime {
         Minecraft minecraft = Minecraft.getInstance();
         Runnable cleanup = () -> {
             ACTOR.shutdown();
+            PreviewController.shutdown();
             IntentRuntime.get().shutdownPersistence();
             bodyGone(false);
         };

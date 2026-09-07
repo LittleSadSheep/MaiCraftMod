@@ -25,6 +25,7 @@ public final class ClientActorBoundary {
     private DefaultLocalPlayerContext activeContext;
     private boolean windowControlActive;
     private boolean restoreMouseOnRelease;
+    private boolean previewReview;
 
     public ClientActorBoundary() {
         this(Minecraft.getInstance());
@@ -56,8 +57,9 @@ public final class ClientActorBoundary {
             observedPlayer = player;
             bodyEpoch = nextRevision(bodyEpoch, "body epoch");
         }
+        body.suspendForReview(previewReview);
         body.beginTick(tickRevision);
-        updateWindowControl(body.automationControlRequested());
+        updateWindowControl(body.effectiveAutomationRequested());
         if (player == null || minecraft.level == null || minecraft.gameMode == null ||
                 minecraft.getConnection() == null) {
             if (playerChanged) {
@@ -82,7 +84,7 @@ public final class ClientActorBoundary {
             }
             mutationClaimedTick = tickRevision;
         }
-        updateWindowControl(body.automationControlRequested());
+        updateWindowControl(body.effectiveAutomationRequested());
 
         DefaultLocalPlayerContext context = new DefaultLocalPlayerContext(
                 this,
@@ -112,7 +114,7 @@ public final class ClientActorBoundary {
 
     /** Retain the cursor guard while F8 settles an open automation menu before restoring it. */
     public boolean preventsMouseGrab() {
-        return windowControlActive || body.automationControlRequested();
+        return windowControlActive || body.effectiveAutomationRequested();
     }
 
     /** Mouse ownership follows the logical request, including a retained portal handoff. */
@@ -144,6 +146,7 @@ public final class ClientActorBoundary {
         result.put("actor_tick", tickRevision);
         result.put("control_revision", controlRevision);
         result.put("control_requested", body.automationControlRequested());
+        result.put("preview_review", previewReview);
         result.put("owns_controls", body.automationOwnsControls());
         var input = minecraft.player == null ? null : minecraft.player.input;
         result.put("input", input == null ? "none" : input.getClass().getName());
@@ -194,6 +197,17 @@ public final class ClientActorBoundary {
     public boolean automationControlRequested() {
         requireClientThread();
         return body.automationControlRequested();
+    }
+
+    public boolean effectiveAutomationControlRequested() {
+        requireClientThread();
+        return body.effectiveAutomationRequested();
+    }
+
+    /** Applied by beginTick, where native leases and input ownership are reconciled together. */
+    public void previewReview(boolean waiting) {
+        requireClientThread();
+        previewReview = waiting;
     }
 
     public String controlUnavailableReason() {
@@ -260,6 +274,7 @@ public final class ClientActorBoundary {
         actions.revokeForBoundary("the client runtime stopped");
         menus.revokeForHumanHandoff(player, "the client runtime stopped");
         body.shutdown();
+        previewReview = false;
         restoreMouseOnRelease = false;
         updateWindowControl(false);
         activeContext = null;
