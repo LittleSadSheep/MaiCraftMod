@@ -18,6 +18,7 @@ import java.util.Map;
 public final class KnowledgeLibrary {
     public static final String INDEX = "maicraft://knowledge/index";
     public static final String GUIDE = "maicraft://knowledge/guide";
+    public static final String BLUEPRINT = "maicraft://knowledge/blueprint";
     private static final int PAGE_SIZE = 16;
     public interface Source {
         List<KnowledgeDocument.Entry> entries();
@@ -32,7 +33,8 @@ public final class KnowledgeLibrary {
     public KnowledgeLibrary(Source source) {
         this.source = source;
         builtins = Map.of(INDEX, load("index", "知识索引", "按需发现方块状态、Ponder 教程和实际执行能力。"),
-                GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"));
+                GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"),
+                BLUEPRINT, load("blueprint", "统一机器蓝图 JSON", "从教程引用、编辑或自行设计结构，分别调用构建、修改与使用能力。"));
     }
     public static KnowledgeLibrary offline() {
         return new KnowledgeLibrary(new Source() {
