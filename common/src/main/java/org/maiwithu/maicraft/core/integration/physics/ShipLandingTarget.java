@@ -103,6 +103,8 @@ public final class ShipLandingTarget implements MovingFlightTarget {
     }
     @Override public Vec3 point() { return point; }
     @Override public Vec3 velocity() { return velocity; }
+    @Override public boolean supportsFastDescent() { return available && quietDeck(velocity); }
+    static boolean quietDeck(Vec3 motion) { return motion.lengthSqr()<.0001; }
     @Override public boolean contact() { return contact; }
     @Override public boolean touchdown() { return available && support.ticks >= 8; }
 

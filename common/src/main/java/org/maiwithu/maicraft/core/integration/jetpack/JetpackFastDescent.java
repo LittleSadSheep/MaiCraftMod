@@ -13,11 +13,16 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
  * A mode receipt and upright context are client evidence, not a server fall-damage guarantee.
  */
 public final class JetpackFastDescent {
-    enum Phase { IDLE, DISABLING, FALLING, ENABLING, BRAKING, DONE }
+    enum Phase { IDLE, DISABLING, FALLING, SHORT_FALL, ENABLING, BRAKING, DONE }
     enum Command { NONE, OFF, ON, HOVER }
     record Observation(long tick, Vec3 position, Vec3 velocity, Vec3 landing,
                        JetpackNativeAdapter.Snapshot power, boolean clearColumn, boolean upright,
-                       boolean grounded, int ping, Command receiptCommand, NativeActionReceipt.Status receiptStatus) {}
+                       boolean grounded, int ping, Command receiptCommand, NativeActionReceipt.Status receiptStatus, boolean harmlessDrop) {
+        Observation(long tick,Vec3 position,Vec3 velocity,Vec3 landing,JetpackNativeAdapter.Snapshot power,
+                    boolean clearColumn,boolean upright,boolean grounded,int ping,Command command,NativeActionReceipt.Status status) {
+            this(tick,position,velocity,landing,power,clearColumn,upright,grounded,ping,command,status,false);
+        }
+    }
 
     private final LongSet forbidden;
     private Phase phase = Phase.IDLE;
@@ -26,6 +31,7 @@ public final class JetpackFastDescent {
     private Vec3 descentLanding, descentExit;
     private long phaseTick;
     private boolean stopping, recovering, effects, touchdown = true;
+    private boolean shortDrop;
     private String detail = "awaiting an aligned descent column";
     private double restartHeight;
 
@@ -49,11 +55,15 @@ public final class JetpackFastDescent {
     }
     public boolean tick(LocalPlayerContext ctx, Vec3 landing, JetpackNativeAdapter.Snapshot power,
                         boolean allowStart, boolean touchdown) {
+        return tick(ctx,landing,power,allowStart,touchdown,JetpackRoute.observed(ctx,forbidden));
+    }
+    /** Use the same fresh static/physical-deck geometry as the owning flight session. */
+    public boolean tick(LocalPlayerContext ctx, Vec3 landing, JetpackNativeAdapter.Snapshot power,
+                        boolean allowStart, boolean touchdown, JetpackRoute.Space space) {
         ctx.requireCurrent();
         if (finished() || !active() && !allowStart) return false;
         var player = ctx.player();
         if (receipt != null && !receipt.terminal()) ctx.actions().poll(ctx, receipt);
-        var space = JetpackRoute.observed(ctx, forbidden);
         boolean landingMode = active() ? this.touchdown : touchdown;
         boolean column = columnAvailable(space, player.position(), landing, landingMode) && !player.isInWater()
                 && !player.isPassenger() && !player.isFallFlying();
@@ -63,10 +73,13 @@ public final class JetpackFastDescent {
             column &= exit != null && descentExit != null && exit.distanceToSqr(descentExit) < 0.0001;
         }
         var info = ctx.connection().getPlayerInfo(player.getUUID());
+        boolean harmless=landing!=null && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(player).damage(
+                player.fallDistance+Math.max(0,player.getY()-landing.y),
+                org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.ORDINARY,true)<=0;
         var observation = new Observation(ctx.tickRevision(), player.position(), player.getDeltaMovement(), landing,
                 power, column, JetpackNativeAdapter.uprightActive(JetpackNativeAdapter.activeEvidence(player)),
                 player.onGround(), info == null ? -1 : info.getLatency(), receiptCommand,
-                receipt == null ? null : receipt.status());
+                receipt == null ? null : receipt.status(),harmless);
         boolean wasActive = active();
         Command command = advance(observation, allowStart, touchdown);
         if (!wasActive && !active()) return false;
@@ -104,30 +117,35 @@ public final class JetpackFastDescent {
                     || !power.controllable() || !power.active() || !power.hover() || o.ping() > 2000) return Command.NONE;
             restartHeight = restartHeight(o.velocity().y, power.gravity(), o.ping());
             double height = o.position().y - o.landing().y;
-            if (height < Math.max(3, restartHeight + 0.75) || o.velocity().y > 0.1) return Command.NONE;
+            shortDrop=touchdown && height>=.35 && height<3 && o.harmlessDrop();
+            if (height < Math.max(3, restartHeight + 0.75) && !shortDrop || o.velocity().y > 0.1) return Command.NONE;
             this.touchdown = touchdown;
             descentLanding = o.landing();
             enter(Phase.DISABLING, o.tick(), "disabling over the aligned landing column");
         }
         boolean columnChanged = !o.clearColumn() || !aligned || o.landing() == null
                 || o.landing().distanceToSqr(descentLanding) > 0.0001;
-        if (stopping || columnChanged || !power.controllable() || !power.hover()) {
+        if (stopping || columnChanged || !power.controllable() || !power.hover() || shortDrop && !o.harmlessDrop() && !o.grounded()) {
             recovering = true;
             if (phase != Phase.ENABLING) enter(Phase.ENABLING, o.tick(), "restoring hover after cancellation or changed landing");
         }
         double height = o.position().y - descentLanding.y;
         restartHeight = restartHeight(o.velocity().y, power.gravity(), o.ping());
-        if ((phase == Phase.DISABLING || phase == Phase.FALLING)
+        if (!shortDrop && (phase == Phase.DISABLING || phase == Phase.FALLING)
                 && (height <= restartHeight || o.grounded() || o.tick() - phaseTick >= 60)) {
             enter(Phase.ENABLING, o.tick(), "restarting before the predicted control latency reaches the platform");
         }
         switch (phase) {
             case DISABLING -> {
-                if (confirmed(o, Command.OFF) && !power.active()) enter(Phase.FALLING, o.tick(), "native free descent");
+                if (confirmed(o, Command.OFF) && !power.active()) enter(shortDrop ? Phase.SHORT_FALL : Phase.FALLING, o.tick(), "native free descent");
                 else if (!pending(o, Command.OFF)) return Command.OFF;
             }
             case FALLING -> {
                 if (power.active()) { recovering = true; enter(Phase.ENABLING, o.tick(), "active mode changed during free descent"); }
+            }
+            case SHORT_FALL -> {
+                if(o.grounded()) enter(Phase.DONE,o.tick(),"harmless short touchdown; owning flight restores its requested modes");
+                else if(power.active()) { recovering=true; enter(Phase.ENABLING,o.tick(),"active mode changed during short descent"); }
             }
             case ENABLING -> {
                 if (!power.hover()) return pending(o, Command.HOVER) ? Command.NONE : Command.HOVER;

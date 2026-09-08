@@ -18,6 +18,8 @@ import org.joml.Quaterniond;
 public final class ShipBoardingGeometryTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        check(ShipLandingTarget.quietDeck(Vec3.ZERO),"a stationary physical deck permits the native fast-descent sequence");
+        check(!ShipLandingTarget.quietDeck(new Vec3(.1,0,0)),"a moving deck must retain tracking instead of dropping toward an old column");
         World world = new World();
         BlockPos origin = new BlockPos(20_000_000,64,20_000_000);
         for (int x=0;x<5;x++) for (int z=0;z<5;z++) world.blocks.put(origin.offset(x,0,z),Blocks.OAK_PLANKS.defaultBlockState());

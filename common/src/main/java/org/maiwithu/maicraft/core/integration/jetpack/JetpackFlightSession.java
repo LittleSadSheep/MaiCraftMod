@@ -120,8 +120,8 @@ public final class JetpackFlightSession implements TransportSession {
         clearanceBraking = false;
         if (fastDescent.active()) {
             updateLook(ctx, fastDescentTarget, true);
-            if (stopping) fastDescent.requestStop();
-            boolean handled = fastDescent.tick(ctx, fastDescentTarget, power, false);
+            if (stopping || movingTarget!=null && !movingTarget.supportsFastDescent()) fastDescent.requestStop();
+            boolean handled = fastDescent.tick(ctx, fastDescentTarget, power, false,true,space(ctx));
             if (fastDescent.hasEffects()) effects = changedActive = true;
             if (handled) return running();
         }
@@ -391,7 +391,7 @@ public final class JetpackFlightSession implements TransportSession {
             fastDescent = new JetpackFastDescent(forbidden);
         if (fastDescent.finished()) return false;
         updateLook(ctx, target, true);
-        if (!fastDescent.tick(ctx, target, power, true, touchdown)) return false;
+        if (!fastDescent.tick(ctx, target, power, true, touchdown,space(ctx))) return false;
         fastDescentTarget = target;
         if (fastDescent.hasEffects()) effects = changedActive = true;
         return true;

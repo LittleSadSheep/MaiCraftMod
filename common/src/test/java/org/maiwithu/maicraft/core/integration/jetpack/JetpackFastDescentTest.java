@@ -15,6 +15,7 @@ public final class JetpackFastDescentTest {
 
     public static void main(String[] args) {
         normalSequence();
+        harmlessShortDrop();
         cancellationRestartsImmediately();
         changedColumnRestoresHover();
         failedReceiptDoesNotReleaseDisabledPack();
@@ -23,6 +24,21 @@ public final class JetpackFastDescentTest {
         platformGeometry();
         intermediateHeight();
         System.out.println("JetpackFastDescentTest: passed");
+    }
+
+    private static void harmlessShortDrop() {
+        var descent=new JetpackFastDescent();
+        var start=at(0,2,-.03,true,true,true,Command.NONE,null);
+        var harmless=new Observation(start.tick(),start.position(),start.velocity(),start.landing(),start.power(),
+                true,true,false,0,Command.NONE,null,true);
+        check(descent.advance(harmless,true)==Command.OFF,"a harmless two-block deck approach should not wait in slow hover");
+        var off=at(2,1.7,-.25,false,false,true,Command.OFF,Status.CONFIRMED_APPLIED);
+        descent.advance(new Observation(off.tick(),off.position(),off.velocity(),off.landing(),off.power(),
+                true,false,false,0,Command.OFF,Status.CONFIRMED_APPLIED,true),false);
+        check(descent.phase().equals("short_fall"),"short descent retains gravity until its supported landing");
+        descent.advance(new Observation(9,LANDING,Vec3.ZERO,LANDING,off.power(),true,false,true,0,
+                Command.OFF,Status.CONFIRMED_APPLIED,true),false);
+        check(descent.finished(),"short touchdown returns directly to the flight owner's mode restoration");
     }
 
     private static void normalSequence() {
