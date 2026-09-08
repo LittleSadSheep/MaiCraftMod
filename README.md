@@ -49,7 +49,9 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 其他方向使用 `semantic_target="platform"` 与 `direction`（`up`、`down`、`forward`、`backward`、`left`、`right` 或四个英文方位）。相对方向在任务开始时固定；区域搜索半径 `max_distance` 默认 64，范围 8–128 格。普通坐标移动仍支持省略 Y 和到达容差，`exact=true` 用于需要准确站位的动作。
 
-`perceive(view="surroundings")` 的 `terrain_overview` 提供附近与下方地形的简短摘要：大致方位、相对高度、水平范围、支撑样本及未知区域。每次观察按帧预算推进，当前采样水平半径 12 格、向下深度 24 格；未采到的平台不代表不存在，也不代表没有路径。
+`perceive(view="surroundings")` 的 `terrain_overview` 提供地形缩略信息：大致方位、相对高度、水平范围、`surface_material` 材质、支撑样本及未知区域。预览覆盖已加载地形的水平半径 128 格、向下 256 格，按距离使用 4／8／32 格采样间距。同一次请求会等待后续客户端帧补充结果；达到采样或响应预算后返回明确的完整／部分采样状态。远处不同材质的支撑面会优先保留，未采到的平台不代表不存在。
+
+飞行航点允许高度偏差和观察区域内到达，后续路径仍检查真实身体碰撞。静止飞艇的已验证下降柱支持关包快速下降；确认无伤的短落可以直接关包到地面。地面移动会退出喷气背包飞行模式，落地保护也会在材料就绪后退出缓慢悬停；下一次飞行任务按需重新启用背包。
 
 电梯的实际楼层见 `surroundings.elevators`，也可用 `perceive(view="situation", focus="maicraft:travel")` 读取。`maicraft:travel` 支持 `elevator_floor="top"`、`bottom`、`next_up`、`next_down` 或同步列表中的楼层 ID／名称；可用 `elevator_id` 指定轿厢，交通模式使用 `auto` 或 `elevator`，无须填写目的地高度。
 

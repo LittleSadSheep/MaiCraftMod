@@ -70,6 +70,7 @@ public final class ClientRuntime {
         org.maiwithu.maicraft.core.inventory.StockEvidence.observe(minecraft.player);
         PathCaches.clientTick(minecraft.player);
         PreviewController.tick(minecraft);
+        org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade.tickObservation(minecraft.player);
         ACTOR.previewReview(PreviewController.waitingReview());
         Optional<LocalPlayerContext> opened = ACTOR.beginTick();
         if (opened.isEmpty()) {

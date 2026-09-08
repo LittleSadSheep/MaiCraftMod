@@ -79,7 +79,7 @@ final class PublicToolCatalog {
 
     private static final List<JsonObject> TOOLS = List.of(
             tool(PERCEIVE,
-                    "Read a concise, decision-oriented view of the current game state. surroundings includes a bounded terrain_overview and synchronized elevator floor identities; needs_sync means the list is unknown, not empty. Travel can approach an elevator and return a floor-selection decision.",
+                    "Read a concise, decision-oriented view of the current game state. surroundings includes terrain_overview, a terrain thumbnail sampled up to 128 blocks horizontally and 256 down, with surface_material and approximate region spans. It advances over client ticks and returns complete or explicit partial coverage. Synchronized elevator floor identities are also included; needs_sync means unknown, not empty.",
                     schema("""
                             {
                               "type":"object",

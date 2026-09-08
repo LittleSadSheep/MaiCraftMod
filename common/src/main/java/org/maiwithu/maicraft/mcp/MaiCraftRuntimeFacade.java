@@ -55,12 +55,31 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     @Override
     public CompletionStage<JsonElement> perceive(JsonObject arguments) {
+        if("surroundings".equals(arguments.get("view").getAsString())) return observeSurroundings(arguments);
         if ("attention".equals(arguments.get("view").getAsString())
                 && arguments.get("wait_ms").getAsInt() > 0) {
             return waitForAttention(arguments);
         }
         return onClient(() -> perceiveOnClient(arguments));
     }
+    private CompletionStage<JsonElement> observeSurroundings(JsonObject arguments) {
+        var result=new CompletableFuture<JsonElement>();
+        onClient(()->{
+            if(result.isDone()) return new JsonObject();
+            LocalPlayer expected=requireWorld().player;
+            navigationOverview.prepare(expected).whenComplete((ignored,failure)->{
+                if(result.isDone()) return;
+                if(failure!=null) { result.completeExceptionally(failure); return; }
+                try {
+                    if(requireWorld().player!=expected) throw new IllegalStateException("terrain observation body changed");
+                    result.complete(perceiveOnClient(arguments));
+                } catch(RuntimeException unavailable) { result.completeExceptionally(unavailable); }
+            });
+            return new JsonObject();
+        }).whenComplete((ignored,failure)->{ if(failure!=null) result.completeExceptionally(failure); });
+        return result;
+    }
+    public static void tickObservation(LocalPlayer player) { INSTANCE.navigationOverview.tick(player); }
 
     @Override
     public CompletionStage<JsonElement> plan(JsonObject arguments) {
