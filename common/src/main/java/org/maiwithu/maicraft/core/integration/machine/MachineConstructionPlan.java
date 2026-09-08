@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.ReplaceMode;
 import org.maiwithu.maicraft.core.task.build.MachineSealingTaskRecord.Seal;
 
-/** Immutable Mod-authored physical plan. World loading and native effects belong to its task. */
+/** Immutable physical plan from a semantic layout or an explicit versioned blueprint. */
 public final class MachineConstructionPlan {
     public record Part(BlockPos position, MachineInstallation.PartSpec spec) {}
     private final BlockPos anchor;
@@ -33,12 +33,14 @@ public final class MachineConstructionPlan {
     private final List<BlockPos> components;
     private final JsonObject report;
     private final boolean replace;
+    private final boolean replaceBlockEntities;
     private final List<Seal> seals;
 
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
-            List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace) {
+            List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities) {
         this.anchor = anchor.immutable(); this.blocks = List.copyOf(blocks); this.parts = List.copyOf(parts);
         this.components = List.copyOf(components); this.report = report.deepCopy(); this.replace = replace;
+        this.replaceBlockEntities = replaceBlockEntities;
         Map<BlockPos, BuildTaskRecord.Target> byPosition = new LinkedHashMap<>();
         blocks.forEach(target -> byPosition.put(target.pos(), target));
         List<Seal> closures = new ArrayList<>();
@@ -70,8 +72,33 @@ public final class MachineConstructionPlan {
         return id != null && (block ? BuiltInRegistries.BLOCK.containsKey(id) : BuiltInRegistries.ITEM.containsKey(id));
     }
 
+    /** Catch unsupported native installations during design review, before requesting a construction task. */
+    public static SemanticMachineLayout.Result reviewExplicit(SemanticMachineLayout.Result layout) {
+        if (!layout.buildable()) return layout;
+        JsonObject report = layout.report().deepCopy();
+        try {
+            compile(BlockPos.ZERO, layout, false);
+            report.addProperty("native_installation_validated", true);
+            report.addProperty("site_and_material_preflight_pending", true);
+            return new SemanticMachineLayout.Result(true, layout.blueprint(), report);
+        } catch (IllegalArgumentException unsupported) {
+            report.addProperty("buildable", false);
+            report.addProperty("native_installation_validated", false);
+            JsonObject validation = report.getAsJsonObject("validation");
+            validation.addProperty("valid", false);
+            validation.getAsJsonArray("errors").add("unsupported_native_installation: " + unsupported.getMessage());
+            return new SemanticMachineLayout.Result(false, layout.blueprint(), report);
+        }
+    }
+
     public static MachineConstructionPlan compile(BlockPos anchor, SemanticMachineLayout.Result layout, boolean replace) {
-        if (!layout.buildable()) throw new IllegalArgumentException("machine layout is not executable");
+        return compile(anchor, layout, replace, false);
+    }
+
+    public static MachineConstructionPlan compile(BlockPos anchor, SemanticMachineLayout.Result layout,
+            boolean replace, boolean replaceBlockEntities) {
+        if (replaceBlockEntities && !replace) throw new IllegalArgumentException("replace_block_entities requires replace_existing");
+        if (!layout.buildable()) throw new IllegalArgumentException("machine layout is not executable: " + layout.report());
         Map<BlockPos, BuildTaskRecord.Target> blocks = new LinkedHashMap<>();
         List<Part> parts = new ArrayList<>();
         Set<String> partSlots = new LinkedHashSet<>();
@@ -103,7 +130,11 @@ public final class MachineConstructionPlan {
             blocks.put(position, new BuildTaskRecord.Target(state, state.isAir() ? Items.AIR : block.asItem(),
                     position, id, null, null, null, false, properties.keySet(), true));
         }
-        JsonObject report = layout.report();
+        // Generated halves must be declared even for model-authored blueprints.
+        Map<Long, BuildTaskRecord.Target> cells = new LinkedHashMap<>();
+        blocks.values().forEach(target -> cells.put(target.pos().asLong(), target));
+        blocks.values().forEach(target -> MachineBlueprint.validateGeneratedCells(target, cells));
+        JsonObject report = layout.report().deepCopy();
         if (report.has("configurations") && !report.getAsJsonArray("configurations").isEmpty()) {
             if (!exists("mekanism:configurator", false))
                 throw new IllegalArgumentException("native interface configuration requires an installed Mekanism configurator");
@@ -130,7 +161,7 @@ public final class MachineConstructionPlan {
             throw new IllegalArgumentException("native part host overlaps an ordinary block target");
         // Center cables form supports for peripheral parts and must always be installed first.
         parts.sort(java.util.Comparator.comparing(part -> part.spec().side() != null));
-        return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace);
+        return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace, replaceBlockEntities);
     }
 
     /** The survey anchor denotes the floor of the installation, including below-machine drives. */
@@ -169,7 +200,7 @@ public final class MachineConstructionPlan {
                 Items.AIR, at, "native part preparation", null, null, null, false, Set.of(), true));
         BuildTaskRecord task = new BuildTaskRecord(callId, deadline, placement,
                 replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE, replace, consume,
-                consume, Map.of(), List.of(), false);
+                consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true);
         task.materialSupplyProtection(parts.stream().map(Part::position).toList());
         task.semanticFacts(Map.of("machine_geometry_verified", parts.isEmpty() && openings.isEmpty(), "machine_production_verified", false));

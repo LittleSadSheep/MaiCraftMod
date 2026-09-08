@@ -177,7 +177,7 @@ public final class MachineBlueprint {
         return normalized;
     }
 
-    private static void validateGeneratedCells(BuildTaskRecord.Target target, Map<Long, BuildTaskRecord.Target> targets) {
+    static void validateGeneratedCells(BuildTaskRecord.Target target, Map<Long, BuildTaskRecord.Target> targets) {
         BlockState desired = target.desiredState();
         BlockPos other = null;
         BlockState expected = null;
