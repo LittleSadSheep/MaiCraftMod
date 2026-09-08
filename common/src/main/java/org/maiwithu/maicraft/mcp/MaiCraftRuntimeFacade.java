@@ -347,6 +347,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("sign_observation", signs);
         result.add("local_decision_summary", localDecisionSummary(player, hostileCount));
         result.add("terrain_overview",navigationOverview.describe(player));
+        result.add("elevators",new com.google.gson.Gson().toJsonTree(
+                org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloors.overview(player)));
         result.add("view", PhysicalStructurePerception.view(player));
         result.add("physical_structures", PhysicalStructurePerception.observe(player));
         return result;
