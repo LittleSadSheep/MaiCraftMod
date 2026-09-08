@@ -55,10 +55,10 @@ public final class LandingSurfaceRulesTest {
             if (tall) scene.blocks.put(FEET.above(),lower.setValue(BlockStateProperties.DOUBLE_BLOCK_HALF,DoubleBlockHalf.UPPER));
             var plan = water(scene);
             BlockPos top = tall ? FEET.above() : FEET;
-            check(plan.clicked().equals(top) && plan.cell().equals(top.above()) && plan.feet().equals(FEET),
-                    "plant outline determines the real source cell without moving the promised ground stance");
+            check(plan.feet().equals(FEET) && (plan.cell().equals(FEET) || plan.cell().equals(top.above())),
+                    "visible floor permits replacing the plant cell; a blocked floor retains the native upper-source option");
             Vec3 eye = Vec3.atBottomCenterOf(FEET.above(5));
-            var hit = scene.clip(new ClipContext(eye,eye.add(0,-8,0),ClipContext.Block.OUTLINE,
+            var hit = scene.clip(new ClipContext(eye,plan.aimPoint().add(plan.aimPoint().subtract(eye).normalize().scale(.01)),ClipContext.Block.OUTLINE,
                     ClipContext.Fluid.NONE,CollisionContext.empty()));
             check(WaterBucketFall.waterCell(scene,hit,false).equals(plan.cell()),
                     "actual native bucket ray and planned water cell agree over vegetation");
@@ -68,8 +68,8 @@ public final class LandingSurfaceRulesTest {
                     "a protected paired upper plant cannot be removed indirectly");
             scene.blocks.put(plan.cell(),Blocks.WATER.defaultBlockState());
             check(LandingAssistPlan.existingSafe(LandingAssistPlan.Kind.WATER,scene.getBlockState(plan.cell()))
-                            && !LandingAssistPlan.existingSafe(LandingAssistPlan.Kind.WATER,scene.getBlockState(FEET)),
-                    "water at the top is not falsely reported as water already replacing both plant halves");
+                            && (plan.cell().equals(FEET) || !LandingAssistPlan.existingSafe(LandingAssistPlan.Kind.WATER,scene.getBlockState(FEET))),
+                    "source evidence belongs to the actual replacement cell");
             check(water(scene).existing(),"an observed high source is usable without claiming placement ownership");
             check(LandingAssistGeometry.safeAfterRemoval(scene,pos -> true,plan,.6,1.8,LongSets.emptySet()),
                     "source recovery retains independently verified real ground");

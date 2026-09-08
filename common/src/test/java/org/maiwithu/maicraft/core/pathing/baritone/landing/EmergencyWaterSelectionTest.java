@@ -79,7 +79,7 @@ public final class EmergencyWaterSelectionTest {
                 f.world.scene.blocks.put(BlockPos.ZERO, grass);
                 if (surface == 2) f.world.scene.blocks.put(BlockPos.ZERO.above(),
                         grass.setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER));
-                source = BlockPos.ZERO.above(surface);
+                source = surface == 1 ? BlockPos.ZERO : BlockPos.ZERO.above(2);
             }
             f.position(LIVE_DROP, -LIVE_SPEED, false);
             var session = EmergencyLanding.find(f.context);
@@ -128,7 +128,7 @@ public final class EmergencyWaterSelectionTest {
                 (proxy, method, arguments) -> method.getName().equals("level") ? tracked : method.invoke(f.context, arguments));
         f.position(2_000_000, -.08, false);
         assertWater(EmergencyLanding.find(context), "world-exterior altitude does not hide loaded ground");
-        check(tracked.clips == 5 && tracked.longestRay <= 384 && tracked.highestStart == 320,
+        check(tracked.groundProbes == 5 && tracked.longestRay <= 384 && tracked.highestStart == 320,
                 "probing skips millions of world-exterior air cells and stays within build height");
         tracked.unloaded = true; tracked.clips = 0;
         check(EmergencyLanding.find(context) == null && tracked.clips == 0,
@@ -171,11 +171,12 @@ public final class EmergencyWaterSelectionTest {
     private static final class TrackedLevel extends ClientLevel {
         WaterLandingReplayTest.Scene scene;
         net.minecraft.world.level.dimension.DimensionType dimension;
-        int clips; double longestRay, highestStart; boolean unloaded;
+        int clips, groundProbes; double longestRay, highestStart; boolean unloaded;
         private TrackedLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
         public boolean isLoaded(BlockPos pos) { return !unloaded; }
         public net.minecraft.world.level.dimension.DimensionType dimensionType() { return dimension; }
         public BlockHitResult clip(ClipContext context) {
+            if (context.getTo().y == getMinBuildHeight()) groundProbes++;
             clips++; longestRay = Math.max(longestRay, context.getFrom().distanceTo(context.getTo()));
             highestStart = Math.max(highestStart, context.getFrom().y);
             return scene.clip(context);

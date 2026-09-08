@@ -232,6 +232,9 @@ public final class WaterLandingReplayTest {
         }
     }
     static final class TestPlayer extends LocalPlayer {
+        public void awardStat(net.minecraft.stats.Stat<?> stat, int amount) { }
+        public void playSound(net.minecraft.sounds.SoundEvent sound, float volume, float pitch) { }
+        public boolean mayUseItemAt(BlockPos pos, Direction face, ItemStack stack) { return true; }
         Inventory inventory; boolean wet; float health, hayMultiplier;
         net.minecraft.world.damagesource.DamageSources sources;
         private TestPlayer() { super(null, null, null, null, null, false, false); }
@@ -261,6 +264,13 @@ public final class WaterLandingReplayTest {
         }
     }
     static final class FlatLevel extends ClientLevel {
+        public boolean mayInteract(net.minecraft.world.entity.player.Player player, BlockPos pos) { return true; }
+        public boolean setBlock(BlockPos pos, BlockState state, int flags) { scene.blocks.put(pos.immutable(),state); return true; }
+        public void scheduleTick(BlockPos pos, net.minecraft.world.level.material.Fluid fluid, int delay) { }
+        public void playSound(net.minecraft.world.entity.player.Player player, BlockPos pos, net.minecraft.sounds.SoundEvent sound,
+                net.minecraft.sounds.SoundSource source, float volume, float pitch) { }
+        public void gameEvent(net.minecraft.core.Holder<net.minecraft.world.level.gameevent.GameEvent> event, Vec3 position,
+                net.minecraft.world.level.gameevent.GameEvent.Context context) { }
         Scene scene; boolean water; BlockHitResult nativeHit; net.minecraft.world.level.dimension.DimensionType dimension;
         java.util.List<net.minecraft.world.entity.Entity> observedEntities;
         private FlatLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }

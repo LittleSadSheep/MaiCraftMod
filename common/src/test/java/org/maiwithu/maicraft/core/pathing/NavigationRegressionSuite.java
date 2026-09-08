@@ -26,6 +26,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFallTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.landing.LandingSurfaceRulesTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.landing.NativeBucketLandingTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.landing.WaterSurfaceExecutionTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyWaterSelectionTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingReplayTest.main(args);

@@ -143,6 +143,7 @@ public final class LandingAssistSession {
         if (failed) { continuePreparationCleanup(context); return false; }
         if (Float.isNaN(previousHealth)) rememberHealth(context);
         if (!materialReady(context)) return false;
+        refreshWaterAim(context);
         if (!survivesHay(context)) { fail("hay would not reduce the observed fall to survivable damage"); return false; }
         if (!context.level().isLoaded(plan.cell()) || !context.level().isLoaded(plan.clicked())) return false;
         if (!LandingAssistGeometry.safe(context.level(), context.level()::isLoaded, plan,
@@ -228,6 +229,7 @@ public final class LandingAssistSession {
         }
         displacedStableTicks = 0;
         if (!failed && !materialReady(context)) return;
+        if (!failed) refreshWaterAim(context);
         if (!failed && materialReadyTick == Long.MIN_VALUE) materialReadyTick = context.tickRevision();
         if (!failed && preparation != null && !preparation.ready()) {
             placementGate = "preparing_hand_and_closing_menu";
@@ -280,11 +282,9 @@ public final class LandingAssistSession {
             fail("the placement cell changed while falling; no repeated or destructive use was submitted"); return;
         }
         BlockHitResult hit = trace(context, false);
-        if (!matchesPlacement(hit)) { placementGate = "native_ray_not_on_placement_face"; return; }
-        if (plan.kind() == LandingAssistPlan.Kind.WATER
-                && !org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.waterCell(context.level(),hit,false).equals(plan.cell())) {
-            placementGate = "native_bucket_target_mismatch"; return;
-        }
+        if (plan.kind() == LandingAssistPlan.Kind.WATER) {
+            if (!acceptWaterHit(context,hit)) { placementGate = "native_bucket_target_mismatch"; return; }
+        } else if (!matchesPlacement(hit)) { placementGate = "native_ray_not_on_placement_face"; return; }
         InteractionHand hand = preparation.hand();
         if (!context.player().getItemInHand(hand).is(plan.kind().item)) { fail("prepared landing item left the selected hand"); return; }
         int count = context.player().getItemInHand(hand).getCount();
@@ -486,6 +486,33 @@ public final class LandingAssistSession {
     }
     private boolean matchesPlacement(BlockHitResult hit) {
         return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(plan.clicked()) && hit.getDirection() == plan.face();
+    }
+    private boolean acceptWaterHit(LocalPlayerContext context, BlockHitResult hit) {
+        if (hit.getType() != HitResult.Type.BLOCK) return false;
+        var water = org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.waterCell(context.level(),hit,false);
+        if (water.equals(plan.cell())) { // Waterlogging accepts every native hit face.
+            plan = new LandingAssistPlan(plan.kind(),plan.feet(),water,hit.getBlockPos(),hit.getDirection(),false,hit.getLocation());
+            return true;
+        }
+        var feet = plan.feet();
+        var plantTop = org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.exposedWaterCell(context.level(),feet);
+        if (water.getX() != feet.getX() || water.getZ() != feet.getZ()
+                || water.getY() < feet.getY()-1 || water.getY() > plantTop.getY()
+                || EmbeddedBaritonePolicy.protects(water)
+                || !LandingAssistPlan.canPlace(LandingAssistPlan.Kind.WATER,context.level(),water)) return false;
+        for (int y=feet.getY();water.getY() >= feet.getY() && y<plantTop.getY();y++)
+            if (EmbeddedBaritonePolicy.protects(new BlockPos(feet.getX(),y,feet.getZ()))) return false;
+        var actual = new LandingAssistPlan(LandingAssistPlan.Kind.WATER,feet,water,hit.getBlockPos(),hit.getDirection(),false,hit.getLocation());
+        if (!LandingAssistGeometry.safe(context.level(),context.level()::isLoaded,actual,
+                context.player().getBbWidth(),Math.max(1.8,context.player().getBbHeight()),
+                EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) return false;
+        plan = actual; // Bind the actual native water cell before submitting the one owned use.
+        return true;
+    }
+    private void refreshWaterAim(LocalPlayerContext context) {
+        if (plan.kind() != LandingAssistPlan.Kind.WATER || plan.existing() || submitted) return;
+        var hit = org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.floorHit(context.level(),plan.feet(),context.player().getEyePosition());
+        if (hit != null) acceptWaterHit(context,hit);
     }
     private BlockHitResult trace(LocalPlayerContext c, boolean pickup) {
         Vec3 eye = c.player().getEyePosition();

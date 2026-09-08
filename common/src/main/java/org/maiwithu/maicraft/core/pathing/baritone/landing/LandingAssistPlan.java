@@ -21,7 +21,10 @@ import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
 
 /** Logical native landing mechanism, never a claim that a held item has already prevented damage. */
 public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPos clicked,
-                                Direction face, boolean existing) {
+                                Direction face, boolean existing, Vec3 hitPoint) {
+    public LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPos clicked, Direction face, boolean existing) {
+        this(kind,feet,cell,clicked,face,existing,null);
+    }
     public LandingAssistPlan {
         feet = feet.immutable(); cell = cell.immutable(); clicked = clicked.immutable();
     }
@@ -43,11 +46,12 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
     }
 
     public Vec3 aimPoint() {
-        return Vec3.atCenterOf(clicked).add(Vec3.atLowerCornerOf(face.getNormal()).scale(0.5));
+        return hitPoint != null ? hitPoint : Vec3.atCenterOf(clicked).add(Vec3.atLowerCornerOf(face.getNormal()).scale(0.5));
     }
 
     /** Native outline height of the face used by the bucket, including plants and partial blocks. */
     public double placementHeight(BlockGetter view) {
+        if (hitPoint != null) return hitPoint.y;
         var shape = view.getBlockState(clicked).getShape(view,clicked);
         if (shape.isEmpty()) return Double.NaN;
         return clicked.getY() + switch (face) {
@@ -113,19 +117,26 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
 
         private static LandingAssistPlan waterPlan(BlockGetter view, BlockPos feet,
                 Predicate<BlockPos> protectedCell, boolean carried) {
-            BlockPos source = WaterBucketFall.exposedWaterCell(view,feet);
+            BlockPos plantTop = WaterBucketFall.exposedWaterCell(view,feet);
+            BlockPos source = plantTop;
             BlockPos clicked = source.below();
             if (WaterBucketFall.sourceWater(view.getBlockState(source)))
                 return new LandingAssistPlan(Kind.WATER,feet,source,clicked,Direction.UP,true);
+            var floorHit = WaterBucketFall.floorHit(view,feet,Vec3.atBottomCenterOf(feet.above(4)));
+            if (floorHit != null) {
+                source = WaterBucketFall.waterCell(view,floorHit,false); clicked = floorHit.getBlockPos();
+            }
             if (source.equals(feet) && WaterBucketFall.acceptsWater(view,clicked)) source = clicked;
             if (WaterBucketFall.sourceWater(view.getBlockState(source)))
                 return new LandingAssistPlan(Kind.WATER,feet,source,clicked,Direction.UP,true);
             if (!carried || protectedCell.test(source) || !canPlace(Kind.WATER,view,source)) return null;
             // Replacing/flowing through one half of a tall plant can remove its paired half.
             // Keep the whole observed plant column under the same terrain authorization.
-            for (int y=feet.getY();y<source.getY();y++)
+            for (int y=feet.getY();source.getY() >= feet.getY() && y<plantTop.getY();y++)
                 if (protectedCell.test(new BlockPos(feet.getX(),y,feet.getZ()))) return null;
-            return new LandingAssistPlan(Kind.WATER,feet,source,clicked,Direction.UP,false);
+            return new LandingAssistPlan(Kind.WATER,feet,source,clicked,
+                    floorHit == null ? Direction.UP : floorHit.getDirection(),false,
+                    floorHit == null ? null : floorHit.getLocation());
         }
 
         /** Carried aids come first; missing supplies remain conditional plans, never inventory evidence. */

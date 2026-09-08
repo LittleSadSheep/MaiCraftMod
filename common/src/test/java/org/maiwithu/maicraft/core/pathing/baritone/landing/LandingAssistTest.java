@@ -87,9 +87,9 @@ public final class LandingAssistTest {
         scene.blocks.clear();
         scene.blocks.put(BlockPos.ZERO, Blocks.SHORT_GRASS.defaultBlockState());
         check(all.plans(scene, BlockPos.ZERO, pos -> false).stream().anyMatch(plan ->
-                        plan.kind() == LandingAssistPlan.Kind.WATER && plan.clicked().equals(BlockPos.ZERO)
-                                && plan.cell().equals(BlockPos.ZERO.above())),
-                "grass uses its native outline as the bucket target and places source water above it");
+                        plan.kind() == LandingAssistPlan.Kind.WATER && plan.clicked().equals(BlockPos.ZERO.below())
+                                && plan.cell().equals(BlockPos.ZERO)),
+                "an exposed floor face lets the native bucket replace grass in its own cell");
         var young = Blocks.SWEET_BERRY_BUSH.defaultBlockState();
         var grown = young.setValue(BlockStateProperties.AGE_3, 1);
         check(LandingAssistPlan.existingSafe(LandingAssistPlan.Kind.BERRIES, young)
