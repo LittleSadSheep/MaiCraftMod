@@ -23,7 +23,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -39,7 +38,6 @@ public final class IntentRuntime {
 
     private static final int MAX_PLANS = 128;
     private static final int MAX_TASKS = 256;
-    private static final int MAX_ATTENTION = 256;
     private static final int MAX_REQUEST_KEYS = 512;
     private static final int MAX_LANDMARKS = 256;
     private static final int MAX_ATTENTION_ARRAY = 12;
@@ -635,7 +633,15 @@ public final class IntentRuntime {
     }
 
     public JsonObject attention(long afterCursor, int limit) {
-        return attention.read(afterCursor, limit);
+        return attention(afterCursor, limit, null, null);
+    }
+
+    public JsonObject attention(long afterCursor, int limit, String streamId, UUID taskId) {
+        return attention.read(afterCursor, limit, streamId, taskId);
+    }
+
+    public JsonObject attentionCheckpoint() {
+        return attention.checkpoint();
     }
 
     public AutoCloseable subscribeAttention(Consumer<JsonElement> listener) {
@@ -868,69 +874,4 @@ public final class IntentRuntime {
         }
     }
 
-    private static final class AttentionFeed {
-        private final List<AttentionEvent> events = new ArrayList<>();
-        private final CopyOnWriteArrayList<Consumer<JsonElement>> listeners = new CopyOnWriteArrayList<>();
-        private long cursor;
-
-        void publish(String type, UUID taskId, String message, JsonObject data) {
-            AttentionEvent event = new AttentionEvent(
-                    ++cursor, type, taskId, message, data == null ? "{}" : data.toString());
-            events.add(event);
-            while (events.size() > MAX_ATTENTION) events.removeFirst();
-            JsonObject snapshot = read(Math.max(0, cursor - 1), 1);
-            for (Consumer<JsonElement> listener : listeners) {
-                try {
-                    listener.accept(snapshot.deepCopy());
-                } catch (RuntimeException ignored) {
-                    // One failed MCP subscriber must never break task settlement.
-                }
-            }
-        }
-
-        JsonObject read(long afterCursor, int limit) {
-            JsonArray array = new JsonArray();
-            int start = afterCursor == 0 ? Math.max(0, events.size() - limit) : 0;
-            for (int index = start; index < events.size(); index++) {
-                AttentionEvent event = events.get(index);
-                if (event.cursor() <= afterCursor) continue;
-                array.add(event.toJson());
-                if (array.size() >= limit) break;
-            }
-            JsonObject result = new JsonObject();
-            result.addProperty("cursor", cursor);
-            result.add("events", array);
-            return result;
-        }
-
-        AutoCloseable subscribe(Consumer<JsonElement> listener) {
-            listeners.add(listener);
-            return new AutoCloseable() {
-                private boolean closed;
-                @Override
-                public synchronized void close() {
-                    if (closed) return;
-                    closed = true;
-                    listeners.remove(listener);
-                }
-            };
-        }
-
-        void clear() {
-            events.clear();
-        }
-    }
-
-    private record AttentionEvent(long cursor, String type, UUID taskId,
-                                  String message, String dataJson) {
-        JsonObject toJson() {
-            JsonObject result = new JsonObject();
-            result.addProperty("cursor", cursor);
-            result.addProperty("type", type);
-            if (taskId != null) result.addProperty("task_id", taskId.toString());
-            result.addProperty("message", message == null ? "" : message);
-            result.add("data", JsonParser.parseString(dataJson));
-            return result;
-        }
-    }
 }

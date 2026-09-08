@@ -107,3 +107,13 @@ tasks.register('knowledgeRegression', JavaExec) {
 }
 
 tasks.named('check') { dependsOn tasks.named('knowledgeRegression') }
+
+tasks.register('attentionRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks attention delivery, task state and event-driven waiting.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.maiwithu.maicraft.intent.AttentionFeedTest'
+    timeout = java.time.Duration.ofSeconds(45)
+}
+tasks.named('check') { dependsOn tasks.named('attentionRegression') }
