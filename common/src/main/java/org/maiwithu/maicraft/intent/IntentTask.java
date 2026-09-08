@@ -97,6 +97,11 @@ final class IntentTask implements Task {
             wait = null;
             return failStep(TaskState.FAILED,
                     TaskResult.fail("semantic step failed safely: " + safeMessage(failure)));
+        } finally {
+            // Polling sees the actual active child, not an inferred phase from the semantic goal.
+            // Diagnostic failures must never interrupt physical work or replace its real result.
+            try { record.observeExecution(progress(), player.level().getGameTime()); }
+            catch (RuntimeException ignoredDiagnosticFailure) { }
         }
     }
 
@@ -1089,5 +1094,12 @@ final class IntentTask implements Task {
     @Override
     public String name() {
         return "intent";
+    }
+
+    @Override
+    public Map<String, Object> progress() {
+        if (child != null) return sanitizeMap(child.progress());
+        return Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"
+                : wait != null ? "waiting_for_condition" : "preparing_step");
     }
 }

@@ -2616,6 +2616,26 @@ public final class SemanticAcquireCompanionTask
     }
 
     @Override
+    public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("task", name());
+        data.put("phase", activeChild == null ? "planning_acquisition" : "acquiring");
+        Need need = activeNeed == null ? needs.peek() : activeNeed;
+        if (need != null) {
+            data.put("required_final_count", need.requiredFinalCount);
+            if (need.lastObservedCount >= 0) data.put("observed_count", need.lastObservedCount);
+            data.put("acceptable_item_count", need.itemIds.size());
+            if (need.itemIds.size() == 1) data.put("item_id", need.itemIds.getFirst().toString());
+        }
+        if (activeChild != null) {
+            if (activeSource != null) data.put("source", activeSource.name().toLowerCase(java.util.Locale.ROOT));
+            data.put("child", activeChild.progress());
+        }
+        data.put("completed_attempt_count", attempts.size());
+        return Map.copyOf(data);
+    }
+
+    @Override
     protected void cleanup() {
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);

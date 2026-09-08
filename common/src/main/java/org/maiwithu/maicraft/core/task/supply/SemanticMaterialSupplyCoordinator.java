@@ -122,6 +122,19 @@ public final class SemanticMaterialSupplyCoordinator {
         return child != null || pendingReceipt != null || returnNavigation != null;
     }
 
+    public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("phase", child != null ? "acquiring_material" : "returning_to_work_site");
+        if (demand != null) {
+            data.put("required_final_count", demand.requiredFinalCount());
+            data.put("acceptable_item_count", demand.acceptableItemIds().size());
+            if (demand.acceptableItemIds().size() == 1)
+                data.put("item_id", demand.acceptableItemIds().getFirst().toString());
+        }
+        if (child != null) data.put("child", child.progress());
+        return Map.copyOf(data);
+    }
+
     public long childDeadline() {
         return childRecord == null
                 ? childDeadline

@@ -18,6 +18,7 @@ import java.util.UUID;
 public final class IntentTaskRecord extends TaskRecord {
 
     private static final int MAX_ATTEMPTS = 64;
+    private static final com.google.gson.Gson PROGRESS_JSON = new com.google.gson.Gson();
 
     private final UUID externalId;
     private final UUID planId;
@@ -40,6 +41,8 @@ public final class IntentTaskRecord extends TaskRecord {
     private TerminalSnapshot terminal;
     private boolean restoredDetached;
     private Runnable dirty = () -> {};
+    /** Live diagnostics only; neither task/world references nor stale restored progress are retained. */
+    private JsonObject activeExecution;
 
     public IntentTaskRecord(UUID externalId, UUID planId, Goal goal) {
         this(externalId, planId, goal, null);
@@ -131,6 +134,15 @@ public final class IntentTaskRecord extends TaskRecord {
     public boolean paused() { return pause != null; }
     public String bindingKey() { return bindingKey; }
     public boolean restoredDetached() { return restoredDetached; }
+
+    public JsonObject activeExecution() {
+        return activeExecution == null ? null : activeExecution.deepCopy();
+    }
+
+    void observeExecution(Map<String, Object> progress, long gameTime) {
+        activeExecution = PROGRESS_JSON.toJsonTree(progress).getAsJsonObject();
+        activeExecution.addProperty("observed_game_time", gameTime);
+    }
 
     void bindDirty(Runnable dirty) {
         this.dirty = dirty == null ? () -> {} : dirty;

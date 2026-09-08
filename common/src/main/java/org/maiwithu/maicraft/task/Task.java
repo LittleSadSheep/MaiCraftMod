@@ -82,6 +82,11 @@ public interface Task {
     /** 给日志和面板看的短名。 */
     String name();
 
+    /** Read-only live work evidence; keep values bounded and omit planned coordinates/actions. */
+    default java.util.Map<String, Object> progress() {
+        return java.util.Map.of("task", name());
+    }
+
     /** 丢掉身体的原因。 */
     enum StopReason {
         /** 被更高层抢占(反射插进来 / 同步动作插进来)——任务状态留着,之后接着跑。 */

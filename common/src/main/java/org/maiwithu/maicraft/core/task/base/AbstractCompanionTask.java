@@ -359,4 +359,10 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     public String name() {
         return getClass().getSimpleName();
     }
+
+    @Override
+    public Map<String, Object> progress() {
+        return child == null ? Map.of("task", name())
+                : Map.of("task", name(), "child", child.progress());
+    }
 }
