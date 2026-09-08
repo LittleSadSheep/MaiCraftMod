@@ -54,10 +54,8 @@ public final class BoatLandingAssistTest {
         check(BoatLandingAssist.placementEvidence(Set.of(old), List.of(created), 1, 0, false).uuid().equals(created), "unique native entity plus consumption confirms identity");
         check(BoatLandingAssist.placementEvidence(Set.of(old), List.of(created, UUID.randomUUID()), 1, 0, false).verdict() == NativeConfirmation.Verdict.DIVERGED,
                 "ambiguous concurrent spawns must not assign ownership");
-        check(BoatLandingGeometry.timeForActions(3, -0.1, 0.01, 0, 2), "slow fall can leave an actual placement and mount window");
-        check(!BoatLandingGeometry.timeForActions(2, -2, 0.08, 0, 1), "fast high fall has no assumed last-frame boat clutch");
-        check(!BoatLandingGeometry.timeForActions(3, -0.1, 0.01, 1000, 2), "observed connection latency consumes the action window");
-        check(!BoatLandingGeometry.timeForActions(3, -0.1, 0.01, -1, 2), "unknown latency does not mean instantaneous confirmation");
+        check(snapshot.airborneWindow(4,.08,0),"a planned short descent has native spawn and mount steps");
+        check(!snapshot.airborneWindow(200,.08,0),"a planned fatal leap cannot assume instant boat creation and boarding");
         check(BoatLandingRecovery.capacity(net.minecraft.world.item.ItemStack.EMPTY, new net.minecraft.world.item.ItemStack(Items.OAK_BOAT)),
                 "empty main-inventory slot can receive the native boat drop");
         check(!BoatLandingRecovery.capacity(new net.minecraft.world.item.ItemStack(Items.OAK_BOAT), new net.minecraft.world.item.ItemStack(Items.OAK_BOAT)),

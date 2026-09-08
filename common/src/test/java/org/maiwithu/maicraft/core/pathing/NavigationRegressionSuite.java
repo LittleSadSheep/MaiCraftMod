@@ -68,6 +68,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.integration.create.elevator.ElevatorRemoteStagingTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssistTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.landing.BoatCatchReplayTest.main(args);
         org.maiwithu.maicraft.client.actor.NativeConfirmationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest.main(args);
         org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeightTest.main(args);

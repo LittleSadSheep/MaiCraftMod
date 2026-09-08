@@ -21,7 +21,14 @@ final class BoatLandingGeometry {
         double height = CollisionGeometry.supportHeight(view, landing.below());
         if (!Double.isFinite(height)) return null;
         Vec3 spawn = new Vec3(landing.getX()+0.5, landing.getY()-1+height, landing.getZ()+0.5);
-        return hazard(view.getBlockState(landing.below())) ? null : spawn;
+        return safeFloor(view,landing.below(),height) ? spawn : null;
+    }
+    private static boolean safeFloor(BlockGetter view, BlockPos pos, double height) {
+        var state=view.getBlockState(pos);
+        if(state.getFluidState().getType() instanceof net.minecraft.world.level.material.WaterFluid
+                && height>state.getFluidState().getHeight(view,pos)+.0001)
+            state=org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.dryGeometry(state);
+        return !hazard(state);
     }
     static boolean placeable(BlockGetter view, Predicate<BlockPos> loaded, Vec3 eye, Vec3 spawn) {
         if (!clear(view, loaded, boatBox(spawn))) return false;
@@ -71,24 +78,11 @@ final class BoatLandingGeometry {
                      double width, double height, float yaw) {
         Vec3 at = spawn.add(dismountOffset(boatWidth, width, yaw));
         BlockPos floor = BlockPos.containing(at.x, at.y-0.01, at.z);
-        if (!loaded.test(floor) || hazard(view.getBlockState(floor))) return null;
+        if (!loaded.test(floor)) return null;
         double top = CollisionGeometry.supportHeight(view, floor);
-        if (!Double.isFinite(top) || Math.abs(floor.getY()+top-at.y) > 0.01) return null;
+        if (!Double.isFinite(top) || !safeFloor(view,floor,top) || Math.abs(floor.getY()+top-at.y) > 0.01) return null;
         return clear(view, loaded, new AABB(at.x-width/2, at.y+0.001, at.z-width/2,
                 at.x+width/2, at.y+height, at.z+width/2)) ? at : null;
-    }
-    /** Conservative discrete native gravity estimate; unknown latency/physics never creates a window. */
-    static boolean timeForActions(double feetAboveBoat, double velocityY, double gravity, int pingMillis, int actions) {
-        if (!Double.isFinite(feetAboveBoat) || !Double.isFinite(velocityY) || !Double.isFinite(gravity)
-                || gravity <= 0 || velocityY > 0 || pingMillis < 0 || actions < 1) return false;
-        int required = actions * (2 + (int)Math.ceil(pingMillis/50.0)) + 3;
-        double height = feetAboveBoat, speed = velocityY;
-        for (int tick=0; tick<=required; tick++) {
-            height += speed;
-            if (height <= 0.1) return false;
-            speed = (speed-gravity)*0.98;
-        }
-        return true;
     }
     private static boolean loadedRay(Predicate<BlockPos> loaded, Vec3 from, Vec3 to) {
         int count = Math.max(1, (int)Math.ceil(from.distanceTo(to)*4));

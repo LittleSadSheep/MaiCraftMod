@@ -5,16 +5,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
@@ -29,7 +25,7 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 public final class BoatLandingAssist {
     public enum State { RUNNING, SETTLED, FAILED }
     private enum Phase { ITEM, PLACE, MOUNT, RIDING, DISMOUNT, RECOVER, DONE }
-    private final BoatLandingSnapshot.Plan plan;
+    private BoatLandingSnapshot.Plan plan;
     private final LandingPreparation preparation;
     private final boolean recoverCreatedBoat;
     private BoatLandingRecovery recovery;
@@ -46,6 +42,7 @@ public final class BoatLandingAssist {
     private InteractionHand hand = InteractionHand.MAIN_HAND;
     private Set<UUID> beforeBoats = Set.of();
     private int beforeItems;
+    private int placementSubmissions, mountSubmissions;
 
     public BoatLandingAssist(BoatLandingSnapshot.Plan plan) {
         this(plan, true);
@@ -65,13 +62,13 @@ public final class BoatLandingAssist {
         if (spawn == null || !BoatLandingGeometry.hasExit(ctx.level(), ctx.level()::isLoaded, spawn,
                 ctx.player().getBbWidth(), ctx.player().getBbHeight())) return null;
         for (var boat : snapshot.boats()) {
-            if (boat.position().distanceToSqr(spawn) < 0.25 && enoughTime(ctx, spawn, 1)) {
+            if (boat.position().distanceToSqr(spawn) < 0.25) {
                 return new BoatLandingSnapshot.Plan(snapshot.source(), landing, null, boat.uuid(), boat.position(), true);
             }
         }
         Item item = BoatLandingSnapshot.plainBoat(ctx.player().getMainHandItem().getItem()) ? ctx.player().getMainHandItem().getItem()
                 : BoatLandingSnapshot.plainBoat(ctx.player().getOffhandItem().getItem()) ? ctx.player().getOffhandItem().getItem() : null;
-        if (item == null || !enoughTime(ctx, spawn, 2) || snapshot.eye().distanceTo(spawn) > snapshot.blockReach()
+        if (item == null || snapshot.eye().distanceTo(spawn) > snapshot.blockReach()
                 || !BoatLandingGeometry.placeable(ctx.level(), ctx.level()::isLoaded, snapshot.eye(), spawn)) return null;
         return new BoatLandingSnapshot.Plan(snapshot.source(), landing, item, null, spawn, true);
     }
@@ -108,13 +105,8 @@ public final class BoatLandingAssist {
                 }
                 hand = preparation.hand();
             } else {
-                preparation.closeForFailure(ctx);
-                if (preparation.cleanupPending()) return State.RUNNING;
-                if (!org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(ctx.minecraft().screen))
-                    return fail("owned inventory closure is uncertain; airborne boat use cannot proceed through a GUI");
-                if (ctx.player().getMainHandItem().is(plan.item())) hand = InteractionHand.MAIN_HAND;
-                else if (ctx.player().getOffhandItem().is(plan.item())) hand = InteractionHand.OFF_HAND;
-                else return fail("airborne boat placement requires the boat already in hand");
+                if (!preparation.tickEmergency(ctx)) return preparation.failed() ? fail(preparation.diagnostic()) : State.RUNNING;
+                hand=preparation.hand();
             }
             phase = Phase.PLACE;
         }
@@ -123,15 +115,19 @@ public final class BoatLandingAssist {
         if (boat == null) return fail("observed landing boat disappeared");
         aim = boat.getBoundingBox().getCenter();
         if (phase == Phase.MOUNT) {
-            if (!BoatLandingSnapshot.stationary(boat) || !boat.getPassengers().isEmpty()) return fail("landing boat is moving, falling or occupied");
+            if (!supported(ctx,boat) || !boat.getPassengers().isEmpty()) return fail("landing boat is moving, falling or occupied");
             if (!stable(ctx, boat)) return State.RUNNING;
-            if (!ctx.player().onGround() && !enoughTime(ctx, boat.position(), 1)) return fail("insufficient native mount window; retain fallback landing");
-            look(ctx, aim);
+            if (!ctx.player().onGround() && (boat.getBoundingBox().distanceToSqr(ctx.player().getEyePosition())
+                    > ctx.player().entityInteractionRange()*ctx.player().entityInteractionRange()
+                    || boat.getBoundingBox().clip(ctx.player().getEyePosition(),ctx.player().getEyePosition().add(0,-ctx.player().entityInteractionRange(),0)).isPresent()))
+                down(ctx);
+            else look(ctx, aim);
             if (!targeted(ctx, boat) || !ctx.mutationAvailable()) return State.RUNNING;
             if (ctx.player().isShiftKeyDown()) return State.RUNNING;
             effects = true;
-            receipt = ctx.actions().interact(ctx, boat, hand, live -> boatId.equals(vehicleId(live.player()))
-                    ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING, 30);
+            mountSubmissions++;
+            receipt = ctx.actions().interact(ctx, boat, hand, NativeConfirmation.serverObservedEntity(live -> boatId.equals(vehicleId(live.player()))
+                    ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING), 30);
             return State.RUNNING;
         }
         if (phase == Phase.RIDING) {
@@ -172,18 +168,26 @@ public final class BoatLandingAssist {
         return State.RUNNING;
     }
     private State place(LocalPlayerContext ctx) {
-        aim = plan.spawn(); look(ctx, aim);
-        if (!ctx.player().onGround() && !enoughTime(ctx, plan.spawn(), 2)) return fail("insufficient placement/spawn/mount window; retain fallback landing");
+        aim = plan.spawn();
+        if(ctx.player().onGround()) look(ctx,aim); else down(ctx);
+        if (ctx.player().getEyePosition().distanceTo(plan.spawn())>ctx.player().blockInteractionRange()) return State.RUNNING;
         if (!BoatLandingGeometry.placeable(ctx.level(), ctx.level()::isLoaded, ctx.player().getEyePosition(), plan.spawn())) return fail("boat POV placement corridor changed");
         var hit = ctx.level().clip(new net.minecraft.world.level.ClipContext(ctx.player().getEyePosition(),
                 ctx.player().getEyePosition().add(ctx.player().getViewVector(1).scale(ctx.player().blockInteractionRange())),
                 net.minecraft.world.level.ClipContext.Block.OUTLINE, net.minecraft.world.level.ClipContext.Fluid.ANY, ctx.player()));
-        if (hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK || hit.getLocation().distanceToSqr(plan.spawn()) > 0.0025) return State.RUNNING;
+        if (hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK || hit.getDirection()!=net.minecraft.core.Direction.UP
+                || !hit.getBlockPos().equals(plan.landing().below()) || Math.abs(hit.getLocation().y-plan.spawn().y)>.01
+                || hit.getLocation().x<plan.landing().getX() || hit.getLocation().x>plan.landing().getX()+1
+                || hit.getLocation().z<plan.landing().getZ() || hit.getLocation().z>plan.landing().getZ()+1) return State.RUNNING;
+        if (!BoatLandingGeometry.clear(ctx.level(),ctx.level()::isLoaded,BoatLandingGeometry.boatBox(hit.getLocation()))
+                || !BoatLandingGeometry.hasExit(ctx.level(),ctx.level()::isLoaded,hit.getLocation(),ctx.player().getBbWidth(),ctx.player().getBbHeight(),ctx.player().getYRot())) return State.RUNNING;
+        plan=new BoatLandingSnapshot.Plan(plan.source(),plan.landing(),plan.item(),plan.existingBoat(),hit.getLocation(),plan.airborne());
         if (!ctx.level().noCollision(null, BoatLandingGeometry.boatBox(plan.spawn())) || !ctx.mutationAvailable()) return State.RUNNING;
         beforeBoats = new HashSet<>();
         for (Boat boat : ctx.level().getEntitiesOfClass(Boat.class, BoatLandingGeometry.boatBox(plan.spawn()).inflate(2))) beforeBoats.add(boat.getUUID());
         beforeItems = count(ctx.player(), plan.item()); effects = true;
-        receipt = ctx.actions().useItem(ctx, hand, this::observePlacement, 30);
+        placementSubmissions++;
+        receipt = ctx.actions().useItem(ctx, hand, NativeConfirmation.serverObservedEntity(this::observePlacement), 30);
         return State.RUNNING;
     }
     private NativeConfirmation.Verdict observePlacement(LocalPlayerContext ctx) {
@@ -204,28 +208,27 @@ public final class BoatLandingAssist {
     }
     private Boat find(LocalPlayerContext ctx) {
         if (boatId == null) return null;
-        for (Entity entity : ctx.level().entitiesForRendering()) if (boatId.equals(entity.getUUID()) && entity instanceof Boat boat) return boat;
+        for (Boat boat : ctx.level().getEntitiesOfClass(Boat.class,BoatLandingGeometry.boatBox(plan.spawn()).inflate(3)))
+            if (boatId.equals(boat.getUUID())) return boat;
         return null;
     }
     private boolean stable(LocalPlayerContext ctx, Boat boat) {
-        if (!BoatLandingSnapshot.stationary(boat)) { stableTicks = 0; return false; }
+        if (!supported(ctx,boat)) { stableTicks = 0; return false; }
         if (stableTick != ctx.tickRevision()) { stableTick = ctx.tickRevision(); stableTicks++; }
-        return stableTicks >= 2;
+        return !ctx.player().onGround() || stableTicks >= 2;
+    }
+    private boolean supported(LocalPlayerContext ctx, Boat boat) {
+        if (BoatLandingSnapshot.stationary(boat)) return true;
+        var floor=BoatLandingGeometry.support(ctx.level(),ctx.level()::isLoaded,plan.landing());
+        return boat.isAlive() && !boat.isInWater() && boat.fallDistance<=.01F
+                && boat.getDeltaMovement().lengthSqr()<.0004 && floor!=null && boat.position().distanceToSqr(floor)<.0001;
     }
     private static boolean targeted(LocalPlayerContext ctx, Boat boat) {
-        return ctx.player().canInteractWithEntity(boat, 0) && ctx.minecraft().hitResult instanceof EntityHitResult hit
-                && hit.getEntity().getUUID().equals(boat.getUUID())
+        var eye=ctx.player().getEyePosition(); var reach=ctx.player().getViewVector(1).scale(ctx.player().entityInteractionRange());
+        var hit=net.minecraft.world.entity.projectile.ProjectileUtil.getEntityHitResult(ctx.player(),eye,eye.add(reach),
+                ctx.player().getBoundingBox().expandTowards(reach).inflate(1), entity -> !entity.isSpectator() && entity.isPickable(),reach.lengthSqr());
+        return ctx.player().canInteractWithEntity(boat, 0) && hit!=null && hit.getEntity().getUUID().equals(boat.getUUID())
                 && BoatLandingGeometry.visible(ctx.level(), ctx.level()::isLoaded, ctx.player().getEyePosition(), boat.getBoundingBox().getCenter());
-    }
-    private static boolean enoughTime(LocalPlayerContext ctx, Vec3 spawn, int actions) {
-        var info = ctx.connection().getPlayerInfo(ctx.player().getUUID());
-        int ping = info == null ? -1 : info.getLatency();
-        double gravity = ctx.player().getAttributeValue(Attributes.GRAVITY);
-        var slow = ctx.player().getEffect(net.minecraft.world.effect.MobEffects.SLOW_FALLING);
-        int needed = actions * (2 + (int)Math.ceil(Math.max(0,ping)/50.0)) + 3;
-        if (slow != null && (slow.isInfiniteDuration() || slow.getDuration() > needed)) gravity = Math.min(gravity,0.01);
-        return BoatLandingGeometry.timeForActions(ctx.player().getY()-spawn.y-0.5625,
-                ctx.player().getDeltaMovement().y, gravity, ping, actions);
     }
     private static int count(LocalPlayer player, Item item) {
         int count = 0;
@@ -235,8 +238,15 @@ public final class BoatLandingAssist {
     private static UUID vehicleId(LocalPlayer player) { return player.getVehicle() == null ? null : player.getVehicle().getUUID(); }
     private static void look(LocalPlayerContext ctx, Vec3 point) {
         Vec3 d = point.subtract(ctx.player().getEyePosition());
-        ctx.body().requestLook((float)(Math.toDegrees(Math.atan2(d.z,d.x))-90),
-                (float)-Math.toDegrees(Math.atan2(d.y,Math.hypot(d.x,d.z))), ctx.tickRevision());
+        float yaw=Math.hypot(d.x,d.z)<.001 ? ctx.player().getYRot() : (float)(Math.toDegrees(Math.atan2(d.z,d.x))-90);
+        float pitch=(float)-Math.toDegrees(Math.atan2(d.y,Math.hypot(d.x,d.z)));
+        if(!ctx.player().onGround() && d.length()<=ctx.player().blockInteractionRange()) ctx.body().requestImmediateLook(yaw,pitch,ctx.tickRevision());
+        else ctx.body().requestLook(yaw,pitch,ctx.tickRevision());
+    }
+    private void down(LocalPlayerContext ctx) {
+        if(ctx.player().getEyePosition().y-plan.spawn().y<=ctx.player().blockInteractionRange())
+            ctx.body().requestImmediateLook(ctx.player().getYRot(),90,ctx.tickRevision());
+        else ctx.body().requestLook(ctx.player().getYRot(),90,ctx.tickRevision());
     }
     private State fail(String reason) { failed = true; detail = reason; return State.FAILED; }
     static boolean damageFree(float initialHealth, float initialAbsorption, float health, float absorption) {
@@ -276,11 +286,12 @@ public final class BoatLandingAssist {
     public Map<String,Object> diagnostics() {
         var result = new LinkedHashMap<String,Object>();
         result.put("phase", phase.name()); result.put("detail", detail); result.put("created_this_session", owned);
+        result.put("placement_submissions",placementSubmissions); result.put("mount_submissions",mountSubmissions);
         result.put("left_in_world", phase == Phase.DONE && (recovery == null || recovery.boatLeft()));
         result.put("item_recovered", recovery != null && recovery.recovered());
         result.put("boat_uuid", boatId == null ? "unconfirmed" : boatId.toString()); result.put("airborne_opportunity", plan.airborne());
         result.put("ready", ready); result.put("effects_started", effects);
-        result.put("limits", "stationary landing boat; native reach/POV; measured ping is an estimate, not a latency guarantee; no falling-boat immunity assumed");
+        result.put("limits", "native reach, geometry and observed spawn/mount state; no falling-boat immunity assumed");
         return result;
     }
 }

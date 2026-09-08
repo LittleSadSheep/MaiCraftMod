@@ -172,7 +172,7 @@ public final class WaterLandingReplayTest {
             var body = (org.maiwithu.maicraft.client.actor.BodyControlPort) Proxy.newProxyInstance(
                     org.maiwithu.maicraft.client.actor.BodyControlPort.class.getClassLoader(),
                     new Class<?>[]{org.maiwithu.maicraft.client.actor.BodyControlPort.class}, (proxy, method, args) -> {
-                        if (method.getName().equals("requestLook")) { player.setYRot((Float) args[0]); player.setXRot((Float) args[1]); }
+                        if (method.getName().equals("requestLook") || method.getName().equals("requestImmediateLook")) { player.setYRot((Float) args[0]); player.setXRot((Float) args[1]); }
                         if (method.getName().equals("applySteering")) {
                             bodyWrites++; steering = ((org.maiwithu.maicraft.client.actor.BodyControlPort.Steering) args[0]).atYaw((Float) args[1]);
                         }
@@ -232,6 +232,8 @@ public final class WaterLandingReplayTest {
         }
     }
     static final class TestPlayer extends LocalPlayer {
+        public boolean isCreative() { return false; }
+        public boolean isSpectator() { return false; }
         public void awardStat(net.minecraft.stats.Stat<?> stat, int amount) { }
         public void playSound(net.minecraft.sounds.SoundEvent sound, float volume, float pitch) { }
         public boolean mayUseItemAt(BlockPos pos, Direction face, ItemStack stack) { return true; }
@@ -264,6 +266,17 @@ public final class WaterLandingReplayTest {
         }
     }
     static final class FlatLevel extends ClientLevel {
+        public boolean noCollision(net.minecraft.world.entity.Entity entity,net.minecraft.world.phys.AABB body) {
+            for(BlockPos pos:BlockPos.betweenClosed(BlockPos.containing(body.minX-1,body.minY-1,body.minZ-1),BlockPos.containing(body.maxX+1,body.maxY+1,body.maxZ+1)))
+                for(var shape:getBlockState(pos).getCollisionShape(this,pos).toAabbs())
+                    if(shape.move(pos).intersects(body)) return false;
+            return true;
+        }
+        public java.util.List<net.minecraft.world.entity.Entity> getEntities(net.minecraft.world.entity.Entity except,
+                net.minecraft.world.phys.AABB box,java.util.function.Predicate<? super net.minecraft.world.entity.Entity> predicate) {
+            return observedEntities==null ? java.util.List.of() : observedEntities.stream().filter(entity->entity!=except)
+                    .filter(entity->entity.getBoundingBox().intersects(box)).filter(predicate).toList();
+        }
         public boolean mayInteract(net.minecraft.world.entity.player.Player player, BlockPos pos) { return true; }
         public boolean setBlock(BlockPos pos, BlockState state, int flags) { scene.blocks.put(pos.immutable(),state); return true; }
         public void scheduleTick(BlockPos pos, net.minecraft.world.level.material.Fluid fluid, int delay) { }
