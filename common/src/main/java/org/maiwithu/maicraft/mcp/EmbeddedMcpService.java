@@ -299,8 +299,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
         result.add("capabilities", capabilities);
         result.add("serverInfo", serverInfo);
         result.addProperty("instructions",
-                "Use maicraft_perceive to understand the current situation, maicraft_plan to compile a goal, " +
-                "maicraft_execute to start it, and maicraft_task to inspect or control the returned task. " +
+                "Use perceive to understand the current situation, plan to compile a goal, " +
+                "execute to start it, and task to inspect or control the returned task. " +
                 "Execution is asynchronous. Subscribe to maicraft://attention for important events and decisions.");
         sendJson(exchange, 200, success(id, result), session);
     }

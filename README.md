@@ -34,14 +34,16 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 | 工具 | 用途 |
 | --- | --- |
-| `maicraft_perceive` | 读取游戏状态、能力契约、任务、地标和机器证据 |
-| `maicraft_plan` | 将语义目标编译为计划，但不立即执行 |
-| `maicraft_execute` | 启动语义目标或已编译计划，并返回任务 ID |
-| `maicraft_task` | 查询、暂停、恢复、取消任务，或回答任务提出的问题 |
+| `perceive` | 读取游戏状态、能力契约、任务、地标和机器证据 |
+| `plan` | 将语义目标编译为计划，但不立即执行 |
+| `execute` | 启动语义目标或已编译计划，并返回任务 ID |
+| `task` | 查询、暂停、恢复、取消任务，或回答任务提出的问题 |
 
-四个入口不等于只有四种功能。当前运行时注册了 32 项 `maicraft:*` 语义能力，包括 `inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `maicraft_plan` 或 `maicraft_execute`。
+以上是服务器在 MCP `tools/list` 中注册的名称；客户端可以附加服务器前缀来区分不同连接。旧版使用的 `maicraft_` 工具名前缀已移除，升级后请让客户端重新获取工具列表，并更新固定工具名配置。
 
-每项能力的参数和限制由 `maicraft_perceive(view="abilities")` 动态公开。AI 客户端应先读取能力契约，再提交目标，而不是猜测方块坐标、物品栏槽位或内部动作。
+四个入口不等于只有四种功能。当前运行时注册了 32 项 `maicraft:*` 语义能力，包括 `inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
+
+每项能力的参数和限制由 `perceive(view="abilities")` 动态公开。AI 客户端应先读取能力契约，再提交目标，而不是猜测方块坐标、物品栏槽位或内部动作。
 
 ## 快速开始
 
@@ -88,7 +90,7 @@ Linux 或 macOS 使用：
 http://127.0.0.1:8766/mcp
 ```
 
-4. 进入世界后，让 AI 客户端先读取 `maicraft_perceive` 提供的能力，再开始任务。
+4. 进入世界后，让 AI 客户端先读取 `perceive` 提供的能力，再开始任务。
 
 默认服务只监听本机回环地址，但当前默认配置不启用 Bearer Token。**不要通过端口转发、反向代理或隧道将 `8766` 端口暴露给其他设备或公网。**
 

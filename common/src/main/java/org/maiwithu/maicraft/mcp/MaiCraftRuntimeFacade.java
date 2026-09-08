@@ -226,7 +226,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 boolean restoredDetached = record.restoredDetached();
                 if (!record.resume()) {
                     throw new IllegalStateException(record.decisionSnapshot() != null
-                            ? "task needs maicraft_task action=answer"
+                            ? "task needs task action=answer"
                             : "task cannot be resumed");
                 }
                 if (restoredDetached) {

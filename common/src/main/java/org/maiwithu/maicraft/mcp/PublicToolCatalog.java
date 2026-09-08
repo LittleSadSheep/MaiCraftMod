@@ -13,10 +13,10 @@ import java.util.regex.Pattern;
 
 /** Defines and validates the complete public MCP tool surface. */
 final class PublicToolCatalog {
-    static final String PERCEIVE = "maicraft_perceive";
-    static final String PLAN = "maicraft_plan";
-    static final String EXECUTE = "maicraft_execute";
-    static final String TASK = "maicraft_task";
+    static final String PERCEIVE = "perceive";
+    static final String PLAN = "plan";
+    static final String EXECUTE = "execute";
+    static final String TASK = "task";
 
     private static final Pattern RESOURCE_ID = Pattern.compile("^[a-z0-9_.-]+:[a-z0-9_./-]+$");
     private static final Pattern CANONICAL_UUID = Pattern.compile(
@@ -67,7 +67,7 @@ final class PublicToolCatalog {
                   "ability":{"type":"string","pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
                   "outcome":{"type":"string","minLength":1,"maxLength":500},
                   "target":{"anyOf":[{"$ref":"#/$defs/semanticTarget"},{"type":"null"}]},
-                  "parameters":{"type":"object","default":{},"description":"Only keys declared by the selected ability in maicraft_perceive(view=abilities) are accepted."},
+                  "parameters":{"type":"object","default":{},"description":"Only keys declared by the selected ability in perceive(view=abilities) are accepted."},
                   "preferences":{"type":"object","default":{},"description":"Must be empty unless the selected ability explicitly declares accepted_preferences."},
                   "constraints":{"type":"array","items":{"$ref":"#/$defs/constraint"},"maxItems":32,"default":[],"description":"Only parameter-free hard constraints explicitly declared by the selected ability are accepted."},
                   "children":{"type":"array","items":{"$ref":"#/$defs/goal"},"maxItems":32,"default":[],"description":"Ordered child outcomes; accepted only by maicraft:sequence."}

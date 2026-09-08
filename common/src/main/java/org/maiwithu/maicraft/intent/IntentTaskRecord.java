@@ -46,7 +46,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     IntentTaskRecord(UUID externalId, UUID planId, Goal goal, String bindingKey) {
-        super("maicraft_execute", "mcp-" + externalId, NO_DEADLINE);
+        super("execute", "mcp-" + externalId, NO_DEADLINE);
         this.externalId = Objects.requireNonNull(externalId, "externalId");
         this.planId = planId;
         this.goal = Objects.requireNonNull(goal, "goal");

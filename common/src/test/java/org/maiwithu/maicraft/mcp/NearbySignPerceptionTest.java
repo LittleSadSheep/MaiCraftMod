@@ -34,11 +34,11 @@ public final class NearbySignPerceptionTest {
                 "sign observation must retain its declared vertical bound");
         JsonObject request = new JsonObject();
         request.addProperty("view", "surroundings"); request.addProperty("focus", "充气");
-        check(PublicToolCatalog.validateAndNormalize("maicraft_perceive", request).get("focus").getAsString().equals("充气"),
+        check(PublicToolCatalog.validateAndNormalize("perceive", request).get("focus").getAsString().equals("充气"),
                 "the public tool contract must accept a literal Chinese sign query");
         request.addProperty("view", "abilities");
         try {
-            PublicToolCatalog.validateAndNormalize("maicraft_perceive", request);
+            PublicToolCatalog.validateAndNormalize("perceive", request);
             throw new AssertionError("ability filters must still use resource IDs");
         } catch (IllegalArgumentException expected) { }
         System.out.println("NearbySignPerceptionTest: passed");
