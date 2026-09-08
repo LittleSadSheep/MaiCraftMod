@@ -8,6 +8,7 @@ public final class GuiRegressionSuite {
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);
         BodyControlInputTest.main(args);
+        BodyCameraSmoothingTest.main(args);
         EquipRoutingTest.main(args);
         org.maiwithu.maicraft.intent.ExactInteractionTargetTest.main(args);
         org.maiwithu.maicraft.intent.ShipTravelContractTest.main(args);

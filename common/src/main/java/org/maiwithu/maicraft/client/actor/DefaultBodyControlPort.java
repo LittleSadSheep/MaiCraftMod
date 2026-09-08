@@ -341,16 +341,17 @@ public final class DefaultBodyControlPort implements BodyControlPort {
      * make the camera ring or overshoot, and bounds angular acceleration so big turns ramp
      * into and out of their cruise rate (an S-curve) instead of panning linearly.
      */
-    private static AxisStep smoothDampAngle(
+    static AxisStep smoothDampAngle(
             float current, float target, float velocity,
             float smoothTime, float maxSpeed, float dt) {
         float unwrappedTarget = current + Mth.wrapDegrees(target - current);
         return smoothDamp(current, unwrappedTarget, velocity, smoothTime, maxSpeed, dt);
     }
 
-    private static AxisStep smoothDamp(
+    static AxisStep smoothDamp(
             float current, float target, float velocity,
             float smoothTime, float maxSpeed, float dt) {
+        if (current == target) return new AxisStep(target, 0);
         float omega = 2.0f / Math.max(0.0001f, smoothTime);
         float x = omega * dt;
         float decay = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
@@ -372,10 +373,16 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         output = current + Mth.clamp(output - current, -maxStep, maxStep);
 
         float desiredDirection = adjustedTarget - current;
-        if ((desiredDirection > 0.0f && output > adjustedTarget)
-                || (desiredDirection < 0.0f && output < adjustedTarget)) {
+        if ((desiredDirection > 0.0f && output >= adjustedTarget)
+                || (desiredDirection < 0.0f && output <= adjustedTarget)) {
             output = adjustedTarget;
             nextVelocity = 0.0f;
+        } else if ((desiredDirection > 0 && output < current)
+                || (desiredDirection < 0 && output > current)) {
+            // A changed target can leave velocity pointing away from it. Do not drift
+            // past the current angle and then visibly reverse to find the target again.
+            output = current;
+            nextVelocity = 0;
         }
         return new AxisStep(output, nextVelocity);
     }
@@ -410,7 +417,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         }
     }
 
-    private record AxisStep(float value, float velocity) {}
+    record AxisStep(float value, float velocity) {}
 
     private static final float YAW_SMOOTH_TIME = 0.11f;
     private static final float PITCH_SMOOTH_TIME = 0.10f;

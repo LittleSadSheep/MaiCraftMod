@@ -361,8 +361,7 @@ public final class EmbeddedBaritoneRuntime {
         EmbeddedBaritonePolicy.clear();
         pendingPolicyOwner = null;
         pendingPolicyGoal = null;
-        courseCommitted = false;
-        courseTurning = false;
+        CAMERA_COURSE.reset();
         owner = null;
     }
 
@@ -390,8 +389,7 @@ public final class EmbeddedBaritoneRuntime {
         pendingPolicyGoal = null;
         pendingStart = null;
         EmbeddedBaritonePolicy.clear();
-        courseCommitted = false;
-        courseTurning = false;
+        CAMERA_COURSE.reset();
     }
 
     static void abandon(EmbeddedBaritoneNavigator navigator) {
@@ -409,7 +407,7 @@ public final class EmbeddedBaritoneRuntime {
         ACTIONS.bodyGone();
         owner = null; pendingPolicyOwner = null; pendingPolicyGoal = null;
         EmbeddedBaritonePolicy.clear();
-        courseCommitted = false; courseTurning = false;
+        CAMERA_COURSE.reset();
     }
 
     static boolean hasConcretePath(EmbeddedBaritoneNavigator navigator) {
@@ -566,7 +564,7 @@ public final class EmbeddedBaritoneRuntime {
      * aim. That raw stream pitches down toward cell centers below eye level, steepening as
      * the body closes in and snapping back at every movement handoff — a visible per-block
      * bob with the head held down the entire trip. Here the camera locks to a course yaw;
-     * bearing corrections inside {@link #COURSE_TURN_WINDOW_DEGREES} do not rotate the visible
+     * bearing corrections inside the course's turn window do not rotate the visible
      * camera. Physical movement yaw is supplied independently by Baritone's player-rotation
      * bridge, so the camera never decomposes that correction into a second steering input.
      * Only a real corner re-commits the visible course and swings the camera once.
@@ -587,26 +585,8 @@ public final class EmbeddedBaritoneRuntime {
         if (executor != null && executor.submergedWaterTravelActive()) {
             pitch = executor.submergedWaterCameraPitch();
         }
-        if (!courseCommitted) {
-            courseYaw = Mth.wrapDegrees(yaw);
-            courseCommitted = true;
-            courseTurning = false;
-        }
-        // The course holds while corrections fit the strafe window; only a real turn
-        // rotates it — ramped at a bounded rate with hysteresis (past the window to
-        // engage, well inside it to settle). A recalc that flips the aim back and
-        // forth (drop edges, pocket grinds) then averages into one smooth rotation
-        // instead of banging the camera side to side or spinning it around.
-        float bearingError = Mth.wrapDegrees(yaw - courseYaw);
-        if (Math.abs(bearingError) > COURSE_TURN_WINDOW_DEGREES) {
-            courseTurning = true;
-        } else if (courseTurning && Math.abs(bearingError) <= COURSE_SETTLE_DEGREES) {
-            courseTurning = false;
-        }
-        if (courseTurning) {
-            courseYaw = Mth.wrapDegrees(courseYaw + Mth.clamp(bearingError,
-                    -COURSE_TURN_STEP_DEGREES, COURSE_TURN_STEP_DEGREES));
-        }
+        if (tickingContext == null) return;
+        float courseYaw = CAMERA_COURSE.target(yaw, tickingContext.tickRevision());
         // Re-issued every tick even when unchanged: the look lease must stay fresh or the
         // camera would freeze on whatever the last precision aim left it on.
         float walkPitch = player.onGround()
@@ -617,16 +597,7 @@ public final class EmbeddedBaritoneRuntime {
     }
 
     /** Course-steering state; reset whenever navigation ownership changes. */
-    private static boolean courseCommitted;
-    private static boolean courseTurning;
-    private static float courseYaw;
-    /** Bearing corrections beyond this window rotate the course (a real corner); smaller
-     * ones are absorbed as strafe input, keeping the view steady. */
-    private static final float COURSE_TURN_WINDOW_DEGREES = 25.0f;
-    /** A turn settles (stops rotating the course) once inside this margin. */
-    private static final float COURSE_SETTLE_DEGREES = 15.0f;
-    /** Course rotation rate cap: 9°/tick = 180°/s, so a 90° corner takes ~0.5s. */
-    private static final float COURSE_TURN_STEP_DEGREES = 9.0f;
+    private static final NavigationCameraCourse CAMERA_COURSE = new NavigationCameraCourse();
     /** Grounded walking pitch — near level, so the ride never reads as head-down. */
     private static final float WALK_PITCH_DEGREES = 8.0f;
 
@@ -729,8 +700,7 @@ public final class EmbeddedBaritoneRuntime {
         EmbeddedBaritonePolicy.installSnapshot(next.policy());
         pendingPolicyOwner = null;
         pendingPolicyGoal = null;
-        courseCommitted = false;
-        courseTurning = false;
+        CAMERA_COURSE.reset();
         refreshPhysicalObstacles(baritone.getPlayerContext().player());
         baritone.getCustomGoalProcess().setGoalAndPath(
                 new MaiCraftGoalAdapter(next.compiled().goal()));
