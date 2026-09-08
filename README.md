@@ -51,6 +51,10 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 `perceive(view="surroundings")` 的 `terrain_overview` 提供附近与下方地形的简短摘要：大致方位、相对高度、水平范围、支撑样本及未知区域。每次观察按帧预算推进，当前采样水平半径 12 格、向下深度 24 格；未采到的平台不代表不存在，也不代表没有路径。
 
+电梯的实际楼层见 `surroundings.elevators`，也可用 `perceive(view="situation", focus="maicraft:travel")` 读取。`maicraft:travel` 支持 `elevator_floor="top"`、`bottom`、`next_up`、`next_down` 或同步列表中的楼层 ID／名称；可用 `elevator_id` 指定轿厢，交通模式使用 `auto` 或 `elevator`，无须填写目的地高度。
+
+使用 `elevator_floor="ask"`，或仅指定 `transport_mode="elevator"` 而不提供目的地，会先到电梯附近同步楼层，再返回 `waiting_for_decision`。LLM 用 `task(action="answer")` 的 `retry` 和 `details.parameters` 选择 `elevator_id`、`elevator_floor`。同步楼层是中间步骤，实际乘梯并出梯后才完成移动目标；`needs_sync` 表示信息未知，不代表没有楼层。
+
 ## 快速开始
 
 ### 运行要求

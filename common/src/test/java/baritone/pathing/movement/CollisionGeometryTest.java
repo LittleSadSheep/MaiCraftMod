@@ -57,6 +57,17 @@ public final class CollisionGeometryTest {
         scene.blocks.clear();
         check(new CollisionGeometry(scene, false, null, null).clear(0, 0, 0, 1, 0, 0), "ordinary floor");
         check(scene.reads < 250, "flat movement repeated a large neighborhood scan");
+        var dynamic=new java.util.concurrent.atomic.AtomicReference<>(org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY);
+        var frozenOpen=new CollisionGeometry(scene,true,null,null,dynamic::get,.6,1.8);
+        var liveDynamic=new CollisionGeometry(scene,false,null,null,dynamic::get,.6,1.8);
+        dynamic.set(new org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot(
+                java.util.List.of(new net.minecraft.world.phys.AABB(.8,0,0,1.2,2,1)),1,0,"create_observed"));
+        var frozenClosed=new CollisionGeometry(scene,true,null,null,dynamic::get,.6,1.8);
+        check(!liveDynamic.clear(0,0,0,1,0,0) && frozenOpen.clear(0,0,0,1,0,0),
+                "live execution rejects an elevator that moved into a previously planned corridor");
+        dynamic.set(org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY);
+        check(liveDynamic.clear(0,0,0,1,0,0) && !frozenClosed.clear(0,0,0,1,0,0),
+                "a departed elevator releases live passage without mutating worker snapshots");
         scene.blocks.put(new BlockPos(1, -1, 0), Blocks.STONE_SLAB.defaultBlockState());
         check(CollisionGeometry.supportHeight(scene, new BlockPos(1, -1, 0)) == 0.5, "bottom slab support height");
         check(new CollisionGeometry(scene, false, null, null).clear(0, 0, 0, 1, 0, 0), "ordinary slab route");

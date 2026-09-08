@@ -140,6 +140,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             case "situation" -> {
                 JsonObject situation = situation(player);
                 String focus = nullableString(arguments, "focus");
+                if("maicraft:travel".equals(focus) || "maicraft:elevators".equals(focus))
+                    situation.add("elevators",new com.google.gson.Gson().toJsonTree(
+                            org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloors.overview(player)));
                 if ("maicraft:navigation".equals(focus) || "maicraft:transport".equals(focus)) {
                     var gson = new com.google.gson.Gson();
                     situation.add("actor", gson.toJsonTree(ClientRuntime.actor().diagnosticState()));
