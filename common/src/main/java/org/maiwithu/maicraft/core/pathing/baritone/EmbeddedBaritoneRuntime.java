@@ -53,6 +53,8 @@ public final class EmbeddedBaritoneRuntime {
             org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY;
     private static long physicalObservationTick = Long.MIN_VALUE;
     private static net.minecraft.world.phys.Vec3 physicalObservationOrigin;
+    private static org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot sableObstacles=
+            org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY;
 
     public static org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot physicalObstacles() {
         return physicalObstacles;
@@ -60,12 +62,12 @@ public final class EmbeddedBaritoneRuntime {
 
     private static void refreshPhysicalObstacles(LocalPlayer player) {
         long tick = player.level().getGameTime();
-        if (physicalObservationOrigin != null && tick >= physicalObservationTick
-                && tick - physicalObservationTick < 5 && physicalObservationOrigin.distanceToSqr(player.position()) < 16) return;
-        physicalObstacles = org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.capture(
-                player.clientLevel, player.position());
-        physicalObservationTick = tick;
-        physicalObservationOrigin = player.position();
+        if (physicalObservationOrigin == null || tick < physicalObservationTick
+                || tick - physicalObservationTick >= 5 || physicalObservationOrigin.distanceToSqr(player.position()) >= 16) {
+            sableObstacles = org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.capture(player.clientLevel,player.position());
+            physicalObservationTick=tick; physicalObservationOrigin=player.position();
+        }
+        physicalObstacles=sableObstacles.plus(org.maiwithu.maicraft.core.integration.create.ContraptionObstacles.capture(player.clientLevel,player.position()));
     }
 
     private record PendingStart(

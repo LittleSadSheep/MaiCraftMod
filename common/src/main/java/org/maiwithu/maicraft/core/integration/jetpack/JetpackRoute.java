@@ -231,6 +231,7 @@ public final class JetpackRoute {
         return observed(ctx, org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.forbiddenBodyCells());
     }
     public static Space observed(LocalPlayerContext ctx, it.unimi.dsi.fastutil.longs.LongSet forbidden) {
+        var contraptions=org.maiwithu.maicraft.core.integration.create.ContraptionObstacles.capture(ctx.level(),ctx.player().position());
         return new Space() {
             private boolean body(Vec3 feet) {
                 double half = ctx.player().getBbWidth() * 0.5 + 0.08;
@@ -252,6 +253,7 @@ public final class JetpackRoute {
                         && org.maiwithu.maicraft.core.integration.physics.SableStructureBridge.clearBody(ctx.level(), box);
             }
             public boolean clear(Vec3 from, Vec3 to) {
+                if(!contraptions.clearSegment(from,to,ctx.player().getBbWidth()+.16,ctx.player().getBbHeight()+.08)) return false;
                 int samples = Math.max(1, (int) Math.ceil(from.distanceTo(to) / 0.2));
                 if (samples > 400) return false;
                 for (int i = 0; i <= samples; i++) if (!body(from.lerp(to, (double) i / samples))) return false;

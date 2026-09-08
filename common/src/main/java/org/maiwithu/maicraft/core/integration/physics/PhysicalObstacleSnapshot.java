@@ -16,6 +16,12 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
     private static final double EPS = 1e-5;
 
     public PhysicalObstacleSnapshot { boxes = List.copyOf(boxes); }
+    public PhysicalObstacleSnapshot plus(PhysicalObstacleSnapshot other) {
+        if(other.boxes().isEmpty()) return this;
+        var combined=new ArrayList<>(boxes); combined.addAll(other.boxes());
+        return new PhysicalObstacleSnapshot(combined,blockReads+other.blockReads(),
+                conservativeStructures+other.conservativeStructures(),state+"+"+other.state());
+    }
 
     public static PhysicalObstacleSnapshot capture(ClientLevel level, Vec3 focus) {
         var frame = SableStructureBridge.open(level, focus, null);
