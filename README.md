@@ -26,7 +26,7 @@ MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需
 - **Dev 蓝图预览**：在世界中显示半透明待建结构和差异轮廓，支持逐层查看；确认前归还玩家操控，确认后执行冻结的方案。
 - **只读房屋设计**：`maicraft:design_build` 直接显示蓝图，不移动或施工；普通建造在 Dev 确认之后才开始供料。用法见 [房屋设计预览与施工](BUILD_PREVIEW.md)。
 - **按需知识资源**：自动发现安装模组的 Ponder 教程，按组件和场景读取原始旁白、操作提示及方块状态；支持 MCP Resources 和 `perceive(view="knowledge")`。
-- **任务控制**：异步查询、暂停、恢复和取消任务；遇到歧义、风险或缺失条件时返回可处理的决策请求。
+- **任务观察与控制**：优先通过 Attention 事件等待取得权威状态、决策和完整终态结果；支持暂停、恢复和取消。见 [Attention 执行协议](ATTENTION.md)。
 
 与逐格蓝图或远程点击脚本不同，MCP 客户端只描述“要达成什么”。方块位置、路径、施工顺序、菜单操作、重试和结果校验由 MaiCraft 在游戏内负责。
 
@@ -36,12 +36,14 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 | 工具 | 用途 |
 | --- | --- |
-| `perceive` | 读取游戏状态、能力契约、任务、地标和机器证据 |
+| `perceive` | 以 Attention 为首选等待任务事件、决策和结果；也读取游戏状态、能力契约与世界证据 |
 | `plan` | 将语义目标编译为计划，但不立即执行 |
-| `execute` | 启动语义目标或已编译计划，并返回任务 ID |
-| `task` | 查询、暂停、恢复、取消任务，或回答任务提出的问题 |
+| `execute` | 异步启动目标或计划，返回任务 ID 和可直接传给 `perceive` 的 `next_attention` |
+| `task` | 显式检查/恢复任务，暂停、恢复、取消，或回答问题；日常等待使用 Attention |
 
 以上是服务器在 MCP `tools/list` 中注册的名称；客户端可以附加服务器前缀来区分不同连接。旧版使用的 `maicraft_` 工具名前缀已移除，升级后请让客户端重新获取工具列表，并更新固定工具名配置。
+
+执行后按返回的 `next_attention` 等待，读取响应中的 `task` 和 `wake_reason`，再按新的 `next_attention` 续等。Attention 直接引用任务记录，即使历史事件已被挤出缓存，也能返回仍保留的任务决策和最终结果；无需轮询 `task(get)` 或包装同步执行工具。原生资源订阅可使用 `maicraft://attention`，模型唤醒行为由宿主决定。
 
 四个入口不等于只有四种功能。当前运行时注册了 32 项 `maicraft:*` 语义能力，包括 `inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
 
