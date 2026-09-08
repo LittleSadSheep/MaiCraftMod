@@ -86,8 +86,11 @@ public final class KnowledgeLibrary {
     private JsonObject list(String cursor) {
         List<JsonObject> all = new ArrayList<>();
         JsonObject attention = new JsonObject(); attention.addProperty("uri", "maicraft://attention");
-        attention.addProperty("name", "Important events"); attention.addProperty("mimeType", "application/json");
-        attention.addProperty("description", "Live decision-relevant events; knowledge resources are reference material.");
+        attention.addProperty("name", "Task attention"); attention.addProperty("mimeType", "application/json");
+        attention.addProperty("description", "Primary task monitor: authoritative task state, decisions, results and important game events. Subscribe/read, or use perceive with next_attention for task-scoped waiting and reliable cursor continuation.");
+        JsonObject priority = new JsonObject(); priority.addProperty("priority", 1.0);
+        JsonArray audience = new JsonArray(); audience.add("assistant"); priority.add("audience", audience);
+        attention.add("annotations", priority);
         all.add(attention); catalog().forEach(entry -> all.add(entry.metadata()));
         String revision = digest(all.toString());
         int offset = 0;

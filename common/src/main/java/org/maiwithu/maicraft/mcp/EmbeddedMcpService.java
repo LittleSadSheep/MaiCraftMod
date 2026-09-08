@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -244,6 +245,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 // Unknown notifications are intentionally ignored by JSON-RPC.
             }
             if ("notifications/initialized".equals(method)) session.initialized.set(true);
+            if ("notifications/cancelled".equals(method) && request.has("params")
+                    && request.get("params").isJsonObject()) {
+                JsonElement target = request.getAsJsonObject("params").get("requestId");
+                PendingAttention pending = target == null ? null : session.attentionCalls.get(GSON.toJson(target));
+                if (pending != null) pending.cancel();
+            }
             exchange.sendResponseHeaders(202, -1);
             exchange.close();
             return;
@@ -301,7 +308,13 @@ public final class EmbeddedMcpService implements AutoCloseable {
         result.addProperty("instructions",
                 "Use perceive to understand the current situation, plan to compile a goal, " +
                 "execute to start it, and task to inspect or control the returned task. " +
-                "Execution is asynchronous. Subscribe to maicraft://attention for important events and decisions. " +
+                "Attention is the primary execution monitor. After execute or a task control action, pass " +
+                "next_attention to perceive and continue using the response's next_attention. It includes " +
+                "authoritative task state, decisions and terminal results; routine task/get polling is unnecessary. " +
+                "Timeout only ends a wait; continue quietly while running. Handle decisions, pauses and " +
+                "runtime/task unavailability rather than waiting forever. Inspect resync_required and current " +
+                "task state after lost history or a stream reset. Hosts may subscribe to maicraft://attention " +
+                "and read it on updates; notifications themselves do not run the model. " +
                 "For block behavior and Ponder tutorials, start with maicraft://knowledge/index. " +
                 "Discover metadata using resources/list or perceive(view=knowledge, focus=item ID/name), " +
                 "then read one returned URI using resources/read or perceive(view=knowledge, resource_uri=...). " +
@@ -352,6 +365,11 @@ public final class EmbeddedMcpService implements AutoCloseable {
             }
         }
 
+        PendingAttention pending = PublicToolCatalog.PERCEIVE.equals(name)
+                && "attention".equals(nullableString(arguments, "view")) ? new PendingAttention() : null;
+        String callId = GSON.toJson(requestId);
+        if (pending != null && session.attentionCalls.putIfAbsent(callId, pending) != null)
+            throw new RpcException(-32600, "Duplicate active attention request id");
         CompletionStage<JsonElement> stage = null;
         try {
             boolean knowledge = PublicToolCatalog.PERCEIVE.equals(name) && "knowledge".equals(nullableString(arguments, "view"));
@@ -363,9 +381,16 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 case PublicToolCatalog.TASK -> runtime.task(arguments);
                 default -> throw new IllegalStateException("unreachable tool dispatch");
             };
+            if (pending != null) {
+                pending.attach(stage);
+                if (session.closed.get()) pending.cancel();
+            }
             JsonElement value = await(stage, requestTimeout(name, arguments));
             return knowledge && arguments.has("resource_uri") && !arguments.get("resource_uri").isJsonNull()
                     ? knowledgeToolResult(value.getAsJsonObject()) : toolResult(value, false);
+        } catch (CancellationException cancelled) {
+            return toolError("attention_wait_cancelled", "Attention wait cancelled; the game task is unchanged.",
+                    false, true, null);
         } catch (TimeoutException exception) {
             RuntimeFacade.CancellationDisposition cancellation = cancelRuntimeCall(stage);
             boolean mutating = mutatesSemanticState(name, arguments);
@@ -399,6 +424,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
             boolean outcomeKnown = !mutatesSemanticState(name, arguments);
             return toolError("runtime_error", message(failure), true,
                     outcomeKnown, requestKey);
+        } finally {
+            if (pending != null) session.attentionCalls.remove(callId, pending);
         }
     }
 
@@ -446,6 +473,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         optionalMeta(params);
         requireAttentionUri(params);
         session.attentionSubscribed.set(true);
+        session.enqueue(attentionNotification());
         return new JsonObject();
     }
 
@@ -508,6 +536,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         SseConnection connection = new SseConnection(exchange, session::touch);
         session.attach(connection);
+        // Catch up after subscribing before GET, or after events occurred while SSE was disconnected.
+        if (session.attentionSubscribed.get()) connection.enqueue(attentionNotification());
         try {
             connection.writeLoop();
         } catch (InterruptedException exception) {
@@ -528,6 +558,14 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void publishAttentionUpdate() {
+        JsonObject notification = attentionNotification();
+        sessions.values().forEach(session -> {
+            // Never perform socket work on the Minecraft publication thread.
+            if (session.attentionSubscribed.get()) session.enqueue(notification);
+        });
+    }
+
+    private static JsonObject attentionNotification() {
         JsonObject params = new JsonObject();
         params.addProperty("uri", ATTENTION_URI.toString());
         JsonObject notification = new JsonObject();
@@ -535,12 +573,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         notification.addProperty("method", "notifications/resources/updated");
         notification.add("params", params);
 
-        sessions.values().forEach(session -> {
-            // Resource notifications are advisory. Enqueue is a non-blocking,
-            // one-slot coalescing signal; the Minecraft/attention publication
-            // thread never writes, flushes, or closes a socket.
-            if (session.attentionSubscribed.get()) session.enqueue(notification);
-        });
+        return notification;
     }
 
     private Session createSession(String negotiatedVersion) {
@@ -927,6 +960,19 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
     }
 
+    private static final class PendingAttention {
+        private CompletionStage<JsonElement> stage;
+        private boolean cancelled;
+        synchronized void attach(CompletionStage<JsonElement> next) {
+            stage = next;
+            if (cancelled) cancelRuntimeCall(stage);
+        }
+        synchronized void cancel() {
+            cancelled = true;
+            if (stage != null) cancelRuntimeCall(stage);
+        }
+    }
+
     private static final class Session {
         private final String id;
         private final String version;
@@ -934,6 +980,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         private final AtomicBoolean initialized = new AtomicBoolean();
         private final AtomicBoolean closed = new AtomicBoolean();
         private final AtomicReference<SseConnection> connection = new AtomicReference<>();
+        private final ConcurrentMap<String, PendingAttention> attentionCalls = new ConcurrentHashMap<>();
         private volatile long lastActivityNanos = System.nanoTime();
 
         private Session(String id, String version) {
@@ -979,6 +1026,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         private void close() {
             if (!closed.compareAndSet(false, true)) return;
+            attentionCalls.values().forEach(PendingAttention::cancel);
+            attentionCalls.clear();
             SseConnection current = connection.getAndSet(null);
             if (current != null) current.close();
         }

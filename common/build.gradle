@@ -113,7 +113,12 @@ tasks.register('attentionRegression', JavaExec) {
     description = 'Checks attention delivery, task state and event-driven waiting.'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
     mainClass = 'org.maiwithu.maicraft.mcp.AttentionRegressionSuite'
+    maxHeapSize = '512m'
     timeout = java.time.Duration.ofSeconds(45)
+    def regressionDirectory = layout.buildDirectory.dir('attention-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
 }
 tasks.named('check') { dependsOn tasks.named('attentionRegression') }
