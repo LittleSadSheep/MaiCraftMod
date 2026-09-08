@@ -113,7 +113,7 @@ tasks.register('attentionRegression', JavaExec) {
     description = 'Checks attention delivery, task state and event-driven waiting.'
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'org.maiwithu.maicraft.intent.AttentionFeedTest'
+    mainClass = 'org.maiwithu.maicraft.mcp.AttentionRegressionSuite'
     timeout = java.time.Duration.ofSeconds(45)
 }
 tasks.named('check') { dependsOn tasks.named('attentionRegression') }
