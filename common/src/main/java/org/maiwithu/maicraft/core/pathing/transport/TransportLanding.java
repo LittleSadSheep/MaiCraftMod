@@ -85,7 +85,7 @@ public final class TransportLanding {
         return null;
     }
 
-    private static boolean unsafe(BlockGetter view, BlockPos pos, BlockState state) {
+    public static boolean unsafe(BlockGetter view, BlockPos pos, BlockState state) {
         return !state.getFluidState().isEmpty() || BlockHelper.isHazard(view, pos)
                 || state.is(Blocks.POWDER_SNOW) || state.is(Blocks.NETHER_PORTAL) || state.is(Blocks.END_GATEWAY)
                 || state.is(Blocks.POINTED_DRIPSTONE) || state.is(Blocks.BIG_DRIPLEAF)

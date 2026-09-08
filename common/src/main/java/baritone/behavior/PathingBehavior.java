@@ -521,7 +521,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (current == null) {
             if (path.isPresent()) {
                 if (path.get().positions().contains(expectedSegmentStart)) {
-                    current = new PathExecutor(this, path.get());
+                    current = new PathExecutor(this, org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothing.apply(baritone, path.get()));
                     resetEstimatedTicksToGoal(start);
                     queuePathEvent(PathEvent.CALC_FINISHED_NOW_EXECUTING);
                 } else {
@@ -535,7 +535,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         } else if (next == null) {
             if (path.isPresent()) {
                 if (path.get().getSrc().equals(current.getPath().getDest())) {
-                    next = new PathExecutor(this, path.get());
+                    next = new PathExecutor(this, org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothing.apply(baritone, path.get()));
                     queuePathEvent(PathEvent.NEXT_SEGMENT_CALC_FINISHED);
                 } else {
                     logDebug("Discarding next path whose start no longer matches this segment");
