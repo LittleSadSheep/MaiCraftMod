@@ -30,6 +30,21 @@ final class SemanticGoalContract {
                 path + ".preferences", ability, "unknown_preference");
         validateTarget(goal, path, ability);
         validateConstraints(goal, path, ability);
+        if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
+            var parameters = goal.parameters();
+            if (parameters.has("features")) {
+                var features = parameters.get("features");
+                if (!features.isJsonArray() || features.getAsJsonArray().asList().stream().anyMatch(value ->
+                        !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()
+                                || value.getAsString().isBlank()))
+                    throw violation("invalid_build_features", path + ".parameters.features", ability,
+                            "features must be an array of supported semantic feature names.");
+                var unsupported = new java.util.LinkedHashSet<>(SemanticBuildPlanner.normalizedFeatures(features));
+                unsupported.removeAll(SemanticBuildPlanner.SUPPORTED_FEATURES);
+                if (!unsupported.isEmpty()) throw violation("unsupported_build_features",
+                        path + ".parameters.features", ability, "Unsupported semantic build features: " + unsupported);
+            }
+        }
         if ("maicraft:travel".equals(ability)) {
             try {
                 TravelDestination.validatePrecision(goal.parameters());

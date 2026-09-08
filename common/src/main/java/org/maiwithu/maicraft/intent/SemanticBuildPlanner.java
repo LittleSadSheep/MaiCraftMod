@@ -46,6 +46,9 @@ public final class SemanticBuildPlanner {
     private static final int SEARCH_RADIUS = 32;
     private static final int MAX_CANDIDATES = 128;
     private static final int MAX_SLOPE = 6;
+    static final Set<String> SUPPORTED_FEATURES = Set.of(
+            "dock", "porch", "cellar", "workshop", "windows", "rooms", "interior",
+            "furnished", "lighting", "storage", "kitchen", "study", "bedroom");
     /** Internal-only capability used after one fully valid plan has no loaded safe site. */
     public static final String SITE_INVESTIGATION_TOOL = "investigate_build_site";
 
@@ -53,6 +56,15 @@ public final class SemanticBuildPlanner {
 
     /** Integration point for {@link AbilityAdapter}; per-cell ops never enter the Goal. */
     public static IntentAction plan(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        return plan(goal, player, runtime, true);
+    }
+
+    /** Resolve exactly the same loaded-world design without authorizing a site investigation. */
+    static IntentAction previewPlan(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        return plan(goal, player, runtime, false);
+    }
+
+    private static IntentAction plan(Goal goal, LocalPlayer player, IntentRuntime runtime, boolean investigate) {
         JsonObject p = goal.parameters();
         if (p.has("ops")) return decision(goal, "Semantic builds cannot contain per-cell ops.",
                 option("replace_goal", "Describe purpose, size, terrain fit and features."),
@@ -76,9 +88,7 @@ public final class SemanticBuildPlanner {
         boolean replace = bool(p, "replace_existing", false);
         Set<String> features = normalizedFeatures(p.get("features"));
         Set<String> unsupportedFeatures = new LinkedHashSet<>(features);
-        unsupportedFeatures.removeAll(Set.of(
-                "dock", "porch", "cellar", "workshop", "windows", "rooms", "interior",
-                "furnished", "lighting", "storage", "kitchen", "study", "bedroom"));
+        unsupportedFeatures.removeAll(SUPPORTED_FEATURES);
         if (!unsupportedFeatures.isEmpty()) return decision(goal,
                 "Unsupported semantic build features: " + unsupportedFeatures + ".",
                 option("replace_goal", "Choose dock, porch, cellar, workshop or windows."),
@@ -137,6 +147,11 @@ public final class SemanticBuildPlanner {
         Site site = findSite(player, anchor, size, terrain, replace, waterfront,
                 features.contains("dock"), features.contains("cellar"));
         if (site == null) {
+            if (!investigate) return new IntentAction.Report(
+                    org.maiwithu.maicraft.task.TaskResult.fail(
+                            "No valid loaded site is available for the preview; no movement or construction was started.",
+                            Map.of("failure_code", "preview_site_unavailable", "preview_created", false,
+                                    "construction_started", false)), null);
             // Every semantic and permission check above already passed. A missing loaded site gets
             // one bounded internal first-person investigation; invalid goals still stop normally.
             JsonObject investigation = new JsonObject();
@@ -238,9 +253,7 @@ public final class SemanticBuildPlanner {
         boolean replace = bool(p, "replace_existing", false);
         Set<String> features = normalizedFeatures(p.get("features"));
         Set<String> unsupported = new LinkedHashSet<>(features);
-        unsupported.removeAll(Set.of(
-                "dock", "porch", "cellar", "workshop", "windows", "rooms", "interior",
-                "furnished", "lighting", "storage", "kitchen", "study", "bedroom"));
+        unsupported.removeAll(SUPPORTED_FEATURES);
         if (!unsupported.isEmpty()) return LoadedBuildProbe.invalid(
                 "unsupported_build_features", "unsupported semantic build features: " + unsupported);
         if ((terrain.equals("embedded") || features.contains("cellar")) && !replace) {
@@ -1151,11 +1164,9 @@ public final class SemanticBuildPlanner {
         Predicate<String> allowed = id -> !policy.equals("preserve_rare") || !rare(id);
         List<String> choices = preferred.stream().filter(SemanticBuildPlanner::validMaterial)
                 .filter(allowed).toList();
-        // These are registry-derived shape representatives, not a physical material decision.
-        // Before the first survival world effect SemanticBuildMaterialBinding replaces each broad
-        // family with the concrete variant selected from live inventory/storage/recipe/world
-        // evidence. Keeping representatives generic avoids encoding one vanilla wood species as
-        // the answer when the nearest obtainable family member is different.
+        // Shape representatives seed the design; registry membership is not availability evidence.
+        // Read-only binding may select a carried family member before review. Without carried
+        // evidence the displayed concrete material remains a supply requirement, not a known source.
         String plankRepresentative = representative(
                 allowed.and(SemanticBuildPlanner::plankBlock), "planks");
         String frameRepresentative = representative(
@@ -1467,7 +1478,7 @@ public final class SemanticBuildPlanner {
         return Set.copyOf(out);
     }
 
-    private static Set<String> normalizedFeatures(JsonElement element) {
+    static Set<String> normalizedFeatures(JsonElement element) {
         Set<String> raw = stringSet(element);
         Set<String> out = new LinkedHashSet<>(raw);
         if (out.remove("pier")) out.add("dock");

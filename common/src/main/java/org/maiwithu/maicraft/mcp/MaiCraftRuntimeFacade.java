@@ -115,24 +115,30 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 goal = Goal.fromJson(arguments.getAsJsonObject("goal"));
             }
             String requestKey = nullableString(arguments, "request_key");
-            ClientActorBoundary.AutomationRequest control =
-                    ClientRuntime.requestAutomationControl(player);
-            IntentTaskRecord record;
-            try {
-                record = intents.execute(player, goal, planId, requestKey);
-            } catch (RuntimeException failure) {
-                ClientRuntime.rollbackAutomationControl(control);
-                throw failure;
-            }
+            UUID selectedPlanId = planId;
+            IntentTaskRecord record = dispatchExecution(goal, player,
+                    () -> intents.execute(player, goal, selectedPlanId, requestKey));
             JsonObject result = new JsonObject();
             result.addProperty("task_id", record.externalId().toString());
             result.addProperty("status", publicState(record));
             result.addProperty("accepted", true);
             result.addProperty("outcome", record.goal().outcome());
             if (requestKey != null) result.addProperty("request_key", requestKey);
-            result.addProperty("control_status", "takeover_requested");
+            result.addProperty("control_status", IntentRuntime.isReadOnlyDesign(goal)
+                    ? "not_required" : "takeover_requested");
             return result;
         });
+    }
+
+    /** This is the execution entry's sole body-control boundary; local design never enters it. */
+    static IntentTaskRecord dispatchExecution(Goal goal, LocalPlayer player, Supplier<IntentTaskRecord> execute) {
+        if (IntentRuntime.isReadOnlyDesign(goal)) return execute.get();
+        ClientActorBoundary.AutomationRequest control = ClientRuntime.requestAutomationControl(player);
+        try { return execute.get(); }
+        catch (RuntimeException failure) {
+            ClientRuntime.rollbackAutomationControl(control);
+            throw failure;
+        }
     }
 
     @Override
@@ -479,6 +485,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("attempts", attempts);
 
         boolean terminalState = record.getState().isTerminal() || record.terminalSnapshot() != null;
+        if (!terminalState && record.activeExecution() != null) {
+            result.add("active_execution", record.activeExecution());
+        }
         if (!terminalState && record.pauseSnapshot() != null) {
             JsonObject pause = new JsonObject();
             pause.addProperty("reason", record.pauseSnapshot().reason());
@@ -621,6 +630,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     private static String abilityMode(String ability) {
         return switch (ability) {
             case "maicraft:remember_place" -> "local_memory";
+            case "maicraft:design_build" -> "read_only_build_preview";
             case "maicraft:inspect_machine", "maicraft:design_machine" -> "bounded_machine_evidence_review";
             case "maicraft:wait_for_condition" -> "client_clock_or_predicate";
             case "maicraft:sequence" -> "sequential_children";

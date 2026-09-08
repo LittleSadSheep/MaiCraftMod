@@ -287,14 +287,16 @@ public final class SemanticAbilityCatalog {
                             field("protected_labels", "array<string>", "Named entities, areas or possessions that must not be touched."),
                             field("radius", "integer", "Optional bounded loaded-world evidence radius."),
                             field("source_hint", "object", "Optional semantic source evidence: block/tag/entity/trade families and expected products; never coordinates, routes, entity IDs, slots or clicks.")));
-            case "maicraft:build" -> contract(
-                    "Design, site and construct one bounded structure. MaiCraft chooses cells and build order.",
+            case "maicraft:build", BuildDesignAdapter.ABILITY -> contract(
+                    BuildDesignAdapter.ABILITY.equals(ability)
+                            ? "Execute this ability to compile and display a read-only blueprint at a valid loaded site, even with Dev off. No movement, acquisition or construction is permitted. Missing loaded site returns a failure without exploration. Local confirm cannot start construction; use maicraft:build separately. plan alone only stores a semantic Goal and does not generate geometry."
+                            : "Design, site and construct one bounded structure. MaiCraft chooses cells and build order. Use maicraft:design_build to display a blueprint without movement or construction; outcome prose cannot disable execution.",
                     targets("area", "landmark", "coordinates", "current_place", "prior_result"),
                     fields(
                             field("purpose", "string", "What the structure is for, such as seaside_house."),
                             field("size", "string|object", "Small/medium/large or optional approximate bounds."),
                             field("style", "string", "Visual language; leave open to give MaiCraft design freedom."),
-                            field("features", "array<string>", "Semantic features such as dock, porch, cellar or workshop."),
+                            field("features", "array<string>", "Supported: dock (alias pier), porch, cellar, workshop, windows, rooms, interior (aliases interior_space/interior_spaces), furnished, lighting, storage, kitchen, study, bedroom. Doors, entrances, roof, floor and walls are built-in invariants and may be named explicitly. Other values are rejected before planning."),
                             field("terrain_fit", "string", "Surface, embedded, cave, hillside or underground."),
                             field("material_policy", "string", "Available, storage_available, specified or preserve_rare."),
                             field("preferred_materials", "array<resource_id>", "Palette preferences, never per-cell assignments."),

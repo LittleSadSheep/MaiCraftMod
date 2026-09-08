@@ -78,6 +78,7 @@ public final class IntentRuntime {
             "maicraft:cook",
             "maicraft:trade",
             "maicraft:build",
+            BuildDesignAdapter.ABILITY,
             "maicraft:light_area",
             "maicraft:connect_mechanical_power",
             "maicraft:inspect_machine",
@@ -136,6 +137,16 @@ public final class IntentRuntime {
     }
 
     public IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey) {
+        return execute(player, goal, planId, requestKey,
+                org.maiwithu.maicraft.client.preview.PreviewController::showDesign);
+    }
+
+    public static boolean isReadOnlyDesign(Goal goal) {
+        return BuildDesignAdapter.ABILITY.equals(goal.ability());
+    }
+
+    IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey,
+                            java.util.function.Predicate<org.maiwithu.maicraft.client.preview.PreviewSession> publishDesign) {
         validateGoal(goal);
         if (requestKey != null && !requestKey.isBlank()) {
             UUID existingId = requestKeys.get(requestKey);
@@ -162,6 +173,27 @@ public final class IntentRuntime {
         trimTasks();
         markDirty();
         publish("started", record, "Started: " + goal.outcome(), new JsonObject());
+        if (isReadOnlyDesign(goal)) {
+            TaskResult result;
+            try {
+                var action = BuildDesignAdapter.design(goal, player, this, publishDesign);
+                if (!(action instanceof IntentAction.Report report))
+                    throw new IllegalStateException("read-only design returned an executable action");
+                result = report.result();
+            } catch (RuntimeException failure) {
+                result = TaskResult.fail("Read-only design failed: " + failure.getMessage(),
+                        Map.of("failure_code", "preview_design_failed", "construction_started", false));
+            }
+            Map<String, Object> data = new LinkedHashMap<>(result.data() == null ? Map.of() : result.data());
+            data.put("task_id", taskId.toString());
+            result = new TaskResult(result.success(), result.message(), false, false, data);
+            record.addStepResult(new IntentTaskRecord.StepSnapshot(0, goal.ability(),
+                    result.success(), result.message(), result.toJson()));
+            TaskState state = result.success() ? TaskState.SUCCESS : TaskState.FAILED;
+            record.terminal(state, result, player.level().getGameTime());
+            terminal(record, state, result);
+            return record;
+        }
         CompanionTickDispatcher.submitCurrent(player, record);
         return record;
     }

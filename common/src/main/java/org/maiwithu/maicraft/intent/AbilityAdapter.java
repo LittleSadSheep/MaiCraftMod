@@ -50,6 +50,7 @@ final class AbilityAdapter {
             case "maicraft:cook" -> cook(goal);
             case "maicraft:trade" -> trade(goal);
             case "maicraft:build" -> build(goal, player, runtime);
+            case BuildDesignAdapter.ABILITY -> BuildDesignAdapter.design(goal, player, runtime);
             case "maicraft:light_area" -> lightArea(goal, player, runtime);
             case "maicraft:connect_mechanical_power" ->
                     connectPower(goal, player, runtime, continuationToken);
