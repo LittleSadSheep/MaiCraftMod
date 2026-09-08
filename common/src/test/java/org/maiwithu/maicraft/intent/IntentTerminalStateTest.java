@@ -98,7 +98,43 @@ public final class IntentTerminalStateTest {
         changed.terminal(TaskState.CANCELLED, TaskResult.cancelled("test ended"), 30);
         check(!read(snapshot, changed).has("current_goal") && !read(summary, changed).has("current_outcome"),
                 "a terminal task must not advertise active work");
+        activeExecutionIsObservedWithoutPersisting(goal, snapshot);
         System.out.println("IntentTerminalStateTest: passed");
+    }
+
+    private static void activeExecutionIsObservedWithoutPersisting(Goal goal, Method snapshot) throws Exception {
+        var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        record.setState(TaskState.RUNNING);
+        var task = new IntentTask(null, record, null);
+        var field = IntentTask.class.getDeclaredField("child");
+        field.setAccessible(true);
+        field.set(task, new org.maiwithu.maicraft.task.Task() {
+            public TaskState tick(net.minecraft.client.player.LocalPlayer player) { throw new AssertionError("read-only progress"); }
+            public void stop(net.minecraft.client.player.LocalPlayer player, StopReason reason) { throw new AssertionError("read-only progress"); }
+            public String name() { return "supply"; }
+            public Map<String, Object> progress() {
+                return Map.of("phase", "material_supply", "child", Map.of("source", "mine",
+                        "item_id", "minecraft:oak_log", "position", Map.of("x", 1, "y", 2, "z", 3)));
+            }
+        });
+        record.observeExecution(task.progress(), 42);
+        JsonObject live = read(snapshot, record).getAsJsonObject("active_execution");
+        check(live.get("phase").getAsString().equals("material_supply")
+                        && live.getAsJsonObject("child").get("source").getAsString().equals("mine")
+                        && !live.getAsJsonObject("child").has("position"),
+                "active execution exposes the actual nested material task without leaking planned coordinates");
+        live.addProperty("phase", "caller changed");
+        record.pause(43, "paused_by_mcp");
+        JsonObject paused = read(snapshot, record);
+        check(paused.get("state").getAsString().equals("paused")
+                        && paused.getAsJsonObject("active_execution").get("phase").getAsString().equals("material_supply")
+                        && paused.getAsJsonObject("active_execution").get("observed_game_time").getAsLong() == 42,
+                "pause preserves a detached last-observed progress snapshot, not a claim of ongoing work");
+        JsonObject saved = IntentStateCodec.encode("test-world", List.of(), List.of(record), Map.of(), List.of())
+                .getAsJsonArray("tasks").get(0).getAsJsonObject();
+        check(!saved.has("active_execution"), "live diagnostics must not survive restoration as stale work");
+        record.terminal(TaskState.CANCELLED, TaskResult.cancelled("cancelled"), 44);
+        check(!read(snapshot, record).has("active_execution"), "terminal snapshots stop advertising active execution");
     }
 
     private static Method projection(String name) throws Exception {
