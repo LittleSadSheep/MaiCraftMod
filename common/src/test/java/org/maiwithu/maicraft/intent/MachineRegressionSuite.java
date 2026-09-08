@@ -25,6 +25,9 @@ public final class MachineRegressionSuite {
         org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayoutTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutModulesTest.main(args);
         MachineLayoutJobsTest.main(args);
+        MachineBlueprintAbilityTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocumentTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.MachineBuildCompletionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudgetTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutAeNetworksTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutItemOutputsTest.main(args);
@@ -61,7 +64,7 @@ public final class MachineRegressionSuite {
         rejects("maicraft:operate_machine", "null", "{\"operation\":\"deposit\",\"menu_receipt_id\":\"receipt\",\"item_id\":\"minecraft:iron_ingot\"}");
         rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"deposit\",\"menu_receipt_id\":\"receipt\",\"entry_index\":2,\"item_id\":\"minecraft:iron_ingot\"}");
         accepts("maicraft:build_machine", "{\"kind\":\"landmark\",\"label\":\"site\"}", "{\"snapshot_id\":\"receipt\",\"design\":{\"components\":[{\"name\":\"buffer\",\"block_id\":\"minecraft:chest\",\"count\":1,\"role\":\"storage\"}],\"connections\":[],\"style\":\"compact\",\"constraints\":{\"max_width\":5}}}");
-        rejects("maicraft:build_machine", "{\"kind\":\"landmark\",\"label\":\"site\"}", "{\"snapshot_id\":\"receipt\",\"blueprint\":{\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:stone\"}]}}");
+        accepts("maicraft:build_machine", "{\"kind\":\"landmark\",\"label\":\"site\"}", "{\"snapshot_id\":\"receipt\",\"blueprint\":{\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:stone\"}]}}");
         rejects("maicraft:build_machine", "{\"kind\":\"landmark\",\"label\":\"site\"}", "{\"snapshot_id\":\"receipt\",\"design\":{\"components\":[],\"connections\":[]}}");
         rejects("maicraft:modify_machine", "{\"kind\":\"landmark\",\"label\":\"site\"}", "{\"operation\":\"apply_blueprint\",\"snapshot_id\":\"receipt\",\"blueprint\":{}}");
         rejects("maicraft:design_machine", "null", "{\"design\":{\"components\":[{\"name\":\"buffer\",\"block_id\":\"minecraft:chest\",\"count\":1,\"role\":\"storage\"}],\"connections\":[],\"blueprint\":{}}}");

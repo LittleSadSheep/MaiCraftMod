@@ -140,7 +140,7 @@ final class RecoveryAdvisor {
         context.add("goal", goal.toJson());
         context.addProperty(
                 "semantic_goal_rule",
-                "details.goal uses the selected ability's declared fields. Machine goals may describe components, intended connections, style and constraints, plus receipt-bound observed entry_index values. Never provide blueprints, cells, offsets, native routes or click scripts.");
+                "details.goal uses the selected ability's declared fields. Machine review/build may supply a semantic design, explicit blueprint or exported Ponder blueprint_uri; modify_machine can apply blueprint changes. Use receipt-bound observed entry_index values for machine menu operations. MaiCraft owns native routes and gestures; never provide click scripts.");
         return context;
     }
 

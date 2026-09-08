@@ -14,7 +14,8 @@ public final class SemanticAbilityCatalog {
 
     public static JsonObject describe(String ability) {
         JsonObject description = describeContract(ability);
-        if (MachineAbilityAdapter.DESIGN.equals(ability) || MachineAbilityAdapter.BUILD.equals(ability)) {
+        if (MachineAbilityAdapter.DESIGN.equals(ability) || MachineAbilityAdapter.BUILD.equals(ability)
+                || MachineAbilityAdapter.MODIFY.equals(ability)) {
             var budget = org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget.current();
             JsonObject limits = new JsonObject();
             limits.addProperty("max_targets", budget.maxTargets()); limits.addProperty("max_components", budget.maxComponents());
@@ -35,20 +36,23 @@ public final class SemanticAbilityCatalog {
                             field("label", "string", "Short durable machine label; required unless the target already supplies one. Stored as a landmark; observing grants no mutation authority."),
                             field("radius", "integer", "Survey cube radius 0-8, default 4; larger machines need multiple labeled surveys. Unloaded or truncated evidence cannot authorize operations.")));
             case MachineAbilityAdapter.DESIGN -> contract(
-                    "Review and physically compile a semantic machine graph against installed block/item IDs. MaiCraft arranges equipment and process modules, routes compatible transports and generates native configuration operations. Reports exact material estimates, supported interfaces and unresolved operating evidence. expected_output queries client-synchronized recipes; construction alone does not prove production.",
+                    "Review a machine layout against installed block/item IDs without construction. Supply exactly one of design, blueprint or blueprint_uri. A semantic design lets MaiCraft arrange components; a blueprint declares the model's exact structure, using the same JSON as exported Ponder chapters. Reports materials and unresolved requirements. expected_output in a semantic design queries synchronized recipes; successful review does not prove construction or production.",
                     targets("landmark", "area"),
                     fields(field("design", "object",
                             "Shape: {components:[{name,block_id,count,role,module?,module_tier?,module_options?}],connections:[{from,to,medium,purpose}],expected_output?:item_id,style?:string,constraints?:{max_width?,max_depth?,max_height?,terrain_fit?,maintenance_access?,preserve_existing?,throughput?}}. Planning budgets: 1024 component groups, 4096 connections, 32768 physical targets. Modules: create:press_station, create:press_basin_station, create:mixer_station, ae2:storage_cluster, ae2:crafting_cluster, mekanism:induction_matrix. Matrix options: width/height/depth/cell_count/provider_count, tier basic/advanced/elite/ultimate. AE options: storage_tier and storage_cells. Media include kinetic, items, fluids, energy, chemicals and ae_network; unsupported interfaces produce specific compiler issues."),
-                            field("snapshot_id", "string", "Optional fresh site/machine observation that grounds site-specific analysis; requires the exact surveyed target label. It does not expose layout compilation to the LLM.")));
+                            blueprintField(), blueprintUriField(),
+                            field("snapshot_id", "string", "Optional fresh site/machine observation that grounds site-specific analysis; requires the exact surveyed target label. Blueprint offsets are relative to this anchor.")));
             case MachineAbilityAdapter.BUILD -> contract(
-                    "Compile and construct a semantic machine design at an observed anchor. The native task progressively loads its larger footprint, supplies exact materials in batches, places registered blocks and AE2 parts, configures supported Mekanism interfaces, and verifies final geometry and synchronized operating evidence. Dev mode displays the frozen blueprint and waits for the player's local preview confirmation. Unsupported layouts report concrete compiler issues before construction.",
+                    "Construct a machine at an observed anchor. Supply exactly one of design, blueprint or blueprint_uri. MaiCraft compares the declared structure with the world, supplies materials, chooses placement order and executes native interactions. Success verifies declared structure and supported configuration; use operate_machine separately to run the machine and collect operating evidence. Dev mode displays the frozen blueprint and waits for local preview confirmation. Unsupported structures or configurations report concrete issues before construction.",
                     targets("landmark", "area"),
                     fields(
                             field("snapshot_id", "string", "Fresh complete inspect_machine receipt identifying the build anchor. The complete construction footprint is subsequently inspected by the native task and is not limited to the anchor survey radius."),
-                            field("design", "object", "Same semantic graph as design_machine: components, connections, optional expected_output, style and high-level constraints. Blueprint, blocks, cells, offsets, state properties and action scripts are forbidden."),
+                            field("design", "object", "Alternative to blueprint/blueprint_uri: same semantic graph as design_machine, with components, connections and optional expected_output, style and constraints."),
+                            blueprintField(), blueprintUriField(),
                             field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site."),
                             field("material_policy", "string", "ordinary, storage_available (including an existing AE2 network), or inventory_only; exact machine items are never substituted."),
-                            field("replace_existing", "boolean", "Allow removing ordinary obstructing blocks in the compiled footprint; existing block entities stay protected. Default false."),
+                            field("replace_existing", "boolean", "Allow removing ordinary obstructing blocks in the compiled footprint; block entities stay protected unless replace_block_entities is also true. Default false."),
+                            field("replace_block_entities", "boolean", "Also allow replacing existing block entities at declared targets; requires replace_existing=true and authorization for those changes. Default false."),
                             field("protected_labels", "array<string>", "Remembered areas that construction and material acquisition must preserve.")));
             case MachineAbilityAdapter.OPERATE -> contract(
                     "Use existing machines through native evidence: open_menu on a surveyed block, perceive(machine_menu), then deposit/withdraw an exact observed entry. Transfers bind a fresh menu receipt, validate native slot rules and verify inventory/cursor effects. set_control observes one exact vanilla lever state. ae2_supply uses an accessible AE2 terminal, including already configured mixed-mod patterns. Success identifies the observed effect; it never invents production or the meaning of undocumented menu controls.",
@@ -66,12 +70,17 @@ public final class SemanticAbilityCatalog {
                             field("count", "integer", "Exact item quantity, default 1: transfer 1-64, AE2 approved net increase 1-256. Use a stable execute request_key to prevent uncertain transport retries creating duplicate work."),
                             field("allow_crafting", "boolean", "ae2_supply only: may submit an existing AE2 crafting pattern, default false. Requires target={kind:nearest} without a label; selecting a specific surveyed network is unsupported.")));
             case MachineAbilityAdapter.MODIFY -> contract(
-                    "Modify an existing surveyed machine through a dedicated high-level native operation. connect_mechanical_power lets the Mod plan the entire Create rotational route and execute it with guarded first-person actions. Arbitrary per-block modifications are unsupported until a matching Mod-side semantic compiler exists.",
+                    "Modify an existing surveyed machine. apply_blueprint applies explicit desired blocks at anchor-relative offsets and preserves omitted positions; exactly one blueprint or blueprint_uri is required. connect_mechanical_power lets MaiCraft plan a Create rotational route. Success verifies the requested structural change; running and production are checked separately through use abilities.",
                     targets("landmark", "area"),
                     fields(
-                            field("operation", "string", "Currently connect_mechanical_power."),
+                            field("operation", "string", "apply_blueprint or connect_mechanical_power."),
                             field("snapshot_id", "string", "Fresh complete receipt for the exact destination machine label; consumed before execution. Resurvey before another attempt."),
                             field("source_label", "string", "connect_mechanical_power only: remembered powered Create source in the same dimension."),
+                            blueprintField(), blueprintUriField(),
+                            field("material_policy", "string", "apply_blueprint only: ordinary, storage_available or inventory_only."),
+                            field("replace_existing", "boolean", "apply_blueprint only: allow replacing ordinary obstructing blocks, default false. Declare minecraft:air to request removal at an explicit offset."),
+                            field("replace_block_entities", "boolean", "apply_blueprint only: also allow replacing block entities at declared targets, default false; requires replace_existing=true and authorization for those changes."),
+                            field("protected_labels", "array<string>", "apply_blueprint only: remembered areas that modification and material acquisition must preserve."),
                             field("allow_modify", "boolean", "Required true when the player's instructions authorize this change; existing authorization carries through the workflow.")));
             case GeneralAbilityAdapter.FIND_ENTITY -> contract(
                     "Find real entities through loaded client evidence and bounded first-person frontier exploration; MaiCraft owns every route and concrete identity.",
@@ -358,8 +367,16 @@ public final class SemanticAbilityCatalog {
         result.add("accepted_hard_constraints", targets());
         result.addProperty(
                 "execution_boundary",
-                "Express outcomes and declared semantic fields only. MaiCraft owns layout compilation, exact cells and states, native routes, gestures, transactions, retries and result verification. Never provide blueprints, placements, offsets or click scripts.");
+                "Use only fields declared by this ability. Machine blueprint fields accept model-authored block positions and states or exported tutorial structures. MaiCraft owns native routes, gestures, transactions, retries and verification. Never supply click scripts. Construction verifies structure; operation requires separate evidence.");
         return result;
+    }
+
+    private static JsonObject blueprintField() {
+        return field("blueprint", "object", "Alternative to design/blueprint_uri (modify: apply_blueprint only). Shape: {schema_version:1,blocks:[{offset:[x,y,z],block_id:'namespace:id',properties?:{property:'value'}}],metadata?:{...},evidence?:{...}}. Integer offsets are relative to the exact surveyed anchor; omitted cells are preserved and minecraft:air declares removal. Evidence may contain observed NBT or animation transforms; it does not configure the built machine. Unsupported desired configuration is rejected, never silently applied. Copy and edit Ponder chapter JSON or author your own layout.");
+    }
+
+    private static JsonObject blueprintUriField() {
+        return field("blueprint_uri", "string", "Alternative to design/blueprint: exact maicraft://knowledge/ponder/structure/... URI returned by Ponder resources. Read the chapter first to capture it; the Mod resolves the cached structure without echoing all coordinates through model context. In modify_machine this is apply_blueprint only.");
     }
 
     static Set<String> parameterNames(String ability) {

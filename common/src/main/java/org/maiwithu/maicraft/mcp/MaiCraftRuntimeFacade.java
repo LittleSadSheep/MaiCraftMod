@@ -420,7 +420,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("semantic_abilities", abilities);
         result.addProperty(
                 "boundary",
-                "Use fields declared by each ability. Machine design may include components, intended connections, style, constraints and observed menu references. MaiCraft owns exact layouts, states, routes, gestures, retries and confirmation; never submit per-block blueprints or click scripts.");
+                "Use fields declared by each ability. Machine design/build accept a semantic design, an explicit blueprint with block offsets and states, or an exported Ponder blueprint_uri. modify_machine applies blueprint changes; operate_machine performs native use and checks its effects separately. MaiCraft owns routes, gestures, retries and confirmation; never submit click scripts.");
         return result;
     }
 

@@ -303,7 +303,7 @@ public final class MachineDesignReview {
         readiness.addProperty("recipes_verified", false);
         readiness.addProperty("functioning_machine_verified", false);
         readiness.addProperty("executable", false);
-        readiness.addProperty("next_step", valid ? "Resolve verification obligations, then use a matching Mod-side semantic layout compiler or dedicated high-level ability. Never supply per-block instructions." : "Correct the validation errors and submit the semantic design again.");
+        readiness.addProperty("next_step", valid ? "Resolve verification obligations, then build this semantic design or submit an explicit blueprint or exported Ponder blueprint_uri. MaiCraft executes native construction; use abilities verify operation separately." : "Correct the validation errors and submit the semantic design again.");
         result.add("readiness", readiness);
         result.addProperty("notice", "Design validation is not proof of a functioning machine and never authorizes or executes construction, configuration, dismantling or item transfer.");
         return result;
