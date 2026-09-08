@@ -6,7 +6,7 @@ import org.maiwithu.maicraft.entity.InputDriver;
 
 import java.util.function.Consumer;
 
-/** One of the two body-owning positions in the single client task runtime. */
+/** 调度器中的一个任务槽，统一处理开始、超时、替换和结束；同时保存记录与实际执行对象。 */
 final class TaskSlot {
 
     private final Consumer<TaskRecord> outbox;
@@ -35,7 +35,7 @@ final class TaskSlot {
         return record != null && record.getState() == TaskState.RUNNING && task.canRun(player);
     }
 
-    /** Replace this slot and start the new task on the client thread immediately. */
+    /** 新任务先替换并清理旧任务，再调用 start；后续 tick 只有被调度器选中时才推进。 */
     void put(LocalPlayer player, TaskRecord next) {
         if (next == null) {
             throw new IllegalArgumentException("task record is required");
@@ -101,7 +101,7 @@ final class TaskSlot {
         return suspended;
     }
 
-    /** A preempted task does not spend its deadline while another winner owns the body. */
+    /** 等待其他任务使用身体时顺延截止时间，等待调度的时间不计入这个任务的执行预算。 */
     void freeze() {
         if (record != null && record.getState() == TaskState.RUNNING) {
             record.extendDeadlineTo(record.getDeadlineGameTime() + 1L);
@@ -149,6 +149,7 @@ final class TaskSlot {
     }
 
     private void settle(LocalPlayer player) {
+        // 无论结果生成是否抛异常，都要归还输入并清空槽位；清理后才把最终记录交给结果队列。
         TaskRecord finished = record;
         try {
             if (finished.getResult() == null) {

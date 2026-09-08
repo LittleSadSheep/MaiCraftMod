@@ -30,20 +30,15 @@ import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 
 /**
- * Loader-agnostic init for the {@code maicraft-core} tool pack — the worked example
- * of how the single Mod wires its internal semantic execution engine. Each client loader entry
- * point calls {@link #init()} once; one client-tick runtime advances scans, path snapshots and
- * the real local-player task body.
+ * 共享功能的总注册入口，由 Fabric 或 NeoForge 的客户端入口调用一次。
  *
- * <p>Two things plug into the engine here:
+ * <p>增加功能时，需要分清以下几种接线：
  * <ul>
- *   <li>tools — each a {@link org.maiwithu.maicraft.agent.tool.MaiCraftTool} (raw) and
- *       added to the global {@link ToolRegistry} (order preserved for prompt
- *       caching);</li>
- *   <li>task runners — each {@code TaskRecord} type a world-action tool emits is
- *       paired with the {@code CompanionTask} that runs it, via
- *       {@link CompanionTaskFactory#register}.</li>
+ *   <li>{@link ToolRegistry}：内部操作名对应哪个工具，例如 goto；这里的工具不会全部直接公开给 MCP。</li>
+ *   <li>{@link TaskFactory}：工具生成任务记录后，由哪个 Task 对象逐 tick 执行。</li>
+ *   <li>生存反射：哪些紧急行为可以请求接管身体，以及它们的检查顺序。</li>
  * </ul>
+ * 对外能力的参数说明在 SemanticAbilityCatalog，目标到内部操作的转换在各 AbilityAdapter。
  */
 public final class MaiCraftCore {
 
@@ -63,16 +58,10 @@ public final class MaiCraftCore {
     }
 
     /**
-     * 把 core 的即时生存本能链插进引擎的竞价调度(链登记口)。运输包与
-     * 生命周期对接已随排程机器归引擎,不再是 core 的事。
+     * 登记生存反射的工厂；实际运行的实例由 CompanionBrain 创建并参加身体调度。
      */
     private static void registerReflexes() {
-        // 注册号小的先问 —— 与原版 addGoal(int priority, goal) 同一惯例。
-        // 顺序<b>照搬旧的浮点优先级</b>(MLG 10 > 换气 6 > 自卫 5),
-        // 那些数值本身已经退役:反射之间的先后是固定的,不随世界状态变,用连续量
-        // 表达一个固定序,数值就成了必须维护却没人看得懂的魔法数。
-        //
-        // 正在坠落是最迫近的死法,所以摔落缓冲压过一切。
+        // 数字越小越先检查，固定顺序为落地救援、换气、自卫；这些数字不参与动态评分。
         //
         // “卡住”不再是一条盲走反射。脱困可能需要沿水柱游、挖、垫或挖搭结合，
         // 这些动作必须继承当前语义任务的 terrain permit、保护格和原生动作回执。
@@ -87,10 +76,7 @@ public final class MaiCraftCore {
     }
 
     /**
-     * The reflex roster (constitution §6): enlist core's immediate survival instincts
-     * survival chains and the pure policies. The switch persistence is bound by
-     * the engine ({@code CommonClass.wireTaskMachine}). Runs on BOTH sides like
-     * the rest of init.
+     * 登记反射的名称和说明。这里的实例只供查询，实际执行实例由上面的工厂创建。
      */
     private static void enlistReflexRoster() {
         org.maiwithu.maicraft.core.task.reflex.CoreReflexes.registerAll();
@@ -98,8 +84,7 @@ public final class MaiCraftCore {
 
     private static void registerTools() {
 
-        // Registration ORDER is preserved (backends with prompt-caching keyed off
-        // the tool list cache stably across requests).
+        // 工具负责接收参数、生成任务记录或即时结果；需要持续操作身体的功能还必须注册执行器。
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.MoveToTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.AttackTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.locate.LocateStructureTool());
@@ -143,6 +128,7 @@ public final class MaiCraftCore {
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.perception.InspectBlockTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.perception.InspectBlockStorageTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.perception.GetWorldInfoTool());
+        // 部分功能把“工具 + 记录执行器”的注册封装在自己的 API 中，增加功能时先确认是否已成对注册。
         org.maiwithu.maicraft.core.tools.work.SemanticEntitySearchApi.register();
         org.maiwithu.maicraft.core.tools.work.SemanticExploreApi.register();
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.BoardStructureTool());
@@ -156,6 +142,7 @@ public final class MaiCraftCore {
 
 
     private static void registerTaskRunners() {
+        // 按记录的具体 Java 类型查找执行器；仅注册工具却漏掉这里的对应关系，任务仍无法执行。
         TaskFactory.register(MoveToTaskRecord.class, (p, r) -> new MoveToCompanionTask(p, r));
         TaskFactory.register(org.maiwithu.maicraft.core.task.move.FollowTaskRecord.class,
                 (p, r) -> new org.maiwithu.maicraft.core.task.move.FollowCompanionTask(p, r));

@@ -6,19 +6,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Mod-global registry of {@link MaiCraftTool} instances. Populated once during
- * mod init (see {@code CommonClass.init} / per-loader entry points) and
- * read-only thereafter. Insertion order is preserved so the LLM sees tools
- * in a stable order across requests — useful for prompt caching on backends
- * that hash tool definitions.
+ * Mod 内部工具的名称索引，通常在 MaiCraftCore 初始化时填入，由目标适配器和本地分发器查找。
+ * 例如 goto 对应移动工具；MCP 对外的四个入口由 PublicToolCatalog 单独定义。
  *
- * <h2>Why static singleton instead of per-entity</h2>
- * The tool set is a deployment-level decision (which capabilities does the
- * mod expose?), not a per-entity decision. Putting it on the entity would
- * mean every MaiCraft carries an identical copy, wasting memory and creating
- * a sync question (does each entity get its own ToolRegistry? on world load
- * do they get repopulated?). Global is simpler and matches how vanilla
- * registries work.
+ * <p>保留注册顺序，便于稳定列举。底层 Map 没有加锁，初始化后的访问应留在客户端线程。
  */
 public final class ToolRegistry {
 
@@ -26,18 +17,11 @@ public final class ToolRegistry {
 
     private ToolRegistry() {}
 
-    /** 上游认的函数名形状。名字不合规,被打回的不是这个工具而是整个请求。 */
+    /** 内部工具名的格式约束，在注册时统一检查。 */
     private static final java.util.regex.Pattern LEGAL_NAME =
             java.util.regex.Pattern.compile("[a-zA-Z0-9_-]{1,64}");
 
-    /**
-     * Register a tool. Should only be called during mod init. Throws on
-     * duplicate name — silent replacement would mask wiring bugs.
-     *
-     * <p>名字形状也在这里把关。工具清单每轮都随请求发出去,一个非法名字换来的是整轮 400,
-     * 而不是"这个工具用不了"——所以宁可在注册这一刻炸掉,也不能让它混进去。自家工具在初始化
-     * 时就会撞上;借来的工具由调用方接住并跳过(见 {@code McpClientManager})。
-     */
+    /** 注册内部工具，并在启动时检查名称格式和重名，尽早暴露功能接线错误。 */
     public static void register(MaiCraftTool tool) {
         String name = tool.name();
         if (name == null || !LEGAL_NAME.matcher(name).matches()) {
@@ -54,16 +38,7 @@ public final class ToolRegistry {
         }
     }
 
-    /**
-     * Remove a tool by name; returns the removed tool, or {@code null} if none
-     * was registered under that name.
-     *
-     * <p>Added for the MCP client's live enable/disable: disabling a server pulls
-     * its borrowed tools back out so the built-in brain stops seeing them on the
-     * next turn ({@code EntityAgentLoop} re-reads {@link #all()} every turn). Must
-     * be called on the client main thread — same invariant as {@link #all()},
-     * since the backing map is not synchronized.
-     */
+    /** 从名称索引移除工具，返回原实例；这不会取消已经创建的任务。 */
     public static MaiCraftTool remove(String name) {
         return TOOLS.remove(name);
     }
@@ -72,19 +47,7 @@ public final class ToolRegistry {
         return TOOLS.get(name);
     }
 
-    /**
-     * Lenient lookup — exact match first, then case-insensitive fallback.
-     * Mirrors opencode's {@code experimental_repairToolCall} pattern
-     * ({@code llm.ts:331-350}) where mis-cased tool names from the LLM
-     * are silently fixed instead of crashing the turn.
-     *
-     * <p>Most LLM typo failure modes come from case drift
-     * ({@code Move_to} vs {@code move_to}, {@code AssignTask} vs
-     * {@code assign_task}); a single lowercase compare catches them all.
-     * For names that still don't resolve, callers should surface a
-     * structured "unknown tool" error so the LLM can self-correct on
-     * the next turn.
-     */
+    /** 先精确查名，找不到时再把输入转成小写查询；不猜测近义词，也不做自然语言匹配。 */
     public static MaiCraftTool resolve(String name) {
         if (name == null) return null;
         MaiCraftTool exact = TOOLS.get(name);
@@ -94,24 +57,20 @@ public final class ToolRegistry {
         return TOOLS.get(lower);
     }
 
-    /**
-     * All registered tools, in registration order. Fed to each LLM call.
-     * A copy, so callers can pass it to APIs expecting a mutable {@link List}.
-     */
+    /** 按注册顺序返回工具列表的副本，调用方修改列表不会改变注册表。 */
     public static List<MaiCraftTool> all() {
         return new ArrayList<>(TOOLS.values());
     }
 
     /**
-     * 常驻工具——完整定义每轮随请求发出。见 {@link MaiCraftTool#residency()}。
+     * 按工具声明的 RESIDENT 分类筛选；此分类不会让工具自动出现在 MCP 的公开工具列表中。
      */
     public static List<MaiCraftTool> resident() {
         return byResidency(MaiCraftTool.Residency.RESIDENT);
     }
 
     /**
-     * 延迟工具——只在目录里留一行摘要。借来的 MCP 工具全在这一档:自家工具有界且
-     * 高频,借来的无界且描述长度不可控。
+     * 按工具声明的 DEFERRED 分类筛选，具体使用方式由调用方决定。
      */
     public static List<MaiCraftTool> deferred() {
         return byResidency(MaiCraftTool.Residency.DEFERRED);

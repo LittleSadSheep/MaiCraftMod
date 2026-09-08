@@ -20,11 +20,9 @@ public final class TaskDispatch {
     }
 
     /**
-     * Lexically capture the next task emitted by an internal tool.
-     *
-     * <p>High-level intent tasks use this to turn an existing tool into a child
-     * task. Captured records never touch either global slot, so the parent remains
-     * the one scheduler winner. Nested captures and multiple emissions are errors.</p>
+     * 仅在 invocation 执行期间，截获内部工具提交的任务记录，交给业务父任务保存为子任务。
+     * 截获的记录不会进入全局任务槽，因此不会把父任务替换掉；不允许嵌套截获或一次提交多个记录。
+     * 调用结束后必须清掉 activeCapture，避免后续无关工具的任务也被误收走。
      */
     public static void captureNext(Consumer<TaskRecord> sink, Runnable invocation) {
         requireClientThread();

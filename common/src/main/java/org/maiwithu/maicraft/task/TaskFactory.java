@@ -6,23 +6,12 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Maps a queued {@link TaskRecord} to the {@link Task} that runs it on
- * the player body — the seam where concrete task execution plugs into the
- * runtime. Feature modules register each record type with the runner that
- * executes it, keyed by the record's concrete class.
+ * 把任务记录变成执行对象：{@link TaskRecord} 保存参数和状态，{@link Task} 负责逐 tick 干活。
  *
- * <p>A record whose type was never registered falls back to
- * {@link UnsupportedTask}, which fails the task cleanly with a clear
- * message rather than crashing the tick loop.
+ * <p>按记录的具体类精确匹配，不会自动寻找父类的执行器。漏注册时返回 {@link UnsupportedTask}，
+ * 由它报告失败，避免把客户端 tick 循环一起中断。
  *
- * <h2>Registration</h2>
- * Tool packs register during client mod initialization, e.g.:
- * <pre>{@code
- * TaskFactory.register(MoveToTaskRecord.class,
- *         (player, record) -> new MoveToTask(player, record));
- * }</pre>
- * Registration is idempotent-by-type: a later registration for the same record
- * class replaces the earlier runner.
+ * <p>同一种记录再次注册会覆盖之前的工厂；这里登记的是创建方法，每次执行都会创建任务对象。
  */
 public final class TaskFactory {
 

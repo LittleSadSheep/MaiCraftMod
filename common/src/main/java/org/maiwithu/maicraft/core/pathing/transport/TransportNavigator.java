@@ -20,7 +20,10 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
-/** Ground navigation plus native transport recovery, shared by travel and workstation approaches. */
+/**
+ * 移动方式的协调层，旅行和走近工作台等行为共用它。
+ * 普通地面导航交给 EmbeddedBaritoneNavigator；交通方案的选择、执行和交接留在这里。
+ */
 public final class TransportNavigator {
     private final LocalPlayer player;
     private final Supplier<GoalCompiler.Compiled> goals;
@@ -73,6 +76,7 @@ public final class TransportNavigator {
             lastPosition = player.position(); progressTick = player.level().getGameTime();
         }
         if (session != null) {
+            // 一段交通动作尚未结束时，先消费它的实际结果；不能同时启动另一种方式抢走输入。
             if (TransportRuntime.owns(this)) TransportRuntime.drive(this, context);
             if (transportResult == null) return PlayerNav.Status.RUNNING;
             var result = transportResult;
@@ -92,6 +96,7 @@ public final class TransportNavigator {
                 replanning = false; paused = true;
             }
             if (result.state() == TransportSession.State.SUCCEEDED) {
+                // 乘梯或飞行这一段结束，不代表已满足最终站位。下一 tick 交回地面导航继续检查和收尾。
                 if (!reached.getAsBoolean() && player.position().distanceToSqr(legOrigin) < 0.0625) {
                     failure = "transport ended without moving toward the requested destination";
                     return PlayerNav.Status.FAILED;
@@ -146,6 +151,7 @@ public final class TransportNavigator {
             }
             ground = newGround(); ground.withTerrainProbe();
         }
+        // 明确指定喷气背包或电梯时直接尝试该方式；auto 则先走地面，遇到可恢复的导航失败再找交通方案。
         if (!forceConsumed && mode != TransportMode.AUTO && mode != TransportMode.GROUND) {
             forceConsumed = true; return beginTransport(context);
         }

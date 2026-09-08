@@ -21,7 +21,10 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** One semantic goal; ground legs and continuous flight share observed surface-region selection. */
+/**
+ * 朝指定方向寻找可站立区域：地面移动分段接近候选点，飞行则持续观察并选择着陆点。
+ * 任务开始时还没有精确终点，只有观察到的支撑面满足目标条件才可以报告到达。
+ */
 public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTravelTaskRecord> {
     private RegionalGoal goal;
     private RegionalTerrain terrain;
@@ -34,6 +37,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
     private boolean groundExhausted;
     public RegionalTravelTask(LocalPlayer player,RegionalTravelTaskRecord record) { super(player,record); }
     protected void onStart() {
+        // 把“前/后/左/右”按出发时朝向固定为世界方向，避免寻路转头后连搜索目标也跟着旋转。
         goal=new RegionalGoal(player.position(),RegionalGoal.direction(r.direction,player.getYRot()),r.radius);
         terrain=new RegionalTerrain(player.position()); lastPosition=player.position();
     }
@@ -90,6 +94,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
                 + surface.point().distanceTo(position)-goal.progress(surface.point())*2;
     }
     private static boolean platformAt(RegionalTerrain.View view,Vec3 position) {
+        // 到达时复查脚下和四邻的同高支撑，不能仅凭路径终点或旧采样宣布成功。
         int count=0;
         for(int[] offset:new int[][]{{0,0},{1,0},{-1,0},{0,1},{0,-1}}) {
             Vec3 floor=view.surfaceBelow(position.add(offset[0],.15,offset[1]),2);

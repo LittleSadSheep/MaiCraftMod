@@ -36,8 +36,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
- * A semantic parent task. Internal body tools become child tasks and are driven
- * here, so the parent remains the only selected scheduler winner.
+ * 一个业务目标的执行外壳：保存当前步骤，启动具体动作子任务，并在失败时请求外部决策。
+ * 调度器只选择这个父任务；子任务由父任务逐 tick 推进，不单独争抢全局任务槽。
  */
 final class IntentTask implements Task {
 
@@ -139,6 +139,7 @@ final class IntentTask implements Task {
             return begin(resolved);
         }
 
+        // 已经开始的子任务先继续执行；不能每个 tick 都重新转换目标、创建一份新任务。
         if (child != null) {
             return tickChild();
         }
@@ -211,6 +212,7 @@ final class IntentTask implements Task {
                 + record.stepIndex() + "-" + (++childSerial);
         try {
             withExplicitAreaProtection(() -> {
+                // 内部工具原本会向全局任务槽提交记录；在此截获后作为 child，避免它替换自己的父任务。
                 TaskDispatch.captureNext(captured::set, () ->
                         tool.onGameCall(childCallId, action.arguments(), player, immediate::set));
                 return null;
@@ -281,6 +283,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState finishChild() {
+        // 子任务结束先收取结果、释放输入，再决定推进步骤还是请求恢复；动作完成不必然等于整个目标完成。
         Task finishingChild = child;
         TaskRecord finishingRecord = childRecord;
         boolean reobserve=reobserveAfterChild;
@@ -297,6 +300,7 @@ final class IntentTask implements Task {
             if (child == finishingChild) clearChild();
         }
         if (result == null) result = defaultResult(state);
+        // 有些子任务只补齐了观察条件；成功后重新评估当前目标，不直接把业务步骤记为完成。
         if(result.success() && reobserve) return TaskState.RUNNING;
         if (finishingRecord instanceof org.maiwithu.maicraft.core.task.build.BuildTaskRecord
                 && MachineAbilityAdapter.supports(currentGoal().ability())) {
@@ -367,6 +371,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState failStep(TaskState state, TaskResult result) {
+        // 子任务失败先记下这次尝试，再进入待决策状态；不在这里盲目重试，也不立即丢掉整个业务目标。
         TaskState failureState = state == null ? TaskState.FAILED : state;
         // A failed/abandoned execution can never authorize a later prior_result binding.
         record.discardInternalStepPosition(record.stepIndex());

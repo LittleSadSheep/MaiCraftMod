@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 
-/** The one scheduler state machine for the active local player body. */
+/** 本地玩家的唯一身体调度器：每 tick 选一个执行者，并处理前后两个执行者的输入交接。 */
 final class CompanionBrain {
 
     private static final int HAND_PIN_GRACE_TICKS = 600;
@@ -39,10 +39,8 @@ final class CompanionBrain {
                 idlePoses,
                 player);
 
-        // A launched parkour/fall movement cannot surrender steering midway. Keep its existing
-        // body owner for this tick and retry the priority hand-off at the next safe movement
-        // boundary. Reflexes that need airborne takeover must first provide an explicit
-        // continuation controller; clearing the route's keys is never a safe approximation.
+        // 优先级更高也不代表能立刻抢走身体：起跳、坠落或交通动作可能需要先走到可安全交接的位置。
+        // 空中救援若要提前接管，必须明确准备好接续控制；否则这一 tick 仍由原执行者控制。
         if (holder != winner && (!EmbeddedBaritoneRuntime.canSafelySuspendActive()
                 || !org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.canSafelySuspendActive())) {
             boolean rescue = winner instanceof org.maiwithu.maicraft.core.task.chain.MLGChain mlg
@@ -52,15 +50,14 @@ final class CompanionBrain {
             if (!rescue) winner = holder;
         }
         if (holder != null && holder != winner) {
-            // A composite holder may keep its active navigator inside a child task, so stopping
-            // only the holder's own nav field is not a complete body hand-off. Retire the shared
-            // pathing keys/look/native receipt before the higher-priority winner gets this tick.
+            // 导航可能藏在旧执行者的子任务里；交接前统一暂停共享导航和交通输出，再通知旧任务让位。
             EmbeddedBaritoneRuntime.suspendActivePhysicalOutputs();
             org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.suspendActive();
             holder.stop(player, Task.StopReason.PREEMPTED);
         }
         holder = winner;
 
+        // 没被选中的任务本 tick 没机会干活，把截止时间顺延，避免它因等待别人执行而超时。
         if (winner != syncProxy) {
             sync.freeze();
         }

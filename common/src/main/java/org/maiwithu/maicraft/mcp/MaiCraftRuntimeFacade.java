@@ -98,6 +98,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     @Override
     public CompletionStage<JsonElement> execute(JsonObject arguments) {
+        // 返回的是接单回执。持续动作由游戏 tick 推进，调用方用 next_attention 等待进度、问题或终态。
         return onClient(() -> {
             Minecraft minecraft = requireWorld();
             LocalPlayer player = minecraft.player;
@@ -669,6 +670,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private static CompletionStage<JsonElement> onClient(Supplier<? extends JsonElement> operation) {
+        // HTTP 请求可能来自网络线程；统一切到客户端线程读写任务和世界状态，避免与游戏更新并发冲突。
         ClientCallFuture future = new ClientCallFuture();
         Runnable work = () -> {
             if (!future.begin()) return;

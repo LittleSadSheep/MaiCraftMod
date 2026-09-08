@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.MaiCraftCore;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 
-/** NeoForge bootstrap for the single MaiCraft client runtime. */
+/** NeoForge 的客户端接线入口，与 Fabric 共用同一套功能注册、MCP 和任务运行时。 */
 @Mod(value = Constants.MOD_ID, dist = Dist.CLIENT)
 public final class MaiCraftNeoForgeClient {
     public MaiCraftNeoForgeClient(IEventBus modBus) {
@@ -33,6 +33,7 @@ public final class MaiCraftNeoForgeClient {
     }
 
     private void onClientSetup(FMLClientSetupEvent event) {
+        // 初始化安排到客户端工作队列，先完成注册，再开放 MCP 接单。
         event.enqueueWork(() -> {
             MaiCraftCore.init();
             ClientRuntime.start(MaiCraftRuntimeFacade.instance());
@@ -40,6 +41,7 @@ public final class MaiCraftNeoForgeClient {
     }
 
     private void onClientTick(ClientTickEvent.Post event) {
+        // 每次客户端 tick 结束后推进共享运行时，具体业务逻辑不放在加载器事件里。
         ClientRuntime.tick(Minecraft.getInstance());
         PreviewController.tick(Minecraft.getInstance());
     }

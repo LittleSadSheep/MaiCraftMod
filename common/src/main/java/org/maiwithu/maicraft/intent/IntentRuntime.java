@@ -29,10 +29,10 @@ import java.util.stream.Stream;
 import java.io.IOException;
 
 /**
- * Client-thread semantic state around the one Task scheduler.
+ * 保存客户端业务任务的计划、公开 ID、进度、决策和持久化状态，供 MCP 查询。
  *
- * <p>The maps retain plans, public ids and read models only. All physical
- * advancement remains in {@link CompanionTickDispatcher}.</p>
+ * <p>这里负责登记任务和发布状态；身体动作由 {@link CompanionTickDispatcher} 调度，
+ * 普通业务任务的父子步骤由 IntentTask 推进。
  */
 public final class IntentRuntime {
 
@@ -115,6 +115,7 @@ public final class IntentRuntime {
     }
 
     private static synchronized void ensureRegistered() {
+        // 业务父任务也走同一个 TaskFactory；不另外启动一套与身体调度器争抢控制权的循环。
         if (registered) return;
         TaskFactory.register(IntentTaskRecord.class,
                 (player, record) -> new IntentTask(player, record, INSTANCE));
@@ -147,6 +148,7 @@ public final class IntentRuntime {
                             java.util.function.Predicate<org.maiwithu.maicraft.client.preview.PreviewSession> publishDesign) {
         validateGoal(goal);
         if (requestKey != null && !requestKey.isBlank()) {
+            // 网络重试可能重复提交同一请求；同一 request_key 复用原记录，避免重复开工。
             UUID existingId = requestKeys.get(requestKey);
             IntentTaskRecord existing = existingId == null ? null : tasks.get(existingId);
             if (existing != null) return existing;
@@ -192,6 +194,7 @@ public final class IntentRuntime {
             terminal(record, state, result);
             return record;
         }
+        // 放入唯一的当前任务槽，会替换旧任务；这里的接单不等于业务目标已经完成。
         CompanionTickDispatcher.submitCurrent(player, record);
         return record;
     }

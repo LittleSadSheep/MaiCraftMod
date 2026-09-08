@@ -16,6 +16,7 @@ public final class RegionalTerrain {
     }
     public record Surface(Vec3 point, int supportSamples, boolean visible, String material) {
         public Surface(Vec3 point,int supportSamples,boolean visible) { this(point,supportSamples,visible,"unknown"); }
+        // “平台”是几何上的候选落脚面：中心及四邻采样中至少三处同高有支撑，不是游戏里的专用方块类型。
         public boolean platform() { return supportSamples >= 3; }
     }
     private static final int RADIUS=12, STRIDE=4, DEPTH=24;
@@ -66,6 +67,7 @@ public final class RegionalTerrain {
     public boolean complete() { return column==samples.size(); }
     public List<Surface> surfaces() { return List.copyOf(surfaces); }
     public void advance(View view, int budget) {
+        // 把地形采样分摊到多次调用，并限制本次耗时。没加载或没采到的区域保持未知，不能算成空地。
         long end=System.nanoTime()+1_000_000;
         for(int n=0;n<budget && !complete() && (n==0 || System.nanoTime()<end);n++) {
             int index=column++;
@@ -73,6 +75,7 @@ public final class RegionalTerrain {
             if(!view.known(top)) { unknown++; continue; }
             Vec3 floor=view.surfaceBelow(top,depth);
             if(floor==null || floor.y>top.y || top.y-floor.y>depth) continue;
+            // 中心落脚点已经通过碰撞/空间检查，再探测四邻是否有近似同高的支撑面，过滤孤立尖点。
             int supports=1;
             for(int[] offset:new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) {
                 Vec3 beside=view.surfaceBelow(floor.add(offset[0],.15,offset[1]),2);

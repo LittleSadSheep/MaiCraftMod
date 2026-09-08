@@ -7,7 +7,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Immutable compiled semantic plan. It contains goals, never body-control micro-steps. */
+/**
+ * 不可变的业务步骤清单。compile 只整理 Goal 中的可执行步骤并生成计划 ID，
+ * 不在这里调用模型、搜索路径或预先决定按键；执行时才结合世界状态生成具体操作。
+ */
 public record Plan(UUID id, Goal goal, List<Goal> steps, long createdGameTime) {
     public Plan {
         id = Objects.requireNonNull(id, "id");

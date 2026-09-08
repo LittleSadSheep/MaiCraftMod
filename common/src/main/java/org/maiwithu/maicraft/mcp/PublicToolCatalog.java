@@ -11,7 +11,10 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/** Defines and validates the complete public MCP tool surface. */
+/**
+ * MCP 对外的四个入口及 JSON 格式校验。它检查数据形状，不负责理解自然语言。
+ * 具体业务能力放在 goal.ability 中，其参数说明和转换逻辑分别由 SemanticAbilityCatalog 和适配器维护。
+ */
 final class PublicToolCatalog {
     static final String PERCEIVE = "perceive";
     static final String PLAN = "plan";
