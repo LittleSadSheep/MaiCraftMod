@@ -47,6 +47,7 @@ public final class JetpackRoute {
         private final List<Vec3> exits = new ArrayList<>();
         private double ticks = 80;
         private final int nodeLimit;
+        private final boolean landingGoal;
         private int expanded, validatedPoints, initialization, templatePoint = 1;
         private List<Vec3> template;
         private boolean done;
@@ -56,9 +57,13 @@ public final class JetpackRoute {
             this(start, target, power, 6000);
         }
         public Search(Vec3 start, Vec3 target, JetpackNativeAdapter.Snapshot power, int nodeLimit) {
+            this(start,target,power,nodeLimit,true);
+        }
+        public Search(Vec3 start, Vec3 target, JetpackNativeAdapter.Snapshot power, int nodeLimit, boolean landingGoal) {
             if (nodeLimit < 0) throw new IllegalArgumentException("negative search node limit");
             this.start = start; this.target = target; this.power = power;
             this.nodeLimit = nodeLimit;
+            this.landingGoal = landingGoal;
         }
         public boolean done() { return done; }
         public Plan result() { return result; }
@@ -84,7 +89,7 @@ public final class JetpackRoute {
                         done = true; return;
                     }
                     Vec3 point = points.get(i), exit = space.landingBelow(point.add(0, 0.1, 0));
-                    if (i > 0 && !(i == points.size() - 1 ? space.clear(points.get(i - 1), point)
+                    if (i > 0 && !(landingGoal && i == points.size() - 1 ? space.clear(points.get(i - 1), point)
                             : flightClear(space, points.get(i - 1), point, power))) { fail("corridor_changed"); return; }
                     if (exit != null) exits.add(exit);
                     validatedPoints++;
@@ -125,6 +130,10 @@ public final class JetpackRoute {
             if (initialization == 0) {
                 if (!power.controllable()) { fail("uncontrollable"); return; }
                 if (start.distanceTo(target) > 64) { fail("out_of_range"); return; }
+                if (!landingGoal) {
+                    if (!flightClear(space,start,target,power)) { fail("corridor_changed"); return; }
+                    points=new ArrayList<>(List.of(start,target)); initialization=4; return;
+                }
                 landing = space.landingBelow(target.add(0, 0.1, 0));
                 if (landing == null || Math.abs(landing.y - target.y) > 1.01) { fail("no_landing"); return; }
                 origin = BlockPos.containing(start.x, Math.ceil(start.y) + 1, start.z);

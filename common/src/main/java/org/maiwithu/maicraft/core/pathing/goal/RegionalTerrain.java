@@ -17,6 +17,7 @@ public final class RegionalTerrain {
         public boolean platform() { return supportSamples >= 3; }
     }
     private static final int RADIUS=12, STRIDE=4, DEPTH=24;
+    private static final List<Vec3> OFFSETS=offsets();
     private final Vec3 origin;
     private final List<Surface> surfaces = new ArrayList<>();
     private int column, unknown;
@@ -54,7 +55,7 @@ public final class RegionalTerrain {
         long end=System.nanoTime()+1_000_000;
         for(int n=0;n<budget && !complete() && (n==0 || System.nanoTime()<end);n++) {
             int index=column++;
-            Vec3 top=origin.add((index%7)*STRIDE-RADIUS,2,(index/7)*STRIDE-RADIUS);
+            Vec3 top=origin.add(OFFSETS.get(index)).add(0,2,0);
             if(!view.known(top)) { unknown++; continue; }
             Vec3 floor=view.surfaceBelow(top,DEPTH);
             if(floor==null || floor.y>top.y || top.y-floor.y>DEPTH) continue;
@@ -65,6 +66,11 @@ public final class RegionalTerrain {
             }
             surfaces.add(new Surface(floor,supports,view.visible(origin.add(0,1.6,0),floor.add(0,.5,0))));
         }
+    }
+    private static List<Vec3> offsets() {
+        var points=new ArrayList<Vec3>();
+        for(int x=-RADIUS;x<=RADIUS;x+=STRIDE) for(int z=-RADIUS;z<=RADIUS;z+=STRIDE) points.add(new Vec3(x,0,z));
+        points.sort(java.util.Comparator.comparingDouble(Vec3::lengthSqr)); return List.copyOf(points);
     }
     /** Bounds summarize samples, not continuous free space or a promise that a route exists. */
     public Map<String,Object> summary() {

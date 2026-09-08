@@ -12,6 +12,10 @@ public interface MovingFlightTarget {
     Vec3 velocity();
     boolean contact();
     boolean touchdown();
+    /** Discovery can target an observed air corridor before selecting a real landing surface. */
+    default boolean landingSelected() { return true; }
+    /** False while a bounded observation/search slice is still choosing its next segment. */
+    default boolean ready() { return true; }
     /** Before native flight effects only: try a different observed landing face on the same identity. */
     default boolean nextLanding() { return false; }
     JetpackRoute.Space space(LocalPlayerContext context, LongSet forbidden);
