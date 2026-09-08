@@ -42,6 +42,9 @@ final class ElevatorSurvey {
                 Landing board, Landing exit, CallInput call, boolean aboard, double score) {}
 
     static Plan find(LocalPlayerContext ctx, BlockPos destination, LongSet forbidden, CreateElevatorBridge bridge, Cabin cabin, Map<String, Object> evidence) {
+        return find(ctx,destination,forbidden,bridge,cabin,evidence,null);
+    }
+    static Plan find(LocalPlayerContext ctx, BlockPos destination, LongSet forbidden, CreateElevatorBridge bridge, Cabin cabin, Map<String, Object> evidence,Integer selectedFloor) {
         evidence.put("cabin_uuid", cabin.entity().getUUID().toString());
         Map<String, Integer> rejected = new java.util.LinkedHashMap<>();
         evidence.put("rejected_candidates", rejected);
@@ -51,10 +54,10 @@ final class ElevatorSurvey {
         Vec3 player = ctx.player().position();
         boolean aboard = geometry.carries(cabin.local(player));
         evidence.put("support_layers", supportLayers(geometry.stances));
-        evidence.put("source_feet_y", player.y); evidence.put("destination_feet_y", destination.getY());
+        evidence.put("source_feet_y", player.y); evidence.put("destination_feet_y", destination==null ? "selected_native_floor" : destination.getY());
         evidence.put("floor_projections", cabin.floors().stream().map(f -> Map.of("contact_y", f.contactY(),
                 "origin_y", cabin.originAt(f.contactY()).y, "source_decks", deckCandidates(geometry.stances, cabin.originAt(f.contactY()).y, player.y),
-                "target_decks", deckCandidates(geometry.stances, cabin.originAt(f.contactY()).y, destination.getY()))).toList());
+                "target_decks", targetDecks(geometry.stances,cabin.originAt(f.contactY()).y,destination))).toList());
         Map<Integer, ElevatorArrivalView> arrivals = new HashMap<>();
         Map<Integer, Object> doorEvidence = new java.util.LinkedHashMap<>();
         evidence.put("floor_doors", doorEvidence);
@@ -65,14 +68,15 @@ final class ElevatorSurvey {
         java.util.function.IntFunction<CallInput> calls = floor -> callCache.computeIfAbsent(floor,
                 y -> java.util.Optional.ofNullable(callInput(ctx, bridge, cabin, y, radio))).orElse(null);
         for (var target : cabin.floors()) {
-            if (!cabin.serves(target.contactY())) continue;
+            if (!cabin.serves(target.contactY()) || selectedFloor!=null && target.contactY()!=selectedFloor) continue;
             Vec3 targetOrigin = cabin.originAt(target.contactY());
-            List<Double> decks = deckCandidates(geometry.stances, targetOrigin.y, destination.getY());
+            List<Double> decks = targetDecks(geometry.stances,targetOrigin.y,destination);
             if (decks.isEmpty()) { reject(rejected, "target_height_has_no_supported_layer"); continue; }
             for (double deck : decks) {
+                Vec3 targetReference=destination==null ? new Vec3(player.x,targetOrigin.y+deck,player.z) : Vec3.atBottomCenterOf(destination);
                 ElevatorArrivalView targetView = arrivals.computeIfAbsent(target.contactY(), y -> arrival(ctx, bridge, cabin, y, doorEvidence));
                 Landing exit = geometry.landings(targetView, ctx.level()::hasChunkAt, targetOrigin, step, forbidden, deck).stream()
-                        .min(Comparator.comparingDouble(l -> l.outside().distanceToSqr(Vec3.atBottomCenterOf(destination)))).orElse(null);
+                        .min(Comparator.comparingDouble(l -> l.outside().distanceToSqr(targetReference))).orElse(null);
                 if (exit == null) { reject(rejected, "target_landing_missing_or_obstructed"); continue; }
                 var sources = cabin.floors().stream().filter(f -> cabin.serves(f.contactY())
                         && (aboard || Math.abs(cabin.originAt(f.contactY()).y + deck - player.y) <= 1.25)).toList();
@@ -89,7 +93,7 @@ final class ElevatorSurvey {
                         CallInput call = aboard || cabin.targetY() == source.contactY() ? null : calls.apply(source.contactY());
                         if (aboard || cabin.targetY() == source.contactY() || call != null) plans.add(new Plan(cabin.entity().getUUID(),
                                 source.contactY(), target.contactY(), null, exit.inside(), board, exit, call, aboard,
-                                (board == null ? 0 : board.outside().distanceToSqr(player)) + exit.outside().distanceToSqr(Vec3.atBottomCenterOf(destination))));
+                                (board == null ? 0 : board.outside().distanceToSqr(player)) + exit.outside().distanceToSqr(targetReference)));
                         else reject(rejected, "no_proven_native_call_input");
                         continue;
                     }
@@ -106,7 +110,7 @@ final class ElevatorSurvey {
                         CallInput call = aboard || cabin.aligned(source.contactY()) ? null : calls.apply(source.contactY());
                         if (!aboard && !cabin.aligned(source.contactY()) && cabin.targetY() != source.contactY() && call == null) { reject(rejected, "no_proven_native_call_input"); continue; }
                         double score = (board == null ? 0 : board.outside().distanceToSqr(player))
-                                + exit.outside().distanceToSqr(Vec3.atBottomCenterOf(destination));
+                                + exit.outside().distanceToSqr(targetReference);
                         plans.add(new Plan(cabin.entity().getUUID(), source.contactY(), target.contactY(), controller.immutable(),
                                 controlStance, board, exit, call, aboard, score));
                     }
@@ -190,6 +194,10 @@ final class ElevatorSurvey {
             }
         }
         return null;
+    }
+    private static List<Double> targetDecks(List<Vec3> stances,double originY,BlockPos destination) {
+        return destination==null ? stances.stream().map(p->p.y).distinct().sorted().toList()
+                : deckCandidates(stances,originY,destination.getY());
     }
 
     /** Re-read the actual two-ended association immediately before the normal native button gesture. */

@@ -27,6 +27,8 @@ import org.maiwithu.maicraft.entity.InputDriver;
 public final class CreateElevatorTravel implements TransportSession {
     private enum Phase { DISCOVER, APPROACH_CALL, CALL, WAIT, APPROACH_BOARD, BOARD, WALK_CONTROL, SELECT, RIDE, WALK_EXIT, EXIT }
     private final BlockPos destination;
+    private final UUID requestedCabin;
+    private final Integer requestedFloor;
     private final LongSet forbidden;
     private final CreateElevatorBridge bridge = ElevatorInspection.bridge();
     private final ElevatorActions actions = new ElevatorActions();
@@ -57,7 +59,12 @@ public final class CreateElevatorTravel implements TransportSession {
     public CreateElevatorTravel(BlockPos destination) { this(destination, LongSets.emptySet()); }
     public CreateElevatorTravel(BlockPos destination, LongSet forbiddenBodyCells) {
         this.destination = destination.immutable();
+        requestedCabin=null; requestedFloor=null;
         forbidden = LongSets.unmodifiable(new LongOpenHashSet(forbiddenBodyCells));
+    }
+    public CreateElevatorTravel(UUID cabin,int floor,LongSet forbiddenBodyCells) {
+        destination=null; requestedCabin=java.util.Objects.requireNonNull(cabin); requestedFloor=floor;
+        forbidden=LongSets.unmodifiable(new LongOpenHashSet(forbiddenBodyCells));
     }
     public static Map<String, Object> inspect(LocalPlayer player) { return ElevatorInspection.inspect(player); }
     public static Map<String, Object> probe(LocalPlayerContext context, BlockPos destination) { return ElevatorInspection.probe(context, destination); }
@@ -136,6 +143,7 @@ public final class CreateElevatorTravel implements TransportSession {
         switch (phase) {
             case DISCOVER -> {
                 var cabins = bridge.cabins(ctx).stream().filter(c -> observedCabin == null || observedCabin.equals(c.entity().getUUID()))
+                        .filter(c->requestedCabin==null || requestedCabin.equals(c.entity().getUUID()))
                         .sorted(Comparator.comparingInt(c -> c.entity().getId())).toList();
                 if (scanned >= cabins.size()) {
                     if (best == null) return terminal = Result.failed("no_proven_elevator_route",
@@ -154,7 +162,7 @@ public final class CreateElevatorTravel implements TransportSession {
                     return running();
                 }
                 Map<String, Object> evidence = new LinkedHashMap<>();
-                Plan found = ElevatorSurvey.find(ctx, destination, forbidden, bridge, candidate, evidence);
+                Plan found = ElevatorSurvey.find(ctx, destination, forbidden, bridge, candidate, evidence,requestedFloor);
                 surveyEvidence = Map.copyOf(evidence);
                 if (found != null && (best == null || found.score() < best.score())) best = found;
                 scanned++; lastProgress = now;
