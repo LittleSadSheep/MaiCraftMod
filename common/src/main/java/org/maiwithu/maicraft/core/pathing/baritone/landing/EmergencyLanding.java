@@ -33,7 +33,43 @@ public final class EmergencyLanding {
     public static LandingAssistSession find(LocalPlayerContext context) {
         BlockPos ground = groundBelow(context.player());
         if (ground == null) return null;
-        return find(context, ground.above());
+        return findNear(context,ground.above());
+    }
+    public static LandingAssistSession findNear(LocalPlayerContext context, BlockPos preferred) {
+        var ground = preferred.below();
+        var direct = find(context,preferred);
+        var player = context.player();
+        boolean vertical = player.getDeltaMovement().horizontalDistance() < .05
+                && Math.hypot(player.getX()-preferred.getX()-.5,player.getZ()-preferred.getZ()-.5) < .55;
+        if (direct != null && direct.plan().kind() == LandingAssistPlan.Kind.WATER
+                && (vertical || AirLandingControl.reachable(player,preferred))) return direct;
+        LandingAssistSession best = direct;
+        double score = direct != null && (vertical || AirLandingControl.reachable(player,preferred))
+                ? 100 + player.position().distanceToSqr(Vec3.atBottomCenterOf(preferred)) : Double.POSITIVE_INFINITY;
+        // Small local alternatives are enough to steer around a hatch, plant bed or machine.
+        // Every candidate still needs a loaded native floor and a reachable full-body trajectory.
+        for (int x=-2;x<=2;x++) for (int z=-2;z<=2;z++) {
+            if (x == 0 && z == 0) continue;
+            var feet = nearbyGround(context,ground.offset(x,0,z));
+            if (feet == null || !AirLandingControl.reachable(context.player(),feet)) continue;
+            var candidate = find(context,feet);
+            if (candidate == null) continue;
+            double cost = (candidate.plan().kind() == LandingAssistPlan.Kind.WATER ? 0 : 100)
+                    + context.player().position().distanceToSqr(Vec3.atBottomCenterOf(feet));
+            if (cost < score) { best = candidate; score = cost; }
+        }
+        return best;
+    }
+    private static BlockPos nearbyGround(LocalPlayerContext context, BlockPos column) {
+        var level = context.level(); double top = Math.min(context.player().getY(),level.getMaxBuildHeight());
+        if (!level.isLoaded(column)) return null;
+        var hit = level.clip(new ClipContext(new Vec3(column.getX()+.5,top,column.getZ()+.5),
+                new Vec3(column.getX()+.5,level.getMinBuildHeight(),column.getZ()+.5),
+                ClipContext.Block.COLLIDER,ClipContext.Fluid.NONE,context.player()));
+        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().getX() == column.getX()
+                && hit.getBlockPos().getZ() == column.getZ() && level.isLoaded(hit.getBlockPos())
+                && new net.minecraft.world.phys.AABB(hit.getBlockPos()).inflate(.00001).contains(hit.getLocation())
+                ? hit.getBlockPos().above() : null;
     }
     /** A running fall keeps its already selected support and steering while adopting self-rescue. */
     public static LandingAssistSession find(LocalPlayerContext context, BlockPos feet) {
@@ -68,21 +104,16 @@ public final class EmergencyLanding {
     /** Apply the shared session's aim and fall steering through the same native body lease. */
     public static void tick(LocalPlayerContext context, LandingAssistSession session) {
         var player = context.player();
-        Vec3 aim = session.aimPoint().subtract(player.getEyePosition());
-        float yaw = (float) Math.toDegrees(Math.atan2(aim.z, aim.x)) - 90;
-        float pitch = (float) -Math.toDegrees(Math.atan2(aim.y, Math.hypot(aim.x, aim.z)));
-        context.body().requestLook(yaw, pitch, context.tickRevision());
         session.tick(context);
+        if(session.movementOverride()!=null) {
+            context.body().applyMovement(session.movementOverride(),context.tickRevision()); return;
+        }
         boolean sneak = session.wantsSneak(context);
         boolean hold = session.holdingForRecovery(context) || player.onGround();
-        Vec3 delta = Vec3.atBottomCenterOf(session.plan().feet()).subtract(player.position()).subtract(player.getDeltaMovement());
         context.body().applySteering(cameraYaw -> {
             if (hold)
                 return new BodyControlPort.Movement(0, 0, false, sneak, false);
-            double angle = Math.toRadians(cameraYaw);
-            float forward = (float) Math.clamp(-delta.x * Math.sin(angle) + delta.z * Math.cos(angle), -1, 1);
-            float strafe = (float) Math.clamp(delta.x * Math.cos(angle) + delta.z * Math.sin(angle), -1, 1);
-            return new BodyControlPort.Movement(forward, strafe, false, sneak, false);
+            return AirLandingControl.movement(player,session.plan().feet(),cameraYaw,sneak);
         }, player.getYRot(), context.tickRevision());
     }
     /** Center plus four body corners, preserving the original closest native-collider probe. */

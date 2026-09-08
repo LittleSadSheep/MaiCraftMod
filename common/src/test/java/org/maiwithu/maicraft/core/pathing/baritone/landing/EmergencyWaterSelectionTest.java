@@ -91,8 +91,9 @@ public final class EmergencyWaterSelectionTest {
                 .setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP));
         top.position(LIVE_DROP, -LIVE_SPEED, false);
         var alternative = EmergencyLanding.find(top.context);
-        check(alternative == null || !((List<?>) alternative.diagnostics().get("candidate_strategies")).contains("WATER"),
-                "water below a top slab's impact floor is still rejected by real contact geometry");
+        check(alternative == null || !((List<?>) alternative.diagnostics().get("candidate_strategies")).contains("WATER")
+                        || !alternative.plan().feet().equals(BlockPos.ZERO),
+                "water below a top slab is rejected; a reachable neighboring water landing may replace it");
     }
 
     private static void earlyProbe() throws Exception {

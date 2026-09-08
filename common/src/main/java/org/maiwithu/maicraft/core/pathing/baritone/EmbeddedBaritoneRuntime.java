@@ -537,13 +537,23 @@ public final class EmbeddedBaritoneRuntime {
         if (tickingContext != null && assistedFall != null && assistedFall.landingAssist() != null
                 && assistedFall.landingAssist().holdingForRecovery(tickingContext)) {
             // Generic swimming must not jump out of the clutch water or fight its recovery aim.
-            forward = 0; strafe = 0; jump = false; sneak = false; sprint = false;
+            forward = 0; strafe = 0; jump = false; sneak = assistedFall.landingAssist().wantsSneak(tickingContext); sprint = false;
         }
         var landingMovement = assistedFall != null && assistedFall.landingBoat() != null
                 ? assistedFall.landingBoat().movementOverride() : null;
+        if (landingMovement==null && assistedFall!=null && assistedFall.landingAssist()!=null)
+            landingMovement=assistedFall.landingAssist().movementOverride();
         if (landingMovement != null) {
             forward = landingMovement.forward(); strafe = landingMovement.strafe();
             jump = landingMovement.jumping(); sneak = landingMovement.sneaking(); sprint = landingMovement.sprinting();
+        }
+        if (tickingContext!=null && assistedFall!=null && assistedFall.landingAssist()!=null
+                && !player.onGround() && !player.isPassenger() && landingMovement==null
+                && !assistedFall.landingAssist().holdingForRecovery(tickingContext)) {
+            var landing=assistedFall.landingAssist().plan().feet(); final boolean crouch=sneak;
+            tickingContext.body().applySteering(yaw -> org.maiwithu.maicraft.core.pathing.baritone.landing.AirLandingControl
+                    .movement(player,landing,yaw,crouch),player.getYRot(),tickingContext.tickRevision());
+            return;
         }
         InputDriver.applyMovement(player, forward, strafe, jump, sneak, sprint);
     }

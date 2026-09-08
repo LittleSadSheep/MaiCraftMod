@@ -78,7 +78,7 @@ public final class NativeBucketLandingTest {
             look(f,f.world.getBlockState(BlockPos.ZERO).getShape(f.world,BlockPos.ZERO).bounds().getCenter());
             session.tick(context);
             check(session.plan().cell().equals(source),"an actual plant-top ray rebinds its legal water cell before submission");
-        } else EmergencyLanding.tick(context,session);
+        } else { look(f,plan.aimPoint()); EmergencyLanding.tick(context,session); }
         check(uses[0] == 1 && f.player.getMainHandItem().is(Items.BUCKET)
                         && LandingAssistPlan.existingSafe(LandingAssistPlan.Kind.WATER,f.world.getBlockState(source)),
                 "native water submission: uses=" + uses[0] + "; state=" + f.world.getBlockState(source) + "; " + session.diagnostics());

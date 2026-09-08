@@ -65,6 +65,8 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
                 : "no own placement or recovery confirmed";
         GameplayAttentionMonitor.reflexFinished(id(), outcome, attentionActions, resource,
                 "health lost: " + facts.getOrDefault("health_lost", Math.max(0, attentionStartHealth - player.getHealth()))
+                        + "; episode=" + facts.get("rescue_episode") + "; placements=" + facts.get("placement_submissions")
+                        + "; pickups=" + facts.get("pickup_submissions")
                         + "; mitigated with damage: " + facts.getOrDefault("mitigated_with_damage", false));
         attentionActive = false;
     }

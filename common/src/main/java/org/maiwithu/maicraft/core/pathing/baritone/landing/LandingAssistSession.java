@@ -23,12 +23,18 @@ import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 
 /** Native placement, observed protection, stable touchdown and attributable cleanup for one fall. */
 public final class LandingAssistSession {
+    private static final java.util.concurrent.atomic.AtomicLong EPISODES = new java.util.concurrent.atomic.AtomicLong();
+    private long episode;
+    private int placementSubmissions, pickupSubmissions;
+    private int landingChanges;
+    private float airborneYaw = Float.NaN;
     public record Change(BlockPos position, BlockState before, BlockState after) {}
     private LandingAssistPlan plan;
     private List<LandingAssistPlan> automaticCandidates;
     private LandingMaterialSupply materialSupply;
     private boolean materialBound;
     private LandingPreparation preparation;
+    private LandingBoatRescue boat;
     private NativeActionReceipt receipt;
     private NativeActionReceipt stopRelease;
     private String stopReason;
@@ -54,7 +60,7 @@ public final class LandingAssistSession {
 
     public LandingAssistSession(LandingAssistPlan plan) {
         this.plan = plan;
-        if (!plan.existing()) preparation = new LandingPreparation(plan.kind().item);
+        if (!plan.existing() && plan.kind()!=LandingAssistPlan.Kind.BOAT) preparation = new LandingPreparation(plan.kind().item);
     }
     public LandingAssistPlan plan() { return plan; }
     public static LandingAssistSession emergency(LandingAssistPlan plan) {
@@ -64,10 +70,12 @@ public final class LandingAssistSession {
     }
     public static LandingAssistSession automatic(List<LandingAssistPlan> candidates, boolean airborne) {
         if (candidates.isEmpty()) throw new IllegalArgumentException("automatic landing needs observed candidates");
-        candidates = candidates.stream().sorted(java.util.Comparator.comparingInt(
-                candidate -> candidate.kind() == LandingAssistPlan.Kind.HAY ? 1 : 0)).toList();
+        candidates = candidates.stream().sorted(java.util.Comparator.comparingInt(candidate -> switch(candidate.kind()) {
+            case WATER -> 0; case BOAT -> 1; case HAY -> 3; default -> 2;
+        })).toList();
         var session = new LandingAssistSession(candidates.getFirst());
         session.automaticCandidates = List.copyOf(candidates); session.emergency = airborne; session.airborneObserved = airborne;
+        if (session.plan.kind()==LandingAssistPlan.Kind.BOAT) session.boat=new LandingBoatRescue(session.plan,airborne);
         return session;
     }
     LandingAssistSession rejectedCandidates(Map<String,String> rejected) {
@@ -75,6 +83,7 @@ public final class LandingAssistSession {
     }
     private void observeStart(LocalPlayerContext context) {
         if (startedTick != Long.MIN_VALUE) return;
+        episode = EPISODES.incrementAndGet();
         startedTick = context.tickRevision(); actionTicksAtStart = remainingActionTicks(context);
         initialDrop = Math.max(0,context.player().getY()-plan.feet().getY());
         initialDownwardSpeed = Math.max(0,-context.player().getDeltaMovement().y);
@@ -85,12 +94,16 @@ public final class LandingAssistSession {
         for (var candidate : automaticCandidates) {
             if (candidate.kind() == LandingAssistPlan.Kind.HAY && noDamageCandidate) continue;
             if (candidate.existing()) { bindMaterial(candidate); return true; }
+            if (candidate.kind()==LandingAssistPlan.Kind.BOAT) {
+                if (LandingBoatRescue.carried(context.player())!=null) { bindMaterial(candidate); return true; }
+                continue;
+            }
             if (java.util.stream.IntStream.range(0,context.player().getInventory().getContainerSize()).anyMatch(i ->
                     context.player().getInventory().getItem(i).is(candidate.kind().item)) && materialSupply == null) {
                 bindMaterial(candidate); return true;
             }
         }
-        if (materialSupply == null) materialSupply = new LandingMaterialSupply(automaticCandidates.stream().filter(candidate -> !candidate.existing())
+        if (materialSupply == null) materialSupply = new LandingMaterialSupply(automaticCandidates.stream().filter(candidate -> !candidate.existing() && candidate.kind()!=LandingAssistPlan.Kind.BOAT)
                 .map(p -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(p.kind().item)).distinct().toList());
         placementGate = "acquiring_material";
         var supplied = materialSupply.tick(context,remainingActionTicks(context));
@@ -104,6 +117,7 @@ public final class LandingAssistSession {
         }
         if (supplied.state() == LandingMaterialSupply.State.UNAVAILABLE) {
             for (var candidate : automaticCandidates) {
+                if (candidate.kind()==LandingAssistPlan.Kind.BOAT) { bindMaterial(candidate); return true; }
                 if (candidate.existing() && candidate.kind() == LandingAssistPlan.Kind.HAY
                         && candidate.survives(FallDamageBudget.capture(context.player()),context.player().getY(),true)) {
                     bindMaterial(candidate); return true;
@@ -114,6 +128,9 @@ public final class LandingAssistSession {
         return false;
     }
     private void bindMaterial(LandingAssistPlan selected) {
+        if (selected.kind()==LandingAssistPlan.Kind.BOAT) {
+            plan=selected; preparation=null; materialBound=true; boat=new LandingBoatRescue(selected,airborneObserved); return;
+        }
         plan = selected; preparation = selected.existing() ? null : new LandingPreparation(selected.kind().item);
         materialBound = true;
     }
@@ -130,6 +147,8 @@ public final class LandingAssistSession {
         return 200;
     }
     public boolean prepareAlreadyHeld(LocalPlayerContext context) {
+        if (boat!=null) return BoatLandingSnapshot.plainBoat(context.player().getMainHandItem().getItem())
+                || BoatLandingSnapshot.plainBoat(context.player().getOffhandItem().getItem());
         rememberHealth(context);
         if (!survivesHay(context)) return false;
         if (!LandingAssistGeometry.safe(context.level(), context.level()::isLoaded, plan,
@@ -140,9 +159,11 @@ public final class LandingAssistSession {
     }
     public boolean prepare(LocalPlayerContext context) {
         observeStart(context);
+        if (boat!=null) return boat.prepare(context);
         if (failed) { continuePreparationCleanup(context); return false; }
         if (Float.isNaN(previousHealth)) rememberHealth(context);
         if (!materialReady(context)) return false;
+        if (boat!=null) return boat.prepare(context);
         refreshWaterAim(context);
         if (!survivesHay(context)) { fail("hay would not reduce the observed fall to survivable damage"); return false; }
         if (!context.level().isLoaded(plan.cell()) || !context.level().isLoaded(plan.clicked())) return false;
@@ -160,7 +181,7 @@ public final class LandingAssistSession {
         if (EmbeddedBaritonePolicy.protects(plan.cell())
                 || !LandingAssistPlan.canPlace(plan.kind(), context.level(), plan.cell())) {
             preparation.closeForFailure(context);
-            fail("landing placement is no longer an unprotected air cell with the required support");
+            fail("landing placement no longer satisfies native replacement and support rules");
             return false;
         }
         boolean ready = preparation.tick(context);
@@ -191,6 +212,7 @@ public final class LandingAssistSession {
                 && context.player().getBoundingBox().intersects(new net.minecraft.world.phys.AABB(plan.cell()).inflate(0.001)))
             hayContactObserved = true;
         if (!context.permitsNativeActions()) { fail("control authority changed during landing assistance"); return; }
+        if (boat!=null) { boat.tick(context); complete=boat.complete(context); failed|=boat.failed(); return; }
         if (stopReason != null) {
             continueStop(context);
             if (cleanupPending()) return;
@@ -229,6 +251,22 @@ public final class LandingAssistSession {
         }
         displacedStableTicks = 0;
         if (!failed && !materialReady(context)) return;
+        if (!failed && automaticCandidates!=null && boat==null && !submitted && !context.player().onGround() && preparation!=null && preparation.ready()
+                && (!LandingAssistGeometry.safe(context.level(),context.level()::isLoaded,plan,context.player().getBbWidth(),
+                        Math.max(1.8,context.player().getBbHeight()),EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())
+                    || !LandingAssistPlan.canPlace(plan.kind(),context.level(),plan.cell()))) {
+            var replacement=EmergencyLanding.findNear(context,plan.feet());
+            if(replacement!=null) {
+                var selected=replacement.plan();
+                automaticCandidates=replacement.automaticCandidates; rejectedCandidates=replacement.rejectedCandidates;
+                materialSupply=null; materialBound=false; plan=selected; landingChanges++;
+                preparation=selected.existing() || selected.kind()==LandingAssistPlan.Kind.BOAT ? null : new LandingPreparation(selected.kind().item);
+                if(selected.kind()==LandingAssistPlan.Kind.BOAT) boat=new LandingBoatRescue(selected,true);
+                detail="steering to a replacement landing after the native target changed";
+                if(boat==null && !materialReady(context)) return;
+            }
+        }
+        if (boat!=null) { boat.tick(context); complete=boat.complete(context); failed|=boat.failed(); return; }
         if (!failed) refreshWaterAim(context);
         if (!failed && materialReadyTick == Long.MIN_VALUE) materialReadyTick = context.tickRevision();
         if (!failed && preparation != null && !preparation.ready()) {
@@ -242,6 +280,7 @@ public final class LandingAssistSession {
                 else { fail(preparation.diagnostic()); return; }
             }
         }
+        if (!failed) aim(context);
         if (receipt != null) {
             settle(context);
             if (receipt != null) return;
@@ -270,6 +309,9 @@ public final class LandingAssistSession {
             return;
         }
         stableTicks = 0;
+        if (plan.kind() == LandingAssistPlan.Kind.WATER && submitted && waterContactObserved
+                && context.player().isInWater() && !context.player().onGround())
+            detail = "water protection observed; descending to grounded support before recovery";
         if (plan.existing() || submitted) return;
         if (context.player().onGround()) { placementGate = "waiting_for_departure"; return; }
         if (!context.mutationAvailable()) { placementGate = "native_action_slot_busy"; return; }
@@ -298,6 +340,7 @@ public final class LandingAssistSession {
         };
         beforePlacement = context.level().getBlockState(plan.cell());
         submitted = true; // Any exception after submission starts forbids a repeated clutch.
+        placementSubmissions++;
         placementGate = "submitted";
         detail = "native landing item submitted; awaiting block and inventory evidence";
         try {
@@ -365,6 +408,7 @@ public final class LandingAssistSession {
             BlockHitResult hit = trace(context, true);
             if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(plan.cell())) return;
             cleaning = true;
+            pickupSubmissions++;
             receipt = context.actions().useItem(context, hand, c ->
                     c.player().getItemInHand(hand).is(Items.WATER_BUCKET) && c.level().getFluidState(plan.cell()).isEmpty()
                             ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING, 12);
@@ -380,14 +424,19 @@ public final class LandingAssistSession {
         }
     }
 
-    public Vec3 aimPoint() { return placed == null ? plan.aimPoint() : Vec3.atCenterOf(plan.cell()); }
+    public Vec3 aimPoint() { return boat!=null ? boat.aimPoint() : placed == null ? plan.aimPoint() : Vec3.atCenterOf(plan.cell()); }
+    public org.maiwithu.maicraft.client.actor.BodyControlPort.Movement movementOverride() { return boat==null ? null : boat.movementOverride(); }
     /** Hold the landing cell against generic water bobbing while its source is being recovered. */
     public boolean holdingForRecovery(LocalPlayerContext context) {
+        if(boat!=null) return context.player().isPassenger() || boat.movementOverride()!=null;
         return !complete && plan.kind() == LandingAssistPlan.Kind.WATER && nearLanding(context)
                 && (context.player().isInWater() && context.player().fallDistance == 0
                     || submitted && context.player().onGround());
     }
     public boolean wantsSneak(LocalPlayerContext context) {
+        if(boat!=null) return boat.wantsSneak();
+        if (plan.kind() == LandingAssistPlan.Kind.WATER && waterContactObserved && !removed
+                && context.player().isInWater() && !context.player().onGround()) return true;
         if (!submitted && !plan.existing() && plan.kind() != LandingAssistPlan.Kind.WATER
                 && !context.player().onGround()) return true;
         if (plan.kind() != LandingAssistPlan.Kind.SLIME) return false;
@@ -396,8 +445,9 @@ public final class LandingAssistSession {
                 && context.player().fallDistance + 1 < context.player().getAttributeValue(Attributes.SAFE_FALL_DISTANCE);
     }
     public boolean complete() { return complete; }
-    public boolean failed() { return failed || complete && damageObserved && plan.kind() != LandingAssistPlan.Kind.HAY; }
+    public boolean failed() { return failed || boat!=null&&boat.failed() || complete && damageObserved && plan.kind() != LandingAssistPlan.Kind.HAY; }
     public boolean cleanupPending() { return stopReason != null || stopRelease != null
+            || boat!=null&&boat.cleanupPending()
             || preparation != null && preparation.cleanupPending()
             || materialSupply != null && materialSupply.cleanupPending(); }
     private void continuePreparationCleanup(LocalPlayerContext context) {
@@ -407,6 +457,7 @@ public final class LandingAssistSession {
     /** Retire native receipts at an explicit body/task boundary; never assume a pickup happened. */
     public void stop(LocalPlayerContext context, String reason) {
         if (complete) return;
+        if(boat!=null) { boat.stop(context); fail(reason); return; }
         stopReason = reason == null ? "landing session interrupted" : reason;
         fail(stopReason);
         continueStop(context);
@@ -443,6 +494,9 @@ public final class LandingAssistSession {
     public List<Change> drainChanges() { var result = List.copyOf(changes); changes.clear(); return result; }
     public Map<String, Object> diagnostics() {
         var result = new LinkedHashMap<String, Object>();
+        result.put("rescue_episode",episode);
+        result.put("landing_changes",landingChanges);
+        result.put("placement_submissions",placementSubmissions); result.put("pickup_submissions",pickupSubmissions);
         result.put("strategy", plan.kind().name()); result.put("phase", detail);
         result.put("placement_gate",placementGate);
         if (startedTick != Long.MIN_VALUE) result.put("start",Map.of("actor_tick",startedTick,
@@ -451,6 +505,7 @@ public final class LandingAssistSession {
         if (automaticCandidates != null) result.put("candidate_strategies",automaticCandidates.stream().map(p -> p.kind().name()).toList());
         if (!rejectedCandidates.isEmpty()) result.put("rejected_candidates",rejectedCandidates);
         result.put("automatic",automaticCandidates != null);
+        if (boat!=null) result.put("boat_rescue",boat.diagnostics());
         if (materialSupply != null) result.put("material_supply",java.util.Map.of("state",materialSupply.result().state().name(),"detail",materialSupply.result().detail()));
         result.put("landing_feet",java.util.Map.of("x",plan.feet().getX(),"y",plan.feet().getY(),"z",plan.feet().getZ()));
         result.put("submitted", submitted); result.put("confirmed_own_placement", placed != null);
@@ -461,13 +516,41 @@ public final class LandingAssistSession {
         result.put("native_hay_contact", hayContactObserved);
         result.put("health_lost", healthLost); result.put("absorption_lost", absorptionLost);
         result.put("mitigated_with_damage", complete && !failed() && plan.kind() == LandingAssistPlan.Kind.HAY && damageObserved);
+        if (boat!=null) {
+            var facts=(Map<?,?>)boat.diagnostics().get("boat");
+            result.put("confirmed_own_placement",Boolean.TRUE.equals(facts.get("created_this_session")));
+            result.put("removed_own_aid",Boolean.TRUE.equals(facts.get("item_recovered")));
+            result.put("native_boat_catch",Boolean.TRUE.equals(facts.get("ready")));
+            result.put("placement_submissions",facts.containsKey("placement_submissions") ? facts.get("placement_submissions") : 0);
+        }
         if (receipt != null) result.put("receipt", receipt.status().name());
         return result;
     }
     private boolean stable(LocalPlayerContext c) {
         var player = c.player();
         return nearLanding(c) && (player.onGround() && Math.abs(player.getDeltaMovement().y) < 0.1
-                || !removed && player.isInWater() && player.fallDistance == 0 && player.getDeltaMovement().y >= 0);
+                || (plan.existing() || failed) && !removed && player.isInWater()
+                    && player.fallDistance == 0 && player.getDeltaMovement().y >= 0);
+    }
+    private void aim(LocalPlayerContext context) {
+        var player = context.player(); var eye = player.getEyePosition();
+        if (!submitted && !player.onGround() && preparation != null && preparation.ready()
+                && plan.kind() == LandingAssistPlan.Kind.WATER && acceptWaterHit(context,trace(context,false))) {
+            context.body().requestImmediateLook(player.getYRot(),player.getXRot(),context.tickRevision());
+            return; // Freeze a usable native ray instead of leaving a queued turn active.
+        }
+        var delta = aimPoint().subtract(eye);
+        float yaw = Math.hypot(delta.x,delta.z) < .001 ? player.getYRot()
+                : (float)Math.toDegrees(Math.atan2(delta.z,delta.x))-90;
+        float pitch = (float)-Math.toDegrees(Math.atan2(delta.y,Math.hypot(delta.x,delta.z)));
+        if (!player.onGround() && plan.kind() == LandingAssistPlan.Kind.WATER) {
+            if (!Float.isFinite(airborneYaw)) airborneYaw = player.getYRot();
+            yaw = airborneYaw; pitch = 90;
+        }
+        boolean urgent = !submitted && !player.onGround() && preparation != null && preparation.ready()
+                && eye.y-plan.placementHeight(context.level()) <= player.blockInteractionRange();
+        if (urgent) context.body().requestImmediateLook(yaw,pitch,context.tickRevision());
+        else context.body().requestLook(yaw,pitch,context.tickRevision());
     }
     private boolean nearLanding(LocalPlayerContext c) {
         return c.player().position().distanceToSqr(Vec3.atBottomCenterOf(plan.feet())) < 4;

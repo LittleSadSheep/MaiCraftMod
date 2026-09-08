@@ -36,7 +36,7 @@ public final class WaterLandingReplayTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         for (int drop : new int[]{4, 12, 20, 24}) replay(drop);
-        missingEvidence(); existingWater(); postRemovalSupport(); stalePreparation(); delayedFailedHealth(); window();
+        missingEvidence(); existingWater(); postRemovalSupport(); stalePreparation(); delayedFailedHealth(); shortFallAim(); window();
         System.out.println("WaterLandingReplayTest: passed");
     }
 
@@ -70,7 +70,9 @@ public final class WaterLandingReplayTest {
             Fixture f = new Fixture(false);
             f.position(2, -1, false); f.player.setXRot(0);
             check(f.session.prepareAlreadyHeld(f.context), "held opportunity is ready");
-            f.tick(); check(f.uses == 0, "nearby support alone cannot bypass the actual facing ray");
+            f.world.scene.blocks.put(BlockPos.ZERO.above(),Blocks.STONE.defaultBlockState());
+            f.tick(); check(f.uses == 0, "urgent aim cannot place through an actual occluding block");
+            f.world.scene.blocks.remove(BlockPos.ZERO.above());
             f.player.setXRot(90); f.blockEvidence = missing != 0; f.inventoryEvidence = missing != 1;
             f.tick(); f.position(0, 0, true); f.player.fallDistance = 0;
             f.player.wet = missing != 2 && f.world.water;
@@ -94,13 +96,40 @@ public final class WaterLandingReplayTest {
         f.position(2, -1, false); f.player.setXRot(90);
         check(f.session.prepareAlreadyHeld(f.context), "held opportunity is ready"); f.tick();
         f.position(0.2, 0, false); f.player.wet = true; f.player.fallDistance = 0;
-        while (f.uses < 2 && f.time < 30) f.tick();
-        check(f.uses == 2, "stable water contact starts recovery");
+        for(int i=0;i<20;i++) f.tick();
+        check(f.uses==1 && f.session.wantsSneak(f.context),"floating water contact retains its source and sinks toward supported ground");
+        f.position(0,0,true);
+        while (f.uses < 2 && f.time < 50) f.tick();
+        check(f.uses == 2, "grounded supported dwell starts recovery");
+        f.position(.2,0,false);
         for (int i = 0; i < 15; i++) f.tick();
         check(!f.session.complete(), "a stale wet flag after pickup cannot prove supported feet");
         f.position(0, 0, true);
         for (int i = 0; i < 12; i++) f.tick();
         check(f.session.complete() && !f.session.failed(), "renewed collision support completes recovery dwell");
+        for(int i=0;i<15;i++) f.tick();
+        check(f.uses==2 && f.session.diagnostics().get("placement_submissions").equals(1)
+                && f.session.diagnostics().get("pickup_submissions").equals(1),"one fall never pours again after its one pickup");
+    }
+    private static void shortFallAim() throws Exception {
+        var f=new Fixture(false); f.position(4,0,false); f.player.setYRot(73); f.player.setXRot(0);
+        java.util.List<Float> yaws=new java.util.ArrayList<>(); int[] urgent={0};
+        var body=(org.maiwithu.maicraft.client.actor.BodyControlPort)Proxy.newProxyInstance(
+                org.maiwithu.maicraft.client.actor.BodyControlPort.class.getClassLoader(),
+                new Class<?>[]{org.maiwithu.maicraft.client.actor.BodyControlPort.class},(proxy,method,args)-> {
+                    if(method.getName().equals("requestLook") || method.getName().equals("requestImmediateLook")) yaws.add((Float)args[0]);
+                    if(method.getName().equals("requestImmediateLook")) {
+                        urgent[0]++; f.player.setYRot((Float)args[0]); f.player.setXRot((Float)args[1]);
+                    }
+                    return null; // No render frame is available to advance ordinary camera smoothing.
+                });
+        var context=(LocalPlayerContext)Proxy.newProxyInstance(LocalPlayerContext.class.getClassLoader(),new Class<?>[]{LocalPlayerContext.class},
+                (proxy,method,args)->method.getName().equals("body") ? body : method.invoke(f.context,args));
+        check(f.session.prepareAlreadyHeld(context),"short-fall bucket already held");
+        double y=4,v=0;
+        while(y>0 && f.uses==0) { f.position(y,v,false); f.time++; f.session.tick(context); y+=v; v=(v-.08)*.98; }
+        check(f.uses==1 && urgent[0]>0 && !f.player.onGround(),"low fall uses the native bucket in the same tick as urgent aim");
+        check(yaws.stream().allMatch(yaw->Math.abs(yaw-73)<.001),"water rescue never spins horizontal heading while looking down");
     }
 
     private static void stalePreparation() throws Exception {

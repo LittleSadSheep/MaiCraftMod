@@ -79,7 +79,7 @@ final class EmbeddedBaritoneActionBridge {
             assist.tick(context);
             // Placement may need secondary use, but a newly placed slime must release it
             // before the next physical landing, without waiting for the receipt's dwell.
-            input.setInputForceState(Input.SNEAK, assist.wantsSneak(context));
+            if (!context.player().onGround()) input.setInputForceState(Input.SNEAK, assist.wantsSneak(context));
             org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(assist.diagnostics());
             for (var change : assist.drainChanges()) {
                 navigator.recordConfirmedNativeAction();

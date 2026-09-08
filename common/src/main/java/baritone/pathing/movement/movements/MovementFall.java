@@ -178,7 +178,7 @@ public class MovementFall extends Movement {
         // The scheduler cannot safely suspend a launched fall. Adopt its rescue in this owner
         // instead of waiting for a reflex hand-off that cannot occur until after impact.
         if (landingAssist != null || landingBoat != null) return;
-        var candidate = org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding.find(context, dest);
+        var candidate = org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding.findNear(context, dest);
         var inventory = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot.capture(
                 context.player(), org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.LANDING_ONLY,
                 context.level().dimensionType().ultraWarm());

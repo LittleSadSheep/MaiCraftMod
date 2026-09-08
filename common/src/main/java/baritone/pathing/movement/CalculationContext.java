@@ -245,6 +245,8 @@ public class CalculationContext {
 
     public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet, int drop) {
         return landingPlans(feet).stream().filter(plan -> plan.survives(fallDamageBudget, feet.getY() + drop, true))
+                .filter(plan -> plan.kind()!=org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.BOAT
+                    || landingBoats!=null && landingBoats.airborneWindow(drop,fallDamageBudget.gravity(),waterLandingWindow.initialDownwardSpeed()))
                 .filter(plan -> plan.existing()
                 || plan.kind() != org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.WATER
                 || waterLandingWindow.permits(feet.getY() + drop - plan.placementHeight(bsi.access))).toList();

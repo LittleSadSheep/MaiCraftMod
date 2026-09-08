@@ -155,6 +155,10 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
                 for (var plan : potential.plans(view, feet, protectedCell))
                     if (!result.contains(plan)) result.add(plan);
             }
+            if (othersAllowed && (maySupply || available.contains(Kind.BOAT))) {
+                var boat = LandingBoatRescue.plan(view,feet,width,height);
+                if (boat != null) result.add(boat);
+            }
             return List.copyOf(result);
         }
     }
