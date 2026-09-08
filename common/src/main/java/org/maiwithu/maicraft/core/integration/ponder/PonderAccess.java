@@ -13,4 +13,5 @@ public interface PonderAccess {
     }
     Snapshot snapshot();
     PonderTranscript compile(Entry entry);
+    default PonderReplaySession replay(Entry entry) { throw new IllegalStateException("Ponder replay is unsupported by this provider"); }
 }

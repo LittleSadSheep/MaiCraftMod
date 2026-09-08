@@ -65,6 +65,21 @@ public final class ReflectivePonderAccess implements PonderAccess {
             // Do not call SceneRegistryAccess.compile, scene.begin, scene.tick or any world instruction.
             Object scene = api.registry().getMethod("compileScene", localizationType, api.story(), api.level())
                     .invoke(null, localization, entry.nativeEntry(), null);
+            return PonderInstructionReader.read(scene, defaults(api, localization));
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+            throw new IllegalStateException("Ponder narration compilation unavailable for " + entry.component() + ": " + reason(unavailable), unavailable);
+        }
+    }
+
+    @Override public PonderReplaySession replay(Entry entry) {
+        try { return PonderReplayRuntime.request(entry, resolver.get()); }
+        catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+            throw new IllegalStateException("Ponder replay unavailable: " + reason(unavailable), unavailable);
+        }
+    }
+
+    static Map<String, String> defaults(Api api, Object localization) throws ReflectiveOperationException {
+            Class<?> localizationType = api.localization();
             Map<String, String> defaults = new LinkedHashMap<>();
             Object specific = localizationType.getField("specific").get(localization);
             for (var sceneEntry : ((Map<?, ?>) specific).entrySet()) {
@@ -77,10 +92,7 @@ public final class ReflectivePonderAccess implements PonderAccess {
                 String[] id = text.getKey().toString().split(":", 2);
                 defaults.put(id[0] + ".ponder.shared." + id[1], String.valueOf(text.getValue()));
             }
-            return PonderInstructionReader.read(scene, defaults);
-        } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
-            throw new IllegalStateException("Ponder narration compilation unavailable for " + entry.component() + ": " + reason(unavailable), unavailable);
-        }
+            return defaults;
     }
 
     private static Object call(Api api, Object owner, String method) throws ReflectiveOperationException {
@@ -91,7 +103,7 @@ public final class ReflectivePonderAccess implements PonderAccess {
                 .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)), 0, 8); }
         catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
-    private static String reason(Throwable failure) {
+    static String reason(Throwable failure) {
         if (failure instanceof InvocationTargetException invocation && invocation.getCause() != null) failure = invocation.getCause();
         return failure.getClass().getSimpleName() + (failure.getMessage() == null ? "" : ": " + failure.getMessage());
     }
