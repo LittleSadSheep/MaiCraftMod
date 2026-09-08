@@ -288,9 +288,11 @@ public class MovementDiagonal extends Movement {
                     .setInput(Input.SPRINT, executor.submergedWaterSprinting())
                     .setInput(Input.SNEAK, false);
         }
-        if (ctx.playerFeet().equals(dest)) {
+        BetterBlockPos routeFeet = executor == null ? ctx.playerFeet() : executor.groundJumpFeet(this, ctx.playerFeet());
+        if (routeFeet.equals(dest)) {
             return state.setStatus(MovementStatus.SUCCESS);
-        } else if (!playerInValidPosition() && !(MovementHelper.isLiquid(ctx, src) && getValidPositions().contains(ctx.playerFeet().above()))) {
+        } else if (!getValidPositions().contains(routeFeet) && !playerInValidPosition()
+                && !(MovementHelper.isLiquid(ctx, src) && getValidPositions().contains(ctx.playerFeet().above()))) {
             return state.setStatus(MovementStatus.UNREACHABLE);
         }
         if (dest.y > src.y && ctx.player().position().y < src.y + 0.1 && ctx.player().horizontalCollision) {

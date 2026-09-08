@@ -81,6 +81,8 @@ public class PathExecutor implements IPathExecutor, Helper {
     private final PathTickBudget tickBudget = new PathTickBudget();
     private boolean advanceAgain;
     private boolean jumpAfterAdvance;
+    private org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation groundJump =
+            new org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation();
 
     public PathExecutor(PathingBehavior behavior, IPath path) {
         this.behavior = behavior;
@@ -98,6 +100,7 @@ public class PathExecutor implements IPathExecutor, Helper {
      */
     public boolean onTick() {
         tickBudget.reset();
+        groundJump.observe(ctx.player().onGround(), ctx.player().getY());
         jumpAfterAdvance = false;
         boolean result;
         do {
@@ -129,7 +132,7 @@ public class PathExecutor implements IPathExecutor, Helper {
         }
         Movement movement = (Movement) path.movements().get(pathPosition);
         waterTravel.update(pathPosition);
-        BetterBlockPos whereAmI = waterTravel.routeFeet(ctx.playerFeet());
+        BetterBlockPos whereAmI = groundJumpFeet(movement, waterTravel.routeFeet(ctx.playerFeet()));
         if (!ownsUnsettledLanding(movement) && !movement.getValidPositions().contains(whereAmI)) {
             for (int i = pathPosition - 1; i >= 0; i--) {// prefer the nearest matching movement after knockback
                 if (((Movement) path.movements().get(i)).getValidPositions().contains(whereAmI)) {
@@ -301,9 +304,11 @@ public class PathExecutor implements IPathExecutor, Helper {
     private Tuple<Double, BlockPos> closestPathPos(IPath path) {
         double best = -1;
         BlockPos bestPos = null;
+        boolean verifiedHop = pathPosition < path.movements().size()
+                && !groundJumpFeet(path.movements().get(pathPosition), ctx.playerFeet()).equals(ctx.playerFeet());
         for (IMovement movement : path.movements()) {
             for (BlockPos pos : ((Movement) movement).getValidPositions()) {
-                double dist = waterTravel.active()
+                double dist = waterTravel.active() || verifiedHop
                         ? Math.hypot(ctx.player().getX() - pos.getX() - 0.5,
                                 ctx.player().getZ() - pos.getZ() - 0.5)
                         : VecUtils.entityDistanceToCenter(ctx.player(), pos);
@@ -432,7 +437,8 @@ public class PathExecutor implements IPathExecutor, Helper {
         if (requested) {
             // 赶路跑跳:已经决定疾跑,且跳跃可达走廊里任何落点都无摔伤(深洞/流体/立柱
             // 会否决这一跳),按住跳跃把疾跑换成跑跳;顶头走廊自动获得更短的连跳节奏。
-            if (TravelJumpPolicy.shouldTravelJump(behavior.baritone, path.movements(), pathPosition)) {
+            if (TravelJumpPolicy.shouldTravelJump(behavior.baritone, path.movements(), pathPosition,
+                    runway -> groundJump.launch(current.getSrc().getY(), ctx.player().getY(), runway))) {
                 behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
             }
             return true;
@@ -683,6 +689,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             }
             PathExecutor ret = new PathExecutor(behavior, path);
             ret.pathPosition = pathPosition;
+            ret.groundJump = groundJump;
             ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
             ret.costEstimateIndex = costEstimateIndex;
             ret.ticksOnCurrent = ticksOnCurrent;
@@ -702,6 +709,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             logDebug("Discarding earliest segment movements, length cut from " + path.length() + " to " + newPath.length());
             PathExecutor ret = new PathExecutor(behavior, newPath);
             ret.pathPosition = pathPosition - cutoffAmt;
+            ret.groundJump = groundJump;
             ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
             if (costEstimateIndex != null) {
                 ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
@@ -739,6 +747,10 @@ public class PathExecutor implements IPathExecutor, Helper {
 
     public boolean isSprinting() {
         return sprintNextTick;
+    }
+
+    public BetterBlockPos groundJumpFeet(IMovement movement, BetterBlockPos physicalFeet) {
+        return groundJump.feet(movement, physicalFeet);
     }
 
     /** Whether the selected current movement owns the temporary physical swim-depth offset. */

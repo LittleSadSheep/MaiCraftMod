@@ -73,6 +73,7 @@ public final class AssistedFallOwnershipTest {
         var behavior = (PathingBehavior) memory.allocateInstance(PathingBehavior.class);
         field(PathingBehavior.class, "baritone").set(behavior, backend);
         var executor = (PathExecutor) memory.allocateInstance(PathExecutor.class);
+        field(PathExecutor.class, "groundJump").set(executor, new org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation());
         field(PathExecutor.class, "ctx").set(executor, context); field(PathExecutor.class, "path").set(executor, path);
         field(PathExecutor.class, "behavior").set(executor, behavior); field(PathExecutor.class, "pathPosition").setInt(executor, 1);
         field(PathExecutor.class, "waterTravel").set(executor,

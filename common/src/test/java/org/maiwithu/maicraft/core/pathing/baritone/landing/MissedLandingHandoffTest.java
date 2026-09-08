@@ -58,6 +58,7 @@ public final class MissedLandingHandoffTest {
                     throw new AssertionError(method.getName());
                 });
         var executor = (PathExecutor) f.memory.allocateInstance(PathExecutor.class);
+        field(PathExecutor.class, "groundJump").set(executor, new org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation());
         field(PathExecutor.class, "path").set(executor, path);
         var backend = (Baritone) f.memory.allocateInstance(Baritone.class);
         var behavior = (PathingBehavior) f.memory.allocateInstance(PathingBehavior.class);

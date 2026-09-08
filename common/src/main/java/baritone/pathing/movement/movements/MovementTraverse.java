@@ -231,6 +231,7 @@ public class MovementTraverse extends Movement {
         var currentExecutor = baritone.getPathingBehavior().getCurrent();
         PathExecutor executor = currentExecutor instanceof PathExecutor pathExecutor
                 ? pathExecutor : null;
+        if (executor != null) feet = executor.groundJumpFeet(this, ctx.playerFeet());
         if (executor != null && executor.controlsSubmergedWaterMovement(this)) {
             if (executor.submergedWaterMovementReached(this)) {
                 return state.setStatus(MovementStatus.SUCCESS);

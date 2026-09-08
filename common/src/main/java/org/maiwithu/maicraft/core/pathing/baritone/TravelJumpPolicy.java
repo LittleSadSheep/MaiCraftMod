@@ -50,7 +50,7 @@ public final class TravelJumpPolicy {
      * 与前进动量都是调用方已验证的前置条件;这里只裁决"这一跳落不落得下去"。
      */
     public static boolean shouldTravelJump(Baritone baritone, List<IMovement> movements,
-                                           int pathPosition) {
+                                           int pathPosition, java.util.function.Consumer<List<IMovement>> verifiedRunway) {
         IPlayerContext ctx = baritone.getPlayerContext();
         LocalPlayer player = ctx.player();
         if (player == null) {
@@ -141,6 +141,7 @@ public final class TravelJumpPolicy {
                 return false;
             }
         }
+        verifiedRunway.accept(List.copyOf(movements.subList(pathPosition, pathPosition + runwayMovements)));
         return true;
     }
 

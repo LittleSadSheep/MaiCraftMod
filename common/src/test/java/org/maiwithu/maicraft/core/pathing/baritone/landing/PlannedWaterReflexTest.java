@@ -52,6 +52,7 @@ public final class PlannedWaterReflexTest {
                     throw new AssertionError(method.getName());
                 });
         PathExecutor executor = (PathExecutor) memory.allocateInstance(PathExecutor.class);
+        field(PathExecutor.class, "groundJump").set(executor, new org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation());
         field(PathExecutor.class, "path").set(executor, path);
         PathingBehavior behavior = (PathingBehavior) memory.allocateInstance(PathingBehavior.class);
         field(PathingBehavior.class, "current").set(behavior, executor);
