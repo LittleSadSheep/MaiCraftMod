@@ -57,7 +57,26 @@ public final class TravelTransportContractTest {
                         && SemanticAbilityCatalog.describe("maicraft:travel").toString().contains("transport_mode"),
                 "public and internal contracts all expose the same travel preference");
         destinationPrecision();
+        regionalDiscovery();
         System.out.println("TravelTransportContractTest: passed");
+    }
+
+    private static void regionalDiscovery() {
+        for(String mode:List.of("auto","ground","jetpack")) {
+            JsonObject parameters=new JsonObject();
+            parameters.addProperty("semantic_target","lower_platform"); parameters.addProperty("transport_mode",mode);
+            var action=(IntentAction.Tool)AbilityAdapter.adapt(goal(parameters),null,null);
+            check(action.toolName().equals("travel_region") && action.arguments().get("direction").getAsString().equals("down"),
+                    "a lower platform can be discovered before its coordinates are known");
+            check(!action.arguments().has("x") && action.arguments().get("transport_mode").getAsString().equals(mode),
+                    "discovery preserves movement choice without fabricating a destination");
+            parameters.addProperty("direction","up");
+            try { AbilityAdapter.adapt(goal(parameters),null,null); throw new AssertionError("contradictory direction accepted"); }
+            catch(IllegalArgumentException expected) { }
+            parameters.remove("direction"); parameters.addProperty("exact",true);
+            try { AbilityAdapter.adapt(goal(parameters),null,null); throw new AssertionError("unknown exact cell accepted"); }
+            catch(IllegalArgumentException expected) { }
+        }
     }
 
     private static void destinationPrecision() {

@@ -275,6 +275,27 @@ final class AbilityAdapter {
         TravelDestination.validatePrecision(goal.parameters());
         TravelDestination destination = TravelDestination.fromGoal(goal);
         TransportMode mode = TransportMode.parse(string(goal.parameters(), "transport_mode"));
+        String discovery=exploreTarget(goal);
+        if ("platform".equals(discovery) || "lower_platform".equals(discovery)) {
+            if (destination!=null || goal.target()!=null && !"nearest".equals(goal.target().kind())
+                    || goal.parameters().has("block_id") || goal.parameters().has("block")
+                    || goal.parameters().has("biome_id") || goal.parameters().has("biome_tag"))
+                throw new IllegalArgumentException("platform discovery cannot be combined with another destination");
+            if (bool(goal.parameters(),"exact",false) || mode==TransportMode.ELEVATOR)
+                throw new IllegalArgumentException("platform discovery uses a region and auto, ground or jetpack transport");
+            String direction=string(goal.parameters(),"direction");
+            if (direction==null) direction="lower_platform".equals(discovery) ? "down" : "forward";
+            if ("lower_platform".equals(discovery) && !"down".equals(direction))
+                throw new IllegalArgumentException("lower_platform requires direction=down");
+            org.maiwithu.maicraft.core.pathing.goal.RegionalGoal.direction(direction,0);
+            parameters.addProperty("direction",direction);
+            parameters.addProperty("transport_mode",mode.name().toLowerCase(java.util.Locale.ROOT));
+            parameters.addProperty("max_distance",integer(goal.parameters(),"max_distance",64,8,128));
+            parameters.addProperty("may_alter_terrain",bool(goal.parameters(),"may_alter_terrain",false)
+                    || bool(goal.preferences(),"may_alter_terrain",false));
+            return new IntentAction.Tool("travel_region",parameters.toString());
+        }
+        if (goal.parameters().has("direction")) throw new IllegalArgumentException("direction is for platform discovery");
         parameters.addProperty("transport_mode", mode.name().toLowerCase(java.util.Locale.ROOT));
         String block = string(goal.parameters(), "block_id");
         if (block == null) block = string(goal.parameters(), "block");
