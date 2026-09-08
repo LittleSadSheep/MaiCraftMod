@@ -42,6 +42,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     private static final MaiCraftRuntimeFacade INSTANCE = new MaiCraftRuntimeFacade();
 
     private final IntentRuntime intents;
+    private final NavigationOverview navigationOverview=new NavigationOverview();
 
     private MaiCraftRuntimeFacade() {
         this.intents = IntentRuntime.get();
@@ -345,6 +346,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("nearby_signs", signs.remove("signs"));
         result.add("sign_observation", signs);
         result.add("local_decision_summary", localDecisionSummary(player, hostileCount));
+        result.add("terrain_overview",navigationOverview.describe(player));
         result.add("view", PhysicalStructurePerception.view(player));
         result.add("physical_structures", PhysicalStructurePerception.observe(player));
         return result;

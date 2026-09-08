@@ -92,6 +92,11 @@ public final class RegionalTerrain {
             data.put("horizontal_distance",List.of(samples.stream().mapToDouble(s->s.point().subtract(origin).horizontalDistance()).min().orElseThrow(),
                     samples.stream().mapToDouble(s->s.point().subtract(origin).horizontalDistance()).max().orElseThrow()));
             data.put("surface_samples",samples.size());
+            data.put("approximate_xz_span",List.of(
+                    Math.floor(samples.stream().mapToDouble(s->s.point().x-origin.x).min().orElseThrow()/STRIDE)*STRIDE,
+                    Math.ceil(samples.stream().mapToDouble(s->s.point().x-origin.x).max().orElseThrow()/STRIDE)*STRIDE,
+                    Math.floor(samples.stream().mapToDouble(s->s.point().z-origin.z).min().orElseThrow()/STRIDE)*STRIDE,
+                    Math.ceil(samples.stream().mapToDouble(s->s.point().z-origin.z).max().orElseThrow()/STRIDE)*STRIDE));
             data.put("broad_support_samples",samples.stream().filter(Surface::platform).count());
             data.put("visible_samples",samples.stream().filter(Surface::visible).count());
             data.put("evidence","sampled_loaded_geometry; continuity and route unverified");
