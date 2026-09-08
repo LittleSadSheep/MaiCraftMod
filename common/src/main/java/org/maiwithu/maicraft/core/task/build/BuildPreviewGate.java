@@ -26,7 +26,8 @@ public final class BuildPreviewGate {
     public static Decision await(TaskRecord owner, BuildTaskRecord plan) {
         if (plan.previewManaged()) return Decision.DISABLED;
         Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
-        if (PreviewController.enabled() && PreviewController.current() == null)
+        if (PreviewController.enabled() && (PreviewController.current() == null
+                || PreviewController.current().designOnly()))
             plan.targets.forEach(target -> cells.put(target.pos(), target.desiredState()));
         return await(owner, owner.describe(), cells);
     }

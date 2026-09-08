@@ -11,11 +11,12 @@ import net.minecraft.world.level.block.state.BlockState;
 
 /** Immutable authored cells plus an explicit, one-way human review decision. No world writes. */
 public final class PreviewSession {
-    public enum Decision { WAITING, CONFIRMED, CANCELLED, DISABLED }
+    public enum Decision { WAITING, CONFIRMED, CANCELLED, DISABLED, DESIGN_ONLY }
     public static final int MAX_CELLS = 65_536;
     private final String owner, dimension, title;
     private final Map<BlockPos, BlockState> cells;
     private final List<PreviewPart> parts;
+    private boolean designOnly;
     private Decision decision = Decision.WAITING;
     private boolean visible = true;
     private int minY = Integer.MIN_VALUE, maxY = Integer.MAX_VALUE;
@@ -43,11 +44,21 @@ public final class PreviewSession {
     public String title() { return title; }
     public Map<BlockPos, BlockState> cells() { return cells; }
     public List<PreviewPart> parts() { return parts; }
+    public boolean designOnly() { return designOnly; }
     public Decision decision() { return decision; }
     public boolean visible() { return visible && decision != Decision.CANCELLED; }
     public boolean includes(BlockPos pos) { return pos.getY() >= minY && pos.getY() <= maxY; }
     public int minY() { return minY; }
     public int maxY() { return maxY; }
+
+    /** A standalone display carries no construction authorization, even after local confirm. */
+    public static PreviewSession design(String owner, String dimension, String title,
+                                        Map<BlockPos, BlockState> cells) {
+        PreviewSession session = new PreviewSession(owner, dimension, title, cells);
+        session.designOnly = true;
+        session.decision = Decision.DESIGN_ONLY;
+        return session;
+    }
 
     public boolean confirm() {
         if (decision != Decision.WAITING) return false;

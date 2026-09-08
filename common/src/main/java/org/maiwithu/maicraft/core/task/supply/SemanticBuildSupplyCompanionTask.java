@@ -30,7 +30,6 @@ import org.maiwithu.maicraft.task.TaskState;
 final class SemanticBuildSupplyCompanionTask
         extends AbstractCompanionTask<SemanticBuildSupplyTaskRecord> {
     private enum ChildKind { BUILD }
-    private enum SupplyPurpose { SELECT_VARIANT, FETCH_BATCH }
     private record BatchNeed(Item item, int fetch, int consumableBeforeBlock) {}
 
     private final Map<Item, Integer> fullLedger = new LinkedHashMap<>();
@@ -55,15 +54,21 @@ final class SemanticBuildSupplyCompanionTask
             new SemanticMaterialSupplyCoordinator();
     private final Map<ResourceLocation, ResourceLocation> selectedVariants =
             new LinkedHashMap<>();
-    private int materialFamilyIndex;
-    private SemanticBuildMaterialBinding.Family selectingFamily;
-    private SupplyPurpose supplyPurpose;
     private final List<BlockPos> plannedMutationCells = new ArrayList<>();
+    private final java.util.function.BiFunction<TaskRecord, BuildTaskRecord,
+            org.maiwithu.maicraft.client.preview.PreviewSession.Decision> previewGate;
 
     SemanticBuildSupplyCompanionTask(
             LocalPlayer player, SemanticBuildSupplyTaskRecord record) {
+        this(player, record, org.maiwithu.maicraft.core.task.build.BuildPreviewGate::await);
+    }
+
+    SemanticBuildSupplyCompanionTask(LocalPlayer player, SemanticBuildSupplyTaskRecord record,
+            java.util.function.BiFunction<TaskRecord, BuildTaskRecord,
+                    org.maiwithu.maicraft.client.preview.PreviewSession.Decision> previewGate) {
         super(player, record);
         activePlan = record.plan;
+        this.previewGate = previewGate;
     }
 
     @Override
@@ -113,7 +118,7 @@ final class SemanticBuildSupplyCompanionTask
             return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
         }
 
-        var preview = org.maiwithu.maicraft.core.task.build.BuildPreviewGate.await(r, activePlan);
+        var preview = previewGate.apply(r, activePlan);
         if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.WAITING)
             return TaskState.RUNNING;
         if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
@@ -182,11 +187,9 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     /**
-     * Bind every broad planner family before construction. A carried family member wins because
-     * it is already the cheapest verified source. With no carried evidence, acquire exactly one
-     * member of the whole acceptable family: the generic acquire planner then chooses storage
-     * only when authorized, otherwise the cheapest live recipe/world branch (whose block child is
-     * nearest-first). The selected concrete item is locked before any build cell changes.
+     * Bind every planner family before preview using carried evidence only. Registry alternatives
+     * are compatible shapes, not observed supply sources. With no carried evidence keep the
+     * design's material requirement; all fetching waits for review and targets that frozen item.
      */
     static boolean batchCompleted(TaskState terminal, TaskResult result) {
         if (terminal != TaskState.SUCCESS || result == null || !result.success()) return false;
@@ -195,25 +198,12 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private void advanceMaterialBinding() {
-        while (failureCode == null && materialFamilyIndex < materialProposal.families().size()) {
-            SemanticBuildMaterialBinding.Family family =
-                    materialProposal.families().get(materialFamilyIndex);
-            ResourceLocation carried = bestCarried(family.alternatives());
-            if (carried != null || family.alternatives().size() == 1) {
-                selectedVariants.put(family.groupId(), carried != null
-                        ? carried : family.alternatives().getFirst());
-                materialFamilyIndex++;
-                continue;
-            }
-            selectingFamily = family;
-            supplyPurpose = SupplyPurpose.SELECT_VARIANT;
-            beginSupply(new SemanticMaterialSupplyCoordinator.Demand(
-                    family.alternatives(), 1,
-                    "select one obtainable material variant for " + family.identity()));
-            return;
-        }
         if (failureCode != null || prepared) return;
         try {
+            for (var family : materialProposal.families()) {
+                selectedVariants.put(family.groupId(), SemanticBuildMaterialBinding.select(family,
+                        id -> inventoryCount(BuiltInRegistries.ITEM.get(id))));
+            }
             activePlan = SemanticBuildMaterialBinding.bind(
                     r.plan, materialProposal, Map.copyOf(selectedVariants));
             refreshLedgers();
@@ -226,22 +216,7 @@ final class SemanticBuildSupplyCompanionTask
         }
     }
 
-    private ResourceLocation bestCarried(List<ResourceLocation> alternatives) {
-        ResourceLocation best = null;
-        int bestCount = 0;
-        for (ResourceLocation id : alternatives) {
-            int count = inventoryCount(BuiltInRegistries.ITEM.get(id));
-            if (count > bestCount || count == bestCount && count > 0
-                    && (best == null || id.compareTo(best) < 0)) {
-                best = id;
-                bestCount = count;
-            }
-        }
-        return best;
-    }
-
     private void startBatchSupply(BatchNeed need) {
-        supplyPurpose = SupplyPurpose.FETCH_BATCH;
         Item item = need.item();
         int requiredFinal = Math.min(SemanticAcquireTaskRecord.MAX_FINAL_COUNT,
                 inventoryCount(item) + need.fetch());
@@ -264,43 +239,18 @@ final class SemanticBuildSupplyCompanionTask
         if (tick.status() == SemanticMaterialSupplyCoordinator.Status.RUNNING) {
             return TaskState.RUNNING;
         }
-        recordSupplyRound(supplyPurpose, tick);
+        recordSupplyRound(tick);
         if (tick.status() == SemanticMaterialSupplyCoordinator.Status.FAILED) {
-            stopWith(supplyPurpose == SupplyPurpose.SELECT_VARIANT
-                            ? "material_variant_unavailable" : "material_batch_supply_failed",
+            stopWith("material_batch_supply_failed",
                     tick.message(), tick.failureType());
-            selectingFamily = null;
-            supplyPurpose = null;
             return TaskState.FAILED;
         }
-        if (supplyPurpose == SupplyPurpose.SELECT_VARIANT) {
-            ResourceLocation selected = selectingFamily == null
-                    ? null : bestCarried(selectingFamily.alternatives());
-            if (selected == null) {
-                stopWith("material_variant_selection_unobserved",
-                        "generic supply reported success but no acceptable concrete build material "
-                                + "was present in synchronized inventory",
-                        FailureType.NO_MATERIAL);
-                selectingFamily = null;
-                supplyPurpose = null;
-                return TaskState.FAILED;
-            }
-            selectedVariants.put(selectingFamily.groupId(), selected);
-            materialFamilyIndex++;
-            selectingFamily = null;
-            supplyPurpose = null;
-            advanceMaterialBinding();
-            return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
-        }
-        supplyPurpose = null;
         return TaskState.RUNNING;
     }
 
-    private void recordSupplyRound(
-            SupplyPurpose purpose, SemanticMaterialSupplyCoordinator.Tick tick) {
+    private void recordSupplyRound(SemanticMaterialSupplyCoordinator.Tick tick) {
         Map<String, Object> value = new LinkedHashMap<>();
-        value.put("kind", purpose == SupplyPurpose.SELECT_VARIANT
-                ? "material_variant" : "material_batch");
+        value.put("kind", "material_batch");
         value.put("terminal_state", tick.status().name().toLowerCase());
         value.put("remaining_cells", remainingCellCount());
         value.put("message", tick.message() == null ? "" : tick.message());
@@ -565,6 +515,18 @@ final class SemanticBuildSupplyCompanionTask
     @Override protected String timeoutMessage() {
         if (failureCode == null) failureCode = "semantic_build_supply_timeout";
         return "semantic build supply timed out; review the remaining ledger before retrying";
+    }
+
+    @Override public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("task", name());
+        data.put("phase", supply.active() ? "material_supply" : activeChild != null ? "building"
+                : traversabilityScan != null ? "verifying" : !prepared ? "preparing_materials"
+                : "awaiting_preview_or_batch");
+        data.put("construction_batches_started", buildRounds);
+        if (supply.active()) data.put("child", supply.progress());
+        else if (activeChild != null) data.put("child", activeChild.progress());
+        return Map.copyOf(data);
     }
 
     @Override protected void cleanup() {

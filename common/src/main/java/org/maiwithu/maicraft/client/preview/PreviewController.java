@@ -41,6 +41,7 @@ public final class PreviewController {
                                    Map<BlockPos, BlockState> cells, List<PreviewPart> parts) {
         initialize();
         tick(Minecraft.getInstance());
+        if (current != null && current.designOnly()) release(current.owner());
         if (current != null) {
             if (current.owner().equals(owner)) return current.decision();
             return Decision.WAITING;
@@ -54,6 +55,20 @@ public final class PreviewController {
         message("蓝图等待确认：" + title + " · " + cells.size() + " 格。"
                 + " /maicraft preview confirm 开工；cancel 取消；layer <Y> 切片。", ChatFormatting.AQUA);
         return Decision.WAITING;
+    }
+
+    /** Explicit read-only display is independent of the automatic Dev construction gate. */
+    public static boolean showDesign(PreviewSession session) {
+        tick(Minecraft.getInstance());
+        if (!session.designOnly() || Minecraft.getInstance().level == null
+                || !session.dimension().equals(Minecraft.getInstance().level.dimension().location().toString())
+                || current != null && !current.designOnly()) return false;
+        current = session;
+        world = Minecraft.getInstance().level;
+        PreviewRenderer.invalidate();
+        message("只读设计蓝图：" + session.title() + " · " + session.cells().size()
+                + " 格。不会移动或施工；confirm 不会开工。cancel 关闭；layer <Y> 切片。", ChatFormatting.AQUA);
+        return true;
     }
 
     public static void release(String owner) {
@@ -77,7 +92,7 @@ public final class PreviewController {
 
     static int dev(boolean enabled) {
         initialize();
-        if (!enabled && current != null) {
+        if (!enabled && current != null && !current.designOnly()) {
             if (current.decision() == Decision.WAITING) {
                 current.cancel(); PreviewRenderer.invalidate();
             }
@@ -95,6 +110,10 @@ public final class PreviewController {
 
     static int confirm() {
         tick(Minecraft.getInstance());
+        if (current != null && current.designOnly()) {
+            message("这是只读设计，不能确认开工。需要施工时另行提交 maicraft:build。", ChatFormatting.YELLOW);
+            return 0;
+        }
         if (current == null || !current.confirm()) return unavailable();
         message("蓝图已确认，施工继续。", ChatFormatting.GREEN);
         return 1;

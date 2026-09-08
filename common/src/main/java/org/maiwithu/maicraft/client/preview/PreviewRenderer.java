@@ -74,7 +74,8 @@ public final class PreviewRenderer {
                 + " · " + session.decision() + " · 可见区块 " + ready + "/" + visible.size()
                 + (fallback == 0 ? "" : " · 特殊模型仅轮廓 " + fallback)
                 + (session.parts().isEmpty() ? "" : " · AE部件为示意几何")
-                + " · /maicraft preview confirm | cancel | layer <Y>"), false);
+                + (session.designOnly() ? " · 只读设计 · /maicraft preview cancel | layer <Y>"
+                : " · /maicraft preview confirm | cancel | layer <Y>")), false);
     }
 
     private static void draw(List<PreviewMeshSection> visible, RenderType type, int pass,

@@ -28,12 +28,13 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 
 /**
- * Binds a semantic building palette to one concrete obtainable variant per material family.
+ * Freezes a semantic building palette without performing acquisition to discover a variant.
  *
  * <p>The semantic planner still owns appearance and layout. This class only broadens ordinary
  * building roles (planks, masonry, logs, slabs, doors, panes, railings, stairs and carpet) to
- * equivalent registered blocks, then rewrites the already-reviewed plan before its first world
- * effect. Functional furniture, lights and block entities remain exact.</p>
+ * equivalent registered blocks, then binds carried variants before review. Without carried
+ * evidence the original design remains a material requirement, not a promise of availability.
+ * Functional furniture, lights and block entities remain exact.</p>
  */
 final class SemanticBuildMaterialBinding {
     // Ae2ResourceSupply.Request permits 2,048 accepted IDs in total. There are at most eleven
@@ -82,6 +83,17 @@ final class SemanticBuildMaterialBinding {
     }
 
     private SemanticBuildMaterialBinding() {}
+
+    /** Registry membership proves compatibility only. Never mine a sample to decide a palette. */
+    static ResourceLocation select(Family family, java.util.function.ToIntFunction<ResourceLocation> carried) {
+        ResourceLocation selected = family.originals().getFirst();
+        int best = Math.max(0, carried.applyAsInt(selected));
+        for (ResourceLocation alternative : family.alternatives()) {
+            int count = carried.applyAsInt(alternative);
+            if (count > best) { selected = alternative; best = count; }
+        }
+        return selected;
+    }
 
     static Proposal propose(BuildTaskRecord plan, boolean broadenMaterialFamilies) {
         Map<String, Accumulator> accumulators = new LinkedHashMap<>();
