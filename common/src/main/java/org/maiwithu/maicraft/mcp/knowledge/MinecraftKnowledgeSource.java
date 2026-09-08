@@ -11,18 +11,20 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.properties.Property;
+import org.maiwithu.maicraft.core.integration.create.CreateTooltipKnowledge;
 import org.maiwithu.maicraft.core.integration.ponder.ReflectivePonderAccess;
 
 /** Client-thread-only registry facts plus automatically discovered Ponder reference documents. */
 public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
     public static final String BLOCK = "maicraft://knowledge/block/";
     private final PonderKnowledgeSource ponder = new PonderKnowledgeSource(new ReflectivePonderAccess(), MinecraftKnowledgeSource::displayName);
+    private final CreateTooltipKnowledge tooltips = new CreateTooltipKnowledge();
 
     @Override public List<KnowledgeDocument.Entry> entries() { return ponder.entries(); }
     @Override public String status() { return ponder.status(); }
     @Override public JsonArray templates() {
         JsonArray templates = ponder.templates();
-        templates.add(PonderKnowledgeSource.template(BLOCK + "{namespace}/{+path}", "registry.block", "安装版本中的方块状态属性和 Ponder 场景链接"));
+        templates.add(PonderKnowledgeSource.template(BLOCK + "{namespace}/{+path}", "registry.block", "安装版本中的方块状态、物品说明、Create Shift/Ctrl 用法和 Ponder 场景链接"));
         return templates;
     }
 
@@ -54,8 +56,14 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
                 .append("## 实际状态属性\n\n| 属性 | 默认值 | 允许值 |\n| --- | --- | --- |\n");
         for (Property<?> property : block.getStateDefinition().getProperties()) appendProperty(text, block, property);
         if (block.getStateDefinition().getProperties().isEmpty()) text.append("该方块没有方块状态属性。\n");
-        text.append("\n属性来自当前注册表。属性名称不自动证明其物理含义；库存、过滤器、模式等也可能属于方块实体配置。\n\n")
-                .append("## Ponder 用法\n\n");
+        text.append("\n属性来自当前注册表。属性名称不自动证明其物理含义；库存、过滤器、模式等也可能属于方块实体配置。\n\n");
+        List<String> baseTooltip = CreateTooltipKnowledge.baseTooltip(block.asItem());
+        if (!baseTooltip.isEmpty()) {
+            text.append("## 默认物品说明\n\n");
+            baseTooltip.forEach(line -> text.append("- ").append(line).append('\n'));
+            text.append('\n');
+        }
+        text.append(tooltips.description(block.asItem()).markdown()).append("\n## Ponder 用法\n\n");
         KnowledgeDocument component = ponder.read(PonderKnowledgeSource.componentUri(id.toString()));
         if (component != null) text.append("[查看该组件的原始教程](").append(component.uri()).append(")\n");
         else text.append("当前未取得该方块的 Ponder 场景（").append(ponder.status()).append("）；不能据此推断其功能或可操作性。\n");
@@ -67,9 +75,13 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
         text.append("| `").append(property.getName()).append("` | `").append(property.getName(block.defaultBlockState().getValue(property)))
                 .append("` | ").append(String.join(", ", property.getPossibleValues().stream().map(property::getName).toList())).append(" |\n");
     }
-    private static KnowledgeDocument.Entry blockEntry(ResourceLocation id, Block block) {
+    private KnowledgeDocument.Entry blockEntry(ResourceLocation id, Block block) {
+        var description = tooltips.description(block.asItem());
+        String summary = description.summary();
+        if (summary.length() > 120) summary = summary.substring(0, 120) + "…";
         return new KnowledgeDocument.Entry(BLOCK + id.getNamespace() + "/" + id.getPath(), "block." + id,
-                block.getName().getString(), "实际方块状态与使用资料 · " + id, id.toString());
+                block.getName().getString(), "实际方块状态与使用资料 · " + id + (summary.isBlank() ? "" : " · " + summary),
+                id + " " + description.searchText());
     }
     private static String displayName(String value) {
         ResourceLocation id = ResourceLocation.tryParse(value);

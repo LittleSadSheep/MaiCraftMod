@@ -6,6 +6,7 @@ public final class KnowledgeRegressionSuite {
         net.minecraft.SharedConstants.tryDetectVersion();
         net.minecraft.server.Bootstrap.bootStrap();
         org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibraryTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.CreateTooltipKnowledgeTest.main(args);
         org.maiwithu.maicraft.core.integration.ponder.PonderKnowledgeTest.main(args);
         var source = new org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource();
         var document = source.read("maicraft://knowledge/block/minecraft/chest");

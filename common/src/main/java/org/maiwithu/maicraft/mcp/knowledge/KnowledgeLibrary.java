@@ -125,7 +125,7 @@ public final class KnowledgeLibrary {
         JsonObject result = new JsonObject(); result.add("resources", hits);
         result.addProperty("total_matches", matches.size()); result.addProperty("truncated", matches.size() > limit);
         result.addProperty("provider_status", source.status()); result.addProperty("content_loaded", false);
-        result.addProperty("search_scope", "Registered component names, IDs, tags and schematic names; unrequested scene bodies are not compiled or searched.");
+        result.addProperty("search_scope", "Registered component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; unrequested scene bodies are not compiled or searched.");
         result.addProperty("next_step", "Read a returned URI with resources/read or perceive(view=knowledge, resource_uri=...). No matches do not prove no relevant mechanic exists.");
         return result;
     }
