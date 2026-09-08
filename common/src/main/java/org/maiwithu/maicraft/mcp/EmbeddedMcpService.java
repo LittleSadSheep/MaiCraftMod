@@ -301,7 +301,11 @@ public final class EmbeddedMcpService implements AutoCloseable {
         result.addProperty("instructions",
                 "Use perceive to understand the current situation, plan to compile a goal, " +
                 "execute to start it, and task to inspect or control the returned task. " +
-                "Execution is asynchronous. Subscribe to maicraft://attention for important events and decisions.");
+                "Execution is asynchronous. Subscribe to maicraft://attention for important events and decisions. " +
+                "For block behavior and Ponder tutorials, start with maicraft://knowledge/index. " +
+                "Discover metadata using resources/list or perceive(view=knowledge, focus=item ID/name), " +
+                "then read one returned URI using resources/read or perceive(view=knowledge, resource_uri=...). " +
+                "Reference knowledge is not an execution capability or a live-world observation.");
         sendJson(exchange, 200, success(id, result), session);
     }
 
@@ -311,7 +315,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
             case "ping" -> new JsonObject();
             case "tools/list" -> listTools();
             case "tools/call" -> callTool(session, optionalObject(rawParams), requestId);
-            case "resources/list" -> listResources();
+            case "resources/list" -> listResources(optionalObject(rawParams), "list");
+            case "resources/templates/list" -> listResources(optionalObject(rawParams), "templates");
             case "resources/read" -> readResource(optionalObject(rawParams));
             case "resources/subscribe" -> subscribeResource(session, optionalObject(rawParams));
             case "resources/unsubscribe" -> unsubscribeResource(session, optionalObject(rawParams));
@@ -349,15 +354,18 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         CompletionStage<JsonElement> stage = null;
         try {
+            boolean knowledge = PublicToolCatalog.PERCEIVE.equals(name) && "knowledge".equals(nullableString(arguments, "view"));
             stage = switch (name) {
-                case PublicToolCatalog.PERCEIVE -> runtime.perceive(arguments);
+                case PublicToolCatalog.PERCEIVE -> knowledge ? runtime.knowledge(
+                        org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary.perceptionRequest(arguments)) : runtime.perceive(arguments);
                 case PublicToolCatalog.PLAN -> runtime.plan(arguments);
                 case PublicToolCatalog.EXECUTE -> runtime.execute(arguments);
                 case PublicToolCatalog.TASK -> runtime.task(arguments);
                 default -> throw new IllegalStateException("unreachable tool dispatch");
             };
             JsonElement value = await(stage, requestTimeout(name, arguments));
-            return toolResult(value, false);
+            return knowledge && arguments.has("resource_uri") && !arguments.get("resource_uri").isJsonNull()
+                    ? knowledgeToolResult(value.getAsJsonObject()) : toolResult(value, false);
         } catch (TimeoutException exception) {
             RuntimeFacade.CancellationDisposition cancellation = cancelRuntimeCall(stage);
             boolean mutating = mutatesSemanticState(name, arguments);
@@ -394,23 +402,21 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
     }
 
-    private JsonObject listResources() {
-        JsonObject resource = new JsonObject();
-        resource.addProperty("uri", ATTENTION_URI.toString());
-        resource.addProperty("name", "Important events");
-        resource.addProperty("description", "Decision-relevant events emitted by the active game runtime.");
-        resource.addProperty("mimeType", "application/json");
-        JsonArray resources = new JsonArray();
-        resources.add(resource);
-        JsonObject result = new JsonObject();
-        result.add("resources", resources);
-        return result;
+    private JsonObject listResources(JsonObject params, String action) {
+        only(params, "cursor", "_meta"); optionalMeta(params);
+        JsonObject request = new JsonObject(); request.addProperty("action", action);
+        if (params.has("cursor")) request.add("cursor", params.get("cursor"));
+        return knowledgeRequest(request);
     }
 
     private JsonObject readResource(JsonObject params) {
         only(params, "uri", "_meta");
         optionalMeta(params);
-        requireAttentionUri(params);
+        String uri = requiredString(params, "uri");
+        if (!ATTENTION_URI.toString().equals(uri)) {
+            JsonObject request = new JsonObject(); request.addProperty("action", "read"); request.addProperty("uri", uri);
+            return knowledgeRequest(request);
+        }
         CompletionStage<JsonElement> stage = runtime.readAttention();
         try {
             JsonElement snapshot = await(stage, config.requestTimeout());
@@ -441,6 +447,37 @@ public final class EmbeddedMcpService implements AutoCloseable {
         requireAttentionUri(params);
         session.attentionSubscribed.set(true);
         return new JsonObject();
+    }
+
+    private JsonObject knowledgeRequest(JsonObject request) {
+        CompletionStage<JsonElement> stage = null;
+        try {
+            stage = runtime.knowledge(request);
+            return await(stage, config.requestTimeout()).getAsJsonObject();
+        } catch (TimeoutException timeout) {
+            cancelRuntimeCall(stage); throw new RpcException(-32001, "Knowledge request timed out");
+        } catch (InterruptedException interrupted) {
+            cancelRuntimeCall(stage); Thread.currentThread().interrupt();
+            throw new RpcException(-32001, "Knowledge request interrupted");
+        } catch (Exception failure) {
+            Throwable cause = unwrap(failure);
+            if (cause instanceof org.maiwithu.maicraft.mcp.knowledge.KnowledgeException resource)
+                throw new RpcException(resource.code(), resource.getMessage());
+            if (cause instanceof IllegalArgumentException) throw new RpcException(-32602, cause.getMessage());
+            throw new RpcException(-32603, message(cause));
+        }
+    }
+
+    private static JsonObject knowledgeToolResult(JsonObject value) {
+        JsonArray content = new JsonArray(), metadata = new JsonArray();
+        for (JsonElement element : value.getAsJsonArray("contents")) {
+            JsonObject document = element.getAsJsonObject(), text = new JsonObject(), info = new JsonObject();
+            text.addProperty("type", "text"); text.add("text", document.get("text")); content.add(text);
+            info.add("uri", document.get("uri")); info.add("mimeType", document.get("mimeType")); metadata.add(info);
+        }
+        JsonObject structured = new JsonObject(); structured.add("resources", metadata);
+        JsonObject result = new JsonObject(); result.add("content", content); result.add("structuredContent", structured);
+        result.addProperty("isError", false); return result;
     }
 
     private JsonObject unsubscribeResource(Session session, JsonObject params) {
@@ -817,6 +854,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private static void requireAttentionUri(JsonObject params) {
         if (!ATTENTION_URI.toString().equals(requiredString(params, "uri"))) {
+            if (requiredString(params, "uri").startsWith("maicraft://knowledge/"))
+                throw new RpcException(-32602, "Knowledge is read on demand; resource update subscriptions are supported for maicraft://attention only");
             throw new RpcException(-32002, "Resource not found");
         }
     }

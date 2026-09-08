@@ -23,7 +23,7 @@ final class PublicToolCatalog {
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     );
     private static final Set<String> VIEWS = Set.of(
-            "situation", "surroundings", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu"
+            "situation", "surroundings", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu", "knowledge"
     );
     private static final Set<String> TARGET_KINDS = Set.of(
             "current_place", "coordinates", "landmark", "player", "entity", "nearest", "area", "prior_result"
@@ -79,13 +79,14 @@ final class PublicToolCatalog {
 
     private static final List<JsonObject> TOOLS = List.of(
             tool(PERCEIVE,
-                    "Read a concise, decision-oriented view of the current game state. surroundings includes terrain_overview, a terrain thumbnail sampled up to 128 blocks horizontally and 256 down, with surface_material and approximate region spans. It advances over client ticks and returns complete or explicit partial coverage. Synchronized elevator floor identities are also included; needs_sync means unknown, not empty.",
+                    "Read game state or reference knowledge. Use view=knowledge with focus=item ID/name to discover Ponder tutorials and block properties, then resource_uri to read one Markdown page. Knowledge discovery is metadata-only and needs no player world. surroundings includes terrain_overview, a thumbnail sampled up to 128 blocks horizontally and 256 down, surface_material and approximate region spans. It advances over client ticks with complete or partial coverage. Synchronized elevator floor identities are included; needs_sync means unknown, not empty.",
                     schema("""
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks","machines","machine_menu"],"default":"situation","description":"landmarks returns durable semantic labels. machines lists cached session observations; inspect_machine gives fresh geometry. machine_menu returns structured current native menu evidence and a receipt for exact entry transfers. Stored absolute coordinates remain private to MaiCraft."},
-                                "focus":{"type":["string","null"],"maxLength":256,"description":"Ability filter for abilities. With situation, maicraft:physical_structures observes Sable ships, native gaze hits, current poses and bounded support surfaces; maicraft:navigation or maicraft:transport also includes these plus actor, navigation, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text to find (for example 充气); view direction and physical structures are also returned."},
+                                "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"knowledge searches reference metadata or reads resource_uri; it does not authorize actions or prove runtime capabilities. landmarks returns labels, machines lists observations, machine_menu returns native menu evidence."},
+                                "focus":{"type":["string","null"],"maxLength":256,"description":"With knowledge, an item ID or search words; omit when reading resource_uri. Ability filter for abilities. With situation, maicraft:physical_structures observes Sable ships, gaze hits, poses and support surfaces; maicraft:navigation or maicraft:transport also includes actor, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text; view direction and physical structures are also returned."},
+                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"knowledge only: an exact discovered maicraft://knowledge/... URI. Reads Markdown without loading unrelated documents."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For view=tasks, return one full task when present; otherwise list concise recent task summaries."},
                                  "after_cursor":{"type":"integer","minimum":0,"default":0},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"For view=attention, wait up to this duration for a newer event without polling raw game state."},
@@ -195,13 +196,17 @@ final class PublicToolCatalog {
     }
 
     private static void validatePerceive(JsonObject value) {
-        only(value, "view", "focus", "task_id", "after_cursor", "wait_ms", "limit", "server_id");
+        only(value, "view", "focus", "resource_uri", "task_id", "after_cursor", "wait_ms", "limit", "server_id");
         defaults(value, "view", "situation", "after_cursor", 0, "wait_ms", 0,
                 "limit", 10, "server_id", "minecraft-server");
         String view = string(value, "view", 1, 32, false);
         if (!VIEWS.contains(view)) throw bad("view has an unsupported value");
         if ("surroundings".equals(view)) nullableString(value, "focus", 1, 128);
+        else if ("knowledge".equals(view)) nullableString(value, "focus", 1, 256);
         else nullableResource(value, "focus");
+        nullableString(value, "resource_uri", 1, 2048);
+        if (present(value, "resource_uri") && !"knowledge".equals(view)) throw bad("resource_uri is only supported by knowledge");
+        if (present(value, "resource_uri") && present(value, "focus")) throw bad("Use focus to search or resource_uri to read, not both");
         nullableUuid(value, "task_id");
         int cursor = integer(value, "after_cursor", 0, Integer.MAX_VALUE);
         int waitMs = integer(value, "wait_ms", 0, 60_000);

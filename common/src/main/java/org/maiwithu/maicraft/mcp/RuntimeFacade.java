@@ -42,6 +42,12 @@ public interface RuntimeFacade {
 
     CompletionStage<JsonElement> readAttention();
 
+    /** Read-only documentation requests; implementations may inspect registries but need no player world. */
+    default CompletionStage<JsonElement> knowledge(JsonObject arguments) {
+        return java.util.concurrent.CompletableFuture.completedFuture(
+                org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary.offline().request(arguments));
+    }
+
     /**
      * Registers a listener for important-event changes. Closing the returned
      * handle must detach only this listener and must be safe to call repeatedly.

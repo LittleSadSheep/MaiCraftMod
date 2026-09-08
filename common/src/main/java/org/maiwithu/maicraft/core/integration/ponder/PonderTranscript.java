@@ -33,7 +33,8 @@ public record PonderTranscript(String sceneId, String title, List<Step> steps,
         if (end < steps.size()) text.append("\n[继续读取第 ").append(end + 1).append(" 条起的内容](")
                 .append(baseUri).append("?offset=").append(end).append(")\n");
         text.append("\n## 解释边界\n\n")
-                .append("以上是作者演示证据。焦点坐标属于教程，等待刻数属于演示时间；它们不是玩家世界坐标或生产速率。")
+                .append("以上是作者演示证据。焦点来自未加载演示结构的编译过程，可能受占位边界影响，只用于定位旁白；等待刻数不是生产速率。")
+                .append("持物提示只列 ID 与数量，物品数据组件未展开。")
                 .append("未显示的规则保持未知。机器是否可操作，还需查询当前 MaiCraft abilities 与实际世界状态。\n");
         if (!unexpanded.isEmpty()) {
             text.append("\n未执行、未推断含义的演示指令：\n");

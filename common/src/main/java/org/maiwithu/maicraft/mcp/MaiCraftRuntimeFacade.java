@@ -43,6 +43,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     private final IntentRuntime intents;
     private final NavigationOverview navigationOverview=new NavigationOverview();
+    private final org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary knowledge =
+            new org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary(new org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource());
 
     private MaiCraftRuntimeFacade() {
         this.intents = IntentRuntime.get();
@@ -55,6 +57,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     @Override
     public CompletionStage<JsonElement> perceive(JsonObject arguments) {
+        if ("knowledge".equals(arguments.get("view").getAsString())) return knowledge(
+                org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary.perceptionRequest(arguments));
         if("surroundings".equals(arguments.get("view").getAsString())) return observeSurroundings(arguments);
         if ("attention".equals(arguments.get("view").getAsString())
                 && arguments.get("wait_ms").getAsInt() > 0) {
@@ -143,6 +147,10 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             intents.bindForRequest(minecraft, minecraft.player);
             return intents.attention(0, 20);
         });
+    }
+
+    @Override public CompletionStage<JsonElement> knowledge(JsonObject arguments) {
+        return onClient(() -> knowledge.request(arguments));
     }
 
     @Override
