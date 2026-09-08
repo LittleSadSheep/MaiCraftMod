@@ -52,7 +52,8 @@ final class LandingBoatRescue {
         }
         return null;
     }
-    boolean prepare(LocalPlayerContext context) { tick(context); return ready && !failed; }
+    boolean materialReady() { return ready && !failed; }
+    boolean prepare(LocalPlayerContext context) { tick(context); return materialReady(); }
     void tick(LocalPlayerContext context) {
         if (stopped || failed) { cleanup(context); return; }
         departed |= !context.player().onGround();

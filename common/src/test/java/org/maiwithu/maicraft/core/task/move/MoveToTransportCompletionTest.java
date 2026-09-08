@@ -284,6 +284,7 @@ public final class MoveToTransportCompletionTest {
     }
 
     private static final class TestPlayer extends LocalPlayer {
+        @Override public net.minecraft.world.item.ItemStack getItemBySlot(net.minecraft.world.entity.EquipmentSlot slot) { return net.minecraft.world.item.ItemStack.EMPTY; }
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         @Override public boolean isAlive() { return true; }
         @Override public float getHealth() { return 20; }

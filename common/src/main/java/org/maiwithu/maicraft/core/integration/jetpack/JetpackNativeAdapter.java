@@ -38,10 +38,13 @@ public final class JetpackNativeAdapter {
 
     public static Snapshot inspect(LocalPlayerContext ctx) {
         ctx.requireCurrent();
-        return observe(ctx.player());
+        return observeCurrentPlayer(ctx.player());
     }
     public static Snapshot observe(net.minecraft.client.player.LocalPlayer player) {
         if (!net.minecraft.client.Minecraft.getInstance().isSameThread()) throw new IllegalStateException("client-thread jetpack observation required");
+        return observeCurrentPlayer(player);
+    }
+    private static Snapshot observeCurrentPlayer(net.minecraft.client.player.LocalPlayer player) {
         if (player == null) return Snapshot.unavailable("local player unavailable");
         ItemStack chest = player.getItemBySlot(EquipmentSlot.CHEST);
         String id = BuiltInRegistries.ITEM.getKey(chest.getItem()).toString();

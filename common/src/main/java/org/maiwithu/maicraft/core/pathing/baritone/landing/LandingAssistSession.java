@@ -34,6 +34,8 @@ public final class LandingAssistSession {
     private LandingMaterialSupply materialSupply;
     private boolean materialBound;
     private LandingPreparation preparation;
+    private final org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode groundFlight=
+            new org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode();
     private LandingBoatRescue boat;
     private NativeActionReceipt receipt;
     private NativeActionReceipt stopRelease;
@@ -159,11 +161,11 @@ public final class LandingAssistSession {
     }
     public boolean prepare(LocalPlayerContext context) {
         observeStart(context);
-        if (boat!=null) return boat.prepare(context);
+        if (boat!=null) return boat.prepare(context) && prepareGroundFlight(context);
         if (failed) { continuePreparationCleanup(context); return false; }
         if (Float.isNaN(previousHealth)) rememberHealth(context);
         if (!materialReady(context)) return false;
-        if (boat!=null) return boat.prepare(context);
+        if (boat!=null) return boat.prepare(context) && prepareGroundFlight(context);
         refreshWaterAim(context);
         if (!survivesHay(context)) { fail("hay would not reduce the observed fall to survivable damage"); return false; }
         if (!context.level().isLoaded(plan.cell()) || !context.level().isLoaded(plan.clicked())) return false;
@@ -176,7 +178,7 @@ public final class LandingAssistSession {
         if (plan.existing()) {
             if (!LandingAssistPlan.existingSafe(plan.kind(), context.level().getBlockState(plan.cell())))
                 fail("the observed landing mechanism changed before departure");
-            return !failed;
+            return !failed && prepareGroundFlight(context);
         }
         if (EmbeddedBaritonePolicy.protects(plan.cell())
                 || !LandingAssistPlan.canPlace(plan.kind(), context.level(), plan.cell())) {
@@ -186,10 +188,21 @@ public final class LandingAssistSession {
         }
         boolean ready = preparation.tick(context);
         if (preparation.failed()) fail(preparation.diagnostic());
+        return ready && prepareGroundFlight(context);
+    }
+    private boolean prepareGroundFlight(LocalPlayerContext context) {
+        boolean ready=groundFlight.prepare(context);
+        if(!ready && groundFlight.failed() && context.player().onGround()) fail(groundFlight.diagnostics().toString());
         return ready;
     }
 
-    /** Does not clear movement on failure: the fall owner keeps steering until a real landing. */
+    private void tickBoat(LocalPlayerContext context) {
+        boat.tick(context);
+        if(boat.materialReady() && !context.player().onGround()) groundFlight.prepare(context);
+        complete=boat.complete(context); failed|=boat.failed();
+    }
+
+    /** The fall owner retains steering and its flight-mode handoff until actual landing. */
     public void tick(LocalPlayerContext context) {
         if (complete || lastTick == context.tickRevision()) return;
         lastTick = context.tickRevision();
@@ -212,7 +225,8 @@ public final class LandingAssistSession {
                 && context.player().getBoundingBox().intersects(new net.minecraft.world.phys.AABB(plan.cell()).inflate(0.001)))
             hayContactObserved = true;
         if (!context.permitsNativeActions()) { fail("control authority changed during landing assistance"); return; }
-        if (boat!=null) { boat.tick(context); complete=boat.complete(context); failed|=boat.failed(); return; }
+        groundFlight.poll(context);
+        if (boat!=null) { tickBoat(context); return; }
         if (stopReason != null) {
             continueStop(context);
             if (cleanupPending()) return;
@@ -266,7 +280,7 @@ public final class LandingAssistSession {
                 if(boat==null && !materialReady(context)) return;
             }
         }
-        if (boat!=null) { boat.tick(context); complete=boat.complete(context); failed|=boat.failed(); return; }
+        if (boat!=null) { tickBoat(context); return; }
         if (!failed) refreshWaterAim(context);
         if (!failed && materialReadyTick == Long.MIN_VALUE) materialReadyTick = context.tickRevision();
         if (!failed && preparation != null && !preparation.ready()) {
@@ -280,6 +294,8 @@ public final class LandingAssistSession {
                 else { fail(preparation.diagnostic()); return; }
             }
         }
+        if(!failed && !submitted && !context.player().onGround() && (plan.existing() || preparation!=null && preparation.ready()))
+            groundFlight.prepare(context); // Do not wait for a mode receipt instead of placing urgent protection.
         if (!failed) aim(context);
         if (receipt != null) {
             settle(context);
@@ -495,6 +511,7 @@ public final class LandingAssistSession {
     public Map<String, Object> diagnostics() {
         var result = new LinkedHashMap<String, Object>();
         result.put("rescue_episode",episode);
+        result.put("ground_flight_mode",groundFlight.diagnostics());
         result.put("landing_changes",landingChanges);
         result.put("placement_submissions",placementSubmissions); result.put("pickup_submissions",pickupSubmissions);
         result.put("strategy", plan.kind().name()); result.put("phase", detail);

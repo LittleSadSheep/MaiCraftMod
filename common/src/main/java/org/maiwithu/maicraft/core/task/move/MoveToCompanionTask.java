@@ -70,6 +70,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private boolean nearRetried;
     private long landingBaseline = Long.MAX_VALUE;
     private Map<String,Object> landingFacts = Map.of();
+    private final org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode groundFlight=
+            new org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode();
     /** FIND(就近方块)子系统:扫描/入册/契约/轮换全在组件里,此处只驱动。 */
     private NearestBlockFinder finder;
 
@@ -272,6 +274,16 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (nav == null && reached()) return successAtBody();
         if (boatLeg != null) {
             return tickBoatLeg();
+        }
+        if(player.onGround() && !reached() && !org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.occupied()
+                && (r.transportMode==org.maiwithu.maicraft.core.pathing.transport.TransportMode.GROUND
+                    || r.transportMode==org.maiwithu.maicraft.core.pathing.transport.TransportMode.AUTO)) {
+            var context=org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+            if(!groundFlight.prepare(context)) {
+                context.body().releaseAll();
+                if(groundFlight.failed()) { fail(groundFlight.diagnostics().toString(),FailureType.UNKNOWN); return TaskState.FAILED; }
+                return TaskState.RUNNING;
+            }
         }
         if (r.kind == MoveToTaskRecord.Kind.FIND && nav == null) {
             TaskState pre = tickFindDiscovery();
@@ -544,6 +556,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         data.put("final_y", player.getY());
         data.put("final_z", player.getZ());
         data.put("ground_y", gy);
+        data.put("ground_flight_mode",groundFlight.diagnostics());
         observeLanding();
         data.put("landing_assist_observed",!landingFacts.isEmpty());
         if (!landingFacts.isEmpty()) data.put("landing_assist",landingFacts);
