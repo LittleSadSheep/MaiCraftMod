@@ -16,6 +16,10 @@ public interface MovingFlightTarget {
     default boolean landingSelected() { return true; }
     /** False while a bounded observation/search slice is still choosing its next segment. */
     default boolean ready() { return true; }
+    /** Static discovery points can use the existing release/reignite descent; moving decks cannot. */
+    default boolean supportsFastDescent() { return false; }
+    /** Keep discovering a nearby supported exit when cancellation occurs before any floor is known. */
+    default boolean seekLandingOnStop() { return false; }
     /** Before native flight effects only: try a different observed landing face on the same identity. */
     default boolean nextLanding() { return false; }
     JetpackRoute.Space space(LocalPlayerContext context, LongSet forbidden);

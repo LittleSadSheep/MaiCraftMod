@@ -22,6 +22,7 @@ public final class JetpackFlightSession implements TransportSession {
     private Vec3 planningTarget;
     private boolean planningLanding;
     private Vec3 observationHold;
+    private boolean discoveringExit;
     private int departureNodes;
     private boolean searchCharged, searchBudgetExhausted;
     private final java.util.List<Map<String,Object>> preflightAttempts = new java.util.ArrayList<>();
@@ -103,9 +104,11 @@ public final class JetpackFlightSession implements TransportSession {
         ctx.body().applyMovement(BodyControlPort.Movement.STOPPED, ctx.tickRevision());
         power = JetpackNativeAdapter.inspect(ctx);
         nativeEvidence = JetpackNativeAdapter.activeEvidence(ctx.player());
-        if (movingTarget != null && !stopping && !exiting) {
+        if (movingTarget != null && followsTarget()) {
             if (!movingTarget.update(ctx)) {
-                failure = "jetpack_target_unavailable"; detail = movingTarget.diagnostics().toString(); stopping = true;
+                failure = "jetpack_target_unavailable"; detail = movingTarget.diagnostics().toString();
+                if(discoveringExit) discoveringExit=false;
+                else requestStop();
                 if (!effects) return finish(ctx, false);
             } else {
                 target = movingTarget.point(); platform = java.util.List.of(target);
@@ -132,7 +135,8 @@ public final class JetpackFlightSession implements TransportSession {
         }
         if (phase == Phase.PLAN) {
             if (stopping) return finish(ctx, false);
-            if (!power.controllable() || !grounded || ctx.player().isInWater()
+            if (!power.controllable() || !grounded && (!power.active() || !power.hover()
+                    || !JetpackNativeAdapter.uprightActive(nativeEvidence)) || ctx.player().isInWater()
                     || ctx.player().isPassenger() || ctx.player().isFallFlying()) {
                 failure = "jetpack_unavailable"; detail = power.reason(); return finish(ctx, false);
             }
@@ -185,10 +189,13 @@ public final class JetpackFlightSession implements TransportSession {
             }
             phase = Phase.FLY; waypointTick = lastTick;
         }
-        if (phase == Phase.FLY && movingTarget != null && !stopping && !exiting) {
+        if (phase == Phase.FLY && movingTarget != null && followsTarget()) {
             if (!movingTarget.ready()) {
                 if (observationHold==null) observationHold=ctx.player().position();
-                if (!power.controllable() || power.fuelTicks()<140) { stopping=true; escape(ctx,space(ctx)); }
+                if (!power.controllable() || !power.active() || !power.hover()
+                        || !JetpackNativeAdapter.uprightActive(nativeEvidence) || power.fuelTicks()<140) {
+                    stopping=true; discoveringExit=false; escape(ctx,space(ctx));
+                }
                 else steer(ctx,observationHold,false);
                 return running();
             }
@@ -202,7 +209,7 @@ public final class JetpackFlightSession implements TransportSession {
     }
 
     private JetpackRoute.Space space(LocalPlayerContext ctx) {
-        return movingTarget != null && !stopping && !exiting
+        return movingTarget != null && followsTarget()
                 ? movingTarget.space(ctx, forbidden) : JetpackRoute.observed(ctx, forbidden);
     }
 
@@ -211,11 +218,14 @@ public final class JetpackFlightSession implements TransportSession {
     }
 
     private boolean landingSelected() { return movingTarget==null || movingTarget.landingSelected(); }
+    private boolean followsTarget() { return (!stopping || discoveringExit) && !exiting; }
 
     private void retarget(LocalPlayerContext ctx) {
         if (route == null || route.points().getLast().distanceTo(target) < .5 && planningLanding==landingSelected()) return;
         var space = space(ctx);
         Vec3 position = ctx.player().position();
+        planningTarget=target;
+        planningTarget=target;
         if (!landingSelected()) {
             if (!JetpackRoute.flightClear(space,position,target,power)) { obstruction(ctx,space,target); return; }
             route=new JetpackRoute.Plan(java.util.List.of(position,target),route.emergencyLandings(),
@@ -242,18 +252,20 @@ public final class JetpackFlightSession implements TransportSession {
         double remaining = 60;
         for (int i = waypoint; i < route.points().size(); i++) remaining += JetpackRoute.edgeTicks(
                 i == waypoint ? position : route.points().get(i - 1), route.points().get(i), power);
-        if (!exiting && (stopping || !power.controllable() || !power.active() || !power.hover()
+        if (!exiting && (stopping && !discoveringExit || !power.controllable() || !power.active() || !power.hover()
                 || !JetpackNativeAdapter.uprightActive(nativeEvidence)
                 || power.fuelTicks() < remaining || lastTick - waypointTick > 200)) {
             if (!stopping) { failure = "jetpack_landing_required"; detail = "fuel, mode or flight progress no longer supports the remaining route"; }
             escape(ctx, space); return;
         }
         if (route.points().size() == 2) {
-            if (!exiting && !stopping && !landingSelected()) {
+            if (followsTarget() && !landingSelected()) {
                 Vec3 next=route.points().getLast();
                 double distance=position.distanceToSqr(next);
                 if(distance<waypointDistance-.01) { waypointDistance=distance; waypointTick=lastTick; }
-                if(!space.clear(position,next) || !steer(ctx,next,false)) obstruction(ctx,space,next);
+                if(!space.clear(position,next)) { obstruction(ctx,space,next); return; }
+                if(!stopping && position.y>next.y+3 && tryFastDescent(ctx,next,false)) return;
+                if(!steer(ctx,next,false)) obstruction(ctx,space,next);
                 return;
             }
             landing = route.points().getLast(); approachHeight = Math.max(position.y, landing.y);
@@ -279,9 +291,11 @@ public final class JetpackFlightSession implements TransportSession {
         lastObstacle = space.obstruction(ctx.player().position(), next);
         failure = "jetpack_corridor_changed"; detail = "verified flight segment changed: " + lastObstacle;
         recordTrace(ctx, true);
-        if (!repaired && !stopping && !exiting && power.controllable() && JetpackNativeAdapter.uprightActive(nativeEvidence)
+        if (!repaired && followsTarget() && power.controllable() && JetpackNativeAdapter.uprightActive(nativeEvidence)
                 && space.clear(ctx.player().position(), ctx.player().position())) {
             repaired = true; holdPoint = ctx.player().position();
+            planningTarget=target;
+            planningTarget=target;
             planningLanding=landingSelected();
             search = new JetpackRoute.Search(holdPoint, target, power,6000,planningLanding); phase = Phase.REPLAN;
             brake(ctx);
@@ -290,9 +304,11 @@ public final class JetpackFlightSession implements TransportSession {
 
     private void repair(LocalPlayerContext ctx) {
         var space = space(ctx);
-        if (stopping || !power.controllable() || !JetpackNativeAdapter.uprightActive(nativeEvidence)
+        if (stopping && !discoveringExit || !power.controllable() || !JetpackNativeAdapter.uprightActive(nativeEvidence)
                 || !space.clear(ctx.player().position(), holdPoint)) { escape(ctx, space); return; }
         if (!steer(ctx, holdPoint, false)) { escape(ctx, space); return; }
+        if (movingTarget!=null && !movingTarget.ready()) return;
+        if (movingTarget!=null && !movingTarget.ready()) return;
         if (movingTarget != null && planningTarget != null && (planningTarget.distanceTo(target) > 1 || planningLanding!=landingSelected())) {
             planningTarget = target; planningLanding=landingSelected();
             search = new JetpackRoute.Search(ctx.player().position(),target,power,6000,planningLanding);
@@ -370,7 +386,7 @@ public final class JetpackFlightSession implements TransportSession {
     }
 
     private boolean tryFastDescent(LocalPlayerContext ctx, Vec3 target, boolean touchdown) {
-        if (movingTarget != null) return false;
+        if (movingTarget != null && !movingTarget.supportsFastDescent()) return false;
         if (fastDescent.finished() && fastDescentTarget != null && fastDescentTarget.distanceToSqr(target) > 0.01)
             fastDescent = new JetpackFastDescent(forbidden);
         if (fastDescent.finished()) return false;
@@ -485,7 +501,11 @@ public final class JetpackFlightSession implements TransportSession {
         trace.addLast(Map.copyOf(sample));
         while (trace.size() > 48) trace.removeFirst();
     }
-    @Override public void requestStop() { stopping = true; fastDescent.requestStop(); }
+    @Override public void requestStop() {
+        stopping=true;
+        discoveringExit=movingTarget!=null && movingTarget.seekLandingOnStop();
+        fastDescent.requestStop();
+    }
     @Override public void abandon() {
         fastDescent.abandon();
         ClientRuntime.actor().body().releaseAll(); phase = Phase.DONE;

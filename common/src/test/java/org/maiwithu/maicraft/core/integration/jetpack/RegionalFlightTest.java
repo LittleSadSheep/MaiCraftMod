@@ -48,6 +48,36 @@ public final class RegionalFlightTest {
         check(target.landingSelected() && target.point().y==-10,"replacement platform is observed, not guessed");
         for(int tick=260;tick<263;tick++) target.advance(target.point(),Vec3.ZERO,true,space,view,POWER,tick);
         check(target.touchdown(),"only stable supported arrival completes a regional flight");
+        var edge=new JetpackRoute.Space() {
+            public boolean clear(Vec3 from,Vec3 to) {
+                for(int i=0;i<=20;i++) {
+                    Vec3 point=from.lerp(to,i/20D);
+                    if(point.y<origin.y && point.x<4) return false;
+                }
+                return true;
+            }
+            public Vec3 landingBelow(Vec3 point) { return null; }
+        };
+        var departure=new RegionalFlightTarget(new RegionalGoal(origin,new Vec3(0,-1,0),64));
+        for(int tick=0;tick<40 && !departure.ready();tick++)
+            check(departure.advance(origin,Vec3.ZERO,true,edge,view,POWER,tick),"search around the departure platform edge");
+        check(departure.ready() && (departure.point().y>=origin.y || departure.point().x>=4),
+                "the descent direction cannot tunnel through the current platform");
+        var sealed=new JetpackRoute.Space() {
+            public boolean clear(Vec3 from,Vec3 to) { return from.equals(to); }
+            public Vec3 landingBelow(Vec3 point) { return null; }
+        };
+        Vec3 oldPoint=departure.point();
+        departure.advance(origin,Vec3.ZERO,true,sealed,view,POWER,41);
+        check(!departure.ready() || !departure.point().equals(oldPoint),"changed local obstacles retire the stale air segment");
+        floor[0]=0;
+        Vec3 above=new Vec3(.5,20,.5);
+        var cancelled=new RegionalFlightTarget(new RegionalGoal(above,new Vec3(0,1,0),64));
+        cancelled.advance(above,Vec3.ZERO,false,space,view,POWER,0);
+        check(!cancelled.landingSelected(),"an upward goal does not bind the lower floor");
+        cancelled.seekLandingOnStop();
+        for(int tick=1;tick<20 && !cancelled.landingSelected();tick++) cancelled.advance(above,Vec3.ZERO,false,space,view,POWER,tick);
+        check(cancelled.landingSelected() && cancelled.point().y==0,"cancellation discovers an available exit without continuing the upward intent");
         System.out.println("RegionalFlightTest: passed");
     }
     private static void check(boolean value,String message) { if(!value) throw new AssertionError(message); }
