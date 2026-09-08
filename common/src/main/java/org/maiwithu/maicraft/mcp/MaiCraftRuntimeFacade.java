@@ -30,9 +30,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -126,6 +124,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             if (requestKey != null) result.addProperty("request_key", requestKey);
             result.addProperty("control_status", IntentRuntime.isReadOnlyDesign(goal)
                     ? "not_required" : "takeover_requested");
+            result.add("next_attention", AttentionSnapshot.continuation(
+                    intents.attentionCheckpoint(), record.externalId().toString()));
             return result;
         });
     }
@@ -148,11 +148,10 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     @Override
     public CompletionStage<JsonElement> readAttention() {
-        return onClient(() -> {
-            Minecraft minecraft = requireWorld();
-            intents.bindForRequest(minecraft, minecraft.player);
-            return intents.attention(0, 20);
-        });
+        JsonObject args = new JsonObject();
+        args.addProperty("after_cursor", 0);
+        args.addProperty("limit", 20);
+        return onClient(() -> attentionOnClient(args));
     }
 
     @Override public CompletionStage<JsonElement> knowledge(JsonObject arguments) {
@@ -165,6 +164,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private JsonElement perceiveOnClient(JsonObject arguments) {
+        if ("attention".equals(arguments.get("view").getAsString())) return attentionOnClient(arguments);
         Minecraft minecraft = requireWorld();
         LocalPlayer player = minecraft.player;
         intents.bindForRequest(minecraft, player);
@@ -214,9 +214,6 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 result.add("tasks", tasks);
                 yield result;
             }
-            case "attention" -> intents.attention(
-                    arguments.get("after_cursor").getAsLong(),
-                    arguments.get("limit").getAsInt());
             case "landmarks" -> landmarks(player);
             case "machines" -> org.maiwithu.maicraft.core.integration.machine.MachineSnapshots.summaries(player);
             case "machine_menu" -> org.maiwithu.maicraft.core.integration.machine.MachineMenu.inspect(player);
@@ -322,7 +319,10 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             }
             default -> throw new IllegalArgumentException("unknown task action: " + action);
         }
-        return taskSnapshot(record);
+        JsonObject result = taskSnapshot(record);
+        result.add("next_attention", AttentionSnapshot.continuation(
+                intents.attentionCheckpoint(), record.externalId().toString()));
+        return result;
     }
 
     private JsonObject situation(LocalPlayer player) {
@@ -446,7 +446,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    private static JsonObject taskSnapshot(IntentTaskRecord record) {
+    static JsonObject taskSnapshot(IntentTaskRecord record) {
         JsonObject result = new JsonObject();
         result.addProperty("task_id", record.externalId().toString());
         if (record.planId() != null) result.addProperty("plan_id", record.planId().toString());
@@ -523,7 +523,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         }
     }
 
-    private static JsonObject taskSummary(IntentTaskRecord record) {
+    static JsonObject taskSummary(IntentTaskRecord record) {
         JsonObject result = new JsonObject();
         result.addProperty("task_id", record.externalId().toString());
         result.addProperty("state", publicState(record));
@@ -657,58 +657,15 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
      * initiate model sampling from inside the Mod.
      */
     private CompletionStage<JsonElement> waitForAttention(JsonObject arguments) {
-        long afterCursor = arguments.get("after_cursor").getAsLong();
-        int limit = arguments.get("limit").getAsInt();
-        int waitMs = arguments.get("wait_ms").getAsInt();
-        ClientCallFuture future = new ClientCallFuture();
-        AtomicReference<AutoCloseable> subscription = new AtomicReference<>();
-        future.whenComplete((ignored, failure) -> closeQuietly(subscription.getAndSet(null)));
-
-        Runnable setup = () -> {
-            if (!future.begin()) return;
-            try {
-                Minecraft minecraft = requireWorld();
-                intents.bindForRequest(minecraft, minecraft.player);
-                JsonObject initial = intents.attention(afterCursor, limit);
-                if (hasAttentionEvents(initial)) {
-                    future.completeCall(initial);
-                    return;
-                }
-
-                Consumer<JsonElement> listener = ignored -> {
-                    if (future.isDone()) return;
-                    JsonObject snapshot = intents.attention(afterCursor, limit);
-                    if (hasAttentionEvents(snapshot)) future.completeCall(snapshot);
-                };
-                AutoCloseable handle = intents.subscribeAttention(listener);
-                subscription.set(handle);
-                if (future.isDone()) {
-                    closeQuietly(subscription.getAndSet(null));
-                    return;
-                }
-
-                // Subscribe before the second read so an event can land on neither side
-                // of the check only if the listener itself already completed the future.
-                JsonObject raced = intents.attention(afterCursor, limit);
-                if (hasAttentionEvents(raced)) {
-                    future.completeCall(raced);
-                    return;
-                }
-                if (!future.markWaiting()) return;
-                JsonObject timeoutSnapshot = raced.deepCopy();
-                CompletableFuture.delayedExecutor(waitMs, TimeUnit.MILLISECONDS)
-                        .execute(() -> future.completeCall(timeoutSnapshot));
-            } catch (Throwable failure) {
-                future.failCall(failure);
-            }
-        };
-        scheduleClient(future, setup);
-        return future;
+        return AttentionWait.start(() -> attentionOnClient(arguments), intents::subscribeAttention,
+                work -> Minecraft.getInstance().execute(work), arguments.get("wait_ms").getAsInt());
     }
 
-    private static boolean hasAttentionEvents(JsonObject snapshot) {
-        return snapshot.has("events") && snapshot.get("events").isJsonArray()
-                && snapshot.getAsJsonArray("events").size() > 0;
+    private JsonObject attentionOnClient(JsonObject arguments) {
+        Minecraft minecraft = Minecraft.getInstance();
+        boolean available = minecraft.player != null && minecraft.level != null && minecraft.gameMode != null
+                && intents.attentionAvailable();
+        return AttentionSnapshot.read(intents, arguments, available);
     }
 
     private static CompletionStage<JsonElement> onClient(Supplier<? extends JsonElement> operation) {
@@ -734,14 +691,6 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         }
     }
 
-    private static void closeQuietly(AutoCloseable closeable) {
-        if (closeable == null) return;
-        try {
-            closeable.close();
-        } catch (Exception ignored) {
-        }
-    }
-
     private static final class ClientCallFuture extends CompletableFuture<JsonElement>
             implements RuntimeFacade.ManagedCall {
         private static final int QUEUED = 0;
@@ -754,10 +703,6 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
         private boolean begin() {
             return state.compareAndSet(QUEUED, RUNNING);
-        }
-
-        private boolean markWaiting() {
-            return state.compareAndSet(RUNNING, WAITING);
         }
 
         private boolean completeCall(JsonElement value) {

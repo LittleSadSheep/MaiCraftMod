@@ -303,6 +303,7 @@ public final class IntentRuntime {
     public void bodyUnavailable() {
         captureCheckpoint(true);
         bodyAttached = false;
+        gameEvent("runtime.unavailable", "The controlled body disconnected; task state must be resynchronized.", new JsonObject());
     }
 
     /** Capture the exact checkpoint before death cleanup; disk persistence continues asynchronously. */
@@ -477,6 +478,7 @@ public final class IntentRuntime {
     }
 
     private void clearSemanticState() {
+        bodyAttached = false;
         plans.clear();
         tasks.clear();
         requestKeys.clear();
@@ -513,6 +515,13 @@ public final class IntentRuntime {
     public void resumed(IntentTaskRecord record) {
         markDirty();
         publish("resumed", record, "Task resumed", new JsonObject());
+    }
+
+    void stepCompleted(IntentTaskRecord record) {
+        JsonObject data = new JsonObject();
+        data.addProperty("completed_step_count", record.stepIndex());
+        data.addProperty("step_count", record.steps().size());
+        publish("step_completed", record, "A semantic step finished; the parent task may still be running.", data);
     }
 
     /** Pause only an otherwise-running semantic parent while first-person control is unavailable. */
@@ -642,6 +651,10 @@ public final class IntentRuntime {
 
     public JsonObject attentionCheckpoint() {
         return attention.checkpoint();
+    }
+
+    public boolean attentionAvailable() {
+        return bodyAttached;
     }
 
     public AutoCloseable subscribeAttention(Consumer<JsonElement> listener) {

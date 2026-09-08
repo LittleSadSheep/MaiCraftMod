@@ -79,7 +79,7 @@ final class PublicToolCatalog {
 
     private static final List<JsonObject> TOOLS = List.of(
             tool(PERCEIVE,
-                    "Read game state or reference knowledge. Use view=knowledge with focus=item ID/name to discover Ponder tutorials and block properties, then resource_uri to read one Markdown page. Knowledge discovery is metadata-only and needs no player world. surroundings includes terrain_overview, a thumbnail sampled up to 128 blocks horizontally and 256 down, surface_material and approximate region spans. It advances over client ticks with complete or partial coverage. Synchronized elevator floor identities are included; needs_sync means unknown, not empty.",
+                    "Use view=attention as the primary task monitor: pass execute/task's next_attention arguments, then continue with each response's next_attention. It waits for task events or important body/player events and includes authoritative task state, pending decisions and terminal results. Ordinary task/get polling is unnecessary. On timeout, continue waiting; on decision/paused/unavailable, act or report instead of waiting forever. Read game state or reference knowledge with other views. Use view=knowledge with focus=item ID/name to discover tutorials, then resource_uri to read one Markdown page. Knowledge needs no player world. surroundings includes sampled terrain_overview with complete or partial coverage and synchronized elevator floors; needs_sync means unknown, not empty.",
                     schema("""
                             {
                               "type":"object",
@@ -87,9 +87,10 @@ final class PublicToolCatalog {
                                 "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"knowledge searches reference metadata or reads resource_uri; it does not authorize actions or prove runtime capabilities. landmarks returns labels, machines lists observations, machine_menu returns native menu evidence."},
                                 "focus":{"type":["string","null"],"maxLength":256,"description":"With knowledge, an item ID or search words; omit when reading resource_uri. Ability filter for abilities. With situation, maicraft:physical_structures observes Sable ships, gaze hits, poses and support surfaces; maicraft:navigation or maicraft:transport also includes actor, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text; view direction and physical structures are also returned."},
                                 "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"knowledge only: an exact discovered maicraft://knowledge/... URI. Reads Markdown without loading unrelated documents."},
-                                 "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For view=tasks, return one full task when present; otherwise list concise recent task summaries."},
-                                 "after_cursor":{"type":"integer","minimum":0,"default":0},
-                                 "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"For view=attention, wait up to this duration for a newer event without polling raw game state."},
+                                 "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For attention, filter task events while retaining important body/player events and include authoritative task state. For tasks, read one full task."},
+                                 "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
+                                 "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
+                                 "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: event-driven wait, normally 30000 ms. Returns immediately for completed tasks, pending decisions, pauses, missing tasks or resync; timeout does not cancel the game task."},
                                  "limit":{"type":"integer","minimum":1,"maximum":20,"default":10},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
@@ -109,7 +110,7 @@ final class PublicToolCatalog {
                             }
                             """), annotations(false, false, false)),
             tool(EXECUTE,
-                    "Start a goal or a previously compiled plan and return its task identifier immediately.",
+                    "Start a goal or compiled plan asynchronously. Pass the returned next_attention to perceive to wait for authoritative task state and results; prefer Attention over polling task/get or wrapping execution as a synchronous call.",
                     goalSchema("""
                             {
                               "type":"object",
@@ -123,7 +124,7 @@ final class PublicToolCatalog {
                             }
                             """), annotations(false, true, false)),
             tool(TASK,
-                    "Inspect or control a runtime task. When state=waiting_for_decision, answer with the exact "
+                    "Inspect or control a runtime task. Prefer perceive(view=attention) for waiting and completion; get/list are for explicit inspection and recovery. After a control action, continue with next_attention. When state=waiting_for_decision, answer with the exact "
                             + "decision_id and one listed choice. retry may refine details.parameters; recover "
                             + "and replace_goal require one semantic details.goal. Never provide internal tool "
                             + "names, routes, block layouts or click scripts. Machine abilities accept semantic "
@@ -196,7 +197,7 @@ final class PublicToolCatalog {
     }
 
     private static void validatePerceive(JsonObject value) {
-        only(value, "view", "focus", "resource_uri", "task_id", "after_cursor", "wait_ms", "limit", "server_id");
+        only(value, "view", "focus", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit", "server_id");
         defaults(value, "view", "situation", "after_cursor", 0, "wait_ms", 0,
                 "limit", 10, "server_id", "minecraft-server");
         String view = string(value, "view", 1, 32, false);
@@ -208,13 +209,17 @@ final class PublicToolCatalog {
         if (present(value, "resource_uri") && !"knowledge".equals(view)) throw bad("resource_uri is only supported by knowledge");
         if (present(value, "resource_uri") && present(value, "focus")) throw bad("Use focus to search or resource_uri to read, not both");
         nullableUuid(value, "task_id");
-        int cursor = integer(value, "after_cursor", 0, Integer.MAX_VALUE);
+        nullableUuid(value, "stream_id");
+        long cursor = longInteger(value, "after_cursor", 0, 9_007_199_254_740_991L);
         int waitMs = integer(value, "wait_ms", 0, 60_000);
         integer(value, "limit", 1, 20);
         string(value, "server_id", 1, 128, false);
         boolean hasTask = present(value, "task_id");
-        if (hasTask && !"tasks".equals(view)) {
-            throw bad("task_id is only supported by the tasks view");
+        if (hasTask && !Set.of("tasks", "attention").contains(view)) {
+            throw bad("task_id is only supported by tasks and attention");
+        }
+        if (present(value, "stream_id") && !"attention".equals(view)) {
+            throw bad("stream_id is only supported by attention");
         }
         if (cursor != 0 && !"attention".equals(view)) {
             throw bad("after_cursor is only supported by the attention view");
@@ -450,13 +455,17 @@ final class PublicToolCatalog {
     }
 
     private static int integer(JsonObject object, String key, int min, int max) {
+        return (int) longInteger(object, key, min, max);
+    }
+
+    private static long longInteger(JsonObject object, String key, long min, long max) {
         require(object, key);
         JsonElement element = object.get(key);
         if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
             throw bad(key + " must be an integer");
         }
         try {
-            int value = element.getAsBigDecimal().intValueExact();
+            long value = element.getAsBigDecimal().longValueExact();
             if (value < min || value > max) throw bad(key + " is outside the accepted range");
             return value;
         } catch (ArithmeticException exception) {

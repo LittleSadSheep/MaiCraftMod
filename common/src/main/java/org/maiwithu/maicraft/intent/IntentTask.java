@@ -98,7 +98,7 @@ final class IntentTask implements Task {
             return failStep(TaskState.FAILED,
                     TaskResult.fail("semantic step failed safely: " + safeMessage(failure)));
         } finally {
-            // Polling sees the actual active child, not an inferred phase from the semantic goal.
+            // Attention and explicit inspection see the actual observed active child.
             // Diagnostic failures must never interrupt physical work or replace its real result.
             try { record.observeExecution(progress(), player.level().getGameTime()); }
             catch (RuntimeException ignoredDiagnosticFailure) { }
@@ -514,6 +514,7 @@ final class IntentTask implements Task {
         Goal goal = record.steps().get(index);
         record.addStepResult(new IntentTaskRecord.StepSnapshot(
                 index, goal.ability(), result.success(), result.message(), result.toJson()));
+        runtime.stepCompleted(record);
         if (!result.success()) terminalResult = result;
     }
 
