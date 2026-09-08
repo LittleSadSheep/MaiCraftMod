@@ -13,6 +13,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
 import org.maiwithu.maicraft.core.integration.ponder.PonderFixture;
+import org.maiwithu.maicraft.core.integration.ponder.PonderBlueprintStore;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.PonderKnowledgeSource;
 
@@ -44,11 +45,22 @@ public final class KnowledgeHttpTest {
             }
             check(attention && scene != null && PonderFixture.compiled == 0, "keep attention and discover foreign Ponder scenes");
             var templates = send("resources/templates/list", new JsonObject()).getAsJsonObject("result");
-            check(templates.getAsJsonArray("resourceTemplates").size() == 2, "resource template discovery");
+            var templateMimes = new java.util.HashMap<String, String>();
+            templates.getAsJsonArray("resourceTemplates").forEach(element -> {
+                var row = element.getAsJsonObject(); templateMimes.put(row.get("name").getAsString(), row.get("mimeType").getAsString());
+            });
+            check("text/markdown".equals(templateMimes.get("ponder.component")) && "text/markdown".equals(templateMimes.get("ponder.scene"))
+                    && "text/markdown".equals(templateMimes.get("ponder.replay")) && "application/json".equals(templateMimes.get("ponder.structure")),
+                    "discover narration, replay and JSON structure templates by identity");
             JsonObject search = send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\",\"focus\":\"addon:machine\"}}"));
             check(!search.getAsJsonObject("result").get("isError").getAsBoolean() && PonderFixture.compiled == 0, "model-driven metadata search without world access");
             var contents = send("resources/read", uri(scene)).getAsJsonObject("result").getAsJsonArray("contents");
             check(contents.get(0).getAsJsonObject().get("text").getAsString().contains("A source rule"), "standard resource Markdown");
+            String structure = PonderBlueprintStore.put("http_fixture", json("{\"schema_version\":1,\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:stone\",\"properties\":{}}],\"evidence\":{\"projection_complete\":true}}"));
+            var structureContent = send("resources/read", uri(structure)).getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
+            check(structureContent.get("mimeType").getAsString().equals("application/json")
+                    && JsonParser.parseString(structureContent.get("text").getAsString()).getAsJsonObject().getAsJsonArray("blocks").size() == 1,
+                    "structure resource survives HTTP as JSON with the common blueprint envelope");
             JsonObject args = new JsonObject(); args.addProperty("view", "knowledge"); args.addProperty("resource_uri", scene);
             JsonObject tool = new JsonObject(); tool.addProperty("name", "perceive"); tool.add("arguments", args);
             JsonObject fallback = send("tools/call", tool).getAsJsonObject("result");

@@ -34,6 +34,7 @@ public final class PonderKnowledgeTest {
         String last = transcript.markdown(snapshot.entries().getFirst(), "maicraft://knowledge/ponder/scene/example", 40);
         check(first.contains("?offset=40") && !first.contains("line-40"), "progressive scene page");
         check(last.contains("line-40") && !last.contains("line-0"), "next page retains omitted content");
+        PonderReplayTest.main(args);
         System.out.println("PonderKnowledgeTest: passed");
     }
     private static void check(boolean condition, String detail) { if (!condition) throw new AssertionError(detail); }

@@ -68,6 +68,7 @@ public final class ClientRuntime {
         // 总流程：观察世界 → 取得本 tick 的身体上下文 → 检查控制权 → 调度任务 → 推进导航 → 归还上下文。
         // 中途因预览或人工接管而返回时，仍需通过 finally 收尾，不能遗留上一轮的按键或原生动作。
         requireClientThread(minecraft);
+        org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime.tick();
         tickStage = "observing";
         org.maiwithu.maicraft.core.inventory.StockEvidence.observe(minecraft.player);
         PathCaches.clientTick(minecraft.player);

@@ -10,12 +10,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import org.maiwithu.maicraft.core.integration.ponder.PonderAccess;
+import org.maiwithu.maicraft.core.integration.ponder.PonderBlueprintStore;
+import org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime;
 
 /** Registry-driven progressive disclosure: index -> component -> one storyboard's original text. */
 public final class PonderKnowledgeSource implements KnowledgeLibrary.Source {
     public static final String INDEX = "maicraft://knowledge/ponder/index";
     public static final String COMPONENT = "maicraft://knowledge/ponder/component/";
     public static final String SCENE = "maicraft://knowledge/ponder/scene/";
+    public static final String REPLAY = "maicraft://knowledge/ponder/replay/";
     private final PonderAccess access;
     private final Function<String, String> displayName;
     private String status = "not_observed";
@@ -56,7 +59,15 @@ public final class PonderKnowledgeSource implements KnowledgeLibrary.Source {
             try { offset = Integer.parseInt(parts[1].substring(7)); }
             catch (NumberFormatException invalid) { throw new IllegalArgumentException("Invalid Ponder offset"); }
         }
-        String base = parts[0]; PonderAccess.Snapshot snapshot = snapshot();
+        String base = parts[0];
+        if (base.startsWith(PonderBlueprintStore.PREFIX)) {
+            if (parts.length != 1) throw new IllegalArgumentException("Structure resources do not accept query parameters");
+            PonderReplayRuntime.refreshEnvironment();
+            JsonObject blueprint = PonderBlueprintStore.read(base);
+            return blueprint == null ? null : new KnowledgeDocument(uri, "ponder.structure", "Ponder 章节结构",
+                    "Blueprint blocks and separate demonstration evidence", blueprint.toString(), "application/json");
+        }
+        PonderAccess.Snapshot snapshot = snapshot();
         if (base.equals(INDEX)) return index(uri, snapshot, offset);
         if (base.startsWith(COMPONENT)) {
             if (offset != 0) throw new IllegalArgumentException("Component indexes do not accept an offset");
@@ -69,13 +80,17 @@ public final class PonderKnowledgeSource implements KnowledgeLibrary.Source {
             text.append("\n来源：当前 Ponder 注册表。场景名称来自注册的演示结构标识，正式标题在读取该场景时提取。\n");
             return new KnowledgeDocument(uri, "ponder.component", title, "Registered scene index", text.toString());
         }
-        if (base.startsWith(SCENE)) {
-            String key = base.substring(SCENE.length());
+        if (base.startsWith(SCENE) || base.startsWith(REPLAY)) {
+            boolean replay = base.startsWith(REPLAY);
+            String key = base.substring((replay ? REPLAY : SCENE).length());
             PonderAccess.Entry entry = snapshot.entries().stream().filter(candidate -> candidate.key().equals(key)).findFirst().orElse(null);
             if (entry == null) return null;
+            if (replay) return new KnowledgeDocument(uri, "ponder.replay." + key, "Ponder 章节结构",
+                    "On-demand chapter end snapshots with narration", access.replay(entry).markdown(base, offset));
             var transcript = access.compile(entry);
             return new KnowledgeDocument(uri, "ponder.scene." + key, transcript.title(), "Original Ponder narration and control hints",
-                    transcript.markdown(entry, base, offset));
+                    transcript.markdown(entry, base, offset) + "\n[按需提取章节结构](" + REPLAY + key
+                            + ")：在独立演示世界中回放，只保留章节末状态和拆除/替换前状态；后续客户端 tick 分批完成。\n");
         }
         return null;
     }
@@ -100,6 +115,9 @@ public final class PonderKnowledgeSource implements KnowledgeLibrary.Source {
         JsonArray templates = new JsonArray();
         templates.add(template(COMPONENT + "{namespace}/{+path}", "ponder.component", "Ponder 组件教程目录"));
         templates.add(template(SCENE + "{scene}{?offset}", "ponder.scene", "从目录取得的故事板；offset 按说明/提示条目分页"));
+        templates.add(template(REPLAY + "{scene}{?offset}", "ponder.replay", "按需回放并读取章节摘要；offset 按章节分页"));
+        JsonObject structure = template(PonderBlueprintStore.PREFIX + "{scene}/{snapshot}", "ponder.structure", "从章节摘要取得的结构，包含蓝图方块与独立演示证据");
+        structure.addProperty("mimeType", "application/json"); templates.add(structure);
         return templates;
     }
     static JsonObject template(String uri, String name, String description) {
