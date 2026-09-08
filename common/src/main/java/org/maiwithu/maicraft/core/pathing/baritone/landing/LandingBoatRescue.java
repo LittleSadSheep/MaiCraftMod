@@ -57,7 +57,7 @@ final class LandingBoatRescue {
     void tick(LocalPlayerContext context) {
         if (stopped || failed) { cleanup(context); return; }
         departed |= !context.player().onGround();
-        if (departed && context.player().onGround() && !context.player().isPassenger() && (boat==null || !boat.ready())) {
+        if (departed && context.player().onGround() && !context.player().isPassenger() && (boat==null || !boat.ready() && !boat.mountPending())) {
             failed=true; detail="ground contact preceded the native boat catch"; cleanup(context); return;
         }
         if (boat == null && !prepareMaterial(context)) return;

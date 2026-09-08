@@ -9,6 +9,7 @@
   ],
   "client": [
     "ClientLevelBlockChangeMixin",
+    "BoatCatchPacketMixin",
     "MachineBlockEntityReceiptMixin",
     "MekanismContainerSyncMixin",
     "GameRendererCameraMixin",

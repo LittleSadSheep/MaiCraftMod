@@ -23,6 +23,7 @@ public final class ClientActorBoundary {
     private long tickRevision;
     private long mutationClaimedTick = Long.MIN_VALUE;
     private DefaultLocalPlayerContext activeContext;
+    private boolean positionPacketTick;
     private boolean windowControlActive;
     private boolean restoreMouseOnRelease;
     private boolean previewReview;
@@ -40,6 +41,12 @@ public final class ClientActorBoundary {
 
     public Optional<LocalPlayerContext> beginTick() {
         requireClientThread();
+        // An urgent interaction may open this tick just before vanilla sends player movement.
+        // END_CLIENT_TICK consumes the same context and mutation claim, never a second budget.
+        if(positionPacketTick) {
+            positionPacketTick=false;
+            if(activeContext!=null && isCurrent(activeContext)) return Optional.of(activeContext);
+        }
         tickRevision = nextRevision(tickRevision, "tick revision");
         mutationClaimedTick = Long.MIN_VALUE;
         activeContext = null;
@@ -101,6 +108,14 @@ public final class ClientActorBoundary {
         actions.advance(context);
         menus.advance(context);
         return Optional.of(context);
+    }
+
+    public Optional<LocalPlayerContext> beginPositionPacketTick() {
+        requireClientThread();
+        if(activeContext!=null || !body.automationOwnsControls()) return Optional.empty();
+        var opened=beginTick();
+        positionPacketTick=opened.isPresent();
+        return opened;
     }
 
     public void endTick(LocalPlayerContext context) {

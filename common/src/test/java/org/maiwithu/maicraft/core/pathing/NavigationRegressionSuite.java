@@ -5,6 +5,7 @@ package org.maiwithu.maicraft.core.pathing;
 public final class NavigationRegressionSuite {
     public static void main(String[] args) throws Exception {
         org.maiwithu.maicraft.entity.InputDriverTest.main(args);
+        org.maiwithu.maicraft.client.actor.PacketTickBudgetTest.main(args);
         org.maiwithu.maicraft.core.pathing.RegionalTerrainTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.RegionalFlightTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundModeTest.main(args);

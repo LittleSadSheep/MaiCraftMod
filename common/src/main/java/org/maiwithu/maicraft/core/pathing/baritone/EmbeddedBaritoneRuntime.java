@@ -541,6 +541,12 @@ public final class EmbeddedBaritoneRuntime {
         }
         var landingMovement = assistedFall != null && assistedFall.landingBoat() != null
                 ? assistedFall.landingBoat().movementOverride() : null;
+        // Boat.interact refuses secondary use. Release the ordinary fall's edge-crouch before
+        // the next player physics/input tick, not only after entering the mount window.
+        if(assistedFall!=null && assistedFall.landingBoat()!=null) sneak=assistedFall.landingBoat().wantsSneak();
+        else if(tickingContext!=null && assistedFall!=null && assistedFall.landingAssist()!=null
+                && assistedFall.landingAssist().plan().kind()==org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.BOAT)
+            sneak=assistedFall.landingAssist().wantsSneak(tickingContext);
         if (landingMovement==null && assistedFall!=null && assistedFall.landingAssist()!=null)
             landingMovement=assistedFall.landingAssist().movementOverride();
         if (landingMovement != null) {

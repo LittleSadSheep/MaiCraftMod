@@ -23,6 +23,20 @@ final class BoatLandingGeometry {
         Vec3 spawn = new Vec3(landing.getX()+0.5, landing.getY()-1+height, landing.getZ()+0.5);
         return safeFloor(view,landing.below(),height) ? spawn : null;
     }
+    /** Fresh spawn packets omit onGround; verify support at the boat's actual, possibly off-center position. */
+    static boolean supportedAt(BlockGetter view,Predicate<BlockPos> loaded,Vec3 at) {
+        AABB contact=new AABB(at.x-.6874,at.y-.02,at.z-.6874,at.x+.6874,at.y+.001,at.z+.6874);
+        for(BlockPos cell:BlockPos.betweenClosed(BlockPos.containing(contact.minX-1,at.y-2,contact.minZ-1),
+                BlockPos.containing(contact.maxX+1,at.y,contact.maxZ+1))) {
+            if(!loaded.test(cell)) return false;
+            var state=view.getBlockState(cell);
+            for(AABB local:state.getCollisionShape(view,cell,CollisionContext.empty()).toAabbs()) {
+                AABB box=local.move(cell);
+                if(Math.abs(box.maxY-at.y)<.02 && box.intersects(contact) && safeFloor(view,cell,local.maxY)) return true;
+            }
+        }
+        return false;
+    }
     private static boolean safeFloor(BlockGetter view, BlockPos pos, double height) {
         var state=view.getBlockState(pos);
         if(state.getFluidState().getType() instanceof net.minecraft.world.level.material.WaterFluid

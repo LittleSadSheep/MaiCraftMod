@@ -19,7 +19,8 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
 /** Native stationary-boat landing. A falling boat is never treated as an immunity device:
  * Boat.checkFallDamage can propagate damage to riders through Entity.causeFallDamage.
- * New entities require inventory consumption plus a unique observed new UUID. Boarding alone
+ * A unique new entity can be caught before its inventory/variant packets arrive. Ownership and
+ * recovery still require inventory consumption and the matching boat item. Boarding alone
  * does not complete the fall: wait for rideTick reset, stable support and native Shift dismount.
  */
 public final class BoatLandingAssist {
@@ -43,6 +44,11 @@ public final class BoatLandingAssist {
     private Set<UUID> beforeBoats = Set.of();
     private int beforeItems;
     private int placementSubmissions, mountSubmissions;
+    private long placementTick=-1,spawnTick=-1,mountTick=-1;
+    private boolean mountBeforePositionPacket;
+    private String mountGate="not_started";
+    private Map<String,Object> mountProbe=Map.of();
+    private Map<String,Object> placementProbe=Map.of();
 
     public BoatLandingAssist(BoatLandingSnapshot.Plan plan) {
         this(plan, true);
@@ -76,7 +82,7 @@ public final class BoatLandingAssist {
     public State tick(LocalPlayerContext ctx) {
         ctx.requireCurrent();
         if (failed) { drain(ctx); return State.FAILED; }
-        if (phase == Phase.DONE) return State.SETTLED;
+        if (phase == Phase.DONE) { BoatCatchWindow.clear(this); return State.SETTLED; }
         if (lastTick == ctx.tickRevision()) return State.RUNNING;
         lastTick = ctx.tickRevision();
         if (epoch < 0) { epoch = ctx.bodyEpoch(); revision = ctx.controlRevision();
@@ -90,10 +96,10 @@ public final class BoatLandingAssist {
         }
         if (receipt != null) {
             ctx.actions().poll(ctx, receipt);
-            if (!receipt.terminal()) return State.RUNNING;
+            if (!receipt.terminal()) { mountGate=phase==Phase.PLACE ? "waiting_for_server_boat" : "waiting_for_native_receipt"; return State.RUNNING; }
             if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) return fail(receipt.detail());
             receipt = null;
-            if (phase == Phase.PLACE) { owned = true; phase = Phase.MOUNT; }
+            if (phase == Phase.PLACE) { phase = Phase.MOUNT; }
             else if (phase == Phase.MOUNT) { phase = Phase.RIDING; boardedTick = lastTick; }
         }
         if (cancelled && !ctx.player().isPassenger()) return fail("boat landing cancelled; no unrelated entity touched");
@@ -113,19 +119,29 @@ public final class BoatLandingAssist {
         if (phase == Phase.PLACE) return place(ctx);
         Boat boat = find(ctx);
         if (boat == null) return fail("observed landing boat disappeared");
+        if(!owned && plan.item()!=null && boat.getPickResult().is(plan.item()) && !beforeBoats.contains(boatId)
+                && (ctx.player().isCreative() || count(ctx.player(),plan.item())<beforeItems)) owned=true;
         aim = boat.getBoundingBox().getCenter();
         if (phase == Phase.MOUNT) {
+            if(plan.airborne()) BoatCatchWindow.arm(this,ctx);
             if (!supported(ctx,boat) || !boat.getPassengers().isEmpty()) return fail("landing boat is moving, falling or occupied");
             if (!stable(ctx, boat)) return State.RUNNING;
-            if (!ctx.player().onGround() && (boat.getBoundingBox().distanceToSqr(ctx.player().getEyePosition())
+            if (plan.airborne() && (boat.getBoundingBox().distanceToSqr(ctx.player().getEyePosition())
                     > ctx.player().entityInteractionRange()*ctx.player().entityInteractionRange()
                     || boat.getBoundingBox().clip(ctx.player().getEyePosition(),ctx.player().getEyePosition().add(0,-ctx.player().entityInteractionRange(),0)).isPresent()))
                 down(ctx);
-            else look(ctx, aim);
-            if (!targeted(ctx, boat) || !ctx.mutationAvailable()) return State.RUNNING;
-            if (ctx.player().isShiftKeyDown()) return State.RUNNING;
+            else look(ctx, aim,plan.airborne());
+            boolean inRange=ctx.player().canInteractWithEntity(boat,0),hit=targeted(ctx,boat);
+            mountProbe=Map.of("tick",lastTick,"feet_above_boat",ctx.player().getY()-boat.getY(),
+                    "velocity_y",ctx.player().getDeltaMovement().y,"eye_distance",Math.sqrt(boat.getBoundingBox().distanceToSqr(ctx.player().getEyePosition())),
+                    "on_ground",ctx.player().onGround(),"shift",ctx.player().isShiftKeyDown(),"in_reach",inRange,"ray_hit",hit);
+            if(!inRange) { mountGate="outside_native_entity_reach"; return State.RUNNING; }
+            if(!hit) { mountGate="native_ray_not_on_boat"; return State.RUNNING; }
+            if(!ctx.mutationAvailable()) { mountGate="native_action_slot_busy"; return State.RUNNING; }
+            if(ctx.player().isShiftKeyDown()) { mountGate="waiting_for_shift_release"; return State.RUNNING; }
             effects = true;
-            mountSubmissions++;
+            mountSubmissions++; mountTick=lastTick; mountGate="mount_submitted";
+            BoatCatchWindow.clear(this);
             receipt = ctx.actions().interact(ctx, boat, hand, NativeConfirmation.serverObservedEntity(live -> boatId.equals(vehicleId(live.player()))
                     ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING), 30);
             return State.RUNNING;
@@ -186,18 +202,30 @@ public final class BoatLandingAssist {
         beforeBoats = new HashSet<>();
         for (Boat boat : ctx.level().getEntitiesOfClass(Boat.class, BoatLandingGeometry.boatBox(plan.spawn()).inflate(2))) beforeBoats.add(boat.getUUID());
         beforeItems = count(ctx.player(), plan.item()); effects = true;
-        placementSubmissions++;
+        placementSubmissions++; placementTick=lastTick; mountGate="waiting_for_server_boat";
+        placementProbe=Map.of("feet_above_support",ctx.player().getY()-plan.spawn().y,
+                "velocity_y",ctx.player().getDeltaMovement().y,"on_ground",ctx.player().onGround());
         receipt = ctx.actions().useItem(ctx, hand, NativeConfirmation.serverObservedEntity(this::observePlacement), 30);
+        if(plan.airborne()) BoatCatchWindow.arm(this,ctx);
         return State.RUNNING;
     }
     private NativeConfirmation.Verdict observePlacement(LocalPlayerContext ctx) {
         java.util.List<UUID> candidates = new java.util.ArrayList<>();
+        java.util.List<UUID> matchingItems = new java.util.ArrayList<>();
         for (Boat boat : ctx.level().getEntitiesOfClass(Boat.class, BoatLandingGeometry.boatBox(plan.spawn()).inflate(0.5))) {
-            if (boat.getType() == EntityType.BOAT && boat.getPickResult().is(plan.item())) candidates.add(boat.getUUID());
+            if (boat.getType() == EntityType.BOAT) {
+                candidates.add(boat.getUUID());
+                if(boat.getPickResult().is(plan.item())) matchingItems.add(boat.getUUID());
+            }
         }
-        var evidence = placementEvidence(beforeBoats, candidates, beforeItems, count(ctx.player(), plan.item()), ctx.player().isCreative());
-        if (evidence.uuid() != null) boatId = evidence.uuid();
-        return evidence.verdict();
+        var evidence = placementEvidence(beforeBoats, matchingItems, beforeItems, count(ctx.player(), plan.item()), ctx.player().isCreative());
+        var fresh=candidates.stream().filter(id->!beforeBoats.contains(id)).distinct().toList();
+        if(fresh.size()!=1) return fresh.size()>1 ? NativeConfirmation.Verdict.DIVERGED : NativeConfirmation.Verdict.PENDING;
+        boatId=fresh.getFirst();
+        if(spawnTick<0) spawnTick=ctx.tickRevision();
+        owned|=evidence.verdict()==NativeConfirmation.Verdict.APPLIED;
+        // A real unique entity is already usable. Inventory acknowledgement only controls ownership/recovery.
+        return NativeConfirmation.Verdict.APPLIED;
     }
     record PlacementEvidence(NativeConfirmation.Verdict verdict, UUID uuid) {}
     static PlacementEvidence placementEvidence(Set<UUID> before, java.util.List<UUID> matches, int oldCount, int newCount, boolean creative) {
@@ -215,20 +243,19 @@ public final class BoatLandingAssist {
     private boolean stable(LocalPlayerContext ctx, Boat boat) {
         if (!supported(ctx,boat)) { stableTicks = 0; return false; }
         if (stableTick != ctx.tickRevision()) { stableTick = ctx.tickRevision(); stableTicks++; }
-        return !ctx.player().onGround() || stableTicks >= 2;
+        return plan.airborne() || !ctx.player().onGround() || stableTicks >= 2;
     }
     private boolean supported(LocalPlayerContext ctx, Boat boat) {
-        if (BoatLandingSnapshot.stationary(boat)) return true;
-        var floor=BoatLandingGeometry.support(ctx.level(),ctx.level()::isLoaded,plan.landing());
         return boat.isAlive() && !boat.isInWater() && boat.fallDistance<=.01F
-                && boat.getDeltaMovement().lengthSqr()<.0004 && floor!=null && boat.position().distanceToSqr(floor)<.0001;
+                && boat.getDeltaMovement().lengthSqr()<.0004
+                && BoatLandingGeometry.supportedAt(ctx.level(),ctx.level()::isLoaded,boat.position());
     }
     private static boolean targeted(LocalPlayerContext ctx, Boat boat) {
         var eye=ctx.player().getEyePosition(); var reach=ctx.player().getViewVector(1).scale(ctx.player().entityInteractionRange());
         var hit=net.minecraft.world.entity.projectile.ProjectileUtil.getEntityHitResult(ctx.player(),eye,eye.add(reach),
                 ctx.player().getBoundingBox().expandTowards(reach).inflate(1), entity -> !entity.isSpectator() && entity.isPickable(),reach.lengthSqr());
         return ctx.player().canInteractWithEntity(boat, 0) && hit!=null && hit.getEntity().getUUID().equals(boat.getUUID())
-                && BoatLandingGeometry.visible(ctx.level(), ctx.level()::isLoaded, ctx.player().getEyePosition(), boat.getBoundingBox().getCenter());
+                && BoatLandingGeometry.visible(ctx.level(), ctx.level()::isLoaded, eye, hit.getLocation());
     }
     private static int count(LocalPlayer player, Item item) {
         int count = 0;
@@ -237,10 +264,13 @@ public final class BoatLandingAssist {
     }
     private static UUID vehicleId(LocalPlayer player) { return player.getVehicle() == null ? null : player.getVehicle().getUUID(); }
     private static void look(LocalPlayerContext ctx, Vec3 point) {
+        look(ctx,point,false);
+    }
+    private static void look(LocalPlayerContext ctx,Vec3 point,boolean urgent) {
         Vec3 d = point.subtract(ctx.player().getEyePosition());
         float yaw=Math.hypot(d.x,d.z)<.001 ? ctx.player().getYRot() : (float)(Math.toDegrees(Math.atan2(d.z,d.x))-90);
         float pitch=(float)-Math.toDegrees(Math.atan2(d.y,Math.hypot(d.x,d.z)));
-        if(!ctx.player().onGround() && d.length()<=ctx.player().blockInteractionRange()) ctx.body().requestImmediateLook(yaw,pitch,ctx.tickRevision());
+        if(urgent || !ctx.player().onGround() && d.length()<=ctx.player().blockInteractionRange()) ctx.body().requestImmediateLook(yaw,pitch,ctx.tickRevision());
         else ctx.body().requestLook(yaw,pitch,ctx.tickRevision());
     }
     private void down(LocalPlayerContext ctx) {
@@ -248,7 +278,7 @@ public final class BoatLandingAssist {
             ctx.body().requestImmediateLook(ctx.player().getYRot(),90,ctx.tickRevision());
         else ctx.body().requestLook(ctx.player().getYRot(),90,ctx.tickRevision());
     }
-    private State fail(String reason) { failed = true; detail = reason; return State.FAILED; }
+    private State fail(String reason) { BoatCatchWindow.clear(this); failed = true; detail = reason; return State.FAILED; }
     static boolean damageFree(float initialHealth, float initialAbsorption, float health, float absorption) {
         return health >= initialHealth && absorption >= initialAbsorption;
     }
@@ -265,18 +295,32 @@ public final class BoatLandingAssist {
             }
         } catch (IllegalArgumentException retiredByBoundary) { receipt = null; }
     }
+    void beforePositionPacket(LocalPlayerContext context) {
+        if(!plan.airborne() || cancelled || failed || mountSubmissions>0 || (phase!=Phase.PLACE && phase!=Phase.MOUNT)) {
+            BoatCatchWindow.clear(this); return;
+        }
+        int before=mountSubmissions; tick(context);
+        if(mountSubmissions>before) mountBeforePositionPacket=true;
+        else if(context.player().onGround() && !failed) fail("boat catch window closed before the ground movement report: "+mountGate);
+    }
+    void catchWindowFailed(RuntimeException failure) { fail("boat catch callback failed: "+failure.getMessage()); }
+    public boolean mountPending() { return phase==Phase.MOUNT && receipt!=null
+            && receipt.kind()==NativeActionReceipt.Kind.INTERACT_ENTITY && !receipt.terminal(); }
     public boolean ready() { return ready; }
     public boolean failed() { return failed; }
     public boolean effectsStarted() { return effects; }
     public Vec3 aimPoint() { return aim; }
     public boolean wantsSneak() { return phase == Phase.DISMOUNT; }
     public org.maiwithu.maicraft.client.actor.BodyControlPort.Movement movementOverride() {
+        if(phase==Phase.MOUNT && mountSubmissions>0 || phase==Phase.RIDING)
+            return org.maiwithu.maicraft.client.actor.BodyControlPort.Movement.STOPPED;
         return phase == Phase.RECOVER ? recovery.movement() : null;
     }
     public boolean cleanupPending() {
         return receipt != null && !receipt.terminal() || preparation != null && preparation.cleanupPending();
     }
     public void cancel(LocalPlayerContext ctx) {
+        BoatCatchWindow.clear(this);
         cancelled = true;
         if (preparation != null && !preparation.ready() && epoch == ctx.bodyEpoch()
                 && revision == ctx.controlRevision() && ctx.permitsNativeActions()) preparation.closeForFailure(ctx);
@@ -287,6 +331,10 @@ public final class BoatLandingAssist {
         var result = new LinkedHashMap<String,Object>();
         result.put("phase", phase.name()); result.put("detail", detail); result.put("created_this_session", owned);
         result.put("placement_submissions",placementSubmissions); result.put("mount_submissions",mountSubmissions);
+        result.put("placement_tick",placementTick); result.put("spawn_observed_tick",spawnTick); result.put("mount_tick",mountTick);
+        result.put("requested_item",plan.item()==null ? "existing_boat" : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(plan.item()).toString());
+        result.put("mount_before_position_packet",mountBeforePositionPacket); result.put("mount_gate",mountGate); result.put("mount_probe",mountProbe);
+        result.put("placement_probe",placementProbe);
         result.put("left_in_world", phase == Phase.DONE && (recovery == null || recovery.boatLeft()));
         result.put("item_recovered", recovery != null && recovery.recovered());
         result.put("boat_uuid", boatId == null ? "unconfirmed" : boatId.toString()); result.put("airborne_opportunity", plan.airborne());
