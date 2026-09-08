@@ -60,6 +60,7 @@ final class IntentTask implements Task {
 
     private Task child;
     private TaskRecord childRecord;
+    private boolean reobserveAfterChild;
     private IntentAction.Wait wait;
     private List<IntentAction.Tool> chain = List.of();
     private int chainIndex;
@@ -159,6 +160,7 @@ final class IntentTask implements Task {
             return afterImmediate();
         }
         if (action instanceof IntentAction.Native nativeAction) {
+            reobserveAfterChild=nativeAction.reobserveAfterSuccess();
             return beginNative(nativeAction.record());
         }
         if (action instanceof IntentAction.Chain nextChain) {
@@ -276,6 +278,7 @@ final class IntentTask implements Task {
     private TaskState finishChild() {
         Task finishingChild = child;
         TaskRecord finishingRecord = childRecord;
+        boolean reobserve=reobserveAfterChild;
         TaskState state = finishingRecord.getState();
         TaskResult result;
         try {
@@ -289,6 +292,7 @@ final class IntentTask implements Task {
             if (child == finishingChild) clearChild();
         }
         if (result == null) result = defaultResult(state);
+        if(result.success() && reobserve) return TaskState.RUNNING;
         if (finishingRecord instanceof org.maiwithu.maicraft.core.task.build.BuildTaskRecord
                 && MachineAbilityAdapter.supports(currentGoal().ability())) {
             Map<String, Object> machineData = new LinkedHashMap<>(result.data());
@@ -788,6 +792,7 @@ final class IntentTask implements Task {
     private void clearChild() {
         child = null;
         childRecord = null;
+        reobserveAfterChild=false;
     }
 
     /**

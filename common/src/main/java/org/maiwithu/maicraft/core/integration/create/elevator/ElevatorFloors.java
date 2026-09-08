@@ -9,8 +9,11 @@ import net.minecraft.client.player.LocalPlayer;
 /** Synchronized floor identities; names and contact heights never come from guessed landmarks. */
 public final class ElevatorFloors {
     public record Floor(String id,int contactY,String shortName,String longName,boolean served) {}
-    public record Elevator(UUID id,double distance,double approachDistance,Integer currentContactY,List<Floor> floors) {
+    public record Elevator(UUID id,double distance,double approachDistance,Integer currentContactY,List<Floor> floors,boolean readyForDecision) {
         public Elevator { floors=List.copyOf(floors); }
+        public Elevator(UUID id,double distance,double approachDistance,Integer currentContactY,List<Floor> floors) {
+            this(id,distance,approachDistance,currentContactY,floors,approachDistance<=4);
+        }
     }
     private ElevatorFloors() {}
     public static List<Elevator> observe(LocalPlayer player) {
@@ -20,7 +23,9 @@ public final class ElevatorFloors {
                 Math.hypot(player.getX()-c.column().x()-.5,player.getZ()-c.column().z()-.5),
                 sourceFloor(c,player),c.floors().stream()
                     .map(f->new Floor("floor:"+f.contactY(),f.contactY(),f.shortName(),f.longName(),c.serves(f.contactY())))
-                    .sorted(Comparator.comparingInt(Floor::contactY)).toList()))
+                    .sorted(Comparator.comparingInt(Floor::contactY)).toList(),player.onGround()
+                        && (ElevatorInspection.supports(c,player) || bridge.recentSupport(c,player)
+                            ? c.aligned(c.targetY()) : Math.hypot(player.getX()-c.column().x()-.5,player.getZ()-c.column().z()-.5)<=4)))
                 .sorted(Comparator.comparingDouble(Elevator::approachDistance).thenComparingDouble(Elevator::distance)).toList();
     }
     private static Integer sourceFloor(CreateElevatorBridge.Cabin cabin,LocalPlayer player) {
@@ -51,6 +56,7 @@ public final class ElevatorFloors {
                 "approach_distance",Math.round(elevator.approachDistance()*10)/10D,
                 "floor_list_state",elevator.floors().isEmpty() ? "needs_sync" : "synchronized",
                 "floor_count",elevator.floors().size(),"floors_truncated",elevator.floors().size()>16,
+                "ready_for_floor_decision",elevator.readyForDecision(),
                 "floors",rows.stream().map(f->Map.of("id",f.id(),"short_name",f.shortName(),"long_name",f.longName(),
                         "served",f.served(),"at_player_height",elevator.currentContactY()!=null && f.contactY()==elevator.currentContactY())).toList());
     }

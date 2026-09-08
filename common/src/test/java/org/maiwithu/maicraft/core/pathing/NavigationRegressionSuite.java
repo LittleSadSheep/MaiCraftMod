@@ -9,6 +9,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.integration.jetpack.RegionalFlightTest.main(args);
         org.maiwithu.maicraft.core.integration.create.ContraptionObstaclesTest.main(args);
         org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloorsTest.main(args);
+        org.maiwithu.maicraft.intent.ElevatorTravelIntentTest.main(args);
         org.maiwithu.maicraft.core.pathing.util.SwimAirBudgetTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicyTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest.main(args);

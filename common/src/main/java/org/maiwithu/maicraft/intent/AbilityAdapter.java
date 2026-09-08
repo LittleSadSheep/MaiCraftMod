@@ -261,6 +261,7 @@ final class AbilityAdapter {
     private record BedSite(BlockPos foot, Direction facing) {}
 
     private static IntentAction travel(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        if(ElevatorTravelIntent.applies(goal)) return ElevatorTravelIntent.adapt(goal,player);
         JsonObject parameters = new JsonObject();
         if (goal.parameters().has("structure_id")) {
             if (goal.target() != null || goal.parameters().has("destination") || goal.parameters().has("semantic_target")
@@ -977,7 +978,9 @@ sealed interface IntentAction {
     record Report(org.maiwithu.maicraft.task.TaskResult result,
                   Goal.WorldPosition verifiedPosition) implements IntentAction {}
     /** Typed native child sharing the existing body scheduler and protection context. */
-    record Native(org.maiwithu.maicraft.task.TaskRecord record) implements IntentAction {}
+    record Native(org.maiwithu.maicraft.task.TaskRecord record,boolean reobserveAfterSuccess) implements IntentAction {
+        Native(org.maiwithu.maicraft.task.TaskRecord record) { this(record,false); }
+    }
     record Chain(List<Tool> actions) implements IntentAction {
         public Chain {
             actions = List.copyOf(actions);

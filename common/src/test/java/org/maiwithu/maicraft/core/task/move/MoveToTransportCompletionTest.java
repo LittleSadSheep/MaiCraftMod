@@ -50,7 +50,36 @@ public final class MoveToTransportCompletionTest {
         discoveryFailure(memory);
         ordinaryNearArrival(memory);
         automaticLandingResult(memory);
+        observationDoesNotCompleteTravel(memory);
         System.out.println("MoveToTransportCompletionTest: passed");
+    }
+
+    private static void observationDoesNotCompleteTravel(Unsafe memory) throws Exception {
+        try(var f=new Fixture(memory,.5)) {
+            var goal=new org.maiwithu.maicraft.intent.Goal("maicraft:travel","Choose an elevator floor",null,
+                    "{\"transport_mode\":\"elevator\"}","{}",List.of(),List.of());
+            var record=new org.maiwithu.maicraft.intent.IntentTaskRecord(java.util.UUID.randomUUID(),null,goal);
+            record.setState(TaskState.RUNNING);
+            Class<?> type=Class.forName("org.maiwithu.maicraft.intent.IntentTask");
+            var ctor=type.getDeclaredConstructor(LocalPlayer.class,record.getClass(),org.maiwithu.maicraft.intent.IntentRuntime.class);
+            ctor.setAccessible(true); Object parent=ctor.newInstance(f.player,record,null);
+            var observed=new org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloorTaskRecord(
+                    "test-floor-sync",100,java.util.UUID.randomUUID(),null,true);
+            observed.setState(TaskState.SUCCESS);
+            org.maiwithu.maicraft.task.Task child=new org.maiwithu.maicraft.task.Task() {
+                public TaskState tick(LocalPlayer player) { return TaskState.SUCCESS; }
+                public void stop(LocalPlayer player,StopReason reason) {}
+                public String name() { return "native floor observation"; }
+                public org.maiwithu.maicraft.task.TaskResult result(TaskState state) { return org.maiwithu.maicraft.task.TaskResult.ok("floors synchronized"); }
+            };
+            field(type,"child").set(parent,child); field(type,"childRecord").set(parent,observed);
+            field(type,"reobserveAfterChild").setBoolean(parent,true);
+            var finish=type.getDeclaredMethod("finishChild"); finish.setAccessible(true);
+            check(finish.invoke(parent)==TaskState.RUNNING && record.stepIndex()==0 && record.getState()==TaskState.RUNNING,
+                    "successful floor observation must leave the semantic travel step unfinished for its LLM decision");
+            check(field(type,"childRecord").get(parent)==null && !field(type,"reobserveAfterChild").getBoolean(parent),
+                    "observation cleanup releases the child without leaking its continuation into the later ride");
+        }
     }
 
     private static void nativeCompletion(Unsafe memory, String phase) throws Exception {
