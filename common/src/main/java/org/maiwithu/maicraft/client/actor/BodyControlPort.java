@@ -30,6 +30,11 @@ public interface BodyControlPort {
 
     void requestLook(float yaw, float pitch, long leaseTickRevision);
 
+    /** A time-critical interaction needs its real camera ray aligned during this actor tick. */
+    default void requestImmediateLook(float yaw, float pitch, long leaseTickRevision) {
+        requestLook(yaw,pitch,leaseTickRevision);
+    }
+
     void clearLook();
 
     /** Immediately zero every injected signal. This never sends an interaction packet. */

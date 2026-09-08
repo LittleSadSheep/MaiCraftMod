@@ -222,6 +222,16 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState prepareSurface() {
+        if (r.inPlace) {
+            if (station == null || !CraftingWorkstationCoordinator.usableTable(player,station)
+                    || visibleStationHit() == null) {
+                fail("in-place craft has no currently reachable 3x3 surface",FailureType.NO_SUPPORT);
+                return TaskState.FAILED;
+            }
+            stationAimPoint = visibleStationHit().getLocation();
+            stationAimRequestedRevision = Long.MIN_VALUE; stage = Stage.OPEN;
+            return TaskState.RUNNING;
+        }
         // Keep one exact station identity for the lifetime of its active route. Re-running the
         // coordinator mid-route could switch to a newly carried/nearer table while the old nav
         // still owns the body.
@@ -480,6 +490,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                 return TaskState.RUNNING;
             }
             int beforeMenu = player.containerMenu.containerId;
+            if (r.inPlace) context.body().releaseAll();
             openReceipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND, hit,
                     NativeConfirmation.menuChanged(beforeMenu), 30);
             return TaskState.RUNNING;

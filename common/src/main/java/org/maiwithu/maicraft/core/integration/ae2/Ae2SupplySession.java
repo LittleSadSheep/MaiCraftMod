@@ -705,6 +705,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             }
         }
         int beforeContainer = player.containerMenu.containerId;
+        if (inPlace) context.body().releaseAll();
         nativeReceipt = context.actions().useBlock(
                 context,
                 InteractionHand.MAIN_HAND,
@@ -733,6 +734,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         int beforeContainer = player.containerMenu.containerId;
+        if (inPlace) context.body().releaseAll();
         nativeReceipt = context.actions().useItem(
                 context,
                 InteractionHand.MAIN_HAND,

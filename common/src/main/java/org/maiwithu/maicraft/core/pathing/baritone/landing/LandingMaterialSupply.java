@@ -32,11 +32,16 @@ public final class LandingMaterialSupply {
     private UUID playerId;
     private boolean stopping;
     private boolean acquisitionAttempted;
+    private boolean allowCrafting, craftSubmitted;
     private String stopReason = "landing action window reached";
 
     public LandingMaterialSupply(List<ResourceLocation> acceptableIds) {
         this(acceptableIds, Ae2ResourceSupply::beginInPlace);
     }
+    public static LandingMaterialSupply boats(List<ResourceLocation> acceptableIds) {
+        var supply = new LandingMaterialSupply(acceptableIds); supply.allowCrafting = true; return supply;
+    }
+    public boolean craftSubmitted() { return craftSubmitted; }
 
     LandingMaterialSupply(List<ResourceLocation> acceptableIds,
             BiFunction<LocalPlayer, Ae2ResourceSupply.Request, Ae2ResourceSupply.Session> begin) {
@@ -72,7 +77,7 @@ public final class LandingMaterialSupply {
                 var group = new Ae2ResourceSupply.Group(requested.getFirst(), requested, 1,
                         Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT);
                 acquisitionAttempted = true;
-                session = begin.apply(context.player(), new Ae2ResourceSupply.Request(List.of(group), false));
+                session = begin.apply(context.player(), new Ae2ResourceSupply.Request(List.of(group), allowCrafting));
             }
             stopping |= carried != null && !carried.equals(HAY) || remainingTicks <= ACTION_RESERVE_TICKS
                     || context.tickRevision() - started >= MAX_SUPPLY_TICKS;
@@ -86,6 +91,7 @@ public final class LandingMaterialSupply {
                 return result;
             }
             var receipt = outcome.orElseThrow();
+            craftSubmitted |= receipt.craftingJobsSubmitted() > 0 || receipt.craftingRequests() > 0;
             carried = carried(context);
             if (carried != null && worldReady(context)) return available(carried,
                     (carried.equals(HAY) ? "carried hay mitigation fallback" : "damage-free landing material observed in inventory")

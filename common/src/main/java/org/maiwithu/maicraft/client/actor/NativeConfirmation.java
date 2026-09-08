@@ -15,6 +15,14 @@ public interface NativeConfirmation {
     enum Verdict { PENDING, APPLIED, NOT_APPLIED, DIVERGED }
 
     Verdict observe(LocalPlayerContext context);
+    default int stableTicksRequired() { return 2; }
+    /** A newly received entity/vehicle identity already comes from the server's entity stream. */
+    static NativeConfirmation serverObservedEntity(NativeConfirmation evidence) {
+        return new NativeConfirmation() {
+            public Verdict observe(LocalPlayerContext context) { return evidence.observe(context); }
+            public int stableTicksRequired() { return 1; }
+        };
+    }
 
     public static NativeConfirmation blockBecomesAir(BlockPos target, BlockState before) {
         BlockPos frozen = target.immutable();

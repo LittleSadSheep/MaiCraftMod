@@ -394,8 +394,11 @@ public final class Ae2ResourceSupply {
     public static Session beginInPlace(LocalPlayer player, Request request) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(request, "request");
-        if (request.allowCrafting() || request.operation() != Operation.SUPPLY)
-            throw new IllegalArgumentException("in-place reflex supply only extracts existing stock");
+        if (request.operation() != Operation.SUPPLY || request.groups().size() != 1 || request.totalCount() != 1)
+            throw new IllegalArgumentException("in-place reflex supply accepts one required item");
+        if (request.allowCrafting() && request.acceptedItemIds().stream().anyMatch(id ->
+                !org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot.plainBoat(BuiltInRegistries.ITEM.get(id))))
+            throw new IllegalArgumentException("in-place crafting is reserved for one landing boat");
         Ae2ReflectionBridge bridge = Ae2ReflectionBridge.availability().bridge().orElseThrow(
                 () -> new IllegalStateException("AE2 client integration is unavailable: " + availabilityDetail()));
         return new Ae2SupplySession(player, request, bridge, true);

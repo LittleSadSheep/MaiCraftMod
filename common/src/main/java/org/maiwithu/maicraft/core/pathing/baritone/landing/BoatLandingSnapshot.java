@@ -26,6 +26,21 @@ public record BoatLandingSnapshot(BlockPos source, Vec3 eye, double blockReach, 
     }
     public BoatLandingSnapshot { source = source.immutable(); boats = List.copyOf(boats); }
     public static BoatLandingSnapshot empty() { return new BoatLandingSnapshot(BlockPos.ZERO, Vec3.ZERO, 0, 0, 0.6, 1.8, null, List.of()); }
+    /** Planned departure needs time for native spawn and mount feedback; an ongoing fall still tries its best. */
+    public boolean airborneWindow(double drop, double gravity, double downwardSpeed) {
+        if (!Double.isFinite(drop) || !Double.isFinite(gravity) || !Double.isFinite(downwardSpeed)
+                || drop<=0 || gravity<=0 || downwardSpeed<0) return false;
+        double y=drop, speed=downwardSpeed, eyeHeight=Math.max(1.62,eye.y-source.getY());
+        int placed=-1,mounted=-1;
+        for(int tick=0;tick<200;tick++) {
+            if(y<=.5625) return false;
+            if(mounted>=0 && tick>mounted) return true;
+            if(placed>=0 && tick>placed && y+eyeHeight-.5625<=entityReach) mounted=tick;
+            if(placed<0 && y+eyeHeight<=blockReach) placed=tick;
+            y-=speed; speed=(speed+gravity)*.98;
+        }
+        return false;
+    }
     public static BoatLandingSnapshot capture(LocalPlayer player) {
         if (!Minecraft.getInstance().isSameThread()) throw new IllegalStateException("boat facts require client thread");
         List<BoatFact> boats = new ArrayList<>();
@@ -66,7 +81,7 @@ public record BoatLandingSnapshot(BlockPos source, Vec3 eye, double blockReach, 
         return boat.isAlive() && boat.onGround() && boat.fallDistance <= 0.01F
                 && boat.getDeltaMovement().lengthSqr() < 0.0004 && !boat.isInWater();
     }
-    static boolean plainBoat(Item item) {
+    public static boolean plainBoat(Item item) {
         return item == Items.OAK_BOAT || item == Items.SPRUCE_BOAT || item == Items.BIRCH_BOAT
                 || item == Items.JUNGLE_BOAT || item == Items.ACACIA_BOAT || item == Items.DARK_OAK_BOAT
                 || item == Items.MANGROVE_BOAT || item == Items.CHERRY_BOAT || item == Items.BAMBOO_RAFT;

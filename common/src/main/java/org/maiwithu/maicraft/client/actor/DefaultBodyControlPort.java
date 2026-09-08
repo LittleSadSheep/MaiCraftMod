@@ -84,6 +84,15 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     @Override
+    public void requestImmediateLook(float yaw, float pitch, long leaseTickRevision) {
+        requestLook(yaw,pitch,leaseTickRevision);
+        cameraYaw = targetYaw; cameraPitch = targetPitch;
+        yawVelocity = 0; pitchVelocity = 0; cameraInitialized = true;
+        lastLookUpdateNanos = System.nanoTime();
+        applyCamera(controlledPlayer,cameraYaw,cameraPitch);
+    }
+
+    @Override
     public void releaseAll() {
         movement = Movement.STOPPED;
         steering = null;

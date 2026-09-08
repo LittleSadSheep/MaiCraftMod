@@ -397,7 +397,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     private NativeActionReceipt oneShot(NativeActionReceipt.Kind kind, LocalPlayerContext context,
                                         NativeConfirmation confirmation, int timeoutTicks) {
         NativeActionReceipt receipt = new NativeActionReceipt(
-                kind, context, timeoutTicks, 2, confirmation, null, null);
+                kind, context, timeoutTicks, confirmation.stableTicksRequired(), confirmation, null, null);
         install(receipt);
         return receipt;
     }

@@ -16,6 +16,8 @@ public final class CraftTaskRecord extends TaskRecord {
     /** Exact recipe result count expected from each authorized take; zero means a legacy record. */
     public final int outputPerBatch;
     public final BlockPos station;
+    public boolean inPlace;
+    public CraftTaskRecord inPlace() { inPlace = true; return this; }
 
     /** Compatibility constructor for callers created before exact batch boundaries were recorded. */
     public CraftTaskRecord(String callId, long deadline, ResourceLocation recipeId,

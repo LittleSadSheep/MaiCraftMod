@@ -45,6 +45,13 @@ public final class BodyControlInputTest {
         double worldX = -h.player.input.forwardImpulse * Math.sin(angle) + h.player.input.leftImpulse * Math.cos(angle);
         double worldZ = h.player.input.forwardImpulse * Math.cos(angle) + h.player.input.leftImpulse * Math.sin(angle);
         check(Math.abs(worldX - 1) < 1e-6 && Math.abs(worldZ) < 1e-6, "turning the camera must not rotate the intended world motion");
+        h.body.requestImmediateLook(73,90,h.tick);
+        check(h.player.getYRot()==73 && h.player.getXRot()==90 && h.player.yRotO==73 && h.player.xRotO==90,
+                "urgent aim updates the actual native ray and visible camera before endTick or another render frame");
+        h.body.endTick(h.context);
+        check(h.player.getYRot()==73 && h.player.getXRot()==90,"old camera angular velocity cannot undo an urgent aim");
+        try { h.body.requestImmediateLook(0,0,h.tick-1); throw new AssertionError("stale urgent lease accepted"); }
+        catch (IllegalArgumentException expected) { }
         h.nextTick(true);
         h.body.endTick(h.context);
         expect(h, 0, 0, false, false, false);

@@ -9,7 +9,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /** Tests the exact replacement verdict used by native mining receipt polling. */
 public final class NativeConfirmationTest {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         BlockState dryFence = Blocks.OAK_FENCE.defaultBlockState();
@@ -26,6 +26,18 @@ public final class NativeConfirmationTest {
         expect(dryFence, water, NativeConfirmation.Verdict.DIVERGED);
         expect(wetFence, Blocks.LAVA.defaultBlockState(), NativeConfirmation.Verdict.DIVERGED);
         expect(wetFence, Blocks.STONE.defaultBlockState(), NativeConfirmation.Verdict.DIVERGED);
+        var h=new ActorControlTestHarness();
+        var factory=DefaultNativeActionPort.class.getDeclaredMethod("oneShot",NativeActionReceipt.Kind.class,
+                LocalPlayerContext.class,NativeConfirmation.class,int.class); factory.setAccessible(true);
+        NativeConfirmation observed=c -> NativeConfirmation.Verdict.APPLIED;
+        var normal=(NativeActionReceipt)factory.invoke(h.actions,NativeActionReceipt.Kind.USE_ITEM,h.context,observed,10);
+        if(h.actions.poll(h.context,normal).terminal()) throw new AssertionError("ordinary predictions still need their dwell");
+        h.nextTick(true);
+        if(!h.actions.poll(h.context,normal).terminal()) throw new AssertionError("ordinary observation settles after its second tick");
+        var entity=(NativeActionReceipt)factory.invoke(h.actions,NativeActionReceipt.Kind.USE_ITEM,h.context,
+                NativeConfirmation.serverObservedEntity(observed),10);
+        if(h.actions.poll(h.context,entity).status()!=NativeActionReceipt.Status.CONFIRMED_APPLIED)
+            throw new AssertionError("a server-observed entity does not wait an extra render or actor tick");
         System.out.println("NativeConfirmationTest: passed");
     }
 
