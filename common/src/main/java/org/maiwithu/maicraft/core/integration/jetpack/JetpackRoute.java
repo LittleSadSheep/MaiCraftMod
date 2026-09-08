@@ -194,7 +194,7 @@ public final class JetpackRoute {
         return observed != null && observed.distanceToSqr(landing) < 0.01;
     }
 
-    /** Look ahead only inside the current clear height band or ascent column; never skip into touchdown. */
+    /** Follow a clear forward corridor from the actual height; intermediate altitude is a guide. */
     static int nextWaypoint(Space space, Plan route, Vec3 position, int current, JetpackNativeAdapter.Snapshot power) {
         int last = route.points().size() - 2;
         current = Math.min(current, last);
@@ -218,8 +218,9 @@ public final class JetpackRoute {
     }
     static boolean atWaypointHeight(Plan route, int index, double height) {
         double target = route.points().get(index).y;
-        boolean descending = index > 0 && target < route.points().get(index - 1).y - 0.01;
-        return height >= target - 0.1 && (!descending || height <= target + 0.1);
+        // Extra height does not require waiting. The following swept-body check still prevents
+        // turning through a floor/ceiling while descending past an opening.
+        return height >= target - 0.1;
     }
     private static Vec3 center(BlockPos p) { return new Vec3(p.getX() + 0.5, p.getY(), p.getZ() + 0.5); }
     private static double distance(BlockPos a, BlockPos b) {

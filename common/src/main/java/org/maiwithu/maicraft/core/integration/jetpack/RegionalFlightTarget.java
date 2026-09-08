@@ -20,6 +20,7 @@ public final class RegionalFlightTarget implements MovingFlightTarget {
     private final Map<BlockPos,Integer> visits=new HashMap<>();
     private final java.util.Set<BlockPos> rejected=new HashSet<>();
     private Vec3 point, position;
+    private Vec3 segmentStart;
     private List<Vec3> candidates=List.of();
     private int candidateIndex, legs, stableTicks;
     private long observedTick;
@@ -50,7 +51,7 @@ public final class RegionalFlightTarget implements MovingFlightTarget {
         contacted=landing && grounded && current.distanceTo(point)<.85;
         stableTicks=contacted && Math.abs(velocity.y)<.1 ? stableTicks+1 : 0;
         if(landing) return true;
-        if(point!=null && (arrived(current,point) || !JetpackRoute.flightClear(space,current,point,power))) {
+        if(point!=null && (arrived(current,point) || passed(segmentStart,point,current) || !JetpackRoute.flightClear(space,current,point,power))) {
             visits.merge(cell(point),1,Integer::sum); point=null; candidates=List.of();
         }
         if(point!=null) return true;
@@ -69,7 +70,7 @@ public final class RegionalFlightTarget implements MovingFlightTarget {
         for(int n=0;n<4 && candidateIndex<candidates.size() && (n==0 || System.nanoTime()<end);n++) {
             Vec3 candidate=candidates.get(candidateIndex++);
             if(JetpackRoute.flightClear(space,current,candidate,power)) {
-                point=candidate; legs++; candidates=List.of(); return true;
+                segmentStart=current; point=candidate; legs++; candidates=List.of(); return true;
             }
         }
         if(candidateIndex==candidates.size()) { exhausted=true; return false; }
@@ -81,6 +82,12 @@ public final class RegionalFlightTarget implements MovingFlightTarget {
     }
     private static BlockPos cell(Vec3 point) { return BlockPos.containing(point.scale(1D/3)); }
     static boolean arrived(Vec3 current,Vec3 target) { return current.distanceToSqr(target)<.64 && Math.abs(current.y-target.y)<.3; }
+    static boolean passed(Vec3 start,Vec3 target,Vec3 current) {
+        if(start==null) return false;
+        Vec3 direction=target.subtract(start).normalize(), beyond=current.subtract(target);
+        double forward=beyond.dot(direction);
+        return forward>=0 && beyond.subtract(direction.scale(forward)).lengthSqr()<1;
+    }
     public Vec3 point() { return point==null ? position : point; }
     public Vec3 velocity() { return Vec3.ZERO; }
     public boolean contact() { return contacted; }

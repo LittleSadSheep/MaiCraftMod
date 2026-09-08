@@ -10,6 +10,10 @@ public final class RegionalFlightTest {
             true,"fixture","create_jetpack:netherite_jetpack",true,true,900,17000,.016,.32,.6,-.03,.08);
     public static void main(String[] args) {
         Vec3 origin=new Vec3(.5,80,.5);
+        check(RegionalFlightTarget.passed(origin,origin.add(0,-6,0),origin.add(0,-7.2,0)),
+                "overshooting an air observation point continues discovery instead of climbing back to it");
+        check(!RegionalFlightTarget.passed(origin,origin.add(0,-6,0),origin.add(3,-7.2,0)),
+                "passing the altitude far from the corridor does not skip its approach");
         double[] floor={0};
         var space=new JetpackRoute.Space() {
             public boolean clear(Vec3 from,Vec3 to) { return to.y>=floor[0]; }
