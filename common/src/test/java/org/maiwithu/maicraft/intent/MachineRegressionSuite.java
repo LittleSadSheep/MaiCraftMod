@@ -40,6 +40,8 @@ public final class MachineRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildExecutionContextTest.main(args);
         org.maiwithu.maicraft.core.task.supply.BuildBatchCompletionTest.main(args);
         SemanticBuildPlannerTest.main(args);
+        try { SemanticBuildSiteTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("loaded build site regression", failure); }
         accepts("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"label\":\"factory\",\"radius\":4}");
         rejects("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"radius\":4.5}");
         rejects("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"radius\":2147483648}");

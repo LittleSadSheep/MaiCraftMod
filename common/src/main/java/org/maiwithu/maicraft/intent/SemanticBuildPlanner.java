@@ -134,7 +134,8 @@ public final class SemanticBuildPlanner {
 
         StyleProfile style = styleProfile(text(p, "style"), purpose);
         boolean waterfront = waterfront(purpose, features);
-        Site site = findSite(player, anchor, size, terrain, replace, waterfront, features.contains("dock"));
+        Site site = findSite(player, anchor, size, terrain, replace, waterfront,
+                features.contains("dock"), features.contains("cellar"));
         if (site == null) {
             // Every semantic and permission check above already passed. A missing loaded site gets
             // one bounded internal first-person investigation; invalid goals still stop normally.
@@ -271,7 +272,7 @@ public final class SemanticBuildPlanner {
         StyleProfile style = styleProfile(text(p, "style"), purpose);
         boolean waterfront = waterfront(purpose, features);
         Site site = findSite(player, anchor, size, terrain, replace,
-                waterfront, features.contains("dock"));
+                waterfront, features.contains("dock"), features.contains("cellar"));
         if (site == null) return LoadedBuildProbe.noSite(waterfront);
 
         try {
@@ -387,14 +388,15 @@ public final class SemanticBuildPlanner {
             Map.entry("temple", RoomUse.STUDY));
 
     private static Site findSite(LocalPlayer player, Goal.WorldPosition anchor, Size size,
-                                 String terrain, boolean replace, boolean waterfront, boolean dock) {
+                                 String terrain, boolean replace, boolean waterfront,
+                                 boolean dock, boolean cellar) {
         int stride = Math.max(2, Math.min(size.width, size.depth) / 3);
         Site best = null;
         int checked = 0;
         for (int[] offset : offsets(stride)) {
             if (checked++ >= MAX_CANDIDATES) break;
             Site site = inspect(player, anchor.x() + offset[0], anchor.z() + offset[1],
-                    anchor.y(), size, terrain, replace, waterfront, dock);
+                    anchor.y(), size, terrain, replace, waterfront, dock, cellar);
             if (site != null && (best == null || site.score < best.score)) best = site;
         }
         return best;
@@ -415,7 +417,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static Site inspect(LocalPlayer player, int cx, int cz, int anchorY, Size size,
-                                String terrain, boolean replace, boolean waterfront, boolean dock) {
+                                String terrain, boolean replace, boolean waterfront,
+                                boolean dock, boolean cellar) {
         ClientLevel level = player.clientLevel;
         int minX = cx - size.width / 2, minZ = cz - size.depth / 2;
         int maxX = minX + size.width - 1, maxZ = minZ + size.depth - 1;
@@ -425,7 +428,7 @@ public final class SemanticBuildPlanner {
             if (!loadedColumn(level, x, z, anchorY)) return null;
             int y = replace ? ClientSurfaceHeight.constructionGround(level, x, z)
                     : ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
-            if (y <= level.getMinBuildHeight() + 4
+            if (y <= level.getMinBuildHeight()
                     || y + size.wallHeight() + 22 >= level.getMaxBuildHeight()) return null;
             BlockPos ground = new BlockPos(x, y - 1, z);
             BlockState state = level.getBlockState(ground);
@@ -443,10 +446,14 @@ public final class SemanticBuildPlanner {
         // instead of raising the entire house onto an inaccessible floating platform.
         int baseY = terrain.equals("surface") && replace ? low - 1
                 : terrain.equals("embedded") ? low : high;
+        // Underground clearance belongs to designs that actually excavate a cellar. Requiring
+        // it for every surface build rejects the default superflat surface at min height + 4.
+        if (cellar && baseY - 4 < level.getMinBuildHeight()) return null;
         int roofTop = baseY + size.wallHeight() + Math.max(size.width, size.depth) / 2 + 5;
         for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
             int columnY = heights[x - minX][z - minZ];
-            int bottom = Math.min(columnY - 3, baseY - (terrain.equals("embedded") ? 4 : 1));
+            int bottom = Math.max(level.getMinBuildHeight(),
+                    Math.min(columnY - 3, baseY - (cellar || terrain.equals("embedded") ? 4 : 1)));
             for (int y = bottom; y <= roofTop; y++) {
                 BlockPos pos = new BlockPos(x, y, z);
                 if (!level.isLoaded(pos) || protectedCell(pos)
