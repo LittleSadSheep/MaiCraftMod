@@ -44,6 +44,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private final JsonArray requirements;
     private final JsonArray initialContents;
     private final JsonArray filters;
+    private final MachineBuildCompletion completion;
     private final JsonArray commissioning = new JsonArray();
     private final SemanticMaterialSupplyCoordinator supply = new SemanticMaterialSupplyCoordinator();
     private Phase phase = Phase.SURVEY;
@@ -55,7 +56,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private int filterIndex;
     private long commissioningDeadline;
     private boolean acquiringItem;
-    private boolean blocksStarted, geometryVerified;
+    private boolean blocksStarted;
     private boolean sealingStarted;
     private Map<String, Object> lastChild = Map.of();
     private String failureCode;
@@ -68,6 +69,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
                 .map(part -> new org.maiwithu.maicraft.client.preview.PreviewPart(part.position(), part.spec().itemId(),
                         part.spec().side() == null ? "center" : part.spec().side().getSerializedName())).toList();
         JsonObject report = record.plan.report();
+        completion = new MachineBuildCompletion(report.has("explicit_blueprint") && report.get("explicit_blueprint").getAsBoolean());
         configurations = report.has("configurations") ? report.getAsJsonArray("configurations") : new JsonArray();
         requirements = report.has("commissioning_requirements") ? report.getAsJsonArray("commissioning_requirements") : new JsonArray();
         initialContents = report.has("initial_contents") ? report.getAsJsonArray("initial_contents") : new JsonArray();
@@ -220,7 +222,10 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             verifyConfigIndex++;
         }
         if (verifyConfigIndex >= configurations.size()) {
-            geometryVerified = true; phase = Phase.COMMISSION; commissioningDeadline = 0;
+            if (completion.acceptGeometry()) {
+                phase = Phase.DONE; r.verified(); return TaskState.SUCCESS;
+            }
+            phase = Phase.COMMISSION; commissioningDeadline = 0;
         }
         return TaskState.RUNNING;
     }
@@ -247,6 +252,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             }
             commissioning.add(evidence); requirementIndex++; commissioningDeadline = 0; return TaskState.RUNNING;
         }
+        completion.acceptCommissioning();
         phase = Phase.DONE; r.verified(); return TaskState.SUCCESS;
     }
 
@@ -300,11 +306,10 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (child != null) { child.stop(player, StopReason.REPLACED); child.result(TaskState.CANCELLED); child = null; }
         supply.cancel(player); BuildPreviewGate.release(r); super.cleanup();
     }
-    @Override protected String successMessage() { return "Machine layout constructed and native configurations applied; inspect commissioning evidence for operating readiness."; }
+    @Override protected String successMessage() { return "Declared machine structure constructed and checked; use operate_machine separately to configure and verify operation."; }
     @Override protected Map<String, Object> resultData() {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("machine_geometry_verified", geometryVerified); data.put("machine_production_verified", false);
-        data.put("configuration_complete", phase == Phase.DONE); data.put("machine_layout", r.plan.report());
+        Map<String, Object> data = new LinkedHashMap<>(completion.report());
+        data.put("machine_layout", r.plan.report());
         data.put("commissioning", commissioning); data.put("installed_parts", partIndex);
         data.put("configured_interfaces", configIndex); data.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
         data.put("initialized_containers", contentsIndex);
