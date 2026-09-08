@@ -49,9 +49,9 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 每项能力的参数和限制由 `perceive(view="abilities")` 动态公开。AI 客户端应先读取能力契约，再提交目标，而不是猜测方块坐标、物品栏槽位或内部动作。
 
-移动目标还未定位时，可以使用 `maicraft:travel` 的 `semantic_target="lower_platform"`，让 Mod 边移动边寻找下方平台，无须给坐标。`transport_mode="jetpack"` 保持同一次飞行控制，在平台进入局部观察后转入着陆；`ground` 使用普通步行寻路，`auto` 可选择可用的喷气背包。
+移动目标还未定位时，可以使用 `maicraft:travel` 的 `semantic_target="platform"` 与 `direction="down"`，让 Mod 边移动边寻找下方平台，无须给坐标。`transport_mode="jetpack"` 保持同一次飞行控制，在平台进入局部观察后转入着陆；`ground` 使用普通步行寻路，`auto` 可选择可用的喷气背包。
 
-其他方向使用 `semantic_target="platform"` 与 `direction`（`up`、`down`、`forward`、`backward`、`left`、`right` 或四个英文方位）。相对方向在任务开始时固定；区域搜索半径 `max_distance` 默认 64，范围 8–128 格。普通坐标移动仍支持省略 Y 和到达容差，`exact=true` 用于需要准确站位的动作。
+所有平台搜索都使用 `semantic_target="platform"`，通过 `direction` 选择方向（`up`、`down`、`forward`、`backward`、`left`、`right` 或四个英文方位，默认 `forward`）。相对方向在任务开始时固定；区域搜索半径 `max_distance` 默认 64，范围 8–128 格。普通坐标移动仍支持省略 Y 和到达容差，`exact=true` 用于需要准确站位的动作。
 
 `perceive(view="surroundings")` 的 `terrain_overview` 提供地形缩略信息：大致方位、相对高度、水平范围、`surface_material` 材质、支撑样本及未知区域。预览覆盖已加载地形的水平半径 128 格、向下 256 格，按距离使用 4／8／32 格采样间距。同一次请求会等待后续客户端帧补充结果；达到采样或响应预算后返回明确的完整／部分采样状态。远处不同材质的支撑面会优先保留，未采到的平台不代表不存在。
 

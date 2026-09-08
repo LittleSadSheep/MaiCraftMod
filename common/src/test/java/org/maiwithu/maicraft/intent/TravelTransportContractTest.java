@@ -64,14 +64,22 @@ public final class TravelTransportContractTest {
     private static void regionalDiscovery() {
         for(String mode:List.of("auto","ground","jetpack")) {
             JsonObject parameters=new JsonObject();
-            parameters.addProperty("semantic_target","lower_platform"); parameters.addProperty("transport_mode",mode);
-            var action=(IntentAction.Tool)AbilityAdapter.adapt(goal(parameters),null,null);
-            check(action.toolName().equals("travel_region") && action.arguments().get("direction").getAsString().equals("down"),
-                    "a lower platform can be discovered before its coordinates are known");
-            check(!action.arguments().has("x") && action.arguments().get("transport_mode").getAsString().equals(mode),
-                    "discovery preserves movement choice without fabricating a destination");
-            parameters.addProperty("direction","up");
-            try { AbilityAdapter.adapt(goal(parameters),null,null); throw new AssertionError("contradictory direction accepted"); }
+            parameters.addProperty("semantic_target","platform"); parameters.addProperty("transport_mode",mode);
+            var defaultAction=(IntentAction.Tool)AbilityAdapter.adapt(goal(parameters),null,null);
+            check(defaultAction.arguments().get("direction").getAsString().equals("forward"),
+                    "platform discovery defaults to the starting heading");
+            // 同一种平台搜索应支持每个方向，并完整保留交通方式；不需要为方向另造目标类型。
+            for (String direction : List.of("down", "up", "forward", "backward", "left", "right",
+                    "north", "south", "east", "west")) {
+                parameters.addProperty("direction",direction);
+                var action=(IntentAction.Tool)AbilityAdapter.adapt(goal(parameters),null,null);
+                check(action.toolName().equals("travel_region") && action.arguments().get("direction").getAsString().equals(direction),
+                        "platform discovery preserves the requested search direction");
+                check(!action.arguments().has("x") && action.arguments().get("transport_mode").getAsString().equals(mode),
+                        "discovery preserves movement choice without fabricating a destination");
+            }
+            parameters.addProperty("direction","diagonal");
+            try { AbilityAdapter.adapt(goal(parameters),null,null); throw new AssertionError("unknown direction accepted"); }
             catch(IllegalArgumentException expected) { }
             parameters.remove("direction"); parameters.addProperty("exact",true);
             try { AbilityAdapter.adapt(goal(parameters),null,null); throw new AssertionError("unknown exact cell accepted"); }

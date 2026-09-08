@@ -20,7 +20,10 @@ import org.maiwithu.maicraft.core.scan.TargetIndex;
 import java.util.List;
 import java.util.UUID;
 
-/** Compiles semantic abilities into existing internal tools or native intent steps. */
+/**
+ * 把外部模型提交的结构化业务目标转换成内部工具、原生任务或待回答的问题。
+ * 这里只识别已约定的能力和字段；自然语言由外部模型理解，Mod 不会猜测任意一句话的含义。
+ */
 final class AbilityAdapter {
 
     private AbilityAdapter() {}
@@ -31,6 +34,7 @@ final class AbilityAdapter {
 
     static IntentAction adapt(
             Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
+        // 按能力归属分流。新增能力时，参数说明、允许字段和这里的执行映射需要一起维护。
         if (MachineAbilityAdapter.supports(goal.ability())) {
             return MachineAbilityAdapter.adapt(goal, player, runtime, continuationToken);
         }
@@ -278,7 +282,8 @@ final class AbilityAdapter {
         TravelDestination destination = TravelDestination.fromGoal(goal);
         TransportMode mode = TransportMode.parse(string(goal.parameters(), "transport_mode"));
         String discovery=exploreTarget(goal);
-        if ("platform".equals(discovery) || "lower_platform".equals(discovery)) {
+        // 平台类型与方向分开表达；这里只整理搜索条件，具体落脚点由移动中的地形观察决定。
+        if ("platform".equals(discovery)) {
             if (destination!=null || goal.target()!=null && !"nearest".equals(goal.target().kind())
                     || goal.parameters().has("block_id") || goal.parameters().has("block")
                     || goal.parameters().has("biome_id") || goal.parameters().has("biome_tag"))
@@ -286,9 +291,7 @@ final class AbilityAdapter {
             if (bool(goal.parameters(),"exact",false) || mode==TransportMode.ELEVATOR)
                 throw new IllegalArgumentException("platform discovery uses a region and auto, ground or jetpack transport");
             String direction=string(goal.parameters(),"direction");
-            if (direction==null) direction="lower_platform".equals(discovery) ? "down" : "forward";
-            if ("lower_platform".equals(discovery) && !"down".equals(direction))
-                throw new IllegalArgumentException("lower_platform requires direction=down");
+            if (direction==null) direction="forward";
             org.maiwithu.maicraft.core.pathing.goal.RegionalGoal.direction(direction,0);
             parameters.addProperty("direction",direction);
             parameters.addProperty("transport_mode",mode.name().toLowerCase(java.util.Locale.ROOT));
