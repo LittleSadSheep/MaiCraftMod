@@ -22,6 +22,14 @@ public final class LandingAssistGeometry {
     }
     public static boolean safe(BlockGetter world, Predicate<BlockPos> loaded, LandingAssistPlan plan,
                                double width, double height, LongSet forbiddenBody) {
+        if (plan.kind() == LandingAssistPlan.Kind.BOAT) {
+            if (LandingBoatRescue.plan(world,plan.feet(),width,height) == null) return false;
+            var body = new net.minecraft.world.phys.AABB(plan.aimPoint().x-width/2,plan.aimPoint().y+.563,plan.aimPoint().z-width/2,
+                    plan.aimPoint().x+width/2,plan.aimPoint().y+.563+height,plan.aimPoint().z+width/2);
+            for (BlockPos cell : BlockPos.betweenClosed(BlockPos.containing(body.minX,body.minY,body.minZ),BlockPos.containing(body.maxX,body.maxY,body.maxZ)))
+                if (!loaded.test(cell) || forbiddenBody.contains(cell.asLong())) return false;
+            return true;
+        }
         boolean raisedSupport = plan.kind().solidSupport() && !plan.existing();
         BlockPos physicalFeet = raisedSupport ? plan.feet().above() : plan.feet();
         BlockGetter geometry = new BlockGetter() {

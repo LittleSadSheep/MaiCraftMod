@@ -33,12 +33,13 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         BERRIES(Items.SWEET_BERRIES, Blocks.SWEET_BERRY_BUSH),
         TWISTING_VINES(Items.TWISTING_VINES, Blocks.TWISTING_VINES),
         WEEPING_VINES(Items.WEEPING_VINES, Blocks.WEEPING_VINES), SLIME(Items.SLIME_BLOCK, Blocks.SLIME_BLOCK),
-        HAY(Items.HAY_BLOCK, Blocks.HAY_BLOCK);
+        HAY(Items.HAY_BLOCK, Blocks.HAY_BLOCK), BOAT(Items.OAK_BOAT,Blocks.AIR);
         public final Item item;
         public final Block block;
         Kind(Item item, Block block) { this.item = item; this.block = block; }
         public boolean solidSupport() { return this == SLIME || this == HAY; }
         public boolean matches(BlockState state) {
+            if (this == BOAT) return false;
             if (this == WATER) return state.getFluidState().getType() instanceof net.minecraft.world.level.material.WaterFluid;
             return state.is(block) || this == TWISTING_VINES && state.is(Blocks.TWISTING_VINES_PLANT)
                     || this == WEEPING_VINES && state.is(Blocks.WEEPING_VINES_PLANT);
@@ -70,6 +71,10 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         public static InventorySnapshot capture(LocalPlayer player, TerrainPermit permit, boolean ultraWarm) {
             var kinds = java.util.EnumSet.noneOf(Kind.class);
             for (Kind kind : Kind.values()) {
+                if (kind==Kind.BOAT) {
+                    if (LandingBoatRescue.carried(player)!=null) kinds.add(kind);
+                    continue;
+                }
                 if (player.getOffhandItem().is(kind.item)) kinds.add(kind);
                 for (int slot = 0; slot < Math.min(36, player.getInventory().getContainerSize()); slot++) {
                     if (player.getInventory().getItem(slot).is(kind.item)) { kinds.add(kind); break; }
@@ -84,6 +89,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             BlockState target = view.getBlockState(feet);
             BlockState support = view.getBlockState(feet.below());
             for (Kind kind : Kind.values()) {
+                if (kind == Kind.BOAT) continue;
                 if (kind == Kind.WATER ? !waterAllowed || ultraWarm : !othersAllowed) continue;
                 if (kind == Kind.WATER) {
                     LandingAssistPlan water = waterPlan(view,feet,protectedCell,available.contains(Kind.WATER));
@@ -160,10 +166,12 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             case BERRIES -> state.getValue(BlockStateProperties.AGE_3) == 0;
             case COBWEB, TWISTING_VINES, WEEPING_VINES -> state.is(BlockTags.FALL_DAMAGE_RESETTING);
             case SLIME, HAY -> true; // Slime needs a safe rebound; hay needs a nonfatal damage budget.
+            case BOAT -> false;
         };
     }
 
     public static boolean canPlace(Kind kind, BlockGetter view, BlockPos feet) {
+        if (kind == Kind.BOAT) return LandingBoatRescue.plan(view,feet,.6,1.8) != null;
         if (kind == Kind.WATER) {
             if (WaterBucketFall.canWaterlog(view,feet)) return true;
             BlockState support = view.getBlockState(feet.below());
@@ -186,7 +194,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             case WEEPING_VINES -> view.getBlockState(feet.above()).is(Blocks.WEEPING_VINES)
                     || view.getBlockState(feet.above()).is(Blocks.WEEPING_VINES_PLANT)
                     || view.getBlockState(feet.above()).isFaceSturdy(view,feet.above(),Direction.DOWN);
-            case WATER -> throw new IllegalStateException("water uses bucket placement rules");
+            case WATER, BOAT -> throw new IllegalStateException("transport items use their native placement rules");
         };
     }
 
