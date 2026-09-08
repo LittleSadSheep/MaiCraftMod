@@ -122,8 +122,13 @@ public final class JetpackFlightSession implements TransportSession {
             updateLook(ctx, fastDescentTarget, true);
             if (stopping || movingTarget!=null && !movingTarget.supportsFastDescent()) fastDescent.requestStop();
             boolean handled = fastDescent.tick(ctx, fastDescentTarget, power, false,true,space(ctx));
-            if (fastDescent.hasEffects()) effects = changedActive = true;
-            if (handled) return running();
+            if (fastDescent.hasEffects()) effects = true;
+            if (fastDescent.hasModeChanges()) changedActive = true;
+            if (handled) {
+                double distance = ctx.player().position().distanceToSqr(fastDescentTarget);
+                if (distance < waypointDistance - .01) { waypointDistance = distance; waypointTick = lastTick; }
+                return running();
+            }
         }
         if (receipt != null) {
             ctx.actions().poll(ctx, receipt);
@@ -264,7 +269,7 @@ public final class JetpackFlightSession implements TransportSession {
                 double distance=position.distanceToSqr(next);
                 if(distance<waypointDistance-.01) { waypointDistance=distance; waypointTick=lastTick; }
                 if(!space.clear(position,next)) { obstruction(ctx,space,next); return; }
-                if(!stopping && position.y>next.y+3 && tryFastDescent(ctx,next,false)) return;
+                if(!stopping && position.y>next.y+.1 && tryFastDescent(ctx,next,false)) return;
                 if(!steer(ctx,next,false)) obstruction(ctx,space,next);
                 return;
             }
@@ -277,7 +282,7 @@ public final class JetpackFlightSession implements TransportSession {
         double distance = position.distanceToSqr(next);
         if (distance < waypointDistance - 0.01) { waypointDistance = distance; waypointTick = lastTick; }
         if (!space.clear(position, next)) { obstruction(ctx, space, next); return; }
-        if (!stopping && !exiting && position.y > next.y + 3 && tryFastDescent(ctx, next, false)) return;
+        if (!stopping && !exiting && position.y > next.y + .1 && tryFastDescent(ctx, next, false)) return;
         if (waypoint == route.points().size() - 2 && JetpackRoute.atWaypointHeight(route, waypoint, position.y)
                 && Math.hypot(position.x - next.x, position.z - next.z) < 0.4) {
             landing = route.points().getLast(); approachHeight = next.y;
@@ -393,7 +398,9 @@ public final class JetpackFlightSession implements TransportSession {
         updateLook(ctx, target, true);
         if (!fastDescent.tick(ctx, target, power, true, touchdown,space(ctx))) return false;
         fastDescentTarget = target;
-        if (fastDescent.hasEffects()) effects = changedActive = true;
+        waypointDistance = ctx.player().position().distanceToSqr(target); waypointTick = lastTick;
+        if (fastDescent.hasEffects()) effects = true;
+        if (fastDescent.hasModeChanges()) changedActive = true;
         return true;
     }
 

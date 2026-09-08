@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 
-/** Native off/drop/on/shift sequence over a verified platform. Never writes entity physics.
+/** Native shift descent, with off/drop/on acceleration when altitude permits. Never writes entity physics.
  * A mode receipt and upright context are client evidence, not a server fall-damage guarantee.
  */
 public final class JetpackFastDescent {
@@ -29,9 +29,10 @@ public final class JetpackFastDescent {
     private Command receiptCommand = Command.NONE;
     private NativeActionReceipt receipt;
     private Vec3 descentLanding, descentExit;
-    private long phaseTick;
+    private long phaseTick, progressTick;
+    private double lowestHeight = Double.POSITIVE_INFINITY;
     private boolean stopping, recovering, effects, touchdown = true;
-    private boolean shortDrop;
+    private boolean shortDrop, modeChanges;
     private String detail = "awaiting an aligned descent column";
     private double restartHeight;
 
@@ -39,6 +40,7 @@ public final class JetpackFastDescent {
     public JetpackFastDescent(LongSet forbidden) { this.forbidden = forbidden; }
     public boolean active() { return phase != Phase.IDLE && phase != Phase.DONE; }
     public boolean hasEffects() { return effects; }
+    public boolean hasModeChanges() { return modeChanges; }
     public boolean finished() { return phase == Phase.DONE; }
     public void requestStop() { stopping = true; if (phase == Phase.IDLE) phase = Phase.DONE; }
     /** Manual control/body loss revokes native authority; leave mode restoration to the new owner. */
@@ -90,14 +92,16 @@ public final class JetpackFastDescent {
             }
             receipt = JetpackNativeAdapter.setMode(ctx, command == Command.HOVER, command != Command.OFF);
             receiptCommand = command;
-            effects = true;
+            effects = modeChanges = true;
         }
         Vec3 position = player.position(), velocity = player.getDeltaMovement();
         // No UP during the restart window: released UP lets native hover clamp a fast downward velocity.
         boolean sneak = phase == Phase.BRAKING;
+        if (sneak) effects = true;
         ctx.body().applySteering(yaw -> {
             var brake = power.controllable()
-                    ? JetpackSteering.toward(position, velocity, position, yaw, true, power)
+                    ? sneak ? shiftSteering(position, velocity, landing, yaw, power)
+                            : JetpackSteering.toward(position, velocity, position, yaw, true, power)
                     : BodyControlPort.Movement.STOPPED;
             return new BodyControlPort.Movement(brake.forward(), brake.strafe(), false, sneak, false);
         }, player.getYRot(), ctx.tickRevision());
@@ -113,15 +117,25 @@ public final class JetpackFastDescent {
         var power = o.power();
         boolean aligned = o.landing() != null && aligned(o.position(), o.velocity(), o.landing());
         if (phase == Phase.IDLE) {
-            if (!allowStart || stopping || !o.clearColumn() || !aligned || o.grounded() || !o.upright()
-                    || !power.controllable() || !power.active() || !power.hover() || o.ping() > 2000) return Command.NONE;
+            String rejection = !allowStart || stopping ? "descent not requested"
+                    : !o.clearColumn() ? "landing column or exit not verified"
+                    : !aligned ? "aligning position and horizontal momentum with descent column"
+                    : o.grounded() ? "already grounded"
+                    : !o.upright() || !power.controllable() || !power.active() || !power.hover() ? "native upright hover unavailable"
+                    : o.ping() > 2000 ? "native control latency exceeds descent budget" : null;
+            if (rejection != null) { detail = rejection; return Command.NONE; }
             restartHeight = restartHeight(o.velocity().y, power.gravity(), o.ping());
             double height = o.position().y - o.landing().y;
             shortDrop=touchdown && height>=.35 && height<3 && o.harmlessDrop();
-            if (height < Math.max(3, restartHeight + 0.75) && !shortDrop || o.velocity().y > 0.1) return Command.NONE;
+            boolean freeDrop = shortDrop || height >= Math.max(3, restartHeight + 0.75);
+            if (o.velocity().y > 0.1 || !freeDrop && height <= (touchdown ? .1 : shiftReleaseHeight(power, o.ping()))) {
+                detail = "coasting upward or inside the final hover-braking margin"; return Command.NONE;
+            }
             this.touchdown = touchdown;
             descentLanding = o.landing();
-            enter(Phase.DISABLING, o.tick(), "disabling over the aligned landing column");
+            lowestHeight = height; progressTick = o.tick();
+            enter(freeDrop ? Phase.DISABLING : Phase.BRAKING, o.tick(), freeDrop
+                    ? "disabling over the aligned landing column" : "native shift descent without a mode toggle");
         }
         boolean columnChanged = !o.clearColumn() || !aligned || o.landing() == null
                 || o.landing().distanceToSqr(descentLanding) > 0.0001;
@@ -130,6 +144,7 @@ public final class JetpackFastDescent {
             if (phase != Phase.ENABLING) enter(Phase.ENABLING, o.tick(), "restoring hover after cancellation or changed landing");
         }
         double height = o.position().y - descentLanding.y;
+        if (height < lowestHeight - .01) { lowestHeight = height; progressTick = o.tick(); }
         restartHeight = restartHeight(o.velocity().y, power.gravity(), o.ping());
         if (!shortDrop && (phase == Phase.DISABLING || phase == Phase.FALLING)
                 && (height <= restartHeight || o.grounded() || o.tick() - phaseTick >= 60)) {
@@ -164,8 +179,8 @@ public final class JetpackFastDescent {
                 else if (!this.touchdown && height <= shiftReleaseHeight(power, o.ping())) {
                     enter(Phase.DONE, o.tick(), "releasing shift above the cruise height; returning to normal altitude control");
                 }
-                else if (o.tick() - phaseTick >= 40) {
-                    recovering = true; enter(Phase.ENABLING, o.tick(), "shift descent bounded; returning to ordinary landing");
+                else if (o.tick() - progressTick >= 40) {
+                    recovering = true; enter(Phase.ENABLING, o.tick(), "native shift descent stopped making height progress; restoring hover");
                 }
             }
             default -> {}
@@ -181,6 +196,14 @@ public final class JetpackFastDescent {
     static boolean aligned(Vec3 position, Vec3 velocity, Vec3 landing) {
         return Math.hypot(position.x - landing.x, position.z - landing.z) < 0.18
                 && velocity.horizontalDistance() < 0.06;
+    }
+    /** Correct drift only when the next native impulse stays inside the verified descent alignment. */
+    static BodyControlPort.Movement shiftSteering(Vec3 position, Vec3 velocity, Vec3 landing, float yaw,
+                                                  JetpackNativeAdapter.Snapshot power) {
+        var correction = JetpackSteering.toward(position, velocity, landing, yaw, true, power);
+        var next = JetpackMotion.step(position, velocity, correction, yaw, power);
+        return aligned(next.position(), next.velocity(), landing) ? correction
+                : JetpackSteering.toward(position, velocity, position, yaw, true, power);
     }
     static boolean columnAvailable(JetpackRoute.Space space, Vec3 position, Vec3 landing) {
         return columnAvailable(space, position, landing, true);

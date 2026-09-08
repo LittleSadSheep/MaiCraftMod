@@ -16,6 +16,9 @@ public final class JetpackFastDescentTest {
     public static void main(String[] args) {
         normalSequence();
         harmlessShortDrop();
+        nativeShiftWithoutModeCycle();
+        longDescentKeepsMakingProgress();
+        shiftCorrectsDriftWithinColumn();
         cancellationRestartsImmediately();
         changedColumnRestoresHover();
         failedReceiptDoesNotReleaseDisabledPack();
@@ -39,6 +42,50 @@ public final class JetpackFastDescentTest {
         descent.advance(new Observation(9,LANDING,Vec3.ZERO,LANDING,off.power(),true,false,true,0,
                 Command.OFF,Status.CONFIRMED_APPLIED,true),false);
         check(descent.finished(),"short touchdown returns directly to the flight owner's mode restoration");
+    }
+
+    private static void nativeShiftWithoutModeCycle() {
+        var descent = new JetpackFastDescent();
+        check(descent.advance(at(0, 2.9, -.1078, true, true, true, Command.NONE, null), true) == Command.NONE
+                        && descent.phase().equals("braking"),
+                "an aligned ordinary descent should use native Shift without requiring an OFF/ON cycle");
+        var intermediate = new JetpackFastDescent();
+        intermediate.advance(at(0, 2, -.1078, true, true, true, Command.NONE, null), true, false);
+        check(intermediate.phase().equals("braking"), "a short cruise descent should not wait for the old three-block gate");
+        intermediate.advance(at(4, 1, -.392, true, true, true, Command.NONE, null), false, false);
+        check(intermediate.finished(), "direct Shift must release early enough to preserve the next cruise height");
+        var low = new JetpackFastDescent();
+        low.advance(at(0, .5, -.1078, true, true, true, Command.NONE, null), true, false);
+        check(!low.active(), "an intermediate target inside the release window must retain ordinary hover");
+        descent.requestStop();
+        check(descent.advance(at(1, 2.8, -.392, true, true, true, Command.NONE, null), false) == Command.ON,
+                "cancelling direct Shift must release descent and confirm enabled hover");
+        var stalled = new JetpackFastDescent();
+        stalled.advance(at(0, 2, -.1078, true, true, true, Command.NONE, null), true);
+        check(stalled.advance(at(41, 2, -.1078, true, true, true, Command.NONE, null), false) == Command.ON,
+                "a descent without actual height progress must still recover");
+    }
+
+    private static void longDescentKeepsMakingProgress() {
+        var descent = new JetpackFastDescent();
+        double height = 180, velocity = -.1078;
+        boolean active = true;
+        Command receipt = Command.NONE;
+        int shiftTicks = 0, ticks = 0;
+        for (; ticks < 700 && !descent.finished(); ticks++) {
+            Command command = descent.advance(at(ticks, height, velocity, active, active, true, receipt,
+                    receipt == Command.NONE ? null : Status.CONFIRMED_APPLIED), true);
+            if (command != Command.NONE) { active = command != Command.OFF; receipt = command; }
+            boolean shift = descent.phase().equals("braking");
+            if (shift) shiftTicks++;
+            double step = !active ? velocity : shift ? Math.max(velocity, -POWER.vertical())
+                    : JetpackDynamics.nextVertical(velocity, false, POWER);
+            height = Math.max(0, height + step);
+            velocity = height == 0 ? 0 : JetpackDynamics.rawAfterStep(step, POWER);
+        }
+        check(shiftTicks > 40, "long-descent replay must cover more than the previous fixed Shift timeout");
+        check(descent.finished() && height == 0 && ticks < 500,
+                "a progressing long descent must keep native Shift until touchdown, not retire above the platform");
     }
 
     private static void normalSequence() {
@@ -66,6 +113,21 @@ public final class JetpackFastDescentTest {
                 "cancellation waited for old OFF receipt instead of reversing it");
         descent.advance(at(2, 11.7, -0.1, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false);
         check(descent.finished(), "cancellation did not hand back an enabled upright hover");
+    }
+
+    private static void shiftCorrectsDriftWithinColumn() {
+        for (float yaw : new float[]{0, 35, 90, 170}) {
+            Vec3 position = LANDING.add(.17, 20, 0), velocity = Vec3.ZERO;
+            for (int tick = 0; tick < 80; tick++) {
+                var input = JetpackFastDescent.shiftSteering(position, velocity, LANDING, yaw, POWER);
+                var next = JetpackMotion.step(position, velocity, input, yaw, POWER);
+                position = next.position(); velocity = next.velocity();
+                check(JetpackFastDescent.aligned(position, velocity, LANDING),
+                        "horizontal correction must not accelerate itself outside the descent column");
+            }
+            check(Math.hypot(position.x - LANDING.x, position.z - LANDING.z) < .06,
+                    "Shift descent must converge toward the landing instead of just stopping at its current position");
+        }
     }
 
     private static void changedColumnRestoresHover() {
@@ -115,8 +177,8 @@ public final class JetpackFastDescentTest {
 
     private static void eligibility() {
         var shortDrop = new JetpackFastDescent();
-        shortDrop.advance(at(0, 2, -0.1, true, true, true, Command.NONE, null), true);
-        check(!shortDrop.active(), "a short platform landing needlessly toggled the pack");
+        check(shortDrop.advance(at(0, 2, -0.1, true, true, true, Command.NONE, null), true) == Command.NONE,
+                "a short platform landing needlessly toggled the pack");
         check(!JetpackFastDescent.aligned(LANDING.add(0.2, 10, 0), Vec3.ZERO, LANDING), "off-center column admitted");
         check(!JetpackFastDescent.aligned(LANDING.add(0, 10, 0), new Vec3(0.07, 0, 0), LANDING), "sideways drift admitted");
         var unavailable = new JetpackFastDescent();
