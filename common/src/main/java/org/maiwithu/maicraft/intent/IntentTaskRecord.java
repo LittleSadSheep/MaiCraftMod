@@ -204,7 +204,10 @@ public final class IntentTaskRecord extends TaskRecord {
 
     void insertRecovery(Goal recovery) {
         // 例如造炉子缺石头：把“找石头”插在“造炉子”前面，找齐后还会回到造炉子这一步。
-        List<Goal> expanded = expandedSteps(recovery, "recovery");
+        // 前置工作仍属于当前分组，不能借插入恢复步骤绕过祖先的保护要求。
+        Goal scoped = stepIndex < steps.size()
+                ? recovery.withInheritedProtection(steps.get(stepIndex).inheritedProtectionLabels()) : recovery;
+        List<Goal> expanded = expandedSteps(scoped, "recovery");
         // Insert every prerequisite before the failed step in one semantic-plan mutation. The
         // original step stays immediately after the expansion, so it is retried only after the
         // complete recovery sequence succeeds.
@@ -222,7 +225,8 @@ public final class IntentTaskRecord extends TaskRecord {
         if (stepIndex >= steps.size()) {
             throw new IllegalStateException("there is no current semantic step to replace");
         }
-        List<Goal> expanded = expandedSteps(replacement, "replacement");
+        List<Goal> expanded = expandedSteps(replacement.withInheritedProtection(
+                steps.get(stepIndex).inheritedProtectionLabels()), "replacement");
         List<Goal> updated = new ArrayList<>(steps.size() - 1 + expanded.size());
         updated.addAll(steps.subList(0, stepIndex));
         updated.addAll(expanded);

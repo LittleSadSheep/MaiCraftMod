@@ -893,17 +893,8 @@ final class IntentTask implements Task {
 
     private static Set<String> explicitProtectedLabels(Goal goal) {
         if (goal == null) return Set.of();
-        JsonObject parameters = goal.parameters();
-        if (!parameters.has("protected_labels")
-                || !parameters.get("protected_labels").isJsonArray()) return Set.of();
-        java.util.LinkedHashSet<String> labels = new java.util.LinkedHashSet<>();
-        for (var element : parameters.getAsJsonArray("protected_labels")) {
-            if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()
-                    && !element.getAsString().isBlank()) {
-                labels.add(normalizeProtectionLabel(element.getAsString()));
-            }
-        }
-        return Set.copyOf(labels);
+        return goal.protectionLabels().stream().map(IntentTask::normalizeProtectionLabel)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private static String normalizeProtectionLabel(String label) {

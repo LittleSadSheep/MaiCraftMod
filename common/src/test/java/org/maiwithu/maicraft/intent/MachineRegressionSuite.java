@@ -18,6 +18,8 @@ public final class MachineRegressionSuite {
         catch (Exception failure) { throw new AssertionError(failure); }
         try { IntentTerminalStateTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
+        try { SequenceProtectionTest.main(args); }
+        catch (Exception failure) { throw new AssertionError(failure); }
         try { HarvestEvidenceContractTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
         org.maiwithu.maicraft.core.scan.SearchGeometryTest.main(args);

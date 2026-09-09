@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 
@@ -16,7 +17,13 @@ public record Goal(String ability,
                    String parametersJson,
                    String preferencesJson,
                    List<Constraint> constraints,
-                   List<Goal> children) {
+                   List<Goal> children,
+                   List<String> inheritedProtectionLabels) {
+
+    public Goal(String ability, String outcome, SemanticTarget target, String parametersJson,
+                String preferencesJson, List<Constraint> constraints, List<Goal> children) {
+        this(ability, outcome, target, parametersJson, preferencesJson, constraints, children, List.of());
+    }
 
     public Goal {
         // 参数存成 JSON 文本，步骤列表复制后禁止直接修改，避免别人拿着原对象改掉已接受的目标。
@@ -26,6 +33,10 @@ public record Goal(String ability,
         preferencesJson = canonicalObject(preferencesJson);
         constraints = List.copyOf(constraints == null ? List.of() : constraints);
         children = List.copyOf(children == null ? List.of() : children);
+        inheritedProtectionLabels = List.copyOf(inheritedProtectionLabels == null
+                ? List.of() : new LinkedHashSet<>(inheritedProtectionLabels));
+        if (inheritedProtectionLabels.stream().anyMatch(String::isBlank))
+            throw new IllegalArgumentException("inherited protection labels must not be blank");
     }
 
     public static Goal fromJson(JsonObject source) {
@@ -69,20 +80,43 @@ public record Goal(String ability,
     }
 
     public Goal withParameters(JsonObject parameters) {
-        return new Goal(ability, outcome, target, parameters.toString(), preferencesJson, constraints, children);
+        return new Goal(ability, outcome, target, parameters.toString(), preferencesJson, constraints, children,
+                inheritedProtectionLabels);
     }
 
     public Goal withTarget(SemanticTarget nextTarget) {
         // 例如把“前一步找到的地方”换成 Mod 确认的位置，其他要求保持原样。
-        return new Goal(ability, outcome, nextTarget, parametersJson, preferencesJson, constraints, children);
+        return new Goal(ability, outcome, nextTarget, parametersJson, preferencesJson, constraints, children,
+                inheritedProtectionLabels);
+    }
+
+    /** 分组范围作为执行元数据携带，不塞进子能力未声明的参数，也不改写原始请求。 */
+    public Goal withInheritedProtection(List<String> labels) {
+        var inherited = new LinkedHashSet<>(labels);
+        inherited.addAll(inheritedProtectionLabels);
+        if (inherited.equals(new LinkedHashSet<>(inheritedProtectionLabels))) return this;
+        return new Goal(ability, outcome, target, parametersJson, preferencesJson, constraints, children,
+                List.copyOf(inherited));
+    }
+
+    public List<String> protectionLabels() {
+        var labels = new LinkedHashSet<>(inheritedProtectionLabels);
+        JsonElement declared = parameters().get("protected_labels");
+        if (declared != null && declared.isJsonArray()) {
+            for (JsonElement label : declared.getAsJsonArray()) {
+                if (label.isJsonPrimitive() && label.getAsJsonPrimitive().isString()
+                        && !label.getAsString().isBlank()) labels.add(label.getAsString());
+            }
+        }
+        return List.copyOf(labels);
     }
 
     public List<Goal> executableSteps() {
-        // sequence 按顺序递归展开，只留下具体目标；当前不会把中间 sequence 的参数继承给这些目标。
+        // 展开每层 sequence 时带上该层保护范围；子分组的新增保护不会回流到兄弟步骤。
         if ("maicraft:sequence".equals(ability)) {
             List<Goal> flattened = new ArrayList<>();
             for (Goal child : children) {
-                flattened.addAll(child.executableSteps());
+                flattened.addAll(child.withInheritedProtection(protectionLabels()).executableSteps());
             }
             return List.copyOf(flattened);
         }

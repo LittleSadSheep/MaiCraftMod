@@ -313,6 +313,14 @@ public final class IntentStateCodec {
             steps.add(decodeGoal(element.getAsJsonObject()));
         }
         if (steps.isEmpty()) steps.addAll(goal.executableSteps());
+        // 旧存档若保留了原步骤顺序，可从原始树补回分组范围；已有的执行范围继续保留。
+        List<Goal> declared = goal.executableSteps();
+        if (steps.size() == declared.size() && java.util.stream.IntStream.range(0, steps.size())
+                .allMatch(i -> steps.get(i).toJson().equals(declared.get(i).toJson()))) {
+            for (int i = 0; i < steps.size(); i++) {
+                steps.set(i, steps.get(i).withInheritedProtection(declared.get(i).inheritedProtectionLabels()));
+            }
+        }
         int stepIndex = integer(value, "step_index", 0);
         if (stepIndex < 0 || stepIndex > steps.size()) {
             // 当前做到哪一步不能超出已保存的步骤，否则整条任务记录不可信。
@@ -519,6 +527,15 @@ public final class IntentStateCodec {
             throw new IllegalArgumentException(
                     "semantic goal contains native execution details or exceeds persistence bounds");
         }
+        // 执行步骤另存分组范围，公开 Goal JSON 仍只描述原请求；重启不能丢掉这些约束。
+        if (!goal.inheritedProtectionLabels().isEmpty()) {
+            JsonArray inherited = new JsonArray();
+            for (String label : goal.inheritedProtectionLabels()) {
+                if (label.length() > MAX_TEXT) throw new IllegalArgumentException("protection label exceeds persistence bounds");
+                inherited.add(label);
+            }
+            original.add("inherited_protected_labels", inherited);
+        }
         // 蓝图可能有许多方块，不套普通元数据每层二百五十六项的限制，但目标整体仍不能超过文件预算。
         if (original.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > IntentStateStore.MAX_BYTES)
             throw new IllegalArgumentException("semantic goal exceeds checkpoint byte budget; reference a blueprint resource instead");
@@ -528,6 +545,13 @@ public final class IntentStateCodec {
     private static Goal decodeGoal(JsonObject value) {
         // 还原目标再重新检查，并比较是否丢了字段；保存的数据与还原后的目标必须一致。
         Goal goal = Goal.fromJson(value);
+        List<String> inherited = new ArrayList<>();
+        for (JsonElement label : array(value, "inherited_protected_labels", MAX_RESULT_DEPTH * 256)) {
+            if (!label.isJsonPrimitive() || !label.getAsJsonPrimitive().isString())
+                throw new IllegalArgumentException("persisted protection label must be a string");
+            inherited.add(label.getAsString());
+        }
+        goal = goal.withInheritedProtection(inherited);
         JsonElement safe = safeGoal(goal);
         if (!safe.equals(value)) {
             throw new IllegalArgumentException(
