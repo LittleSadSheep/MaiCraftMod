@@ -15,9 +15,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Client-thread publisher for detached A* snapshots. Capture only consults
- * {@code ClientChunkCache#getChunkNow}; absent chunks stay absent and are never loaded or generated.
- * One snapshot may be shared by searches started in the same game tick and center chunk.
+ * 保留旧搜索接口使用的区块快照。同一世界、同一游戏刻、同一区块中心可以复用一次复制结果。
+ * 当前客户端仍调用 clientTick，但它只发性能计时通知并清除失效条目；不会每次更新复制区块。
  */
 public final class PathCaches {
 
@@ -82,6 +81,7 @@ public final class PathCaches {
                 || entry.getValue().owner() != minecraft.level);
     }
 
+    // 只复制中心前后各四个区块范围内已经加载的区块，最多九乘九个；同时记住哪些格有方块实体，不复制实体对象。
     private static LoadedChunks snapshot(ClientLevel level, BlockPos feet) {
         Long2ObjectOpenHashMap<LoadedChunks.ChunkSnapshot> map = new Long2ObjectOpenHashMap<>();
         LongOpenHashSet blockEntities = new LongOpenHashSet();
@@ -107,6 +107,7 @@ public final class PathCaches {
         return new LoadedChunks(map, blockEntities, level.getMinBuildHeight(), level.getHeight());
     }
 
+    // 复制只能在客户端主线程、当前实际世界中做，避免读到另一个存档或正在变化的区块容器。
     private static void requireActiveClientLevel(ClientLevel level) {
         Minecraft minecraft = Minecraft.getInstance();
         if (!minecraft.isSameThread()) {

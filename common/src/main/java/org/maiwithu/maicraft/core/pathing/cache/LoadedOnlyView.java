@@ -12,11 +12,8 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 
 /**
- * 活世界的"只读已加载"视图:读到未加载区块一律返回空气/空流体,
- * <b>绝不触发同步区块加载或生成</b>({@code getChunkNow} 只查内存)。
- * 执行期逐 tick 的成本复核与格集重算读的世界经此钳制——路径末端
- * 伸进未加载地形时,每 tick 的读取不会触发同步区块加载
- * 区块上。已加载区块的读取与直读 level 完全一致。
+ * 读取客户端当前已加载的区块，不为查询强行加载远处区块。当前施工和挖矿等操作仍在使用。
+ * 未加载处返回空气、空流体或没有方块实体，因此需要位置真实存在的调用者还要单独核对加载状态。
  */
 public final class LoadedOnlyView implements BlockGetter {
 

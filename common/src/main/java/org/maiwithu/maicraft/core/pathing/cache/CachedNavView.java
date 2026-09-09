@@ -10,9 +10,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
 /**
- * A {@link BlockGetter} over a {@link LoadedChunks} snapshot — the search-side world view.
- * Loaded chunk → copied block-state palette; not captured → AIR. The mutable last-chunk
- * pointer is confined to one search worker; all terrain behind it is immutable.
+ * 把旧区块快照包装成可查询方块的视图。快照里没有的区块返回空气，但调用者必须另查 isLoaded，不能把缺资料当成真实空地。
+ * 只知道哪些格有方块实体，不提供真实实体对象；当前只用于旧 forSearch 接口。
  */
 public final class CachedNavView implements BlockGetter, BlockEntityAware {
 
@@ -43,6 +42,7 @@ public final class CachedNavView implements BlockGetter, BlockEntityAware {
         }
         int chunkX = SectionPos.blockToSectionCoord(x);
         int chunkZ = SectionPos.blockToSectionCoord(z);
+        // 连续查询同一区块时复用上次查到的快照；跨区块时按坐标重新查，不会让上一个区块冒充当前区块。
         LoadedChunks.ChunkSnapshot chunk = prev;
         if (chunk == null || chunk.chunkX() != chunkX || chunk.chunkZ() != chunkZ) {
             chunk = loaded.at(chunkX, chunkZ);

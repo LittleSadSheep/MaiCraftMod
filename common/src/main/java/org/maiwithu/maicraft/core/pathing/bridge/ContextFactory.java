@@ -16,17 +16,8 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.BlockGetter;
 
 /**
- * 上下文工厂:把当前客户端身体与只读快照接到 {@link CalculationContext}。
- *
- * <p>{@link #forSearch}(主线程调用)从 {@link PathCaches#ensureSnapshot}
- * 拿本维度的 {@link LoadedChunks} 快照,套上 {@link CachedNavView}
- * (逐格 memoize,未捕获 chunk 乐观按 AIR),chunk 加载谓词即快照
- * 捕获谓词;背包/附魔/饥饿/药水在 {@link CalculationContext} 与
- * {@code ToolSet} 构造时折成 final 字段。产出的上下文整体冻结,
- * 可交给 worker 线程跑完整场搜索。
- *
- * <p>{@link #forExecution}(主线程专用)直读活世界,供执行期逐 tick
- * 复核成本;{@code safeForThreadedUse=false},禁止交给 worker。
+ * 准备方块和挖掘费用计算所需的环境：forExecution 读取已加载现场，当前挖矿和找方块仍调用它；forSearch 准备旧搜索的冻结区块。
+ * 调用者可提供自己的创建方法；共同的保护格会与当前任务继承的保护范围合并。
  */
 public final class ContextFactory {
 
@@ -65,6 +56,7 @@ public final class ContextFactory {
         if (!(player.level() instanceof ClientLevel level)) {
             throw new IllegalArgumentException("path search requires a LocalPlayer in ClientLevel");
         }
+        // 旧搜索分支先在游戏线程复制区块，再把只读快照和对应的加载判断一起交给费用计算对象。
         LoadedChunks loaded = PathCaches.ensureSnapshot(level, player.blockPosition());
         CachedNavView view = new CachedNavView(loaded);
         return builder.create(player, view, view::isLoaded, true, protectedSacred(sacred), deniedPlace,
@@ -97,6 +89,7 @@ public final class ContextFactory {
     public static CalculationContext forExecution(LocalPlayer player, LongSet sacred,
                                                   LongSet deniedPlace, LongSet forbiddenBodyCells,
                                                   TerrainPermit permit, ContextBuilder builder) {
+        // 现用挖矿等查询读最新现场，只限制为已加载区块；这里不是搜索快照。
         var view = org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(player.level());
         ChunkLoadedTest loaded = view instanceof org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView v
                 ? v::isLoaded : ChunkLoadedTest.ALWAYS;

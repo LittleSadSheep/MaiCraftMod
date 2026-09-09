@@ -14,12 +14,7 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 
 /**
- * Fully detached, immutable terrain input for one A* generation.
- *
- * <p>Capture happens on the Minecraft client thread. Each loaded chunk's block-state palettes are
- * copied before publication; workers never retain or read a {@link LevelChunk}, {@code ClientLevel},
- * block entity, or player. Replacing the cache entry cannot affect an in-flight search because the
- * old snapshot owns all of its palette copies.
+ * 保存旧搜索用的一批冻结区块：方块状态、高度范围，以及有方块实体的位置。调用者拿不到可修改原集合的入口。
  */
 public final class LoadedChunks {
 
@@ -57,8 +52,7 @@ public final class LoadedChunks {
     }
 
     /**
-     * One copied chunk-column. Palette instances are private to this snapshot and never mutated
-     * after construction.
+     * 逐段复制一个区块的方块状态表；后续搜索读这份表，不直接保留会随游戏变化的原区块内容。
      */
     public static final class ChunkSnapshot {
 

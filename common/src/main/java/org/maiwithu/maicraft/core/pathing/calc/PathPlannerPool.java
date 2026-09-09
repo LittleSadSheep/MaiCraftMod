@@ -9,18 +9,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
- * The shared worker pool that runs A* searches off the Minecraft client thread. Each
- * embedded Baritone navigation submits its search here and polls the returned future each tick.
- *
- * <h2>Sizing: bounded, CPU-friendly</h2>
- * A* is pure CPU work. MaiCraft controls one local body, so more than two workers only adds heat and
- * contention. The pool is fixed at at most two daemon workers; excess generations queue instead of
- * spawning threads. This leaves the client/render threads responsive on high-core-count machines.
- *
- * <p>Workers are <b>daemon</b> (never hold up JVM shutdown) and run at {@link Thread#MIN_PRIORITY} so
- * the OS scheduler prefers the latency-sensitive game / render threads whenever both are runnable —
- * a cheap best-effort assist on top of the hard thread cap. Idle core threads time out
- * ({@link ThreadPoolExecutor#allowCoreThreadTimeOut}) so the pool holds no threads when nothing navigates.
+ * 给现用 Baritone 寻路和地形检查分配后台计算线程：最多两个线程，另有三十二个排队位置。
+ * 队列满了返回失败，不让这次计算改在游戏线程上硬跑；空闲线程一分钟后可退出。提交者负责准备可在后台使用的数据。
  */
 public final class PathPlannerPool {
 
@@ -47,6 +37,7 @@ public final class PathPlannerPool {
     }
 
     /** Run {@code task} on the planner pool; the result lands in the returned future. */
+    // 把计算排到后台并立即返回一个等待结果的对象；如果连队列也进不去，返回的对象直接带失败原因。
     public static <T> CompletableFuture<T> submit(Supplier<T> task) {
         try {
             return CompletableFuture.supplyAsync(task, POOL);
