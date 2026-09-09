@@ -92,6 +92,20 @@ public final class BuildDesignPreviewTest {
         check(runtime.execute(player, design, null, "read-only-request", ignored -> {
             throw new AssertionError("idempotent execution republished the preview");
         }) == record, "request_key must retain the original read-only result");
+        var modelParameters = JsonParser.parseString("""
+                {"operation":"preview","blueprint":{"blocks":[
+                  {"offset":[-2,0,3],"block_id":"minecraft:spruce_planks"}]}}
+                """);
+        Goal model = new Goal("maicraft:build", "Preview exact authored block", design.target(),
+                modelParameters.toString(), "{}", List.of(), List.of());
+        check(IntentRuntime.isReadOnlyDesign(model), "model previews must bypass the body scheduler");
+        var modelRecord = runtime.execute(player, model, null, "authored-preview", preview -> {
+            published.set(preview); return true;
+        });
+        check(modelRecord.getState() == TaskState.SUCCESS && published.get().designOnly(),
+                "build preview finishes without starting construction");
+        check(published.get().cells().get(new BlockPos(-2, 64, 3)).is(Blocks.SPRUCE_PLANKS),
+                "model preview must not move the origin or replace the selected material");
         level.loaded = false;
         action = BuildDesignAdapter.design(design, player, null, ignored -> {
             throw new AssertionError("missing site must not publish a speculative blueprint");

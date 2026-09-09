@@ -28,6 +28,15 @@ public final class MachineRegressionSuite {
         MachineLayoutJobsTest.main(args);
         MachineBlueprintAbilityTest.main(args);
         BlueprintRuntimeEntryTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BuildingSceneCompilerTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BuildingSceneInspectionTest.main(args);
+        org.maiwithu.maicraft.mcp.BuildingModelPublicTest.main(args);
+        try { org.maiwithu.maicraft.core.blueprint.BuildingSceneStoreTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("building scene revision regression", failure); }
+        try { BuildingSceneRuntimeTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("building model entry and export regression", failure); }
+        try { BuildProjectContinuationTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("durable building continuation regression", failure); }
         org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocumentTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachineBuildCompletionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudgetTest.main(args);
