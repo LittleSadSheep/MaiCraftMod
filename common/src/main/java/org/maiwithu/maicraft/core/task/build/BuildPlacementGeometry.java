@@ -8,6 +8,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.StandingAndWallBlockItem;
@@ -20,7 +21,9 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -46,7 +49,6 @@ import java.util.function.Predicate;
  */
 final class BuildPlacementGeometry {
 
-    private static final double CROUCH_EYE_HEIGHT = 1.27;
     private static final double REACH = 4.45;
     private static final double[] FACE_SAMPLES = {0.25, 0.50, 0.75};
     private static final Direction[] SUPPORT_ORDER = {
@@ -55,7 +57,7 @@ final class BuildPlacementGeometry {
     };
 
     record Gesture(BlockPos stance, BlockPos clicked, Direction face, Vec3 point,
-                   float yaw, float pitch, String proof) {
+                   float yaw, float pitch, boolean sneak, String proof) {
         Gesture {
             stance = stance.immutable();
             clicked = clicked.immutable();
@@ -130,6 +132,32 @@ final class BuildPlacementGeometry {
         return !plan(player, target, targets, true, stanceAllowed).isEmpty();
     }
 
+    /** A reachable native gesture from the actual feet position, without centering on a path cell. */
+    static Gesture currentGesture(LocalPlayer player, BuildTaskRecord.Target target,
+                                   Map<Long, BuildTaskRecord.Target> targets) {
+        if (!(target.item() instanceof BlockItem) || !player.level().isLoaded(target.pos())) return null;
+        BuildPlacementStage stage = new BuildPlacementStage(player.level(), player.level()::isLoaded,
+                targets, target, false);
+        if (!stage.bodyCellAvailable(player.blockPosition())) return null;
+        for (AABB box : target.desiredState().getCollisionShape(stage, target.pos()).toAabbs())
+            if (box.move(target.pos()).intersects(player.getBoundingBox())) return null;
+        List<Gesture> candidates = new ArrayList<>();
+        BlockState live = stage.state(target.pos());
+        if (!live.isAir() && (live.canBeReplaced()
+                || (live.is(target.block()) && maximumUses(target) > 1)))
+            gesturesAt(player, target, stage, target.pos(), Direction.UP, player.position(),
+                    true, true, candidates);
+        for (Direction toward : SUPPORT_ORDER) {
+            BlockPos clicked = target.pos().relative(toward);
+            Direction face = toward.getOpposite();
+            if (stage.support(clicked, face))
+                gesturesAt(player, target, stage, clicked, face, player.position(), false, true, candidates);
+        }
+        return candidates.stream().min(Comparator.comparingDouble(g ->
+                Math.abs(net.minecraft.util.Mth.wrapDegrees(g.yaw() - player.getYRot()))
+                        + Math.abs(g.pitch() - player.getXRot()))).orElse(null);
+    }
+
     private static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
                                       Map<Long, BuildTaskRecord.Target> targets, boolean firstOnly,
                                       Predicate<BlockPos> stanceAllowed) {
@@ -167,7 +195,8 @@ final class BuildPlacementGeometry {
     static BlockState predict(LocalPlayer player, BuildTaskRecord.Target target,
                               BlockHitResult hit, float yaw, float pitch) {
         if (!(target.item() instanceof BlockItem)) return null;
-        return predictedState(player, new ItemStack(target.item()), hit, yaw, pitch);
+        return predictedState(player, new ItemStack(target.item()), hit, yaw, pitch,
+                player.isSecondaryUseActive());
     }
 
     /** True for the final state or for a receipt-confirmable intermediate of a bounded multi-use. */
@@ -222,31 +251,45 @@ final class BuildPlacementGeometry {
             if (firstOnly && !out.isEmpty()) return;
             if (!stanceAllowed.test(stance)
                     || !stage.bodyCellAvailable(stance)) continue;
-            Vec3 eye = new Vec3(stance.getX() + 0.5, stance.getY() + CROUCH_EYE_HEIGHT,
-                    stance.getZ() + 0.5);
-            for (double a : FACE_SAMPLES) {
-                for (double b : FACE_SAMPLES) {
-                    Vec3 point = facePoint(clicked, face, a, b);
-                    if (eye.distanceToSqr(point) > REACH * REACH) continue;
-                    if (!stage.rayClear(eye, point, clicked)) continue;
-                    float yaw = AimGeometry.yawTo(eye, point);
-                    float pitch = AimGeometry.pitchTo(eye, point);
-                    Gesture gesture = new Gesture(stance, clicked, face, point, yaw, pitch,
-                            direct ? "replaceable target face" : "adjacent support face");
-                    if (provesGesture(player, target, gesture)) {
-                        out.add(gesture);
-                        if (firstOnly) return;
-                    }
-                }
-            }
+            gesturesAt(player, target, stage, clicked, face,
+                    new Vec3(stance.getX() + .5, stance.getY(), stance.getZ() + .5),
+                    direct, false, out);
+            if (firstOnly && !out.isEmpty()) return;
         }
+    }
+
+    private static void gesturesAt(LocalPlayer player, BuildTaskRecord.Target target,
+                                    BuildPlacementStage stage, BlockPos clicked, Direction face,
+                                    Vec3 feet, boolean direct, boolean live, List<Gesture> out) {
+        BlockState state = stage.state(clicked);
+        boolean sneak = BuildPlacementInteraction.requiresSneak(state);
+        Vec3 eye = feet.add(0, player.getEyeHeight(sneak ? Pose.CROUCHING : Pose.STANDING), 0);
+        VoxelShape shape = state.getShape(stage, clicked);
+        for (Vec3 point : facePoints(clicked, shape, face)) {
+            if (eye.distanceToSqr(point) > REACH * REACH || !stage.rayClear(eye, point, clicked)) continue;
+            BlockHitResult hit = shape.clip(eye, point, clicked);
+            if (hit == null || hit.isInside() || hit.getDirection() != face
+                    || hit.getLocation().distanceToSqr(point) > 1.0e-6) continue;
+            float yaw = AimGeometry.yawTo(eye, point), pitch = AimGeometry.pitchTo(eye, point);
+            Gesture gesture = new Gesture(BlockPos.containing(feet), clicked, face, point, yaw, pitch,
+                    sneak, direct ? "replaceable target face" : "adjacent support face");
+            if (live ? provesLiveGesture(player, target, gesture) : provesGesture(player, target, gesture))
+                out.add(gesture);
+        }
+    }
+
+    private static boolean provesLiveGesture(LocalPlayer player, BuildTaskRecord.Target target, Gesture gesture) {
+        BlockState predicted = predictedState(player, new ItemStack(target.item()), gesture.syntheticHit(),
+                gesture.yaw(), gesture.pitch(), gesture.sneak());
+        return predicted != null && (target.acceptsPlacedState(predicted)
+                || isProgress(target, player.level().getBlockState(target.pos()), predicted));
     }
 
     private static boolean provesGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                          Gesture gesture) {
         if (target.itemPlace()) return true;
-        BlockState predicted = predict(player, target, gesture.syntheticHit(),
-                gesture.yaw(), gesture.pitch());
+        BlockState predicted = predictedState(player, new ItemStack(target.item()), gesture.syntheticHit(),
+                gesture.yaw(), gesture.pitch(), gesture.sneak());
         if (predicted != null && (target.acceptsPlacedState(predicted)
                 || isProgress(target, player.level().isLoaded(target.pos())
                         ? player.level().getBlockState(target.pos())
@@ -303,7 +346,7 @@ final class BuildPlacementGeometry {
         List<BlockPos> out = new ArrayList<>();
         for (int dy : new int[]{-1, 0, -2, 1}) {
             int y = target.getY() + dy;
-            for (int radius : new int[]{2, 3, 4}) {
+            for (int radius : new int[]{1, 2, 3, 4}) {
                 for (int dx = -radius; dx <= radius; dx++) {
                     for (int dz = -radius; dz <= radius; dz++) {
                         if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
@@ -316,36 +359,42 @@ final class BuildPlacementGeometry {
         return out;
     }
 
-    private static Vec3 facePoint(BlockPos clicked, Direction face, double a, double b) {
-        double x = clicked.getX() + 0.5;
-        double y = clicked.getY() + 0.5;
-        double z = clicked.getZ() + 0.5;
+    static List<Vec3> facePoints(BlockPos clicked, VoxelShape shape, Direction face) {
+        // Clip against the union from the actual eye later: hidden/internal box faces cannot win.
+        List<Vec3> points = new ArrayList<>();
+        for (AABB box : shape.toAabbs()) for (double a : FACE_SAMPLES) for (double b : FACE_SAMPLES)
+            points.add(facePoint(clicked, box, face, a, b));
+        return points;
+    }
+
+    private static Vec3 facePoint(BlockPos clicked, AABB box, Direction face, double a, double b) {
+        double x = 0, y = 0, z = 0;
         switch (face.getAxis()) {
             case X -> {
-                x = clicked.getX() + (face == Direction.EAST ? 1.0 : 0.0);
-                y = clicked.getY() + a;
-                z = clicked.getZ() + b;
+                x = face == Direction.EAST ? box.maxX : box.minX;
+                y = box.minY + (box.maxY - box.minY) * a;
+                z = box.minZ + (box.maxZ - box.minZ) * b;
             }
             case Y -> {
-                x = clicked.getX() + a;
-                y = clicked.getY() + (face == Direction.UP ? 1.0 : 0.0);
-                z = clicked.getZ() + b;
+                x = box.minX + (box.maxX - box.minX) * a;
+                y = face == Direction.UP ? box.maxY : box.minY;
+                z = box.minZ + (box.maxZ - box.minZ) * b;
             }
             case Z -> {
-                x = clicked.getX() + a;
-                y = clicked.getY() + b;
-                z = clicked.getZ() + (face == Direction.SOUTH ? 1.0 : 0.0);
+                x = box.minX + (box.maxX - box.minX) * a;
+                y = box.minY + (box.maxY - box.minY) * b;
+                z = face == Direction.SOUTH ? box.maxZ : box.minZ;
             }
         }
         // Pull a hair inside the clicked block so floating-point rounding keeps the ray on the
         // intended face while the BlockHitResult still reports that exact outward direction.
-        return new Vec3(x - face.getStepX() * 1.0e-4,
-                y - face.getStepY() * 1.0e-4,
-                z - face.getStepZ() * 1.0e-4);
+        return new Vec3(clicked.getX() + x - face.getStepX() * 1.0e-4,
+                clicked.getY() + y - face.getStepY() * 1.0e-4,
+                clicked.getZ() + z - face.getStepZ() * 1.0e-4);
     }
 
     private static BlockState predictedState(LocalPlayer player, ItemStack stack, BlockHitResult hit,
-                                             float yaw, float pitch) {
+                                             float yaw, float pitch, boolean sneak) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
         Vec3 look = direction(yaw, pitch);
         Direction[] nearest = Direction.values();
@@ -356,6 +405,7 @@ final class BuildPlacementGeometry {
         try {
             BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(
                     player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
+                @Override public boolean isSecondaryUseActive() { return sneak; }
                 @Override public Direction getHorizontalDirection() {
                     return Direction.fromYRot(yaw);
                 }

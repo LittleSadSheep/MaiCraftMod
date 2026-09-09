@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 /** Read-only collision view at one point in construction, rather than the finished solid volume. */
-final class BuildPlacementStage {
+final class BuildPlacementStage implements BlockGetter {
     private final BlockGetter world;
     private final Predicate<BlockPos> loaded;
     private final Map<Long, BuildTaskRecord.Target> targets;
@@ -35,19 +35,30 @@ final class BuildPlacementStage {
         return world.getBlockState(pos);
     }
 
+    @Override public BlockState getBlockState(BlockPos pos) { return state(pos); }
+    @Override public net.minecraft.world.level.block.entity.BlockEntity getBlockEntity(BlockPos pos) {
+        return world.getBlockEntity(pos);
+    }
+    @Override public net.minecraft.world.level.material.FluidState getFluidState(BlockPos pos) {
+        return state(pos).getFluidState();
+    }
+    @Override public int getHeight() { return world.getHeight(); }
+    @Override public int getMinBuildHeight() { return world.getMinBuildHeight(); }
+
     boolean support(BlockPos pos, net.minecraft.core.Direction face) {
         if (!loaded.test(pos)) return false;
         BlockState state = state(pos);
         if (state.isAir() || state.canBeReplaced()) return false;
-        try { return state.isFaceSturdy(world, pos, face); }
-        catch (RuntimeException ignored) { return state.isCollisionShapeFullBlock(world, pos); }
+        // A slab or stair is a legal click anchor even when the clicked face is not sturdy.
+        // The item placement context separately checks any support needed for survival.
+        return !state.getShape(this, pos).isEmpty();
     }
 
     boolean bodyCellAvailable(BlockPos feet) {
         if (feet.equals(active.pos()) || feet.above().equals(active.pos())) return false;
         BlockState low = state(feet), high = state(feet.above());
-        if (!low.getCollisionShape(world, feet).isEmpty()
-                || !high.getCollisionShape(world, feet.above()).isEmpty()
+        if (!low.getCollisionShape(this, feet).isEmpty()
+                || !high.getCollisionShape(this, feet.above()).isEmpty()
                 || !low.getFluidState().isEmpty() || !high.getFluidState().isEmpty()) return false;
         // Missing floor remains a candidate only: the live navigator must provide real support.
         return state(feet.below()).getFluidState().isEmpty();
@@ -61,7 +72,7 @@ final class BuildPlacementStage {
             BlockPos cell = BlockPos.containing(from.add(delta.scale(i / (double) samples)));
             if (cell.equals(clicked) || cell.equals(active.pos()) || cell.equals(previous)) continue;
             previous = cell;
-            if (!state(cell).getShape(world, cell).isEmpty()) return false;
+            if (state(cell).getShape(this, cell).clip(from, to, cell) != null) return false;
         }
         return true;
     }

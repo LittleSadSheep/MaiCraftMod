@@ -44,7 +44,29 @@ public final class BuildPlacementStageTest {
         }
         check(checkedLayers == 18, "test includes every interior layer and the final roof");
         rejectsActualObstructions(plan, interior);
+        partialShapesLeaveRealRayOpenings();
         System.out.println("BuildPlacementStageTest: passed; checked 18 closed-volume construction layers");
+    }
+
+    private static void partialShapesLeaveRealRayOpenings() {
+        TestWorld world = new TestWorld();
+        var active = target(new BlockPos(3, 65, 0), false);
+        var stage = new BuildPlacementStage(world, pos -> true, Map.of(), active, false);
+        BlockPos slab = new BlockPos(1, 65, 0), clicked = new BlockPos(3, 65, 0);
+        world.cells.put(slab, Blocks.OAK_SLAB.defaultBlockState());
+        check(stage.support(slab, Direction.UP) && stage.support(slab, Direction.EAST),
+                "non-sturdy slab faces are still clickable anchors");
+        check(stage.rayClear(new Vec3(.5, 65.75, .5), new Vec3(3.1, 65.75, .5), clicked),
+                "a ray above a bottom slab passes through the unoccupied half");
+        check(!stage.rayClear(new Vec3(.5, 65.25, .5), new Vec3(3.1, 65.25, .5), clicked),
+                "the same slab still blocks a ray through its solid half");
+        world.cells.put(slab, Blocks.OAK_STAIRS.defaultBlockState().setValue(
+                net.minecraft.world.level.block.state.properties.BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH));
+        check(stage.rayClear(new Vec3(.5, 65.75, .25), new Vec3(3.1, 65.75, .25), clicked),
+                "a ray through the low side of stairs is not blocked by the whole cell");
+        world.cells.put(slab, Blocks.STONE.defaultBlockState());
+        check(!stage.rayClear(new Vec3(.5, 65.75, .5), new Vec3(3.1, 65.75, .5), clicked),
+                "full blocks still block the open-half ray");
     }
 
     private static void rejectsActualObstructions(Map<Long, BuildTaskRecord.Target> plan, BuildTaskRecord.Target active) {
