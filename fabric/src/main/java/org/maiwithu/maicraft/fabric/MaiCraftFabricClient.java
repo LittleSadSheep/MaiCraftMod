@@ -15,9 +15,13 @@ import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.core.MaiCraftCore;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 
-/** Fabric 的客户端接线入口：注册功能、启动本地 MCP，并把游戏事件转交给共享运行时。 */
+/**
+ * Fabric 的客户端接线入口，把加载器事件连接到公共运行时、预览和消息观察。
+ * 它不另写一套任务调度或身体动作，两个加载器尽量共用同一实现。
+ */
 public final class MaiCraftFabricClient implements ClientModInitializer {
     @Override
+    // 先登记公共工具和任务，再把启动、每刻更新、退出接到 Fabric 事件上；真正的玩法逻辑仍在公共模块。
     public void onInitializeClient() {
         // 先建立工具和任务执行器的对应关系，客户端启动后再开放 MCP 接单。
         MaiCraftCore.init();
@@ -27,11 +31,13 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(ClientRuntime::tick);
         ClientTickEvents.END_CLIENT_TICK.register(PreviewController::tick);
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> ClientRuntime.stop());
+        // 聊天消息保留发送者身份；游戏提示按系统文字交给注意事件系统，这里没有单独使用动作栏 overlay 标志。
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receivedAt) ->
                 GameplayAttentionMonitor.chat(
                         sender.getName(), sender.getId(), message.getString(), false));
         ClientReceiveMessageEvents.GAME.register((message, overlay) ->
                 GameplayAttentionMonitor.chat(null, null, message.getString(), true));
+        // 注册本地 maicraft 状态与预览命令，不向服务器登记同名管理员命令。
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
                 dispatcher.register(PreviewCommands.attach(ClientCommandManager.literal("maicraft")
                         .then(ClientCommandManager.literal("status").executes(context ->

@@ -15,6 +15,7 @@ out
 .idea/
 !.idea/scopes
 
+# 只忽略实际构建输出目录，不能把 Java 源码里也叫 build 的包一起屏蔽。
 # gradle
 /build/
 /buildSrc/build/
@@ -37,6 +38,8 @@ runs
 *.prompt.md
 *.generated.md
 .vscode
+# 临时报告集中在 docs/tmp；docs 继续沿用本地保留、不进入 Git 的规则。
 docs/
+# 项目工作规则只在根目录保留，不进入 Git 历史。
 AGENTS.md
 experiments/

@@ -3,15 +3,18 @@ plugins {
     id 'maven-publish'
 }
 
+// 统一产物名字，包含 Mod 名、模块名和 Minecraft 版本。
 base {
     archivesName = "${mod_id}-${project.name}-${minecraft_version}"
 }
 
+// 按配置选择 Java 工具链，并另生成源码包。
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(java_version)
     withSourcesJar()
 }
 
+// 设置编译依赖仓库；Sponge 与 Parchment 的指定坐标走各自限定仓库，减少错误来源匹配。
 repositories {
     mavenCentral()
     // https://docs.gradle.org/current/userguide/declaring_repositories.html#declaring_content_exclusively_found_in_one_repository
@@ -45,6 +48,7 @@ repositories {
 
 // Declare capabilities on the outgoing configurations.
 // Read more about capabilities here: https://docs.gradle.org/current/userguide/component_capabilities.html#sec:declaring-additional-capabilities-for-a-local-component
+// 声明产物可被依赖方识别的坐标。按当前 archivesName 公式，前两个 capability 名字相同。
 ['apiElements', 'runtimeElements', 'sourcesElements'].each { variant ->
     configurations."$variant".outgoing {
         capability("$group:${base.archivesName.get()}:$version")
@@ -56,6 +60,7 @@ repositories {
     }
 }
 
+// 源码包与普通 Jar 都附带许可证；下面的 Jar 清单只记录版本、名称等元信息。
 sourcesJar {
     from(rootProject.file('LICENSE')) {
         rename { "${it}_${mod_name}" }
@@ -80,6 +85,7 @@ jar {
     }
 }
 
+// 资源文件里的版本和 Mod 信息占位符在这里展开；新增用于资源的属性要加入这张表，不是在根 build.gradle 找表。
 processResources {
     var expandProps = [
             'version'                      : version,
@@ -105,6 +111,7 @@ processResources {
     inputs.properties(expandProps)
 }
 
+// 配置 Maven 发布方式，只有执行发布任务才使用；目标地址由 local_maven_url 环境变量提供。
 publishing {
     publications {
         register('mavenJava', MavenPublication) {

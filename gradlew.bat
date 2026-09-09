@@ -26,6 +26,7 @@
 @rem Set local scope for the variables with windows NT shell
 if "%OS%"=="Windows_NT" setlocal
 
+@rem 从脚本自己的位置定位项目，不依赖调用命令时所在目录。
 set DIRNAME=%~dp0
 if "%DIRNAME%"=="" set DIRNAME=.
 @rem This is normally unused
@@ -36,9 +37,11 @@ set APP_HOME=%DIRNAME%
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
+@rem 这里只是启动 Wrapper 的小 JVM 默认内存，实际构建 JVM 还有 gradle.properties 的配置。
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 
 @rem Find java.exe
+@rem 优先使用 JAVA_HOME 指向的 Java，否则查 PATH；找不到时输出原因并以失败状态退出。
 if defined JAVA_HOME goto findJavaFromJavaHome
 
 set JAVA_EXE=java.exe
@@ -70,6 +73,7 @@ goto fail
 :execute
 @rem Setup the command line
 
+@rem 交给项目自带的 Wrapper Jar 选择并启动配置的 Gradle，原命令参数继续传入。
 set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
 
 
@@ -83,6 +87,7 @@ if %ERRORLEVEL% equ 0 goto mainEnd
 :fail
 rem Set variable GRADLE_EXIT_CONSOLE if you need the _script_ return code instead of
 rem the _cmd.exe /c_ return code!
+@rem 把 Java 或启动失败的返回码传给调用方，避免失败却显示为成功。
 set EXIT_CODE=%ERRORLEVEL%
 if %EXIT_CODE% equ 0 set EXIT_CODE=1
 if not ""=="%GRADLE_EXIT_CONSOLE%" exit %EXIT_CODE%

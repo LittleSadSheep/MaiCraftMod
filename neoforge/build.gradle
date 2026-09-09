@@ -3,6 +3,7 @@ plugins {
     id 'net.neoforged.moddev'
 }
 
+// 选择 NeoForge 版本与映射，并配置开发运行入口；可选访问转换文件来自公共模块。
 neoForge {
     version = neoforge_version
     // Automatically enable neoforge AccessTransformers if the file exists
@@ -24,6 +25,7 @@ neoForge {
             jvmArgument('-Xmx3072M')
             programArguments.addAll '--width', '1280', '--height', '720'
         }
+        // 这是数据生成的启动配置；还需要实际的数据提供器注册，声明 runData 不会自动调用任意 Java 数据清单。
         data {
             data()
 
@@ -36,6 +38,7 @@ neoForge {
             server()
         }
     }
+    // 告诉开发运行环境，当前 Mod 的代码来自本模块主源码集。
     mods {
         "${mod_id}" {
             sourceSet sourceSets.main
@@ -43,4 +46,5 @@ neoForge {
     }
 }
 
+// 若运行数据生成得到资源，这个目录会参与打包；当前是否真的生成了标签要检查提供器和输出文件。
 sourceSets.main.resources { srcDir 'src/generated/resources' }

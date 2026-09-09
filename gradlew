@@ -67,6 +67,7 @@
 # Attempt to set APP_HOME
 
 # Resolve links: $0 may be a link
+# 从脚本路径开始跟随符号链接，找到实际安装目录。
 app_path=$0
 
 # Need this for daisy-chained symlinks.
@@ -86,12 +87,14 @@ done
 # shellcheck disable=SC2034
 APP_BASE_NAME=${0##*/}
 # Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
+# 解析真实目录并避免目录切换的提示文本混入路径。
 APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s
 ' "$PWD" ) || exit
 
 # Use the maximum available, or set MAX_FD != -1 to use that value.
 MAX_FD=maximum
 
+# 警告只写标准错误；下面 die 还会用非零返回码结束。
 warn () {
     echo "$*"
 } >&2
@@ -104,6 +107,7 @@ die () {
 } >&2
 
 # OS specific support (must be 'true' or 'false').
+# 识别平台，稍后为 Windows 兼容 shell 转换路径，为支持的平台调整文件句柄上限。
 cygwin=false
 msys=false
 darwin=false
@@ -119,6 +123,7 @@ CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
 
 
 # Determine the Java command to use to start the JVM.
+# 优先使用 JAVA_HOME；还兼容 AIX 的 Java 路径，未设置时从 PATH 找 Java。
 if [ -n "$JAVA_HOME" ] ; then
     if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
         # IBM's JDK on AIX uses strange locations for the executables
@@ -144,6 +149,7 @@ location of your Java installation."
 fi
 
 # Increase the maximum file descriptors if we can.
+# 尽量提高可打开文件数；系统不支持时仅警告，不阻止 Gradle 启动。
 if ! "$cygwin" && ! "$darwin" && ! "$nonstop" ; then
     case $MAX_FD in #(
       max*)
@@ -171,6 +177,7 @@ fi
 #   * DEFAULT_JVM_OPTS, JAVA_OPTS, and GRADLE_OPTS environment variables.
 
 # For Cygwin or MSYS, switch paths to Windows format before running java
+# 把程序路径和确实像路径的参数转换为 Windows 可识别形式，选项参数不做路径转换。
 if "$cygwin" || "$msys" ; then
     APP_HOME=$( cygpath --path --mixed "$APP_HOME" )
     CLASSPATH=$( cygpath --path --mixed "$CLASSPATH" )
@@ -211,6 +218,7 @@ DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
 #   * For example: A user cannot expect ${Hostname} to be expanded, as it is an environment variable and will be
 #     treated as '${Hostname}' itself on the command line.
 
+# 先把 Wrapper 主类、类路径和原始参数组成位置参数，保留带空格参数的边界。
 set -- \
         "-Dorg.gradle.appname=$APP_BASE_NAME" \
         -classpath "$CLASSPATH" \
@@ -232,7 +240,7 @@ fi
 #   readarray ARGS < <( xargs -n1 <<<"$var" ) &&
 #   set -- "${ARGS[@]}" "$@"
 #
-# but POSIX shell has neither arrays nor command substitution, so instead we
+# 为避免依赖 Bash 的数组和进程替换写法，下面先逐行解析再重新组成位置参数。
 # post-process each arg (as a line of input to sed) to backslash-escape any
 # character that might be a shell metacharacter, then use eval to reverse
 # that process (while maintaining the separation between arguments), and wrap
@@ -242,6 +250,7 @@ fi
 # an unmatched quote.
 #
 
+# 再解析环境变量中的 JVM 选项；特殊字符先转义，重组后仍作为独立参数传入。
 eval "set -- $(
         printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" |
         xargs -n1 |
@@ -249,4 +258,5 @@ eval "set -- $(
         tr '\n' ' '
     )" '"$@"'
 
+# 用 Java 进程替换当前 shell，让退出状态直接交回调用方。
 exec "$JAVACMD" "$@"

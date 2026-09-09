@@ -1,6 +1,8 @@
+# NeoForge 读取的 Mod 元信息；占位符由 Gradle 构建时替换。
 modLoader = "javafml" #mandatory
 loaderVersion = "${neoforge_loader_version_range}" #mandatory
 license = "${license}" # Review your options at https://choosealicense.com/.
+# 这一段是 Mod 的标识与显示信息，不负责注册游戏行为。
 [[mods]] #mandatory
 modId = "${mod_id}" #mandatory
 version = "${version}" #mandatory
@@ -9,10 +11,12 @@ credits="${credits}" #optional
 authors = "${mod_author}" #optional
 description = '''${description}''' #mandatory (Supports multiline text)
 [[mixins]]
+# 载入公共访问器和客户端事件钩子的配置。
 config = "${mod_id}.mixins.json"
 
 [[mixins]]
 config = "maicraft-baritone.mixins.json"
+# 依赖的 type=required 表示必需；side=CLIENT 限定依赖适用端，真正入口的客户端限制还在 Java 的 @Mod 注解中。
 [[dependencies.${mod_id}]] #optional
 modId = "neoforge" #mandatory
 type="required" #mandatory (Can be one of "required", "optional", "incompatible" or "discouraged")

@@ -1,3 +1,4 @@
+// 把 buildSrc 下的 Groovy 脚本编译成项目共用的 Gradle 约定插件。
 plugins {
     id 'groovy-gradle-plugin'
 }

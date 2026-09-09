@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintStateTest;
 
 /** No game launch required; actual server receipts still require in-game acceptance tests. */
 public final class MachineRegressionSuite {
+    // 顺序运行机器、建造和部分语义边界测试；任一断言或未处理异常都会使这组检查失败。
     public static void main(String[] args) {
         try { TravelTransportContractTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
@@ -50,6 +51,7 @@ public final class MachineRegressionSuite {
         catch (Exception failure) { throw new AssertionError("read-only build preview regression", failure); }
         try { SemanticBuildSiteTest.main(args); }
         catch (Exception failure) { throw new AssertionError("loaded build site regression", failure); }
+        // 接下来检查内部机器能力参数，包括整数、来源和目标约束；这里没有经过最外层 PublicToolCatalog。
         accepts("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"label\":\"factory\",\"radius\":4}");
         rejects("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"radius\":4.5}");
         rejects("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"radius\":2147483648}");
@@ -69,6 +71,7 @@ public final class MachineRegressionSuite {
         rejects("maicraft:build_machine", "{\"kind\":\"landmark\",\"label\":\"site\"}", "{\"snapshot_id\":\"receipt\",\"design\":{\"components\":[],\"connections\":[]}}");
         rejects("maicraft:modify_machine", "{\"kind\":\"landmark\",\"label\":\"site\"}", "{\"operation\":\"apply_blueprint\",\"snapshot_id\":\"receipt\",\"blueprint\":{}}");
         rejects("maicraft:design_machine", "null", "{\"design\":{\"components\":[{\"name\":\"buffer\",\"block_id\":\"minecraft:chest\",\"count\":1,\"role\":\"storage\"}],\"connections\":[],\"blueprint\":{}}}");
+        // 模拟中途取消，要求保留已发生的数量变化和不确定性，同时不把内部槽号直接公开。
         var interrupted = IntentTask.withInterruptedEffects(
                 org.maiwithu.maicraft.task.TaskResult.cancelled("cancelled"),
                 org.maiwithu.maicraft.task.TaskResult.fail("partial deposit", java.util.Map.of(
@@ -94,9 +97,11 @@ public final class MachineRegressionSuite {
         json.add("parameters", JsonParser.parseString(parameters));
         return Goal.fromJson(json);
     }
+    // 只调用 SemanticGoalContract；单独通过这项检查不等于同一个请求一定能通过外层公开协议。
     private static void accepts(String ability, String target, String parameters) {
         SemanticGoalContract.validate(goal(ability, target, parameters), Set.of(ability));
     }
+    // 预期明确的契约异常才算拒绝成功；没有抛异常就让测试失败，其他异常也不能冒充正确拒绝。
     private static void rejects(String ability, String target, String parameters) {
         try { accepts(ability, target, parameters); }
         catch (SemanticContractException expected) { return; }

@@ -1,8 +1,10 @@
+# 默认文本使用 LF；下面为 Windows 脚本和 Gradle 文件指定 CRLF。
 * text eol=lf
 *.bat text eol=crlf
 *.patch text eol=lf
 *.java text eol=lf
 *.gradle text eol=crlf
+# 这些二进制类型不进行文本换行转换。
 *.png binary
 *.gif binary
 *.exe binary

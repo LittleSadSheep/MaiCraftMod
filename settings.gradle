@@ -1,3 +1,4 @@
+// 告诉 Gradle 去哪些仓库找构建插件；Fabric 插件的指定坐标只向 Fabric 仓库解析。
 pluginManagement {
     repositories {
         gradlePluginPortal()
@@ -17,11 +18,13 @@ pluginManagement {
     }
 }
 
+// 安装 Java 工具链解析服务，让构建能按项目要求寻找合适 JDK；它本身不启动 Minecraft。
 plugins {
     id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
 }
 
 // This should match the folder name of the project, or else IDEA may complain (see https://youtrack.jetbrains.com/issue/IDEA-317606)
+// 根项目由公共代码、Fabric 版本和 NeoForge 版本三个模块组成。
 rootProject.name = 'MaiCraft'
 include('common')
 include('fabric')
