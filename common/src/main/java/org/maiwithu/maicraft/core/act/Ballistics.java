@@ -16,9 +16,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.DoubleUnaryOperator;
 
-/** Projectile aiming helpers for gravity-affected arrows. */
+/**
+ * 帮弓箭选择看向哪里：考虑箭下坠、空气减速、目标移动，以及中途是否被墙或其他实体挡住。
+ * 先用公式猜方向，再用逐刻飞行模拟筛选。这里算的是当前所见世界下的预测，真正发射和确认命中由战斗任务负责。
+ */
 public final class Ballistics {
 
+    // lookPoint 用来转头，direction 是发射方向，travelTicks 是模拟要飞多久；不是已经射中。
     public record Aim(Vec3 lookPoint, Vec3 direction, double travelTicks) {}
 
     private record SimulationHit(double ticks, double centerDistance) {}
@@ -29,6 +33,8 @@ public final class Ballistics {
 
     private Ballistics() {}
 
+    // 先估计几个可能命中的方向，再逐刻模拟箭会不会撞墙或撞到别的实体。
+    // 所有方向都不行就返回 null；这是本算法没找到射法，不是证明现实中绝无可行弹道。
     public static Aim findArrowShot(Level level, Entity shooter, Entity target,
                                     double velocity, double gravity, double drag,
                                     double hitboxRadius, double maxRange,
@@ -45,6 +51,7 @@ public final class Ballistics {
         }
 
         Vec3 currentLook = shooter.getViewVector(1.0f).normalize();
+        // 按目标当前速度预测它以后的位置，暂不预测转弯、跳跃落地或受到击退后的变速。
         Vec3 targetVelocity = target.getDeltaMovement();
         Vec3 shooterVelocity = inheritedVelocity(shooter.getDeltaMovement(), shooter.onGround(), copiesShooterVelocity);
         List<Vec3> candidates = new ArrayList<>();
@@ -61,6 +68,7 @@ public final class Ballistics {
             SimulationHit hit = simulate(level, shooter, target, targetVelocity, eye,
                     direction.scale(velocity).add(shooterVelocity), gravity, drag, hitboxRadius);
             if (hit == null) continue;
+            // 在能命中的方向中，偏好靠近身体中心、少转头、飞得快的那一个。
             double score = hit.centerDistance + angleDegrees(currentLook, direction) * 0.03 + hit.ticks * 0.01;
             if (score < bestScore) {
                 bestScore = score;
@@ -71,15 +79,18 @@ public final class Ballistics {
     }
 
     /** A simple no-drag fallback retained for callers that only need a look point. */
+    // 简化版只按重力计算低弧线，不看墙和实体。无解时退回直接看目标，所以返回点不代表一定射得到。
     public static Vec3 aimPoint(Vec3 eye, Vec3 target, double v, double g) {
         Vec3 direction = solveDirection(eye, target, v, g);
         return direction == null ? target : eye.add(direction.scale(64.0));
     }
 
+    // 箭实际从眼睛下方约 0.1 格发出，模拟也从这里开始，避免贴着障碍时算错。
     static Vec3 projectileStart(double x, double eyeY, double z) {
         return new Vec3(x, eyeY - PROJECTILE_EYE_OFFSET, z);
     }
 
+    // 弓箭等会带上射手的横向速度；射手在空中才额外带上竖直速度。弩等可由调用方关闭继承。
     static Vec3 inheritedVelocity(Vec3 movement, boolean onGround, boolean copiesShooterVelocity) {
         if (!copiesShooterVelocity) {
             return new Vec3(0.0, 0.0, 0.0);
@@ -87,6 +98,7 @@ public final class Ballistics {
         return new Vec3(movement.x, onGround ? 0.0 : movement.y, movement.z);
     }
 
+    // 按不计空气阻力的抛物线找较低的发射角；根号里的数小于零表示这种速度和重力下到不了。
     static Vec3 solveDirection(Vec3 eye, Vec3 target, double velocity, double gravity) {
         double dx = target.x - eye.x;
         double dz = target.z - eye.z;
@@ -106,6 +118,8 @@ public final class Ballistics {
         return direction.lengthSqr() < EPS ? null : direction.normalize();
     }
 
+    // 反过来假定箭在 ticks 刻后到达，算所需的起始方向。
+    // 把每刻减速与重力累加进公式；结果长度接近一才符合传入的发射速度。
     static Vec3 directionByTime(Vec3 eye, Vec3 target, double ticks,
                                 double velocity, double gravity, double drag) {
         if (ticks <= EPS || velocity <= EPS || drag <= 0.0) {
@@ -127,6 +141,7 @@ public final class Ballistics {
         return allFinite(direction) ? direction : null;
     }
 
+    // 估计到达目标时箭从哪个方向飞来，后面用它在目标身体框内挑更容易碰到的点。
     static Vec3 velocityOnImpact(Vec3 initialDirection, double ticks,
                                  double velocity, double gravity, double drag) {
         if (initialDirection == null || ticks <= EPS || velocity <= EPS || drag <= 0.0) {
@@ -155,6 +170,8 @@ public final class Ballistics {
         return Math.toDegrees(Math.acos(dot));
     }
 
+    // 先试着找到合适的飞行时间，再对移动后的目标中心和几个边缘点计算方向。
+    // 同时尝试精确时间和附近的整数刻，减小公式估计与逐刻模拟之间的差别。
     private static void addDragAwareCandidates(List<Vec3> out, Vec3 eye, AABB box, Vec3 targetVelocity,
                                                double velocity, double gravity, double drag,
                                                double hitboxRadius) {
@@ -195,6 +212,8 @@ public final class Ballistics {
         addDirectionForTime(out, eye, point, roundedTicks, velocity, gravity, drag);
     }
 
+    // 沿估计的入射方向挑身体框里的候选点，尽量往内部留余量，避免擦过边缘。
+    // 这里只看目标的形状；墙和其他实体要到 simulate 才检查。
     static Vec3 findHittablePosition(Vec3 eye, Vec3 directionOnImpact,
                                      Vec3 entityPositionOnImpact, AABB targetBox) {
         if (directionOnImpact == null || directionOnImpact.lengthSqr() < EPS) return null;
@@ -223,6 +242,7 @@ public final class Ballistics {
         return best;
     }
 
+    // 公式要求的速度与实际速度偏差超过 15% 就不采用，剩下的方向还要经过完整模拟。
     private static void addDirectionForTime(List<Vec3> out, Vec3 eye, Vec3 point, double ticks,
                                             double velocity, double gravity, double drag) {
         Vec3 direction = directionByTime(eye, point, ticks, velocity, gravity, drag);
@@ -236,6 +256,7 @@ public final class Ballistics {
         addCandidate(out, direction.normalize());
     }
 
+    // 再补一组不计阻力的低弧线候选，避免只靠飞行时间搜索漏掉可行方向。
     private static void addParabolicFallbackCandidates(List<Vec3> out, Vec3 eye, AABB box,
                                                        Vec3 targetVelocity, double velocity,
                                                        double gravity) {
@@ -246,6 +267,7 @@ public final class Ballistics {
         }
     }
 
+    // 去掉无效向量和几乎相同的方向，少做重复模拟；夹角小于 0.05° 视为重复。
     private static void addCandidate(List<Vec3> out, Vec3 direction) {
         if (direction == null || direction.lengthSqr() < EPS || !allFinite(direction)) {
             return;
@@ -259,6 +281,7 @@ public final class Ballistics {
         out.add(normalized);
     }
 
+    // 最多模拟 80 刻。每刻比较这一小段路先撞目标、方块还是其他实体；先撞障碍就淘汰。
     private static SimulationHit simulate(Level level, Entity shooter, Entity target, Vec3 targetVelocity,
                                           Vec3 start, Vec3 initialVelocity, double gravity,
                                           double drag, double hitboxRadius) {
@@ -287,11 +310,13 @@ public final class Ballistics {
             }
 
             pos = next;
+            // 飞完这一刻后先按比例减速，再加向下的重力，得到下一刻的速度。
             velocity = velocity.scale(drag).add(0.0, -gravity, 0.0);
         }
         return null;
     }
 
+    // 排除自己和指定目标，找这一小段路上的其他活着且可碰撞实体；它们也会挡箭。
     private static double firstOtherEntityDistance(Entity shooter, Entity target, Vec3 from, Vec3 to,
                                                    double hitboxRadius) {
         AABB hitbox = new AABB(
@@ -305,6 +330,7 @@ public final class Ballistics {
         return hit == null ? Double.MAX_VALUE : hit.getLocation().distanceToSqr(from);
     }
 
+    // 算弹道这一小段离目标中心最近有多远，作为“是否正中身体”的评分。
     private static double distanceToSegment(Vec3 point, Vec3 from, Vec3 to) {
         Vec3 segment = to.subtract(from);
         double lengthSqr = segment.lengthSqr();
@@ -315,6 +341,7 @@ public final class Ballistics {
         return point.distanceTo(from.add(segment.scale(t)));
     }
 
+    // 每个方向取中间和靠近两侧的点，组合成最多 27 个瞄点；很薄的方向只取中间。
     private static List<Vec3> sampleBox(AABB box) {
         double[] xs = axisSamples(box.minX, box.maxX);
         double[] ys = axisSamples(box.minY, box.maxY);
@@ -347,6 +374,7 @@ public final class Ballistics {
 
     private record TimeSearchResult(double ticks, double delta) {}
 
+    // 比较左右两个时间段的误差，不断保留较好的一半，直到范围足够小；这是缩小候选范围的估算。
     private static TimeSearchResult findMinimum(double from, double to, DoubleUnaryOperator function) {
         double lower = from;
         double upper = to;

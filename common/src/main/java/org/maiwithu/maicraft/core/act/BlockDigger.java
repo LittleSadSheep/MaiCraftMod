@@ -22,14 +22,10 @@ import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
- * Progressive first-person block breaking through the serialized native action boundary:
- * <ul>
- *   <li>stage or select the best usable tool and await its receipt;</li>
- *   <li>aim at a raycast-verified face and advance the native break receipt each tick;</li>
- *   <li>report success only after synchronized client facts confirm the target changed.</li>
- * </ul>
- * Shared by path-obstruction clearing ({@code ExecHarness}), auto-mine
- * ({@code MineCompanionTask}), and {@link Interaction} (break_block / interact).
+ * 把挖一个方块拆成选工具、关背包、瞄准、持续挖、等结果几步。
+ * 每一刻调用一次，不会在一个循环里瞬间挖完；目标和未完成动作保存在本对象中。
+ * 它有“可先拆遮挡物”和“只挖目标”两种入口，是否允许碰别的方块由调用方选择。
+ * 这里使用公共动作接口的确认结果；该接口当前的客户端预测误判见审计记录 A26。
  */
 public final class BlockDigger {
 
@@ -99,6 +95,7 @@ public final class BlockDigger {
      * exactly the block (and face) the caller's view ray landed on, no internal
      * aim-point search. The hit block is always treated as the target.
      */
+    // 调用方已经选好准星命中面时，直接挖这一格，不再找别的方块，也不自动选工具。
     public DigResult digStep(BlockHitResult crosshairHit) {
         if (blockHitDelay > 0) {                    // let the previous break land first
             blockHitDelay--;
@@ -133,6 +130,7 @@ public final class BlockDigger {
      * so callers must poll the existing receipt instead of submitting another
      * {@link #digStep(BlockPos)}.
      */
+    // 方块从画面上消失后，仍要核对之前发出的挖掘记录。没有本次记录，不能把别人挖掉算作自己挖成。
     public DigResult settleGone(boolean targetBreak) {
         if (receipt == null) {
             // The target can disappear while this digger is still selecting/staging its tool.
@@ -157,6 +155,8 @@ public final class BlockDigger {
         return DigResult.NO_SHOT;
     }
 
+    // 坐标入口先找能看到的目标面；找不到时还可能改挖眼睛与目标之间的遮挡物。
+    // 只许挖指定格的调用方应使用 digTargetStep，否则“挖目标”可能顺便拆掉别的格。
     public DigResult digStep(BlockPos target) {
         Level level = player.level();
         if (NavigationSafetyContext.protectsMutation(target)) {
@@ -202,6 +202,7 @@ public final class BlockDigger {
     }
 
 
+    // 只尝试目标自身可见的面，绝不改挖前面的遮挡块；看不到就交回调用方换站位。
     public DigResult digTargetStep(BlockPos target) {
         if (NavigationSafetyContext.protectsMutation(target)) {
             cancel();
@@ -226,6 +227,8 @@ public final class BlockDigger {
         return advance(hit, true);
     }
     /** Shared per-tick dig advance against a resolved hit (face + aim point). */
+    // 真正开挖前再次检查保护格，接着按顺序等工具搬运、关闭背包、快捷栏选择完成。
+    // 这些步骤都是跨刻等待；中途失败就不继续挖。
     private DigResult advance(BlockHitResult hit, boolean targetBreak) {
         if (NavigationSafetyContext.protectsMutation(hit.getBlockPos())) {
             cancel();
@@ -249,6 +252,7 @@ public final class BlockDigger {
             submitToolSelection(toolContext);
             return DigResult.PROGRESSING;
         }
+        // 从背包搬到快捷栏后要先确认物品到位，再关掉背包回到世界操作。
         if (toolStageReceipt != null) {
             if (!toolStageReceipt.terminal()) {
                 toolStageReceipt = toolContext.menus().poll(toolContext, toolStageReceipt);
@@ -283,6 +287,7 @@ public final class BlockDigger {
                 return DigResult.NO_SHOT;
             }
         }
+        // 挖到一半换了手中物品或其附带数据，就取消旧挖掘，以免继续使用旧工具的进度。
         if (receipt != null && !receipt.terminal() && destroyingItem != null
                 && !net.minecraft.world.item.ItemStack.isSameItemSameComponents(
                         destroyingItem, player.getMainHandItem())) {
@@ -291,6 +296,7 @@ public final class BlockDigger {
         }
         InputDriver.lookAt(player, hit.getLocation());
         LocalPlayerContext context = ClientRuntime.requireContext(player);
+        // 第一次出手先等视角靠近目标；开始以后继续推进同一份挖掘记录，不每刻重新开挖。
         if (receipt == null) {
             if (!aimReady(hit.getLocation())) {
                 return DigResult.PROGRESSING;
@@ -313,6 +319,8 @@ public final class BlockDigger {
         return DigResult.NO_SHOT;
     }
 
+    // 换目标之前先结束旧挖掘和未完成的工具操作，下一次 tick 才开始新目标。
+    // 随后查适合的工具槽位；此时只是选出编号，还没保证它已经拿在手里。
     private boolean start(BlockPos target, boolean selectTool) {
         if (receipt != null && !receipt.terminal()
                 || toolStageReceipt != null && !toolStageReceipt.terminal()
@@ -338,6 +346,7 @@ public final class BlockDigger {
         return true;
     }
 
+    // 工具在快捷栏就切换选中格；在背包第 9～35 格则先显示背包，再与当前快捷栏格交换。
     private void submitToolSelection(LocalPlayerContext context) {
         int bestSlot = pendingToolSlot;
         if (bestSlot >= 9 && bestSlot < 36 && !context.menus().ensureVisible(context)) return;
@@ -360,6 +369,8 @@ public final class BlockDigger {
      * "already awaiting confirmation".  Breaks are physically stopped, submitted one-shot hotbar
      * selections are retired as uncertain, and pending menu staging is closed at the task boundary.
      */
+    // 取消不只是清变量：要通知游戏停止挖掘，结束未确认的切工具操作，并处理还开着的背包。
+    // 这些停止动作交给公共动作／菜单接口收尾，最后才清掉本对象记录。
     public void cancel() {
         boolean pendingBreak = receipt != null && !receipt.terminal();
         boolean pendingSelection = toolSelectReceipt != null && !toolSelectReceipt.terminal();
@@ -392,6 +403,7 @@ public final class BlockDigger {
     }
 
     /** Clear logical state. Deliberately does not touch the post-break cooldown. */
+    // 只清本次挖掘的局部记录；挖完后的冷却仍保留，避免连续挖掘绕过速度设置。
     private void reset() {
         pos = null;
         receipt = null;
@@ -418,6 +430,8 @@ public final class BlockDigger {
      * the face the ray hits ({@code getDirection}), so the dig looks at the real interaction
      * face like a player would. {@code null} if nothing on the block is in line of sight.
      */
+    // 从方块实际形状的中心和六个方向找可见点，射线必须真的落到目标格。
+    // 门、楼梯等不是完整立方体，不能只拿整格中心判断能不能挖。
     private BlockHitResult reachableHit(BlockPos pos) {
         Level level = player.level();
         if (!level.isLoaded(pos)) {
@@ -461,6 +475,7 @@ public final class BlockDigger {
      * of reach. ({@link #reachableHit} already tries the centre first, so if that hit the target it
      * would have returned it; reaching here means the centre ray hits something else.)
      */
+    // 朝目标整格中心看过去，返回最先挡住视线的方块，供允许拆遮挡物的入口选择。
     private BlockHitResult centerRaycast(BlockPos target) {
         Level level = player.level();
         if (!level.isLoaded(target)) {
@@ -481,6 +496,7 @@ public final class BlockDigger {
 
     /** A point on the block's shape:
      *  {@code min*m + max*(1-m)} on each axis. */
+    // 把 0、0.5、1 映射到方块形状的两端和中间；这里 0 取最大边，1 取最小边。
     private static Vec3 offsetOn(BlockPos pos, VoxelShape shape, double mx, double my, double mz) {
         double x = shape.min(Direction.Axis.X) * mx + shape.max(Direction.Axis.X) * (1 - mx);
         double y = shape.min(Direction.Axis.Y) * my + shape.max(Direction.Axis.Y) * (1 - my);

@@ -8,11 +8,9 @@ import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 
 /**
- * Client-thread task scope for body cells that navigation must never occupy.
- *
- * <p>The semantic parent owns the observed constraint; every nested internal task creates and
- * executes its {@link PlayerNav} while the scope is active. Search contexts copy the set before
- * worker dispatch, so no thread-local state crosses the client-thread boundary.</p>
+ * 让一段任务代码及其子调用共用两份名单：“不能改动的格”和“身体不能进入的格”。
+ * 例如去取材料时，不能为了抄近路拆掉正在施工的墙，也不能走进保留给机器的空间。
+ * 名单只对当前线程有效；异步寻路必须把它复制到自己的计算数据中，不能在工作线程重新读这里。
  */
 public final class NavigationSafetyContext {
     private static final ThreadLocal<LongSet> PROTECTED_MUTATION_CELLS = new ThreadLocal<>();
@@ -26,8 +24,7 @@ public final class NavigationSafetyContext {
     }
 
     /**
-     * Run one nested task operation with an exact, internally observed area protection.
-     * Existing nested scopes are unioned, so a child cannot weaken its parent's hard constraint.
+     * 在执行 operation 这段代码期间加上保护格；子任务可以增加保护，不能把父任务的保护拿掉。
      */
     public static <T> T withProtectedArea(
             Iterable<BlockPos> mutationCells,
@@ -38,11 +35,12 @@ public final class NavigationSafetyContext {
         return withProtectedArea(mutation, body, operation);
     }
 
-    /** Packed-cell overload used by a semantic parent on every tick without rebuilding positions. */
+    /** 已经有压缩成 long 的坐标集合时直接使用，避免每刻重新创建 BlockPos。 */
     public static <T> T withProtectedArea(
             LongSet mutationCells,
             LongSet bodyCells,
             Supplier<T> operation) {
+        // 先记住外层保护，再把本层新增的格合进去；不改调用方传入的原集合。
         LongSet previousMutation = PROTECTED_MUTATION_CELLS.get();
         LongSet previous = FORBIDDEN_BODY_CELLS.get();
         LongSet combinedMutation = combined(previousMutation, mutationCells);
@@ -56,6 +54,7 @@ public final class NavigationSafetyContext {
         }
         try {
             return operation.get();
+        // 无论任务正常返回还是抛异常，都恢复进入前的保护范围，避免污染下一个无关任务。
         } finally {
             if (previousMutation == null) PROTECTED_MUTATION_CELLS.remove();
             else PROTECTED_MUTATION_CELLS.set(previousMutation);
@@ -76,6 +75,7 @@ public final class NavigationSafetyContext {
         return cells == null ? LongSets.emptySet() : cells;
     }
 
+    // 只回答这格是否在“不能改动”名单里；不在名单里也不等于已经获得所有破坏权限。
     public static boolean protectsMutation(BlockPos pos) {
         return pos != null && protectedMutationCells().contains(pos.asLong());
     }
