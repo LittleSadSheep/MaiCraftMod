@@ -7,7 +7,9 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Internal coordinates come from the machine layout compiler, never an LLM click script. */
+/**
+ * 保存一次 AE2 部件安装要求：装哪件物品、在哪一格、占中央还是某一面；构造时就检查物品和占位是否相符。
+ */
 public final class AePartTaskRecord extends TaskRecord {
     static { TaskFactory.register(AePartTaskRecord.class, AePartTask::new); }
     public final BlockPos target;

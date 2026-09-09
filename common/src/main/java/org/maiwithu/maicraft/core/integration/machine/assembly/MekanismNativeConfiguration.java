@@ -14,7 +14,10 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.world.phys.BlockHitResult;
 
-/** Plans a real configurator use from synchronized modes, without invoking configuration setters. */
+/**
+ * 读取 Mekanism 管道、机器接口和感应端口当前的模式，以及再点一次会切到哪个模式。
+ * 也读取配置器的工作模式，并提供与原生滚轮切换相同的发包动作；机器设置本身仍由手持配置器右键完成。
+ */
 public final class MekanismNativeConfiguration {
     private MekanismNativeConfiguration() {}
     public record Observation(String current, List<String> cycle) {
@@ -25,6 +28,7 @@ public final class MekanismNativeConfiguration {
         public String next() { return cycle.get((cycle.indexOf(current) + 1) % cycle.size()); }
     }
 
+    // 管道按世界方向找接口；普通机器先把东南西北换算成相对机器正面的方向，再读取该面支持的模式。
     public static Observation inspect(Level level, BlockPos position, Direction face, String medium) {
         if (!level.isLoaded(position)) throw new IllegalArgumentException("configuration target is unloaded");
         Object entity = level.getBlockEntity(position);
@@ -73,6 +77,7 @@ public final class MekanismNativeConfiguration {
         }
     }
 
+    // 必须手持配置器并处于配置模式；配能量口、流体口等还要选对介质，感应端口只要求是配置模式。
     public static boolean toolReady(ItemStack stack, String medium) {
         try {
             Class<?> item = Class.forName("mekanism.common.item.ItemConfigurator");
@@ -91,7 +96,9 @@ public final class MekanismNativeConfiguration {
         catch (ClassNotFoundException | LinkageError failure) { return false; }
     }
 
-    /** Pipes select a multipart segment from the real player ray, not merely the outside hit face. */
+    /**
+     * 普通机器核对点中了指定面；管道还要让 Mekanism 读取实际准星选中的分支，外侧碰撞面的方向不足以确定是哪段管道。
+     */
     public static boolean hitMatches(LocalPlayer player, BlockPos target, Direction desiredFace, BlockHitResult hit) {
         if (!hit.getBlockPos().equals(target)) return false;
         if (!isTransmitter(player.level(), target)) return hit.getDirection() == desiredFace;
@@ -111,6 +118,7 @@ public final class MekanismNativeConfiguration {
         } catch (ReflectiveOperationException | LinkageError failure) { throw new IllegalArgumentException("configurator mode unavailable", failure); }
     }
 
+    // 从已安装版本的枚举顺序预测工具的下一模式，不直接修改手持物上的设置。
     public static String nextToolMode(ItemStack stack) {
         try {
             Class<?> item = Class.forName("mekanism.common.item.ItemConfigurator");
@@ -121,9 +129,7 @@ public final class MekanismNativeConfiguration {
     }
 
     /**
-     * Exact official shift-scroll operation from ClientTickHandler.onMouseEvent. The packet class,
-     * slot and increment are fixed here; callers cannot provide arbitrary protocol fields. The
-     * server applies IModeItem.changeMode and synchronizes the stack; no local stack setter runs.
+     * 发送 Mekanism 原生的“主手工具模式前进一步”请求。调用者必须先取得动作额度，发送后等待服务器同步，不能直接认定切换成功。
      */
     public static void advanceToolMode(LocalPlayer player) {
         toolMode(player.getMainHandItem()); // Bind the native mode operation to a real held configurator.

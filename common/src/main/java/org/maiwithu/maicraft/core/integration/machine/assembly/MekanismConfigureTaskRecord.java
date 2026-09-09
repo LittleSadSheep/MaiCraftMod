@@ -7,7 +7,9 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** One desired native configuration, resolved internally from a machine layout's interface contract. */
+/**
+ * 保存一次机器接口配置要求：位置、哪一面、处理物品还是流体等介质、最后应是什么模式；实际支持范围在执行时读取。
+ */
 public final class MekanismConfigureTaskRecord extends TaskRecord {
     static { TaskFactory.register(MekanismConfigureTaskRecord.class, MekanismConfigureTask::new); }
     public final BlockPos target;

@@ -13,7 +13,9 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Finds existing crouching interaction stances with the same outline ray used before native use. */
+/**
+ * 为 AE2 部件安装和 Mekanism 配置寻找已有站位，并预先检查潜行时能不能点到目标。
+ */
 final class AssemblyInteractionGeometry {
     private AssemblyInteractionGeometry() {}
 
@@ -26,6 +28,7 @@ final class AssemblyInteractionGeometry {
         return hit.getType() == HitResult.Type.BLOCK ? hit : null;
     }
 
+    // 只在目标周围水平三格、向下两格至向上一格内找，按离玩家最近的有效位置选择；已失败的位置跳过。
     static BlockPos nearestStand(LocalPlayer player, BlockPos target, Set<Long> excluded, Function<Vec3, Vec3> aimFrom) {
         BlockPos best = null;
         double distance = Double.POSITIVE_INFINITY;
@@ -40,6 +43,7 @@ final class AssemblyInteractionGeometry {
         return best;
     }
 
+    // 当前只认整数高度的站位：脚和头两格必须完全没有碰撞、没有流体，脚下还要有结实的顶面。半砖上的半格站位不在候选中。
     private static boolean standable(LocalPlayer player, BlockPos feet) {
         var level = player.level();
         if (NavigationSafetyContext.forbidsBody(feet) || NavigationSafetyContext.forbidsBody(feet.above())

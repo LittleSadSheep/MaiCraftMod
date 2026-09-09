@@ -29,8 +29,8 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * One absolute control-state outcome, never a toggle script. A submitted lever use is reconciled
- * without replay; success proves the lever's state, not downstream wiring, production or safety.
+ * 把已有拉杆设为明确的开或关：先核对观察记录，再走近、空手瞄准，只点一次并等待世界状态确认。
+ * 已经是目标状态就直接完成。拉杆状态正确只说明开关拨好了，机器是否接通、是否产出仍需另行观察。
  */
 public final class MachineControlTask extends AbstractCompanionTask<MachineControlTaskRecord> {
     private static final double REACH = 4.5;
@@ -62,6 +62,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
             return failure("machine_dimension_changed", "The surveyed machine belongs to a different dimension.",
                     FailureType.TARGET_LOST);
         }
+        // 点过以后先收齐结果；此时拉杆本来就可能已经改变，不能再拿点击前状态把确认流程拦住。
         if (phase == Phase.CONFIRM) return confirm();
         if (player.containerMenu != player.inventoryMenu) {
             return failure("machine_menu_busy", "An unrelated menu is open; the machine control was not used.",
@@ -84,6 +85,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         };
     }
 
+    // 从已观察范围中找原版拉杆。指定位置时只认那一根；没有指定时必须恰好一根，不能随意选一个。
     private TaskState select() {
         if (!freshSurvey()) return TaskState.FAILED;
         List<BlockPos> candidates = new ArrayList<>();
@@ -111,6 +113,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         }
         before = player.level().getBlockState(control);
         expected = before.setValue(LeverBlock.POWERED, r.request.desiredPowered());
+        // 目标状态已经满足就无需走路或点击；注意当前保护区检查在这之前，所以受保护拉杆仍会被拒绝。
         if (before.equals(expected)) {
             alreadySatisfied = true;
             controlStateVerified = true;
@@ -120,6 +123,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         return TaskState.RUNNING;
     }
 
+    // 走到手够得到且视线能碰到拉杆的位置；导航说已到但仍不能交互，等待十次后报告站位不合适。
     private TaskState approach() {
         if (withinReach()) {
             stopNav();
@@ -153,9 +157,8 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
             }
             receipt = null;
         }
-        // An empty hand prevents a held mod item from intercepting use or placing something.
-        // Vanilla's fallback useWithoutItem is entered only for MAIN_HAND, even if the offhand
-        // is empty. Do not send an offhand packet that can never pull this lever.
+        // 空主手能避免手持物抢先处理右键；原版空手使用方块的后备分支只接受主手。
+        // 当前只会切到空快捷栏，不会把手持物移到普通背包；九格全满就报告需要空手。
         if (player.getMainHandItem().isEmpty()) hand = InteractionHand.MAIN_HAND;
         else {
             for (int slot = 0; slot < 9; slot++) {
@@ -184,12 +187,12 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
                     FailureType.UNKNOWN);
         }
         InputDriver.halt(player);
-        // Wait for the native input tick to release secondary use, rather than accidentally
-        // bypassing ordinary block interaction while approaching from a sneaking stance.
+        // 等游戏实际松开潜行再点。潜行右键可能绕过普通方块交互，光发出停止指令还不够。
         if (player.isSecondaryUseActive()) return TaskState.RUNNING;
         Vec3 aim = aimPoint();
         InputDriver.lookAt(player, aim);
         if (!aimGate.ready(player, aim.subtract(player.getEyePosition()))) return TaskState.RUNNING;
+        // 镜头真正转到位后，用游戏准星再确认命中的就是这根拉杆，避免只根据预先计算的视线点击。
         HitResult trace = Interaction.nativeRaytrace(player, REACH);
         if (!(trace instanceof BlockHitResult hit) || trace.getType() != HitResult.Type.BLOCK
                 || !hit.getBlockPos().equals(control)) {
@@ -199,7 +202,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         var context = ClientRuntime.requireContext(player);
         if (!context.mutationAvailable()) return TaskState.RUNNING;
         if (!freshSurvey()) return TaskState.FAILED;
-        // Set the latch BEFORE entering a native action: an exception cannot permit another use.
+        // 发出右键之前就记为“已尝试”；即使调用中抛出异常，也不能重试一次把拉杆又拨回去。
         controlAttempted = true;
         outcomeUncertain = true;
         phase = Phase.CONFIRM;
@@ -221,8 +224,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
             return failure("machine_control_unconfirmed", "The lever's requested state was not confirmed; no second toggle was attempted.",
                     FailureType.UNKNOWN);
         }
-        // Vanilla LeverBlock changes POWERED only on the server; its client use emits particles.
-        // The exact expected state must survive the native receipt's distinct-tick stability gate.
+        // 原版客户端点击拉杆只显示粒子，开关状态由服务器改变。先等动作确认，再核对拉杆仍是目标状态。
         if (!player.level().isLoaded(control) || !player.level().getBlockState(control).equals(expected)) {
             return failure("machine_control_state_diverged", "The lever changed again while its outcome was being confirmed.",
                     FailureType.TARGET_LOST);
@@ -232,6 +234,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         return TaskState.SUCCESS;
     }
 
+    // 核对整个观察立方体都已加载且结构摘要没变。附近无关方块变化目前也会要求重新观察。
     private boolean freshSurvey() {
         BlockPos center = r.request.center();
         int radius = r.request.radius();
@@ -278,6 +281,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         return TaskState.FAILED;
     }
 
+    // 已经点过、确认还没结束时，父任务即使认为目标够了，也应先等这一笔点击结清。
     @Override public boolean mustSettleBeforeSatisfiedCancellation() {
         return controlAttempted && !controlStateVerified && receipt != null && !receipt.terminal();
     }
@@ -292,13 +296,14 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
                         "machine control task ended before confirmation");
                 receiptStatus = receipt.status().name().toLowerCase(java.util.Locale.ROOT);
             } catch (RuntimeException unavailable) {
-                // The runtime retires old-body receipts; cleanup must preserve uncertain evidence.
+                // 角色或运行环境已更换时由运行层作废旧确认；这里仍保留“结果不确定”，不能声称没点过。
             }
             outcomeUncertain = true;
         }
         if (controlAttempted && !controlStateVerified) outcomeUncertain = true;
     }
 
+    // 分别报告是否尝试点击、开关是否确认、结果是否不确定；机器生产和接线验证始终留给后续观察。
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("operation", "set_control");

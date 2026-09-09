@@ -30,7 +30,10 @@ import org.maiwithu.maicraft.core.task.inventory.EquipTaskRecord;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Uses an equipped configurator exactly once per observed next mode; every transition needs a receipt. */
+/**
+ * 把一个 Mekanism 接口切到明确模式，例如某面设为输出。先准备配置器、选工具模式，再走到能点准该面的地方。
+ * 接口每次只前进一步，确认确实切到预期模式后才能继续；达到目标就停，一整轮仍不到目标则报告异常。
+ */
 public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismConfigureTaskRecord> {
     private final ActualViewConvergenceGate aimGate = new ActualViewConvergenceGate();
     private EquipCompanionTask equip;
@@ -49,6 +52,7 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
         MekanismNativeConfiguration.Observation observation = observe();
         if (!observation.cycle().contains(r.desiredMode)) { stop("configuration_mode_unsupported", "Desired mode is not supported by this installed machine."); return; }
         block = player.level().getBlockState(r.target).getBlock();
+        // 已经是目标模式就完成，不再要求玩家拿到配置器。
         if (observation.current().equals(r.desiredMode)) { verified = true; return; }
         ResourceLocation id = ResourceLocation.parse("mekanism:configurator");
         if (!BuiltInRegistries.ITEM.containsKey(id)) { stop("configurator_unavailable", "The installed registry has no Mekanism configurator."); return; }
@@ -61,6 +65,7 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
             failureCode = "configuration_timeout"; return TaskState.TIMEOUT;
         }
         if (verified) return TaskState.SUCCESS;
+        // 先收完上一次操作的结果；工具切模式和机器接口切模式共用这一等待入口，但分别核对各自状态。
         if (receipt != null) return confirm();
         if (submitted) return stop("configuration_receipt_missing", "Native configuration was submitted without a receipt; inspect before retrying.");
         if (equip != null) {
@@ -82,6 +87,7 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
             return stop("configuration_menu_busy", "Close the active menu before native configurator use.");
         }
         boolean inductionPort = r.medium.equals("induction_port");
+        // 先试当前位置能否点准；不行再找已有站位。管道要点到指定分支，感应端口则任意一面都能切换。
         Vec3 aim = relocate ? null : aimFrom(player.getEyePosition());
         if (aim == null) return approach();
         stopNav(); InputDriver.halt(player); InputDriver.sneak(player, true); InputDriver.lookAt(player, aim);
@@ -94,6 +100,7 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
         var observation = observe();
         if (observation.current().equals(r.desiredMode)) { verified = true; return TaskState.SUCCESS; }
         if (confirmedUses >= observation.cycle().size()) return stop("configuration_cycle_diverged", "The machine did not reach the requested mode after one verified cycle.");
+        // 用刚读到的状态计算下一步，避免按照开始时的旧模式一直循环点击。
         beforeMode = observation.current(); expectedMode = observation.next();
         if (!context.mutationAvailable()) return TaskState.RUNNING;
         submitted = true;
@@ -126,6 +133,7 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
         if (stance != null) rejectedStances.add(stance.asLong());
         stance = null; relocate = true; aimTicks = 0; aimGate.reset(); stopNav();
     }
+    // 确认失败就保留“已提交但未结清”；只有实际状态仍符合预期，才清除这一标记并允许下一次操作。
     private TaskState confirm() {
         var context = ClientRuntime.requireContext(player);
         receipt = context.actions().poll(context, receipt);
@@ -145,6 +153,7 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
         verified = expectedMode.equals(r.desiredMode);
         return verified ? TaskState.SUCCESS : TaskState.RUNNING;
     }
+    // 逐次切换手持配置器的模式，每次等确认；当前最多尝试十六次，找不到可用模式就停止。
     private TaskState switchToolMode() {
         if (modeSwitches >= 16) return stop("configurator_mode_unavailable", "No supported configurator mode was reached after the observed mode cycle.");
         var context = ClientRuntime.requireContext(player);
@@ -177,7 +186,7 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
             try {
                 var context = ClientRuntime.requireContext(player);
                 receipt = context.actions().retireOneShotForTaskBoundary(context, receipt, "Mekanism configuration ended");
-            } catch (RuntimeException revoked) { /* Actor revocation owns cleanup after disconnect; outcome stays uncertain. */ }
+            } catch (RuntimeException revoked) { /* 断线后由角色运行层收尾；这次配置仍可能已经生效。 */ }
         }
         InputDriver.halt(player); super.cleanup();
     }

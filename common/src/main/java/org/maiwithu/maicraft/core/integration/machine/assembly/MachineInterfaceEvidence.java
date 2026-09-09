@@ -7,7 +7,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 
-/** Queries installed NeoForge side capabilities without extracting, inserting or manufacturing contents. */
+/**
+ * 通过 NeoForge 接口读取某一面的库存、储液槽或能量口信息，不实际存取。Fabric 没有这套接口时会报告无法读取。
+ * 看到接口只代表能查到它，不代表两端资源相容或已经传输成功；物品和流体这里只报告槽数。
+ */
 public final class MachineInterfaceEvidence {
     private MachineInterfaceEvidence() {}
 

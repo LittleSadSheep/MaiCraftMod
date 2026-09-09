@@ -26,7 +26,10 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Physical, idempotent machine initialization through observed menu/transfer/close receipts. */
+/**
+ * 补足机器里指定物品的数量，例如给 AE2 驱动器装存储元件。先打开并观察真实菜单，分次放入缺少的数量，再关好菜单。
+ * 已经够数就不再添加；当前只向空槽放入，不补齐已有但未满的一叠，也不取走原有物品。
+ */
 public final class MachineContentsTask extends AbstractCompanionTask<MachineContentsTaskRecord> {
     private enum Phase { HAND, OPEN, OBSERVE, DEPOSIT, CLOSE, FAILURE_CLEANUP, DONE }
     private Phase phase;
@@ -64,6 +67,7 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
         if (world.getGameTime() > r.getDeadlineGameTime()) return failure("machine_contents_timeout", "Machine initialization timed out.");
         if (phase == Phase.DONE) return TaskState.SUCCESS;
         if (!sameMenu()) return failure("machine_contents_menu_changed", "The observed menu or its slot identities changed.");
+        // 先等服务器同步完整库存；打开菜单时客户端的空槽外观不能作为开始装入的依据。
         if (!StockEvidence.isContainerSynchronized(player, ownedMenu)) {
             if (++syncTicks > 100) return failure("machine_contents_unsynchronized", "The machine never supplied a complete server inventory snapshot.");
             return TaskState.RUNNING;
@@ -76,6 +80,7 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
         if (installed >= r.count) { close(); return TaskState.RUNNING; }
         ItemStack source = ItemStack.EMPTY;
         for (ItemStack stack : player.getInventory().items) if (matches(stack)) { source = stack; break; }
+        // 先正常关菜单，再报告还缺多少。父级机器装配任务收到这个缺料结果后才去补货。
         if (source.isEmpty()) {
             missingCount = r.count - installed;
             failureCode = "machine_contents_material_shortage";
@@ -91,6 +96,7 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
         }
         if (selectedEntry < 0) return failure("machine_contents_no_empty_slot", "No observed empty physical slot accepts the supplied item; existing contents were preserved.");
         beforeCount = installed;
+        // 一次不超过缺额、来源这一叠、目标槽容量和六十四件；放完重新观察，再决定是否继续下一槽。
         transferCount = Math.min(Math.min(r.count - installed, 64), Math.min(source.getCount(), entries.get(selectedEntry).getMaxStackSize(source)));
         phase = Phase.DEPOSIT;
         start(MachineMenu.transferTask(id(), deadline(1200), observation.get("menu_receipt_id").getAsString(),
@@ -122,6 +128,7 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
             JsonObject observation = MachineMenu.inspect(player);
             installed = installedCount(observation, r.itemId.toString());
             ItemStack destination = entries.get(selectedEntry).getItem();
+            // 不仅看背包少了多少，还要求机器总数和本次目标空槽都增加了准确数量。
             if (installed != beforeCount + transferCount || !matches(destination) || destination.getCount() != transferCount
                     || !Boolean.TRUE.equals(result.data().get("transfer_verified"))
                     || !(result.data().get("actual_player_delta") instanceof Number delta) || delta.intValue() != -transferCount) {
@@ -152,6 +159,7 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
         for (int i = 0; i < entries.size(); i++) if (entries.get(i) != ownedMenu.getSlot(i)) return false;
         return true;
     }
+    // AE2 驱动器另检查菜单确属同一台驱动器；其他机器依靠打开任务和后续菜单身份检查。
     private boolean targetMenuMatches() {
         if (!BuiltInRegistries.BLOCK.getKey(world.getBlockState(r.target).getBlock()).toString().equals("ae2:drive")) return true;
         try {
@@ -179,6 +187,7 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
         if (ownedMenu != null && player.containerMenu == ownedMenu) { phase = Phase.FAILURE_CLEANUP; return TaskState.RUNNING; }
         fail(message, FailureType.UNKNOWN); return TaskState.FAILED;
     }
+    // 失败后由拥有菜单的一层安排关闭；子存取任务已经在收尾时等待它，避免两个关闭流程争着处理鼠标上的物品。
     private TaskState cleanupFailure() {
         var context = ClientRuntime.requireContext(player);
         if (cleanupReceipt != null) {
@@ -206,7 +215,7 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
         if (child != null) { child.stop(player, StopReason.REPLACED); child.result(TaskState.CANCELLED); child = null; }
         if (!closed && ownedMenu != null && player.containerMenu == ownedMenu && cleanupReceipt == null && !childClosing) {
             try { var context = ClientRuntime.requireContext(player); context.menus().closeForTaskBoundary(context, 80, "machine contents task ended"); }
-            catch (RuntimeException revoked) { /* Actor handoff owns any old-world menu. */ }
+            catch (RuntimeException revoked) { /* 世界或角色已更换时，旧菜单由运行层收尾。 */ }
         }
         super.cleanup();
     }

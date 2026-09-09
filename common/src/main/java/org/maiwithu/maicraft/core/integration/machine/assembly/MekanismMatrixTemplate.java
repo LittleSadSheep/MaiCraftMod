@@ -6,14 +6,14 @@ import com.google.gson.JsonObject;
 import java.util.Set;
 import java.util.function.Predicate;
 
-/** A complete bounded induction matrix layout, following Mekanism's cuboid/MatrixValidator rules. */
+/**
+ * 生成一套 Mekanism 感应矩阵模板：完整外壳、输入输出端口、内部储能元件和供应元件，以及装好后要检查的模式和边界。
+ */
 public final class MekanismMatrixTemplate {
     private MekanismMatrixTemplate() {}
 
     /**
-     * Coordinates start at the lower northwest corner. Two interior cells are necessary for one
-     * storage cell and one provider; a 3x3x3 cube cannot contain both. Ports never replace frame edges.
-     * The caller supplies registered block/item evidence and executes configuration after building.
+     * 使用默认三宽、三高、四深和一对内部元件生成模板；具体物品必须已安装，这里只生成计划，不放置方块。
      */
     public static JsonObject compile(String tier, Predicate<String> blockExists, Predicate<String> itemExists) {
         return compile(tier, new JsonObject(), blockExists, itemExists);
@@ -42,6 +42,7 @@ public final class MekanismMatrixTemplate {
         int cells = integer(options, "cell_count", 1, 1, capacity);
         int providers = integer(options, "provider_count", 1, 1, capacity);
         if (cells + providers > capacity) throw new IllegalArgumentException("matrix interior cannot contain requested cells and providers");
+        // 高度至少四格且内部有两格余量时，为施工留一个两格高的站人空间；其余内部位置按储能元件、供应元件、空气的顺序填。
         boolean accessClearance = height >= 4 && capacity - cells - providers >= 2;
         JsonObject blueprint = new JsonObject();
         JsonArray blocks = new JsonArray();
@@ -72,6 +73,7 @@ public final class MekanismMatrixTemplate {
         verification.addProperty("require_formed", true);
         verification.addProperty("require_input_output_modes", true);
         verification.addProperty("production_verified_by_geometry", false);
+        // 验收要求外壳成形且端口模式正确；这里明确保留“形状本身不能证明生产”的标记。
         blueprint.add("commissioning", verification);
         JsonObject ports = new JsonObject();
         ports.add("energy_input", port(1, 1, 0, "north"));

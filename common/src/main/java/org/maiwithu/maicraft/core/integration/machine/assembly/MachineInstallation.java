@@ -18,7 +18,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.BlockHitResult;
 
-/** Installation facts derived from installed registries and AE2's read-only placement predictor. */
+/**
+ * 当前主要负责 AE2 的电缆和面板：识别物品占哪个槽、预判右键会装到哪里、读取已经装好的部件。
+ * 这里的普通方块 block/BlockSpec 帮助代码目前仅被测试使用；机器主施工使用 MachineConstructionPlan 和建造任务。
+ */
 public final class MachineInstallation {
     private MachineInstallation() {}
 
@@ -26,7 +29,9 @@ public final class MachineInstallation {
         public BlockSpec { exactProperties = Set.copyOf(exactProperties); }
     }
 
-    /** Null side means the center cable slot; peripheral parts always name one world direction. */
+    /**
+     * side 为空代表方块中央的电缆；面板等外围部件必须指定东、西、南、北、上、下的一面。
+     */
     public record PartSpec(Item item, Class<?> partClass, Direction side) {
         public PartSpec { Objects.requireNonNull(item); Objects.requireNonNull(partClass); }
         public String itemId() { return BuiltInRegistries.ITEM.getKey(item).toString(); }
@@ -63,6 +68,7 @@ public final class MachineInstallation {
         return set(state, property, value);
     }
 
+    // 从已安装的 AE2 接口识别物品；电缆与面板的占位不同，不能把“装在中央”和“装在某一面”混用。
     public static PartSpec aePart(String itemId, Direction side) {
         ResourceLocation id = ResourceLocation.tryParse(itemId);
         if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) throw unsupported("unknown item " + itemId);
@@ -80,7 +86,9 @@ public final class MachineInstallation {
         }
     }
 
-    /** No placement API is invoked here. Prediction can reject or redirect a click; callers must match it. */
+    /**
+     * 询问 AE2：“从这里右键会把部件装到哪一格、哪一面？”预测符合目标才允许继续；这一步不安装部件。
+     */
     public static boolean predicts(LocalPlayer player, PartSpec spec, BlockPos target, BlockHitResult hit) {
         try {
             Class<?> placement = Class.forName("appeng.parts.PartPlacement");
@@ -97,7 +105,9 @@ public final class MachineInstallation {
         }
     }
 
-    /** Exact item identity distinguishes colored cables sharing the same Java part class. */
+    /**
+     * 既比较部件种类，也比较对应物品；例如两种颜色的电缆可能使用同一个类，不能因此视为相同电缆。
+     */
     public static boolean matches(Level level, BlockPos target, PartSpec spec) {
         Object part = part(level, target, spec.side());
         if (part == null || !spec.partClass().isInstance(part)) return false;
@@ -108,7 +118,9 @@ public final class MachineInstallation {
         } catch (ReflectiveOperationException | LinkageError failure) { return false; }
     }
 
-    /** Whole-layout preflight: preserves occupied blocks and delegates existing-host compatibility to AE2. */
+    /**
+     * 检查这一格能否接纳指定部件。空气里只允许先放中央电缆，已有宿主则询问 AE2 是否能占用该空槽。
+     */
     public static boolean canInstall(Level level, BlockPos target, PartSpec spec) {
         if (!level.isLoaded(target) || level.isOutsideBuildHeight(target) || !level.getWorldBorder().isWithinBounds(target)) return false;
         if (matches(level, target, spec)) return true;
@@ -131,7 +143,9 @@ public final class MachineInstallation {
         } catch (ReflectiveOperationException | LinkageError failure) { return null; }
     }
 
-    /** Identity of all seven slots, including empty slots, for the native action's preservation check. */
+    /**
+     * 保存中央及六个面的部件对象，空槽也保留；确认安装时用它检查其他槽有没有被替换。
+     */
     static Object[] parts(Level level, BlockPos target) {
         Object[] result = new Object[7];
         result[0] = part(level, target, null);
@@ -139,6 +153,7 @@ public final class MachineInstallation {
         return result;
     }
 
+    // 只跳过本次要安装的那个槽，其余六个槽必须还是原对象；这里比较对象身份，不比较它们内部配置。
     static boolean otherPartsUnchanged(Object[] before, Object[] after, Direction changedSide) {
         int changed = changedSide == null ? 0 : changedSide.ordinal() + 1;
         for (int i = 0; i < 7; i++) if (i != changed && before[i] != after[i]) return false;

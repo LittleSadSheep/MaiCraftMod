@@ -9,7 +9,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 
-/** Machine faces remain clickable around an attached pipe; transmitter segments use Mekanism's ray API. */
+/**
+ * 寻找 Mekanism 的可点击位置：机器面中心被管道遮住时也尝试周围八个点；管道自身则识别要配置的那段分支。
+ */
 final class MekanismInteractionGeometry {
     private MekanismInteractionGeometry() {}
 
@@ -24,6 +26,7 @@ final class MekanismInteractionGeometry {
             var hit = AssemblyInteractionGeometry.hit(player, eye, aim);
             if (hit == null || !hit.getBlockPos().equals(target)) continue;
             if (port || !transmitter && hit.getDirection() == face) return aim;
+            // 当前只接受已经存在的管道分支，未采用 Mekanism 点击中央后按命中面配置的后备方式；关闭连接的一面可能因此无法重新开启。
             if (transmitter && selectedSegment(player, target, eye, aim) == face) return aim;
         }
         return null;
@@ -43,6 +46,7 @@ final class MekanismInteractionGeometry {
         return result;
     }
 
+    // 向 Mekanism 的多段碰撞盒发射视线，再把命中的小段对应回当前已连接的方向。读不到这些信息就放弃该瞄准点。
     private static Direction selectedSegment(LocalPlayer player, BlockPos target, Vec3 eye, Vec3 aim) {
         try {
             Object tile = player.level().getBlockEntity(target);

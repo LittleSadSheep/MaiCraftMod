@@ -8,10 +8,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 
 /**
- * Actual processed server BE packets, distinct from client-predicted world changes. Game-thread only.
- * Revisions certify the resulting observed server state, not a request ID. A task captures its
- * baseline immediately before native use, so earlier processed packets cannot confirm that use.
- * World-instance keys prevent reconnect/dimension reuse; cancelling never resets a baseline.
+ * 记住每个世界中哪些格子刚收到服务器的方块实体更新。安装前记一次编号，安装后编号变大才说明收到了新消息。
+ * 它证明的是服务器有新的同步，不是“服务器确认了某个请求编号”；调用者仍要检查部件确实正确。只在游戏线程使用。
  */
 public final class ServerBlockEntityReceipts {
     private static final Map<Level, LinkedHashMap<Long, Long>> RECEIVED = new WeakHashMap<>();
@@ -31,12 +29,15 @@ public final class ServerBlockEntityReceipts {
         trim(level, scope);
     }
 
-    /** Pending native actions pin their own position so busy factories cannot evict their receipt. */
+    /**
+     * 开始等待某一格的新同步，并暂时保留它的记录；工厂里其他格子更新再多，也不能挤掉这格正在等待的结果。
+     */
     public static Watch watch(Level level, BlockPos position) {
         WATCHED.computeIfAbsent(level, ignored -> new java.util.HashMap<>()).merge(position.asLong(), 1, Integer::sum);
         return new Watch(level, position.immutable(), revision(level, position));
     }
 
+    // 普通记录超过四千零九十六条时从最旧的开始删；正在被任务观察的记录保留，可能暂时超过这个数量。
     private static void trim(Level level, LinkedHashMap<Long, Long> scope) {
         Map<Long, Integer> pins = WATCHED.getOrDefault(level, Map.of());
         var iterator = scope.keySet().iterator();
@@ -52,6 +53,7 @@ public final class ServerBlockEntityReceipts {
         private boolean closed;
         private Watch(Level level, BlockPos position, long baseline) { this.level = level; this.position = position; this.baseline = baseline; }
         public boolean advanced() { return !closed && revision(level, position) > baseline; }
+        // 结束一次观察，减少这格的保留次数；多个任务都在等同一格时，要等最后一个结束才允许清理。
         @Override public void close() {
             if (closed) return;
             closed = true;

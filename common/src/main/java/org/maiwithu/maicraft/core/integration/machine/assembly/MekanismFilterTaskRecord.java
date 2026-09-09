@@ -7,7 +7,9 @@ import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Internally compiled sorter output contract; it does not expose raw filters or menu clicks. */
+/**
+ * 保存一台物流分拣机应只提取哪种物品；这是机器装配生成的要求，具体过滤列表和菜单操作由执行器处理。
+ */
 public final class MekanismFilterTaskRecord extends TaskRecord {
     static { TaskFactory.register(MekanismFilterTaskRecord.class, MekanismFilterTask::new); }
     public final BlockPos target;

@@ -3,7 +3,10 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import java.util.Map;
 
-/** Construction acceptance must not turn tutorial geometry into claimed configuration or production. */
+/**
+ * 检查机器验收报告的措辞边界：显式蓝图摆好即可完成建造，语义设计还需配置检查；两者都不能声称已经生产。
+ * 也检查旧报告不会随对象后续变化、错误顺序不能提前通过配置验收；这里不启动游戏或验证实际装配。
+ */
 public final class MachineBuildCompletionTest {
     public static void main(String[] args) {
         var explicit = new MachineBuildCompletion(true);
@@ -19,7 +22,7 @@ public final class MachineBuildCompletionTest {
         verify(semantic.report(), false, false, false, "pending");
         rejectsCommissioning(semantic);
         check(!semantic.acceptGeometry(), "semantic geometry must retain native commissioning obligations");
-        // Until commissioning succeeds, a timeout/failure receipt must retain incomplete configuration.
+        // 配置验收尚未成功时，即使方块摆好了，超时或失败报告也必须保留“配置未完成”。
         verify(semantic.report(), true, false, false, "pending");
         semantic.acceptCommissioning();
         verify(semantic.report(), true, true, true, "complete");

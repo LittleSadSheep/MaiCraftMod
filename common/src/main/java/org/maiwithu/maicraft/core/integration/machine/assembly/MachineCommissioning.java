@@ -9,7 +9,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 
-/** Read-only, client-synchronized operating evidence. Geometry alone never passes an operating test. */
+/**
+ * 读取机器已经同步到客户端的状态：Create 是否转动、Mekanism 多方块是否成形和接口模式、AE2 部件是否有电及频道。
+ * 这里集中的是观察与验收信息，不会启动机器；即使这些检查通过，也不代表机器已经产出物品。
+ */
 public final class MachineCommissioning {
     private MachineCommissioning() {}
 
@@ -56,6 +59,7 @@ public final class MachineCommissioning {
         return result;
     }
 
+    // 转速必须是有限的非零数，有动力网络且未过载，才把 Create 的转动状态记为通过。
     static boolean rotating(double speed, boolean network, boolean overloaded) {
         return Double.isFinite(speed) && Math.abs(speed) > .0001 && network && !overloaded;
     }
@@ -78,7 +82,9 @@ public final class MachineCommissioning {
         return result;
     }
 
-    /** Port modes synchronize through TileComponentConfig.readFromUpdateTag. Ejecting does not. */
+    /**
+     * 把机器相对方向的接口设置换算成世界中的六个面。接口模式会同步，自动弹出开关不靠这份数据确认。
+     */
     static JsonObject mekanismPorts(Object entity) {
         JsonObject result = new JsonObject();
         JsonArray ports = new JsonArray();
@@ -116,7 +122,9 @@ public final class MachineCommissioning {
         catch (ReflectiveOperationException | RuntimeException failure) { return null; }
     }
 
-    /** Exact formed-region check for a compiled induction matrix, including synchronized master bounds. */
+    /**
+     * 逐格检查声明的感应矩阵外壳都已成形，并找到同步了边界的主方块；主方块报告的范围必须与计划完全相同。
+     */
     public static JsonObject verifyMatrix(Level level, BlockPos minimum, BlockPos maximum) {
         JsonObject result = new JsonObject();
         result.addProperty("matrix_formed_verified", false);
@@ -157,6 +165,7 @@ public final class MachineCommissioning {
         return result;
     }
 
+    // 只对已知会同步这些信息的 AE2 部件报告电源与频道；其余部件只记录身份，不推测工作状态。
     private static JsonArray aeParts(Level level, BlockPos position) {
         JsonArray parts = new JsonArray();
         Object[] slots = MachineInstallation.parts(level, position);
@@ -181,7 +190,9 @@ public final class MachineCommissioning {
         return parts;
     }
 
-    /** Both faces must expose the declared direction; this does not assert transport or compatible resources. */
+    /**
+     * 检查紧邻的两格是否在相对两面分别允许输出和输入。只报告接口方向是否满足要求，不把它当成实际运输成功。
+     */
     public static JsonObject interfacePair(Level level, BlockPos source, BlockPos destination, String medium) {
         JsonObject result = new JsonObject();
         Direction direction = null;
@@ -226,6 +237,7 @@ public final class MachineCommissioning {
         try { return Class.forName(className, false, MachineCommissioning.class.getClassLoader()).isInstance(value); }
         catch (ClassNotFoundException | LinkageError failure) { return false; }
     }
+    // 这是本文件及多个 Mekanism 帮助类借用的无参反射调用；缺少接口时让上层说明无法观察，不编造结果。
     static Object call(Object value, String name) throws ReflectiveOperationException {
         Method method = value.getClass().getMethod(name);
         return method.invoke(value);

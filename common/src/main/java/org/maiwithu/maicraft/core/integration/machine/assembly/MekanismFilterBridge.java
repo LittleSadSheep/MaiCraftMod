@@ -13,7 +13,10 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 
-/** Narrow reflection bridge for the official visible Sorter GUI's filter and auto-eject actions. */
+/**
+ * 集中读取和提交 Mekanism 物流分拣机的过滤设置；必须是这台分拣机的真实菜单且界面可见。
+ * 当前只支持“一个指定普通物品”的单条精确过滤，不会清空其他过滤规则来强行满足请求。
+ */
 public final class MekanismFilterBridge {
     public enum Decision { READY, ADD, EDIT, CONFLICT }
     public record FilterView(boolean itemStackFilter, String itemId, boolean enabled, boolean exactComponents,
@@ -28,6 +31,7 @@ public final class MekanismFilterBridge {
     }
     private MekanismFilterBridge() {}
 
+    // 没有过滤规则就新增；只有一条同物品规则时可调整；多条规则或其他种类一律报告冲突。
     public static Decision decide(List<FilterView> filters, String requested) {
         if (filters.isEmpty()) return Decision.ADD;
         if (filters.size() != 1) return Decision.CONFLICT;
@@ -52,6 +56,7 @@ public final class MekanismFilterBridge {
         } catch (ReflectiveOperationException | LinkageError unavailable) { throw new IllegalArgumentException("installed Sorter menu API unavailable", unavailable); }
     }
 
+    // 复制现有规则并读取自动弹出开关，同时带上服务器同步编号；不能把客户端尚未同步的默认值当成真实设置。
     public static Snapshot inspect(LocalPlayer player, BlockPos position) {
         Object tile = requireMenu(player, position);
         try {
@@ -73,6 +78,7 @@ public final class MekanismFilterBridge {
         } catch (ReflectiveOperationException | LinkageError unavailable) { throw new IllegalArgumentException("installed Sorter filter API unavailable", unavailable); }
     }
 
+    // 原生按钮会反转开关，因此发包前必须确认它仍然开着，不能把已经关闭的开关又打开。
     public static void disableAutoEject(LocalPlayer player, BlockPos position) {
         Object tile = requireMenu(player, position);
         try {
@@ -85,6 +91,7 @@ public final class MekanismFilterBridge {
         } catch (ReflectiveOperationException | LinkageError unavailable) { throw new IllegalArgumentException("native Sorter auto-eject action unavailable", unavailable); }
     }
 
+    // 再核对规则未变且自动弹出已关闭，然后使用原生新增／编辑过滤请求；不直接改客户端过滤列表。
     public static void saveItemFilter(LocalPlayer player, BlockPos position, ResourceLocation itemId, Snapshot before) {
         requireMenu(player, position);
         Snapshot live = inspect(player, position);

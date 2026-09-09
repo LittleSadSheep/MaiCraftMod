@@ -7,7 +7,9 @@ import java.util.WeakHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
-/** Server tracker evidence for the exact visible Sorter menu, independent of default client tile values. */
+/**
+ * 记住当前分拣机菜单是否收到了服务器的过滤列表和自动弹出状态，防止把本地默认值当作已同步的设置。
+ */
 public final class MekanismFilterSync {
     public record Snapshot(long filtersRevision, long autoEjectRevision) {
         public boolean ready() { return filtersRevision > 0 && autoEjectRevision > 0; }
@@ -20,7 +22,9 @@ public final class MekanismFilterSync {
         return RECEIVED.getOrDefault(menu, new Snapshot(0, 0));
     }
 
-    /** Called after the optional mod has applied a property, never to apply property data itself. */
+    /**
+     * 在模组处理完服务器菜单属性后记录编号；这里只记“更新已经收到”，不替模组写入属性。
+     */
     public static void received(AbstractContainerMenu menu, short property, boolean filterList) {
         Minecraft minecraft = Minecraft.getInstance();
         if (!minecraft.isSameThread() || minecraft.player == null || minecraft.player.containerMenu != menu) return;
@@ -33,6 +37,7 @@ public final class MekanismFilterSync {
             if (!field.trySetAccessible()) return;
             Object raw = field.get(menu);
             if (!(raw instanceof List<?> data) || data.size() < 5) return;
+            // 当前依赖 Mekanism 跟踪属性列表末尾五项的类型和顺序；版本改了排列时会停止认定同步成功。
             int last = data.size() - 1;
             // TileEntityLogisticalSorter.addContainerTrackers appends auto/roundRobin/single/color/filters.
             if (!named(data.get(last), "list.SyncableFilterList") || !named(data.get(last - 1), "SyncableInt")

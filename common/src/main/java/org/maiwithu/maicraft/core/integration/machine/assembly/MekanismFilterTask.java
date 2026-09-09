@@ -24,7 +24,10 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Configure an exact output filter through the visible native GUI and confirmed server tracker packets. */
+/**
+ * 让物流分拣机只提取指定物品：腾出主手、打开菜单、等服务器同步、关闭无过滤自动弹出、保存精确过滤，最后关闭菜单。
+ * 每项设置都等新服务器数据确认；已有不相容规则时报告冲突，不擅自删掉原规则。
+ */
 public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilterTaskRecord> {
     private enum Phase { HAND, OPEN, OBSERVE, CLOSE, DONE }
     private Phase phase;
@@ -68,6 +71,7 @@ public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilt
         MekanismFilterBridge.Snapshot snapshot;
         try { snapshot = MekanismFilterBridge.inspect(player, r.target); }
         catch (IllegalArgumentException unavailable) { return failure("sorter_api_unavailable", unavailable.getMessage()); }
+        // 过滤列表和自动弹出开关两份同步都要收到；当前最多等待一百六十次更新。
         if (!snapshot.sync().ready()) {
             if (++syncTicks > 160) return failure("sorter_filter_sync_unavailable", "The native Sorter did not synchronize its filter list and auto-eject tracker.");
             return TaskState.RUNNING;
@@ -81,6 +85,7 @@ public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilt
         }
         var context = ClientRuntime.requireContext(player);
         if (!context.mutationAvailable() || !context.menus().ensureVisible(context)) return TaskState.RUNNING;
+        // 先关掉绕过过滤的自动弹出，下一轮再保存过滤；先记为已经提交，异常后也不能盲目补发。
         before = snapshot; disablingAuto = snapshot.autoEject(); submitted = true;
         receipt = context.actions().submitProtocol(context, disablingAuto ? "sorter_disable_unfiltered_ejection" : "sorter_save_exact_item_filter",
                 () -> {
@@ -90,6 +95,7 @@ public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilt
         return TaskState.RUNNING;
     }
 
+    // 关闭自动弹出时要求原过滤不变；修改过滤时要求弹出仍关闭，并收到比提交前更新的服务器数据。
     private NativeConfirmation.Verdict observeReceipt() {
         if (player.containerMenu != ownedMenu || player.level() != world) return NativeConfirmation.Verdict.DIVERGED;
         MekanismFilterBridge.Snapshot live;
@@ -146,6 +152,7 @@ public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilt
     private void start(TaskRecord record) { childRecord = record; child = TaskFactory.create(player, record); }
     private long deadline(long duration) { return Math.max(r.getDeadlineGameTime(), world.getGameTime() + duration); }
     private String id() { return r.getToolCallId() + "-sorter-" + phase + "-" + confirmedActions; }
+    // 失败时若仍拥有原菜单且没有待确认请求，先尝试关好菜单，再把原失败原因交给父任务。
     private TaskState failure(String code, String message) {
         failureCode = code; failureMessage = message;
         if (ownedMenu != null && player.containerMenu == ownedMenu && receipt == null) { close(); return TaskState.RUNNING; }
@@ -162,7 +169,7 @@ public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilt
             if (!closed && ownedMenu != null && player.containerMenu == ownedMenu) {
                 context.menus().closeForTaskBoundary(context, 80, "sorter filter task owns its menu cleanup");
             }
-        } catch (RuntimeException revoked) { /* Actor handoff owns old-world receipts and screens. */ }
+        } catch (RuntimeException revoked) { /* 世界或角色已更换时，旧动作和旧界面由运行层收尾。 */ }
         super.cleanup();
     }
     @Override public void stop(LocalPlayer companion, StopReason why) { if (child != null) child.stop(companion, why); super.stop(companion, why); }

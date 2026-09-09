@@ -32,7 +32,10 @@ import org.maiwithu.maicraft.core.task.inventory.EquipTaskRecord;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Places one AE2 part using its ordinary native item interaction and server inventory evidence. */
+/**
+ * 在指定格安装一个 AE2 电缆或面板：拿到物品、找能点到的站位、潜行瞄准、只右键一次，然后核对部件与物品数量。
+ * 其他槽里的部件必须保持原样；成功不代表 AE2 网络已经供电、有频道或能够生产。
+ */
 public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
     private record Candidate(BlockPos clicked, Vec3 aim) {}
     private final ActualViewConvergenceGate aimGate = new ActualViewConvergenceGate();
@@ -53,6 +56,7 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
     @Override protected void onStart() {
         world = player.level();
         if (!player.level().isLoaded(r.target)) { stop("part_target_unloaded", "AE2 target is not loaded."); return; }
+        // 已经装有相同部件就直接完成，不再拿材料，也不会因为保护区禁止修改而拒绝复用它。
         if (MachineInstallation.matches(player.level(), r.target, r.part)) {
             alreadyInstalled = true;
             return;
@@ -66,6 +70,7 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
         beforeParts = MachineInstallation.parts(player.level(), r.target);
         int slot = r.part.side() == null ? 0 : r.part.side().ordinal() + 1;
         if (beforeParts[slot] != null) { stop("part_slot_occupied", "The requested AE2 part slot is occupied."); return; }
+        // 依次尝试点宿主或相邻支撑面；能瞄准还不够，之后还要让 AE2 预测落点确实是目标槽。
         candidates.add(new Candidate(r.target, Vec3.atCenterOf(r.target)));
         for (Direction side : Direction.values()) {
             BlockPos support = r.target.relative(side);
@@ -99,6 +104,7 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
                 MachineInstallation.parts(player.level(), r.target), r.part.side())) {
             return stop("part_host_changed", "Existing AE2 parts changed before placement.");
         }
+        // 当前只接受没有附加设置的普通部件物品；带复制配置等组件的同种物品也会被拒绝。
         if (!ItemStack.isSameItemSameComponents(player.getMainHandItem(), new ItemStack(r.part.item()))) {
             return stop("part_held_item_changed", "AE2 placement requires the original plain part item without copied settings.");
         }
@@ -129,6 +135,7 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
         }
         if (!context.mutationAvailable()) return TaskState.RUNNING;
         beforeCount = countItem();
+        // 在点击前记下这格最新的服务器同步编号；创造模式物品不会减少，因此还必须等到新的同步。
         serverWatch = ServerBlockEntityReceipts.watch(player.level(), r.target);
         submitted = true;
         receipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND, hit, fresh -> {
@@ -146,6 +153,7 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
         BlockHitResult hit = AssemblyInteractionGeometry.hit(player, eye, candidate.aim());
         return hit != null && MachineInstallation.predicts(player, r.part, r.target, hit) ? candidate.aim() : null;
     }
+    // 在附近已有地面上找站位；到达后仍点不到就记为失败站位，再找其他位置或换一个支撑面。
     private TaskState approach(Candidate candidate) {
         if (stance == null) stance = AssemblyInteractionGeometry.nearestStand(player, r.target, rejectedStances, eye -> aimFrom(candidate, eye));
         if (stance == null) { nextCandidate(); return TaskState.RUNNING; }
@@ -169,6 +177,7 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
         return receiptVerdict(present, itemDecrease, false, false);
     }
 
+    // 生存模式要求部件出现且恰好少一件物品；创造模式要求数量不变、部件出现、并收到这格的新服务器同步。
     static NativeConfirmation.Verdict receiptVerdict(boolean present, int itemDecrease, boolean creative, boolean serverUpdate) {
         if (creative) {
             if (itemDecrease != 0) return NativeConfirmation.Verdict.DIVERGED;
@@ -187,6 +196,7 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
         return count;
     }
 
+    // 等待本次右键结果，再复查部件与数量。确认失败就保留不确定结果，不再补点一次。
     private TaskState confirm() {
         if (receipt == null) return stop("part_receipt_missing", "AE2 use has no receipt; inspect before retrying.");
         var context = ClientRuntime.requireContext(player);
@@ -214,7 +224,7 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
             try {
                 var context = ClientRuntime.requireContext(player);
                 receipt = context.actions().retireOneShotForTaskBoundary(context, receipt, "AE2 part task ended");
-            } catch (RuntimeException revoked) { /* Actor revocation owns cleanup after disconnect; outcome stays uncertain. */ }
+            } catch (RuntimeException revoked) { /* 断线后由角色运行层收尾；这里仍不能确认安装是否发生。 */ }
         }
         InputDriver.halt(player);
         super.cleanup();

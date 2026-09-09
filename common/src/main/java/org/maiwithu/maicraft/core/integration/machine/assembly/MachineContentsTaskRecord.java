@@ -7,7 +7,9 @@ import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Ensure at least count installed items without withdrawing or replacing any existing machine contents. */
+/**
+ * 保存机器应至少装有多少件指定物品；数量范围为一至三万二千七百六十八。执行时保留原库存，只补不足部分。
+ */
 public final class MachineContentsTaskRecord extends TaskRecord {
     static { TaskFactory.register(MachineContentsTaskRecord.class, MachineContentsTask::new); }
     public final BlockPos target;
