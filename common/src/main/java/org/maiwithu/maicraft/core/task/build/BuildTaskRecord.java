@@ -18,67 +18,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Typed descriptor for a bounded multi-block construction job. */
+/** 一份具体施工单：每一格最后要是什么、能否替换原方块、材料要求、保护范围，以及当前完成数量。 */
 public final class BuildTaskRecord extends TaskRecord implements InternalPositionReceipt {
 
     public static final String TOOL_NAME = "build";
 
     public final List<Target> targets;
-    /**
-     * 目标格上已经有东西时怎么办(四档见 {@link ReplaceMode})。
-     *
-     * <p>工具层现在只发两种:让路的走 {@link ReplaceMode#REPLACE_EMPTY}(顶掉挡路的,
-     * 并把图纸里的空气格当清空指令),不让路的走 {@code replaceExisting=false} 那条
-     * <b>开工前置</b>——那不是这四档里的任何一档:它是整单拒绝,不是逐格跳过。
-     * 中间两档已经实现并受测,等图纸层把档位开放给玩家时直接可用。
-     */
+    /** 已有方块怎么处理；普通布尔入口会选 DONT_REPLACE 或 REPLACE_EMPTY，具体四种规则见 ReplaceMode。 */
     public final ReplaceMode replaceMode;
-    /**
-     * 允许盖掉<b>带方块实体</b>的方块吗——默认不允许。
-     *
-     * <p>箱子、木桶、熔炉、告示牌、酿造台都带方块实体,而它们往里装着玩家的东西。
-     * 让路的档位管的是"石头挡路要不要顶掉",这一条管的是"玩家的箱子要不要动",
-     * 两件事的答案不该绑在一起:少砌一格墙是遗憾,清掉一箱子东西是事故。
-     *
-     * <p>双格方块要连另一半一起看:床的另一半、门的上半,任一半带方块实体就都不动。
-     *
-     * <p>与让路的中间两档一样,当前两条工具入口都发 {@code false}(保护),开放给
-     * 玩家是后面版本的事。留成构造参数而不是硬编码的常量,是为了别把一个恒假的
-     * 分支伪装成可配开关——读代码的人会以为它有别的取值。
-     */
+    /** 是否还允许替换箱子、熔炉等保存数据的方块；与普通替换许可分开，机器蓝图入口可以明确传入。 */
     public final boolean replaceBlockEntities;
     public final boolean replaceExisting;
     /** 是否消耗背包材料:随能力画像而定(创造免耗材,生存逐格真扣)。 */
     public final boolean consumeMaterials;
-    /**
-     * 料不齐时允许分段施工:<b>能建多少建多少</b>,收工报还差什么。
-     *
-     * <p>按调用入口分,不一刀切。小活(手写格集)背包装得下,整批拒绝的原子性
-     * 更值钱——半成品比没开工糟。整幢图纸装不下:满背包 36 格顶天两千来块,而
-     * 一栋房子上百种方块、几千格,<b>一趟本来就运不完</b>,拒绝等于永远开不了工。
-     *
-     * <p>分段之所以不留废墟,是因为续建是精确的:每一遍的待建集都从"图纸与世界
-     * 当下的差集"重算,已经建对的格自动跳过。补齐材料后原样再发一次同一个调用,
-     * 就从断点接上——不需要记住计划,因为世界本身就是计划的进度。
-     */
+    /** 材料没齐时能否先做带得够的部分；普通语义建造由供料父任务补材料，但不能把只建一部分报为全部成功。 */
     public final boolean allowPartial;
-    /**
-     * 方块实体数据,按目标格位置索引:箱子里的东西、告示牌的字、旗帜的花纹。
-     *
-     * <p>放在边表而不是 {@code Target} 里,因为它只有图纸才有,而且只有极少数格
-     * 用得上——为它给每一格都加一个字段,是让百分之一的情形去改百分之百的构造点。
-     *
-     * <p>不做旋转:图纸转 90° 时方块的朝向会跟着转,但箱子里第 3 格的物品不该跟着
-     * 挪位。带方向语义的方块实体数据(比如活塞头指向)本来就该由方块状态承载。
-     */
+    /** 图纸里附带的箱内物品、告示牌文字等数据；当前普通第一人称施工会拒绝直接写这些数据。 */
     public final Map<Long, CompoundTag> blockEntityData;
-    /**
-     * 待生成的摆设实体:展示框、盔甲架、画。
-     *
-     * <p>它们不是方块,进不了 {@code targets},但拆了这栋房子就不完整——钉在墙上的
-     * 画、立在院里的盔甲架都是设计的一部分。整栋盖完之后一次生成:实体要挂在墙上,
-     * 墙得先有。
-     */
+    /** 图纸的画、展示框、盔甲架等摆设；这里能记录，不代表普通施工已支持生成，当前执行器会报告不支持。 */
     public final List<EntitySpawn> entities;
 
     private int placed;
@@ -86,15 +43,11 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private int completed;
     private int droppedAtLoad;
     private Map<Long, java.util.List<CellNeed>> cellNeeds = Map.of();
-    /**
-     * Aggregate semantic design facts authored by the trusted planner. They deliberately contain
-     * no cell coordinates: the construction task proves every target cell independently, then may
-     * publish these human-sized facts only when that final proof is complete.
-     */
+    /** 规划器给出的楼层、房间等预期概况；施工通过最终检查后才会把它作为整体验证结果附上。 */
     private Map<String, Object> semanticFacts = Map.of();
-    /** Planner endpoints whose connectivity must be proven against the finished client world. */
+    /** 建好后必须能走通的入口、房间和上下楼位置。 */
     private BuildTraversabilityContract traversabilityContract;
-    /** Verified semantic site retained inside the Mod for a later prior_result binding. */
+    /** 建造完成后保留的位置，让下一步能引用“刚建好的地方”。 */
     private Position verifiedPosition;
     private List<BlockPos> protectedNavigationCells = List.of();
     private java.util.function.Predicate<net.minecraft.client.player.LocalPlayer> preflightGuard = player -> true;
@@ -115,7 +68,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         materialSupplyProtection = cells.stream().map(BlockPos::immutable).distinct().toList();
     }
 
-    /** Preserve the reviewed site's live guards when supply creates another construction batch. */
+    /** 分批施工时共享原来的预览决定、临时支撑账和场地检查，不能每一批都忘掉前一批的保护要求。 */
     public void copyExecutionContextTo(BuildTaskRecord destination) {
         destination.previewManaged = previewManaged;
         destination.scaffoldLedger = scaffoldLedger;
@@ -124,7 +77,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
                 preflightGuard, mutationGuard, confirmedMutation);
     }
 
-    /** Optional externally observed structure constraints; ordinary build records keep no guards. */
+    /** 机器等特定流程可添加“开工前／每次修改前”的最新状态检查；普通建造默认没有这些额外检查。 */
     public void executionGuards(List<BlockPos> protectedCells,
             java.util.function.Predicate<net.minecraft.client.player.LocalPlayer> beforeStart,
             java.util.function.BiPredicate<net.minecraft.client.player.LocalPlayer, BlockPos> beforeMutation,
@@ -212,12 +165,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     }
 
     /**
-     * 素面格升格走原生放置:方块没有任何 blockstate 属性、这一格也不带方块实体数据时,
-     * "照图直写"与"玩家动作"的产物语义完全等价,唯一区别是后者跑物品放置钩子——
-     * 领地可拦、Visual Workbench 一类原地换方块的模组照常接管。升格改的是 Target 的
-     * itemPlace 字段:车道选择、宽容对账(按自述名)、按手扣料三处读的都是它,单一真源。
-     * 有属性的方块不升格(哪怕目标恰是默认态,如朝北的熔炉):原生放置按视线推导
-     * 状态,给不出图纸点名的精确值。
+     * 没有朝向等属性、没有额外数据、物品与方块一一对应的普通格，允许按游戏正常放置结果验收。
+     * strictIdentity 或明确状态要求仍保留严格检查；这里不直接往世界写方块。
      */
     private static List<Target> promotePlainCells(List<Target> targets,
                                                   Map<Long, CompoundTag> blockEntityData) {
@@ -228,8 +177,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
                     && !t.desiredState().isAir()
                     && t.desiredState().getProperties().isEmpty()
                     && !blockEntityData.containsKey(t.pos().asLong())
-                    // 物品放出来的必须就是图纸要的方块:盆栽(potted_*)无属性但 item 是花盆,
-                    // 原生放置只给空盆,盆+花两件的料单格必须留在直写道。
+                    // 花盆物品只会放出空盆，不能因此把“带花的盆”当作同一种单次放置。
                     && t.item() instanceof net.minecraft.world.item.BlockItem bi
                     && bi.getBlock() == t.desiredState().getBlock();
             out.add(plain
@@ -240,13 +188,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         return List.copyOf(out);
     }
 
-    /**
-     * 加载图纸时就落不了地、根本没进目标集的格数(流体、活塞头、推不出物品的方块)。
-     *
-     * <p>要单独记一笔并交代出去,理由和"跳过的格从分母去掉"是同一条:一张一千格的
-     * 图纸掉了二百格,若这二百格连目标集都没进,任务会理直气壮地报"八百格全部达标",
-     * 而设计缺了五分之一,没有一个字提到过。加载期的掉格也是掉格。
-     */
+    /** 图纸读取时被舍弃、未进入目标列表的数量；不能把被丢掉的格子当作已经建好。 */
     public int droppedAtLoad() {
         return droppedAtLoad;
     }
@@ -273,18 +215,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         }
     }
 
-    /**
-     * 按位置索引的<b>逐格料单</b>:这一格不是"一件某物",而是这几叠。
-     *
-     * <p>一格一件是特例而不是通则,这一点容易想反。带花的花盆是<b>花盆加那株花两件
-     * 东西</b>——正因如此它没有自己的物品,而"按方块的物品收一件"这条路在这里没有答案。
-     * 通行的做法之一是就此整格丢掉(建出来院子里少二十一个花盆);另一条是老老实实收
-     * 两件。后者才对。旗帜是同一条路的另一头:一叠,但要求组件一致。
-     *
-     * <p>这张表<b>整个盖过</b>默认的"{@code item() × materialCount()}"。放在边表而不是
-     * {@code Target} 里,理由和方块实体数据一样:只有极少数格用得上,为它给每一个构造点
-     * 加一个字段是让百分之一的情形去改百分之百的代码。
-     */
+    /** 特殊格子的材料清单，例如带花的盆要盆和花；当前普通施工会要求这类组合效果走专门流程。 */
     public Map<Long, java.util.List<CellNeed>> cellNeeds() {
         return cellNeeds;
     }
@@ -333,19 +264,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         this.completed = completed;
     }
 
-    /**
-     * {@code task_status} 的进度面:<b>只报进度,不报状况</b>。
-     *
-     * <p>进度是"还剩多少"——单调、有分母、幂等,拉多少次都是同一个答案。状况是
-     * "出了什么事"(有人在拆、材料见底)——离散、有时效、错过就没了,该走事件
-     * 队列推给她,不该等人来问。两者混在一格里,进度会变得不可预测,状况会丢掉
-     * 时序,而且只有轮询才拿得到——偏偏状况最不该等人问。
-     */
+    /** 显示已确认符合蓝图的格数；外界把成品改坏后，这个数可以在复查时减少。 */
     @Override
-    /**
-     * 一行人话 —— 这是<b>给主人看的</b>:头顶气泡、面板、task_status 印的都是它。
-     * 工具 id 不写进来,需要它的地方(运行时状态的 tool 属性、派发回执)本来就有。
-     */
     public String describe() {
         return "搭建 " + completed + "/" + targets.size();
     }
@@ -387,9 +307,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     }
 
     /**
-     * @param itemPlace 原生车道:这一格由<b>物品自己</b>像真右键那样落位,而不是照图直写。
-     *                  只给没提任何摆放要求的单格 set——那是"放一个工作台"这类玩家动作,
-     *                  朝向随她的视线,模组钩在物品放置上的转换照常发生。
+     * 一格的期望方块、要用的物品以及需要严格保留的属性。
+     * @param itemPlace 未明确要求的状态按游戏正常放置结果接受，不表示绕过玩家点击直接生成方块。
      */
     public record Target(BlockState desiredState, Item item, BlockPos pos, String label,
                          Direction facing, Direction.Axis axis, Boolean topHalf,
@@ -414,10 +333,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
                     item, pos, label, facing, axis, topHalf);
         }
 
-        /**
-         * 进原生车道。放不出来的东西——清空格、液体、没有物品形态的方块——进不了,
-         * 原样返回:车道的前提是"手里有一件能放的东西"。
-         */
+        /** 允许按正常物品放置结果处理；要求精确类型、空气、液体或非方块物品时不作这种转换。 */
         public Target asItemPlace() {
             if (strictIdentity || desiredState.isAir()
                     || desiredState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock
@@ -430,9 +346,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         public Target {
             exactProperties = exactProperties == null ? java.util.Set.of() : java.util.Set.copyOf(exactProperties);
             desiredState = Objects.requireNonNull(desiredState, "desiredState");
-            // 归一在这一处做完:每一个目标格无论从工具还是从图纸来,都必须过这道口,
-            // 所以运行态(作物生长阶段、含水、活塞伸出、堆肥进度、锅里装的东西)
-            // 在这里一次清干净,而不是让每条入口各清各的。
+            // 目标状态先经过 BuildStates 的统一整理，再检查显式属性是否合法；具体会整理哪些属性要看该类。
             desiredState = org.maiwithu.maicraft.core.build.BuildStates.normalize(desiredState);
             item = Objects.requireNonNull(item, "item");
             pos = Objects.requireNonNull(pos, "pos").immutable();
@@ -463,16 +377,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         }
 
         /**
-         * 这一格要花<b>几件</b>材料——盘点、报价与实扣的唯一真源。
-         *
-         * <p>清空格与液体格不费料。双格方块(门、床、高草、向日葵)在图纸里是上下
-         * 两格、各带一个同样的物品,逐格计费就会一扇门吃掉两扇门的料,所以只让
-         * "下半"计费,上半随之而生。
-         *
-         * <p>反过来也有一格要<b>多件</b>的:双层砖是两块半砖摞出来的,雪层、海龟蛋、
-         * 海泡菜按层数/个数算。此前这里是个布尔量"要不要花一件",一格恒定一件——
-         * 而屋面把双层砖当立面用,约三成屋面格子因此少报一件。清单与实扣不同源的
-         * 后果和门那件事一模一样,只是方向相反:玩家按清单备齐了,照样建到一半停下。
+         * 从空位建成这一格需要几件物品：门上半、床头不重复计费，双层台阶要两件，雪层等按层数算。
+         * 这里只算完整目标的材料数，没有减去世界里已经存在的部分状态。
          */
         public int materialCount() {
             if (desiredState == null || desiredState.isAir()) {
@@ -537,10 +443,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         public boolean matches(BlockState state) {
             if (!matchesExactProperties(state)) return false;
             if (itemPlace) {
-                // 原生格的对账不看状态位:没提朝向的格子,朝向就不是工程量——游戏按
-                // 玩家规则给什么就是什么。方块种类按"自述名"对,不只按注册名:有模组
-                // 在放置时把原版设施原地换成自家实现(注册名变了,名字没变),按注册名
-                // 对账会判不符,拆了重放,和模组拉锯到天荒地老。
+                // 普通物品放置先核对显式属性，再接受同方块或相同翻译键的模组替代品；并非对全部状态逐项相等。
                 return !state.isAir() && (state.getBlock() == desiredState.getBlock()
                         || state.getBlock().getDescriptionId()
                                 .equals(desiredState.getBlock().getDescriptionId()));
@@ -552,7 +455,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
             return matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true);
         }
 
-        /** Explicit machine-state requests are verified even if general building settings ignore them. */
+        /** 明确点名的机器属性必须逐项一致，strictIdentity 还要求方块类型完全相同。 */
         public boolean matchesExactProperties(BlockState state) {
             if (strictIdentity && (state == null || state.getBlock() != desiredState.getBlock())) return false;
             if (exactProperties.isEmpty()) return true;
@@ -571,7 +474,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     }
 
     private static BlockState applyHints(BlockState state, Direction facing,
-                                         Direction.Axis axis, Boolean topHalf) {
+                                          Direction.Axis axis, Boolean topHalf) {
+        // 将可选朝向、轴向和上下半层写到支持的属性里；后续 Target 构造会拒绝方块根本不支持的要求。
         if (facing != null) {
             if (state.hasProperty(BlockStateProperties.FACING)) {
                 state = state.setValue(BlockStateProperties.FACING, facing);

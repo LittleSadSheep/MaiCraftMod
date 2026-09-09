@@ -20,15 +20,9 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * 施工的背包口径,只此一处:存量只算 36 格主背包
- * ({@link PlayerInv#BUILDABLE_SLOTS}),预检与逐格闸门同源;实际扣料只由
- * 原生第一人称放置及其同步背包事实完成。
- * 此前预检用 41 格(含盔甲与副手)、闸门用 36 格:一整叠木板放在副手时,
- * 预检数得到、开工放行,而每一格都判缺料——口径分叉就是这类账目事故。
- *
- * <p>三档匹配并存且不可互换:按物品类型({@link #hasItems})、按料单口径
- * ({@link #countMatching}——料单自己说要不要组件全等)、按组件全等
- * ({@link #strictCount}——少比一个组件就等于拿白剑换走玩家那把锋利五)。
+ * 施工读取背包的帮助类：统计材料、找要拿的槽位，也支持要求附魔／花纹等属性一致的材料。
+ * 普通存量统计只算主背包三十六格；实际选物品是否可用后面二十七格，还受 allowInventory 设置影响。
+ * 这里不扣材料，物品消耗由游戏里的实际放置完成。
  */
 final class BuildInventory {
 
@@ -81,6 +75,7 @@ final class BuildInventory {
 
     /** 够不够 {@code count} 件——双层砖那种一格吃两件的格子要问这个。 */
     boolean hasItems(Item item, int count, boolean wholeInventory) {
+        // 调用者允许且设置也允许时才动用完整背包，否则只认快捷栏。
         if (wholeInventory && NavSettings.get().allowInventory) {
             return mainInventoryCount(item) >= count;
         }
@@ -100,6 +95,7 @@ final class BuildInventory {
     }
 
     int findSlot(Item item, boolean wholeInventory) {
+        // 先选快捷栏里同类型的第一叠，找不到才按 allowInventory 决定是否继续找主背包。
         Inventory inventory = player.getInventory();
         for (int i = 0; i < 9; i++) {
             ItemStack stack = inventory.getItem(i);
@@ -114,6 +110,7 @@ final class BuildInventory {
     }
 
     int mainInventoryCount(Item item) {
+        // 这个统计方法不看 allowInventory，始终统计主背包；与 findSlot 的可用范围并不总是一致。
         return PlayerInv.buildableCount(player.getInventory(), item);
     }
 
@@ -131,6 +128,7 @@ final class BuildInventory {
 
     /** 手上拿着的方块能放出哪些状态——寻路的建造上下文按它判"她有什么可垫"。 */
     Set<BlockState> availableStates(boolean wholeInventory) {
+        // 供保留的建造成本接口估计手里能放出什么；这里只是按当前站位做预测，不代表目标位置一定放得下。
         Set<BlockState> states = new HashSet<>();
         Inventory inventory = player.getInventory();
         int limit = wholeInventory && NavSettings.get().allowInventory
@@ -154,6 +152,7 @@ final class BuildInventory {
                 states.add(state);
             }
         } catch (RuntimeException e) {
+            // 模组的放置预测抛异常时，用默认状态兜底；默认状态也只是估计，不是一次成功放置的证明。
             states.add(blockItem.getBlock().defaultBlockState());
         }
     }

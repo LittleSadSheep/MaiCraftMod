@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Semantic material policy coordinator; concrete acquisition and placement stay Mod-owned. */
+/** 大建筑的供料父任务：先确定整份方案的材料，确认预览，再循环“取一批材料、建一批”，直到成品验收通过。 */
 final class SemanticBuildSupplyCompanionTask
         extends AbstractCompanionTask<SemanticBuildSupplyTaskRecord> {
     private enum ChildKind { BUILD }
@@ -73,6 +73,7 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected void onStart() {
+        // 普通分批供料只接方块物品计划；摆设、箱内数据等组合效果要走专用流程。
         if (!activePlan.cellNeeds().isEmpty() || !activePlan.blockEntityData.isEmpty()
                 || !activePlan.entities.isEmpty()) {
             stopWith("unsupported_semantic_material_effect",
@@ -107,6 +108,7 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected TaskState onTick() {
+        // 正在取料或施工就先推进那件事；不能看见目标方块恰好都存在，就跳过尚未结束的点击和支撑清理。
         if (supply.active()) return tickSupply();
         if (activeChild != null) return tickChild();
         if (traversabilityScan != null) return finishMatched();
@@ -119,6 +121,7 @@ final class SemanticBuildSupplyCompanionTask
         }
 
         var preview = previewGate.apply(r, activePlan);
+        // 材料型号先定好给玩家看，但真正获取材料要等玩家确认，避免还没同意方案就出去采集。
         if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.WAITING)
             return TaskState.RUNNING;
         if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
@@ -145,6 +148,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private TaskState tickChild() {
+        // 施工小任务自己超时就停；它有真实进展而延长时间时，总供料任务也跟着延长，避免外层先超时。
         TaskState terminal;
         if (player.level().getGameTime() >= activeRecord.getDeadlineGameTime()) {
             activeChild.stop(player, Task.StopReason.REPLACED);
@@ -176,6 +180,7 @@ final class SemanticBuildSupplyCompanionTask
         if (terminal == TaskState.FAILED
                 && ("material_exhausted".equals(childCode)
                         || "missing_materials".equals(childCode)) && progress) {
+            // 确实建了一些、只是材料用完，才自动进入下一轮补料；其他失败停下来等判断，不盲目继续重建。
             return TaskState.RUNNING;
         }
         stopFromChild("construction_batch_failed",
@@ -198,6 +203,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private void advanceMaterialBinding() {
+        // 每种可替代材料只选一个实际型号，冻结整份方案；之后每批沿用相同材料，避免建到一半换样子。
         if (failureCode != null || prepared) return;
         try {
             for (var family : materialProposal.families()) {
@@ -217,6 +223,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private void startBatchSupply(BatchNeed need) {
+        // 取物任务用“最终背包要有多少”表达需求，因此把现有数量加上这一批还要取的数量。
         Item item = need.item();
         int requiredFinal = Math.min(SemanticAcquireTaskRecord.MAX_FINAL_COUNT,
                 inventoryCount(item) + need.fetch());
@@ -232,6 +239,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private TaskState tickSupply() {
+        // 为建筑取料时，建筑目标和专门保护区不能成为采矿来源，避免边建边把自己的建筑当材料挖掉。
         SemanticMaterialSupplyCoordinator.Tick tick = NavigationSafetyContext.withProtectedArea(
                 plannedMutationCells, List.of(),
                 () -> supply.tick(player, this::runChild));
@@ -261,6 +269,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private void startBuild() {
+        // 新建一份施工任务单，共享整份蓝图的保护、预览和脚手架记录；世界里已经正确的格子会跳过。
         buildRounds++;
         batchVerified = false;
         long now = player.level().getGameTime();
@@ -287,6 +296,7 @@ final class SemanticBuildSupplyCompanionTask
 
     /** Find the first material that blocks the shared BuildOrder using fresh inventory facts. */
     private BatchNeed nextNeed() {
+        // 按实际施工顺序假算现有材料能做多少，找到第一种会卡住的材料，再按剩余需求和背包容量决定取多少。
         Map<Item, Integer> simulated = inventoryCounts();
         List<BuildTaskRecord.Target> ordered = activePlan.targets.stream()
                 .sorted(BuildOrder.BUILD_ORDER).toList();
@@ -313,6 +323,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private Map<Item, Integer> ledger(boolean onlyOutstanding) {
+        // 完整账算全部目标，剩余账跳过当前已匹配的格子；清空和自动生成的另一半不重复算材料。
         Map<Item, Integer> result = new LinkedHashMap<>();
         for (BuildTaskRecord.Target target : activePlan.targets) {
             if (onlyOutstanding && matches(target)) continue;
@@ -332,6 +343,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private TaskState finishMatched() {
+        // 方块都对后，若方案要求能进门上楼，就再分刻验证通行；完成后才保留供后续任务引用的位置。
         if (activePlan.traversabilityContract() == null) {
             retainVerifiedPosition();
             return TaskState.SUCCESS;
@@ -429,6 +441,7 @@ final class SemanticBuildSupplyCompanionTask
 
     private void stopFromChild(
             String code, String message, TaskResult result, FailureType type) {
+        // 当前只认 outcome_uncertain，并把说明追加进文字；其他不确定字段不会在这里自动转换或传到外层。
         if (result != null && result.data() != null
                 && Boolean.TRUE.equals(result.data().get("outcome_uncertain"))) {
             message += "; the child outcome is uncertain and must be observed before retry";
@@ -448,6 +461,7 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected Map<String, Object> resultData() {
+        // 汇总材料账和每批结果；必须全部匹配、通行通过、无遗留支撑且最后施工批次确认成功，才报告目标满足。
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("material_policy", r.materialPolicy.id());
         data.put("material_palette_bound_before_construction", prepared);
@@ -530,6 +544,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     @Override protected void cleanup() {
+        // 总任务结束时，取料与施工小任务也要停止，并释放整份方案的预览记录。
         org.maiwithu.maicraft.core.task.build.BuildPreviewGate.release(r);
         if (supply.active()) supply.cancel(player);
         if (activeChild != null) {
