@@ -38,3 +38,4 @@ runs
 *.generated.md
 .vscode
 docs/
+experiments/
