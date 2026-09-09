@@ -23,12 +23,9 @@ import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * Reduces noisy client state into decision-relevant MCP attention events.
- *
- * <p>This sampler never asks the LLM to poll raw blocks. It reports transitions only. A hit from
- * another player is deliberately treated as an ambiguous social signal: the semantic task pauses
- * and the LLM may narrate or ask what the player meant; the Mod does not infer retaliation or
- * following.</p>
+ * 把聊天、天气、时间、受伤和死亡变化整理成事件。除观察外，这个类也负责暂停被玩家攻击的任务、
+ * 保存死亡进度和请求原版重生，所以改这里可能同时影响通知和角色行为。
+ * 另一个玩家的攻击只被解释成需要确认意图的信号，不自动决定还击或跟随。
  */
 public final class GameplayAttentionMonitor {
 
@@ -55,13 +52,17 @@ public final class GameplayAttentionMonitor {
 
     private GameplayAttentionMonitor() {}
 
-    /** Sample once per END_CLIENT_TICK before the task scheduler chooses its body owner. */
+    /**
+     * 在每次客户端游戏更新结束、选任务控制身体之前观察一次。首次观察和换世界时只建立基准，不补发旧变化。
+     */
     public static void tick(LocalPlayer player) {
         ClientLevel level = player.clientLevel;
         String dimension = level.dimension().location().toString();
         String phase = WorldTimeSemantics.phase(level).id();
         String weather = weather(level);
+        // 把普通血量和吸收黄心相加观察。黄心到期也会使这个数下降，因此单靠它变小不能证明受到了伤害。
         float effectiveHealth = player.getHealth() + player.getAbsorptionAmount();
+        // 当前用 lastHurtByMob 的时间识别新攻击者；原版客户端的伤害包并不更新这组服务端 AI 字段。
         int hurtByMobTimestamp = player.getLastHurtByMobTimestamp();
         boolean dead = player.isDeadOrDying() || player.getHealth() <= 0.0F;
 
@@ -73,6 +74,7 @@ public final class GameplayAttentionMonitor {
             return;
         }
 
+        // 再次看到活着的身体时先准备重新绑定；任务记录恢复并完成 afterSemanticBind 之前，自动行为仍暂停。
         if (lifeState == LifeState.DEAD_REPORTED || lifeState == LifeState.RESPAWN_REQUESTED) {
             // This is a fresh LocalPlayer body. Arm same-identity restore before
             // CompanionTickDispatcher observes and retires the dead body.
@@ -117,7 +119,10 @@ public final class GameplayAttentionMonitor {
         remember(level, dimension, phase, weather, effectiveHealth, hurtByMobTimestamp);
     }
 
-    /** Loader chat hooks call this with plain text; component trees are intentionally discarded. */
+    /**
+     * 加载器把收到的聊天转成纯文本交进来。最长保留 512 字符，十秒最多八条，同来源和内容五秒内去重。
+     * 正文标记为外部不可信文本；被压掉的数量附在下一条真正发出的事件上。
+     */
     public static synchronized void chat(
             String senderName, UUID senderId, String message, boolean system) {
         if (message == null) return;
@@ -166,6 +171,7 @@ public final class GameplayAttentionMonitor {
         reset(false);
     }
 
+    // 清掉世界观察基准、聊天限流和反射动作记录；跨重生重绑时可保留死亡快照，避免丢掉恢复所需信息。
     public static synchronized void reset(boolean preserveDeathRecovery) {
         previousLevel = null;
         previousDimension = null;
@@ -184,6 +190,7 @@ public final class GameplayAttentionMonitor {
     }
 
     /** Report a safety reflex once, without exposing movement, target or inventory internals. */
+    // 同一种紧急反应只记一次开始；它还在进行时重复请求不会重复发通知。
     public static synchronized void reflexStarted(
             String reflex, String reason, String actionCategory,
             String consumptionRisk, String damageRisk) {
@@ -200,6 +207,7 @@ public final class GameplayAttentionMonitor {
         publish("agent.reflex", "An emergency reflex took control.", data);
     }
 
+    // 只有已开始且尚未报告升级的反应会发出这一事件，每次反应最多升级通知一次。
     public static synchronized void reflexEscalated(
             String reflex, String reason, String riskSummary) {
         String key = safeText(reflex, 48);
@@ -212,6 +220,7 @@ public final class GameplayAttentionMonitor {
         publish("agent.reflex", "An emergency reflex escalated.", data);
     }
 
+    // 结束时取走该次反应记录，并报告动作数量、资源影响和持续时间；没有对应开始记录就忽略。
     public static synchronized void reflexFinished(
             String reflex, String outcome, int actionCount,
             String resourceEffect, String damageEffect) {
@@ -235,6 +244,7 @@ public final class GameplayAttentionMonitor {
     }
 
     /** Publish the conservative post-respawn checkpoint after IntentRuntime has restored it. */
+    // 重生后的任务绑定完成才报告库存对比，并解除死亡阶段的自动行为锁；没有自动开始捡回遗物。
     public static synchronized void afterSemanticBind(LocalPlayer player) {
         if (player == null || lifeState != LifeState.RESPAWN_OBSERVED || lastDeath == null) return;
         Map<String, Integer> currentInventory = inventoryCounts(player);
@@ -258,6 +268,7 @@ public final class GameplayAttentionMonitor {
         data.addProperty("next_required_step",
                 "reassess safety and prove fresh owned drops before any recovery attempt");
         publish("agent.respawned", "Respawn completed; semantic work remains paused for reassessment.", data);
+        // 这里只解除死亡阶段锁，没有清除原任务里的 death_recovery 决定；手动重生后仍可能被旧决定挡住 resume。
         lifeState = LifeState.ALIVE;
     }
 
@@ -268,7 +279,10 @@ public final class GameplayAttentionMonitor {
         CANCEL_TASK
     }
 
-    /** Recognise only our structured death decision; ordinary task answers remain untouched. */
+    /**
+     * 只解析程序自己生成的 death_recovery 决定：可重生时允许请求重生，连接仍在时允许显式观战，或取消任务。
+     * 这里仅决定下一步类型，真正发动作在 applyDeathDecision。
+     */
     public static DeathDecisionEffect classifyDeathDecision(
             LocalPlayer player, IntentTaskRecord.DecisionSnapshot decision, String choice) {
         if (decision == null || choice == null
@@ -301,6 +315,7 @@ public final class GameplayAttentionMonitor {
         requestNativeRespawn(player, effect == DeathDecisionEffect.REQUEST_NATIVE_SPECTATE, false);
     }
 
+    // 先保存当前任务和此刻可见库存，再报告死亡；只有目标带自动重生要求且模式允许时才尝试自动请求。
     private static synchronized void deathDetected(LocalPlayer player) {
         IntentTaskRecord active = currentIntent();
         boolean hardcore = player.level().getLevelData().isHardcore();
@@ -355,6 +370,7 @@ public final class GameplayAttentionMonitor {
         runtime.checkpointDeath();
     }
 
+    // 发重生请求之前必须连接正常并完成任务进度交接；显式观战复用原版 respawn 请求，由服务端模式决定结果。
     private static boolean requestNativeRespawn(
             LocalPlayer player, boolean explicitSpectate, boolean automatic) {
         if (player == null || !connectionAlive()
@@ -417,6 +433,7 @@ public final class GameplayAttentionMonitor {
                 ? intent : null;
     }
 
+    // 当前步骤为 true 或整任务为 true 都算请求；步骤明确填 false 不能覆盖整任务的 true。
     private static boolean semanticBoolean(IntentTaskRecord record, String key) {
         if (record == null) return false;
         if (record.stepIndex() >= 0 && record.stepIndex() < record.steps().size()
@@ -448,6 +465,7 @@ public final class GameplayAttentionMonitor {
                 && minecraft.getConnection().getConnection().isConnected();
     }
 
+    // 按物品注册名合并普通槽位、盔甲和副手数量，不区分附魔、名字或其他组件，也不是死亡前提前保存的库存。
     private static Map<String, Integer> inventoryCounts(LocalPlayer player) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         if (player == null) return counts;
@@ -478,6 +496,7 @@ public final class GameplayAttentionMonitor {
         return counts.values().stream().mapToInt(Integer::intValue).sum();
     }
 
+    // 逐种比较死亡时快照和重生后数量，只累计减少的件数；同名不同组件的物品在这里仍视为同一种。
     private static int missingCount(Map<String, Integer> before, Map<String, Integer> after) {
         int missing = 0;
         for (Map.Entry<String, Integer> entry : before.entrySet()) {
@@ -491,6 +510,7 @@ public final class GameplayAttentionMonitor {
                 ? source.get(key).getAsString() : null;
     }
 
+    // 只有判断为新攻击且读到攻击者是玩家时才暂停语义任务；否则仍发受伤通知，但没有这一玩家交互分支。
     private static void damaged(
             LocalPlayer player, float before, float after, boolean freshMobAttack) {
         LivingEntity attacker = freshMobAttack ? player.getLastHurtByMob() : null;

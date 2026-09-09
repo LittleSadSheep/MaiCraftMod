@@ -20,7 +20,9 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 
-/** Dev-only route lines. Reads the selected paths; it cannot request movement or world actions. */
+/**
+ * Dev 开启且界面没有隐藏时，画出现有地面与飞行路线、最终目标和当前转向点；只读取路线，不请求移动。
+ */
 public final class NavigationPathRenderer {
     private static final int GROUND = 0xCC35D9FF, FLIGHT = 0xCCBA77FF;
     private static final int STEERING = 0xFFFFD641, DESTINATION = 0xFF55FF88;
@@ -42,7 +44,7 @@ public final class NavigationPathRenderer {
         if (mesh == null) return;
         Lines.INSTANCE.setupRenderState();
         try {
-            // Reuse Minecraft's immediate VBO; no persistent meshes or world references to clean up.
+            // 使用原版临时绘制缓冲区，本类不保留跨帧模型或世界引用。
             VertexBuffer buffer = DefaultVertexFormat.POSITION_COLOR_NORMAL.getImmediateDrawVertexBuffer();
             buffer.bind();
             buffer.upload(mesh);
@@ -61,6 +63,7 @@ public final class NavigationPathRenderer {
         marker(lines, route.steeringTarget(), camera, STEERING, 0.22);
     }
 
+    // 在目标周围画三条交叉短线，分别标出目的地和当前走向点。
     private static void marker(BufferBuilder lines, Vec3 point, Vec3 camera, int color, double size) {
         if (point == null) return;
         segment(lines, point.add(-size, 0, 0), point.add(size, 0, 0), camera, color);
@@ -68,6 +71,7 @@ public final class NavigationPathRenderer {
         segment(lines, point.add(0, 0, -size), point.add(0, 0, size), camera, color);
     }
 
+    // 两端都超过相机 128 格就不画；线段几乎为零也跳过，再把坐标换成相对相机的位置。
     private static void segment(BufferBuilder lines, Vec3 from, Vec3 to, Vec3 camera, int color) {
         if (from.distanceToSqr(camera) > 128 * 128 && to.distanceToSqr(camera) > 128 * 128) return;
         Vec3 direction = to.subtract(from);
@@ -82,7 +86,7 @@ public final class NavigationPathRenderer {
                 .setNormal((float) normal.x, (float) normal.y, (float) normal.z);
     }
 
-    /** Through-world developer lines use the main target and never write scene depth. */
+    /** 调试路径允许透过地形显示：暂时关深度比较，只写颜色，画完恢复深度比较。 */
     private static final class Lines extends RenderType {
         static final RenderType INSTANCE = new Lines(List.of(RENDERTYPE_LINES_SHADER,
                 new RenderStateShard.LineStateShard(OptionalDouble.of(2.5)), TRANSLUCENT_TRANSPARENCY,

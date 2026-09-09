@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Shared Mojmap render boundary for NeoForge and Fabric. */
+/** 原版世界画完后追加导航路径线，两个加载器共用这个入口；不改变寻路结果。 */
 @Mixin(LevelRenderer.class)
 public abstract class NavigationPathRenderMixin {
     @Inject(method = "renderLevel", at = @At("RETURN"))

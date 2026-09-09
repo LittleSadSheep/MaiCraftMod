@@ -19,6 +19,8 @@ package com.github.lunatrius.schematica.client.world;
 import com.github.lunatrius.core.util.math.MBlockPos;
 import com.github.lunatrius.schematica.api.ISchematic;
 
+// Baritone 编译时需要的第三方类签名占位，根构建脚本会把 com/github/lunatrius 整包排除出发布物。
+// 它不是可运行的示意图世界：构造时的强制转换和 getSchematic 的异常都是占位，不能在客户端实例化。
 public class SchematicWorld {
 
     public final MBlockPos position = (MBlockPos) (Object) "cringe";

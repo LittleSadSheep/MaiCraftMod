@@ -11,13 +11,17 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Builds the read-only, player-facing output for {@code /maicraft status}. */
+/**
+ * 整理 /maicraft status 的本地说明：MCP 是否监听、角色控制权、当前任务和最近问题，不改变任务状态。
+ */
 public final class MaiCraftStatus {
     private static final int TEXT_LIMIT = 160;
 
     private MaiCraftStatus() {}
 
-    /** Render locally without re-entering loader chat-receive hooks as an external game event. */
+    /**
+     * 直接把状态文字放进本地聊天显示区，不把自己的状态说明重新当作外部聊天事件。
+     */
     public static int showInChat() {
         Minecraft minecraft = Minecraft.getInstance();
         lines().forEach(minecraft.gui.getChat()::addMessage);
@@ -44,6 +48,7 @@ public final class MaiCraftStatus {
                 + " · control " + control,
                 inWorld ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
 
+        // 从最近五十个任务里找第一个未结束的；没有时显示空闲，再查看最近二十个任务中的失败或超时。
         IntentTaskRecord active = IntentRuntime.get().tasks(50).stream()
                 .filter(record -> !record.getState().isTerminal())
                 .findFirst()
@@ -74,6 +79,7 @@ public final class MaiCraftStatus {
         return List.copyOf(lines);
     }
 
+    // 区分已经接管、申请接管但还没拿到控制权，以及仍由玩家操作；切换中读取失败就显示 transitioning。
     private static String controlState(boolean inWorld) {
         if (!inWorld) return "unavailable";
         try {
@@ -117,6 +123,7 @@ public final class MaiCraftStatus {
                 .append(Component.literal(value).withStyle(valueColor));
     }
 
+    // 把多行和连续空白压成一行，最长显示 160 个字符，避免一条错误刷满聊天区域。
     private static String compact(String value) {
         if (value == null || value.isBlank()) return "unknown";
         String singleLine = value.replace('\r', ' ').replace('\n', ' ')

@@ -9,7 +9,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Observe the actual rendered screen in both vanilla and NeoForge's layered GUI dispatcher. */
+/** 界面这一帧确实画完后通知菜单观察器，防止只创建了菜单对象、玩家还没看到它时就开始点击。 */
 @Mixin(Screen.class)
 public abstract class ScreenVisibilityMixin {
     @Inject(method = "renderWithTooltip", at = @At("RETURN"))

@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Samples MaiCraft's leased camera curve once per rendered frame instead of once per game tick. */
+/** 每次画面开始绘制时更新自动控制的镜头，让转头跟随帧率平滑变化；控制权仍由 ClientRuntime 判断。 */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererCameraMixin {
     @Inject(method = "render", at = @At("HEAD"))
@@ -20,7 +20,7 @@ public abstract class GameRendererCameraMixin {
         ClientRuntime.renderFrame(Minecraft.getInstance());
     }
 
-    /** Suppress only the automatic focus-loss pause; ESC still uses the native pause path. */
+    /** 自动控制生效时跳过渲染流程中的失焦暂停；玩家主动按 ESC 的原版暂停入口不受这段替换影响。 */
     @Redirect(method = "render", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/Minecraft;pauseGame(Z)V"))
     private void maicraft$pauseWhenHumanControlled(Minecraft minecraft, boolean pauseOnly) {

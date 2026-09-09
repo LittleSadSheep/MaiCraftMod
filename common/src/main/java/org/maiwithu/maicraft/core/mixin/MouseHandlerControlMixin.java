@@ -8,7 +8,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Closing a container or clicking the game must not recapture the cursor during automation. */
+/** 自动控制要求鼠标保持释放时，取消原版抓回鼠标的动作，避免关箱子或点击游戏后突然锁住玩家光标。 */
 @Mixin(MouseHandler.class)
 public abstract class MouseHandlerControlMixin {
     @Inject(method = "grabMouse", at = @At("HEAD"), cancellable = true)
