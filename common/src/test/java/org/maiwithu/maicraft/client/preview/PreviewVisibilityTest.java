@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.client.preview;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -45,11 +47,64 @@ public final class PreviewVisibilityTest {
                 BlockPos.ZERO, slabLines, 1, 1, 1);
         check(slabLines.vertices > 0 && slabLines.maxY <= .501f, "slab outline follows the model shape rather than a full block cage");
         check(session.cells().equals(blocks), "visibility never modifies the construction blueprint");
+        wholeStructureOutlines(blocks);
         System.out.println("PreviewVisibilityTest: passed");
+    }
+
+    private static void wholeStructureOutlines(Map<BlockPos, BlockState> cube) {
+        PreviewSession session = new PreviewSession("shell", "minecraft:overworld", "shell", cube);
+        Counter solid = outline(session);
+        check(Math.abs(solid.length - 36) < 1e-6, "3x3x3 cube has only its twelve outer edges, without coplanar block seams");
+        check(solid.vertices == 72, "outline segments shared by cells are emitted once across mesh sections");
+        Map<BlockPos, BlockState> hollow = new LinkedHashMap<>(cube);
+        hollow.remove(new BlockPos(4, 1, 4));
+        Counter shell = outline(new PreviewSession("hollow", "minecraft:overworld", "hollow", hollow));
+        check(shell.segments.equals(solid.segments), "sealed interior air contributes no outline, even with translucent walls");
+        hollow.put(new BlockPos(4, 2, 4), Blocks.OAK_SLAB.defaultBlockState());
+        Counter closedSlabRoof = outline(new PreviewSession("slab roof", "minecraft:overworld", "slab roof", hollow));
+        check(closedSlabRoof.length > shell.length, "a slab roof adds a visible inset on its exterior side");
+        check(closedSlabRoof.segments.stream().noneMatch(line -> line.contains("[4.0, 1.0, 4.0]")),
+                "a half-height roof still seals the interior cavity");
+        hollow.remove(new BlockPos(4, 2, 4));
+        Counter open = outline(new PreviewSession("open", "minecraft:overworld", "open", hollow));
+        check(open.length > shell.length, "opening the roof makes the cavity connected to exterior air");
+        session.layers(1, 1);
+        check(Math.abs(outline(session).length - 28) < 1e-6, "layer slicing recomputes the selected slab's exterior perimeter");
+        Map<BlockPos, BlockState> slabs = Map.of(BlockPos.ZERO, Blocks.OAK_SLAB.defaultBlockState(),
+                BlockPos.ZERO.east(), Blocks.OAK_SLAB.defaultBlockState());
+        Counter slab = outline(new PreviewSession("slabs", "minecraft:overworld", "slabs", slabs));
+        check(Math.abs(slab.length - 14) < 1e-6 && slab.maxY == .5f, "joined slabs preserve their half-height outline and remove the shared seam");
+        Counter step = outline(new PreviewSession("step", "minecraft:overworld", "step",
+                Map.of(BlockPos.ZERO, Blocks.STONE.defaultBlockState(), BlockPos.ZERO.east(), Blocks.OAK_SLAB.defaultBlockState())));
+        check(Math.abs(step.length - 18) < 1e-6, "different neighboring shapes split their shared edges at the half-height crease");
+        Counter stair = outline(new PreviewSession("stair", "minecraft:overworld", "stair",
+                Map.of(BlockPos.ZERO, Blocks.OAK_STAIRS.defaultBlockState())));
+        check(Math.abs(stair.length - 14) < 1e-6, "stair geometry retains its step rather than collapsing to a bounding box");
+        Map<BlockPos, BlockState> sparse = Map.of(BlockPos.ZERO, Blocks.STONE.defaultBlockState(),
+                new BlockPos(1_000_000, 1_000_000, 1_000_000), Blocks.STONE.defaultBlockState());
+        check(Math.abs(outline(new PreviewSession("sparse", "minecraft:overworld", "sparse", sparse)).length - 24) < 1e-6,
+                "disconnected sparse components do not require traversing their bounding volume");
+    }
+
+    private static Counter outline(PreviewSession session) {
+        PreviewOutlineGeometry geometry = new PreviewOutlineGeometry(session, new PreviewWorldView(session, new World()));
+        Counter counter = new Counter();
+        session.cells().keySet().forEach(pos -> geometry.emit(pos, BlockPos.ZERO, counter));
+        return counter;
     }
     private static final class Counter implements VertexConsumer {
         int vertices; float maxY = -Float.MAX_VALUE;
-        public VertexConsumer addVertex(float x, float y, float z) { vertices++; maxY = Math.max(maxY, y); return this; }
+        double length; float[] start;
+        final List<String> segments = new ArrayList<>();
+        public VertexConsumer addVertex(float x, float y, float z) {
+            vertices++; maxY = Math.max(maxY, y);
+            if ((vertices & 1) == 1) start = new float[]{x, y, z};
+            else {
+                length += Math.sqrt((x-start[0])*(x-start[0]) + (y-start[1])*(y-start[1]) + (z-start[2])*(z-start[2]));
+                segments.add(java.util.Arrays.toString(start) + ":" + java.util.Arrays.toString(new float[]{x,y,z}));
+            }
+            return this;
+        }
         public VertexConsumer setColor(int r, int g, int b, int a) { return this; }
         public VertexConsumer setUv(float u, float v) { return this; }
         public VertexConsumer setUv1(int u, int v) { return this; }
