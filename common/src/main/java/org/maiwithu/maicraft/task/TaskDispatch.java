@@ -40,7 +40,7 @@ public final class TaskDispatch {
         }
     }
 
-    /** Submit a bounded synchronous body task. Its tool call completes at terminal settlement. */
+    /** 有 capture 时把任务单交给父任务；否则送到同步槽。reply 参数目前未在这里使用。 */
     public static void runSync(LocalPlayer player, TaskRecord record, Consumer<String> reply) {
         requireClientThread();
         if (capture(record)) {
@@ -49,10 +49,7 @@ public final class TaskDispatch {
         CompanionTickDispatcher.submitSync(player, record);
     }
 
-    /**
-     * Replace the current task. Internal tool calls remain parked until this
-     * record reaches a terminal state and is delivered locally exactly once.
-     */
+    /** 有 capture 时交回任务单；否则替换当前槽。旧 ToolCall 已登记时，结束结果才会走对应回调。 */
     public static void setTask(LocalPlayer player, TaskRecord record, JsonObject args,
                                Consumer<String> reply) {
         requireClientThread();

@@ -3,8 +3,7 @@ package org.maiwithu.maicraft.agent.tool;
 import java.util.UUID;
 
 /**
- * 告诉分发器“这次调用针对哪个玩家”。接口只提供 UUID，不保存世界或身体控制权。
- * 分发器仍须拿这个身份与当前本地玩家核对。
+ * 旧 ToolCall 携带的玩家身份接口，只给 UUID。它没有保存世界或控制权；当前只有旧调用对象引用它。
  */
 public interface ToolAnchor {
 

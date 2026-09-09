@@ -9,12 +9,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Dispatches every internal capability directly inside the running client JVM.
- *
- * <p>There is no packet hop and no second runtime. Calls originating on the MCP HTTP
- * executor are marshalled to the Minecraft client thread, then invoke the registered
- * tool against the real {@link LocalPlayer}. Synchronous body tasks remain parked by
- * call id until the single task scheduler delivers their result.</p>
+ * 保留的旧工具调用通道：ship 登记 ToolCall 并切到游戏线程，deliver 按编号交回结果。
+ * 当前仓库没有创建 ToolCall 的生产入口；语义任务直接调用 onGameCall，再接住任务单或即时结果。
+ * 调度器仍会调用 deliver，但只有先经 ship 登记过的调用才会收到这里的回调。
  */
 public final class LocalToolDispatcher {
 

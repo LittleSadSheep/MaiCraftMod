@@ -7,8 +7,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * 让其他功能登记“这轮工作结束后要做什么”，例如解除手里必须拿着镐子的要求。
- * 调度器在取消任务、失去玩家对象或长时间没有任务时调用这里；具体收尾内容由登记者负责。
+ * 保留的工作结束通知列表。调度器在空闲、取消或失去身体时会触发它。
+ * 当前仓库没有调用 onSessionEnd 登记监听，因此这些触发在项目自身的运行链里没有收尾动作。
  */
 public final class TaskSessionHooks {
 

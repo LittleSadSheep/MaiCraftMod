@@ -29,7 +29,7 @@ final class CompanionBrain {
     /** 每个游戏刻选一件事执行；需要换任务时，先让旧任务松开按键。 */
     void tick(LocalPlayer player) {
         if (handPinRelease.tick(!sync.isEmpty() || !current.isEmpty())) {
-            // 一段时间没有任务后，解除上次工作留下的手持物品锁定。
+            // 一段时间没有任务后触发旧结束通知；当前没有监听者，不能把它描述成已经解除手持锁。
             TaskSessionHooks.fireSessionEnd(player);
         }
 
@@ -145,7 +145,7 @@ final class CompanionBrain {
     }
 
     void cancelAll(LocalPlayer player) {
-        // 两个任务都结束，并停掉此时可能正在插队自救的行为，再解除本轮工作留下的物品锁定。
+        // 结束两个任务并停掉正在自救的行为，随后触发保留的结束通知；具体动作清理由各执行器 stop 负责。
         boolean hadWork = !sync.isEmpty() || !current.isEmpty();
         sync.cancel(player);
         current.cancel(player);
@@ -214,7 +214,7 @@ final class CompanionBrain {
     }
 
     private void shipResults() {
-        // 把结束结果逐个交回发起调用的地方；没有调用编号的内部行为无需回复。
+        // 尝试交回旧 ToolCall 通道中的等待者；当前语义结果由 IntentTask 自行结算，未登记的编号会被旧通道忽略。
         while (!outbox.isEmpty()) {
             TaskRecord record = outbox.removeFirst();
             String callId = record.getToolCallId();

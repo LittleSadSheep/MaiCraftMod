@@ -6,8 +6,8 @@ import com.google.gson.JsonParser;
 import java.util.function.Consumer;
 
 /**
- * 保存一次内部工具调用：编号、工具名、原始参数、玩家身份和结果回调。
- * 它本身不会执行任务、计时或重试；这些事情由分发器及实际工具负责。
+ * 旧分发通道使用的调用对象：编号、工具名、JSON 参数、玩家身份和结果回调。
+ * 当前仓库没有生产或测试代码创建它，不能把它当作当前 MCP 请求必经的数据。
  */
 public final class ToolCall {
 

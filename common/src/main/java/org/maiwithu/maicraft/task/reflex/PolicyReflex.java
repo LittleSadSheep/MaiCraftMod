@@ -1,7 +1,6 @@
 package org.maiwithu.maicraft.task.reflex;
 
 /**
- * 给某条自动选择规则保存一个名字和一句说明。
- * 这个记录本身不会执行规则，也不会申请身体控制；真正的判断仍由使用该规则的代码负责。
+ * 旧的策略说明记录，只保存名字与描述。当前没有构造调用，CoreReflexes 只剩一条未使用的导入。
  */
 public record PolicyReflex(String id, String describe) implements Reflex {}

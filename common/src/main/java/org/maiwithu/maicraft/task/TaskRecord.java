@@ -31,7 +31,7 @@ public abstract class TaskRecord {
 
     private TaskState state = TaskState.PENDING;
     private TaskResult result;
-    /** 保留旧接口的“异步任务”标记；当前结果仍统一由 LocalToolDispatcher 送回。 */
+    /** 保留旧接口的异步标记；当前语义结果由父任务读取，只有旧 ToolCall 调用才用 LocalToolDispatcher 回调。 */
     private boolean async;
     /** 首次进入 RUNNING 的游戏刻;task_status 用它报已耗时。-1 = 还没开跑。 */
     private long startedGameTime = -1;
