@@ -26,6 +26,8 @@ public final class MachineRegressionSuite {
         try { HarvestEvidenceContractTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
         org.maiwithu.maicraft.core.scan.SearchGeometryTest.main(args);
+        try { org.maiwithu.maicraft.core.scan.TargetIndexInvalidationTest.main(args); }
+        catch (Exception failure) { throw new AssertionError(failure); }
         MachineSurveyModelTest.main(args);
         MachineDesignReviewTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayoutTest.main(args);

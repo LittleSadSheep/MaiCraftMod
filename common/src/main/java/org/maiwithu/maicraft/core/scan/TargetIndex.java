@@ -60,7 +60,15 @@ public final class TargetIndex {
     }
 
     private record QueryKey(BlockPos center, List<Block> targets, int want, int radius,
-                            Set<BlockPos> excluded) {}
+                            Set<BlockPos> excluded) {
+        boolean affectedBy(BlockPos pos, Block before, Block after) {
+            return (targets.contains(before) || targets.contains(after)) && !excluded.contains(pos)
+                    && Math.abs(SectionPos.blockToSectionCoord(pos.getX())
+                            - SectionPos.blockToSectionCoord(center.getX())) <= radius
+                    && Math.abs(SectionPos.blockToSectionCoord(pos.getZ())
+                            - SectionPos.blockToSectionCoord(center.getZ())) <= radius;
+        }
+    }
 
     /** A cold query resumes at its next section instead of repeatedly walking its warm prefix. */
     private static final class QueryProgress {
@@ -153,7 +161,7 @@ public final class TargetIndex {
     }
 
     /** Release ownership; the next eviction sweep retires a cache unused for 200 ticks. */
-    // 减少使用计数，但当前不从 targetRefs 删除零引用类型；只要整个维度仍在使用，这些旧类型会继续留着。
+    // 释放任务的使用计数，暂留类型供跨刻登记／注销的查询复用；整个维度闲置后按清扫周期退出。
     public static void unregister(ClientLevel level, Collection<Block> blocks) {
         LevelIndex idx = INDEXES.get(level.dimension());
         if (idx == null) {
@@ -175,7 +183,7 @@ public final class TargetIndex {
 
     /** Optional client observation hook for keeping an already-built section entry fresh. */
     // 客户端观察到关心的方块种类变化时更新索引；这也可能是客户端预测，使用位置前仍需核对实际世界。
-    // 当前会清掉全部查询进度，没有按查询的目标种类或范围筛选；零引用旧类型也可触发（A67）。
+    // 零引用类型仍可能被跨刻查询复用，因此维护其段缓存；只重置目标和范围确实受影响的查询。
     public static void onBlockChange(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
         if (!anyActive) {
             return;
@@ -191,7 +199,7 @@ public final class TargetIndex {
         if ((!oldT && !newT) || ob == nb) {
             return;
         }
-        idx.queries.clear();
+        idx.queries.keySet().removeIf(query -> query.affectedBy(pos, ob, nb));
         long key = SectionPos.asLong(SectionPos.blockToSectionCoord(pos.getX()),
                 SectionPos.blockToSectionCoord(pos.getY()), SectionPos.blockToSectionCoord(pos.getZ()));
         SectionEntry e = idx.sections.get(key);
