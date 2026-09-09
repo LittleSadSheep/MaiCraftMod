@@ -193,6 +193,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         }
 
         // A fixed-duration hold ends when its window elapses: release the button.
+        // 当前实现到按住时限就直接停止并结算，不再等 interaction 内尚未确认的点击。
+        // 只有另外设置了 expectedBlock 才会核对目标方块，未设置时可能把仍在等待的动作报成成功（A30）。
         if (holdUntil >= 0 && player.level().getGameTime() >= holdUntil) {
             interaction.stop();
             successMsg = describeDone() + settle();

@@ -127,6 +127,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         }
 
         // A fixed-duration hold completes on time even if the line of sight lapsed near the end.
+        // 按住时限到了便停止并返回成功，即使最后一次交互还没确认；这也是审计记录 A30 的触发点。
         if (interaction != null && holdUntil >= 0 && player.level().getGameTime() >= holdUntil) {
             interaction.stop();
             successMsg = describeDone() + settle();

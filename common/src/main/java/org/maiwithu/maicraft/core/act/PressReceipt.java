@@ -13,10 +13,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 一次按键前后的世界事实差异。按键被"消费"不等于"发生了什么"——船可以吃掉点击,
- * 却因为生成位置和身体重叠被原版静默拒绝,世界纹丝不动。这里不判成败,只把三样
- * 看得见的变化如实报出:手上的东西、瞄着的那一格、身边新冒出来的实体。判断交给
- * 读回执的人——什么算"成"只有意图知道,而意图在模型那边。
+ * 记下点击前后看见的差别：双手物品、瞄准的方块、附近新看到的实体。
+ * 例如点完后手里的雪球少了一颗，可以报告这件事；是否完成用户目标，还要由具体任务判断。
+ * 这是客户端前后对比，不是服务器对这次点击的确认，也不保证所有变化都是此次点击造成的。
  */
 public final class PressReceipt {
 
@@ -29,6 +28,7 @@ public final class PressReceipt {
     private final BlockState aimBefore;
     private final Set<Integer> entityIdsBefore;
 
+    // 复制双手物品，记住瞄准格的方块和附近实体编号；物品必须复制，否则原对象变化会污染“之前”的记录。
     private PressReceipt(LocalPlayer player, BlockPos aim) {
         this.mainBefore = player.getMainHandItem().copy();
         this.offBefore = player.getOffhandItem().copy();
@@ -43,8 +43,8 @@ public final class PressReceipt {
     }
 
     /**
-     * 按键之后对账:每一条是一件真发生的事,空表 = 三个观察面都没动静。
-     * 语言面向工具回执(英文),坐标点名,方便模型下一步引用。
+     * 比较现在和按键之前看见的状态。空列表只说明这几类状态没有可报告的变化。
+     * 新看到的实体也可能是从别处走过来的；这些差异不能单独证明点击成功。
      */
     public List<String> diff(LocalPlayer player) {
         List<String> facts = new ArrayList<>();
@@ -56,6 +56,7 @@ public final class PressReceipt {
         if (off != null) {
             facts.add(off);
         }
+        // 只有前后都能读取瞄准格才比较；区块卸载时不把它当成方块消失。
         if (aim != null && player.level().isLoaded(aim)) {
             BlockState now = player.level().getBlockState(aim);
             if (now != aimBefore) {
@@ -63,6 +64,7 @@ public final class PressReceipt {
                         + ": " + blockName(aimBefore) + " -> " + blockName(now));
             }
         }
+        // 只列现在看到、之前没记录的实体，不列已经消失的实体。
         for (Entity e : nearby(player)) {
             if (!entityIdsBefore.contains(e.getId())) {
                 facts.add("appeared: " + BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath()
@@ -72,6 +74,7 @@ public final class PressReceipt {
         return facts;
     }
 
+    // 物品种类、附带数据或数量有变化就报告；下面的简短文字只展示种类和数量。
     private static String stackChange(String hand, ItemStack before, ItemStack now) {
         if (ItemStack.isSameItemSameComponents(before, now) && before.getCount() == now.getCount()) {
             return null;

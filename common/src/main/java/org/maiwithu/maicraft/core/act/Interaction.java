@@ -25,47 +25,21 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * First-person interaction primitive for the local player: aim the camera at a target,
- * then submit and reconcile one native button press
- * one mouse button (left = ATTACK, right = USE) with a {@link Timing}. Every
- * higher-level action is a thin layer on top: mining = ATTACK a block (hold),
- * {@code attack} = ATTACK an entity, eat/bow = hold USE in the air.
- *
- * <h2>Native dispatch</h2>
- * <ul>
- *   <li>ATTACK + block  → {@link BlockDigger} with a progressive break receipt;</li>
- *   <li>ATTACK + entity → a cooldown-gated native attack receipt;</li>
- *   <li>USE + block     → a native block-use receipt with loaded-world confirmation;</li>
- *   <li>USE + entity    → a native interaction receipt with inventory/menu/riding confirmation;</li>
- *   <li>USE + air       → a native item-use receipt, optionally followed by a release receipt.</li>
- * </ul>
- *
- * <p>准星语义的 USE({@link #forHit} 建的)另有一步收尾:方块/实体没吃掉点击时落到
- * 物品自用——真客户端的完整右键顺序。指定命中面的外科
- * 原语({@link #useBlock(LocalPlayer, BlockHitResult, InteractionHand)})没有这一步。
- *
- * <h2>Timing</h2>
- * {@link Timing#once()} taps once; {@link Timing#repeat} taps N times spaced by an
- * interval (auto-click a button, grind a mob); {@link Timing#hold()} holds the
- * button until the action self-completes (a block breaks, food finishes);
- * {@link Timing#hold(int)} holds up to N ticks then releases (draw + loose a bow).
- *
- * <p>Stateful + ticked (like {@link BlockDigger} / {@code PlayerNav}). The caller
- * walks the body within reach first; this only aims and presses.
+ * 把一次鼠标操作分成几刻完成：先瞄准，再出手，再观察有没有生效。
+ * 左键方块是持续挖掘，左键实体是攻击；右键分别对应点方块、点实体或使用手中物品。
+ * 它负责停步、转头和点击，不会自己走近目标。需要靠近时由外层任务先寻路。
  */
 public final class Interaction {
 
     public enum Status { RUNNING, DONE, FAILED }
     public enum Button { ATTACK, USE }
 
-    /** Vanilla block-interaction reach (survival); creative is 5. */
+    /** 当前统一按 4.5 格计算；这里没有随创造模式或玩家触及距离属性变化。 */
     private static final double REACH = 4.5;
 
     /**
-     * When and how often the button fires
-     * (once / continuous / interval). {@code hold} actions press-and-hold until
-     * the action finishes on its own (breaking, eating) or {@code maxHold} elapses
-     * (bow); discrete actions fire {@code limit} times spaced by {@code interval}.
+     * 说明按一下、重复按，还是持续按住。例如拉弓持续按住，开箱子按一下。
+     * 重复动作按 limit 计次；持续使用物品按 maxHold 决定何时松开，零表示等物品自行结束。
      */
     public static final class Timing {
         final boolean hold;
@@ -80,22 +54,22 @@ public final class Interaction {
             this.maxHold = maxHold;
         }
 
-        /** One single press. */
+        /** 只完成一次点击。 */
         public static Timing once() {
             return new Timing(false, 1, 1, 0);
         }
 
-        /** {@code times} presses, each spaced {@code interval} ticks apart. */
+        /** 重复点击；两次之间先等待 interval 次 tick，次数和间隔至少为一。 */
         public static Timing repeat(int times, int interval) {
             return new Timing(false, Math.max(1, times), Math.max(1, interval), 0);
         }
 
-        /** Hold until the action finishes on its own (block broken / food eaten). */
+        /** 持续使用，直到食物吃完等行为自行结束。 */
         public static Timing hold() {
             return new Timing(true, -1, 1, 0);
         }
 
-        /** Hold up to {@code maxTicks}, then release (e.g. draw a bow and loose). */
+        /** 持续使用指定刻数后松开，例如拉弓后放箭；具体计数从使用得到确认后开始。 */
         public static Timing hold(int maxTicks) {
             return new Timing(true, -1, 1, Math.max(1, maxTicks));
         }
@@ -113,11 +87,9 @@ public final class Interaction {
     private BlockPos requiredBlockPos;
     private Block requiredBlock;
     /**
-     * 准星语义的 USE 才有的兜底:方块/实体没吃掉点击时,同一次按键落到物品自用
-     * ——真客户端也是方块/实体未消费点击后再尝试物品自用；桶找水、船找水面、
-     * 掷物出手都住在那条路上。
-     * 外科原语(指定命中面的放置、开台)不设兜底:那里落空就该落空,兜底会把
-     * 手里的东西扔出去。false = 兜底关闭或被任务层否决(身体约束物品)。
+     * 是否允许点方块／实体没有确认成功后，再使用手里的物品，例如扔出雪球。
+     * 目前连“不确定是否已经生效”也会进入这一步，不能把它解释成已确认对方没有处理点击。
+     * 精确 useBlock 默认关闭；forHit 的调用方自行决定是否开启。
      */
     private boolean itemFallthrough;
     private MenuReceipt closeReceipt;
@@ -191,6 +163,7 @@ public final class Interaction {
      * look, resolving the CLOSER of a block or an entity (else MISS). A wall occludes a mob behind
      * it (entities are searched only as near as the block hit). {@code reach} 4.5 = survival.
      */
+    // 沿玩家当前准星看出去。先找到挡路方块，再看前面是否有更近的可点击实体，不能点穿墙。
     public static HitResult nativeRaytrace(LocalPlayer player, double reach) {
         Level level = player.level();
         Vec3 eye = player.getEyePosition();
@@ -207,23 +180,12 @@ public final class Interaction {
     }
 
     /**
-     * Build the native action for a resolved crosshair {@code hit} + {@code button}, mapping
-     * {@code holdTicks} to the cell's natural cadence — a 6-cell (button × target) dispatch:
-     * <ul>
-     *   <li>ATTACK·BLOCK → break (BlockDigger holds till the block is gone);</li>
-     *   <li>ATTACK·ENTITY → hit (tap = one cooldown-gated hit; hold = keep hitting);</li>
-     *   <li>USE·BLOCK → activate (tap once; hold re-clicks every rightClickDelay — modded crank);</li>
-     *   <li>USE·ENTITY → interact (tap once; hold re-clicks);</li>
-     *   <li>USE·AIR → useItem (tap = throw; hold = charge/eat up to ticks, or self-complete);</li>
-     *   <li>ATTACK·AIR → {@code null} (left-click air does nothing).</li>
-     * </ul>
-     * {@code holdTicks}: 0 = tap, &gt;0 / -1 = hold. The block/entity hit is used as-is (the
-     * native raytrace already resolved the exact face/point — no re-raycast). The caller drives
-     * the returned object to completion and enforces the hold duration.
+     * 根据准星命中的东西决定做法：左键方块就挖，左键实体就打，右键则交互或使用物品。
+     * holdTicks 为零表示点一下；非零时对实体／方块反复点，对空气则持续使用物品。
+     * 实体／方块的最长按住时间由外层任务控制，这里只设置一个很大的重复次数。
+     * 创建时记住目标，真正出手前仍会检查准星；左键空气直接返回 null，表示没有可做的动作。
      *
-     * @param itemFallthrough USE 的准星兜底开关(见 {@link #itemFallthrough}):方块/实体
-     *                        没吃掉点击就落到物品自用。任务层拿它挡身体约束物品——
-     *                        手里是食物/末影珍珠时传 false,免得点了块石头把自己喂了。
+     * @param itemFallthrough 点击没有确认成功时，是否允许再尝试使用手里的物品。
      */
     public static Interaction forHit(LocalPlayer p, HitResult hit, Button button, int holdTicks,
                                      boolean itemFallthrough) {
@@ -273,6 +235,7 @@ public final class Interaction {
         return this;
     }
 
+    // 需要特定方块时，每次新右键前都核对它还在那里，防止箱子被换成别的东西后继续点。
     private boolean requiredBlockPresent() {
         if (requiredBlock == null || player.level().isLoaded(requiredBlockPos)
                 && player.level().getBlockState(requiredBlockPos).is(requiredBlock)) return true;
@@ -287,6 +250,8 @@ public final class Interaction {
         return failType;
     }
 
+    // 先处理还没关好的界面，再分别推进挖方块、对空气使用物品或离散点击。
+    // 已经发出的动作优先等结果，不因这次动作刚打开了箱子就立刻把箱子关上。
     public Status tick() {
         if (receipt == null
                 && (closeReceipt != null || player.containerMenu != player.inventoryMenu
@@ -306,6 +271,7 @@ public final class Interaction {
     }
 
     /** World buttons cannot be pressed through an open container screen. */
+    // 发一次关闭菜单请求，然后逐刻等它完成；关闭失败就不能继续向世界点击。
     private Status awaitWorldInputReady() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (closeReceipt == null) {
@@ -331,6 +297,7 @@ public final class Interaction {
 
     // ---- ATTACK + block: continuous break ----
 
+    // 目标已经是空气就算挖完；否则交给 BlockDigger 逐刻挖。看不到可挖面时区分太远还是被挡住。
     private Status breakBlock() {
         if (!player.level().isLoaded(block)) {
             failType = FailureType.TARGET_LOST;
@@ -356,6 +323,8 @@ public final class Interaction {
 
     // ---- USE + air: tap or hold (food / bow) ----
 
+    // 例如吃东西：先按一次右键，观察手中物品、菜单或使用状态，再决定继续按住还是松开。
+    // 点一下只要求这次使用得到确认；持续使用才会等到吃完或到达按住时限。
     private Status useAir() {
         InputDriver.halt(player);
         LocalPlayerContext context = ClientRuntime.requireContext(player);
@@ -377,6 +346,7 @@ public final class Interaction {
         if (!receipt.terminal()) {
             return Status.RUNNING;
         }
+        // 已经发出松开请求时，只等待松开结果，不重新开始使用。
         if (releasing) {
             if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
                 return Status.DONE;
@@ -405,6 +375,7 @@ public final class Interaction {
 
     // ---- discrete: attack entity / use block / use entity (once or repeat) ----
 
+    // 一次点击没确认完就不计次；确认一次后先等间隔，再开始下一次。
     private Status discrete() {
         if (cooldown > 0) {
             cooldown--;
@@ -421,6 +392,8 @@ public final class Interaction {
         return Status.RUNNING;
     }
 
+    // 上次攻击尚未确认就继续等；准备新攻击时先停止移动、瞄准活着的目标，
+    // 还要等攻击冷却和目标的短暂无敌时间结束，才发出攻击。
     private boolean fireAttackEntity() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (receipt != null) {
@@ -470,6 +443,7 @@ public final class Interaction {
         return false;
     }
 
+    // 每次新点击都重新瞄准目标。指定面的操作还必须让当前准星真正落在那个面上。
     private boolean fireUseBlock() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (receipt != null) {
@@ -516,6 +490,8 @@ public final class Interaction {
         return false;
     }
 
+    // 确认成功才算完成一次。若允许物品兜底，任何其他终态都先转去使用手中物品，
+    // 目前没有区分“确认没生效”和“结果不确定”；这是审计记录 A29 的问题。
     private boolean settleUseReceipt(LocalPlayerContext context, String action) {
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) {
@@ -539,6 +515,8 @@ public final class Interaction {
         return false;
     }
 
+    // 点击格、相邻格、手中物品或菜单只要有一项变化，就作为点击已生效的线索。
+    // 它没有验证每种物品真正想产生的完整结果，也没有证明变化一定由这次点击造成。
     private NativeConfirmation blockUseConfirmation(BlockHitResult hit, InteractionHand usedHand) {
         BlockPos clicked = hit.getBlockPos().immutable();
         BlockPos adjacent = clicked.relative(hit.getDirection()).immutable();
@@ -567,16 +545,14 @@ public final class Interaction {
     }
 
     /**
-     * The vanilla verdict of the most recent USE-on-block press: {@code "consumed (...)"}
-     * or the per-hand results (e.g. {@code "main_hand=FAIL, off_hand=PASS"}). A press that
-     * consumes can STILL have placed nothing (the item's own rules refused) — placement
-     * callers must verify the world afterwards, and this string is what they log when a
-     * press quietly did nothing.
+     * 最近一次使用动作的简短说明。目前成功时只写 confirmed，未出手时为 not fired，
+     * 不包含原版每只手的 PASS／FAIL 返回值，也不能拿这段文字代替成品检查。
      */
     public String lastUseOutcome() {
         return lastUseOutcome;
     }
 
+    // 目标仍活着、准星也确实点到它，才提交交互；需要物品兜底时仍沿用相同目标检查。
     private boolean fireUseEntity() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (receipt != null) {
@@ -611,6 +587,7 @@ public final class Interaction {
         return false;
     }
 
+    // 用手中物品、打开的菜单或乘坐关系变化来判断实体交互；其他变化如羊是否被剪毛不在这份观察里。
     private NativeConfirmation entityUseConfirmation(Entity target, InteractionHand usedHand) {
         Entity vehicleBefore = player.getVehicle();
         int passengersBefore = target.getPassengers().size();
@@ -627,6 +604,7 @@ public final class Interaction {
                 ridingChanged);
     }
 
+    // 实际视线与目标差不超过 7° 才算转头到位；后续射线检查还要确认没有点到别的东西。
     private boolean aimReady(Vec3 target) {
         Vec3 direction = target.subtract(player.getEyePosition());
         if (direction.lengthSqr() < 1.0e-8) {
@@ -641,6 +619,8 @@ public final class Interaction {
      * point damps packet-to-packet velocity noise; clamping it back into an inset box guarantees
      * that prediction can never lead so far that the native crosshair intentionally misses.
      */
+    // 近战目标在移动时稍微朝它前方瞄，并把瞄点留在身体框内。
+    // 相邻帧只移动一部分瞄点，避免怪物小幅晃动就带着镜头猛抖。
     private Vec3 stableEntityAimPoint(Entity target) {
         AABB box = target.getBoundingBox();
         Vec3 center = box.getCenter();
@@ -684,6 +664,8 @@ public final class Interaction {
     }
 
     /** Stop issuing work. Native use release still owns a receipt and must be drained by the runtime. */
+    // 挖掘交给 digger 取消；正在持续使用物品就发出松开，然后停止移动。
+    // 普通方块／实体点击的未确认记录没有在此退役，外层结束时仍需处理它；否则会留下 A28 同类等待。
     public void stop() {
         if (digger != null) digger.cancel();
         if (receipt != null && receipt.kind() == NativeActionReceipt.Kind.USE_ITEM
