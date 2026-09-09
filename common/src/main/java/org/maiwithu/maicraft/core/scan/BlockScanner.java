@@ -15,16 +15,8 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 /**
- * 读地形的两个原语:<b>扫一节</b>({@link #scanChunkSection})和<b>小盒里找最近</b>
- * ({@link #nearestBlock})。串成一次搜索是 {@link BlockSearch} 的事,这里只管怎么读。
- *
- * <h2>为什么不是逐格读</h2>
- * 朴素搜索是 {@code (2r+1)³} 次 {@code getBlockState}(r=12 就 ~15k 次)。扫一节改成先问
- * {@link LevelChunkSection#maybeHas(Predicate)}——只看该节调色板的 2-10 项,没有目标就整节
- * 4096 格一次跳过。稀疏目标(矿)能快 50-200 倍。
- *
- * <p>{@link #nearestBlock} 仍是逐格读:它问的是"手边够得着的有没有",盒子只有十几格见方
- * 且必在加载区内,搭一次环序搜索的架子比直接读还贵。
+ * 执行一小段实际方块扫描，返回位置、方块状态和距离。
+ * 大范围分刻调度由 BlockSearch 或 TargetIndex 负责，本类不自己创建后台搜索任务。
  */
 public final class BlockScanner {
 
@@ -55,6 +47,7 @@ public final class BlockScanner {
      * <p>谓词带位置:有的判据要问方块实体(见 {@code CraftOps} 的行为探测),
      * 光有状态答不了。空气格不问谓词,直接跳过。
      */
+    // 小范围直接逐格找非空气目标，按眼睛到方块中心的距离选；不在这里判断能否走到或视线是否被挡。
     public static BlockPos nearestBlock(Level level, BlockPos base, Vec3 eye,
                                         int hr, int vr, double maxDist,
                                         java.util.function.BiPredicate<BlockPos, BlockState> match) {
@@ -79,6 +72,7 @@ public final class BlockScanner {
      * {@code out}。全仓找方块最终都落到这里——{@link BlockSearch} 一个配额换一节,
      * {@link #scanRings} 一口气走完一串。公开是因为前者要按这个粒度计费。
      */
+    // 先看这一段是不是空的、是否可能含目标；有可能才遍历它的 16×16×16 个格子。
     public static void scanChunkSection(Level level, ChunkAccess chunk,
                                         int chunkX, int sectionY, int chunkZ,
                                         BlockPos center, int radius, double radiusSq,
@@ -94,6 +88,7 @@ public final class BlockScanner {
         scanSection(section, chunkX, sectionY, chunkZ, center, radius, radiusSq, filter, out);
     }
 
+    // 从段内坐标还原世界坐标，再按球形半径过滤并记录匹配方块；不把方形外框里的所有格都当成范围内。
     private static void scanSection(LevelChunkSection section,
                                     int chunkX, int sectionY, int chunkZ,
                                     BlockPos center, int radius, double radiusSq,

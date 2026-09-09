@@ -6,18 +6,15 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /**
- * Per-action proof that a deferred look request crossed the actor's {@code endTick} boundary and
- * the real player camera, rather than a requested yaw/pitch, now faces the intended direction.
- *
- * <p>Callers submit their look request every tick, then ask this gate whether the current view may
- * be trusted for a raytrace or direction-sensitive native action. A new target/action must call
- * {@link #reset()} before its first request.</p>
+ * 等待玩家实际看向目标，避免只是发出了转头要求，就把点击或抛竿当成已经瞄好。
+ * 计时从首次请求开始，reset 后下一次重新等待；它不自己转动相机。
  */
 public final class ActualViewConvergenceGate {
     private static final double MINIMUM_DOT = Math.cos(Math.toRadians(1.0D));
 
     private long firstRequestRevision = Long.MIN_VALUE;
 
+    // 首次要求转头时不允许同刻就出手；以后比较玩家实际视线与当前目标方向，误差在一度内才通过。
     public boolean ready(LocalPlayer player, Vec3 desiredDirection) {
         long revision = ClientRuntime.requireContext(player).tickRevision();
         if (firstRequestRevision == Long.MIN_VALUE) {

@@ -9,13 +9,8 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.PlayerInv;
 
 /**
- * Authoritative receipt for walking over one loose {@link ItemEntity}.
- *
- * <p>Navigation arrival and radial distance are deliberately absent from the
- * success contract. A pickup is confirmed only when the exact tracked entity is
- * gone from the synchronized client world <em>and</em> the matching item count in
- * the main inventory increased. This keeps despawn, another player's pickup and
- * an item-entity merge from masquerading as our loot.</p>
+ * 保存一次靠近掉落物之前的物品样式与背包数量，再判断实体消失后背包是否相应增加。
+ * 这比“走到了就算捡到”更具体，但仍是客户端观察组合；同种物品的其他增减与合堆可能影响判断。
  */
 public final class NativePickupReceipt {
 
@@ -55,6 +50,8 @@ public final class NativePickupReceipt {
     }
 
     /** Observe one tick of entity/inventory synchronization. */
+    // 实体还在就继续等；看不到实体后，要求同种同组件物品的背包增加量达到最大观察堆量。
+    // 背包暂未对上时再给一段同步等待，不立刻把消失当成拾取。
     public State poll(LocalPlayer player, int inventorySyncTicks) {
         ItemEntity live = liveEntity(player);
         if (live != null) {
@@ -77,6 +74,7 @@ public final class NativePickupReceipt {
     }
 
     /** Quantity safely attributable to this entity when {@link State#RECEIVED}. */
+    // 最多按记录里的最大观察数量报告，避免背包别处的大幅增加直接放大本次数字。
     public int confirmedUnits(LocalPlayer player) {
         return Math.min(largestObservedStack, inventoryGain(player));
     }
@@ -103,6 +101,7 @@ public final class NativePickupReceipt {
      * it invokes {@code ItemEntity#playerTouch}; this is evidence that pickup was
      * actually attempted, not a guessed spherical radius.
      */
+    // 按原版拾取查询的身体范围判断是否接触；乘坐时还合并载具范围，不只是比较两点距离。
     public static boolean insideVanillaTouchEnvelope(LocalPlayer player, ItemEntity item) {
         AABB touchBox;
         if (player.isPassenger() && player.getVehicle() != null) {
@@ -118,6 +117,7 @@ public final class NativePickupReceipt {
      * Concrete local capacity evidence for a pickup. A full inventory is only
      * reported when no main-inventory slot can accept any of this exact stack.
      */
+    // 只要有一个空格或同种堆叠还能加一件就返回 true；表示能接收一部分，不保证整堆全装得下。
     public static boolean canAccept(LocalPlayer player, ItemStack wanted) {
         int limit = Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size());
         for (int slot = 0; slot < limit; slot++) {

@@ -1,14 +1,8 @@
 package org.maiwithu.maicraft.core.scan;
 
 /**
- * Expanding square-ring spiral enumeration, shared by the structure and biome
- * locators (one walks placement regions, the other walks sample-grid cells).
- *
- * <p>Ring 0 is the single center cell; ring {@code r > 0} is the 8r-cell
- * perimeter of the (2r+1)² square, enumerated side by side: top edge west→east
- * (sans the NE corner), east edge north→south (sans SE), bottom edge east→west
- * (sans SW), west edge south→north (sans NW). Every cell of every ring is
- * visited exactly once; the union over rings 0..N is the full (2N+1)² grid.
+ * 从中心区块向外一圈圈枚举方形边界，不在这里访问世界。
+ * 调用方负责给有效的圈数和圈内序号，当前方法没有另做范围校验。
  */
 public final class RingSpiral {
 
@@ -23,6 +17,7 @@ public final class RingSpiral {
      * The {@code idx}-th cell of {@code ring}'s perimeter as a (dx, dz) offset
      * from the spiral center. {@code idx} must be in {@code [0, perimeter(ring))}.
      */
+    // 中心圈只有原点；其他圈按四条边依次给出偏移，每条边两倍圈数个位置，避免角点重复。
     public static int[] offset(int ring, int idx) {
         if (ring == 0) return new int[]{0, 0};
         int side = idx / (2 * ring);

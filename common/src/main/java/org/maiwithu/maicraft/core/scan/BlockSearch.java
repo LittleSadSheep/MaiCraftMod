@@ -22,26 +22,8 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 /**
- * 找方块,全仓就这一条路:{@code scan_blocks} 问"附近有哪些",{@code goto} 的 FIND 模式问
- * "最近的那个在哪",两者只差 {@code want} 和半径。
- *
- * <p>从中心所在 chunk 起按 {@link RingSpiral} 逐环外扩走 chunk 列,每列内 section 的顺序和
- * 何时可以收工都问 {@link SearchGeometry}:攒够的 {@code want} 个一旦比下一环最近的可能还近,
- * 立刻停——这是精确界,停下来的结果和走满全程逐字一致。一个
- * {@link SearchBudget#trySectionScan} 配额换一节,跨 tick 续。
- *
- * <h2>已加载地形就是边界</h2>
- * 没加载的列跳过并计数,绝不去加载它:读它会把服务端线程按在区块 IO 或地形生成上,而一次感知
- * 查询没有理由为了回答自己而把世界变大。跳过的列数随 {@link ScanResult} 回去,让回执说得清
- * 覆盖到哪——那边的方块是"不知道",不是"没有"。
- *
- * <h2>为什么在主线程</h2>
- * {@code LevelChunkSection} 的调色板是可变的,主线程随时可能就地扩容,后台读到一半会炸。
- * 所以读地形只能排队,靠配额与 4ms 墙钟顶住 tick。代价是找一个八成不存在的方块要花几秒;
- * 换来的是不会漏节、不会读到半个调色板。
- *
- * <p>它<b>不占身体、不进任务队列</b>:她该走走该挖挖,搜索在后头自己推进。客户端主线程,
- * 由两个 loader 的 tick 末钩子驱动。
+ * 把较大的“找附近这些方块”请求分散到多刻完成，避免一次扫描卡住画面。
+ * 扫描围绕发起时的位置进行，最多保留 8192 个较近结果；它返回的是观察，不是到目标的可行路线。
  */
 public final class BlockSearch {
 
@@ -140,6 +122,7 @@ public final class BlockSearch {
      *         one pet can have a {@code scan_blocks} query and a {@code goto} lookup in
      *         flight at once, and abandoning one must not silence the other.
      */
+    // 登记一个分刻扫描任务并返回编号，暂不扫描；完成时才调用 onDone。
     public static int start(UUID entityUuid, ClientLevel level, BlockPos center, int radius, int want,
                             Set<Block> targets, Consumer<ScanResult> onDone) {
         BlockSearch job = new BlockSearch(entityUuid, level, center, radius, want, targets, onDone);
@@ -148,6 +131,7 @@ public final class BlockSearch {
     }
 
     /** Abandon one search: no callback will fire. Unknown / already-finished ids are a no-op. */
+    // 只从扫描列表移除，不调用完成回调；取消后的调用结算由外层负责。
     public static void cancel(int id) {
         JOBS.removeIf(job -> job.id == id);
     }
@@ -158,6 +142,7 @@ public final class BlockSearch {
     }
 
     /** Advance all pending scans under the shared client-tick budget. */
+    // 按列表顺序给任务机会，共享本刻扫描预算；前面的任务可能先用完额度。
     public static void tick(ClientLevel level) {
         if (JOBS.isEmpty()) return;
         SearchBudget.refresh(level.getGameTime());
@@ -167,6 +152,8 @@ public final class BlockSearch {
     }
 
     /** @return true when finished (reply sent). */
+    // 记住扫到哪一圈、哪列和哪个高度段；用完额度就暂停在这里，下刻接着扫。
+    // 三十秒左右的游戏刻期限从首次推进时开始，不按每个任务实际获得的 CPU 时间计。
     private boolean tickOne(ClientLevel level) {
         long now = level.getGameTime();
         if (!level.dimension().equals(dimension)) {
@@ -216,6 +203,7 @@ public final class BlockSearch {
      * spiral is exhausted or the shared column-check budget is spent. Even unloaded columns
      * consume a permit so a large empty search cannot bypass the tick deadline.
      */
+    // 按方形圈取下一列；未加载区块只计为缺失，不主动加载。已有最近结果足够好时可以证明后续外圈无需再扫。
     private boolean nextColumn(ClientLevel level) {
         while (ring <= maxRing) {
             if (perimIdx >= RingSpiral.perimeter(ring)) {
@@ -254,6 +242,7 @@ public final class BlockSearch {
         fed = matches.size();
     }
 
+    // 先移除任务再调用回调，返回扫描覆盖、未加载、提前停止和截断信息；找到一些结果不等于范围全部查完。
     private void finish(long now, boolean deadlineHit) {
         // Remove before calling foreign callbacks: they may enqueue/cancel searches or throw.
         JOBS.remove(this);

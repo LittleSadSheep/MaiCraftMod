@@ -10,36 +10,8 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 /**
- * An ordered set of fallback EXECUTIONS for one bounded goal, driven by a parent
- * {@link AbstractCompanionTask}. Each {@link Rung} offers a different way to reach
- * the SAME goal (e.g. "walk to the exact face" → "approach an adjacent cell" →
- * "dig the occluder, then place"), declares the {@link FailureType}s it is willing
- * to catch, and caps how many times it may be retried.
- *
- * <h2>Recovery boundary</h2>
- * A ladder only ever offers alternative executions of the goal the parent already
- * owns; it NEVER acquires a prerequisite or widens the goal. That rule is encoded
- * in the failure routing: a rung catches only the {@link FailureType}s it lists
- * (in practice the "in-ladder" categories — {@code OCCLUDED}, {@code NO_PATH},
- * {@code OUT_OF_REACH}, {@code HAZARD}, …). A failure no rung handles — a
- * prerequisite gap like {@code NO_MATERIAL} / {@code WRONG_TOOL} — falls straight
- * through {@link #advance(FailureType)} (returns {@code false}), and the parent
- * gives up carrying that cause back to the LLM.
- *
- * <h2>Driving it</h2>
- * A parent's {@code onTick} runs the current rung's task and, on a terminal
- * failure, asks the ladder whether to continue:
- * {@snippet :
- * TaskState st = runChild(ladder.current());
- * if (st == null) return TaskState.RUNNING;          // rung still working
- * if (st != TaskState.FAILED) return st;             // rung succeeded / non-fail terminal
- * if (ladder.advance(lastFailure())) return TaskState.RUNNING;   // retry / next rung
- * fail(doneReason(), lastFailure());                 // ladder exhausted
- * return TaskState.FAILED;
- * }
- *
- * <p>Deterministic and Minecraft-free: strategies are {@link Supplier}s of
- * {@link Task}, so the advancement logic is unit-testable with fakes.
+ * 保存几种可依次尝试的任务策略，根据失败类型和尝试次数选择下一种。
+ * 当前生产源码没有构造它的调用点；现有任务里的重试并不会因为改了这里而自动改变。
  */
 public final class RecoveryLadder {
 
@@ -79,6 +51,7 @@ public final class RecoveryLadder {
      * and cached until the ladder retries or advances (so per-tick calls reuse the
      * same instance). {@code null} once the ladder is {@link #exhausted()}.
      */
+    // 第一次使用当前策略时才创建任务，并缓存同一个实例；不会每次查询都重新开始。
     public Task current() {
         if (index >= rungs.size()) return null;
         if (cached == null) cached = rungs.get(index).strategy().get();
@@ -99,6 +72,8 @@ public final class RecoveryLadder {
      *       {@code lastFail}).</li>
      * </ul>
      */
+    // 当前策略接受这类失败且次数没满就再试；否则往后找能处理这种失败的策略。
+    // 找不到就耗尽。它只换策略引用，旧任务的停止和清理仍由调用方负责。
     public boolean advance(FailureType lastFail) {
         if (index < rungs.size()) {
             Rung r = rungs.get(index);

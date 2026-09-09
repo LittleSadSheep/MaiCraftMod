@@ -19,7 +19,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 
-/** Prepare a useful tool for a batch, without turning small bootstrap ingredients into a cycle. */
+/**
+ * 为一批采集或使用动作选择工具要求，考虑开局材料、预计工作量和背包／储存中的资源。
+ * 这些是本项目的准备策略，不能把所有速度或耐久门槛都解释成游戏完成动作必需的条件。
+ */
 public final class WorkToolPreparation {
     static final int BATCH_SIZE = 4;
     static final long ABUNDANT_IRON = 64;
@@ -38,6 +41,7 @@ public final class WorkToolPreparation {
         return bootstrapLimit(inventory(player), blocks.stream().map(Block::defaultBlockState).toList());
     }
 
+    // 估算开局最少还需几根木头或几块工具石料，避免为了做第一把工具又无限要求另一把工具。
     static int bootstrapLimit(List<ItemStack> inventory, List<BlockState> sources) {
         int planks = 0, sticks = 0, stone = 0;
         boolean table = false, pick = false;
@@ -73,6 +77,8 @@ public final class WorkToolPreparation {
         return tillingTool(inventory, iron, diamonds);
     }
 
+    // 按铁和钻石的存量选参考锄头，再用挖草捆速度筛已有锄头。
+    // 这个速度不是耕地动作速度，富余铁可能反而让已有石锄被判不合格（A66）。
     static UseTool tillingTool(List<ItemStack> inventory, long iron, long diamonds) {
         String tier = diamonds >= ABUNDANT_DIAMONDS ? "diamond" : iron >= ABUNDANT_IRON ? "iron" : "stone";
         ResourceLocation id = ResourceLocation.withDefaultNamespace(tier + "_hoe");
@@ -90,6 +96,7 @@ public final class WorkToolPreparation {
         return batchLimit(inventory(player), blocks.stream().map(Block::defaultBlockState).toList(), requested);
     }
 
+    // 按可用工具耐久给本批留八点余量，最多先做六十四单位；它是批次估计，不是精确计算每个掉落物要挖几块。
     static int batchLimit(List<ItemStack> inventory, List<BlockState> sources, int requested) {
         int durableWork = 0;
         for (ItemStack stack : inventory) {
@@ -107,6 +114,7 @@ public final class WorkToolPreparation {
                 work, iron, diamonds, preferredTierCap);
     }
 
+    // 小于四单位的开局工作不主动升级；较大工作先选一种来源的工具族和最低等级，再结合存量偏好找参考工具。
     static Choice missing(List<ItemStack> inventory, List<BlockState> sources, int work,
                           long iron, long diamonds, int preferredTierCap) {
         if (work < BATCH_SIZE) return null;

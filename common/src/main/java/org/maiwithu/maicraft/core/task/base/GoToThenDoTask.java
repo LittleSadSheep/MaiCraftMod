@@ -7,28 +7,8 @@ import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
 
 /**
- * The "walk within reach, then act" shape shared by every task that navigates to a
- * target and then does one bounded thing there ({@code place_block},
- * {@code break_block}, {@code interact}, a single attack engagement, …). It collapses
- * the identical nav-drive-then-act loop those tasks each hand-wrote onto three small
- * abstract hooks, leaving each concrete task to describe only its target, its
- * arrival test, and its action.
- *
- * <h2>Shape</h2>
- * <ul>
- *   <li>{@link #onStart()} builds the nav from {@link #buildNav()}.</li>
- *   <li>each tick: if {@link #reached()} → {@link #act()}; otherwise drive the nav —
- *       {@code RUNNING}/{@code ARRIVED} keep going, {@code FAILED} routes through
- *       {@link #handleNavFailure(FailureType, String)}.</li>
- * </ul>
- *
- * <h2>Recovery hook</h2>
- * The default {@link #handleNavFailure} is today's behaviour: report the nav's
- * cause via {@link #fail} and terminate. This is the seam a later stage overrides
- * to attach a {@link RecoveryLadder} — swap "give up on a nav failure" for "try the
- * next rung" WITHOUT touching the loop or the concrete tasks.
- *
- * @param <R> the concrete {@link TaskRecord} subtype for this task.
+ * 把“先走近，再执行”组织成公共流程。
+ * 子类分别定义导航目标、实际能否操作和操作本身；导航到了与手真的够得着是两个检查。
  */
 public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompanionTask<R> {
 
@@ -57,6 +37,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
      * 游在水面(舀水、放船正是这个姿势)和坐在载具里都没有 onGround,原版对
      * 交互也从不要求脚踏实地;这道门挡的只是坠落中途的按键。
      */
+    // 这里的 settled 只表示落地、在水里或乘坐，不表示速度一定为零。
     protected final boolean bodySettled() {
         return player.onGround() || player.isInWater() || player.isPassenger();
     }
@@ -76,6 +57,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
     private static final int DUD_GRACE_TICKS = 10;
 
     @Override
+    // 具体任务说现在能干活，就直接执行 act；否则推进导航。没有导航且还够不到时，只报告需要先走近。
     protected final TaskState onTick() {
         if (reached()) return act();
         if (nav == null) {
@@ -99,6 +81,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
                 dudTicks = 0;
                 yield TaskState.RUNNING;
             }
+            // 导航到终点而实际操作条件还没满足时，先等十次更新，再报告站位不合用，交给子类选择是否换位。
             case ARRIVED -> {
                 // reached() said no above, so the nav's arrival is a stance-dud
                 // candidate: the search's membership is satisfied but the work

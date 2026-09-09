@@ -22,29 +22,8 @@ import java.util.LinkedHashMap;
 import java.util.Set;
 
 /**
- * 客户端已加载目标方块索引:回答"离这里最近的 X 方块在哪"而【不做周期性全量扫描】。
- *
- * <h2>形态(每维度一份,全部同伴共享)</h2>
- * {@code SectionPos → { Block → 段内位置集 }} 的倒排索引,只有含目标的 section 才有条目。
- * 三条供给让它保持新鲜:
- * <ol>
- *   <li><b>方块变更钩子</b>——{@code observed client block changes}(即原版 POI 系统自己的
- *       写入口)每次服务端方块变化调用 {@link #onBlockChange};无关方块两次哈希查询即返回,
- *       没有任何任务注册目标时第一行即返回。挖掉的目标实时出索引,长出的树苗实时进索引。</li>
- *   <li><b>懒构建</b>——查询碰到未建/过期的 section 时就地构建:palette 预筛(不含目标的
- *       section 几乎零成本跳过)+ 一趟计数 + 一趟收位,每次查询有构建预算封顶。</li>
- *   <li><b>驱逐</b>——{@link #clientTick} 周期清除已卸载区块的条目;最后一个任务注销时整个
- *       索引短暂保留，供跨 tick 的规划查询继续复用。</li>
- * </ol>
- *
- * <h2>丰度分级</h2>
- * 一个 section 内某目标超过 {@link #SATURATION} 个(石头/泥土这类铺天盖地的),不枚举位置,
- * 只存"饱和"标记——查询碰到饱和段时对【该一个 section】现场取位即可。稀疏目标(矿石)与
- * 成簇目标(原木)全量索引。
- *
- * <h2>线程契约</h2>
- * 全部状态仅客户端主线程读写；查询永远只访问当前已经加载的区块。
- * 新区块在客户端收到后会在首次查询时懒构建。
+ * 缓存当前客户端已加载方块的位置，供采矿等任务反复询问最近目标。
+ * 新访问的区块段按需建索引，方块种类变化时更新；查询进度可以跨刻继续，不把一次预算用完当成没找到。
  */
 public final class TargetIndex {
 
@@ -99,6 +78,7 @@ public final class TargetIndex {
     }
 
     /** 一个 section 的条目:该段内每种目标的打包位置(y<<8|z<<4|x),或饱和标记。 */
+    // 每个区块段按方块种类保存位置；同种超过 256 个时只记饱和标志，查询时再现场读取，避免存大量重复坐标。
     private static final class SectionEntry {
         final int version;
         final LevelChunkSection source;
@@ -155,6 +135,7 @@ public final class TargetIndex {
     // ==================== 注册 ====================
 
     /** 任务开始时登记其目标方块(计数式,可重入)。 */
+    // 登记任务关心的方块类型并增加引用数；加入新类型时让旧段索引过期，下一次访问再补建。
     public static void register(ClientLevel level, Collection<Block> blocks) {
         LevelIndex idx = INDEXES.computeIfAbsent(level.dimension(), k -> new LevelIndex());
         boolean changed = false;
@@ -172,6 +153,7 @@ public final class TargetIndex {
     }
 
     /** Release ownership; the next eviction sweep retires a cache unused for 200 ticks. */
+    // 减少使用计数，但当前不从 targetRefs 删除零引用类型；只要整个维度仍在使用，这些旧类型会继续留着。
     public static void unregister(ClientLevel level, Collection<Block> blocks) {
         LevelIndex idx = INDEXES.get(level.dimension());
         if (idx == null) {
@@ -192,6 +174,8 @@ public final class TargetIndex {
     // ==================== 供给:方块变更钩子 ====================
 
     /** Optional client observation hook for keeping an already-built section entry fresh. */
+    // 客户端观察到关心的方块种类变化时更新索引；这也可能是客户端预测，使用位置前仍需核对实际世界。
+    // 当前会清掉全部查询进度，没有按查询的目标种类或范围筛选；零引用旧类型也可触发（A67）。
     public static void onBlockChange(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
         if (!anyActive) {
             return;
@@ -242,6 +226,7 @@ public final class TargetIndex {
     }
 
     /** Exclusions participate in the nearest selection, not after truncating the result window. */
+    // 按起点、目标、数量、半径和排除位置复用扫描进度；一刻最多约两毫秒，未完成时返回当前已找到的部分。
     public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded) {
         LevelIndex idx = INDEXES.get(level.dimension());
@@ -316,6 +301,7 @@ public final class TargetIndex {
     }
 
     /** 构建一个 section 的条目:palette 预筛 → 一趟计数定饱和 → 一趟收位。 */
+    // 先统计这一段包含哪些目标类型；稀少类型保存具体位置，很多的类型用饱和标志。
     private static SectionEntry build(LevelChunkSection section, LevelIndex idx) {
         SectionEntry e = new SectionEntry(idx.version, section);
         if (triviallyEmpty(section, idx)) {
@@ -362,6 +348,7 @@ public final class TargetIndex {
     }
 
     /** 把条目中所请求目标的位置追加进 {@code out};饱和目标对该一个 section 现场取位。 */
+    // 普通条目直接解码位置；饱和条目当场遍历该段，再交给最近位置容器排序。
     private static void collect(SectionEntry e, LevelChunkSection section,
                                 int cx, int sy, int cz, Collection<Block> targets,
                                 SearchGeometry.NearestPositions nearest) {
@@ -400,6 +387,7 @@ public final class TargetIndex {
     // ==================== 生命周期 ====================
 
     /** Called from END_CLIENT_TICK; periodically evicts entries for chunks no longer loaded. */
+    // 周期性清理没人使用的维度索引与已卸载区块；活动索引的零引用类型目前不在这里单独清理。
     public static void clientTick(ClientLevel level) {
         if (INDEXES.isEmpty() || ++sweepTimer < EVICT_SWEEP_TICKS) {
             return;
@@ -433,6 +421,7 @@ public final class TargetIndex {
     }
 
     /** Clear all observations when the local body or world disappears. */
+    // 世界会话结束时清空全部索引和查询时钟；客户端运行时负责在相应边界调用。
     public static void dropAll() {
         INDEXES.clear();
         anyActive = false;

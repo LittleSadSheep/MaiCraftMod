@@ -8,15 +8,8 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * A reusable "candidate targets, minus the ones we've given up on" holder.
- * Callers provide the identity key, so exclusions can be stored as block
- * positions, entity ids, or any other stable handle without this class knowing
- * about the underlying world object.
- *
- * <p>{@link #blacklist} and {@link #skip} are the same operation under two names,
- * letting each caller use the verb that fits its domain.
- *
- * @param <T> the candidate type.
+ * 按实体编号、位置等调用方选定的键，记住本轮不再尝试的目标。
+ * blacklist 与 skip 当前作用相同，都会一直排除到 reset；没有单独的临时跳过期限。
  */
 public final class TargetSet<T> {
 
@@ -47,6 +40,7 @@ public final class TargetSet<T> {
      * (the smallest under the comparator), or empty if all are excluded or the
      * list is empty.
      */
+    // 先按调用方给的键排除被跳过的目标，再按偏好选最小者；这里不改变原候选列表。
     public Optional<T> pick(List<T> candidates, Comparator<T> preference) {
         return candidates.stream()
                 .filter(c -> !isExcluded(c))

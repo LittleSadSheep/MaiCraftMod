@@ -3,21 +3,8 @@ package org.maiwithu.maicraft.core.task.base;
 import org.maiwithu.maicraft.core.FailureType;
 
 /**
- * A cheap, side-effect-free "can this task even begin?" gate, checked once by
- * {@link AbstractCompanionTask#start()} before any body is driven.
- *
- * <p>Preconditions replace the ad-hoc fail-fast blocks each concrete task used to
- * open with (e.g. {@code BuildCompanionTask} rejecting an occupied target with
- * replacement off, {@code MineCompanionTask} rejecting an un-harvestable
- * request). Expressing them as a small ordered list keeps the "why can't I start"
- * diagnosis uniform: the FIRST precondition that reports a {@link Failure} decides
- * the task's terminal result, carrying both a model-facing message and a
- * {@link FailureType} the reactive layer can branch on.
- *
- * <p>A precondition is a PREREQUISITE check — the kinds of failure it emits
- * ({@link FailureType#NO_MATERIAL}, {@link FailureType#WRONG_TOOL}, …) are exactly
- * the "kick back to the LLM" categories: the deterministic layer must not silently
- * acquire what's missing, it reports and stops.
+ * 任务开始前的一项检查。返回 null 表示允许继续，返回 Failure 则给出失败原因和类别。
+ * 它只表达判断结果，不会自动补材料、寻路或重试。
  */
 public interface Precondition {
 

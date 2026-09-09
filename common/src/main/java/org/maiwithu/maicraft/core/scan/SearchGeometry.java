@@ -8,14 +8,8 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 
 /**
- * "由近及远"的两条判据,全仓找方块的地方共用:<b>哪一节先看</b>,和
- * <b>什么时候可以不看了</b>。
- *
- * <p>两条都只是几何,与"现扫一遍"还是"查索引"无关——所以现扫的
- * {@link BlockSearch}、建索引的 {@link TargetIndex} 和 {@link BlockScanner} 的环形扫
- * 读的是同一个答案,同一片地不会给出两种"最近"。
- *
- * <p>纯函数,不碰世界,不碰线程。
+ * 为附近搜索提供遍历顺序和“外面不可能再有更近结果”的停止依据。
+ * 它只做几何与结果排序，不读世界、加载区块或执行导航。
  */
 public final class SearchGeometry {
 
@@ -34,6 +28,7 @@ public final class SearchGeometry {
      * @param centerSectionY 中心所在的 section Y;超出 [min,max] 时夹到边界
      * @return 每一层恰好出现一次的 section Y 序列;区间为空时返回空数组
      */
+    // 先查离玩家高度近的区块段，再向下、向上交替展开；输入范围为空就返回空顺序。
     public static int[] sectionOrder(int minSectionY, int maxSectionY, int centerSectionY) {
         if (maxSectionY < minSectionY) {
             return new int[0];
@@ -61,6 +56,7 @@ public final class SearchGeometry {
      * {@code m*16 - 15} 格。这是个下界,不是估计:环序枚举下,它就是"后面还能
      * 挖出多好的结果"的上限。
      */
+    // 算某一圈区块中可能出现的最小水平距离，用来判断外圈是否还可能比已找到的结果更近。
     public static double ringFloorDistance(int ring) {
         return ring <= 0 ? 0.0 : (double) ring * CHUNK - (CHUNK - 1);
     }
@@ -81,6 +77,7 @@ public final class SearchGeometry {
      *
      * <p>只留 {@code want} 个距离而不是全部命中:判据只关心第 want 近的那个有多远。
      */
+    // 只保留所需数量的最近距离；堆顶放其中最远的，便于新距离更小时替换它。
     public static final class NearestBound {
 
         private final int want;
@@ -117,6 +114,7 @@ public final class SearchGeometry {
     }
 
     /** Bounded nearest candidates; dense sections must compare every cell before discarding it. */
+    // 同样保留最近若干位置，并固定同距离时的坐标顺序；保存坐标副本，避免扫描复用的可变坐标把结果改掉。
     public static final class NearestPositions {
         private final int want;
         private final BlockPos center;
@@ -149,6 +147,7 @@ public final class SearchGeometry {
             }
         }
 
+        // 必须严格近于外圈理论下限才停，保留同距位置参与稳定排序的机会。
         public boolean canStopAfterRing(int ring) {
             double lowerBound = ringFloorDistance(ring + 1);
             // Strict comparison keeps equal-distance tie-breaking independent of ring order.

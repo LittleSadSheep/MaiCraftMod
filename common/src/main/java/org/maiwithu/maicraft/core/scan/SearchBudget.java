@@ -1,25 +1,8 @@
 package org.maiwithu.maicraft.core.scan;
 
 /**
- * Global per-tick budget for every loaded-client-world search —
- * structure locating ({@link LocateStructureCompanionTask}), biome locating
- * ({@link LocateBiomeCompanionTask}) and long-range block scans
- * ({@link BlockSearch}). The Explorer's Compass {@code WorldWorkerManager}
- * model: total search cost per tick is a client constant, independent of how
- * many companions are searching at once — per-task budgets would stack
- * linearly with pet count.
- *
- * <h2>Fairness</h2>
- * First-come-first-served within a tick (entities tick in a stable order), so
- * concurrent searches effectively serialize: the first finishes in a few
- * ticks, then the next drains the pool. For companion-scale concurrency
- * that's strictly better than splitting the pool — total latency is the same
- * and the implementation stays trivial. Revisit with round-robin only if
- * dozens of simultaneous searches ever become real.
- *
- * <h2>Threading</h2>
- * Minecraft client thread only. The game-time stamp resets the pool exactly once per
- * observed client world tick.
+ * 给 BlockSearch 等使用它的扫描共享一份每刻预算，防止多个请求各自把游戏主线程占满。
+ * 当前先调用者先用，不保证轮流分配。TargetIndex 另有自己的两毫秒预算，所以这里不是全项目所有搜索的唯一上限。
  */
 public final class SearchBudget {
 
@@ -66,6 +49,7 @@ public final class SearchBudget {
     }
 
     /** The actual pool reset; also the test seam. */
+    // 每个新的游戏刻重新给列检查、群系采样和区块段扫描发额度，并设置本轮时间截止点。
     public static void resetForTick(long tick) {
         stampTick = tick;
         checksLeft = MAX_CHECKS_PER_TICK;
@@ -75,6 +59,7 @@ public final class SearchBudget {
     }
 
     /** Take one section-scan permit (one 16³ section); false = resume next tick. */
+    // 额度或时间用完就让调用方留到下一刻；已经开始的一段扫描不会在这里被中途打断。
     public static boolean trySectionScan() {
         if (sectionScansLeft <= 0 || System.nanoTime() >= deadlineNanos) return false;
         sectionScansLeft--;
