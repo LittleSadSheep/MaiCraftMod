@@ -18,7 +18,10 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 
-/** Continuous same-height walking: swept body clearance and gap-free support intervals. */
+/**
+ * 检查角色能否沿一条同高度直线走过去：整个身体不能擦进障碍，脚下沿途都要有连续支撑，还要避开危险和保护格。
+ * 一次对象共用方块读取预算；资料不足、形状读取失败或预算用尽时不给这条直线放行。
+ */
 public final class GroundCorridor {
     private static final double EPS = 1e-5;
     public static final double MAX_LENGTH = 128;
@@ -81,6 +84,7 @@ public final class GroundCorridor {
                 }
             }
         }
+        // 把各块地面能支撑的路段排好序，再从起点连到终点；中间有任何断开的区间就不能直接走。
         supports.sort(Comparator.comparingDouble(interval -> interval[0]));
         double covered = 0;
         for (double[] interval : supports) {
@@ -97,6 +101,7 @@ public final class GroundCorridor {
                 box.minZ - half + EPS, box.maxZ + half - EPS) != null;
     }
 
+    // 把一块障碍或支撑面投影到整条路线，求它覆盖从起点到终点的哪一段，避免只检查几个离散采样点。
     private static double[] interval(Vec3 from, Vec3 to, double minX, double maxX, double minZ, double maxZ) {
         double[] result = {0, 1};
         return clip(from.x, to.x - from.x, minX, maxX, result)

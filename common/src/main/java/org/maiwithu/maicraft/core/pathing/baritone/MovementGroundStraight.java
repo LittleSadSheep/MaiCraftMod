@@ -14,7 +14,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
-/** One walking movement across a verified line, without intermediate cell-center aims. */
+/**
+ * 执行合并后的地面直线：朝终点前进，远时冲刺，接近后停下。真正轮到这一步时，仍反复检查眼前一段路和惯性可能带到的位置。
+ */
 public final class MovementGroundStraight extends Movement {
     private final Vec3 from, target;
     private final double originalCost;
@@ -51,6 +53,7 @@ public final class MovementGroundStraight extends Movement {
                 EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells(), EmbeddedBaritoneRuntime.physicalObstacles());
     }
 
+    // 允许角色在直线附近少量偏移，避免不是恰好踩在格心就算离开路线；这份容许位置集合不替代实时碰撞检查。
     @Override protected Set<BetterBlockPos> calculateValidPositions() {
         // Include traversed cells, not merely endpoints: executor recovery and distance checks
         // still use the movement's physical corridor when the line crosses no graph nodes.

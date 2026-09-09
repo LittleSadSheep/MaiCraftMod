@@ -13,7 +13,10 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
-/** Client-thread lowering of flat graph runs; all special movements retain their original owner. */
+/**
+ * 把地面路径中可直接走过的一串小步合成直线，减少每过一格就重新转向。只处理同高度的普通直走和斜走。
+ * 跳跃、台阶等特殊动作保留原安排；直线必须重新检查身体碰撞、地面连续性和保护范围。
+ */
 public final class GroundPathSmoothing extends PathBase {
     private final IPath source;
     private final List<IMovement> movements;
@@ -42,9 +45,9 @@ public final class GroundPathSmoothing extends PathBase {
     static IPath smooth(IBaritone baritone, IPath path, GroundCorridor corridor, BlockPos anchor, Vec3 actualStart) {
         var result = new ArrayList<IMovement>(); var original = path.movements();
         int preserveThrough = path.positions().indexOf(anchor);
-        // Leave the final approach before a step/jump intact so its established launch and
-        // interaction timing keeps both original adjacent primitives.
+        // 台阶或跳跃前的最后接近动作保留，避免合并直线后改变起跳位置与操作时机。
         for (int start = 0; start < original.size();) {
+            // 观察预算用完就把后面的原路径保留下来，不要求整条路径都能拉直。
             if (corridor.exhausted()) { result.addAll(original.subList(start, original.size())); break; }
             IMovement first = original.get(start); int limit = start;
             while (limit < original.size() && flat(original.get(limit))
@@ -54,7 +57,7 @@ public final class GroundPathSmoothing extends PathBase {
             Vec3 a = null, b = null;
             if (start >= preserveThrough && limit > start + 1) {
                 a = actualStart != null && first.getSrc().equals(anchor) ? actualStart : corridor.stance(first.getSrc());
-                // At most eight probes within the 128-block window, including the whole run first.
+                // 先试这段里最远的位置；不通就把尝试距离折半，控制这次检查的次数。
                 for (int candidate = limit - 1; candidate > start; candidate = start + (candidate - start) / 2) {
                     b = corridor.stance(original.get(candidate).getDest());
                     if (corridor.clear(a, b)) { end = candidate; break; }

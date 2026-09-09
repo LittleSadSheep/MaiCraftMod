@@ -5,7 +5,9 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.pathing.movement.movements.MovementDiagonal;
 import baritone.pathing.movement.movements.MovementTraverse;
 
-/** The horizontal route layer of one explicitly verified travel hop, never a generic air override. */
+/**
+ * 一次已核对的平地跑跳期间，暂时让指定的走路步骤仍按起跳地面高度判断进度，避免刚离地就误认为偏离路线。
+ */
 public final class GroundJumpContinuation {
     private Integer floor;
     private double takeoffY;
@@ -21,10 +23,11 @@ public final class GroundJumpContinuation {
     public void observe(boolean grounded, double y) {
         if (floor == null) return;
         if (!grounded) airborne = true;
-        // Preserve ordinary recovery for falling below the runway, missed launches, and landing.
+        // 落回地面、掉到起跳高度以下，或等待超时，就结束这次临时高度；没有成功起跳最多等三次更新。
         if (grounded && airborne || y < takeoffY - 0.1 || ++ticks > (airborne ? 40 : 3)) floor = null;
     }
 
+    // 只对当时核对过、起终点都在同一地面层的直走／斜走步骤生效；其他动作仍使用实际脚的位置。
     public BetterBlockPos feet(IMovement movement, BetterBlockPos actual) {
         if (floor == null || movement == null || !verified.contains(movement)
                 || !(movement instanceof MovementTraverse || movement instanceof MovementDiagonal)

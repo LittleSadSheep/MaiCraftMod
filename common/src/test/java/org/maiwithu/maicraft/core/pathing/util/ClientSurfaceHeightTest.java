@@ -14,6 +14,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
+// 检查清树选址会跳过树木而保留水和箱子，并验证六十四次读取的边界；最低高度在这里代表没有找到有效地面。
 public final class ClientSurfaceHeightTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();

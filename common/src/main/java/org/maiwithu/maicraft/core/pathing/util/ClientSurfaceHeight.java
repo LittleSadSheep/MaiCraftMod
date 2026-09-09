@@ -7,19 +7,15 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.levelgen.Heightmap;
 
-/** Client-safe equivalents of heightmaps that are maintained only by the live server world. */
+/**
+ * 在客户端查某一列的地面高度：从已经同步的高度上界往下读方块，补出客户端没有同步的“忽略树叶高度图”。
+ */
 public final class ClientSurfaceHeight {
 
     private ClientSurfaceHeight() {}
 
     /**
-     * Returns the first free cell above the highest motion-blocking, non-leaf block.
-     *
-     * <p>{@link Heightmap.Types#MOTION_BLOCKING_NO_LEAVES} is not synchronized in client chunk
-     * packets. Querying it directly therefore reads the client's unpopulated map and can return
-     * the minimum build height. The synchronized {@link Heightmap.Types#MOTION_BLOCKING} map is a
-     * safe upper bound because its predicate is a superset; scanning down with the original
-     * no-leaves predicate preserves the requested semantics without mutating chunk heightmaps.
+     * 返回最高的非树叶遮挡物上面一格。它找的是这一整列的顶部，不是玩家当前楼层的地板。
      */
     public static int motionBlockingNoLeaves(ClientLevel level, int x, int z) {
         int minY = level.getMinBuildHeight();
@@ -35,7 +31,9 @@ public final class ClientSurfaceHeight {
         return minY;
     }
 
-    /** Ground for an authorized clearing job; a tree crown or trunk is not terrain. */
+    /**
+     * 允许清树的选址再跳过树干和树叶，但遇到水、建筑或容器仍保留；最多向下找六十四格。
+     */
     public static int constructionGround(ClientLevel level, int x, int z) {
         return constructionGround(level, x, z,
                 level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z));
@@ -43,8 +41,7 @@ public final class ClientSurfaceHeight {
 
     static int constructionGround(BlockGetter level, int x, int z, int upperY) {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        // A loaded heightmap is the upper bound. Do not turn a floating canopy into an
-        // unbounded scan through the entire world; a deeper column is not a nearby site.
+        // 从同步高度向下限量找地面；找不到时返回世界最低高度作为未找到标记，当前建筑选址据此拒绝这一候选。
         int bottom = Math.max(level.getMinBuildHeight(), upperY - 64);
         for (int y = upperY - 1; y >= bottom; y--) {
             cursor.set(x, y, z);
