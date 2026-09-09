@@ -26,7 +26,10 @@ import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.task.TaskFactory;
 
-/** Synchronized machine-menu evidence and one-use, exact-entry transfer authorization. */
+/**
+ * 保存“这个菜单是从哪台机器打开的”，并把某次观察做成只能使用一次的存取依据。
+ * 这里集中登记菜单任务、读取槽位、判断槽位背后是什么容器；具体点击由打开、关闭、存取三个执行器处理。
+ */
 public final class MachineMenu {
     static final int MAX_ENTRIES = 512;
     private static final int MAX_RECEIPTS = 16;
@@ -40,6 +43,7 @@ public final class MachineMenu {
             String structuralFingerprint, BlockPos machinePosition) {
         public OpenRequest {
             if (machinePosition == null) throw new IllegalArgumentException("machine position is required");
+            // 当前借用了拉杆控制请求的构造器来检查共同的位置、半径和摘要字段，这里不会控制拉杆。
             var validated = new MachineControl.Request(dimension, center, radius,
                     structuralFingerprint, false, machinePosition);
             center = validated.center();
@@ -102,7 +106,10 @@ public final class MachineMenu {
                 request.machinePosition(), blockId, ClientRuntime.requireContext(player).bodyEpoch()));
     }
 
-    /** Read the real current menu; only menus opened by this machine seam receive a transfer receipt. */
+    /**
+     * 读取当前菜单和实际携带物品。只有本流程打开、仍可见、鼠标没有拿物品且来源仍有效的菜单才给存取编号。
+     * 编号最多保留十六份，约六百次角色更新后过期；报告不解释配方或控制数据的业务含义。
+     */
     public static JsonObject inspect(LocalPlayer self) {
         Minecraft minecraft = Minecraft.getInstance();
         if (!minecraft.isSameThread() || minecraft.player != self)
@@ -145,6 +152,7 @@ public final class MachineMenu {
                 ItemStack candidate = self.getInventory().getItem(inventory);
                 if (candidate.isEmpty()) continue;
                 String id = BuiltInRegistries.ITEM.getKey(candidate.getItem()).toString();
+                // 当前先按物品种类去重，再检查是否接受；前一叠不接受时，同种但组件不同的后一叠也不会再检查。
                 if (seen.add(id) && slot.mayPlace(candidate)) acceptable.add(id);
             }
             entry.add("accepts_carried_item_ids", acceptable);
@@ -185,6 +193,7 @@ public final class MachineMenu {
         return out;
     }
 
+    // 先移除一次性编号，再核对玩家、菜单、身体版本、有效期、槽位对象和所有内容；失败后也需重新观察。
     static Inspection consume(String token, LocalPlayer player) {
         final UUID id;
         try { id = UUID.fromString(token); }
@@ -208,6 +217,7 @@ public final class MachineMenu {
         return inspection;
     }
 
+    // 比较的是同一批槽位对象和顺序，仅菜单类型相同还不够。
     static boolean sameEntries(Inspection inspection, AbstractContainerMenu menu) {
         if (inspection.menu.get() != menu || inspection.entries.size() != menu.slots.size()) return false;
         for (int index = 0; index < menu.slots.size(); index++) {
@@ -228,9 +238,11 @@ public final class MachineMenu {
     }
 
     /** Class evidence supplements slot acceptance rules; generic virtual render entries fail closed. */
+    // 先排除结果／虚拟槽，再核对直接容器或已知模组存储接口；无法解释的自定义 getter 不当作已证实的普通库存。
     static String backingEvidence(Slot slot) {
         if (slot instanceof ResultSlot || MachineMenuPolicy.virtualEntryName(slot.getClass().getName())) return "virtual_or_recipe_entry";
         try {
+            // 这里写死了开发环境的方法名。Fabric 发布包会映射原版方法名而保留这个字符串，因此普通槽位会查找失败并返回未知。
             Class<?> getter = slot.getClass().getMethod("getItem").getDeclaringClass();
             if (getter == Slot.class && slot.getContainerSlot() >= 0
                     && slot.getContainerSlot() < slot.container.getContainerSize()) return "native_container_backing";

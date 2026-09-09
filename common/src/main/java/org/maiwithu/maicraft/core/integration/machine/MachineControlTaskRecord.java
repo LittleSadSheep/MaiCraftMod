@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.core.integration.machine;
 import java.util.Objects;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Internal typed action; positions originate in the surveyed machine and named landmarks. */
+/**
+ * 保存把已观察拉杆设为开或关的请求；位置来自机器观察或地标，真正点击和验证由 MachineControlTask 执行。
+ */
 public final class MachineControlTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "machine_control";
     public final MachineControl.Request request;

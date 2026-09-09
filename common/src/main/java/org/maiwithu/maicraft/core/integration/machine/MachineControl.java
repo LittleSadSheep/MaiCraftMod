@@ -7,7 +7,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 
-/** Bounded first-person control of an existing machine's observed vanilla lever. */
+/**
+ * 当前控制能力是把已有机器的某个原版拉杆设置为开或关，提供请求检查和任务创建。没有在这里解释机器配方或自动选择多个开关。
+ */
 public final class MachineControl {
     private MachineControl() {}
 

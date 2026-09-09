@@ -11,7 +11,9 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Close exactly the owned machine menu with no cursor stack; wait for its native receipt. */
+/**
+ * 只关闭当前流程登记过的机器菜单，并等待原生关闭结果。鼠标有物品或换成了别的菜单时先报告无法关闭。
+ */
 public final class MachineMenuCloseTask extends AbstractCompanionTask<MachineMenuCloseTaskRecord> {
     private AbstractContainerMenu menu;
     private MenuReceipt receipt;

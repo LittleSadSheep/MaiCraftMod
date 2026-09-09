@@ -28,9 +28,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
 /**
- * Bounded, read-only client evidence for an LLM's machine analysis. Call on the game thread.
- * Never loads chunks, opens menus, reads arbitrary NBT, or mutates machines. The structure
- * fingerprint is a stale-observation guard, not proof of ownership or machine configuration.
+ * 读取标记点附近已加载的方块，把布局、状态和部分可观察的模组信息交给上层分析。
+ * 它只提供客户端看到的事实；相邻方块不等于接口连通，结构摘要也不证明库存、配方、权限或生产正确。
  */
 public final class MachineSurvey {
     public static final int MAX_RADIUS = MachineSurveyModel.MAX_RADIUS;
@@ -44,6 +43,7 @@ public final class MachineSurvey {
     private MachineSurvey() {}
 
     /** Radius is defensively clamped; callers should reject invalid user arguments first. */
+    // 半径限制到 0..8，先扫描完整小立方体，再按输出预算挑选显示项；被省略的数量会在报告中说明。
     public static JsonObject inspect(LocalPlayer self, BlockPos center, int requestedRadius) {
         Objects.requireNonNull(self, "local player");
         Objects.requireNonNull(center, "machine center");
@@ -75,6 +75,7 @@ public final class MachineSurvey {
         report.add("detected_mods", mods);
 
         // Prefer machine blocks and nearby useful blocks when a terrain-heavy volume exceeds the budget.
+        // 先展示名称上像机器的组件，再按离中心远近排列；普通地形也参与结构观察，但可能在输出中被截断。
         capture.blocks.sort(Comparator.comparingInt((ObservedBlock block) -> block.hint.relevant() ? 0 : 1)
                 .thenComparingInt(block -> distanceSquared(block.relative))
                 .thenComparingInt(block -> block.relative.getY())
@@ -144,6 +145,7 @@ public final class MachineSurvey {
         report.addProperty("candidate_adjacencies_format", "[from_block_index,to_block_index,face_from_first]; indices refer to relative_blocks");
         report.addProperty("adjacency_meaning", "observed touching faces only; does not prove compatible ports, transport, power, network membership, recipe or flow direction");
         report.addProperty("omitted_candidate_adjacencies", observedAdjacencies.omitted());
+        // 总报告完整性还包含组件细节和相邻关系；structure_complete 只说明方块布局有没有漏读或漏列。
         boolean truncated = omitted > 0 || omittedDetails > 0 || observedAdjacencies.omitted() > 0 || capture.propertiesTruncated;
         report.addProperty("truncated", truncated);
         report.addProperty("complete", capture.unloaded == 0 && capture.outside == 0 && !truncated);
@@ -173,6 +175,7 @@ public final class MachineSurvey {
         return capture(self.level(), center, radius, false).fingerprint;
     }
 
+    // 每一格的加载情况、方块状态和方块实体类型都写入摘要；只返回摘要时跳过部分转速等动态信息。
     private static Capture capture(Level level, BlockPos center, int requestedRadius, boolean includeTelemetry) {
         int radius = MachineSurveyModel.boundedRadius(requestedRadius);
         Capture result = new Capture(radius, worldScope(level));
@@ -226,6 +229,7 @@ public final class MachineSurvey {
                         if (entityType != null) evidence.addProperty("block_entity_type", entityType);
                         evidence.addProperty("source", "client_block_state_and_synced_entity");
                     }
+                    // AE2 宿主能读到部件时记录各面的类名；读不到就写未知，不能把未知当成空宿主或无网络。
                     if (hint.family().equals("ae2") && id.endsWith(":cable_bus")) {
                         JsonObject parts = OptionalReads.ae2Parts(entity);
                         if (parts == null) {
@@ -256,6 +260,7 @@ public final class MachineSurvey {
         return result;
     }
 
+    // 为每个世界对象分配一次会话编号；断线或换世界对象后，旧观察摘要不会冒充新会话。
     private static synchronized String worldScope(Level level) {
         return WORLD_SCOPES.computeIfAbsent(level, ignored -> UUID.randomUUID().toString());
     }
@@ -279,6 +284,7 @@ public final class MachineSurvey {
         catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
 
+    // 每段文本先写字节长度再写内容，避免不同字段拼接后刚好变成同一串字节。
     private static void hash(MessageDigest digest, String... values) {
         for (String value : values) {
             byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
@@ -304,6 +310,7 @@ public final class MachineSurvey {
     }
 
     /** Exact, read-only API whitelist already used by the existing Create/AE2 integrations. */
+    // 可选模组不存在、接口变了或读取失败时返回未知；不会为了读取这份报告去调用写入方法。
     private static final class OptionalReads {
         private static final Class<?> KINETIC = load("com.simibubi.create.content.kinetics.base.KineticBlockEntity");
         private static final Class<?> CABLE_BUS = load("appeng.blockentity.networking.CableBusBlockEntity");

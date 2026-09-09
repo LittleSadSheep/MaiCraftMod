@@ -7,7 +7,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Registry-name hints only. A role is never evidence of a working connection or recipe. */
+/**
+ * 根据注册名猜组件可能的用途，再列出贴在一起的方块。名称猜测只是阅读提示，不是已验证的功能或网络连接。
+ */
 final class MachineSurveyModel {
     static final int MAX_RADIUS = 8;
     record Hint(String family, List<String> roles, boolean relevant) {}
@@ -18,6 +20,7 @@ final class MachineSurveyModel {
 
     private MachineSurveyModel() {}
 
+    // 例如名字含 shaft 推测为转动传递，含 tank 推测为存储；未知模组保留命名空间但不强行猜用途。
     static Hint classify(String registryId) {
         String id = registryId.toLowerCase(Locale.ROOT);
         int colon = id.indexOf(':');
@@ -101,6 +104,7 @@ final class MachineSurveyModel {
     }
 
     /** Only geometric touching-face evidence. Inspect each unordered pair once with linear work. */
+    // 每格只检查东、上、南三个方向，避免同一对相邻格重复列两遍；超过输出上限就累计省略数量。
     static Adjacencies adjacent(List<Component> components, int maxEdges) {
         Map<Point, Integer> lookup = new HashMap<>();
         for (Component component : components) lookup.put(component.point, component.blockIndex);

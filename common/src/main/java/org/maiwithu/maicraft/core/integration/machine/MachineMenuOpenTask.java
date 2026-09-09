@@ -27,7 +27,9 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Exact observed machine approach/open; leaves the native menu available for a later receipt. */
+/**
+ * 从已观察机器走到可交互位置，准备空手、瞄准并只右键一次；菜单真正出现后记录它的机器来源。
+ */
 public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenuOpenTaskRecord> {
     private static final double REACH = 4.5;
     private enum Phase { START, APPROACH, HAND, AIM, CONFIRM }
@@ -96,6 +98,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         };
     }
 
+    // 当前只寻找空手或空快捷栏，不会把手持物移到普通背包空格；快捷栏全满就报告需要空手。
     private TaskState prepareHand() {
         var context = ClientRuntime.requireContext(player);
         if (receipt != null) {
@@ -141,6 +144,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         return TaskState.RUNNING;
     }
 
+    // 必须观察到新菜单、空鼠标和未变的目标方块种类，再等待界面可见；没有确认就不重复右键。
     private TaskState confirm() {
         if (receipt == null) return failure("machine_menu_open_unconfirmed",
                 "Machine use entered without a complete receipt; no second use was attempted.", FailureType.UNKNOWN);
@@ -159,6 +163,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         return TaskState.SUCCESS;
     }
 
+    // 准备阶段多次重查整个观察范围和结构摘要，不只核对这一个将要打开的方块。
     private boolean fresh() {
         int radius = r.request.radius();
         BlockPos center = r.request.center();

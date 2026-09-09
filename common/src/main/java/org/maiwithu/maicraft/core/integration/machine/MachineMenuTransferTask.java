@@ -21,8 +21,8 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * One exact selected-item transfer through observed real inventory entries. All click indexes are
- * bound to a one-use inspection of the same menu instance. No QUICK_MOVE, swaps or ghost setters.
+ * 按一次菜单观察完成精确存入或取出：拿起、放入、退回余量、核对背包差额。每次点击都等确认后再继续。
+ * 当前一次只选择一个来源槽和一个目标槽，不会合并多叠来源，也不会把所取物品分到多个背包槽。
  */
 public final class MachineMenuTransferTask extends AbstractCompanionTask<MachineMenuTransferTaskRecord> {
     private enum Phase { START, PICKUP, PLACE, RETURN, VERIFY }
@@ -93,6 +93,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         };
     }
 
+    // 消费观察编号并重新核对现场；普通背包的三十六个槽必须全部且各出现一次，才开始选来源与去向。
     private TaskState begin() {
         try { inspection = MachineMenu.consume(r.receiptId, player); }
         catch (IllegalArgumentException stale) { return failure("machine_menu_receipt_invalid", stale.getMessage(), FailureType.TARGET_LOST); }
@@ -114,6 +115,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         if (r.deposit) {
             destinationEntry = r.entryIndex;
             sourceEntry = -1;
+            // 目前要求某一叠自身够数；例如两叠各二十件，不能在这一轮合起来存四十件。
             for (int index : playerEntries) {
                 Slot source = menu.getSlot(index);
                 ItemStack stack = source.getItem();
@@ -130,6 +132,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
                 return failure("machine_withdraw_source_unavailable", "The selected real machine entry does not allow taking the requested item and count.", FailureType.NO_MATERIAL);
             }
             destinationEntry = -1;
+            // 目前也要求一个背包槽能装完；多个槽的剩余容量不会合并计算。
             for (int index : playerEntries) {
                 Slot destination = menu.getSlot(index);
                 if (compatible(destination.getItem(), stack) && destination.mayPlace(stack)
@@ -171,6 +174,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
                 kind.copyWithCount(pickupAmount), -pickupAmount);
     }
 
+    // 鼠标上正好是剩余数量就一次全放；鼠标拿得更多时逐件右键放，达到要求后再退回余量。
     private TaskState place() {
         ItemStack carried = menu.getCarried();
         Slot destination = menu.getSlot(destinationEntry);
@@ -187,6 +191,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
                 Phase.PLACE, amount, kind.copyWithCount(carried.getCount() - amount), amount);
     }
 
+    // 只退回原来源槽；它现在不能接收时停止并报告未结清，不另找一个未经计划的槽位塞进去。
     private TaskState returnRemainder() {
         Slot source = menu.getSlot(sourceEntry);
         ItemStack carried = menu.getCarried();
@@ -199,6 +204,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         return click(sourceEntry, 0, Phase.RETURN, carried.getCount(), ItemStack.EMPTY, carried.getCount());
     }
 
+    // 提交前计算本次点击后预期的背包、鼠标和机器来源数量；确认这些变化才推进记账。
     private TaskState click(int entryIndex, int button, Phase submittedPhase, int amount,
             ItemStack expectedCursor, int entryDelta) {
         Slot entry = menu.getSlot(entryIndex);
@@ -236,6 +242,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         return TaskState.RUNNING;
     }
 
+    // 最后要求放入数量、背包净变化和空鼠标同时正确，避免只数点击次数就声称搬运完成。
     private TaskState verify() {
         actualPlayerDelta = matchingPlayerCount() - initialPlayerCount;
         if (placed != r.count || !menu.getCarried().isEmpty() || !inventoryMatches(expectedInventory)
@@ -304,6 +311,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         failureCode = code; uncertain |= effectsStarted; fail(message, type); return TaskState.FAILED;
     }
 
+    // 未完成时让原生关闭逻辑处理鼠标物品，并继续标记结果不确定；不能据此认为已回到点击前状态。
     @Override protected void cleanup() {
         super.cleanup();
         if (effectsStarted && !verified) uncertain = true;

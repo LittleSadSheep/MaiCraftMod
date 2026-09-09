@@ -32,7 +32,10 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Frozen-layout workflow: review, native construction, multipart installation, configuration, evidence. */
+/**
+ * 整套机器装配的流程入口：观察现场、放普通方块、装部件、封洞、放初始物品、设过滤和接口，最后复查。
+ * 每个阶段把具体动作交给现有任务执行；本类负责先后顺序、等待和最终结果。结构完成后，生产是否成功仍需另外运行观察。
+ */
 final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecord> {
     private enum Phase { SURVEY, BLOCKS, PARTS, SEAL, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
     private final Level world;
@@ -81,6 +84,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         Decision decision = BuildPreviewGate.await(r, r.describe(), preview, previewParts);
         if (decision == Decision.WAITING) return TaskState.RUNNING;
         if (decision == Decision.CANCELLED) return TaskState.CANCELLED;
+        // 有缺料任务时先把它推进完，取材期间保护机器计划格，避免为了材料拆掉当前机器。
         if (supply.active()) {
             var tick = org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.withProtectedArea(
                     plannedPositions, List.of(), () -> supply.tick(player, this::runChild));
@@ -112,11 +116,13 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         return TaskState.RUNNING;
     }
 
+    // 普通方块只启动一轮子任务，之后继续装部件；生存模式先经过供料，创造模式直接建。
     private TaskState buildBlocks() {
         if (blocksStarted || r.plan.blocks().isEmpty() && survey.partClears().isEmpty()) { phase = Phase.PARTS; return TaskState.RUNNING; }
         blocksStarted = true;
         boolean consume = !WorkProfile.of(player).freeMaterials();
         var plan = r.plan.blockTask(id(), r.getDeadlineGameTime(), consume, survey.partClears(), survey.openings());
+        // 这份附加检查只确认世界对象和加载状态，没有保存并逐次比较场地旧方块；它不能代替施工器的替换许可。
         plan.executionGuards(r.plan.constructionAccess(plan), actor -> actor.level() == world,
                 (actor, pos) -> actor.level() == world && actor.level().isLoaded(pos), (actor, pos) -> {});
         if (consume) start(new SemanticBuildSupplyTaskRecord(id(), r.getDeadlineGameTime(), plan,
@@ -125,6 +131,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         return TaskState.RUNNING;
     }
 
+    // 部件已在正确位置就跳过，否则先确保有物品，再交给 AE2 的原生安装任务。
     private TaskState installPart() {
         if (partIndex >= r.plan.parts().size()) { phase = Phase.SEAL; return TaskState.RUNNING; }
         var part = r.plan.parts().get(partIndex);
@@ -135,6 +142,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         return TaskState.RUNNING;
     }
 
+    // 临时出入口留到普通结构和部件完成后再封，封口任务负责先走到外面。
     private TaskState seal() {
         if (sealingStarted || r.plan.seals().isEmpty()) { phase = Phase.CONTENTS; return TaskState.RUNNING; }
         sealingStarted = true;
@@ -178,6 +186,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private boolean ensureItem(ResourceLocation id) {
         return ensureItem(id, 1);
     }
+    // 先数普通背包；缺少时创造模式用原版取物任务，生存模式按声明的来源策略获取。
     private boolean ensureItem(ResourceLocation id, int count) {
         int have = player.getInventory().items.stream().filter(stack -> !stack.isEmpty()
                 && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(id)).mapToInt(net.minecraft.world.item.ItemStack::getCount).sum();
@@ -194,6 +203,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         return false;
     }
 
+    // 重新读取普通格、部件及已要求的接口配置；每次最多检查 128 项，不直接相信前一阶段说成功。
     private TaskState verify() {
         int budget = 128;
         int blocks = r.plan.blocks().size();
@@ -230,6 +240,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         return TaskState.RUNNING;
     }
 
+    // 收集部件观察，再逐条检查布局声明的形成要求；每条形成要求开始观察后最多等 200 刻。
     private TaskState commission() {
         int budget = 16;
         while (evidenceIndex < r.plan.components().size() && budget-- > 0) {
@@ -257,6 +268,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     }
 
     private void start(TaskRecord record) { childRecord = record; child = TaskFactory.create(player, record); }
+    // 子任务结束后先取结果。容器缺料只有在动作已结清、自己打开的菜单已关闭时，才允许转去补料再回来。
     private TaskState tickChild() {
         TaskState state = player.level().getGameTime() >= childRecord.getDeadlineGameTime()
                 ? TaskState.TIMEOUT : runChild(child);
@@ -298,10 +310,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (state == PlayerNav.Status.ARRIVED) stopNav();
         return TaskState.RUNNING;
     }
+    // 新启动的单个装配动作先给三分钟；外层仍要传播或检查子任务期限。
     private long deadline() { return player.level().getGameTime() + 3 * 60 * 20; }
     private String id() { return r.getToolCallId() + "-assembly-" + (++serial); }
     private TaskState failure(String code, String message) { failureCode = code; fail(message, FailureType.UNKNOWN); return TaskState.FAILED; }
 
+    // 结束时停止尚在运行的子任务、取消供料、释放预览，再清理公共导航状态。
     @Override protected void cleanup() {
         if (child != null) { child.stop(player, StopReason.REPLACED); child.result(TaskState.CANCELLED); child = null; }
         supply.cancel(player); BuildPreviewGate.release(r); super.cleanup();
