@@ -11,15 +11,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 轻量寻路性能探针,用于定位客户端卡顿是否来自寻路的游戏线程开销。
- *
- * <p>仅在 {@link NavSettings#profile} 打开时记账;关闭时 {@link #begin()} 返回 0,所有记录点近乎零开销。
- * 寻路执行链({@code PlayerNav.tick} → {@code PathingCore.tick} → {@code PathExecutor.onTick})跑在
- * Minecraft 客户端线程且单线程推进,因此这里的静态状态无需加锁。
- *
- * <p>按 ~5 秒窗口把各阶段的 {次数 / 总耗时 / 峰值} 以及并发导航数聚合成一行 INFO 日志。总耗时相对窗口
- * 长度的占比,直接反映寻路吃掉了多少主线程时间;峰值抓单 tick 卡顿。开关:运行期把
- * {@code NavSettings.get().profile = true}(默认 false)。
+ * 调试客户端卡顿：记录少量工作耗时，并在开启 profile 时由后台定期查看主线程正在执行什么。
+ * 当前仍有客户端卡顿采样和挖矿计时入口；五秒汇总所需的 tickFrame，以及搜索完成统计，尚未接入现用调用链。
  */
 public final class NavProfiler {
 
@@ -126,6 +119,7 @@ public final class NavProfiler {
     private static final String[] sampleStacks = new String[STALL_SAMPLES];
     private static final AtomicLong sampleWrites = new AtomicLong();
 
+    // 开启后每二十五毫秒记录一次主线程位置；保留最近六十四份，关闭开关后后台采样退出。
     private static synchronized void ensureSampler() {
         if (samplerRunning) {
             return;
@@ -196,7 +190,9 @@ public final class NavProfiler {
         }
     }
 
-    /** 每次 PlayerNav.tick() 调用一次:统计并发导航数,并按窗口触发汇总日志。 */
+    /**
+     * 推进五秒统计窗口并在到期时打印；当前源码没有调用这里，所以不能仅打开开关就期待出现汇总日志。
+     */
     public static void tickFrame() {
         if (!NavSettings.get().profile) {
             return;
@@ -292,6 +288,7 @@ public final class NavProfiler {
     }
 
     /** 探针开/关切换时调用:丢弃当前窗口,下次 {@link #tickFrame} 从干净基线重启,避免跨开关的偏斜窗口。 */
+    // 清掉统计窗口和计数；不改变 profile 开关，也不在这里停止采样线程。
     public static void reset() {
         windowStartMs = 0L;
         navTicks = 0L;

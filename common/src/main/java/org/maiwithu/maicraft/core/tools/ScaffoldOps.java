@@ -14,11 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code scaffold_materials} 的业务半边:增删改查那份垫路料清单。
- *
- * <p>四个动作都落到同一个出口——{@link ScaffoldMaterials#store}——然后回读落盘后的实际结果。
- * 回执报的永远是<b>存进去之后读回来的</b>那份,不是请求的那份:认不出的 id 会被丢掉,
- * 模型得看见这件事,否则它会以为自己加上了。
+ * 处理垫路材料的读取、增删、替换和清空，更新内存后通知玩家，并返回材料清单和背包里未列入的方块。
  */
 public final class ScaffoldOps {
 
@@ -38,6 +34,7 @@ public final class ScaffoldOps {
                 if (given.isEmpty()) {
                     return error(self, refusal("add", gaveNothing));
                 }
+                // 当前先把原标签展开成物品再追加，保存后原有标签关系会丢失。
                 List<String> merged = new ArrayList<>(ScaffoldMaterials.effectiveIds(self));
                 for (String id : given) {
                     if (!merged.contains(id)) {
@@ -50,6 +47,7 @@ public final class ScaffoldOps {
                 if (given.isEmpty()) {
                     return error(self, refusal("delete", gaveNothing));
                 }
+                // 当前用展开后的物品名减去输入条目；输入若仍是 #标签，就无法删掉对应成员。
                 List<String> kept = new ArrayList<>(ScaffoldMaterials.effectiveIds(self));
                 kept.removeAll(given);
                 ScaffoldMaterials.store(self, kept);
@@ -82,6 +80,7 @@ public final class ScaffoldOps {
         JsonArray list = new JsonArray();
         materials.forEach(list::add);
         root.add("materials", list);
+        // 当前这个字段只表示清单非空：默认清单也为真，主动清空反而为假；不能据此判断用户是否改过。
         root.addProperty("customised", !ScaffoldMaterials.storedIds(self).isEmpty());
 
         JsonArray carrying = new JsonArray();

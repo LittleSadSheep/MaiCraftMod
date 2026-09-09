@@ -4,6 +4,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalGoal;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalTerrain;
 
+// 用给定高度和材质的简化地图，检查区域方向、分次取样、未知列记录，以及概览保留远处不同材质的表面。
 public final class RegionalTerrainTest {
     public static void main(String[] args) {
         Vec3 origin=new Vec3(.5,100,.5);

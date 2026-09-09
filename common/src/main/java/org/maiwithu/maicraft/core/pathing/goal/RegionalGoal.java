@@ -2,12 +2,15 @@ package org.maiwithu.maicraft.core.pathing.goal;
 
 import net.minecraft.world.phys.Vec3;
 
-/** A direction anchored when intent starts; camera motion never changes the requested region. */
+/**
+ * 描述“从起点朝某个方向找一处地方”：范围在八到一百二十八格内，候选还要沿该方向前进至少三格。
+ */
 public record RegionalGoal(Vec3 origin, Vec3 direction, double radius) {
     public RegionalGoal {
         if (origin == null || direction == null || !Double.isFinite(radius) || radius < 8 || radius > 128)
             throw new IllegalArgumentException("regional travel radius must be 8..128 blocks");
     }
+    // 前后左右按出发时的朝向固定，之后转头不改变目标方向；东南西北和上下使用世界方向。
     public static Vec3 direction(String name, float yaw) {
         double angle = Math.toRadians(yaw);
         Vec3 forward = new Vec3(-Math.sin(angle),0,Math.cos(angle));

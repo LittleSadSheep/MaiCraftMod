@@ -26,7 +26,9 @@ public final class NavSettings {
 
     // ==================== 成本 / 能力开关 ====================
 
-    /** 调试:打开寻路性能探针,{@link org.maiwithu.maicraft.core.pathing.util.NavProfiler} 按窗口打 [nav-profile] 日志。默认关。 */
+    /**
+     * 调试开关：目前能启用卡顿采样；五秒汇总入口未接入现用流程，见 NavProfiler。
+     */
     public boolean profile = false;
 
     /** 允许挖掘方块开路。 */

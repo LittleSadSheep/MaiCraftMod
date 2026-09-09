@@ -30,6 +30,7 @@ public final class ScaffoldMaterialsTool implements MaiCraftTool {
     }
 
     @Override
+    // 下方对外说明仍承诺跨会话保存，但当前 ScaffoldMaterials 只有静态内存配置；本轮只记录，不修改工具返回内容。
     public String description() {
         return "Manage which blocks you are willing to spend as throwaway scaffolding — the blocks "
                 + "pathfinding sacrifices to pillar up, bridge a gap or step over a ledge. This is a "
@@ -57,7 +58,7 @@ public final class ScaffoldMaterialsTool implements MaiCraftTool {
     }
 
     @Override
-    // 这里只解析参数并转交 ScaffoldOps。实际修改、保存、通知玩家和整理返回清单都在那一层完成。
+    // 这里只解析参数并转交 ScaffoldOps；修改内存、通知玩家和整理返回清单都在那一层完成。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer self, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         reply.accept(impl.apply(

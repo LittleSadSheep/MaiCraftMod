@@ -17,28 +17,16 @@ import java.util.Map;
 import java.util.PriorityQueue;
 
 /**
- * 水面导航:她驾着船,把船开到离目标最近的可达水格。与 {@link PlayerNav} 同一份
- * 契约(tick → RUNNING/ARRIVED/FAILED),任务层可以把两条腿接力着用。
- *
- * <h2>为什么不并进步行 A*</h2>
- * 步行图的动作集(跳、垫、挖、贴边)对船一条都不成立;船的图是<b>同一水面高度的
- * 二维平面 + 岸线障碍</b>。硬塞进主引擎要给每个动作加"在船上吗"的分支,那是把
- * 两种物理搅成一锅。这里独立做一次有预算的平面 A*(8 邻接,对角要求两正交都可行,
- * 防贴角),路径执行按"当前能直线水路看到的最远路点"贪心推进——网格锯齿交给
- * 船的动量抹平,不需要平滑器。
- *
- * <h2>目标在岸上是常态</h2>
- * 启发朝目标的水平投影;预算内到不了就取<b>离目标最近的已访问水格</b>当靠岸点,
- * 开到那儿即 ARRIVED——下船走路是任务层的下一棒,这里不越界。
- *
- * <p>驾驶输入走 {@link InputDriver#steerVehicle}(原版桨物理);本地玩家必须真实
- * 乘坐该船,所有划桨输入仍由客户端身体租约产生。
+ * 玩家已经坐在船上时，先规划一段同高度水路并划向终点。最多搜索四千零九十六次，找不到目标就驶向已找到的最近水格。
+ * 这里的 ARRIVED 只表示这段水路结束，不保证目标已到达或旁边真有岸；后续由移动任务决定。
  */
 public final class BoatNav {
 
     public enum Status { RUNNING, ARRIVED, FAILED }
 
-    /** 平面 A* 的节点预算:半径 ~60 格的湖面全覆盖,再远的航程靠途中重规划。 */
+    /**
+     * 单次水路搜索最多展开四千零九十六个节点；当前到达这段终点后不会在本类重新规划。
+     */
     private static final int NODE_BUDGET = 4096;
     /** 对当前路点无进展多少刻判搁浅。 */
     private static final int STUCK_TICKS = 60;
@@ -73,7 +61,9 @@ public final class BoatNav {
         return failReason;
     }
 
-    /** 船这一刻在消耗它的航线吗——任务层的续约(progress lease)读它。 */
+    /**
+     * 最近二十刻没有持续停滞就算仍有进展，外层移动任务据此延长允许行进的时间。
+     */
     public boolean progressing() {
         return noProgressTicks <= 20;
     }
@@ -84,6 +74,7 @@ public final class BoatNav {
             failReason = "no longer in a boat";
             return Status.FAILED;
         }
+        // 只在开头规划一次；刚下水暂时读不到水时最多等三十刻。
         if (!planned) {
             Integer surface = waterSurfaceAt(boat.blockPosition());
             if (surface == null) {
@@ -125,6 +116,7 @@ public final class BoatNav {
             distSq = horizontalDistSq(at, wp);
         }
         // 搁浅判定:对当前路点的最近距离长期不缩短。撞上冰面、被推上岸都落在这儿。
+        // 不断接近路点就清掉停滞计数；超过六十刻没进展则停止划桨，交给外层处理。
         if (distSq < bestWpDistSq - 0.05) {
             bestWpDistSq = distSq;
             noProgressTicks = 0;
@@ -146,7 +138,9 @@ public final class BoatNav {
     // 规划
     // ------------------------------------------------------------------
 
-    /** @return null = 有航线可走;否则直接给出终态。 */
+    /**
+     * 在最初找到的水面高度搜索八个方向，斜走还要求两侧格可通行；找不到目标就保存这次搜索中最接近目标的路径。
+     */
     private Status plan(Boat boat, int surface) {
         BlockPos feet = boat.blockPosition();
         surfaceY = surface;
@@ -220,7 +214,9 @@ public final class BoatNav {
         return null;
     }
 
-    /** 这一格水面能过船吗:水在面上,面上两格无碰撞体(船身 + 坐着的人头)。 */
+    /**
+     * 当前只检查这一格有水、上方两格没有碰撞；没有按船的宽度检查两侧，也没检查含水格本身的实体碰撞。
+     */
     private boolean cruisable(int x, int z) {
         Level level = player.level();
         BlockPos at = new BlockPos(x, surfaceY, z);
@@ -231,7 +227,9 @@ public final class BoatNav {
                 && level.getBlockState(at.above(2)).getCollisionShape(level, at.above(2)).isEmpty();
     }
 
-    /** 船脚下的水面 y。往下扫三格:被浮力弹起、载人下压的瞬间,船位会短暂离面。 */
+    /**
+     * 从船所在格向下最多看三格，取第一个有水的高度；不是从这里再向上搜索整片水的真正表面。
+     */
     private Integer waterSurfaceAt(BlockPos feet) {
         Level level = player.level();
         for (int dy = 0; dy <= 3; dy++) {
@@ -243,7 +241,9 @@ public final class BoatNav {
         return null;
     }
 
-    /** 两点之间是不是一条干净的直线水路(按步长采样格子)。 */
+    /**
+     * 沿中心线约每半格取样；通过时跳过中间路点，直接划向更远的路点。
+     */
     private boolean clearWaterLine(Vec3 from, BlockPos to) {
         double tx = to.getX() + 0.5;
         double tz = to.getZ() + 0.5;

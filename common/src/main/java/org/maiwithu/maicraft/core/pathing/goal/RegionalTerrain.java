@@ -6,7 +6,9 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.world.phys.Vec3;
 
-/** Incremental coarse surface samples, shared by travel decisions and the downward overview. */
+/**
+ * 分多次少量读取周围地形，记录能站的表面、相邻支撑、可见性和材质。稀疏取样用于挑候选，不证明整个平台连续或路线能走通。
+ */
 public final class RegionalTerrain {
     public interface View {
         Vec3 surfaceBelow(Vec3 point, int depth);
@@ -31,7 +33,9 @@ public final class RegionalTerrain {
     private RegionalTerrain(Vec3 origin,int radius,int depth,List<Vec3> samples) {
         this.origin=origin; this.radius=radius; this.depth=depth; this.samples=samples;
     }
+    // 概览把取样扩大到一百二十八格、向下二百五十六格；远处采得更疏。
     public static RegionalTerrain overview(Vec3 origin) { return new RegionalTerrain(origin,128,256,OVERVIEW_OFFSETS); }
+    // 只读已加载世界；向下碰到表面后，再用实际身体尺寸和禁入区域检查能否站立。
     public static View observed(net.minecraft.client.player.LocalPlayer player) {
         var level=player.clientLevel;
         return new View() {
@@ -66,6 +70,7 @@ public final class RegionalTerrain {
     public Vec3 origin() { return origin; }
     public boolean complete() { return column==samples.size(); }
     public List<Surface> surfaces() { return List.copyOf(surfaces); }
+    // 每次最多处理指定数量的列，并在约一毫秒后让出；单列读取本身不会被中途打断。
     public void advance(View view, int budget) {
         // 把地形采样分摊到多次调用，并限制本次耗时。没加载或没采到的区域保持未知，不能算成空地。
         long end=System.nanoTime()+1_000_000;
@@ -89,6 +94,7 @@ public final class RegionalTerrain {
         for(int x=-RADIUS;x<=RADIUS;x+=STRIDE) for(int z=-RADIUS;z<=RADIUS;z+=STRIDE) points.add(new Vec3(x,0,z));
         points.sort(java.util.Comparator.comparingDouble(Vec3::lengthSqr)); return List.copyOf(points);
     }
+    // 近、中、远取样交替安排，避免近处还没看完就完全没有远处信息。
     private static List<Vec3> overviewOffsets() {
         var medium=new ArrayList<Vec3>(); var far=new ArrayList<Vec3>();
         for(int x=-32;x<=32;x+=8) for(int z=-32;z<=32;z+=8) medium.add(new Vec3(x,0,z));
@@ -105,6 +111,7 @@ public final class RegionalTerrain {
         return List.copyOf(merged);
     }
     /** Bounds summarize samples, not continuous free space or a promise that a route exists. */
+    // 按方位、高度段和材质分组，最多展示十二组；先留不同材质的平台候选，再补较近的组。
     public Map<String,Object> summary() {
         var groups=new LinkedHashMap<String,List<Surface>>();
         for(var surface:surfaces) {
