@@ -34,7 +34,7 @@ public final class KnowledgeLibrary {
         this.source = source;
         builtins = Map.of(INDEX, load("index", "知识索引", "按需发现方块状态、Ponder 教程和实际执行能力。"),
                 GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"),
-                BLUEPRINT, load("blueprint", "统一机器蓝图 JSON", "从教程引用、编辑或自行设计结构，分别调用构建、修改与使用能力。"));
+                BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格对象建模、开孔、材质、导出、续建，以及机器蓝图。"));
     }
     public static KnowledgeLibrary offline() {
         return new KnowledgeLibrary(new Source() {
@@ -73,6 +73,7 @@ public final class KnowledgeLibrary {
     public KnowledgeDocument read(String uri) {
         if (uri.length() > 2048) throw new IllegalArgumentException("Resource URI is too long");
         KnowledgeDocument document = builtins.get(uri);
+        if (document == null && uri.startsWith(BuildingSceneResources.PREFIX)) document = BuildingSceneResources.read(uri);
         if (document == null) document = source.read(uri);
         if (document == null) throw KnowledgeException.missing(uri);
         return document;
