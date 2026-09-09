@@ -51,10 +51,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Receipt-driven construction performed only through the local first-person body. */
+/** 实际施工：先逐格检查，再走到合适位置拿材料、瞄准、放置；最后复查成品并拆掉自己搭的临时支撑。 */
 class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecord>
         implements BuildPlacementRegistry.Provider, PlayerNav.ContextProvider {
-    /** Verified mutations renew this lease; elapsed total time never kills a progressing build. */
+    /** 真正确认挖掉、放下或完成更多格子时，给施工再留两分钟；单纯原地空转不会因此无限续期。 */
     private static final long BUILD_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
     private static final int PREFLIGHT_BUDGET = 24;
     private static final int USE_TIMEOUT = 40;
@@ -119,6 +119,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private String failureCode, note = "all native actions re-verified";
 
     FirstPersonBuildCompanionTask(LocalPlayer player, BuildTaskRecord record) {
+        // 保存全部目标并按施工顺序排序，记住不能让导航破坏的格子，以及上一批留下的临时支撑。
         super(player, record);
         rules = new BuildCellRules(player, record);
         inventory = new BuildInventory(player);
@@ -138,11 +139,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         preflightOrder.sort(BuildOrder.BUILD_ORDER);
     }
 
-    /**
-     * Add loaded cells that construction navigation may observe but must never clear or replace.
-     * Callers use this before the first child tick; the constraint is internal and never enters a
-     * public semantic goal.
-     */
+    /** 开工前补充不能碰的位置；开始检查或施工后不允许再偷偷更换这份保护范围。 */
     protected final void addProtectedNavigationCells(Iterable<BlockPos> cells) {
         if (preflightAt != 0 || preflightDone || providerRegistered || phase != Phase.PREFLIGHT) {
             throw new IllegalStateException(
@@ -161,6 +158,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override protected void onStart() {
+        // 先拒绝普通放块做不了的内容，例如直接写箱子数据、生成画或组合摆设，避免建到一半才暴露不支持。
         bounds();
         if (r.targets.isEmpty()) { r.completed(0); succeed(); return; }
         if (!r.blockEntityData.isEmpty()) addUnsupported("block_entity_data", null,
@@ -177,6 +175,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override protected TaskState onTick() {
+        // Dev 预览还没确认就等待，点取消就结束；确认后才按当前阶段逐步施工。
         var preview = BuildPreviewGate.await(r, r);
         if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.WAITING)
             return TaskState.RUNNING;
@@ -197,6 +196,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState preflightTick() {
+        // 每刻最多检查二十四个目标，避免大蓝图一次卡住游戏；目标没加载时先走近，加载后继续。
         int budget = PREFLIGHT_BUDGET;
         while (preflightAt < preflightOrder.size() && budget-- > 0) {
             BuildTaskRecord.Target target = preflightOrder.get(preflightAt);
@@ -209,6 +209,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState travelToLoad(BlockPos target, boolean preflight) {
+        // 这里只为了让目标区块进入视野，采用不改地形的导航；加载到目标后还要回来继续原来的检查。
         if (nav == null) {
             int x = target.getX(), z = target.getZ();
             nav = PlayerNav.toGoal(player, () -> NavGoal.column(x, z), 1.0,
@@ -236,6 +237,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void validateSecondary(BuildTaskRecord.Target secondary, BlockPos primaryPos) {
+        // 门上半、床头等应由另一半放置时一起生成；要求蓝图两半互相匹配，不能分别指向冲突状态。
         BuildTaskRecord.Target primary = targets.get(primaryPos.asLong());
         if (primary != null) for (BuildPlacementGeometry.GeneratedCell generated
                 : BuildPlacementGeometry.generatedBy(primary)) {
@@ -249,6 +251,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void inspectPrimary(BuildTaskRecord.Target target) {
+        // 看这一格是否已满足目标；不满足时先检查能否替换、能否手工放成，并统计还需多少材料。
         BlockState live = player.level().getBlockState(target.pos());
         if (live.isAir()) r.scaffoldLedger().cleared(target.pos());
         List<BuildPlacementGeometry.GeneratedCell> generated = BuildPlacementGeometry.generatedBy(target);
@@ -284,7 +287,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void inspectGenerated(BuildTaskRecord.Target primary,
-                                  List<BuildPlacementGeometry.GeneratedCell> generated) {
+                                   List<BuildPlacementGeometry.GeneratedCell> generated) {
+        // 一次放门或床会影响不止一格，连自动生成的另一半也要检查加载、保护、占用和不可破坏方块。
         for (BuildPlacementGeometry.GeneratedCell effect : generated) {
             BuildTaskRecord.Target declared = targets.get(effect.pos().asLong());
             if (declared != null && !BuildValidity.sameBlockState(declared.desiredState(), effect.expected()))
@@ -314,6 +318,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState finishPreflight() {
+        // 全部检查结束后汇总拒绝原因；允许分批时只要还有可做的格子就开工，材料不足留给供料父任务处理。
         if (!r.preflightGuardMatches(player)) {
             failAt(siteMin, "observed build region changed before construction", FailureType.TARGET_LOST,
                     "build_observation_stale", false); return TaskState.FAILED;
@@ -349,6 +354,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState selectTick() {
+        // 找下一格不符合蓝图的位置，先清掉冲突方块，再选择放置手法；整轮做完进入成品复查。
         resetCell();
         while (queueAt < queue.size()) {
             cell = queue.get(queueAt);
@@ -370,6 +376,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private List<BlockPos> clearCells(CellPlan plan) {
+        // 当前把主格和自动生成格里“不为空且不匹配”的方块加入待清除列表，这里没有再按替换许可过滤。
         LinkedHashSet<BlockPos> out = new LinkedHashSet<>();
         if (player.level().isLoaded(plan.target().pos())) {
             BlockState live = player.level().getBlockState(plan.target().pos());
@@ -384,6 +391,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState clearNavTick() {
+        // 走到能挖的位置前再次核对专用观察守卫和箱子等保护；普通建造的守卫默认允许通过。
         if (!player.level().isLoaded(clearing)) {
             failAt(clearing, "cell unloaded after preflight", FailureType.TARGET_LOST,
                     "cell_unloaded", false); return TaskState.FAILED;
@@ -415,6 +423,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState clearTick() {
+        // 对准目标挖掘并等待确认；当前没有在这里重新调用 blockedByMode 检查预检后出现的普通方块。
         if (!player.level().isLoaded(clearing)) {
             failAt(clearing, "break target unloaded", FailureType.TARGET_LOST,
                     "clear_target_lost", false); return TaskState.FAILED;
@@ -456,6 +465,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState nextClear() {
+        // 清完一格继续下一格；冲突全部清完后，要么空气目标已完成，要么进入放置阶段。
         if (clearing != null && player.level().isLoaded(clearing)
                 && player.level().getBlockState(clearing).isAir()) r.scaffoldLedger().cleared(clearing);
         clearAt++; stopNav();
@@ -469,6 +479,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState placeNavTick() {
+        // 一种放法不通就试下一种；站位必须精确到指定格，不能像长途旅行那样“附近就算到了”。
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
         while (gestureAt < liveGestures.size()
                 && !supportExists(liveGestures.get(gestureAt))) gestureAt++;
@@ -494,6 +505,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState selectItemTick() {
+        // 生存模式从实际背包拿材料；创造模式缺材料时借一个空快捷栏格临时放入，之后还要清掉。
         if (creativeReceipt != null) {
             LocalPlayerContext ctx = ClientRuntime.requireContext(player);
             creativeReceipt = ctx.actions().poll(ctx, creativeReceipt);
@@ -547,6 +559,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState aimTick() {
+        // 先真正转头到位，复查视线会点到哪，再预测会放成什么状态，并检查是否把自己或生物卡进方块。
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
         Vec3 eye = player.getEyePosition();
         InputDriver.halt(player); InputDriver.sneak(player, true); InputDriver.lookAt(player, gesture.point());
@@ -570,6 +583,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.FAILED;
         }
         Map<Long, BlockState> frozen = freeze(cell);
+        // 点击前保存相关格子的状态，之后用变化来确认这一次点击是否生效，不能仅凭“发出点击”算完成。
         if (!r.mutationGuardMatches(player, cell.target().pos())
                 || cell.generated().stream().anyMatch(effect -> !r.mutationGuardMatches(player, effect.pos()))) {
             failAt(cell.target().pos(), "observed target changed before placement", FailureType.TARGET_LOST,
@@ -598,6 +612,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState rejectPlayerOccupiedGesture() {
+        // 自己站在准备放块的位置上，就跳过这个站位的所有手法，换一个位置，避免原地换角度仍把自己堵住。
         BlockPos occupiedFeet = PlayerNav.playerFeet(player);
         InputDriver.halt(player); stopNav(); selection.reset(); aimConvergence.reset();
         gesture = null;
@@ -616,6 +631,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState waitUseTick() {
+        // 点击已发出就等待这一次的结果；明确没生效才换手法，结果不确定或变成别的东西则停止并报告。
         InputDriver.halt(player);
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
         useReceipt = ctx.actions().poll(ctx, useReceipt);
@@ -638,6 +654,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         BlockState live = player.level().getBlockState(cell.target().pos());
         if (useCount < BuildPlacementGeometry.maximumUses(cell.target())
                 && BuildPlacementGeometry.isProgress(cell.target(), Blocks.AIR.defaultBlockState(), live)) {
+            // 雪层、双层台阶等需要多次放置；看到已经朝目标前进时，继续补下一次，而不是把中间状态拆掉。
             renewBuildProgress();
             liveGestures = BuildPlacementGeometry.plan(player, cell.target(), targets);
             gestureAt = 0; gesture = null; selection.reset(); aimConvergence.reset();
@@ -649,6 +666,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void finishPlaced() {
+        // 记下这一格完成；如果借用了创造快捷栏，还要先归还。当前 placed 计数也会包含期间由外界放成的格子。
         r.placedOne(); renewBuildProgress(); markComplete(cell);
         if (creativeSlot >= 0 && !creativeStack.isEmpty()) {
             phase = Phase.CLEAR_CREATIVE;
@@ -656,6 +674,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState clearCreativeTick() {
+        // 清除为本次施工临时放入的创造物品，等清除确认并关好物品栏，再做下一格。
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
         if (creativeReceipt == null) {
             if (!creativeMenu.inventoryReady(ctx)) return TaskState.RUNNING;
@@ -678,6 +697,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState deferOrFail() {
+        // 所有放法都试完，可能只是支撑尚未建好，就先做别的格；若同样身体和世界状态再次失败，停止空转。
         long key = cell.target().pos().asLong();
         PlacementAttemptSignature signature = placementAttemptSignature();
         if (!exhaustedPlacementStates.computeIfAbsent(key, ignored -> new HashSet<>()).add(signature)) {
@@ -709,6 +729,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private PlacementAttemptSignature placementAttemptSignature() {
+        // 记录玩家站位、可用手法和目标附近方块，用来识别“又回到同样情况，没有进展”的重复尝试。
         BlockPos feet = PlayerNav.playerFeet(player);
         long hash = 0xcbf29ce484222325L;
         hash = mixStateHash(hash, liveGestures.size());
@@ -749,6 +770,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void beginVerify() {
+        // 开始新一轮成品复查，清掉上轮失败列表和通行检查结果，避免把旧证据当新结果。
         stopNav(); verifyAt = 0; verifyFailed.clear(); verifyFailureStates.clear();
         traversabilityScan = null;
         traversabilityResult = null;
@@ -756,6 +778,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState verifyTick() {
+        // 分刻重读每一格。发现变化会尝试有限修补；同一批错误状态重复出现时失败，而不是永远拆建循环。
         int budget = PREFLIGHT_BUDGET;
         while (verifyAt < r.targets.size() && budget-- > 0) {
             BuildTaskRecord.Target target = r.targets.get(verifyAt);
@@ -815,6 +838,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState scaffoldSelectTick() {
+        // 成品格子都对上后，先清理自己的临时支撑；还有支撑或目标不匹配时不能宣布整项成功。
         while (scaffoldAt < scaffoldQueue.size()) {
             scaffold = scaffoldQueue.get(scaffoldAt);
             if (!player.level().isLoaded(scaffold)) {
@@ -839,6 +863,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState routeVerifyTick() {
+        // 有进门／上楼通行要求的方案，还要检查这些地方实际连得通；方块都对并不一定代表房子能用。
         traversabilityResult = traversabilityScan.tick();
         if (traversabilityResult == null) {
             // This tick consumed new, finite verification work; yielding it must not spend the
@@ -884,6 +909,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState scaffoldBreakTick() {
+        // 只拆自己曾确认放下、现在仍是原状态的临时支撑；被别人换过或新加保护的就停，不误拆新东西。
         BlockState live = player.level().getBlockState(scaffold);
         if (live.isAir()) {
             r.scaffoldLedger().cleared(scaffold);
@@ -915,6 +941,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private NativeConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before) {
+        // 主格和另一半都达到要求才完全确认；支持叠加的中间状态也算本次点击有进展，其余变化按不一致处理。
         return ctx -> {
             if (!ctx.level().isLoaded(plan.target().pos())) return NativeConfirmation.Verdict.PENDING;
             if (matches(ctx, plan)) return NativeConfirmation.Verdict.APPLIED;
@@ -944,7 +971,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private boolean matches(BuildTaskRecord.Target target,
-                            List<BuildPlacementGeometry.GeneratedCell> generated) {
+                             List<BuildPlacementGeometry.GeneratedCell> generated) {
+        // 不只看主格，自动生成的另一半也必须已加载且正确；缺观察不能当成正确。
         if (!player.level().isLoaded(target.pos())
                 || !target.matches(player.level().getBlockState(target.pos()))) return false;
         for (BuildPlacementGeometry.GeneratedCell effect : generated)
@@ -965,6 +993,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void markComplete(CellPlan plan) {
+        // 只把此刻确实匹配的已声明目标计入完成数；后来外界改坏时，复查会把它从完成数里移出。
         int before = r.completed();
         if (player.level().isLoaded(plan.target().pos())
                 && plan.target().matches(player.level().getBlockState(plan.target().pos())))
@@ -1032,6 +1061,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void drainScaffolds() {
+        // 导航过程中可能为到达工作位置搭过支撑，把它们收进施工清理名单，避免任务结束后留一堆脚手架。
         boolean added = false;
         for (BlockPos pos : BuildPlacementRegistry.drainScaffold(player))
             if (!targets.containsKey(pos.asLong())) added |= scaffolds.add(pos.immutable());
@@ -1055,6 +1085,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     @Override public void confirmedScaffoldRemoval(BlockPos pos) { r.scaffoldLedger().cleared(pos); }
 
     @Override public boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState support) {
+        // 可以借已建好的成品作支点，但不能借被明确保护的位置；落下临时支撑的位置也要单独检查。
         BuildTaskRecord.Target target = targets.get(clicked.asLong());
         return preflightDone && target != null && !BuildCellRules.isAirTarget(target) && target.matches(support)
                 && !inheritedProtectedMutationCells.contains(clicked.asLong())
@@ -1128,10 +1159,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        // 暂停时先停当前挖掘、撤掉导航的施工协助并松键；任务进度仍保留，恢复后可以重新登记协助。
         if (digger.current() != null) digger.cancel();
         drainScaffolds(); unregisterProvider(); super.stop(companion, why); InputDriver.halt(player);
     }
     @Override protected void cleanup() {
+        // 永久结束时再释放预览、挖掘和菜单，并尽力清掉创造临时物品；已经实际建好的方块不会自动拆回去。
         BuildPreviewGate.release(r);
         if (digger.current() != null) digger.cancel();
         drainScaffolds(); unregisterProvider(); InputDriver.halt(player); selection.reset();
@@ -1161,6 +1194,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     @Override
     protected Map<String, Object> resultData() {
+        // 报告已匹配多少、放过和清过多少、还缺材料以及未清理支撑；只有最终格子和通行均通过才附整体验证。
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("requested", r.targets.size());
         data.put("completed", r.completed());
@@ -1177,6 +1211,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (failureCode != null) data.put("failure_code", failureCode);
         if (failurePos != null) data.put("failure_position", position(failurePos));
         if (uncertain) {
+            // 这里使用施工自己的不确定字段；上层 RecoveryAdvisor 当前读取的是另外两种字段名。
             data.put("world_change_uncertain", true);
             data.put("safe_to_retry_without_observation", false);
         }
@@ -1230,6 +1265,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private Map<Item, Integer> currentShortfall() {
+        // 根据当前仍未完成的格子重新算材料，再减去实际背包数量，不直接沿用开工前的旧缺料表。
         Map<Item, Integer> need = new LinkedHashMap<>();
         for (CellPlan plan : plans) {
             BuildTaskRecord.Target target = plan.target();

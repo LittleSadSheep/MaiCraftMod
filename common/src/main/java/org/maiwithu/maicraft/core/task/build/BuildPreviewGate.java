@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.client.preview.PreviewPart;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 
-/** One review per complete immutable construction, shared by all of its material batches. */
+/** 一整份建筑只让玩家确认一次；分批取材料、分批施工时复用这次决定，不每批都重新弹预览。 */
 public final class BuildPreviewGate {
     private static TaskRecord waiting;
     private static TaskRecord reviewOwner, reviewRoot;
@@ -24,6 +24,7 @@ public final class BuildPreviewGate {
     private BuildPreviewGate() {}
 
     public static Decision await(TaskRecord owner, BuildTaskRecord plan) {
+        // 上层已经负责整份蓝图的预览时，小批次不再另开预览。
         if (plan.previewManaged()) return Decision.DISABLED;
         Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
         if (PreviewController.enabled() && (PreviewController.current() == null
@@ -37,7 +38,8 @@ public final class BuildPreviewGate {
     }
 
     public static Decision await(TaskRecord owner, String title, Map<BlockPos, BlockState> cells,
-                                 List<PreviewPart> parts) {
+                                  List<PreviewPart> parts) {
+        // 先读已有取消／确认结果；第一次等待时同时记住施工任务和它外面的总任务，取消才能停对对象。
         PreviewSession session = PreviewController.current();
         if (session != null && session.owner().equals(owner.publicId())
                 && session.decision() == Decision.CANCELLED) return Decision.CANCELLED;
@@ -61,7 +63,7 @@ public final class BuildPreviewGate {
         return decision;
     }
 
-    /** The runtime calls this even while human controls suspend the construction scheduler. */
+    /** 玩家看预览时施工不推进，给施工单和总任务各延后一刻，避免看图期间超时。 */
     public static void freezeWaitingDeadline() {
         if (waiting != null && !waiting.getState().isTerminal())
             waiting.extendDeadlineTo(waiting.getDeadlineGameTime() + 1);
@@ -69,7 +71,7 @@ public final class BuildPreviewGate {
             reviewRoot.extendDeadlineTo(reviewRoot.getDeadlineGameTime() + 1);
     }
 
-    /** Cancellation is lifecycle work and must settle even after F8 revokes scheduler authority. */
+    /** 即使玩家按 F8 接管了输入，预览中的取消仍要处理，不能等自动控制恢复后才取消。 */
     public static void settleCancellation() {
         if (reviewOwner == null) return;
         TaskRecord owner = reviewOwner;
@@ -84,7 +86,8 @@ public final class BuildPreviewGate {
     }
 
     static boolean cancelReviewedTask(PreviewSession session, TaskRecord owner, TaskRecord expectedRoot,
-                                      TaskRecord activeRoot, Consumer<String> cancel) {
+                                       TaskRecord activeRoot, Consumer<String> cancel) {
+        // 只取消当时展示这份预览的总任务；用户已经换了任务时，旧预览不能取消新任务。
         if (session == null || session.decision() != Decision.CANCELLED
                 || !session.owner().equals(owner.publicId()) || expectedRoot == null
                 || activeRoot != expectedRoot || activeRoot.getState().isTerminal()
@@ -94,6 +97,7 @@ public final class BuildPreviewGate {
     }
 
     public static void release(TaskRecord owner) {
+        // 施工结束后移走它的预览和决定记录，下一个建筑才能重新确认。
         PreviewController.release(owner.publicId());
         resolved.remove(owner);
         if (waiting == owner) waiting = null;

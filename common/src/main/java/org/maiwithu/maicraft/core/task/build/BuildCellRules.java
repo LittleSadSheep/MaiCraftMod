@@ -12,9 +12,8 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
- * 单格判据的唯一出处:这一格能不能动、该不该动、是不是注定动不了。
- * 施工循环、轮扫对账与材料报价三处共用——判据分叉的直接后果就是
- * "报价索要永远不会被放置的格子的材料"那类账目谎言,只此一份。
+ * 检查一格能否施工：是否允许替换、是否有箱子等需要保护、是否越界或不可挖，以及是否挡住玩家或生物。
+ * 这些方法只给判断结果，调用方负责在正确时机检查并决定停止或换位置。
  */
 final class BuildCellRules {
 
@@ -26,15 +25,7 @@ final class BuildCellRules {
         this.r = r;
     }
 
-    /**
-     * 只读已加载区块的取态——未加载处当空气。
-     *
-     * <p>{@code level.getBlockState} 在服务端会<b>同步生成区块</b>(它内部要的是 FULL
-     * 状态,拿不到就现场生成)。判定这一族的读点要么在开工前置上(盘料得扫全图纸),
-     * 要么在每刻的热路径上——一个远处锚点就能让她把图纸覆盖的所有区块现场生成一遍,
-     * 玩家看到的是一次可见卡顿。轮扫那处本来就用的是钳制视图,这几处得跟上同一条纪律,
-     * 否则六个读点里只挡住了一个。
-     */
+    /** 只读已加载区域；底层视图会把未加载处当空气，因此调用者必须另行证明目标已加载。 */
     BlockState peek(BlockPos pos) {
         return LoadedOnlyView.of(player.level()).getBlockState(pos);
     }
@@ -48,13 +39,7 @@ final class BuildCellRules {
         return !isAirTarget(target) && target.costsMaterial();
     }
 
-    /**
-     * 这一格本档不让动吗——让路的判定只有这一处。
-     *
-     * <p>不让动的格子<b>不进待建集、也算作了结</b>。若只是"放的时候跳过",它每一遍
-     * 都会重新排进顺序、每一遍都放不下去,整栋楼陪着它重试到超时,而那一格从第一遍
-     * 起就已经注定动不了。
-     */
+    /** 当前替换模式是否禁止修改这一格；施工预检收到 true 会报告受阻，不会把它当成已建好。 */
     boolean blockedByMode(BuildTaskRecord.Target target) {
         BlockPos pos = target.pos();
         BlockState current = peek(pos);
@@ -74,33 +59,20 @@ final class BuildCellRules {
         return other != null && peek(other).hasBlockEntity();
     }
 
-    /**
-     * 这一格<b>注定</b>动不了吗——世界边界之外,或者砸不动的东西挡着。
-     *
-     * <p>和"这一刻放不下去"要分开:后者(区块没加载、她自己站在那格里、材料没到)
-     * 下一遍就可能变,该留在待建集里;前者从第一遍起就不会变,留着只会让整栋楼
-     * 每一遍都为它重排一次顺序、重试一次,一直耗到超时。
-     */
+    /** 世界边界、高度或基岩等使目标无法施工；和“缺材料、暂时有人挡着”这种可能恢复的情况分开。 */
     boolean hopeless(BuildTaskRecord.Target target) {
         BlockPos pos = target.pos();
         if (!player.level().getWorldBorder().isWithinBounds(pos)) {
             return true;
         }
-        // 出了建造高度就是写不进去:setBlock 直接返回假、世界毫无变化。留在待办里的
-        // 后果是每遍白扣一件料——那一格永远对不上,而扣料照扣。
+        // 超过游戏允许放方块的高度时，提前报告不能建，不继续尝试无效放置。
         if (player.level().isOutsideBuildHeight(pos)) {
             return true;
         }
         return unbreakableAt(pos, target.desiredState());
     }
 
-    /**
-     * 这一格砸不动吗——基岩、末地传送门框架这类 {@code destroySpeed == -1} 的东西。
-     *
-     * <p>不判的话她会对着基岩一遍遍地清、一遍遍地失败,直到超时。<b>双格方块要连
-     * 它的另一半一起查</b>:床的另一半在朝向那一格,门与高草的另一半在正上方——
-     * 只查自己那一格,会出现"下半放下去了、上半卡在基岩里"的半截货。
-     */
+    /** 检查基岩等无法破坏的方块；门和床要连另一半也检查，不能只证明主格放得下。 */
     private boolean unbreakableAt(BlockPos pos, BlockState desired) {
         var level = player.level();
         if (peek(pos).getDestroySpeed(level, pos) == -1) {
@@ -132,13 +104,7 @@ final class BuildCellRules {
         return null;
     }
 
-    /**
-     * 谁都不豁免——包括同伴自己:身体占着/正落进的格子不可放置。
-     *
-     * <p>自己的身体用直接几何判交,不走实体分区索引——假人在索引里会漏检
-     * (法医快照抓到过"双脚站在目标格里却放行",随后往自己身上落方块把自己
-     * 封进树叶)。我在哪儿,不需要问索引。
-     */
+    /** 新方块不能与玩家或其他生物身体重叠；玩家自己单独检查，不能只依赖世界的实体搜索结果。 */
     boolean blockedByEntity(BlockPos pos, BlockState state) {
         VoxelShape shape = state.getCollisionShape(player.level(), pos, CollisionContext.of(player));
         if (shape.isEmpty()) {
@@ -151,7 +117,7 @@ final class BuildCellRules {
         return !player.level().isUnobstructed(player, placed);
     }
 
-    /** Distinguish self-occupation, which construction can solve by choosing another stance. */
+    /** 单独判断是不是玩家自己挡住，这种情况可通过换站位解决，不必当作外部生物阻碍。 */
     boolean blockedByPlayer(BlockPos pos, BlockState state) {
         VoxelShape shape = state.getCollisionShape(player.level(), pos, CollisionContext.of(player));
         return !shape.isEmpty() && intersectsPlayer(
