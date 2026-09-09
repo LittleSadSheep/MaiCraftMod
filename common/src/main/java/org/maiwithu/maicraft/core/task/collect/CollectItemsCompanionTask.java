@@ -21,18 +21,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Intent-level item sweeper for {@link CollectItemsTaskRecord}: "pick up the
- * dropped items around here." The entity already auto-absorbs items within ~1
- * block ({@code setCanPickUpLoot}); this goal actively walks it to each
- * scattered drop with the pathfinder so nothing is left behind after a mine or a
- * attack.
- *
- * <h2>State machine (per tick)</h2>
- * <pre>
- *   SCAN     → nearest matching ItemEntity within the radius; none → DONE.
- *   APPROACH → Navigator into its exact cell; only entity disappearance plus a
- *              synchronized inventory delta confirms pickup, then re-SCAN.
- * </pre>
+ * 反复寻找匹配的地面物品并走近，让服务器按正常拾取规则把物品放进背包。
+ * 分为“找下一堆”和“走到这一堆”两步；物品消失还不够，必须看到对应背包增加才记为拾取成功。
  */
 public final class CollectItemsCompanionTask extends AbstractCompanionTask<CollectItemsTaskRecord> {
 
@@ -61,6 +51,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     @Override
     protected void onStart() {
+        // 每次新任务清空计数和跳过名单；暂停恢复不会自动重新执行这个初始化。
         this.phase = Phase.SCAN;
         this.pickup = null;
         this.contactTicks = 0;
@@ -84,6 +75,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     }
 
     private TaskState tickScan() {
+        // 没有候选后，再区分是真收完了，还是有走不到、消失但未收到、接触后无法拾取等未完成情况。
         ItemEntity best = nearestItem();
         if (best == null) {
             if (unreachable > 0) {
@@ -120,6 +112,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     }
 
     private TaskState tickApproach() {
+        // 先看上一堆是否已进入背包，再决定继续靠近还是等待同步，不一消失就当作自己拿到了。
         if (pickup == null) {
             finishTarget();
             return TaskState.RUNNING;
@@ -146,6 +139,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         ItemEntity live = pickup.liveEntity(player);
         if (live == null) return TaskState.RUNNING;
         if (NativePickupReceipt.insideVanillaTouchEnvelope(player, live)) {
+            // 已碰到物品就停下移动，等拾取冷却结束；背包没有空间时明确失败，不继续顶着物品走。
             if (nav != null) nav.pause();
             if (live.hasPickUpDelay()) {
                 contactTicks = 0;
@@ -169,9 +163,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         }
         contactTicks = 0;
 
-        // A* owns integer feet cells. Once both bodies share the same cell, finish the
-        // remaining fraction with ordinary first-person forward input until the exact vanilla
-        // touch envelope overlaps. Cell membership by itself is never a pickup or a failure.
+        // 站在同一格也可能还没碰到小小的掉落物，最后一点距离用普通前进补齐，不能只凭格子相同算成功。
         if (player.blockPosition().equals(live.blockPosition())) {
             stopNav();
             InputDriver.stepToward(player, live.position(), false);
@@ -207,12 +199,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         return pickup != null && pickup.received(player);
     }
 
-    /**
-     * Item entities try to merge while moving. If the selected id is the loser, disappearance is
-     * not a failed pickup: a previously observed compatible survivor whose count grew by the full
-     * missing stack is concrete merge evidence. Transfer the receipt to that survivor; its full
-     * post-merge stack must then enter the inventory before collection is credited.
-     */
+    /** 两堆物品合并时，旧实体消失不等于被捡走；若已观察到的另一堆数量增加足够，就改为追踪合并后的那堆。 */
     private boolean retargetProvenMerge() {
         if (pickup == null) return false;
         AABB box = player.getBoundingBox().inflate(r.radius);
@@ -247,6 +234,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     }
 
     private ItemEntity nearestItem() {
+        // 每次围绕玩家此刻的位置重新找最近匹配物品；这里没有逐个检查归属，也不限定最初扫描过的身份。
         AABB box = player.getBoundingBox().inflate(r.radius);
         List<ItemEntity> candidates = new ArrayList<>();
         for (Entity e : player.level().getEntities(player, box)) {
@@ -260,6 +248,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     @Override
     protected void cleanup() {
+        // 结束后停止走路；没有直接改背包或删除地面实体，拾取本身由游戏完成。
         InputDriver.halt(player);
         super.cleanup();
     }

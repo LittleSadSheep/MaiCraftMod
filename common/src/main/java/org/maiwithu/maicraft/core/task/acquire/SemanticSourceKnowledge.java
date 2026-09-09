@@ -21,8 +21,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 
 /**
- * Small immutable semantic source graph for relationships vanilla recipes do not express.
- * Entries identify source families only; live tasks still discover targets and verify drops.
+ * 记录配方表没有直接表达的常见来源，例如圆石来自挖石头、羊毛可来自羊。
+ * 这是来源线索，不是世界里已经存在目标的证明；实际能否取得物品仍要看加载到的目标、工具和掉落结果。
  */
 public final class SemanticSourceKnowledge {
     public record ToolRequirement(
@@ -34,12 +34,7 @@ public final class SemanticSourceKnowledge {
         }
     }
 
-    /**
-     * Source evidence plus the dimensions in which that physical source is valid. An absent or
-     * empty entry means that the source is dimension-independent. The map is intentionally keyed
-     * by source family: a loose item may be collected in any dimension even when its natural mob
-     * or ore source is dimension-bound.
-     */
+    /** 按来源种类记录维度限制；缺失表示不限维度。当前只对采矿／狩猎合并限制，不限制已经散落的物品。 */
     public record SourcePlan(
             SemanticAcquireTaskRecord.SourceHint hint,
             Map<SemanticAcquireTaskRecord.Source, List<ResourceLocation>> allowedDimensions) {
@@ -93,8 +88,9 @@ public final class SemanticSourceKnowledge {
         return inferPlan(requestedItemIds).hint();
     }
 
-    /** Infer each recursive need independently; callers must not reuse the root plan. */
+    /** 每一种中间原料重新查自己的来源，不能把最终成品的来源错误地套在它的所有原料上。 */
     public static SourcePlan inferPlan(List<ResourceLocation> requestedItemIds) {
+        // 一组可替代物品合并来源和维度；只要某个可用采矿替代不受维度限制，整组采矿也不强制限定维度。
         LinkedHashSet<String> blocks = new LinkedHashSet<>();
         LinkedHashSet<ResourceLocation> entities = new LinkedHashSet<>();
         LinkedHashSet<ResourceLocation> expected = new LinkedHashSet<>();
@@ -157,6 +153,7 @@ public final class SemanticSourceKnowledge {
             boolean sourcePresent,
             Map<SemanticAcquireTaskRecord.Source, LinkedHashSet<ResourceLocation>> dimensions,
             Set<SemanticAcquireTaskRecord.Source> unrestricted) {
+        // 对同一种来源取可用维度的并集；其中一个明确不限维度时，不再保留其他候选的维度门槛。
         if (!sourcePresent || unrestricted.contains(source)) return;
         List<String> declared = profile.allowedDimensions().getOrDefault(source, List.of());
         if (declared.isEmpty()) {
@@ -172,7 +169,7 @@ public final class SemanticSourceKnowledge {
         }
     }
 
-    /** Root-only user evidence augments, rather than replaces, built-in semantic knowledge. */
+    /** 用户给的来源提示先放入，再补内置线索；这会增加候选，不会删除内置候选或覆盖其维度限制。 */
     public static SemanticAcquireTaskRecord.SourceHint merge(
             SemanticAcquireTaskRecord.SourceHint inferred,
             SemanticAcquireTaskRecord.SourceHint explicit) {
@@ -196,11 +193,7 @@ public final class SemanticSourceKnowledge {
                 bounded(professions, 32), description);
     }
 
-    /**
-     * Relationship policy for a data-driven hunt source family. A family made entirely of
-     * registry MONSTER types is hostile; mixed or passive families must prove wild/unowned
-     * evidence. No entity-specific exception belongs here.
-     */
+    /** 候选全是怪物类别时按敌对来源找，否则按野生来源找；具体哪只是否被保护仍要现场检查。 */
     public static GenericEntitySearchTaskRecord.Relation huntRelation(
             List<ResourceLocation> entityTypeIds) {
         boolean allHostile = entityTypeIds != null && !entityTypeIds.isEmpty()
@@ -213,10 +206,7 @@ public final class SemanticSourceKnowledge {
                 : GenericEntitySearchTaskRecord.Relation.WILD;
     }
 
-    /**
-     * Derive an ordinary harvesting-tool prerequisite from registry and block-tag facts. The
-     * returned alternatives include modded tools whose ItemStack actually passes the drop gate.
-     */
+    /** 找当前缺的采收工具；可替代方块只要有一种能正常取得掉落，就不要求为所有方块配齐工具。 */
     public static ToolRequirement missingTool(LocalPlayer player, Set<Block> sourceBlocks) {
         List<BlockState> states = sourceBlocks.stream()
                 .map(Block::defaultBlockState).toList();
@@ -309,6 +299,7 @@ public final class SemanticSourceKnowledge {
     }
 
     private static Map<String, Profile> profiles() {
+        // 下面是内置的常见原版关系表；维度写的是自然产地，但调用方目前会将它用作采矿／狩猎的硬门槛。
         Map<String, Profile> result = new LinkedHashMap<>();
         block(result, "minecraft:coal", List.of("#minecraft:coal_ores"), "coal ore");
         block(result, "minecraft:raw_iron", List.of("#minecraft:iron_ores"), "iron ore");
@@ -382,6 +373,7 @@ public final class SemanticSourceKnowledge {
     }
 
     private static <T> List<T> bounded(Set<T> values, int maximum) {
+        // 来源提示只保留有限候选，防止一项需求把整份注册表传入下一层。
         return List.copyOf(values.stream().limit(maximum).toList());
     }
 

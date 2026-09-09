@@ -59,9 +59,9 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * A progress-driven semantic acquisition coordinator. It never performs a physical action itself: every
- * effect is a child task, and every transition is based on a terminal receipt plus a fresh live
- * main-inventory observation.
+ * 把“背包里最终要有这些物品”逐步做成：先看现货，再考虑捡取、库存、合成、烹饪、采矿、交易和狩猎。
+ * 缺中间材料时先处理小需求，例如做木剑先要木棍，做木棍又先要木板；实际动作都交给专门子任务。
+ * 完成看真实主背包数量，不把配方计划、发出取物请求或打死一只动物当成已经拿到所需物品。
  */
 public final class SemanticAcquireCompanionTask
         extends AbstractCompanionTask<SemanticAcquireTaskRecord> {
@@ -81,6 +81,8 @@ public final class SemanticAcquireCompanionTask
     private enum HuntChildStage { NONE, SEARCH, ATTACK }
 
     private static final class Need {
+        // 这是一项尚未满足的需求；既可能是最终物品，也可能是为它准备的原料或工具。
+        // 记住已试过的来源和经过哪些配方，避免木板转木头、再转回木板这类循环。
         final List<ResourceLocation> itemIds;
         final int requiredFinalCount;
         final int depth;
@@ -222,6 +224,7 @@ public final class SemanticAcquireCompanionTask
 
     @Override
     protected void onStart() {
+        // 记下起始库存，并把最终需求放到栈顶；以后缺什么先压上去，凑齐后再回到上一层继续。
         initialCounts = counts(r.itemIds);
         rootNeed = new Need(
                 r.itemIds,
@@ -237,6 +240,7 @@ public final class SemanticAcquireCompanionTask
 
     @Override
     protected TaskState onTick() {
+        // 每刻重新找出点名保护的区域；保护名字无法对应当前世界时先停，不把失效保护当成空范围。
         AcquisitionProtection protection = AcquisitionProtection.resolve(r.protectedLabels,
                 IntentRuntime.get().landmarks(), player.level().dimension().location().toString());
         if (!protection.problems().isEmpty()) {
@@ -247,6 +251,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState tickAcquisition() {
+        // 先看最终数量是否已够，再推进当前子任务或原料需求；通常拿够就停，不为了内部计划继续多做。
         plannerStepsThisTick = 0;
         // This check deliberately precedes child advancement. A child may have made the semantic
         // fact true on the previous tick; no menu cleanup, recipe branch or mining swing is allowed
@@ -254,6 +259,7 @@ public final class SemanticAcquireCompanionTask
         // sole exception is an effect already in flight behind a terminal barrier: that exact child
         // is allowed to settle its receipt and close its menu, but not to start another effect.
         if (count(r.itemIds) >= r.count) {
+            // 子任务说“已有操作必须先结束”时仍让它做收尾；攻击任务目前把整场战斗和相关拾取都算在内。
             if (activeChild != null
                     && activeChild.mustSettleBeforeSatisfiedCancellation()) {
                 return tickActiveChild();
@@ -281,12 +287,14 @@ public final class SemanticAcquireCompanionTask
         }
         need.lastObservedCount = observedNeedCount;
         if (observedNeedCount >= need.requiredFinalCount) {
+            // 例如木棍已经凑够，移走木棍这个小需求，下一刻回到原先要合成的木剑。
             Need satisfied = needs.pop();
             propagateSatisfiedNeed(satisfied);
             renewProgressLease();
             return TaskState.RUNNING;
         }
         if (need.decisionRequired) {
+            // 某一来源到了授权或保护边界，需要先让调用者判断；不是换一个来源就能自动越过同一问题。
             if (need.depth > 0) return exhaustNeed(need);
             failureNeed = need;
             return failAcquisition(
@@ -314,6 +322,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState observeInventorySource(Need need) {
+        // 当前数量不够已在前面确认过，记录这一事实后尝试下一个允许来源，不重复启动“查库存”任务。
         addIssue("inventory", "inventory_insufficient",
                 "the final inventory fact is not yet true",
                 needFacts(need));
@@ -322,6 +331,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptNearby(Need need) {
+        // 先看附近掉落物的归属；当前只要有一个匹配目标归属不明或受保护，就不启用这次按类型拾取。
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.NEARBY)) {
             return TaskState.RUNNING;
         }
@@ -349,6 +359,7 @@ public final class SemanticAcquireCompanionTask
         Set<Item> items = need.itemIds.stream()
                 .map(BuiltInRegistries.ITEM::get)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        // 实际交给拾取器的只有物品类型和范围，没有刚才核实过的具体物品实体名单。
         long now = player.level().getGameTime();
         CollectItemsTaskRecord record = new CollectItemsTaskRecord(
                 childId("nearby"), now + COLLECT_TICKS, items, r.searchRadius,
@@ -358,6 +369,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptStorage(Need need) {
+        // 库存来源目前走 AE2；只申请还缺的数量，是否允许网络合成则读取最外层的来源许可中有没有 CRAFT。
         if (!Ae2ResourceSupply.available()) {
             addIssue("storage", "storage_adapter_unavailable",
                     "no supported client storage-network adapter is available",
@@ -385,6 +397,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptCraft(Need need) {
+        // 对每种可接受成品查配方，优先选择材料和工作台都已经满足、成本较低的方案。
         int deficit = missing(need);
         List<CraftCandidate> candidates = new ArrayList<>();
         List<ExecutableCraft> executable = new ArrayList<>();
@@ -423,6 +436,7 @@ public final class SemanticAcquireCompanionTask
                         candidate -> candidate.plan().cost(), CraftPlanCost.ORDER))
                 .orElse(null);
         if (selected != null) {
+            // 现在有现成可做的配方，就不再为了先前尚未凑齐的方案继续找额外材料。
             // Material-complete alternatives supersede an incomplete commitment. Commitment only
             // prevents speculative prerequisite hopping; it may never force more acquisition
             // after another acceptable recipe is already executable from live inventory.
@@ -446,6 +460,7 @@ public final class SemanticAcquireCompanionTask
                 .filter(candidate -> !candidate.surfacePrerequisiteItems().isEmpty())
                 .sorted(Comparator.comparing(CraftCandidate::cost, CraftPlanCost.ORDER))
                 .findFirst().orElse(null);
+        // 原料都齐但缺工作台时，先把取得工作台当作一个小需求，不把它误报为原料缺失。
         if (surfacePrerequisite != null
                 && pushCraftingSurfacePrerequisite(need, surfacePrerequisite)) {
             return TaskState.RUNNING;
@@ -468,10 +483,12 @@ public final class SemanticAcquireCompanionTask
                                 recursiveCandidateStructureCost(candidate, need))
                         .thenComparing(CraftCandidate::cost, CraftPlanCost.ORDER))
                 .toList();
+        // 还缺原料时，排除循环和已失败配方，再比较所需转换层数与成本，挑一个值得继续补材料的方案。
         CraftCandidate chosen = viableCandidates.isEmpty()
                 ? null : viableCandidates.getFirst();
         if (chosen == null) {
             if (!need.committedRecipeIds.isEmpty()) {
+                // 选定配方后已实际动过库存或世界，却发现做不下去时先询问，不自动切到另一条未完成的生产链。
                 if (need.committedRecipeEffectsObserved) {
                     addIssue("craft", "committed_recipe_unavailable",
                             "the selected recipe stopped exposing a complete frontier after "
@@ -543,11 +560,13 @@ public final class SemanticAcquireCompanionTask
                         .map(source -> source.name().toLowerCase(java.util.Locale.ROOT))
                         .toList()));
         needs.push(childNeed);
+        // 把当前要补的原料压到栈顶，下一刻先解决它，原配方仍在下面等着。
         renewProgressLease();
         return TaskState.RUNNING;
     }
 
     private TaskState attemptMine(Need need) {
+        // 从物品对应方块或来源提示找可挖目标；先检查工具要求，再让采矿任务去找实际方块并取回掉落物。
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.MINE)) {
             return TaskState.RUNNING;
         }
@@ -578,6 +597,7 @@ public final class SemanticAcquireCompanionTask
         if (tool == null && bootstrap == 0 && workTool != null) tool = workTool.requirement();
         boolean stockOnlyUpgrade = workTool != null && tool == workTool.requirement() && workTool.stockOnly();
         if (tool != null) {
+            // 没有能正确掉落物品的工具时，先准备工具；工具也走同一套取物／合成需求，而不是凭空生成。
             if (need.miningToolPrerequisitePushed) {
                 addIssue("mine", "wrong_tool_prerequisite_unmet",
                         "source blocks are known, but the recursively requested harvesting tool "
@@ -602,8 +622,7 @@ public final class SemanticAcquireCompanionTask
             Set<ResourceLocation> lineage = new LinkedHashSet<>(need.lineageItems);
             lineage.addAll(toolItems);
             List<SemanticAcquireTaskRecord.Source> toolSources = new ArrayList<>(need.allowedSources);
-            // Source restrictions describe how to obtain the requested material. Making its
-            // work tool remains a prerequisite, even for a mine-only material request.
+            // 当前认为“只许采矿”只约束目标材料，不约束工作工具，所以会额外开放合成工具。
             if (!toolSources.contains(SemanticAcquireTaskRecord.Source.CRAFT))
                 toolSources.add(SemanticAcquireTaskRecord.Source.CRAFT);
             if (stockOnlyUpgrade) {
@@ -649,6 +668,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private long toolMaterialBudget(Item item) {
+        // 升级工具前扣掉已经被其他需求预留的铁锭／钻石，避免为了造工具先花掉最终目标要保留的材料。
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
         int reserved = needs.stream().filter(need -> need.itemIds.contains(id))
                 .mapToInt(need -> need.requiredFinalCount).max().orElse(0);
@@ -658,6 +678,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptCook(Need need) {
+        // 先挑一个有已知烹饪配方的成品，再交给烹饪任务找原料和燃料；对子来源去掉 COOK，防止自己递归调用自己。
         ResourceLocation output = need.itemIds.stream()
                 .filter(this::hasCookingRecipe)
                 .findFirst().orElse(null);
@@ -700,6 +721,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState reviewTrade(Need need) {
+        // 逐个尝试可接受输出；一次交易失败或没增加目标数量后记住该输出，避免一直找同一种失败交易。
         if (!takePlannerStep()) return TaskState.RUNNING;
         ResourceLocation output = need.preferredTradeOutput;
         if (output == null || need.rejectedTradeOutputs.contains(output)) {
@@ -738,6 +760,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState reviewHunt(Need need) {
+        // 狩猎必须允许伤害，并且有“这种生物能提供目标物品”的来源提示；随后才寻找未被保护的实际目标。
         if (!r.allowHarm) {
             SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
             addIssue("hunt", "harm_permission_required",
@@ -790,6 +813,7 @@ public final class SemanticAcquireCompanionTask
         facts.put("relation", relation.name().toLowerCase(java.util.Locale.ROOT));
         facts.put("searched_loaded_radius", loadedRadius);
         if (safe.isEmpty()) {
+            // 暂时没看见可用生物时可以走出去找；同一位置和同一组事实已搜过又没变化，就停止重复搜索。
             if (!protectedCandidates.isEmpty()) {
                 addIssue("hunt", "protected_hunt_targets_skipped",
                         "loaded matching entities were excluded because they have explicit "
@@ -846,6 +870,7 @@ public final class SemanticAcquireCompanionTask
             GenericEntitySearchTaskRecord.Relation relation,
             int loadedRadius,
             List<Map<String, Object>> protectedCandidates) {
+        // 先筛活着、可攻击、类型匹配的对象，再检查名字、驯服、牵引和区域保护等条件，最后按距离排序。
         List<Entity> safe = new ArrayList<>();
         AABB box = player.getBoundingBox().inflate(loadedRadius);
         for (Entity entity : player.clientLevel.getEntities(player, box, candidate ->
@@ -871,6 +896,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState tickActiveChild() {
+        // 每刻观察目标数量，已凑齐时尽早停止多余动作；否则核对狩猎授权、推进子任务并收取它的真实结果。
         r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
         int liveCount = count(activeNeed.itemIds);
         if (liveCount > activeLastObservedCount) {
@@ -926,6 +952,7 @@ public final class SemanticAcquireCompanionTask
                 && completedHuntStage == HuntChildStage.ATTACK
                 && terminal != TaskState.SUCCESS
                 && huntDefeated(result)) {
+            // 当前狩猎把击杀后的全部相关拾取也当作必需步骤，目标物品已够但副产物未处理完也会失败。
             addIssue("hunt", "hunt_loot_settlement_incomplete",
                     "the target was defeated, but collection of all attributable reachable "
                             + "drops did not settle; requested-item progress is retained but the "
@@ -991,6 +1018,7 @@ public final class SemanticAcquireCompanionTask
                 && result != null && result.data() != null
                 && (bool(result.data().get("outcome_uncertain"))
                         || "uncertain".equals(result.data().get("status")))) {
+            // 网络可能已经取过或合成过，但结果不明时不能直接再申请一遍，先交回调用者判断。
             outcomeUncertain = true;
             addIssue("storage", "storage_effect_uncertain",
                     "the storage child reported an uncertain effect; blind retry is forbidden",
@@ -1075,6 +1103,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState revalidateActiveHuntAuthorization() {
+        // 追赶期间对象可能被驯服、改名或失去原身份；每刻再核对，不能只凭开始时的一次判断继续攻击。
         if (activeSource != SemanticAcquireTaskRecord.Source.HUNT
                 || activeHuntStage != HuntChildStage.ATTACK
                 || !(activeRecord instanceof AttackTaskRecord attack)
@@ -1113,6 +1142,7 @@ public final class SemanticAcquireCompanionTask
      * begins, the combat/drop transaction must remain committed to the original identity.
      */
     private TaskState retargetUncommittedHuntToCloserCandidate() {
+        // 还没出手时，眼前出现明显更近的同类目标可以换；已经开始伤害或拾取后不再偷偷换对象。
         if (activeSource != SemanticAcquireTaskRecord.Source.HUNT
                 || activeHuntStage != HuntChildStage.ATTACK
                 || !(activeRecord instanceof AttackTaskRecord attack)
@@ -1182,6 +1212,7 @@ public final class SemanticAcquireCompanionTask
      * otherwise the replacement must remove at least one whole strike-reach band of approach.
      */
     private boolean materiallyCloserForAttack(Entity current, Entity replacement) {
+        // 新目标必须进入可攻击距离，或至少省下一整段攻击距离的接近路程，避免两只来回走动就反复改目标。
         double nativeReach = player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
         double currentReach = Swing.reachTo(nativeReach, current.getBbWidth());
         double replacementReach = Swing.reachTo(nativeReach, replacement.getBbWidth());
@@ -1198,6 +1229,7 @@ public final class SemanticAcquireCompanionTask
 
     private TaskState stopActiveHuntAfterAuthorizationChange(
             List<String> protectionReasons, String issueCode, boolean requiresDecision) {
+        // 停止旧攻击，保留已发生的效果，记下被拒绝的目标；确实触及保护时要求调用者先决定。
         activeChild.stop(player, Task.StopReason.REPLACED);
         TaskResult stopped = activeChild.result(TaskState.CANCELLED);
         int after = count(activeNeed.itemIds);
@@ -1235,6 +1267,7 @@ public final class SemanticAcquireCompanionTask
             TaskState terminal,
             TaskResult result,
             int progress) {
+        // 找到生物之后还要重新核对，再交给攻击任务；攻击结束也要确认目标物品真的进入背包，不能只看生物死了。
         if (stage == HuntChildStage.SEARCH) {
             if (terminal == TaskState.SUCCESS
                     && result != null && result.success()
@@ -1331,6 +1364,7 @@ public final class SemanticAcquireCompanionTask
 
     private Entity revalidateInternalHuntTarget(
             Need need, GenericEntitySearchTaskRecord search) {
+        // 只重新寻找搜索任务确认过的 UUID，并再次核对保护条件，防止旧的运行时数字编号被复用到另一只生物。
         Set<UUID> retained = new LinkedHashSet<>(search.internalVerifiedEntityUuids());
         if (retained.isEmpty()) return null;
         SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
@@ -1361,6 +1395,7 @@ public final class SemanticAcquireCompanionTask
             SemanticAcquireTaskRecord.Source source,
             TaskRecord record,
             String detail) {
+        // 保存这个子任务服务哪一项需求、来自哪种来源，以及开始前的库存，结束后才能比较结果。
         activeNeed = need;
         activeSource = source;
         activeRecord = record;
@@ -1387,6 +1422,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private void cancelActiveBecauseSatisfied() {
+        // 数量已够就停止普通子任务，记录实际得到的东西；不会为了凑足它原来的动作次数继续多做。
         if (activeChild == null) return;
         activeChild.stop(player, Task.StopReason.REPLACED);
         TaskResult result = activeChild.result(TaskState.CANCELLED);
@@ -1428,6 +1464,7 @@ public final class SemanticAcquireCompanionTask
 
     private boolean activeChildEffectsObserved(
             TaskState terminal, TaskResult result, int targetProgress) {
+        // 目标增加、背包总清单变化或结果说明已发生动作，都会被当成有效果；当前没有区分无关的外部库存变化。
         if (targetProgress > 0 || !activeBeforeInventory.equals(inventorySnapshot())) return true;
         Map<String, Object> data = result == null || result.data() == null
                 ? Map.of() : result.data();
@@ -1521,6 +1558,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState exhaustNeed(Need need) {
+        // 最终需求所有来源都失败就报告做不到；小需求失败则回到原配方，视是否已经动过东西决定能否换方案。
         if (need.depth == 0) {
             DimensionBarrier barrier = preferredDimensionBarrier();
             if (barrier != null) {
@@ -1604,6 +1642,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private void propagateSatisfiedNeed(Need satisfied) {
+        // 原料或工具小需求完成后，把“已经发生过实际操作”的信息传给上一层，避免上层以为还什么都没做。
         if (needs.isEmpty()) return;
         Need parent = needs.peek();
         parent.effectsObserved |= satisfied.effectsObserved;
@@ -1616,6 +1655,7 @@ public final class SemanticAcquireCompanionTask
 
     private void collectCraftCandidates(
             ResourceLocation output, CraftOps.Plan plan, List<CraftCandidate> target) {
+        // 把合成规划报告整理成候选配方和成本；兼容旧报告字段，但没有具体配方编号的条目不能执行。
         List<?> values = plan.recoveryCandidates();
         if (values.isEmpty()) {
             TaskResult immediate = plan.immediate();
@@ -1687,6 +1727,7 @@ public final class SemanticAcquireCompanionTask
      */
     private boolean recoverCraftingSurface(
             Need parent, CraftTaskRecord craft, TaskResult result) {
+        // 真正走到工作台发现不能用时，可以先补一个工作台；如果背包已有工作台，问题就不是再取一个能解决的。
         if (result == null || result.data() == null) return false;
         String code = string(result.data().get("failure_code"));
         if (code == null || !code.startsWith("crafting_surface_")) return false;
@@ -1711,6 +1752,7 @@ public final class SemanticAcquireCompanionTask
     private boolean pushCraftingSurfacePrerequisite(
             Need parent, String blockedRecipeId, String outputItemId,
             List<ResourceLocation> candidates) {
+        // 工作台只为同一个配方补一次，并继承原来源许可；不要为重复失败的摆台位置不停制造更多工作台。
         List<ResourceLocation> itemIds = candidates.stream()
                 .filter(id -> !parent.lineageItems.contains(id))
                 .toList();
@@ -1799,6 +1841,7 @@ public final class SemanticAcquireCompanionTask
      * is preferred to wool-plus-dye conversion without encoding any particular item or recipe.
      */
     private int recursiveCandidateStructureCost(CraftCandidate candidate, Need parent) {
+        // 只估计还需经过几层普通合成，用来给候选排序；没有说世界里一定有那些原材料。
         Object raw = candidate.data().get("ingredients");
         if (!(raw instanceof List<?> values)) return UNREACHABLE_STRUCTURE_COST;
         Map<StructureKey, Integer> memo = new HashMap<>();
@@ -1833,6 +1876,7 @@ public final class SemanticAcquireCompanionTask
             Set<ResourceLocation> visiting,
             Map<StructureKey, Integer> memo,
             int remainingDepth) {
+        // 已经带着或没有更上游配方的物品作为边界；遇到循环或超过前瞻深度就认为这条估计不可靠。
         if (forbidden.contains(itemId) || visiting.contains(itemId)) {
             return UNREACHABLE_STRUCTURE_COST;
         }
@@ -1879,6 +1923,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private Map<ResourceLocation, List<CraftingRecipe>> structuralCraftRecipes() {
+        // 为本次任务缓存“成品对应哪些配方”的只读索引，供前瞻打分复用，避免每次都重新整理全部配方。
         if (structuralCraftRecipes != null) return structuralCraftRecipes;
         Map<ResourceLocation, List<CraftingRecipe>> indexed = new LinkedHashMap<>();
         for (var holder : ClientRuntime.requireContext(player)
@@ -1911,6 +1956,8 @@ public final class SemanticAcquireCompanionTask
             CraftCandidate chosen,
             List<CraftCandidate> viableCandidates,
             Need parent) {
+        // 多个配方若各只差一件，任意拿到其中一种原料就能完成一个配方，可以合成一组替代需求一起寻找。
+        // 各差多件时不能这样混，因为从两个配方各凑一半，并不保证任何一个能做。
         IngredientNeed primary = chooseIngredient(chosen, parent);
         if (primary == null) return null;
 
@@ -1998,6 +2045,7 @@ public final class SemanticAcquireCompanionTask
      * separate planner branches.
      */
     private IngredientNeed chooseIngredient(CraftCandidate candidate, Need parent) {
+        // 同样的可替代原料组先合并数量；优先验证最难或需要授权的那组，避免先做一堆配件最后才发现关键原料拿不到。
         Object raw = candidate.data().get("ingredients");
         if (!(raw instanceof List<?> values)) return null;
         Map<List<ResourceLocation>, Integer> missingByItems = new LinkedHashMap<>();
@@ -2096,6 +2144,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private NearbySurvey surveyNearby(List<ResourceLocation> ids) {
+        // 当前只接受 getOwner 明确返回自己的掉落物；原版客户端通常拿不到这项信息，null 也会计入不安全组。
         Set<ResourceLocation> accepted = Set.copyOf(ids);
         int safe = 0;
         int protectedCount = 0;
@@ -2173,6 +2222,7 @@ public final class SemanticAcquireCompanionTask
      * hypothetical tool/armour smelt may not outrank an executable ordinary recipe.
      */
     private List<SemanticAcquireTaskRecord.Source> executionSourceOrder(Need need) {
+        // allowed_sources 是允许集合，不保证按填写顺序执行；每项需求根据当前能否直接合成／烹饪等事实重新排序。
         if (need.plannedSourceOrder != null) return need.plannedSourceOrder;
         SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
         boolean naturalMine = !hint.blockRefs().isEmpty();
@@ -2196,6 +2246,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private boolean craftExecutableNow(Need need) {
+        // 只做只读规划来判断现在是否能直接合成，用于来源排序，不在这里打开菜单或扣材料。
         Set<String> excluded = new LinkedHashSet<>(need.lineageRecipes);
         excluded.addAll(need.rejectedRecipes);
         excluded.addAll(nonCommittedCraftRecipes(need));
@@ -2252,6 +2303,7 @@ public final class SemanticAcquireCompanionTask
      */
     private boolean sourceDimensionAllowed(
             Need need, SemanticAcquireTaskRecord.Source source) {
+        // 当前把内置的来源维度当成这一类采集行动的前置条件，检查发生在观察具体矿块／生物之前。
         List<ResourceLocation> allowed = SemanticSourceKnowledge.inferPlan(need.itemIds)
                 .allowedDimensions(source);
         if (allowed.isEmpty()) return true;
@@ -2311,6 +2363,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private void advanceSource(Need need) {
+        // 按来源身份记住已用尽的一项，再重新排序剩余来源；不能用旧数组下标猜下一项，因为顺序可能变化。
         List<SemanticAcquireTaskRecord.Source> remaining = executionSourceOrder(need);
         if (!remaining.isEmpty()) need.exhaustedSources.add(remaining.getFirst());
         need.plannedSourceOrder = null;
@@ -2330,6 +2383,7 @@ public final class SemanticAcquireCompanionTask
 
     private void addIssue(
             String source, String code, String summary, Map<String, ?> facts) {
+        // 只保留最先出现的六十四条问题，超出的不再追加；这限制报告大小，不限制实际尝试次数。
         if (issues.size() >= MAX_REPORTED_ISSUES) return;
         Map<String, Object> issue = new LinkedHashMap<>();
         issue.put("source", source);
@@ -2345,6 +2399,7 @@ public final class SemanticAcquireCompanionTask
             int after,
             int progress,
             boolean stoppedBecauseSatisfied) {
+        // 记开始和结束库存、子任务结果及是否因数量已够提前停止；记录数量上限与实际执行次数分开。
         if (attempts.size() >= MAX_REPORTED_ATTEMPTS) return;
         Map<String, Object> attempt = new LinkedHashMap<>();
         attempt.put("source", activeSource.name().toLowerCase());
@@ -2401,6 +2456,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private List<Map<String, Object>> recoveryOptions() {
+        // 根据未开放的来源和失败原因给出可选下一步，不在这里自动扩大采矿、交易或伤害许可。
         List<Map<String, Object>> options = new ArrayList<>();
         Set<SemanticAcquireTaskRecord.Source> allowed = Set.copyOf(r.allowedSources);
         for (SemanticAcquireTaskRecord.Source source : List.of(
@@ -2486,6 +2542,7 @@ public final class SemanticAcquireCompanionTask
 
     @Override
     protected Map<String, Object> resultData() {
+        // 结果明确区分最终数量是否满足、尝试过什么、是否有副作用或不确定性，不只返回一句“拿到了／没拿到”。
         if ("requires_dimension".equals(failureCode) && failureDimension != null) {
             return dimensionFailureData();
         }
@@ -2637,6 +2694,7 @@ public final class SemanticAcquireCompanionTask
 
     @Override
     protected void cleanup() {
+        // 总取物任务结束前，先停止仍在做的小任务，并留下已经得到的物品和可能发生的副作用证据。
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
             TaskResult childResult = activeChild.result(TaskState.CANCELLED);

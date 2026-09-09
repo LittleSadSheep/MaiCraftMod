@@ -6,12 +6,8 @@ import net.minecraft.world.item.Item;
 import java.util.Set;
 
 /**
- * Typed task descriptor for the {@code collect_items} tool: "walk around and
- * pick up dropped items nearby". The goal ({@link CollectItemsCompanionTask}) scans
- * for {@code ItemEntity}s within the radius, walks to each with the pathfinder
- * (the entity auto-absorbs items it gets close to), and repeats until none
- * remain. An optional {@link #filter} restricts to specific item types; empty
- * means collect everything.
+ * 拾取任务单：指定哪些物品类型和搜索半径，执行器逐堆走近，交给游戏正常拾取。
+ * 空过滤集合表示所有类型；这里没有具体目标名单、归属策略或最多拾取多少件的字段。
  */
 public final class CollectItemsTaskRecord extends TaskRecord {
 
@@ -40,6 +36,7 @@ public final class CollectItemsTaskRecord extends TaskRecord {
     }
 
     public void addCollected(int count) {
+        // 只累加实际确认得到的非负数量，不能因为一次查询变少了就倒扣已拾取数。
         this.collected += Math.max(0, count);
     }
 
