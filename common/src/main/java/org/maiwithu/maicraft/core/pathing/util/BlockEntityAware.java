@@ -3,11 +3,7 @@ package org.maiwithu.maicraft.core.pathing.util;
 import net.minecraft.core.BlockPos;
 
 /**
- * A world view that can answer "is there a block entity here?" WITHOUT a live world read where it
- * matters. The cache view ({@code CachedNavView}) answers from a snapshot captured on the main thread,
- * so the don't-grief check ({@link BlockHelper#shouldAvoidBreaking}) is safe to run on a worker thread;
- * a live {@code Level} view just asks the level. A plain {@code BlockGetter} that doesn't
- * implement this falls back to {@code getBlockEntity != null}.
+ * 让冻结世界视图只回答“这一格是否有方块实体”，不用把箱子等真实、可变化的实体对象带进旧后台搜索。
  */
 public interface BlockEntityAware {
     boolean hasBlockEntity(BlockPos pos);

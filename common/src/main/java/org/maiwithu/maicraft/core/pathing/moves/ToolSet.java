@@ -27,12 +27,8 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * 快捷栏工具评估:对任意方块给出"最优工具挖掘速度"(1/挖掘tick数)
- * 与最优槽位。结果按 Block 缓存,一次成本计算全程复用。
- *
- * <p>线程模型:构造在主线程,构造时把快捷栏九格逐格 copy、当前选中
- * 槽位、药水修正与全部相关设置取样为 final 字段;此后所有查询只读
- * 快照,worker 线程可安全调用,不会活读玩家背包或全局设置。
+ * 用创建时的九格快捷栏估算不同方块的挖掘速度，当前供方块费用判断使用；这里不会实际把工具拿到手上。
+ * 按速度、耐久设置和同速时的偏好挑槽位；按方块种类缓存结果，计算时使用该方块默认状态。
  */
 public class ToolSet {
 
@@ -75,6 +71,7 @@ public class ToolSet {
     public ToolSet(ItemStack[] hotbarSnapshot, int selectedSlot,
                    boolean ignoreBreakingProtection, double potionAmplifier) {
         this.breakStrengthCache = new HashMap<>();
+        // 这个构造入口只复制数组；从玩家创建时，前面的 snapshotHotbar 已逐件复制物品。
         this.hotbar = hotbarSnapshot.clone();
         this.selectedSlot = selectedSlot;
         this.ignoreBreakingProtection = ignoreBreakingProtection;
@@ -117,6 +114,7 @@ public class ToolSet {
      * 命中哪个标签就返回其序号;不命中任何标签返回 -1(工具本体不在
      * 材质标签里,通常恒 -1,平速时先遇到的槽位保持胜出)。
      */
+    // 这里比较的是工具物品本身，但这些名称指向修理材料标签；原版石材料标签装的是圆石等材料，并不能据此识别石工具。
     private static final List<TagKey<Item>> MATERIAL_TAGS_PRIORITY = List.of(
             materialTag("wooden_tool_materials"),
             materialTag("stone_tool_materials"),
@@ -180,6 +178,7 @@ public class ToolSet {
         BlockState blockState = b.defaultBlockState();
         for (int i = 0; i < 9; i++) {
             ItemStack itemStack = hotbar[i];
+            // 当前这个叫“用剑挖掘”的开关关闭时，会同时跳过剑、斧、三叉戟和重锤。
             if (!useSwordToMine && isWeapon(itemStack)) {
                 continue;
             }
@@ -206,6 +205,7 @@ public class ToolSet {
                 }
             }
         }
+        // 这里返回槽位编号；当前没有单独表示“所有槽位都被筛掉”的结果，初始编号仍是零。
         return best;
     }
 
@@ -260,6 +260,7 @@ public class ToolSet {
             }
         }
 
+        // 把工具速度换成每次更新能挖掉的比例；工具不适合该方块时使用更慢的除数，而不是自动认定完全不能破坏。
         speed /= hardness;
         if (!state.requiresCorrectToolForDrops() || (!item.isEmpty() && item.isCorrectToolForDrops(state))) {
             return speed / 30;

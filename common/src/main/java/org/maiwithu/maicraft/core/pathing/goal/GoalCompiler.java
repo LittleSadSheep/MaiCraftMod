@@ -13,24 +13,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Compiles a task's INTENT into the full navigation contract. Each static
- * factory IS an intent — there is deliberately no intent enum, the method
- * names are the vocabulary — and each returns the two things the navigation
- * and its task must agree on, derived together so they can never drift:
- *
- * <ul>
- *   <li>{@link Compiled#goal()} — the search goal (which feet cells may end
- *       the path);</li>
- *   <li>{@link Compiled#sacred()} — the cells the route itself must leave
- *       untouched (may neither break nor bury: the table it travels to use,
- *       the ore its task will mine).</li>
- * </ul>
- *
- * <p>The load-bearing entry is {@link #block}: the replacement for the old
- * {@code resolveBlockGoal} fallback whose Euclidean {@code near(2.0)} sphere
- * admitted elevated cells (the geometry that let "place a scaffold, stand on
- * it" finish an approach) and marked nothing sacred (so a route could dig
- * through the very block it was travelling to).
+ * 把“站到这一格”“走到方块旁边”“靠近这一片”等意图转换成导航要求，并附上途中不能破坏的目标格。
+ * 目标位置和被保护的位置不是总相同：靠近箱子时保护箱子本身，站到空地则没有要保护的箱子。
  */
 public final class GoalCompiler {
 

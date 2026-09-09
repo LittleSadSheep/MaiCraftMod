@@ -11,11 +11,8 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 
 /**
- * 地面寻路全部旋钮的集中定义:成本模型、能力开关、搜索预算、分段与执行参数。
- * 所有字段 public 可变,运行期直接改写即生效;全局单例 {@link #get()}。
- *
- * <p>方块/物品清单字段经由懒加载 getter 暴露(首次访问才触碰注册表),
- * 保证纯逻辑单测在不引导 MC 注册表的情况下也能使用其余数值字段。
+ * 项目自己的导航、费用和旧建造兼容设置，首次读取部分方块名单时才创建名单。
+ * 一些字段仍被挖矿和建造使用，一些只由旧移动代码读取；现用 Baritone 还有自己的设置对象，实际效果要沿各字段调用判断。
  */
 public final class NavSettings {
 

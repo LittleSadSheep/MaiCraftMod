@@ -19,12 +19,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * goto 的 FIND(就近方块)子系统:起一次 {@link BlockSearch} 找出候选、按 mine 同一道
- * 剪枝入册、编译 anyOf 导航契约、打不通时逐个除名轮换。它与 goto 的坐标三态
- * (BLOCK/COLUMN/YLEVEL)不共享任何逻辑,任务只管驱动。
- *
- * <p>搜索和 {@code scan_blocks} 走同一条路,只是 {@code want} 不同——所以
- * "最近的铁矿在哪"两个工具给的是同一个答案。
+ * 为“走到某种方块旁边”收集候选目的地，生成接近目标并保护目标不被破坏的导航要求。
+ * 当前候选却借用了挖矿的可破坏判断，冰等本可接近的方块会被删掉；这一职责错误已记入审计。
  */
 final class NearestBlockFinder {
 
@@ -88,6 +84,7 @@ final class NearestBlockFinder {
         // 入册前过与 mine 同一道目标剪枝:挖不动/禁挖(贴液体等)/基岩上下
         // 夹死的格不作候选——省得选中一个走近了也没法处置的目标。问的是这块
         // "能不能被处置",与她怎么走过去无关,按可改地形算。
+        // 当前在移动候选上检查能否安全挖掉目标；例如“不要挖冰”的规则也会挡住单纯走近冰。
         var ctx = ContextFactory.forExecution(player,
                 org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.TERRAFORM);
         found.stream()
@@ -125,6 +122,7 @@ final class NearestBlockFinder {
     }
 
     /** 打不通时的轮换:还有得换就把最近候选除名并重建契约,只剩一个则不动。 */
+    // 只在本次已找到的候选中去掉最近项后重试；全部失败时，这里不会再向更外层继续搜索。
     boolean rotateAfterFailure() {
         if (candidates.size() <= 1) {
             return false;

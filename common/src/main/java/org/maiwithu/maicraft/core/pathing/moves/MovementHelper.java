@@ -54,10 +54,8 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 
 /**
- * 移动原语与搜索共用的静态方块判定库(BlockGetter 域):
- * 可穿行 / 可跳穿 / 可站立 / 禁挖 / 流体流动 / 破坏成本等。
- * 位置无关的判定拆成三态预筛(YES/NO/MAYBE),MAYBE 再做位置精判,
- * 让绝大多数格子只看 BlockState 就能出结论。
+ * 另一组带导航设置的方块判断和挖掘费用计算。部分方法仍用于挖矿、找方块及场地观察，部分只服务已停用的旧移动执行器。
+ * 通常先按方块种类判断；只有需要周围环境的情况再读位置，例如积雪下的支撑或水面上下关系。
  */
 public final class MovementHelper {
 
@@ -433,6 +431,7 @@ public final class MovementHelper {
      * 这里——那是 {@link CalculationContext#breakCostMultiplierAt} 的事,
      * 硬禁挖的唯一真源是那个标签。
      */
+    // 判断挖掉这格是否会破坏冰、惊动蠹虫、放出液体或引发落沙；它不是接近这格的导航限制。
     public static boolean avoidBreaking(CalculationContext context, int x, int y, int z, BlockState state) {
         if (!placeableWithinBorder(context.worldBorder, x, z)) {
             return true;
@@ -488,6 +487,7 @@ public final class MovementHelper {
      * 禁挖 → INF;否则 1/速度 + 附加罚金,再乘上下文乘数。
      * {@code includeFalling} 时向上递归叠加整根落沙柱的成本。
      */
+    // 如果身体本来能通过就返回零清障费用；否则计算破坏所需时间，必要时把上方会落下的方块也算进去。
     public static double getMiningDurationTicks(CalculationContext context, int x, int y, int z,
                                                 BlockState state, boolean includeFalling) {
         if (!canWalkThrough(context, x, y, z, state)) {
@@ -711,6 +711,7 @@ public final class MovementHelper {
      * 会动的方块(竹、活塞移动方块、脚手架、潜影盒、滴水石锥、
      * 紫水晶簇)。取形状抛异常时按 false。
      */
+    // 当前用不带世界和位置的碰撞形状判断是否整块；依赖现场数据的模组形状查询失败时返回否，不能据此证明它在现场一定不完整。
     public static boolean isBlockNormalCube(BlockState state) {
         Block block = state.getBlock();
         if (block instanceof BambooStalkBlock

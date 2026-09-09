@@ -12,7 +12,10 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** World-action tool (raw MaiCraftTool): travel with full terrain-traversing navigation. */
+/**
+ * 内部 goto 入口：解析坐标、方块种类和移动许可，交给 MovementOps 创建任务单，再由父任务或调度器执行。
+ * description 与 parameterSchema 保留旧内部工具说明；公开移动能力由语义能力目录定义。
+ */
 public final class MoveToTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

@@ -1,8 +1,8 @@
 package org.maiwithu.maicraft.core.pathing.moves;
 
 /**
- * 动作成本常量表。所有成本单位为 tick(20 tick/s),由各动作的真实物理
- * 耗时换算而来;坠落成本表由逐 tick 重力模拟生成。
+ * 保存行走、冲刺、爬梯等动作的参考耗时，以及按重力和阻力估算的下落时间。当前目标估价等代码仍使用这些数值。
+ * 这些是算法的比较尺度；真实动作完成仍要看游戏状态，不能只等够这个数就算成功。
  */
 public final class ActionCosts {
 
@@ -62,6 +62,7 @@ public final class ActionCosts {
     }
 
     /** 坠落 distance 格所需 tick 数:逐 tick 累减位移,末段线性插值。 */
+    // 逐次累计下落距离，最后一段按比例估算。这个帮助方法本身未检查非法距离，调用者应给有限的非负数。
     public static double distanceToTicks(double distance) {
         if (distance == 0) {
             return 0; // 避免 0/0 得 NaN

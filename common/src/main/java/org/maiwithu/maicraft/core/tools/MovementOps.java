@@ -6,10 +6,7 @@ import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
 /**
- * Movement tool implementation — the business half of {@code MoveToTool}
- * ({@code goto}): its only job is to validate args and build the
- * {@link TaskRecord} the body's task queue runs (the {@link ToolContext}
- * carries the call id and deadline basis).
+ * 把内部移动参数整理成任务单，不在这里寻找路径或控制玩家。初始期限按正常游戏速度约三十秒，执行器会按距离和进展续期。
  */
 public final class MovementOps {
 

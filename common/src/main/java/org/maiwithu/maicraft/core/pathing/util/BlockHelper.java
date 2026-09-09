@@ -34,18 +34,8 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
- * Stateless terrain predicates used by the movement primitives and the A*
- * search: decide
- * whether a block can be stood on, passed through, broken, or is a hazard —
- * without any entity instance, just a {@link BlockGetter} + {@link BlockPos}.
- *
- * <h2>Coordinate convention</h2>
- * A "feet position" {@code p} is walkable as a standing spot when:
- * <ul>
- *   <li>{@code p} and {@code p.above()} are pass-through (air/non-colliding) —
- *       room for the 2-tall entity body, and</li>
- *   <li>{@code p.below()} is solid-walkable — something to stand on.</li>
- * </ul>
+ * 多种任务共用的方块判断：哪里可以作为站位、怎样表示半砖上的脚位、方块是否危险、挖开会不会放出液体、工具能否取得掉落物。
+ * 可通行分类会把可手开的门视为能通过，不等于此刻身体碰撞盒可以直接穿过；需要精确碰撞时应看相应现场检查。
  */
 public final class BlockHelper {
 
@@ -115,6 +105,7 @@ public final class BlockHelper {
      * (needs redstone). The path treats these as passable (no breaking) and the
      * executor right-clicks them open when shut.
      */
+    // 这里当前按具体的原版铁门排除，其他 DoorBlock 都归入可打开类；并没有逐个读取门材质的手动开启能力。
     public static boolean isOpenableDoor(BlockState state) {
         if (state.is(Blocks.IRON_DOOR)) {
             return false;
@@ -359,6 +350,7 @@ public final class BlockHelper {
      * consulted by the A* break cost ({@link #breakWouldCreateFlow}) so
      * "safe to route through" and "safe to mine on purpose" never disagree.
      */
+    // 检查上方和四周会不会放出流体，优先返回岩浆方向；不检查下方，因为下方流体不会因挖上面一格而向上灌。
     public static Direction fluidReleasedByBreaking(BlockGetter level, BlockPos pos) {
         Direction water = null;
         for (Direction dir : Direction.values()) {
@@ -411,6 +403,7 @@ public final class BlockHelper {
      * hotbar (a real player's quick-switch set): a companion can dig into its own pack, so the
      * gate + cost + execution all scan the whole inventory together.
      */
+    // 看是否具备取得正常掉落物的工具；背包扫描范围由传入容器决定，这里不负责把该物品装备到手上。
     public static boolean canHarvest(Container inv, BlockState state) {
         if (!state.requiresCorrectToolForDrops()) {
             return true;

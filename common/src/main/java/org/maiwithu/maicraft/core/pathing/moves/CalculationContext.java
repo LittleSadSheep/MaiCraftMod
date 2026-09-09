@@ -30,14 +30,8 @@ import net.minecraft.world.level.border.WorldBorder;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 
 /**
- * 一次成本计算/搜索的世界视图与能力快照。构造时把设置、背包、附魔
- * 状态全部取样为 final 字段:同一次搜索里每条边用同一把尺,不会
- * 因中途改设置得到自相矛盾的路径。
- *
- * <p>世界读取走注入的 {@link BlockGetter} 视图 + {@link ChunkLoadedTest}
- * 谓词;三个语义开关:{@code permit}(这次移动能不能改地形,见
- * {@link TerrainPermit})、{@code sacred}(自身目标格,不可挖不可埋,
- * 不可穿透)、{@code deniedPlace}(执行层证明放不上的格)。
+ * 保存一次方块费用判断所需的世界读取方式、工具、设置和保护范围；当前挖矿与按方块寻找目的地仍使用它。
+ * 其中也保留了许多旧移动算法的选项。大部分参数在创建时取样，少数费用和下落范围字段仍可被调用者调整。
  */
 public class CalculationContext {
 
@@ -129,6 +123,7 @@ public class CalculationContext {
                               LongSet forbiddenBodyCells, TerrainPermit permit) {
         NavSettings settings = NavSettings.get();
         this.safeForThreadedUse = safeForThreadedUse;
+        // 后台快照不保留可操作的玩家对象；方块读取仍走调用者提供的视图，工具和设置在这里先取样。
         this.player = safeForThreadedUse ? null : player;
         this.view = view;
         this.loadedTest = loadedTest;
@@ -150,6 +145,7 @@ public class CalculationContext {
                 && (!org.maiwithu.maicraft.core.WorkProfile.of(player).hasHunger()
                         || player.getFoodData().getFoodLevel() > 6);
         this.placeBlockCost = settings.blockPlacementPenalty;
+        // 这份费用判断同时受本次地形许可和导航设置影响；后面还有允许例外破坏的方块列表。
         this.allowBreak = permit.mayAlter() && settings.allowBreak;
         this.allowBreakAnyway = List.copyOf(settings.allowBreakAnyway());
         this.allowParkour = settings.allowParkour;
@@ -171,6 +167,7 @@ public class CalculationContext {
         this.minFallHeight = 3;
         // 落差上限不写死:摔不死的高度都可以是路,只是疼。原版摔伤 = 高度-3(半心/格),
         // 按当前血量留 3 颗心(6 点)保命余量反推可承受高度;设置值兜底为下限。
+        // 旧下落模型按当前生命估一个落差，留出六点生命，再与设置比较并把最终值限制到十二格。
         int survivableFall = 3 + Math.max(0, (int) ((player.getHealth() - 6.0f) / 1.0f));
         this.maxFallHeightNoWater = Math.min(12,
                 Math.max(settings.maxFallHeightNoWater, survivableFall));
@@ -269,6 +266,7 @@ public class CalculationContext {
     }
 
     /** Water bucket availability matching the receipt-backed hotbar staging rules. */
+    // 检查快捷栏、按设置允许的普通背包，以及能腾主手的副手桶；这只是携带能力估计，不会真的切换物品。
     private static boolean hasUsableWaterBucket(LocalPlayer player, NavSettings settings) {
         var inventory = player.getInventory();
         int upper = settings.allowInventory ? Math.min(36, inventory.items.size()) : 9;
@@ -399,6 +397,7 @@ public class CalculationContext {
      * 的 {@code avoidanceMultiplier}(NavSettings.blocksToAvoidBreaking)
      * 在 {@code getStrVsBlock} 里实现,此处不参与。
      */
+    // 先拦住保护格和禁止破坏标签；再看破坏开关或例外名单。这个判断属于能不能挖，不代表能不能走到旁边。
     public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
         if (sacred.contains(BlockPos.asLong(x, y, z))) {
             return COST_INF;

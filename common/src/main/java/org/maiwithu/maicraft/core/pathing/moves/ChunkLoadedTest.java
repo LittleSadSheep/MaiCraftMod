@@ -1,8 +1,7 @@
 package org.maiwithu.maicraft.core.pathing.moves;
 
 /**
- * chunk 加载谓词:给定方块坐标的 XZ,回答其所在 chunk 是否已加载
- * (或已被快照捕获)。由调用方以 lambda 注入,后续接快照体系。
+ * 告诉费用计算器某个水平坐标的区块是否已加载。ALWAYS 表示调用者自己承担已加载前提，并不会实际加载区块。
  */
 @FunctionalInterface
 public interface ChunkLoadedTest {
