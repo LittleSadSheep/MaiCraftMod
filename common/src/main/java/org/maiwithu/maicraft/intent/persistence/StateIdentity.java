@@ -14,10 +14,10 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 
 /**
- * A game-derived persistence boundary. No MCP argument participates in this identity.
+ * 决定任务进度属于哪个存档或服务器，避免连到另一处时直接使用上一次的任务和地标。
  *
- * @param key SHA-256 only; raw addresses and save paths never become filenames or public events
- * @param directory shared state directory under the current game directory
+ * @param key 从存档路径或服务器地址计算出的哈希；文件名中不直接写出地址或路径。
+ * @param directory 当前游戏目录里的任务状态保存目录。
  */
 public record StateIdentity(String key, Path directory) {
     public StateIdentity {
@@ -28,6 +28,7 @@ public record StateIdentity(String key, Path directory) {
     }
 
     public static Optional<StateIdentity> resolve(Minecraft minecraft) {
+        // 优先识别单人存档，识别不到再看多人服务器；没进世界时不凭 MCP 传来的文字猜身份。
         if (minecraft == null || minecraft.player == null || minecraft.level == null) {
             return Optional.empty();
         }
@@ -40,6 +41,7 @@ public record StateIdentity(String key, Path directory) {
     }
 
     private static String singleplayerIdentity(Minecraft minecraft) {
+        // 用存档目录区分单人世界；Windows 路径不区分大小写，因此先统一成小写再计算。
         MinecraftServer server = minecraft.getSingleplayerServer();
         if (server == null) return null;
         try {
@@ -54,12 +56,14 @@ public record StateIdentity(String key, Path directory) {
     }
 
     private static String multiplayerIdentity(Minecraft minecraft) {
+        // 多人世界目前只按服务器地址区分，未包含玩家账号，也无法区分同一地址更换前后的世界。
         ServerData server = minecraft.getCurrentServer();
         if (server == null || server.ip == null || server.ip.isBlank()) return null;
         return "multiplayer\n" + server.ip.strip().toLowerCase(Locale.ROOT);
     }
 
     private static String sha256(String value) {
+        // 将路径或地址变成固定长度编号；这只用于区分文件，不证明服务器内容没有变化。
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8));

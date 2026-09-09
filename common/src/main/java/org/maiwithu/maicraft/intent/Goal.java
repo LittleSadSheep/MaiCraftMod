@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Immutable semantic intent. Execution details are compiled later inside the game runtime. */
+/** 模型提出的目标：要做什么、做到什么程度、对象是谁；还没有具体路线、鼠标点击或物品槽操作。 */
 public record Goal(String ability,
                    String outcome,
                    SemanticTarget target,
@@ -19,6 +19,7 @@ public record Goal(String ability,
                    List<Goal> children) {
 
     public Goal {
+        // 参数存成 JSON 文本，步骤列表复制后禁止直接修改，避免别人拿着原对象改掉已接受的目标。
         ability = Objects.requireNonNull(ability, "ability");
         outcome = Objects.requireNonNull(outcome, "outcome");
         parametersJson = canonicalObject(parametersJson);
@@ -28,6 +29,7 @@ public record Goal(String ability,
     }
 
     public static Goal fromJson(JsonObject source) {
+        // 按约定字段读入目标，遇到组合目标就继续读取子目标；公开请求的格式校验在调用本方法前完成。
         String ability = source.get("ability").getAsString();
         String outcome = source.get("outcome").getAsString();
         SemanticTarget target = source.has("target") && !source.get("target").isJsonNull()
@@ -58,6 +60,7 @@ public record Goal(String ability,
     }
 
     public JsonObject parameters() {
+        // 每次返回一份新对象；改它不会改原目标，要用 withParameters 创建修改后的目标。
         return JsonParser.parseString(parametersJson).getAsJsonObject();
     }
 
@@ -70,10 +73,12 @@ public record Goal(String ability,
     }
 
     public Goal withTarget(SemanticTarget nextTarget) {
+        // 例如把“前一步找到的地方”换成 Mod 确认的位置，其他要求保持原样。
         return new Goal(ability, outcome, nextTarget, parametersJson, preferencesJson, constraints, children);
     }
 
     public List<Goal> executableSteps() {
+        // sequence 按顺序递归展开，只留下具体目标；当前不会把中间 sequence 的参数继承给这些目标。
         if ("maicraft:sequence".equals(ability)) {
             List<Goal> flattened = new ArrayList<>();
             for (Goal child : children) {
@@ -85,6 +90,7 @@ public record Goal(String ability,
     }
 
     public JsonObject toJson() {
+        // 保存或公开目标时，把参数和子步骤重新组成 JSON；这里描述的是请求，不证明已经执行。
         JsonObject result = new JsonObject();
         result.addProperty("ability", ability);
         result.addProperty("outcome", outcome);
@@ -101,6 +107,7 @@ public record Goal(String ability,
     }
 
     private static String objectString(JsonObject source, String key) {
+        // 遇到缺失或非对象字段时会当成空对象；严格拒绝错误格式依赖外层校验。
         JsonObject value = source.has(key) && source.get(key).isJsonObject()
                 ? source.getAsJsonObject(key)
                 : new JsonObject();
@@ -108,12 +115,14 @@ public record Goal(String ability,
     }
 
     private static String canonicalObject(String json) {
+        // 空值统一为空对象，并重新解析再输出，去掉无意义空白；这不会把对象键按字母排序。
         if (json == null || json.isBlank()) return "{}";
         JsonElement parsed = JsonParser.parseString(json);
         if (!parsed.isJsonObject()) throw new IllegalArgumentException("goal metadata must be an object");
         return parsed.toString();
     }
 
+    /** 某个维度的一格位置；不带 dimension 时，需要使用这个位置的功能结合当前世界判断。 */
     public record WorldPosition(int x, int y, int z, String dimension) {
         static WorldPosition fromJson(JsonObject value) {
             return new WorldPosition(
@@ -135,6 +144,7 @@ public record Goal(String ability,
         }
     }
 
+    /** 目标的描述方式：当前地点、坐标、地标名、人物名或“前一步的结果”等。 */
     public record SemanticTarget(String kind, String label, WorldPosition position, String relation) {
         static SemanticTarget fromJson(JsonObject value) {
             return new SemanticTarget(
@@ -156,6 +166,7 @@ public record Goal(String ability,
         }
     }
 
+    /** 调用者提出的限制；这里只负责保存，是否真的支持由 SemanticGoalContract 检查。 */
     public record Constraint(String kind, String description, boolean hard, String parametersJson) {
         public Constraint {
             parametersJson = canonicalObject(parametersJson);

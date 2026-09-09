@@ -11,11 +11,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Converts every failed internal action into the same semantic recovery protocol.
- *
- * <p>The model never receives body-control or internal-tool choices. It may retry the current
- * intent, insert one semantic prerequisite, skip, or cancel. This keeps recovery extensible
- * without hard-coding one branch for every recipe, block, entity, GUI, or mod.</p>
+ * 一步做不下去时，把失败原因变成调用者能回答的问题：再试一次、先补条件、改做别的、跳过或取消。
+ * 例如造炉子缺石头，可以回答“先找石头”，而不必让调用者指挥每次鼠标点击。
  */
 final class RecoveryAdvisor {
 
@@ -23,6 +20,7 @@ final class RecoveryAdvisor {
 
     static IntentTaskRecord.DecisionSnapshot afterFailure(
             Goal goal, TaskState state, TaskResult result) {
+        // 先把这次失败的原始结果带上，再决定能否提供“直接重试”选项。
         JsonObject context = baseContext(goal);
         context.addProperty("failure_state", state.name().toLowerCase());
         context.add("failure", resultJson(result));
@@ -39,6 +37,7 @@ final class RecoveryAdvisor {
 
     static IntentTaskRecord.DecisionSnapshot invalidSemanticAnswer(
             Goal goal, String issue, JsonObject priorFailure) {
+        // 答复格式不对时继续询问，并保留上次失败背景；不能因为重新提问就放开原先禁止的重试。
         JsonObject context = baseContext(goal);
         context.addProperty("invalid_answer", issue);
         boolean retryAllowed = ordinaryRetryAllowed(priorFailure);
@@ -61,6 +60,7 @@ final class RecoveryAdvisor {
     }
 
     static boolean ordinaryRetryAllowed(TaskResult result) {
+        // 当前只认这两个标记：结果不确定，或机械动作明确不许重试；标记缺失时默认允许。
         if (result == null || result.data() == null) return true;
         Map<String, Object> data = result.data();
         return !Boolean.TRUE.equals(asBoolean(data.get("outcome_uncertain")))
@@ -78,6 +78,7 @@ final class RecoveryAdvisor {
 
     private static IntentTaskRecord.DecisionSnapshot decision(
             String question, JsonObject context, boolean retryAllowed) {
+        // 不确定上次到底做了多少时，去掉直接重试；仍允许在看过现状后换目标、补前提或叫停。
         List<IntentTaskRecord.DecisionOption> options = new ArrayList<>();
         if (retryAllowed) {
             options.add(new IntentTaskRecord.DecisionOption(
@@ -145,6 +146,7 @@ final class RecoveryAdvisor {
     }
 
     private static JsonObject resultJson(TaskResult result) {
+        // 失败结果本身也可能无法转成 JSON，此时至少保留失败说明，确保还能向调用者提问。
         try {
             return JsonParser.parseString(result.toJson()).getAsJsonObject();
         } catch (RuntimeException ignored) {

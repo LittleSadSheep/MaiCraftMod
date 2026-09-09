@@ -17,19 +17,19 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import org.maiwithu.maicraft.core.Constants;
 
-/** Bounded semantic checkpoints with one serial background writer and atomic file replacement. */
+/** 把任务进度写进磁盘文件：游戏线程先留一份文本，后台依次写入，避免每次保存都卡住游戏。 */
 public final class IntentStateStore {
     public static final int VERSION = 1;
     public static final long MAX_BYTES = 4L * 1024L * 1024L;
     private static final int MAX_RESIDENT_IDENTITIES = 8;
 
-    // A bounded mailbox, not an executor queue: repeated saves replace the same identity's
-    // pending snapshot. No task, world or caller-owned JsonObject is retained by the worker.
+    // 同一个世界连续要求保存时，只保留最近那份待写文本，不把每个旧版本都排队写一遍。
     private final Map<StateIdentity, PendingSave> latest = new LinkedHashMap<>();
     private final Executor writerExecutor;
     private boolean workerRunning;
 
     public IntentStateStore() {
+        // 使用后台守护线程；游戏进程退出时不会为了这个线程保持运行，也没有在这里等待最后写完。
         this(command -> {
             Thread worker = new Thread(command, "maicraft-state-writer");
             worker.setDaemon(true);
@@ -45,17 +45,14 @@ public final class IntentStateStore {
 
     public record LoadResult(Status status, JsonObject root) {}
 
-    /**
-     * One-time connection restore. Resident checkpoints need no IO; a cold restore reads at most
-     * four MiB, including protection against a file growing after its size was checked.
-     */
+    /** 优先读进程内刚保存的文本，没有才读磁盘；最多读取四 MiB，损坏文件移到旁边保留。 */
     public LoadResult load(StateIdentity identity) {
         String captured;
         synchronized (latest) {
             PendingSave save = latest.get(identity);
             captured = save == null ? null : save.json;
         }
-        // Respawn/reconnect must see the accepted checkpoint even if the disk is still busy.
+        // 刚重生或重连时，磁盘可能还没写完；同一进程里仍使用已经留下的最新任务进度。
         if (captured != null) return new LoadResult(Status.LOADED,
                 JsonParser.parseString(captured).getAsJsonObject());
         Path file = file(identity);
@@ -90,15 +87,13 @@ public final class IntentStateStore {
         }
     }
 
-    /**
-     * Capture immutable JSON on the client thread, then return without waiting on storage.
-     * A superseded pending save is cancelled; its replacement remains the authoritative checkpoint.
-     */
+    /** 先复制成不会再变的文本，马上返回“稍后写完”的凭据；收到返回值不等于磁盘已经保存成功。 */
     public CompletableFuture<Void> saveAsync(StateIdentity identity, JsonObject root) throws IOException {
         String json = boundedJson(root);
         PendingSave save = new PendingSave(identity, json);
         synchronized (latest) {
             if (!latest.containsKey(identity) && latest.size() >= MAX_RESIDENT_IDENTITIES) {
+                // 最多留八个世界的文本；优先移走已成功写盘的旧世界，不能丢掉还没保存成功的那份。
                 var iterator = latest.entrySet().iterator();
                 while (iterator.hasNext()) {
                     PendingSave candidate = iterator.next().getValue();
@@ -112,6 +107,7 @@ public final class IntentStateStore {
                 }
             }
             PendingSave replaced = latest.put(identity, save);
+            // 新版本替代尚未完成的旧版本；真正正在写的旧文本可能仍会先写完，再写新版本。
             if (replaced != null && !replaced.completion.isDone()) replaced.completion.cancel(false);
             if (!workerRunning) {
                 workerRunning = true;
@@ -130,7 +126,7 @@ public final class IntentStateStore {
         synchronized (latest) { return latest.containsKey(identity); }
     }
 
-    /** Failed writes are retried by the ordinary save interval, never by a tight disk-error loop. */
+    /** 告诉运行时最近保存有没有失败，由正常保存周期重试，避免后台不断重复写盘报错。 */
     public boolean hasFailedSave(StateIdentity identity) {
         synchronized (latest) {
             PendingSave save = latest.get(identity);
@@ -139,6 +135,7 @@ public final class IntentStateStore {
     }
 
     private void writePending() {
+        // 一次只取一份待写文本；取出后在锁外写盘，让游戏线程仍能提交更新版本。
         while (true) {
             PendingSave save = null;
             synchronized (latest) {
@@ -166,6 +163,7 @@ public final class IntentStateStore {
     }
 
     private static String boundedJson(JsonObject root) throws IOException {
+        // 中文在 UTF-8 中可能占多个字节，既检查字符数，也检查实际写入字节数。
         String json = root.toString();
         if (json.length() > MAX_BYTES || json.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
             throw new IOException("semantic state exceeds " + MAX_BYTES + " bytes");
@@ -174,6 +172,7 @@ public final class IntentStateStore {
     }
 
     private static void write(StateIdentity identity, byte[] payload) throws IOException {
+        // 先写临时文件再替换正式文件，尽量避免留下半个 JSON；完成或失败后清理临时文件。
         Files.createDirectories(identity.directory());
         Path destination = file(identity);
         Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
@@ -200,7 +199,7 @@ public final class IntentStateStore {
         }
     }
 
-    /** Quarantine a structurally valid JSON file whose semantic model failed validation. */
+    /** 文件能解析成 JSON，但任务内容不合法时，把它改名保留，避免下次直接当正常状态使用。 */
     public void quarantine(StateIdentity identity) {
         quarantine(file(identity));
     }
@@ -210,6 +209,7 @@ public final class IntentStateStore {
     }
 
     private static void quarantine(Path file) {
+        // 坏文件加时间戳和 .corrupt 后缀，留下排错材料；如果改名也失败，就写日志说明。
         if (!Files.exists(file)) return;
         String stamp = Long.toString(Instant.now().toEpochMilli());
         Path corrupt = file.resolveSibling(file.getFileName() + "." + stamp + ".corrupt");

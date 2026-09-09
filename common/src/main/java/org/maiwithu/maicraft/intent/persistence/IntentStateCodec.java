@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 
-/** Version-one semantic-only JSON codec. It has no representation for native child state. */
+/** 把总任务、计划和地标转成可保存的 JSON，再从中恢复；不保存旧玩家的按键、菜单或正在走的路线。 */
 public final class IntentStateCodec {
     public static final int MAX_PLANS = 128;
     public static final int MAX_TASKS = 256;
@@ -73,7 +73,7 @@ public final class IntentStateCodec {
             Map<String, UUID> requestKeys,
             List<IntentRuntime.Landmark> landmarks) {}
 
-    /** Reject semantic input that could not be persisted without truncation or detail loss. */
+    /** 检查目标的 JSON 能否完整保存；这里检查每层内容的大小，没有检查组合目标展开后的总步数。 */
     public static void requirePersistableGoal(Goal goal) {
         safeGoal(goal);
     }
@@ -84,6 +84,7 @@ public final class IntentStateCodec {
             Iterable<IntentTaskRecord> tasks,
             Map<String, UUID> requestKeys,
             Iterable<IntentRuntime.Landmark> landmarks) {
+        // 保存文件版本、属于哪个世界、保存时间，再依次写计划、任务、重复请求编号和地标。
         JsonObject root = new JsonObject();
         root.addProperty("version", IntentStateStore.VERSION);
         root.addProperty("identity_key", identityKey);
@@ -104,6 +105,7 @@ public final class IntentStateCodec {
         JsonArray taskArray = new JsonArray();
         int taskCount = 0;
         for (IntentTaskRecord task : tasks) {
+            // 当前按传入顺序只保存前 MAX_TASKS 个；运行时需要自己保证重要任务没被排在这个范围外。
             if (taskCount++ >= MAX_TASKS) break;
             taskArray.add(encodeTask(task));
         }
@@ -134,12 +136,14 @@ public final class IntentStateCodec {
     }
 
     private static JsonObject encodeTask(IntentTaskRecord task) {
+        // 原始目标和实际步骤都保存：恢复过程中可能插入了“先找材料”等新步骤，不能只保存原始目标。
         JsonObject value = new JsonObject();
         value.addProperty("id", task.externalId().toString());
         if (task.planId() != null) value.addProperty("plan_id", task.planId().toString());
         value.add("goal", safeGoal(task.goal()));
         JsonArray steps = new JsonArray();
         task.steps().stream().limit(MAX_STEPS).forEach(step -> steps.add(safeGoal(step)));
+        // 当前只保存前二百五十六步，但下面的 step_index 不会一起裁剪；过长任务可能丢步骤或无法恢复。
         value.add("steps", steps);
         value.addProperty("step_index", task.stepIndex());
 
@@ -155,8 +159,7 @@ public final class IntentStateCodec {
         });
         value.add("completed_steps", completed);
 
-        // These coordinates are an opaque Mod-owned handoff between semantic children. They are
-        // persisted separately from public results and are never emitted by the MCP facade.
+        // 已确认的位置单独保存，供“去前一步找到的地方”使用；不与会删掉坐标的公开结果混在一起。
         JsonArray internalPositions = new JsonArray();
         task.internalPositionReceipts().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
@@ -169,8 +172,7 @@ public final class IntentStateCodec {
                 });
         value.add("internal_positions", internalPositions);
 
-        // Exact cells remain in a private persistence lane and are never sanitized into public
-        // task results. The existing four-megabyte state envelope is the sole storage bound.
+        // 要保护哪些格子也单独保存，恢复后仍可用于导航和施工；文件整体仍受四 MiB 大小限制。
         JsonArray internalAreaProtections = new JsonArray();
         task.internalAreaProtectionReceipts().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
@@ -217,6 +219,8 @@ public final class IntentStateCodec {
             value.add("decision", decision(task.decisionSnapshot()));
         }
         if (task.pendingAnswerSnapshot() != null) {
+            // 答复可能已经收到了，但还没轮到执行；保存它以便回来后继续处理。
+            // 这里目前用了公开结果的过滤规则，答复中合法目标的 position 等字段也会被删掉。
             IntentTaskRecord.DecisionAnswer answer = task.pendingAnswerSnapshot();
             JsonObject item = new JsonObject();
             item.addProperty("decision_id", answer.decisionId().toString());
@@ -236,6 +240,7 @@ public final class IntentStateCodec {
     }
 
     private static JsonObject decision(IntentTaskRecord.DecisionSnapshot decision) {
+        // 保存正在等人回答的问题、允许的选项和背景；问题编号要保留，回来后旧编号的答复才能匹配。
         JsonObject value = new JsonObject();
         value.addProperty("id", decision.id().toString());
         value.addProperty("question", safeMessage(decision.question()));
@@ -252,6 +257,7 @@ public final class IntentStateCodec {
     }
 
     public static Decoded decode(JsonObject root) {
+        // 先恢复普通数据对象；是否属于当前世界、是否允许恢复执行，由状态存储层和运行时再判断。
         List<Plan> plans = new ArrayList<>();
         JsonArray planArray = array(root, "plans", MAX_PLANS);
         for (JsonElement element : planArray) {
@@ -297,6 +303,7 @@ public final class IntentStateCodec {
     }
 
     private static TaskSnapshot decodeTask(JsonObject value) {
+        // 有保存下来的实际步骤就用它，没有才从原始目标重建；所以被截短但非空的列表不会自动补全。
         UUID id = UUID.fromString(text(value, "id"));
         UUID planId = value.has("plan_id")
                 ? UUID.fromString(value.get("plan_id").getAsString()) : null;
@@ -308,6 +315,7 @@ public final class IntentStateCodec {
         if (steps.isEmpty()) steps.addAll(goal.executableSteps());
         int stepIndex = integer(value, "step_index", 0);
         if (stepIndex < 0 || stepIndex > steps.size()) {
+            // 当前做到哪一步不能超出已保存的步骤，否则整条任务记录不可信。
             throw new IllegalArgumentException("persisted semantic step index is outside bounds");
         }
 
@@ -333,6 +341,7 @@ public final class IntentStateCodec {
 
         Map<Integer, Goal.WorldPosition> internalPositions = new LinkedHashMap<>();
         for (JsonElement element : array(value, "internal_positions", MAX_STEPS)) {
+            // 位置必须来自已经完成的步骤；正在尝试或失败的步骤不能授权后续任务使用其位置。
             JsonObject item = element.getAsJsonObject();
             int positionStepIndex = integer(item, "step_index", -1);
             if (positionStepIndex < 0 || positionStepIndex >= stepIndex) {
@@ -353,6 +362,7 @@ public final class IntentStateCodec {
         Map<Integer, List<InternalAreaProtectionReceipt.Footprint>>
                 internalAreaProtections = new LinkedHashMap<>();
         for (JsonElement element : array(value, "internal_area_protections", MAX_STEPS)) {
+            // 同样只恢复已经完成步骤测出的保护范围，并拒绝同一步重复保存多份记录。
             JsonObject item = element.getAsJsonObject();
             int protectionStepIndex = integer(item, "step_index", -1);
             if (protectionStepIndex < 0 || protectionStepIndex >= stepIndex) {
@@ -417,6 +427,7 @@ public final class IntentStateCodec {
     }
 
     private static List<Long> decodePackedCells(JsonObject value, String key) {
+        // 每个 long 都是游戏把一格 x/y/z 打包后的值；这里只恢复列表，不去读取或改变世界方块。
         List<Long> result = new ArrayList<>();
         for (JsonElement element : array(value, key, Integer.MAX_VALUE)) {
             if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
@@ -428,6 +439,7 @@ public final class IntentStateCodec {
     }
 
     private static IntentTaskRecord.DecisionSnapshot decodeDecision(JsonObject value) {
+        // 还原待答问题；没有任何可选项的问题不允许恢复，否则调用者永远没法回答。
         List<IntentTaskRecord.DecisionOption> options = new ArrayList<>();
         for (JsonElement element : array(value, "options", MAX_OPTIONS)) {
             JsonObject item = element.getAsJsonObject();
@@ -452,6 +464,7 @@ public final class IntentStateCodec {
     }
 
     private static IntentTaskRecord.TerminalSnapshot decodeTerminal(JsonObject value) {
+        // “结束结果”只能写成功、失败、超时或取消，不能把 RUNNING 冒充成已经结束。
         TaskState state = TaskState.valueOf(text(value, "state").toUpperCase());
         if (!state.isTerminal()) throw new IllegalArgumentException(
                 "persisted terminal state is not terminal");
@@ -462,6 +475,7 @@ public final class IntentStateCodec {
     }
 
     private static JsonArray array(JsonObject root, String key, int maximum) {
+        // 缺少列表按空列表兼容；已经存在但类型不对或数量过多，则拒绝整份内容，不静默截取。
         if (!root.has(key)) return new JsonArray();
         if (!root.get(key).isJsonArray()) {
             throw new IllegalArgumentException(key + " must be an array");
@@ -494,6 +508,7 @@ public final class IntentStateCodec {
     }
 
     private static JsonObject safeGoal(Goal goal) {
+        // 目标里的合法蓝图另按蓝图规则检查，其他内容不能含内部操作字段；若过滤会改掉目标，就拒绝保存。
         JsonObject original = goal.toJson();
         JsonObject inspection = BlueprintGoalData.instructionView(goal);
         JsonElement safe = safeGoalElement(inspection, 0);
@@ -504,13 +519,14 @@ public final class IntentStateCodec {
             throw new IllegalArgumentException(
                     "semantic goal contains native execution details or exceeds persistence bounds");
         }
-        // Blueprint arrays follow the declared physical budget, not the generic 256-entry metadata limit.
+        // 蓝图可能有许多方块，不套普通元数据每层二百五十六项的限制，但目标整体仍不能超过文件预算。
         if (original.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > IntentStateStore.MAX_BYTES)
             throw new IllegalArgumentException("semantic goal exceeds checkpoint byte budget; reference a blueprint resource instead");
         return original;
     }
 
     private static Goal decodeGoal(JsonObject value) {
+        // 还原目标再重新检查，并比较是否丢了字段；保存的数据与还原后的目标必须一致。
         Goal goal = Goal.fromJson(value);
         JsonElement safe = safeGoal(goal);
         if (!safe.equals(value)) {
@@ -521,6 +537,7 @@ public final class IntentStateCodec {
     }
 
     private static JsonObject safeObject(String json) {
+        // 用于结果／背景的宽松读取：无法解析就改成空对象，不让一条坏诊断文字阻断所有状态保存。
         try {
             JsonElement element = JsonParser.parseString(
                     json == null || json.isBlank() ? "{}" : json);
@@ -536,6 +553,7 @@ public final class IntentStateCodec {
     }
 
     private static JsonElement safeElement(JsonElement value, int depth) {
+        // 递归处理普通结果：删内部字段，限制深度，每个列表或对象最多二百五十六项，长文字也会缩短。
         if (value == null || value.isJsonNull() || depth > MAX_RESULT_DEPTH) {
             return JsonNull.INSTANCE;
         }
@@ -581,7 +599,7 @@ public final class IntentStateCodec {
                 || lower.endsWith("_z");
     }
 
-    /** Goal metadata may contain semantic equipment slots; only native menu slots are forbidden. */
+    /** 目标参数与执行结果用不同的过滤名单；合法的目标坐标、装备部位等可以保留。 */
     private static JsonElement safeGoalElement(JsonElement value, int depth) {
         if (value == null || value.isJsonNull() || depth > MAX_RESULT_DEPTH) {
             return JsonNull.INSTANCE;
@@ -624,6 +642,7 @@ public final class IntentStateCodec {
     }
 
     private static String safeMessage(String value) {
+        // 包含异常或内部类名的旧消息被替换成通用提示；当前做法会同时丢掉这条消息里原有的排错细节。
         String message = bounded(value);
         String lower = message.toLowerCase();
         if (lower.contains("exception") || lower.contains("stack trace")
@@ -637,6 +656,7 @@ public final class IntentStateCodec {
     }
 
     private static String bounded(String value) {
+        // 去掉两端空白并限制长度，超出部分直接截去。
         if (value == null) return "";
         String result = value.strip();
         return result.length() <= MAX_TEXT ? result : result.substring(0, MAX_TEXT);
