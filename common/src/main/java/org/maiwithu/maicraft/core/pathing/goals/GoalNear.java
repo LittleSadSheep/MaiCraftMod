@@ -3,7 +3,10 @@ package org.maiwithu.maicraft.core.pathing.goals;
 import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 import net.minecraft.core.BlockPos;
 
-/** 球形邻域目标:与中心的三维距离平方不超过 rangeSq 即到达。 */
+/**
+ * 旧的球形到达范围：三维距离不超过 range 就算到达，估价仍计算到中心的成本。
+ * 当前没有生产或测试构造调用，现用任务走 NavGoal 的目标描述。
+ */
 public class GoalNear implements Goal {
 
     public final int x;

@@ -20,7 +20,7 @@ public interface MaiCraftTool {
     /** 说明这个内部工具能做什么；不会因此自动公开给 MCP 客户端。 */
     String description();
 
-    /** JSON Schema 兼容的参数声明。 */
+    /** 历史参数 Schema 声明；当前生产分发没有读取它，实际校验由公开契约与各执行入口完成。 */
     Map<String, Object> parameterSchema();
 
     /** 工具的历史分类标签。注册表可以按它筛选，但目前公开的四个 MCP 入口不由它决定。 */

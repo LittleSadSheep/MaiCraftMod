@@ -6,10 +6,8 @@ import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.reflex.Reflex;
 
 /**
- * Compatibility descriptor for the former second-person speaking pose.
- *
- * <p>A first-person local body has no separate nearby body to face, so this
- * pose never competes for control.</p>
+ * 旧的“说话时看向另一名角色”姿势占位，当前没有注册或生产调用。
+ * 第一人称模式下 canRun 永远返回 false；tick 不发动作，stop 也为空。
  */
 public final class SpeakingLookChain implements Task, Reflex {
 

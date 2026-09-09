@@ -8,7 +8,9 @@ import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineCommissioning;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MekanismNativeConfiguration;
 
-/** Final assembly assertions are re-observed after all block, part and configuration effects settle. */
+/**
+ * 按具体要求重新读取装配结果：目前可核对 Mekanism 接口模式和感应矩阵形成，未知要求返回不支持。
+ */
 final class MachineCompletionChecks {
     private MachineCompletionChecks() {}
 
@@ -30,6 +32,7 @@ final class MachineCompletionChecks {
         return unsupported;
     }
 
+    // 要求包含范围时，逐格确认已加载；发现缺块就给一个范围外侧的接近点，不在这里强制加载区块。
     static BlockPos regionToLoad(Level world, BlockPos anchor, JsonObject requirement) {
         if (!requirement.has("min_offset") || !requirement.has("max_offset")) return null;
         BlockPos min = MachineConstructionPlan.offset(anchor, requirement.get("min_offset"));
@@ -39,6 +42,7 @@ final class MachineCompletionChecks {
         return null;
     }
 
+    // 只有已识别的矩阵要求，且观察结果明确给出形成确认，才算这一项通过。
     static boolean satisfied(JsonObject requirement, JsonObject evidence) {
         return requirement.get("kind").getAsString().equals("mekanism_induction_matrix")
                 && evidence.has("matrix_formed_verified") && evidence.get("matrix_formed_verified").getAsBoolean();

@@ -55,6 +55,7 @@ public final class LocalToolDispatcher {
                 deliver(call.id(), TaskResult.fail("unknown internal capability: " + call.toolName()).toJson());
                 return;
             }
+            // 这里只按名字分发，没有自动执行工具的 parameterSchema；工具自己和公开入口必须承担实际参数检查。
             tool.onGameCall(call.id(), call.args(), player, result -> deliver(call.id(), result));
         } catch (RuntimeException exception) {
             if (!(exception instanceof IllegalArgumentException)) {

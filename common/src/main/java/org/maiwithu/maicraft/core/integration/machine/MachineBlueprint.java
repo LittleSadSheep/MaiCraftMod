@@ -28,21 +28,25 @@ import org.maiwithu.maicraft.core.build.BuildStates;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.ReplaceMode;
 
-/** Compile a relative machine design into the existing receipt-driven native construction task. */
+/**
+ * 保留旧的机器蓝图编译器，并提供当前装配流程仍使用的状态解析、多格方块检查。
+ * 当前生产代码不调用本类 compile 或 Compiled.toTask；实际机器装配使用 MachineConstructionPlan 和 MachineBuildTask。
+ */
 public final class MachineBlueprint {
     public static final int MAX_BLOCKS = MachineBlueprintSpec.MAX_BLOCKS;
 
     private MachineBlueprint() {}
 
-    /** Plan-time wire validation; live compilation subsequently enforces the actual surveyed radius. */
+    /**
+     * 旧蓝图格式检查：只收 blocks，并限制在旧观察半径内；它不是当前模型与机器布局的通用入口。
+     */
     public static void validateWire(JsonObject blueprint) {
         MachineBlueprintSpec.parse(blueprint, MachineSurvey.MAX_RADIUS);
     }
 
     /**
-     * Read-only compilation; registry, geometry bounds and replacement policies are validated here.
-     * The resulting native task proves the entire plan's placement gestures and material availability
-     * before its first mutation. No block-entity NBT or server-side block writes are accepted.
+     * 旧入口先观察整个小范围，再把相对格子变成绝对目标，并保存场地摘要及各格旧状态。
+     * 它本身只生成任务数据；方块实际放下还要交给执行器。不能把保留下来的这段逻辑当作当前全部机器装配流程。
      */
     public static Compiled compile(LocalPlayer player, BlockPos anchor, int radius,
             JsonObject blueprint, boolean replaceExisting, boolean replaceBlockEntities) {
@@ -111,8 +115,10 @@ public final class MachineBlueprint {
             byPosition.put(pos.asLong(), target);
         }
         // Generated vanilla halves must be explicitly present, so no implicit mutation escapes the marked region.
+        // 门、床等成对方块必须把另一半也写进蓝图，且状态与主半自动生成的结果完全一致。
         for (BuildTaskRecord.Target target : targets) validateGeneratedCells(target, byPosition);
         List<BlockPos> protectedCells = new ArrayList<>();
+        // 旧入口把观察范围内不需施工的已有方块保留下来，避免后续寻路把这些结构当作可拆障碍。
         for (BlockPos pos : BlockPos.betweenClosed(anchor.offset(-radius, -radius, -radius), anchor.offset(radius, radius, radius))) {
             BuildTaskRecord.Target target = byPosition.get(pos.asLong());
             if (!level.getBlockState(pos).isAir() && (target == null || target.matches(level.getBlockState(pos)))) {
@@ -152,6 +158,7 @@ public final class MachineBlueprint {
     }
 
     /** Registry/state compilation is separately testable without constructing a player or a world. */
+    // 当前机器规划仍共用此方法：名字和属性必须存在；若建造会重置明确给出的属性，立即报不支持，不静默换值。
     static BlockState resolveState(String blockId, Map<String, String> properties) {
         ResourceLocation id = ResourceLocation.tryParse(blockId);
         if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
@@ -200,6 +207,7 @@ public final class MachineBlueprint {
     }
 
     /** Mekanism bounding machines alter extra cells that the generic block-item builder cannot receipt. */
+    // 拒绝需要额外结构格却没有专门安装步骤的方块。Mekanism 通过可选 API 查询，无法确认时也拒绝。
     static void requireModeledEffects(Block block) {
         ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
         String namespace = id.getNamespace();
@@ -252,6 +260,7 @@ public final class MachineBlueprint {
             return toTask(toolCallId, deadlineGameTime, true);
         }
 
+        // 旧任务转换接口：开工前比较整片场地摘要，每次修改前比较目标旧状态，确认自己的修改后更新基准；当前装配流程没有调用它。
         public BuildTaskRecord toTask(String toolCallId, long deadlineGameTime, boolean consumeMaterials) {
             BuildTaskRecord record = new BuildTaskRecord(toolCallId, deadlineGameTime, targets,
                     replaceExisting ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE,

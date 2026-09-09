@@ -11,7 +11,10 @@ import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 
-/** Shared versioned structure format for tutorial exports and model-authored construction. */
+/**
+ * 处理当前版本的逐格机器蓝图：普通方块占整格，AE2 部件可以共用宿主的不同安装面。
+ * 允许保存观察资料，但资料里的 NBT 和实体不会自动成为可以执行的安装操作。
+ */
 public final class MachineBlueprintDocument {
     private static final Set<String> FIELDS = Set.of("schema_version", "blocks", "metadata", "evidence", "entities");
     private static final Set<String> BLOCK_FIELDS = Set.of("offset", "block_id", "properties", "nbt");
@@ -22,6 +25,7 @@ public final class MachineBlueprintDocument {
     public static void validateWire(JsonObject document) { normalized(document); }
 
     /** No layout inference: coordinates and explicit state constraints retain the author's meaning. */
+    // 先整理统一格式，再查询注册表能力；把不支持的方块、状态、NBT 和实体安装收集成错误列表，最多展示 32 条。
     public static SemanticMachineLayout.Result compile(JsonObject document, SemanticMachineLayout.Registry registry) {
         JsonObject blueprint = normalized(document);
         Set<String> errors = new LinkedHashSet<>();
@@ -57,10 +61,12 @@ public final class MachineBlueprintDocument {
         validation.add("errors", errorRows); validation.addProperty("error_count", errors.size());
         validation.addProperty("errors_truncated", errors.size() > 32); report.add("validation", validation);
         // Evidence remains available at its source; do not duplicate large tutorial NBT into every task result.
+        // 附带的教程证据用于阅读，不交给后续施工当成配置指令。
         blueprint.remove("evidence");
         return new SemanticMachineLayout.Result(errors.isEmpty(), blueprint, report);
     }
 
+    // 复制并校验字段，补默认版本与空属性表；总目标数和坐标范围使用可配置的规划预算。
     private static JsonObject normalized(JsonObject document) {
         if (document == null) throw bad("blueprint must be an object");
         keys(document, FIELDS, "blueprint");
@@ -81,6 +87,7 @@ public final class MachineBlueprintDocument {
             keys(cell, part ? PART_FIELDS : BLOCK_FIELDS, "blueprint target");
             JsonArray offset = offset(cell.get("offset")); String position = offset.toString();
             JsonObject target = new JsonObject(); target.add("offset", offset);
+            // 同一格可以放不同面的部件，但同一面不能重复，部件也不能与普通整格方块目标重叠。
             if (part) {
                 String side = string(cell.get("part"), 12, "part");
                 if (!SIDES.contains(side)) throw bad("invalid part side: " + side);
@@ -107,6 +114,7 @@ public final class MachineBlueprintDocument {
             }
             blocks.add(target);
         }
+        // 实体在格式检查时可以作为资料保存并计入数量；编译成实际装配任务时仍会报告缺少实体安装支持。
         if (document.has("entities")) {
             if (!document.get("entities").isJsonArray()) throw bad("entities must be an array");
             if ((long) cells.size() + document.getAsJsonArray("entities").size() > limit) throw bad("blueprint exceeds physical target budget");

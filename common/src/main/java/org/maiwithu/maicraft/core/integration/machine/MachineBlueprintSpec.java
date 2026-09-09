@@ -11,7 +11,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Bounded wire parsing, deliberately independent of Minecraft and registry initialization. */
+/**
+ * 解析旧机器蓝图的相对格子与属性文本，最多 512 格、相对坐标在指定的 0..8 半径内。
+ * 这里只验证 JSON 和数字格式，注册名是否真的存在由后续状态解析决定。
+ */
 final class MachineBlueprintSpec {
     static final int MAX_BLOCKS = 512;
     record Offset(int x, int y, int z) {}
@@ -32,6 +35,7 @@ final class MachineBlueprintSpec {
         if (blocks.isEmpty() || blocks.size() > MAX_BLOCKS) {
             throw new IllegalArgumentException("blueprint.blocks must contain 1..512 cells");
         }
+        // 同一坐标只允许出现一次，避免两条要求互相覆盖后丢掉其中一条。
         Set<Offset> occupied = new HashSet<>();
         List<Cell> out = new ArrayList<>();
         for (int index = 0; index < blocks.size(); index++) {
@@ -66,6 +70,7 @@ final class MachineBlueprintSpec {
         return List.copyOf(out);
     }
 
+    // 必须是精确整数且在已观察半径内；小数不能截断成另一个格子。
     private static int integer(JsonElement value, int radius) {
         if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
             throw new IllegalArgumentException("offset coordinates must be integers");

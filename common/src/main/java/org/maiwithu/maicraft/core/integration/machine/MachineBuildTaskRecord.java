@@ -8,7 +8,9 @@ import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Entire frozen assembly, including multipart effects and final live geometry reconciliation. */
+/**
+ * 保存整套机器装配计划、所在维度、取材策略和保护标签；完成验收之后才记下可对外使用的位置。
+ */
 public final class MachineBuildTaskRecord extends TaskRecord implements InternalPositionReceipt {
     static { TaskFactory.register(MachineBuildTaskRecord.class, MachineBuildTask::new); }
     public final MachineConstructionPlan plan;
@@ -24,6 +26,7 @@ public final class MachineBuildTaskRecord extends TaskRecord implements Internal
         this.materialPolicy = Objects.requireNonNull(materialPolicy); this.protectedLabels = List.copyOf(protectedLabels);
     }
 
+    // 记录已验收机器的锚点，表示结构所在位置，不表示角色正站在这个坐标。
     void verified() {
         var at = plan.anchor(); verified = new Position(at.getX(), at.getY(), at.getZ(), dimension);
     }

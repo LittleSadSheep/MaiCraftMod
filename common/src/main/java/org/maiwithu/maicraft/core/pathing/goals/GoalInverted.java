@@ -1,8 +1,8 @@
 package org.maiwithu.maicraft.core.pathing.goals;
 
 /**
- * 反向目标:远离原目标。永不"到达"(isInGoal 恒 false),
- * 启发式取原目标的相反数——离得越远越优。
+ * 旧的远离目标：估价取原目标的负数，越远越优，但到达判断始终为 false。
+ * 当前没有生产或测试构造调用；现用任务目标由 NavGoal 描述。
  */
 public class GoalInverted implements Goal {
 

@@ -11,7 +11,9 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineInstallation;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Incremental whole-plan bounds and multipart-site preflight before any construction changes. */
+/**
+ * 开工前分批检查世界边界、AE2 部件宿主和临时洞口。普通方块的替换与材料检查另交给建筑子任务。
+ */
 final class MachineBuildSurvey {
     record Progress(boolean complete, BlockPos needsLoad, String failure) {}
     private final MachineConstructionPlan plan;
@@ -28,6 +30,7 @@ final class MachineBuildSurvey {
         plan.parts().stream().filter(part -> part.spec().side() == null).forEach(part -> centers.add(part.position()));
     }
 
+    // 每次最多推进 128 项；需要的格子没加载时返回其位置，让外层先接近并加载，再从原进度继续。
     Progress tick(Level world) {
         int budget = 128;
         while (boundsIndex < positions.size() && budget-- > 0) {
@@ -43,8 +46,10 @@ final class MachineBuildSurvey {
             boolean matches = MachineInstallation.matches(world, at, part.spec());
             if (!matches && NavigationSafetyContext.protectsMutation(at))
                 return new Progress(false, null, "A protected area occupies a planned native part site.");
+            // 面部件所在格现在为空，但计划先装中心部件时，可以等待那个宿主生成。
             boolean futureHost = state.isAir() && part.spec().side() != null && centers.contains(at);
             if (!futureHost && !MachineInstallation.canInstall(world, at, part.spec())) {
+                // 部件宿主不兼容时，只允许清除普通、可破坏、没有另一半的方块；不会按整格方块的替换选项拆掉不兼容方块实体。
                 if (!state.isAir() && plan.replaceExisting() && !state.hasBlockEntity()
                         && !state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
                         && !state.hasProperty(BlockStateProperties.BED_PART) && state.getDestroySpeed(world, at) >= 0) {
@@ -54,6 +59,7 @@ final class MachineBuildSurvey {
             partIndex++;
         }
         if (partIndex < plan.parts().size()) return new Progress(false, null, null);
+        // 洞口为空且未受保护才记作临时入口；原本已是最终封口状态可以保留，其他占用则报告受阻。
         while (sealIndex < sealTargets.size() && budget-- > 0) {
             var target = sealTargets.get(sealIndex); BlockPos at = target.pos();
             if (!world.isLoaded(at)) return new Progress(false, at, null);

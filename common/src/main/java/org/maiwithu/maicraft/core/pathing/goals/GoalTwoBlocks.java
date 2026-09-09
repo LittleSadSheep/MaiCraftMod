@@ -4,8 +4,8 @@ import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 import net.minecraft.core.BlockPos;
 
 /**
- * 双格目标:身体占进目标格或其下一格即算到达(挖穿目标方块后
- * 站进去的场景:脚可以在目标格,也可以在其正下)。
+ * 旧的两格高目标：x/z 必须相同，脚下 y 可等于目标 y 或低一格。
+ * 当前没有生产或测试构造调用；下面估价也对低一格作相同补偿。
  */
 public class GoalTwoBlocks implements Goal {
 

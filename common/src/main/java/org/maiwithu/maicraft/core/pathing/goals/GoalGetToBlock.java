@@ -4,8 +4,8 @@ import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 import net.minecraft.core.BlockPos;
 
 /**
- * 贴脸目标:走到目标方块旁即可——六邻格、本格,以及正下方两格内
- * 都算到达(yDiff 为负时加一再判,身体两格高,脚低一格也够得着)。
+ * 旧的接近方块目标：按横竖格数距离判断附近位置，人在目标下方时给一格身体高度补偿。
+ * 例如低一格站立时，水平方向再差一格也可算到达。当前没有生产或测试构造调用。
  */
 public class GoalGetToBlock implements Goal {
 

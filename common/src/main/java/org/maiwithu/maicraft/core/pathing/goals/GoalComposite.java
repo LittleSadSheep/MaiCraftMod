@@ -2,7 +2,10 @@ package org.maiwithu.maicraft.core.pathing.goals;
 
 import java.util.Arrays;
 
-/** 复合目标:任一子目标满足即到达,启发式取各子目标的最小值。 */
+/**
+ * 旧的多个备选目标：满足其中任意一个就算到达，估价取其中最小值。
+ * 当前没有生产或测试构造调用；传入和取出的目标数组都会复制，空数组则永不到达。
+ */
 public class GoalComposite implements Goal {
 
     private final Goal[] goals;
