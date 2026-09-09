@@ -45,7 +45,8 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
             return Verdict.PENDING;
         BlockState old = before.get(target.pos().asLong()), live = states.apply(target.pos());
         boolean unchanged = live.equals(old);
-        boolean complete = target.matches(live) || BuildPlacementGeometry.isProgress(target, old, live);
+        boolean complete = BuildPlacementGeometry.placementComplete(target, live)
+                || BuildPlacementGeometry.isProgress(target, old, live);
         boolean diverged = !complete && !unchanged;
         // 主格有变化还不够，自动生成的其他格也必须逐一符合要求；有格变成无关状态则记为偏离预期。
         for (var effect : generated) {

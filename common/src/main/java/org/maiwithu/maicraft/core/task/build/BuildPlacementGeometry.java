@@ -289,11 +289,12 @@ final class BuildPlacementGeometry {
     // 其余整数属性必须不倒退、不超过目标，并至少一项增加。精确属性检查在前，因此明确要求精确数量时不能靠这里放宽。
     static boolean isProgress(BuildTaskRecord.Target target, BlockState before, BlockState after) {
         if (after.equals(before)) return false;
-        if (target.matches(after)) return true;
+        if (placementComplete(target, after)) return true;
         // 当前先要求明确列出的精确属性已经相等，再考虑中间进度；精确指定的数量属性也会受此限制。
-        if (!target.matchesExactProperties(after)) return false;
+        if (target.finalProperties() == null && !target.matchesExactProperties(after)) return false;
         BlockState desired = target.desiredState();
         if (after.getBlock() != desired.getBlock()) return false;
+        if (target.finalProperties() != null && !authoredPropertiesCompatibleExceptProgress(target, after)) return false;
 
         if (desired.getBlock() instanceof SlabBlock
                 && desired.hasProperty(BlockStateProperties.SLAB_TYPE)
@@ -324,6 +325,18 @@ final class BuildPlacementGeometry {
             return 2;
         }
         return Math.max(1, target.materialCount());
+    }
+
+    /** A new multi-use placement must finish its required quantity before leaving the active cell. */
+    static boolean placementComplete(BuildTaskRecord.Target target, BlockState live) {
+        if (target.finalProperties() == null) return target.matches(live);
+        if (!target.acceptsPlacedState(live)) return false;
+        for (var property : List.of(BlockStateProperties.LAYERS, BlockStateProperties.CANDLES,
+                BlockStateProperties.PICKLES, BlockStateProperties.EGGS)) {
+            if (target.desiredState().hasProperty(property) && target.finalProperties().contains(property.getName())
+                    && !live.getValue(property).equals(target.desiredState().getValue(property))) return false;
+        }
+        return true;
     }
 
     private static void gesturesAt(LocalPlayer player, BuildTaskRecord.Target target,
@@ -432,6 +445,12 @@ final class BuildPlacementGeometry {
                     && adjusted.hasProperty(p)) {
                 adjusted = adjusted.setValue(p, desired.getValue(p));
             }
+        }
+        if (target.finalProperties() != null) {
+            if (desired.hasProperty(BlockStateProperties.SLAB_TYPE)
+                    && desired.getValue(BlockStateProperties.SLAB_TYPE) == SlabType.DOUBLE)
+                adjusted = adjusted.setValue(BlockStateProperties.SLAB_TYPE, SlabType.DOUBLE);
+            return target.acceptsPlacedState(adjusted);
         }
         return BuildValidity.sameBlockState(adjusted, desired);
     }

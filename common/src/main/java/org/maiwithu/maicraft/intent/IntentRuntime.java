@@ -50,6 +50,7 @@ public final class IntentRuntime {
             "x", "y", "z", "position", "center", "location", "destination", "bounds");
     private static final Set<String> ATTENTION_RESULT_DATA_KEYS = Set.of(
             "task_id", "failure_code", "failure_type", "requires_decision",
+            "build_diagnostics", "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",
             "requires_narration", "outcome_uncertain", "recoverable", "goal",
             "item_ids", "required_final_count", "observed_final_count", "missing",
             "allowed_sources", "achieved_coverage",
