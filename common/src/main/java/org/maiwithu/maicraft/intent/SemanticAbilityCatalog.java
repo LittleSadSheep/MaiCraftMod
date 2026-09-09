@@ -299,9 +299,18 @@ public final class SemanticAbilityCatalog {
             case "maicraft:build", BuildDesignAdapter.ABILITY -> contract(
                     BuildDesignAdapter.ABILITY.equals(ability)
                             ? "Execute this ability to compile and display a read-only blueprint at a valid loaded site, even with Dev off. No movement, acquisition or construction is permitted. Missing loaded site returns a failure without exploration. Local confirm cannot start construction; use maicraft:build separately. plan alone only stores a semantic Goal and does not generate geometry."
-                            : "Design, site and construct one bounded structure. MaiCraft chooses cells and build order. Use maicraft:design_build to display a blueprint without movement or construction; outcome prose cannot disable execution.",
+                            : "Construct a model authored by the LLM, or request a semantic structure. Model operations stay inside this build ability: create_scene, update_scene, get_scene_info, get_object_info, preview, export_scene and build. Only build changes the Minecraft world. Keep named objects, transforms, material slots and Boolean modifiers like Blender; the Mod voxelizes and executes the final cells. This is a declarative modelling subset, not a Python/bpy interpreter. Reuse scene_id for edits/preview/build and project_id for interrupted construction; never replan current_place to resume.",
                     targets("area", "landmark", "coordinates", "current_place", "prior_result"),
                     fields(
+                            field("operation", "string", "Model operation: create_scene, update_scene, get_scene_info, get_object_info, preview, export_scene or build (default). These run through plan/execute; modelling operations never start body work. No operation keeps legacy semantic construction."),
+                            field("scene", "object", "LLM-authored Blender-style scene. {schema_version:1,coordinate_system:'blender_z_up',materials:{Wall:{block_id:'minecraft:oak_planks',properties?:{...}}},objects:[{name:'Wall',type:'MESH',primitive:'cube',location:[3.5,0.5,2],dimensions:[7,1,4],material:'Wall',rotation_euler?:[0,0,0],modifiers?:[{type:'BOOLEAN',operation:'DIFFERENCE',object:'WindowCut'}]}]}. Named cutter meshes are omitted from construction. Mesh faces must land on integer grid; up-axis quarter-turn radians supported. Blender [x,y,z] maps to MC [x,z,-y]; properties use Minecraft axes. minecraft_y_up is optional. Exact materials never substitute. See blueprint knowledge resource for a complete window example."),
+                            field("scene_id", "string", "Immutable saved scene revision returned by model operations. Reuses its original world, dimension and anchor; omit target. Update returns a new revision; old scenes and active builds are retained."),
+                            field("edits", "object", "update_scene only: {objects:[{name:'Wall',dimensions:[9,1,4]}],materials:{Wall:{block_id:'minecraft:stone_bricks'}},remove_objects:['OldRoof']}. Named object fields merge; new objects must be complete. Final graph is validated atomically."),
+                            field("object_name", "string", "get_object_info only: exact saved object name."),
+                            field("page", "integer", "get_scene_info only: zero-based page of 10 objects."),
+                            field("format", "string", "export_scene only: json (default) or vanilla structure nbt; exports a reusable file and reports the NBT minimum-offset translation."),
+                            field("blueprint", "object", "Alternative to scene or scene_id: {schema_version:1,blocks:[{offset:[x,y,z],block_id:'minecraft:stone',properties?:{...}}]}. Exact Minecraft block coordinates relative to target; omitted cells stay untouched. Supports direct per-block design without semantic templates."),
+                            field("project_id", "string", "Resume the frozen construction project returned in task progress/results, including after cancellation or restart. Cannot combine with new design/site/material parameters; completed cells are rechecked against the world."),
                             field("purpose", "string", "What the structure is for, such as seaside_house."),
                             field("size", "string|object", "Small/medium/large or optional approximate bounds."),
                             field("style", "string", "Visual language; leave open to give MaiCraft design freedom."),
@@ -367,7 +376,7 @@ public final class SemanticAbilityCatalog {
         result.add("accepted_hard_constraints", targets());
         result.addProperty(
                 "execution_boundary",
-                "Use only fields declared by this ability. Machine blueprint fields accept model-authored block positions and states or exported tutorial structures. MaiCraft owns native routes, gestures, transactions, retries and verification. Never supply click scripts. Construction verifies structure; operation requires separate evidence.");
+                "Use only fields declared by this ability. Build accepts LLM-authored scenes and explicit block blueprints; machine blueprints also accept exported tutorial structures. MaiCraft owns native routes, gestures, transactions, retries and verification. Never supply click scripts. Construction verifies structure; operation requires separate evidence.");
         return result;
     }
 

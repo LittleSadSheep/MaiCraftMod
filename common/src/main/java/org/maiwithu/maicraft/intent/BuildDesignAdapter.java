@@ -24,8 +24,11 @@ final class BuildDesignAdapter {
 
     static IntentAction design(Goal goal, LocalPlayer player, IntentRuntime runtime,
                                 Predicate<PreviewSession> publish) {
+        if (BuildingSceneContract.supports(goal)) return BuildingSceneAdapter.adapt(goal, player, runtime, publish);
         // 预览规划如果无法完成，直接说明失败；不进入普通任务的“先出去找地”或等待恢复流程。
-        IntentAction compiled = SemanticBuildPlanner.previewPlan(goal, player, runtime);
+        IntentAction compiled = goal.parameters().has("project_id")
+                ? BuildProjectAdapter.plan(goal, player, runtime)
+                : SemanticBuildPlanner.previewPlan(goal, player, runtime);
         if (compiled instanceof IntentAction.Decision decision) return new IntentAction.Report(TaskResult.fail(
                 decision.snapshot().question(), Map.of("failure_code", "preview_design_unavailable",
                         "preview_created", false, "construction_started", false)), null);
@@ -33,7 +36,9 @@ final class BuildDesignAdapter {
         if (!"build".equals(tool.toolName())) throw new IllegalStateException("preview compiler returned body work");
         var args = tool.arguments();
         Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
-        BuildTool.resolvedTargets(args.getAsJsonArray("ops"))
+        (args.has("project_targets")
+                ? org.maiwithu.maicraft.core.blueprint.BuildProjectTargets.decode(args.getAsJsonArray("project_targets"))
+                : BuildTool.resolvedTargets(args.getAsJsonArray("ops")))
                 .forEach(target -> cells.put(target.pos(), target.desiredState()));
         // 展开到最终每一格的状态，用于显示蓝图；这里没有把这些格子提交给施工任务。
         var session = PreviewSession.design("design-" + UUID.randomUUID(),

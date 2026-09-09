@@ -634,6 +634,8 @@ final class AbilityAdapter {
     }
 
     private static IntentAction build(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        if (goal.parameters().has("project_id")) return BuildProjectAdapter.plan(goal, player, runtime);
+        if (BuildingSceneContract.supports(goal)) return BuildingSceneAdapter.adapt(goal, player, runtime);
         // 房屋尺寸、地形与材料会影响实际方案，把这些交给专门的建造规划器处理。
         return SemanticBuildPlanner.plan(goal, player, runtime);
     }

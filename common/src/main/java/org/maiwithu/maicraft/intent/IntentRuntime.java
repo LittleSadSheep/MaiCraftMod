@@ -141,7 +141,7 @@ public final class IntentRuntime {
     }
 
     public static boolean isReadOnlyDesign(Goal goal) {
-        return BuildDesignAdapter.ABILITY.equals(goal.ability());
+        return BuildDesignAdapter.ABILITY.equals(goal.ability()) || BuildingSceneContract.noConstruction(goal);
     }
 
     IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey,
@@ -176,7 +176,9 @@ public final class IntentRuntime {
         if (isReadOnlyDesign(goal)) {
             TaskResult result;
             try {
-                var action = BuildDesignAdapter.design(goal, player, this, publishDesign);
+                var action = BuildingSceneContract.supports(goal)
+                        ? BuildingSceneAdapter.adapt(goal, player, this, publishDesign)
+                        : BuildDesignAdapter.design(goal, player, this, publishDesign);
                 if (!(action instanceof IntentAction.Report report))
                     throw new IllegalStateException("read-only design returned an executable action");
                 result = report.result();

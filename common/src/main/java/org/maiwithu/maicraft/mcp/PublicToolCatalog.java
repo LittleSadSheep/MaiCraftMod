@@ -101,7 +101,7 @@ final class PublicToolCatalog {
                             }
                             """), annotations(true, false, true)),
             tool(PLAN,
-                    "Compile a semantic goal into a plan without starting it.",
+                    "Compile a goal without starting it. maicraft:build accepts LLM-authored Blender-style scenes or explicit block blueprints. Its modelling operations inspect/edit/preview/export named objects; use project_id to resume frozen construction. Read the build ability contract first.",
                     goalSchema("""
                             {
                               "type":"object",

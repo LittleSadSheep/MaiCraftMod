@@ -19,6 +19,12 @@ public final class BlueprintGoalData {
     private static void stripValidatedBlueprints(Goal goal, JsonObject view) {
         // 只有明确声明支持蓝图的机器能力才适用例外；其他地方塞入同名字段，仍要经过普通检查。
         JsonObject parameters = view.getAsJsonObject("parameters");
+        if (BuildingSceneContract.supports(goal)) {
+            BuildingSceneContract.validate(goal);
+            parameters.remove("scene");
+            parameters.remove("edits");
+            parameters.remove("blueprint");
+        }
         JsonElement operation = parameters.get("operation");
         boolean declared = MachineAbilityAdapter.DESIGN.equals(goal.ability())
                 || MachineAbilityAdapter.BUILD.equals(goal.ability())

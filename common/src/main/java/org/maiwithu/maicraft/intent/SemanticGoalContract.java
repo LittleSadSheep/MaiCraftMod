@@ -32,6 +32,14 @@ final class SemanticGoalContract {
         validateTarget(goal, path, ability);
         validateConstraints(goal, path, ability);
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
+            if (BuildingSceneContract.supports(goal)) BuildingSceneContract.validate(goal);
+            if (goal.parameters().has("project_id")) {
+                java.util.UUID.fromString(BuildingSceneContract.string(goal.parameters(), "project_id"));
+                for (String key : goal.parameters().keySet())
+                    if (!Set.of("project_id", "protected_labels").contains(key))
+                        throw violation("invalid_build_resume", path + ".parameters", ability,
+                                "project_id resumes frozen geometry and materials; other design parameters are not accepted");
+            }
             // 建造功能名单在计划阶段就检查；不能先承诺有阳台等功能，施工时再悄悄忽略。
             var parameters = goal.parameters();
             if (parameters.has("features")) {
