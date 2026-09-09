@@ -8,18 +8,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 
 /**
- * Catalogue of the datapack tags the maicraft-core tool pack declares. The
- * pathfinder and the loader-side data generators both reference the constants
- * here so the key's identifier exists in one place only — rename or repath in
- * this file and every consumer follows. These are core's tags (namespace
- * {@code maicraft}), not the engine's: pathfinding scaffolding and protected blocks
- * are tool-pack concerns.
- *
- * <h2>Why not derive at runtime</h2>
- * Tags are referenced from pathfinder hot paths where a fresh
- * {@link ResourceLocation#fromNamespaceAndPath} per call would allocate. Caching
- * the {@link TagKey} as a {@code static final} field amortises that cost
- * and gives the JIT a constant pool reference.
+ * 集中保存本项目几个物品和方块标签的名字，供代码引用。
+ * 创建 TagKey 只创建一个名字，不会产生标签内容。当前默认内容清单与实际生成／加载尚未接通，见 A64。
  */
 public final class InitTag {
 
@@ -81,6 +71,7 @@ public final class InitTag {
      * <p>让工具参数收标签,是因为"一类方块"这件事我们枚举不完:床有 16 色、石头有一族、
      * 模组还会加。标签是 Minecraft 自己表达"一类"的方式,而且整合包能扩。
      */
+    // 只把 # 开头的文字解析成标签名；不是给标签填成员，也不会验证这个标签已在当前注册表加载。
     public static <T> TagKey<T> parseRef(net.minecraft.resources.ResourceKey<
             ? extends net.minecraft.core.Registry<T>> registry, String raw) {
         if (raw == null || !raw.startsWith(TAG_PREFIX)) {

@@ -8,18 +8,8 @@ import net.minecraft.world.item.Items;
 import java.util.function.Consumer;
 
 /**
- * Single source of truth for every item tag maicraft-core emits. A
- * {@link TagAppenderProvider} abstraction lets the Fabric and NeoForge data
- * providers feed their own native builder here, so adding a new tag entry edits
- * one place and both loaders pick it up.
- *
- * <h2>Adding a new tag</h2>
- * <ol>
- *   <li>Declare the {@link TagKey} in {@link InitTag}.</li>
- *   <li>Add a {@code tags.tag(InitTag.X).add(Items.Y)} block in
- *       {@link #addItemTags}.</li>
- *   <li>Re-run {@code ./gradlew :fabric:runDatagen :neoforge:runData}.</li>
- * </ol>
+ * 默认物品标签的内容清单，目标是让不同加载器共用同一份成员定义。
+ * 当前仓库没有调用这份清单的生成器接线，资源里也没有相应标签输出；不要把这里写了成员等同于游戏已经加载它们。
  */
 public final class ModItemTagData {
 
@@ -53,6 +43,7 @@ public final class ModItemTagData {
     /** Adapt a native MC tag builder to an {@link Appender}; loaders pass explicit
      *  lambdas (not method refs) to dodge the {@code add(T)} vs {@code add(T...)}
      *  overload ambiguity. */
+    // 把“加入单个成员”和“引用另一个标签”两种写入函数包装成链式接口，具体写到哪里由调用方提供。
     public static <T> Appender<T> appender(Consumer<T> add, Consumer<TagKey<T>> addTag) {
         return new Appender<>() {
             @Override
@@ -70,6 +61,7 @@ public final class ModItemTagData {
     }
 
     /** Foods that may be used to feed/heal a companion (vanilla foods only, no mod cross-deps). */
+    // 描述默认食物与脚手架物品清单。必须有数据提供器调用并输出标签，单独存在这个方法不会生效。
     public static void addItemTags(TagAppenderProvider<Item> tags) {
         tags.tag(InitTag.TAME_FOODS)
                 .add(Items.APPLE)

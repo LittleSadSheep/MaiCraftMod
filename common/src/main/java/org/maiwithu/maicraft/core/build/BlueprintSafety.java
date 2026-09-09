@@ -12,6 +12,7 @@ import java.util.List;
  * 名单:黑名单是开放集合,每来一个新方块/新组件就得被咬一次;白名单
  * 一次定完,此后新东西自动落在安全的一侧。
  */
+// 清理蓝图附带的方块、装饰实体和载荷物品数据。各方法返回可保留部分，不能只因名字含 safe 就推断所有输入都安全。
 public final class BlueprintSafety {
 
     private BlueprintSafety() {}
@@ -31,6 +32,8 @@ public final class BlueprintSafety {
      *
      * @return 可以照搬的那部分;没有可搬的返回 null
      */
+    // 先要求方块属于配置的白名单标签，再复制数据并去掉位置。
+    // 告示牌还拒绝物品扩展和可点击文字，其他成员检查是否只有管理员能设置 NBT；没有标签时直接不保留。
     public static net.minecraft.nbt.CompoundTag safeBlockEntityData(
             BlockState state, net.minecraft.nbt.CompoundTag data) {
         if (state == null || data == null || data.isEmpty()) {
@@ -115,6 +118,7 @@ public final class BlueprintSafety {
         }
     }
 
+    // 检查这段文字和它的兄弟片段是否附带点击事件，不把可执行点击行为当成纯装饰文本。
     private static boolean hasClickEvent(net.minecraft.network.chat.Component component) {
         if (component.getStyle() != null && component.getStyle().getClickEvent() != null) {
             return true;
@@ -144,6 +148,7 @@ public final class BlueprintSafety {
      *
      * @return 可以生成的那部分;不收返回 null
      */
+    // 只允许物品展示框、发光展示框、盔甲架和画；清理携带物品与位置锚点，其余实体类型不复制。
     public static net.minecraft.nbt.CompoundTag safeEntityData(
             net.minecraft.nbt.CompoundTag data,
             net.minecraft.core.HolderLookup.Provider registries) {
@@ -193,6 +198,7 @@ public final class BlueprintSafety {
      *
      * @return 要收的那些叠(空的槽位不计);没有返回空表
      */
+    // 从已知载荷字段读取物品，用于列出展示框或盔甲架携带的东西；读不出的条目被略过。
     public static List<net.minecraft.world.item.ItemStack> payloadStacks(
             net.minecraft.nbt.CompoundTag data,
             net.minecraft.core.HolderLookup.Provider registries) {
@@ -232,6 +238,8 @@ public final class BlueprintSafety {
     }
 
     /** 剥掉不安全的组件,只留白名单那四样。 */
+    // 当前只要存在组件补丁，就遍历并删减全部有效组件，连物品原版默认组件也会移除。
+    // 例如仅命名的钻石剑也会失去最大耐久和默认攻击属性；应区分默认值与外来补丁，见 A65。
     public static net.minecraft.world.item.ItemStack withUnsafeComponentsDiscarded(
             net.minecraft.world.item.ItemStack stack) {
         if (stack.getComponentsPatch().isEmpty()) {
@@ -258,6 +266,7 @@ public final class BlueprintSafety {
     }
 
     /** 把载荷里每一叠的组件按白名单剥一遍,就地写回——计价和落位读的因此是同一份。 */
+    // 载荷是单个物品就清理该物品；是装备列表则逐格重建，无法保留的格用空标签占位，避免改变栏位顺序。
     private static void sanitizePayload(net.minecraft.nbt.CompoundTag data,
                                         net.minecraft.core.HolderLookup.Provider registries) {
         for (String key : PAYLOAD_KEYS) {
@@ -295,6 +304,7 @@ public final class BlueprintSafety {
     }
 
     /** 把摆设身上带的东西整个拿掉——付不起的时候用,框空着比框里凭空多件东西好。 */
+    // 完全去掉已知的携带物品字段，保留实体的其他说明数据。
     public static void stripPayload(net.minecraft.nbt.CompoundTag data) {
         if (data == null) {
             return;

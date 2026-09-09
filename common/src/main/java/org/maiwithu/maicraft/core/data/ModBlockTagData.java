@@ -5,16 +5,8 @@ import org.maiwithu.maicraft.core.init.InitTag;
 import net.minecraft.world.level.block.Block;
 
 /**
- * Single source of truth for every block tag maicraft-core emits — mirrors
- * {@link ModItemTagData} but for the block registry. Both loaders' block-tag
- * providers forward here, so the content stays in {@code common/}.
- *
- * <h2>Adding a new tag</h2>
- * <ol>
- *   <li>Declare the {@code TagKey<Block>} in {@link InitTag}.</li>
- *   <li>Add a {@code tags.tag(InitTag.X).add(Blocks.Y)} block in {@link #addBlockTags}.</li>
- *   <li>Re-run {@code ./gradlew :fabric:runDatagen :neoforge:runData}.</li>
- * </ol>
+ * 默认方块策略标签的内容清单，本身不修改世界或注册表。
+ * 当前两个加载器没有把这个方法接到数据生成中，实际消费者仍只读游戏标签，导致默认规则缺失（A64）。
  */
 public final class ModBlockTagData {
 
@@ -31,6 +23,8 @@ public final class ModBlockTagData {
      * .blocksToAvoidBreaking 软惩罚(挖掘成本 ×10,无路可走仍会破坏)。数据包
      * 可自由往此标签追加要硬禁挖的方块(任何开关都不破坏)。
      */
+    // 计划把床、门、活板门和栅栏门放入避拆标签，把告示牌和旗帜放入可复制方块数据标签。
+    // 这里引用的是其他标签，真正生成或绑定时还需要展开／保留这些引用。
     public static void addBlockTags(TagAppenderProvider<Block> tags) {
         tags.tag(InitTag.DO_NOT_BREAK)
                 .addTag(net.minecraft.tags.BlockTags.BEDS)
