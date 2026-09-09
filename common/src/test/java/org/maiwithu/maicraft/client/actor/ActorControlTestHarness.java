@@ -76,8 +76,10 @@ final class ActorControlTestHarness {
     /** Unsafe skips the constructor; sprinting is recorded without entity or network mutation. */
     private static final class TestPlayer extends LocalPlayer {
         boolean sprinting;
+        boolean sleeping;
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         @Override public void setSprinting(boolean value) { sprinting = value; }
         @Override public boolean isSprinting() { return sprinting; }
+        @Override public boolean isSleeping() { return sleeping; }
     }
 }

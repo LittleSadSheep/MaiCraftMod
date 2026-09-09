@@ -58,7 +58,7 @@ public final class WorldTimeSemantics {
     }
 
     public static boolean canAttemptSleep(Level level) {
-        // 当前只按“雷暴或上述夜间”判断，不检查这个维度能否用床，也不检查附近怪物和床是否被占用。
+        // 这里只判断雷暴或夜间；睡觉规划和任务另查床的维度安全性，怪物与占用仍由原版判断。
         return level.isThundering() || isNighttime(level);
     }
 }

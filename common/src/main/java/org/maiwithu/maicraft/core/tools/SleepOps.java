@@ -32,6 +32,10 @@ public final class SleepOps {
         if (anyCoordinate && !allCoordinates) {
             return new Plan(null, "a specific bed needs all of x, y and z");
         }
+        // 危险来自维度本身，换床或等天黑都不能消除；直接执行的任务在点击前还会复查。
+        if (!BedBlock.canSetSpawn(self.level())) {
+            return new Plan(null, "beds explode in this dimension; sleeping here is unsafe");
+        }
         BlockPos bedHead = allCoordinates
                 ? headOf(self, new BlockPos(x, y, z))
                 : nearestBedHeadInReach(self);

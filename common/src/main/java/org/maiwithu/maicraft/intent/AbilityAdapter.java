@@ -133,6 +133,13 @@ final class AbilityAdapter {
     }
 
     private static IntentAction sleep(Goal goal, LocalPlayer player) {
+        // 先判断这里能否安全用床，避免为爆炸维度安排找床、放床或等待夜晚。
+        if (!BedBlock.canSetSpawn(player.level())) {
+            return decision(goal, "Beds explode in this dimension; sleeping here is unsafe.",
+                    List.of(option("recover", "Provide a travel prerequisite to a dimension where beds work."),
+                            option("skip", "Continue without sleeping."),
+                            option("cancel", "Cancel the whole task.")));
+        }
         // 先找已加载区域里的床；查询分多刻进行，没有查完就等，不把“暂时没找到”当作“没有”。
         java.util.Set<Block> bedBlocks = BuiltInRegistries.BLOCK
                 .getTag(BlockTags.BEDS)

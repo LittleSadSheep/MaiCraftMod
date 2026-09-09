@@ -1,8 +1,8 @@
 package org.maiwithu.maicraft.core.task.sleep;
 
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -26,6 +26,11 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
         if (player.isSleeping()) return TaskState.SUCCESS;
         var context = ClientRuntime.requireContext(player);
         if (receipt == null) {
+            // 每次准备点击都按原版床的维度规则检查；规划通过后仍可能换维度，爆炸不能靠事后确认补救。
+            if (!BedBlock.canSetSpawn(context.level())) {
+                fail("beds explode in this dimension; sleeping here is unsafe", FailureType.HAZARD);
+                return TaskState.FAILED;
+            }
             // 还没点击时先检查床是否仍在已加载区域、是否伸手够得着，避免对失效位置操作。
             if (!context.level().isLoaded(r.bed)) {
                 fail("bed is outside loaded client terrain", FailureType.TARGET_LOST);
@@ -45,7 +50,7 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
             // 看向床中心的途中可能被墙挡住；实际视线必须落到床头或相邻的床尾。
             if (!(aimed instanceof BlockHitResult hit)
                     || !(context.level().getBlockState(hit.getBlockPos()).getBlock()
-                            instanceof net.minecraft.world.level.block.BedBlock)
+                            instanceof BedBlock)
                     || hit.getBlockPos().distManhattan(r.bed) > 1) {
                 fail("bed is occluded from the current stance", FailureType.OCCLUDED);
                 return TaskState.FAILED;
