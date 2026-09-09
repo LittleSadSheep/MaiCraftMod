@@ -146,7 +146,7 @@ public final class PreviewController {
                 + " 格 / " + current.parts().size() + " 部件示意 · " + (current.visible() ? "显示" : "隐藏") + " · 层 "
                 + (current.minY() == Integer.MIN_VALUE && current.maxY() == Integer.MAX_VALUE
                 ? "全部" : current.minY() + ".." + current.maxY())), ChatFormatting.AQUA);
-        message("蓝色=缺失，橙色=方块/状态不符，红色=需要清除。"
+        message("半透明模型=待放置或需修正，蓝线=整体外轮廓，红色=需要清除。"
                 + " all 显示全部层，range <最低Y> <最高Y> 显示区间，show/hide 切换显示。", ChatFormatting.GRAY);
         return 1;
     }

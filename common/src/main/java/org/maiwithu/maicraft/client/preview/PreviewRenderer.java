@@ -26,6 +26,7 @@ public final class PreviewRenderer {
     private static int minY, maxY, refreshCursor;
     private static Object resourceManager;
     private static Set<BlockPos> centres = Set.of();
+    private static PreviewOutlineGeometry outline;
     private PreviewRenderer() {}
 
     public static void render(Camera camera, Matrix4f view, Matrix4f projection) {
@@ -53,7 +54,7 @@ public final class PreviewRenderer {
         // Fresh visible geometry has priority; every section eventually receives a refresh slot.
         for (PreviewMeshSection section : visible) {
             if (!section.built) {
-                section.rebuild(minecraft, session, world, centres, position, now);
+                section.rebuild(minecraft, session, world, centres, outline, position, now);
                 remaining -= section.workSize();
                 if (remaining <= 0 || System.nanoTime() >= deadline) break;
             }
@@ -61,7 +62,7 @@ public final class PreviewRenderer {
         for (int i = 0; i < visible.size() && remaining > 0 && System.nanoTime() < deadline; i++) {
             PreviewMeshSection section = visible.get(Math.floorMod(refreshCursor++, visible.size()));
             if (section.needsRefresh(minecraft, now)) {
-                section.rebuild(minecraft, session, world, centres, position, now);
+                section.rebuild(minecraft, session, world, centres, outline, position, now);
                 remaining -= section.workSize();
             }
         }
@@ -83,17 +84,23 @@ public final class PreviewRenderer {
     private static void draw(List<PreviewMeshSection> visible, RenderType type, int pass,
                              Matrix4f view, Matrix4f projection, Vec3 camera) {
         type.setupRenderState();
+        float[] color = RenderSystem.getShaderColor().clone();
         try {
-            // Opaque terrain establishes depth first; only real translucent blocks require back-to-front order.
-            if (pass == 2) {
+            if (pass != 4) RenderSystem.setShaderColor(color[0], color[1], color[2], color[3] * .45f);
+            // Every blueprint model is a ghost, including normally solid terrain blocks.
+            if (pass != 4) {
                 for (int i = visible.size() - 1; i >= 0; i--) visible.get(i).draw(pass, view, projection, camera);
             } else for (PreviewMeshSection section : visible) section.draw(pass, view, projection, camera);
-        } finally { VertexBuffer.unbind(); type.clearRenderState(); }
+        } finally {
+            RenderSystem.setShaderColor(color[0], color[1], color[2], color[3]);
+            VertexBuffer.unbind(); type.clearRenderState();
+        }
     }
 
     private static void reset(PreviewSession session, Minecraft minecraft) {
         clear(); cached = session; minY = session.minY(); maxY = session.maxY();
         resourceManager = minecraft.getBlockRenderer().getBlockModelShaper();
+        outline = new PreviewOutlineGeometry(session, new PreviewWorldView(session, minecraft.level));
         Map<BlockPos, PreviewMeshSection> grouped = new LinkedHashMap<>();
         session.cells().entrySet().forEach(cell -> {
             BlockPos pos = cell.getKey();
@@ -113,7 +120,7 @@ public final class PreviewRenderer {
 
     public static void clear() {
         sections.forEach(PreviewMeshSection::close); sections.clear(); cached = null; refreshCursor = 0;
-        centres = Set.of();
+        centres = Set.of(); outline = null;
     }
 
     /** Called by client lifecycle hooks, including disconnect while no level can render. */

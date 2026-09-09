@@ -51,7 +51,7 @@ final class PreviewMeshSection implements AutoCloseable {
         if (now < nextCheck) return false;
         nextCheck = now + 1000;
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
-        return hash(minecraft) != worldHash || models[2] != null && sortedFrom.distanceToSqr(camera) > 1;
+        return hash(minecraft) != worldHash || sortedFrom.distanceToSqr(camera) > 1;
     }
 
     private int hash(Minecraft minecraft) {
@@ -69,7 +69,7 @@ final class PreviewMeshSection implements AutoCloseable {
 
     int workSize() { return cells.size() + parts.size(); }
 
-    void rebuild(Minecraft minecraft, PreviewSession session, PreviewWorldView view, Set<BlockPos> centres,
+    void rebuild(Minecraft minecraft, PreviewSession session, PreviewWorldView view, Set<BlockPos> centres, PreviewOutlineGeometry outline,
                  Vec3 camera, long now) {
         close();
         fallbackModels = 0;
@@ -92,6 +92,7 @@ final class PreviewMeshSection implements AutoCloseable {
                 if (!session.includes(pos)) continue;
                 BlockState desired = cell.getValue();
                 if (!minecraft.level.isLoaded(pos)) continue;
+                outline.emit(pos, origin, line);
                 BlockState actual = minecraft.level.getBlockState(pos);
                 if (desired.equals(actual)) continue;
                 int x = pos.getX() - origin.getX(), y = pos.getY() - origin.getY(), z = pos.getZ() - origin.getZ();
@@ -112,18 +113,14 @@ final class PreviewMeshSection implements AutoCloseable {
                     } else fallbackModels++;
                 }
                 if (desired.isAir()) PreviewOutlineGeometry.emit(actual, minecraft.level, pos, origin, line, 1, .2f, .25f);
-                else if (desired.getRenderShape() != RenderShape.MODEL)
-                    PreviewOutlineGeometry.emit(desired, view, pos, origin, line, .8f, .3f, 1);
-                else if (actual.isAir() || actual.canBeReplaced())
-                    PreviewOutlineGeometry.emit(desired, view, pos, origin, line, .2f, .65f, 1);
-                else PreviewOutlineGeometry.emit(desired, view, pos, origin, line, 1, .65f, .15f);
             }
             for (PreviewPart part : parts) if (session.includes(part.position()))
                 PreviewPartGeometry.emit(part, origin, centres, partMesh, line);
             for (int pass = 0; pass < model.length; pass++) {
                 MeshData mesh = modelUsable[pass] ? model[pass].build() : null;
                 if (mesh == null) continue;
-                if (pass == 2) mesh.sortQuads(translucentMemory, VertexSorting.byDistance((float) (camera.x - origin.getX()),
+                ByteBufferBuilder memory = pass == 0 ? solidMemory : pass == 1 ? cutoutMemory : translucentMemory;
+                mesh.sortQuads(memory, VertexSorting.byDistance((float) (camera.x - origin.getX()),
                         (float) (camera.y - origin.getY()), (float) (camera.z - origin.getZ())));
                 models[pass] = upload(mesh);
             }
