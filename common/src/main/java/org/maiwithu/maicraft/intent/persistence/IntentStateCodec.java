@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.intent.BlueprintGoalData;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.intent.Plan;
@@ -494,24 +495,29 @@ public final class IntentStateCodec {
 
     private static JsonObject safeGoal(Goal goal) {
         JsonObject original = goal.toJson();
-        JsonElement safe = safeGoalElement(original, 0);
+        JsonObject inspection = BlueprintGoalData.instructionView(goal);
+        JsonElement safe = safeGoalElement(inspection, 0);
         if (!safe.isJsonObject()) {
             throw new IllegalArgumentException("semantic goal must encode as an object");
         }
-        if (!safe.equals(original)) {
+        if (!safe.equals(inspection)) {
             throw new IllegalArgumentException(
                     "semantic goal contains native execution details or exceeds persistence bounds");
         }
-        return safe.getAsJsonObject();
+        // Blueprint arrays follow the declared physical budget, not the generic 256-entry metadata limit.
+        if (original.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > IntentStateStore.MAX_BYTES)
+            throw new IllegalArgumentException("semantic goal exceeds checkpoint byte budget; reference a blueprint resource instead");
+        return original;
     }
 
     private static Goal decodeGoal(JsonObject value) {
-        JsonElement safe = safeGoalElement(value, 0);
+        Goal goal = Goal.fromJson(value);
+        JsonElement safe = safeGoal(goal);
         if (!safe.equals(value)) {
             throw new IllegalArgumentException(
                     "persisted semantic goal contains native execution details or exceeds bounds");
         }
-        return Goal.fromJson(value);
+        return goal;
     }
 
     private static JsonObject safeObject(String json) {

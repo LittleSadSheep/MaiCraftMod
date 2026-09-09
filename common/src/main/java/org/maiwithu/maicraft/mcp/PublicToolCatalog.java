@@ -130,8 +130,8 @@ final class PublicToolCatalog {
                     "Inspect or control a runtime task. Prefer perceive(view=attention) for waiting and completion; get/list are for explicit inspection and recovery. After a control action, continue with next_attention. When state=waiting_for_decision, answer with the exact "
                             + "decision_id and one listed choice. retry may refine details.parameters; recover "
                             + "and replace_goal require one semantic details.goal. Never provide internal tool "
-                            + "names, routes, block layouts or click scripts. Machine abilities accept semantic "
-                            + "design fields and receipt-bound observed menu entries; MaiCraft compiles exact work.",
+                              + "names, routes or click scripts. Machine design/build and apply_blueprint accept "
+                              + "the declared blueprint JSON or blueprint_uri; menu operations use observed receipts.",
                     goalSchema("""
                             {
                               "type":"object",

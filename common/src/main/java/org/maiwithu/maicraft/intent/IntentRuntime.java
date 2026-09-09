@@ -555,9 +555,9 @@ public final class IntentRuntime {
     }
 
     void validateGoal(Goal goal) {
+        SemanticGoalContract.validate(goal, KNOWN_ABILITIES);
         IntentStateCodec.requirePersistableGoal(goal);
         rejectMicroInstructions(goal);
-        SemanticGoalContract.validate(goal, KNOWN_ABILITIES);
     }
 
     /** Validate public decision details before the answer can unpause or mutate a task record. */
@@ -794,7 +794,7 @@ public final class IntentRuntime {
     }
 
     private static void rejectMicroInstructions(Goal goal) {
-        String forbidden = findMicroInstruction(goal.toJson());
+        String forbidden = findMicroInstruction(BlueprintGoalData.instructionView(goal));
         if (forbidden != null) {
             throw new IllegalArgumentException(
                     "semantic goals cannot contain " + forbidden + "; describe the outcome instead");

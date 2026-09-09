@@ -26,6 +26,7 @@ public final class MachineRegressionSuite {
         org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutModulesTest.main(args);
         MachineLayoutJobsTest.main(args);
         MachineBlueprintAbilityTest.main(args);
+        BlueprintRuntimeEntryTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocumentTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachineBuildCompletionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudgetTest.main(args);
