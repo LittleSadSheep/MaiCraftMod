@@ -17,7 +17,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 
-/** Large pure layout searches never occupy the client tick or access live registry/world objects. */
+/** 把耗时的机器布局计算放到后台；后台只读复制好的方块与物品规则，不直接读取会变化的游戏世界。 */
 final class MachineLayoutJobs {
     private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(2), runnable -> {
@@ -28,8 +28,9 @@ final class MachineLayoutJobs {
     private static SemanticMachineLayout.Registry registry;
     private MachineLayoutJobs() {}
 
-    /** Null means a client tick should yield. The bounded cache also retains design previews for build. */
+    /** 返回 null 表示还在计算，下个游戏刻再来问；相同设计可以复用已算好的结果。 */
     static SemanticMachineLayout.Result poll(LocalPlayer player, JsonObject design) {
+        // 换世界时取消旧世界的计算，并重新抄一份当前物品／方块规则，防止把旧注册信息带过来。
         if (world.get() != player.level()) {
             JOBS.values().forEach(future -> future.cancel(true)); JOBS.clear(); EXECUTOR.purge();
             world = new WeakReference<>(player.level()); registry = snapshotRegistry();
@@ -37,6 +38,7 @@ final class MachineLayoutJobs {
         String key = design.toString();
         Future<SemanticMachineLayout.Result> future = JOBS.get(key);
         if (future == null) {
+            // 同时最多缓存两份布局计算；新请求超出时取消最早那份，给新设计让位。
             while (JOBS.size() >= 2) {
                 String eldest = JOBS.keySet().iterator().next(); JOBS.remove(eldest).cancel(true);
             }
@@ -59,7 +61,7 @@ final class MachineLayoutJobs {
         }
     }
 
-    /** Only strings and immutable sets cross the worker boundary, never Minecraft callbacks. */
+    /** 在游戏线程上复制方块属性及可选值，后台只拿字符串和不可修改的集合。 */
     static SemanticMachineLayout.Registry snapshotRegistry() {
         Map<String, Map<String, Set<String>>> blocks = new LinkedHashMap<>();
         BuiltInRegistries.BLOCK.forEach(block -> {
@@ -72,6 +74,7 @@ final class MachineLayoutJobs {
     }
 
     static SemanticMachineLayout.Registry frozenRegistry(Map<String, Map<String, Set<String>>> blockProperties, Set<String> itemIds) {
+        // 再复制一层嵌套集合，调用者后来改原列表也不会让正在后台算的规则突然变化。
         Map<String, Map<String, Set<String>>> frozen = new LinkedHashMap<>();
         blockProperties.forEach((id, properties) -> {
             Map<String, Set<String>> copy = new LinkedHashMap<>();

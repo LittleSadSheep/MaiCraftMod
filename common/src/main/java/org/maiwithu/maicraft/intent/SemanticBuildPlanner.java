@@ -40,7 +40,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
 
-/** Loaded-client-only semantic site selection and bounded BuildTool planning. */
+/** 把“在这里建某种房子”变成具体方块方案：先找地块，再选材料、分房间、安排门窗屋顶和通道。 */
 public final class SemanticBuildPlanner {
     private static final int MAX_CELLS = 16_384;
     private static final int SEARCH_RADIUS = 32;
@@ -54,17 +54,18 @@ public final class SemanticBuildPlanner {
 
     private SemanticBuildPlanner() {}
 
-    /** Integration point for {@link AbilityAdapter}; per-cell ops never enter the Goal. */
+    /** 普通建造入口；附近没找到地块时，可以返回一个让玩家走出去继续勘察的任务。 */
     public static IntentAction plan(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         return plan(goal, player, runtime, true);
     }
 
-    /** Resolve exactly the same loaded-world design without authorizing a site investigation. */
+    /** 只展示设计时使用；仍用相同选址规则，但没有地块就返回失败，不让玩家走出去勘察。 */
     static IntentAction previewPlan(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         return plan(goal, player, runtime, false);
     }
 
     private static IntentAction plan(Goal goal, LocalPlayer player, IntentRuntime runtime, boolean investigate) {
+        // 先查尺寸、地形、功能和材料要求；这些通过以后才看世界里的地块，避免为了无效目标先让玩家跑一圈。
         JsonObject p = goal.parameters();
         if (p.has("ops")) return decision(goal, "Semantic builds cannot contain per-cell ops.",
                 option("replace_goal", "Describe purpose, size, terrain fit and features."),
@@ -94,6 +95,7 @@ public final class SemanticBuildPlanner {
                 option("replace_goal", "Choose dock, porch, cellar, workshop or windows."),
                 option("skip", "Skip this structure."), option("cancel", "Cancel the task."));
         if ((terrain.equals("embedded") || features.contains("cellar")) && !replace) {
+            // 目前把嵌入地形或带地窖的设计一律视为需要挖掘，要求 replace_existing；只读预览也经过这里。
             return decision(goal, "Embedded space needs verified excavation, but replace_existing is false.",
                     option("retry", "Retry with details.parameters={\"replace_existing\":true} "
                             + "after approving terrain removal."),
@@ -115,6 +117,7 @@ public final class SemanticBuildPlanner {
         }
 
         Goal.WorldPosition anchor = target(goal, player, runtime);
+        // 点名的地标没记住或在别的维度时不能换到玩家脚下建，必须先解决位置问题。
         if (anchor == null) {
             Goal.SemanticTarget semantic = goal.target();
             boolean named = semantic != null
@@ -152,14 +155,14 @@ public final class SemanticBuildPlanner {
                             "No valid loaded site is available for the preview; no movement or construction was started.",
                             Map.of("failure_code", "preview_site_unavailable", "preview_created", false,
                                     "construction_started", false)), null);
-            // Every semantic and permission check above already passed. A missing loaded site gets
-            // one bounded internal first-person investigation; invalid goals still stop normally.
+            // 目标本身没问题，只是附近没查到地块，就交给勘察任务走出去继续找。
             JsonObject investigation = new JsonObject();
             investigation.add("goal", goal.toJson());
             return new IntentAction.Tool(SITE_INVESTIGATION_TOOL, investigation.toString());
         }
 
         Palette palette = palette(player, preferred, policy);
+        // 地块确定后才选各部位材料并生成方块操作；展开成实际格子后检查数量，不能只数操作条目。
         JsonArray ops = design(site, size, purpose, features, palette, style, terrain, replace);
         int resolvedCells;
         try {
@@ -180,9 +183,7 @@ public final class SemanticBuildPlanner {
         JsonObject args = new JsonObject();
         args.add("ops", ops);
         args.addProperty("replace_existing", replace);
-        // Every survival semantic build retains the complete Mod-authored plan while the generic
-        // material coordinator supplies recoverable batches. The public Goal still contains no
-        // cells or concrete acquisition steps.
+        // 完整房屋方案交给施工，材料允许分批补齐；allow_partial 在这里用于分批执行，不是允许缺一半房子就成功。
         args.addProperty("allow_partial", true);
         args.addProperty("material_policy",
                 policy.equals("storage_available") ? "storage_available" : "ordinary");
@@ -196,7 +197,7 @@ public final class SemanticBuildPlanner {
         return new IntentAction.Tool("build", args.toString());
     }
 
-    /** Outcome of a fresh read-only loaded-world probe made by the hidden investigation task. */
+    /** 勘察任务每到一个地方就重新问一次：这里能建、这里没地块，还是目标本身不合法。 */
     public record LoadedBuildProbe(
             Status status, JsonObject buildArguments, String failureCode, String message) {
         public enum Status { READY, NO_SITE, INVALID }
@@ -218,22 +219,16 @@ public final class SemanticBuildPlanner {
         }
     }
 
-    /**
-     * Re-run the same strict loaded-only site selection after real first-person movement.
-     * READY returns frozen BuildTool arguments; generated coordinates remain inside the Mod.
-     */
+    /** 玩家走到新位置后重新检查附近地块；找到时返回固定的施工参数，之后不用让模型自己拼方块坐标。 */
     public static LoadedBuildProbe probeLoadedBuild(
             Goal goal, LocalPlayer player, IntentRuntime runtime) {
         return probeLoadedBuildAt(goal, player, runtime, player.blockPosition());
     }
 
-    /**
-     * Strictly probe around one internally observed first-person survey stance. The original
-     * semantic target is still resolved for validity/dimension, but is not reused as the local
-     * loaded scan centre; otherwise a prior-result coordinate would be scanned forever.
-     */
+    /** 围绕这次勘察的位置找地，而不是每走一步都回去扫描最初的坐标；原始目标仍用于检查维度和地点有效性。 */
     public static LoadedBuildProbe probeLoadedBuildAt(
             Goal goal, LocalPlayer player, IntentRuntime runtime, BlockPos surveyAnchor) {
+        // 这里重新做了一遍与 plan 相近的参数检查和方案生成；返回状态码，方便勘察任务决定继续找还是停止。
         JsonObject p = goal.parameters();
         if (p.has("ops")) return LoadedBuildProbe.invalid(
                 "per_cell_build_forbidden", "semantic builds cannot contain per-cell ops");
@@ -403,6 +398,7 @@ public final class SemanticBuildPlanner {
     private static Site findSite(LocalPlayer player, Goal.WorldPosition anchor, Size size,
                                  String terrain, boolean replace, boolean waterfront,
                                  boolean dock, boolean cellar) {
+        // 从目标附近向外一圈圈试，最多查一百二十八个候选，取评分最低的合法地块；评分偏向离玩家近且平缓。
         int stride = Math.max(2, Math.min(size.width, size.depth) / 3);
         Site best = null;
         int checked = 0;
@@ -416,6 +412,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static List<int[]> offsets(int stride) {
+        // 候选按方形一圈圈展开，步长随房屋尺寸决定；没有逐格穷举搜索范围内每一种可能位置。
         List<int[]> out = new ArrayList<>();
         out.add(new int[]{0, 0});
         for (int r = stride; r <= SEARCH_RADIUS; r += stride) {
@@ -431,7 +428,8 @@ public final class SemanticBuildPlanner {
 
     private static Site inspect(LocalPlayer player, int cx, int cz, int anchorY, Size size,
                                 String terrain, boolean replace, boolean waterfront,
-                                boolean dock, boolean cellar) {
+                                 boolean dock, boolean cellar) {
+        // 先测房屋底下每列最高地形，记录最低点和最高点，再检查坡度、可用空间、周边和水岸。
         ClientLevel level = player.clientLevel;
         int minX = cx - size.width / 2, minZ = cz - size.depth / 2;
         int maxX = minX + size.width - 1, maxZ = minZ + size.depth - 1;
@@ -443,6 +441,7 @@ public final class SemanticBuildPlanner {
                     : ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
             if (y <= level.getMinBuildHeight()
                     || y + size.wallHeight() + 22 >= level.getMaxBuildHeight()) return null;
+            // 这里先统一预留墙高加二十二格，尚未按实际屋顶样式计算需要多少空间。
             BlockPos ground = new BlockPos(x, y - 1, z);
             BlockState state = level.getBlockState(ground);
             if (!state.getFluidState().isEmpty() || !state.isFaceSturdy(level, ground, Direction.UP)
@@ -455,12 +454,11 @@ public final class SemanticBuildPlanner {
         if (terrain.equals("surface") && variation > (replace ? 3 : 1)) return null;
         if (!terrain.equals("surface") && (variation < 2 || variation > MAX_SLOPE
                 || !gentle(heights))) return null;
-        // A cleared surface floor replaces the lowest ground layer, cutting shallow bumps
-        // instead of raising the entire house onto an inaccessible floating platform.
+        // 当前 hillside 和 embedded 都要求有二至六格高差；完全平的区域不会通过这两种模式。
+        // 允许整平的地面房把地板放在最低地面层，以削掉凸起为主，避免把整间房垫高成悬台。
         int baseY = terrain.equals("surface") && replace ? low - 1
                 : terrain.equals("embedded") ? low : high;
-        // Underground clearance belongs to designs that actually excavate a cellar. Requiring
-        // it for every surface build rejects the default superflat surface at min height + 4.
+        // 只有真的带地窖才要求地板下还有四格可挖，普通地面房不需要这段地下空间。
         if (cellar && baseY - 4 < level.getMinBuildHeight()) return null;
         int roofTop = baseY + size.wallHeight() + Math.max(size.width, size.depth) / 2 + 5;
         for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
@@ -496,6 +494,7 @@ public final class SemanticBuildPlanner {
     private static boolean safeBoundary(ClientLevel level, int minX, int maxX, int minZ, int maxZ,
                                         int low, int high, int anchorY, int baseY, int roofTop,
                                         boolean replace, boolean allowWater) {
+        // 再检查房屋外围三格：目前整个高度范围都要求安全，禁止替换时还要求为空，并非只检查最终屋檐和入口。
         for (int x = minX - 3; x <= maxX + 3; x++) for (int z = minZ - 3; z <= maxZ + 3; z++) {
             if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) continue;
             if (!loadedColumn(level, x, z, anchorY)) return false;
@@ -524,6 +523,7 @@ public final class SemanticBuildPlanner {
 
     private static Shore shore(ClientLevel level, int minX, int maxX, int minZ, int maxZ,
                                int baseY, int length) {
+        // 尝试四个方向的三格宽水面带，要求水面同高、下方有可落支柱的底，甲板上方有空间。
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             Integer waterLevel = null;
             int[][] supportFloor = new int[length][3];
@@ -563,6 +563,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static int waterTop(ClientLevel level, int x, int z, int aroundY) {
+        // 在目标高度附近找最上层静止水；上面不能还有液体，找不到或遇未加载区域就算未知。
         for (int y = aroundY + 2; y >= aroundY - 7; y--) {
             BlockPos pos = new BlockPos(x, y, z);
             if (!level.isLoaded(pos) || !level.isLoaded(pos.above())) return Integer.MIN_VALUE;
@@ -575,6 +576,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static int waterFloor(ClientLevel level, int x, int z, int waterY) {
+        // 从水面往下最多查八格，穿过水后第一层必须能支撑柱子，不能是危险块、作物或带数据的设施。
         for (int y = waterY; y >= waterY - 8; y--) {
             BlockPos pos = new BlockPos(x, y, z);
             if (!level.isLoaded(pos) || level.getBlockEntity(pos) != null) return Integer.MIN_VALUE;
@@ -591,6 +593,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static boolean gentle(int[][] heights) {
+        // 除了总高差，还检查相邻两列落差不能超过两格，避免把陡坎当缓坡。
         for (int x = 0; x < heights.length; x++) for (int z = 0; z < heights[x].length; z++) {
             if (x > 0 && Math.abs(heights[x][z] - heights[x - 1][z]) > 2) return false;
             if (z > 0 && Math.abs(heights[x][z] - heights[x][z - 1]) > 2) return false;
@@ -599,6 +602,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static Direction lowEdge(int[][] h) {
+        // 比较四条边的平均高度，让坡地房入口朝较低的一边。
         long north = 0, south = 0, west = 0, east = 0;
         for (int x = 0; x < h.length; x++) { north += h[x][0]; south += h[x][h[x].length - 1]; }
         for (int z = 0; z < h[0].length; z++) { west += h[0][z]; east += h[h.length - 1][z]; }
@@ -617,7 +621,8 @@ public final class SemanticBuildPlanner {
 
     static JsonArray design(Site s, Size size, String purpose,
                                     Set<String> features, Palette palette,
-                                    StyleProfile style, String terrain, boolean replace) {
+                                     StyleProfile style, String terrain, boolean replace) {
+        // 顺序生成清空室内、地窖、地基、楼板、墙体、内部分间、门窗屋顶和入口；后写的操作可以覆盖前面的格子。
         JsonArray ops = new JsonArray();
         int floorY = s.baseY;
         int wallTop = floorY + size.wallHeight();
@@ -651,6 +656,7 @@ public final class SemanticBuildPlanner {
         if (style.exposedFrame) frameShell(ops, s, floorY, wallTop, size, palette.frame);
 
         List<RoomUse> functions = roomFunctions(purpose, features);
+        // 先预留梯子这条上下通路，摆灯和家具时让开，避免自己把上楼位置堵住。
         Set<Long> reserved = new LinkedHashSet<>();
         reserveColumn(reserved, ladder, floorY + 1, wallTop);
         if (features.contains("cellar")) {
@@ -676,6 +682,7 @@ public final class SemanticBuildPlanner {
         }
 
         if (size.storeys > 1) {
+            // 多层房才安排楼层间梯子，地窖另有从一层向下的入口。
             verticalLink(ops, ladder, s.front, floorY, size, palette.ladder);
         }
         if (features.contains("cellar") && replace) {
@@ -690,8 +697,7 @@ public final class SemanticBuildPlanner {
         List<BlockPos> openings = new ArrayList<>();
         BlockPos mainDoor = edge(s, s.front, floorY + 1, 0);
         BlockPos interiorEntry = edge(s, s.front, floorY + 1, -1);
-        // A centred facade door can meet a centred partition wall. The entrance is a semantic
-        // invariant, so cut its two-block landing after all room walls and furniture are planned.
+        // 外门可能正对室内隔墙；最后再把门后两格高空间清出来，保证入口没有被分间和家具堵死。
         ops.add(set("minecraft:air", interiorEntry.getX(), interiorEntry.getY(), interiorEntry.getZ()));
         ops.add(set("minecraft:air", interiorEntry.getX(), interiorEntry.getY() + 1,
                 interiorEntry.getZ()));
@@ -724,6 +730,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static void supports(JsonArray ops, Site s, String block) {
+        // 坡地低处按几个采样位置补支柱，不把整片低洼处全部填满。
         int stepX = Math.max(2, (s.maxX - s.minX) / 3);
         int stepZ = Math.max(2, (s.maxZ - s.minZ) / 3);
         for (int x : samples(s.minX, s.maxX, stepX)) {
@@ -738,6 +745,7 @@ public final class SemanticBuildPlanner {
 
     private static void frameShell(JsonArray ops, Site s, int floorY, int wallTop,
                                    Size size, String frame) {
+        // 墙边定期加竖柱，每层再加横梁，组成外露框架；这会增加材料需求。
         int stride = Math.max(3, Math.min(5, Math.min(size.width, size.depth) / 3));
         for (int x : samples(s.minX, s.maxX, stride)) {
             ops.add(line(frame, x, floorY + 1, s.minZ, x, wallTop, s.minZ));
@@ -759,6 +767,7 @@ public final class SemanticBuildPlanner {
     private static List<Room> partitionRooms(
             JsonArray ops, Site s, Size size, int floorY, String wall,
             List<RoomUse> functions, int serial) {
+        // 宽至少十一格、深至少十三格时分别加一道隔墙；房间按功能名单轮流分配，功能多于房间时目前不会报缺失。
         int minX = s.minX + 1, maxX = s.maxX - 1;
         int minZ = s.minZ + 1, maxZ = s.maxZ - 1;
         boolean splitX = size.width >= 11;
@@ -801,7 +810,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static void ceilingAndLight(JsonArray ops, Room room, int ceilingY,
-                                        String frame, String light, Set<Long> reserved) {
+                                         String frame, String light, Set<Long> reserved) {
+        // 在房间中央加梁并挂灯；与梯子预留位置太近时不摆这盏灯。
         int x = room.centerX(), z = room.centerZ();
         ops.add(line(frame, room.minX, ceilingY, z, room.maxX, ceilingY, z));
         BlockPos lamp = new BlockPos(x, ceilingY - 1, z);
@@ -812,7 +822,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static void furnish(JsonArray ops, Room room, int floorY,
-                                Palette palette, Set<Long> reserved) {
+                                 Palette palette, Set<Long> reserved) {
+        // 按房间用途选一组家具放四角，中间再加地毯；当前 REST 的家具名单没有床。
         List<BlockPos> spots = List.of(
                 new BlockPos(room.minX, floorY + 1, room.minZ),
                 new BlockPos(room.maxX, floorY + 1, room.minZ),
@@ -845,7 +856,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static void verticalLink(JsonArray ops, BlockPos ladder, Direction facing,
-                                     int floorY, Size size, String block) {
+                                      int floorY, Size size, String block) {
+        // 先在楼板开口，再从底层连续铺梯子到最高层入口，避免梯子被中间楼板截断。
         int highestLanding = floorY + (size.storeys - 1) * size.floorHeight;
         for (int storey = 1; storey < size.storeys; storey++) {
             int landingY = floorY + storey * size.floorHeight;
@@ -857,6 +869,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static BlockPos ladderPosition(Site s, int y) {
+        // 梯子固定放在入口对面的内墙边，离角落留出距离。
         Direction back = s.front.getOpposite();
         return switch (back) {
             case NORTH -> new BlockPos(s.minX + 2, y, s.minZ + 1);
@@ -868,12 +881,14 @@ public final class SemanticBuildPlanner {
     }
 
     private static void reserveColumn(Set<Long> reserved, BlockPos pos, int minY, int maxY) {
+        // 把一列不同高度的格子记成“留给通路”，供家具和灯避让。
         for (int y = minY; y <= maxY; y++) {
             reserved.add(BlockPos.asLong(pos.getX(), y, pos.getZ()));
         }
     }
 
     private static boolean nearReserved(BlockPos pos, Set<Long> reserved, int horizontalRadius) {
+        // 只比较同一高度的水平邻近格，判断准备摆的东西是否会挤占预留通路。
         for (int dx = -horizontalRadius; dx <= horizontalRadius; dx++) {
             for (int dz = -horizontalRadius; dz <= horizontalRadius; dz++) {
                 if (reserved.contains(BlockPos.asLong(
@@ -884,7 +899,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static void windows(JsonArray ops, Site s, int y, List<BlockPos> avoid,
-                                String block, int stride) {
+                                 String block, int stride) {
+        // 四面外墙按间隔开窗；每个窗口再检查有没有靠门或梯子太近。
         for (int x : samples(s.minX + 2, s.maxX - 2, stride)) {
             window(ops, block, x, y, s.minZ, avoid);
             window(ops, block, x, y, s.maxZ, avoid);
@@ -903,6 +919,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static List<Integer> samples(int min, int max, int stride) {
+        // 按步长采样并确保最后一个端点也在列表里，用集合去掉重复的端点。
         LinkedHashSet<Integer> values = new LinkedHashSet<>();
         for (int value = min; value <= max; value += Math.max(1, stride)) values.add(value);
         values.add(max);
@@ -910,7 +927,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static JsonObject roof(Palette palette, Site s, int y,
-                                   StyleProfile style, String purpose) {
+                                    StyleProfile style, String purpose) {
+        // 平顶只铺一层；其他风格根据用途和位置固定挑一个屋顶形状，同一方案重复生成不会随机换样子。
         if (style.roofShapes.contains("flat")) {
             return box(palette.floor, s.minX, y, s.minZ, s.maxX, y, s.maxZ, false);
         }
@@ -933,6 +951,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static void entryTerrace(JsonArray ops, Site s, Palette palette, boolean porch, boolean lights) {
+        // 门外铺一个小平台并留头顶空间；要求门廊时做宽、做深，要求照明时再加灯柱。
         int depth = porch ? 3 : 2;
         int halfWidth = porch ? 2 : 1;
         BlockPos a = edge(s, s.front, s.baseY, 1);
@@ -957,6 +976,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static void dock(JsonArray ops, Site s, Palette palette) {
+        // 水面上搭三格宽甲板，下方隔几格落支柱，两侧加栏杆，并在近端和远端各放一对灯。
         Shore shore = s.shore;
         int deckY = shore.waterY + 1;
         BlockPos a = edge(s, shore.direction, deckY, 1);
@@ -1013,6 +1033,7 @@ public final class SemanticBuildPlanner {
     }
 
     static StyleProfile styleProfile(String requestedStyle, String purpose) {
+        // 用一组英文关键词给风格打分，明确 style 比 purpose 中顺带出现的词权重高；没命中用默认风格。
         String requested = (requestedStyle == null ? "" : requestedStyle)
                 .toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
         String language = purpose
@@ -1034,6 +1055,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static List<RoomUse> roomFunctions(String purpose, Set<String> features) {
+        // 显式功能先排，再补用途文字中识别出的功能，最后加公共区；这里只整理名单，不保证每项都分到房间。
         LinkedHashSet<RoomUse> uses = new LinkedHashSet<>();
         features.stream().sorted().map(ROOM_LANGUAGE::get)
                 .filter(Objects::nonNull).forEach(uses::add);
@@ -1050,7 +1072,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static JsonObject semanticContract(Size size, Set<String> features, Site site,
-                                               int resolvedCells, String purpose) {
+                                                int resolvedCells, String purpose) {
+        // 汇总计划中的楼层、房间、灯和码头数量；这些是设计预期，实际通行和方块完成仍需施工后检查。
         int roomsPerStorey = (size.width >= 11 ? 2 : 1) * (size.depth >= 13 ? 2 : 1);
         int roomCount = roomsPerStorey * size.storeys;
         List<RoomUse> functions = roomFunctions(purpose, features);
@@ -1093,6 +1116,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static JsonObject traversabilityContract(Site site, Size size, Set<String> features) {
+        // 告诉施工验收以后要能从哪里进门、到每层哪里、通过哪条梯子或码头；不是给模型的导航路线。
         int floorY = site.baseY;
         int highestFeetY = floorY + (size.storeys - 1) * size.floorHeight + 1;
         int approachDistance = features.contains("dock") && site.shore != null
@@ -1160,13 +1184,12 @@ public final class SemanticBuildPlanner {
     }
 
     private static Palette palette(LocalPlayer player, List<String> preferred, String policy) {
+        // 按墙、地板、门、梯子、家具等角色挑材料：优先考虑指定且带着的，再考虑背包里合适的或默认代表材料。
         Map<String, Integer> inventory = inventoryBlocks(player);
         Predicate<String> allowed = id -> !policy.equals("preserve_rare") || !rare(id);
         List<String> choices = preferred.stream().filter(SemanticBuildPlanner::validMaterial)
                 .filter(allowed).toList();
-        // Shape representatives seed the design; registry membership is not availability evidence.
-        // Read-only binding may select a carried family member before review. Without carried
-        // evidence the displayed concrete material remains a supply requirement, not a known source.
+        // 游戏里存在一种材料，不等于玩家已经拿得到它；没有库存证据的代表材料只是后续需要补齐的需求。
         String plankRepresentative = representative(
                 allowed.and(SemanticBuildPlanner::plankBlock), "planks");
         String frameRepresentative = representative(
@@ -1229,7 +1252,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static String role(List<String> preferred, Map<String, Integer> inventory,
-                               Predicate<String> allowed, Predicate<String> kind, String policy) {
+                                Predicate<String> allowed, Predicate<String> kind, String policy) {
+        // 指定且带着的优先；specified 不再从其他库存挑，但此方法返回空时，调用方仍可能使用默认材料。
         String presentPreference = first(preferred, id -> inventory.containsKey(id) && kind.test(id));
         if (presentPreference != null) return presentPreference;
         if (policy.equals("specified")) return first(preferred, kind);
@@ -1258,6 +1282,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static String representative(Predicate<String> predicate, String role) {
+        // 从已注册方块中按名字排序取第一个合适的，作为这个角色的默认代表；这一步没有检查配方或库存来源。
         return BuiltInRegistries.BLOCK.stream()
                 .map(block -> BuiltInRegistries.BLOCK.getKey(block).toString())
                 .filter(SemanticBuildPlanner::validMaterial)
@@ -1281,6 +1306,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static boolean basic(String id) {
+        // 普通墙材要是完整碰撞方块；台阶、门窗、作物、带数据的设备和工作站等不作为通用墙块。
         Block block = registered(id);
         return block != null && block != Blocks.AIR && !(block instanceof SlabBlock)
                 && !(block instanceof DoorBlock) && !(block instanceof TransparentBlock)
@@ -1323,6 +1349,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static boolean hangingLight(String id) {
+        // 当前只通过有没有 hanging 属性识别吊灯，没有在这里检查该方块实际发不发光。
         Block block = registered(id);
         return block != null && block.getStateDefinition().getProperty("hanging") != null;
     }
@@ -1345,7 +1372,8 @@ public final class SemanticBuildPlanner {
     }
 
     private static String textured(
-            String base, Map<String, Integer> inventory, String policy) {
+             String base, Map<String, Integer> inventory, String policy) {
+        // 部分石材可以掺入苔藓或裂纹变体；storage_available 时会计划使用变体，即使背包里还没有。
         String candidate = switch (path(base)) {
             case "cobblestone" -> "minecraft:mossy_cobblestone";
             case "stone_bricks" -> "minecraft:mossy_stone_bricks";
@@ -1361,6 +1389,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static String deriveWood(String source, String suffix, String fallback) {
+        // 例如 oak_planks 推导同系列 oak_door；游戏没有注册这个名字时，改用默认材料。
         ResourceLocation id = ResourceLocation.tryParse(source);
         if (id == null || !id.getPath().endsWith("_planks")) return fallback;
         String path = id.getPath();
@@ -1388,12 +1417,14 @@ public final class SemanticBuildPlanner {
     }
 
     private static boolean rare(String id) {
+        // 稀有材料目前按名称关键词识别，不是按配方成本、实际库存价值或模组标签判断。
         String path = path(id);
         return path.contains("diamond") || path.contains("emerald") || path.contains("netherite")
                 || path.contains("ancient_debris") || path.startsWith("gold_") || path.contains("raw_gold");
     }
 
     private static boolean sensitive(ClientLevel level, BlockPos pos) {
+        // 带数据的方块和列出的农作物等都视为敏感位置，选址时避开，避免普通建房拆掉已有设施或农田。
         BlockState state = level.getBlockState(pos);
         Block block = state.getBlock();
         return level.getBlockEntity(pos) != null || state.is(Blocks.FARMLAND)
@@ -1432,6 +1463,7 @@ public final class SemanticBuildPlanner {
     }
 
     static Size parseSize(JsonElement element) {
+        // 名称尺寸有固定模板；数字尺寸会推导层数，并把偶数宽深增加一格，方便居中安排门和屋顶。
         if (element == null || element.isJsonNull()) return null;
         if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()) {
             return switch (element.getAsString().trim().toLowerCase(Locale.ROOT)) {
@@ -1462,6 +1494,7 @@ public final class SemanticBuildPlanner {
     private static int odd(int n) { return (n & 1) == 0 ? n + 1 : n; }
 
     private static boolean waterfront(String purpose, Set<String> features) {
+        // 显式码头功能或用途文字中出现岸边关键词，会额外要求找到水岸；这个要求会影响能否通过选址。
         String p = purpose.toLowerCase(Locale.ROOT);
         return features.contains("dock") || features.contains("pier") || p.contains("seaside")
                 || p.contains("coastal") || p.contains("waterfront") || p.contains("shore")
@@ -1479,6 +1512,7 @@ public final class SemanticBuildPlanner {
     }
 
     static Set<String> normalizedFeatures(JsonElement element) {
+        // 合并少量功能别名；门、墙、屋顶等本来就有的基本结构从可选功能名单中移掉，不额外报“不支持”。
         Set<String> raw = stringSet(element);
         Set<String> out = new LinkedHashSet<>(raw);
         if (out.remove("pier")) out.add("dock");
@@ -1494,6 +1528,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static List<String> resources(JsonElement element) {
+        // 整理材料名称；格式不合法的条目目前直接跳过，不逐项报错。
         if (element == null || !element.isJsonArray()) return List.of();
         List<String> out = new ArrayList<>();
         for (JsonElement item : element.getAsJsonArray()) {
@@ -1534,6 +1569,7 @@ public final class SemanticBuildPlanner {
     }
 
     private static JsonObject base(String kind, String block) {
+        // 以下帮助方法只拼建造操作的 JSON：放一格、定朝向、放门、填盒子、墙或线，实际放置由 BuildTool 负责。
         JsonObject op = new JsonObject(); op.addProperty("op", kind); op.addProperty("block_id", block);
         return op;
     }

@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.task.TaskResult;
 
-/** Read-only terminal action: compiling a preview can never dispatch construction or travel. */
+/** 只在世界里展示房屋蓝图：复用建造规划，但不取材料、不走路，也不施工。 */
 final class BuildDesignAdapter {
     static final String ABILITY = "maicraft:design_build";
     private BuildDesignAdapter() {}
@@ -23,7 +23,8 @@ final class BuildDesignAdapter {
     }
 
     static IntentAction design(Goal goal, LocalPlayer player, IntentRuntime runtime,
-                               Predicate<PreviewSession> publish) {
+                                Predicate<PreviewSession> publish) {
+        // 预览规划如果无法完成，直接说明失败；不进入普通任务的“先出去找地”或等待恢复流程。
         IntentAction compiled = SemanticBuildPlanner.previewPlan(goal, player, runtime);
         if (compiled instanceof IntentAction.Decision decision) return new IntentAction.Report(TaskResult.fail(
                 decision.snapshot().question(), Map.of("failure_code", "preview_design_unavailable",
@@ -34,6 +35,7 @@ final class BuildDesignAdapter {
         Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
         BuildTool.resolvedTargets(args.getAsJsonArray("ops"))
                 .forEach(target -> cells.put(target.pos(), target.desiredState()));
+        // 展开到最终每一格的状态，用于显示蓝图；这里没有把这些格子提交给施工任务。
         var session = PreviewSession.design("design-" + UUID.randomUUID(),
                 player.level().dimension().location().toString(), goal.outcome(), cells);
         if (!publish.test(session)) return new IntentAction.Report(TaskResult.fail(
