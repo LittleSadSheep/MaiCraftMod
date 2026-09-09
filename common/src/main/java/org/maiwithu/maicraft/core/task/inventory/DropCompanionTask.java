@@ -19,7 +19,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Toss inventory items through visible, confirmed inventory-menu clicks. */
+/**
+ * 通过显示出来的背包界面丢弃指定物品，逐次等待结果，不直接修改背包总数。
+ * 这里需要把 Inventory 下标转换成菜单槽号；当前盔甲与副手的转换有 A43 所列的实际风险。
+ */
 public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTaskRecord> {
     private static final long DROP_PROGRESS_LEASE_TICKS = 10L * 20L;
 
@@ -43,6 +46,7 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
     }
 
     @Override
+    // 最多丢身上现有数量；请求十个但只找到三个时，本轮目标会降成三个并在完成文字中说明。
     protected void onStart() {
         Inventory inv = player.getInventory();
         int have = PlayerInv.count(inv, r.item);
@@ -50,6 +54,7 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
     }
 
     @Override
+    // 先等上一次丢弃的菜单结果，确认后再累计数量并找下一堆；目标达到后关闭背包。
     protected TaskState onTick() {
         var context = ClientRuntime.requireContext(player);
         if (receipt != null) {
@@ -76,14 +81,17 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
                     FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
+        // 当前只转换快捷栏下标，错误地把盔甲／副手的 Inventory 下标直接当菜单槽号；可能丢错物品（A43）。
         int menuSlot = inventorySlot < 9 ? 36 + inventorySlot : inventorySlot;
         int before = player.getInventory().getItem(inventorySlot).getCount();
+        // 整堆都需要丢时用“丢整堆”；只需其中一部分时一次丢一个，避免超过本轮目标。
         int button = before <= target - dropped ? 1 : 0;
         int expectedDrop = button == 1 ? before : 1;
         receipt = context.menus().click(context, menuSlot, button, ClickType.THROW,
                 (c, ignored) -> c.player().getInventory().getItem(inventorySlot).getCount() < before
                         ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
                 20);
+        // 先记本次打算丢的数量，确认后才累加；当前确认只要求来源格数量减少，并不验证准确减少量或地上实体。
         pendingDrop = expectedDrop;
         return TaskState.RUNNING;
     }

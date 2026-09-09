@@ -19,9 +19,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 真正把食物拿在手里，按住使用键，让游戏完成吃东西的动画、扣物品和增加饥饿值等效果。
- * 这里不直接改血量或饥饿值；结束后查看物品有没有减少，再判断是否吃成了。
- * 当前只支持有 FOOD 属性的食物，不支持所有能喝的物品。
+ * 把指定食物拿到主手，按住使用，让游戏处理动画、消耗和饥饿值变化。
+ * 任务自己不改生命或饥饿值。它当前用物品前后总量来判断是否吃完，这种判断有 A47 所列的局限。
  */
 public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRecord> {
 
@@ -38,6 +37,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     }
 
     @Override
+    // 当前要求使用有饥饿机制的模式、身上有指定物品，且它带 FOOD 属性；药水和牛奶不属于这一实现。
     protected List<Precondition> preconditions() {
         // 先查当前模式是否按普通饥饿规则运行，再查有没有这种物品、这种物品默认是否有食物属性。
         return List.of(
@@ -56,6 +56,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     }
 
     @Override
+    // 记下物品总量、红心和饥饿值作为前后比较，再找要拿到主手的槽位。
     protected void onStart() {
         // 先记住吃之前的物品数量、血量和饥饿值，最后才能说明发生了什么变化。
         beforeCount = PlayerInv.count(player.getInventory(), r.item);
@@ -66,6 +67,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     }
 
     @Override
+    // 先等物品选好，再持续使用它；用同一份 Interaction 逐刻等待吃完，不反复新建点击。
     protected TaskState onTick() {
         if (eat == null) {
             // 先等食物真的切换到手上，失败就停；成功后只创建一次持续使用动作，之后接着等待它。
@@ -88,6 +90,8 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     }
 
     /** 使用动作结束后，用同类型物品数量是否减少来判断有没有吃掉，增加的血量和饥饿值只是附加说明。 */
+    // 当前只用该物品总量是否减少来判吃成；期间补进同种食物可能抵消减少量。
+    // 数量没少就写“已经吃饱”，没有核实失败原因；这是 A47 记录的问题。
     private TaskState finish() {
         int now = PlayerInv.count(player.getInventory(), r.item);
         if (now >= beforeCount) {
@@ -110,6 +114,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
 
     /** 停止拿取等待和持续使用动作，避免任务结束后仍一直按住使用键。 */
     @Override
+    // 清理选物品时开的菜单，并让持续使用请求停止；停止结果仍由共享动作接口管理。
     protected void cleanup() {
         selection.reset();
         if (eat != null) {
@@ -138,6 +143,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     }
 
     @Override
+    // 这段固定文字目前声称没有效果，但取消前食物可能已经消耗，不能把它当成副作用证据（A47）。
     protected String cancelledMessage() {
         return "eating " + r.label + " interrupted — no effect";
     }

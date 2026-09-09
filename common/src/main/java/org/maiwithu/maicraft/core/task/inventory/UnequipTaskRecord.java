@@ -6,11 +6,8 @@ import net.minecraft.world.entity.EquipmentSlot;
 import java.util.List;
 
 /**
- * {@code equip_item action=unequip} 的任务描述:把这些槽位上的东西收回背包。
- * 与 {@link EquipTaskRecord} 是同一个工具的两个形态——对象都是自己的装备栏,
- * 动词进参数,不另开工具。单 tick 完成,无寻路。
- *
- * <p>{@link #slots} 是一个槽位,或 {@code slot=armor} 展开的四件甲。
+ * 保存这次要清空的装备栏列表，复制后按顺序执行。
+ * 它与穿戴共用 equip_item 工具名，但实际执行器是 UnequipCompanionTask。
  */
 public final class UnequipTaskRecord extends TaskRecord {
 

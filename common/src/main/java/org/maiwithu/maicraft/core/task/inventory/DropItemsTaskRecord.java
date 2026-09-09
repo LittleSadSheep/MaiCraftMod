@@ -4,8 +4,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import net.minecraft.world.item.Item;
 
 /**
- * Typed task descriptor for {@code drop_items}: toss {@code count} of
- * {@code item} out of the entity's inventory onto the ground.
+ * 保存要丢的物品种类、请求数量和显示名；执行器会结合实际拥有数量决定本轮最多丢多少。
  */
 public final class DropItemsTaskRecord extends TaskRecord {
 

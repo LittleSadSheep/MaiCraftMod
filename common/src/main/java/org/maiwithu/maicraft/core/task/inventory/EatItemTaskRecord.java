@@ -4,10 +4,8 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import net.minecraft.world.item.Item;
 
 /**
- * Typed task descriptor for {@code eat}: consume a food / drink from the
- * companion's inventory. {@link EatCompanionTask} eats it natively (the player
- * body's own held-use path), so hunger + saturation + consume effects apply
- * exactly as they do for a real player when the chew completes.
+ * 一份进食任务单：保存要使用的物品和显示名字，以及继承的调用编号与截止时间。
+ * 真正选物品、吃东西和检查结果在 EatCompanionTask。
  */
 public final class EatItemTaskRecord extends TaskRecord {
 

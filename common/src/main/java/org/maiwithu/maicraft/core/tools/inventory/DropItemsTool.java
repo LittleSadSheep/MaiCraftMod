@@ -12,7 +12,10 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** World-action tool (raw MaiCraftTool): drop items onto the ground in front of the body. */
+/**
+ * 内部丢弃入口：请求把一定数量的指定物品丢到地上，拥有量不够时最多丢现有数量。
+ * 工具层只解析参数和安排任务，不直接扣除物品或生成地上实体。
+ */
 public final class DropItemsTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();
@@ -43,6 +46,7 @@ public final class DropItemsTool implements MaiCraftTool {
     }
 
     @Override
+    // 把物品种类和数量交给任务处理，等待结果后回复；具体槽位选择与菜单点击在 DropCompanionTask。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         runSync(companion, impl.dropItems(a.item_id(), a.count(), ctx(toolCallId, companion)), reply);

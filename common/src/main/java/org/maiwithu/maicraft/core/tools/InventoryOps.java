@@ -18,10 +18,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Inventory-management tool implementations — the business half of
- * {@code EquipItemTool} / {@code EatItemTool} / {@code DropItemsTool} /
- * {@code CollectItemsTool}. Each returns a {@link TaskRecord} the body's task
- * queue runs; the {@link ToolContext} carries the call id and deadline basis.
+ * 把装备、进食、丢弃和拾取的内部参数转换成任务单，并给出默认范围和初始时间预算。
+ * 这里不执行菜单点击；执行过程中真正能否完成，还要由任务读取玩家和世界状态。
  */
 public final class InventoryOps {
 
@@ -37,6 +35,7 @@ public final class InventoryOps {
     private static final int COLLECT_MAX_RADIUS = 48;
     private static final long COLLECT_TIMEOUT_TICKS = 60 * 20;   // 1 min
 
+    // 穿戴和卸下共用这个入口；只有 action=unequip 走卸下分支，其他值在本层都按穿戴处理。
     public TaskRecord equipItem(
 String action,
 String item_id,
@@ -77,6 +76,7 @@ String slot,
     }
 
     /** 脱哪些槽:必填;{@code armor} 展开为四件甲。 */
+    // 卸下必须指明栏位；armor 展开为头、胸、腿、脚四个栏位，其余名称只对应一个。
     private static List<EquipmentSlot> readUnequipSlots(String slot) {
         if (slot == null || slot.isBlank()) {
             throw new IllegalArgumentException(
@@ -89,6 +89,7 @@ String slot,
         return List.of(readSlot(slot));
     }
 
+    // 这里仅解析物品编号并给初始时限，是否属于能吃的食物由执行任务检查。
     public TaskRecord eatItem(
 String item_id,
             ToolContext ctx) {
@@ -97,6 +98,7 @@ String item_id,
         return new EatItemTaskRecord(ctx.toolCallId(), ctx.deadline(EAT_TIMEOUT_TICKS), item, label);
     }
 
+    // 丢弃数量在本层压到 1～999；实际拥有量与逐次丢弃由任务判断。
     public TaskRecord dropItems(
 String item_id,
 int count,
@@ -108,6 +110,7 @@ int count,
                 item, count, label);
     }
 
+    // 无效物品编号被略过，过滤集合空时变成收集所有物品；全写错也会走这个分支，范围会意外扩大（D12）。
     public TaskRecord collectItems(
 List<String> item_ids,
 Integer radius,

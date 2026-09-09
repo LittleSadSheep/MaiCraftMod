@@ -12,7 +12,10 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** World-action tool (raw MaiCraftTool): equip an item (tool/weapon/armor/accessory) from the inventory. */
+/**
+ * 内部装备入口，穿戴与卸下共用一个工具名；参数中的 action 决定建立哪种任务。
+ * 它自己不选择更好的装备，也不直接移动物品。
+ */
 public final class EquipItemTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();
@@ -26,6 +29,7 @@ public final class EquipItemTool implements MaiCraftTool {
     }
 
     @Override
+    // 这里的接口文字说空间不足会失败，但当前卸下执行器可能跳过后报成功；实际差异见 A45。
     public String description() {
         return "Equip an item from your OWN inventory: native armor to its equipment slot, "
                 + "other items to the main hand; holding an item does not use it. The previous item is "
@@ -50,6 +54,7 @@ public final class EquipItemTool implements MaiCraftTool {
     }
 
     @Override
+    // 解析穿戴／卸下要求，交给 InventoryOps 创建对应任务。runSync 仍由任务调度逐刻执行，不是当场改装备栏。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         runSync(companion, impl.equipItem(a.action(), a.item_id(), a.slot(), ctx(toolCallId, companion)), reply);

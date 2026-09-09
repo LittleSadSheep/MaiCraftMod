@@ -13,8 +13,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 内部进食工具：按物品 ID 创建一次进食任务，游戏之后逐刻完成拿取和使用。
- * 这里只提交任务；是否真的吃掉，以及最终血量和饥饿值，由 EatCompanionTask 返回。
+ * 内部进食入口，只负责选定物品种类并建立任务。
+ * 自动挑选食物、是否允许特殊效果等判断在语义适配器；真实使用与完成检查在 EatCompanionTask。
  */
 public final class EatItemTool implements MaiCraftTool {
 
@@ -29,6 +29,7 @@ public final class EatItemTool implements MaiCraftTool {
     }
 
     @Override
+    // 运行时文字仍笼统写 eat or drink；当前执行任务只支持有 FOOD 组件的食物，不覆盖全部可饮用物品。
     public String description() {
         return "Eat or drink a consumable from your inventory. It's a real timed action — chewing "
                 + "animation, particles and sound play over the eat duration, and only when it finishes "
@@ -46,6 +47,7 @@ public final class EatItemTool implements MaiCraftTool {
     }
 
     @Override
+    // 创建持续进食任务并交给任务槽，等游戏里的使用过程结束后回复。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         // 参数转成进食任务单；被总任务调用时由总任务接住，直接调用时则替换当前任务。
         Args a = GSON.fromJson(args, Args.class);

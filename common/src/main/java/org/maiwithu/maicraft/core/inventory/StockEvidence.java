@@ -17,10 +17,14 @@ import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.integration.create.CreateStockObservation;
 
-/** One recently observed external stock source; never adds networks together or includes inventory. */
+/**
+ * 记住玩家最近在外部菜单里看到的库存，供取材料时参考。
+ * 它不是实时仓库查询，也没有确认每次背包变化来自哪个容器；任务真正取物时仍需重新核对。
+ */
 public final class StockEvidence {
     public static final long MAX_AGE_TICKS = 1200;
     public enum Source { AE2, CREATE, CONTAINER }
+    // 一份最近看到的外部库存和可合成物品清单；复制集合后保存，避免外面的 Map 后来变化改掉旧观察。
     public record Snapshot(Source source, Map<ResourceLocation, Long> stored,
                            Set<ResourceLocation> craftable, long observedGameTick) {
         public Snapshot { stored = Map.copyOf(stored); craftable = Set.copyOf(craftable); }
@@ -35,6 +39,7 @@ public final class StockEvidence {
     private StockEvidence() {}
 
     /** Called after a complete server container-content packet, never from a client block entity. */
+    // 只有这次服务器菜单同步对应玩家当前菜单，才记为已同步；仅打开一个客户端界面还不算。
     public static void containerSynchronized(AbstractContainerMenu menu) {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player != null && player.containerMenu == menu) {
@@ -49,6 +54,7 @@ public final class StockEvidence {
     }
 
     /** Passive client-tick observation. This opens no screens and submits no packets. */
+    // 每刻检查玩家与世界是否仍相同；只在真实显示外部容器界面时，约每秒读取一次库存。
     public static void observe(LocalPlayer player) {
         if (player == null || player.clientLevel != Minecraft.getInstance().level) {
             CACHE.clear();
@@ -66,6 +72,7 @@ public final class StockEvidence {
         long tick = player.level().getGameTime();
         if (tick % 20 != 0) return; // A large network repository is sampled once per second, not every frame.
         Optional<Snapshot> observation;
+        // Create 专用界面优先走自己的读取方式；其他界面先尝试 AE2，最后才尝试普通容器。
         if (CreateStockObservation.supports(menu)) {
             observation = CreateStockObservation.observe(menu, tick);
         } else {
@@ -84,6 +91,8 @@ public final class StockEvidence {
         return CACHE.latest(player, player.clientLevel, inventory(player), player.level().getGameTime());
     }
 
+    // 普通容器只接受一个外部 Container、普通 Slot 类、无重复槽号且带齐玩家 36 格的菜单。
+    // 这套较窄的规则会排除工作台结果槽等特殊菜单，也会排除一些使用自定义槽类的储物界面。
     private static Optional<Snapshot> containerStock(LocalPlayer player, AbstractContainerMenu menu, long tick) {
         Container backing = null;
         Set<Integer> playerSlots = new HashSet<>(), externalSlots = new HashSet<>();
@@ -120,10 +129,13 @@ public final class StockEvidence {
                     (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b);
     }
 
+    // 只保留最近一个来源类型的库存，不把不同网络加起来；目前没有保存具体箱子或网络的身份。
     static final class Cache {
         private Object player, world;
         private Map<ResourceLocation, Long> inventory, reported;
         private Snapshot snapshot;
+        // 收到新观察时，同类型且原始数值没变的物品仍保留之前的扣减，意在防止旧菜单数据显示重复可用量。
+        // 但同数值也可能是新鲜真实库存或另一个容器，当前无法区分，见 A46。
         void record(Object player, Object world, Map<ResourceLocation, Long> inventory, Snapshot snapshot) {
             Map<ResourceLocation, Long> raw = snapshot.stored();
             if (this.snapshot != null && this.player == player && this.world == world
@@ -139,6 +151,8 @@ public final class StockEvidence {
             this.reported = raw;
             this.snapshot = snapshot;
         }
+        // 换玩家、换世界、时钟倒退或观察超过一分钟就丢弃。背包数量增长时先从缓存库存扣掉同种增量。
+        // 这里没有确认物品真的来自该仓库，普通拾取也会触发扣减；背包减少时不会把数量加回去。
         Optional<Snapshot> latest(Object player, Object world, Map<ResourceLocation, Long> inventory, long tick) {
             if (snapshot == null) return Optional.empty();
             long age = tick - snapshot.observedGameTick();

@@ -13,7 +13,10 @@ import org.maiwithu.maicraft.core.task.base.Precondition;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** One creative slot packet per tick, followed by a later inventory-fact confirmation. */
+/**
+ * 只在创造能力开启时，通过原版创造物品槽位请求增加指定模板物品。
+ * 每次只安排一个槽位，并等待确认，优先合并已有堆叠；背包装不下就结束报告。
+ */
 public final class CreativeTakeItemsCompanionTask
         extends AbstractCompanionTask<CreativeTakeItemsTaskRecord> {
     private int beforeTotal;
@@ -34,6 +37,7 @@ public final class CreativeTakeItemsCompanionTask
     @Override protected void onStart() {
         beforeTotal = PlayerInv.count(player.getInventory(), r.template.getItem());
     }
+    // 在真实显示的背包里逐格创建物品，等原生槽位更新记录结束后再处理下一份；动作记录也由公共每刻更新推进。
     @Override protected TaskState onTick() {
         var context = ClientRuntime.requireContext(player);
         if (added >= r.count) {
@@ -46,6 +50,7 @@ public final class CreativeTakeItemsCompanionTask
                         FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
+            // 完成量使用同种物品的全身总增量，没按模板的全部组件或本任务各次请求数量单独累计。
             added = PlayerInv.count(player.getInventory(), r.template.getItem()) - beforeTotal;
             receipt = null;
             pendingInventorySlot = -1;
@@ -69,6 +74,7 @@ public final class CreativeTakeItemsCompanionTask
         receipt = context.actions().creativeSetSlot(context, slot, expected, 20);
         return TaskState.RUNNING;
     }
+    // 先找与模板种类及组件完全相同、还没叠满的主背包格；没有再找空格，避免覆盖不相关物品。
     private int destinationSlot() {
         for (int i = 0; i < Math.min(36, player.getInventory().getContainerSize()); i++) {
             ItemStack stack = player.getInventory().getItem(i);
@@ -80,6 +86,7 @@ public final class CreativeTakeItemsCompanionTask
         }
         return -1;
     }
+    // 关闭任务使用的菜单并丢弃局部请求记录；不回收此前已经成功创建的物品。
     @Override protected void cleanup() {
         menuSession.cleanup(player);
         receipt = null;

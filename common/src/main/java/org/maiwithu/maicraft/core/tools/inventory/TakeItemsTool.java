@@ -17,8 +17,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Creative-only material request. Execution is a receipt-owning, cross-tick task so the
- * reply reflects the synchronized inventory instead of a local inventory mutation.
+ * 创造模式的内部领取入口，使用真实的创造物品槽位请求取得物品。
+ * 生存模式直接拒绝；背包容量和已成功增加多少由后续任务逐步检查。
  */
 public final class TakeItemsTool implements MaiCraftTool {
 
@@ -50,6 +50,8 @@ public final class TakeItemsTool implements MaiCraftTool {
     }
 
     @Override
+    // 先检查创造能力，再验证物品编号；数量缺省按一份，超范围压到 1～2304。
+    // 之后创建领取任务，等槽位更新，而不是在工具入口直接往本地背包塞物品。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         if (!WorkProfile.of(companion).freeMaterials()) {

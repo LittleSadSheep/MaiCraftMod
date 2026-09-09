@@ -5,11 +5,8 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
 
 /**
- * Typed task descriptor for the {@code equip} tool: "take this item out of my
- * inventory and wear/wield it." Completes in a single tick — no pathing.
- *
- * <p>{@link #slot} is {@code null} for auto-routing (armor → its armor slot,
- * weapon/tool → main hand), or a specific slot when the LLM forces one.
+ * 装备任务的要求：物品种类、目标栏位和显示名。slot 为 null 表示由执行器按物品类型选择栏位。
+ * 它不保存某一格中某一件物品的完整快照，执行时还会重新查背包。
  */
 public final class EquipTaskRecord extends TaskRecord {
 
