@@ -31,6 +31,12 @@ final class SemanticGoalContract {
                 path + ".preferences", ability, "unknown_preference");
         validateTarget(goal, path, ability);
         validateConstraints(goal, path, ability);
+        if (ChatAbilityAdapter.ABILITY.equals(ability)) {
+            try { org.maiwithu.maicraft.client.chat.ChatMessage.parse(goal.parameters()); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_chat_contract", path + ".parameters", ability, invalid.getMessage());
+            }
+        }
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
             if (BuildingSceneContract.supports(goal)) BuildingSceneContract.validate(goal);
             if (goal.parameters().has("project_id")) {

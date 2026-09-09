@@ -49,6 +49,8 @@ public final class IntentRuntime {
             "path_nodes", "block_ops", "placements", "cells",
             "x", "y", "z", "position", "center", "location", "destination", "bounds");
     private static final Set<String> ATTENTION_RESULT_DATA_KEYS = Set.of(
+            "chat_state", "typed_characters", "total_characters", "submission_attempted",
+            "delivery_status", "effects_started", "mechanical_retry_allowed",
             "task_id", "failure_code", "failure_type", "requires_decision",
             "build_diagnostics", "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",
             "requires_narration", "outcome_uncertain", "recoverable", "goal",
@@ -65,6 +67,7 @@ public final class IntentRuntime {
             "gathered", "confirmed_target_breaks", "candidate_count");
 
     private static final Set<String> CORE_ABILITIES = Set.of(
+            ChatAbilityAdapter.ABILITY,
             "maicraft:remember_place",
             "maicraft:sleep",
             "maicraft:travel",

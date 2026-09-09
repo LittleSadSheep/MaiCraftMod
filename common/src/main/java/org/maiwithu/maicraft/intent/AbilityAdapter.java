@@ -43,6 +43,7 @@ final class AbilityAdapter {
             return GeneralAbilityAdapter.adapt(goal, player, runtime);
         }
         return switch (goal.ability()) {
+            case ChatAbilityAdapter.ABILITY -> ChatAbilityAdapter.adapt(goal);
             case "maicraft:remember_place" -> remember(goal, player, runtime);
             case "maicraft:sleep" -> sleep(goal, player);
             case "maicraft:travel" -> travel(goal, player, runtime);

@@ -27,6 +27,7 @@ MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需
 - **只读房屋设计**：`maicraft:design_build` 直接显示蓝图，不移动或施工；普通建造在 Dev 确认之后才开始供料。
 - **按需知识资源**：自动发现安装模组的 Ponder 教程，按组件和场景读取原始旁白、操作提示及方块状态；支持 MCP Resources 和 `perceive(view="knowledge")`。
 - **任务观察与控制**：优先通过 Attention 事件等待取得权威状态、决策和完整终态结果；支持暂停、恢复和取消。
+- **游戏聊天与命令**：打开原版聊天框逐字输入，再自动提交消息或 `/` 命令；支持后台运行和人工接管。
 
 与逐格蓝图或远程点击脚本不同，MCP 客户端只描述“要达成什么”。方块位置、路径、施工顺序、菜单操作、重试和结果校验由 MaiCraft 在游戏内负责。
 
@@ -45,9 +46,28 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 执行后按返回的 `next_attention` 等待，读取响应中的 `task` 和 `wake_reason`，再按新的 `next_attention` 续等。Attention 直接引用任务记录，即使历史事件已被挤出缓存，也能返回仍保留的任务决策和最终结果；无需轮询 `task(get)` 或包装同步执行工具。原生资源订阅可使用 `maicraft://attention`，模型唤醒行为由宿主决定。
 
-四个入口不等于只有四种功能。当前运行时注册了 32 项 `maicraft:*` 语义能力，包括 `inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
+四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
 
 每项能力的参数和限制由 `perceive(view="abilities")` 动态公开。AI 客户端应先读取能力契约，再提交目标，而不是猜测方块坐标、物品栏槽位或内部动作。
+
+例如将以下参数交给 `execute`，会自动打开聊天框、逐字输入并发送；`plan` 只校验和规划，不打开界面：
+
+```json
+{
+  "goal": {
+    "ability": "maicraft:chat",
+    "outcome": "在游戏里向大家问好",
+    "parameters": {"text": "大家好，我回来了！", "typing_interval_ms": 100}
+  },
+  "request_key": "greeting-001"
+}
+```
+
+`text` 以 `/` 开头时走原版命令流程，例如 `/home`；服务器命令和客户端模组命令沿用当前玩家的权限与加载器处理。文字必须为单行，长度最多 256 个 UTF-16 字符，空白按原版规则整理。每个完整显示字符默认间隔 100 毫秒，可设置为 50–1000 毫秒；全部输入后停留 250 毫秒再自动提交。中文、组合 emoji 和重音组合不会被拆开显示。
+
+无需窗口前台或模拟键盘。任务可从失焦产生的不可见暂停画面开始；保留玩家手动打开的暂停菜单、容器和已有聊天草稿。低帧率下输入会变慢，不会一次补打很多字。按 Esc 关闭或手动编辑/切换界面会取消自动发送；任务暂停会释放界面，恢复后继续原草稿。
+
+同一次逻辑发送的网络重试应复用 `request_key`，新的消息使用新的键。结果中的 `delivery_status="submitted_to_client"` 表示已调用原版提交入口，服务器接收和命令执行效果仍需观察 Attention 中的后续消息。提交结果不确定时不会自动重发。
 
 移动目标还未定位时，可以使用 `maicraft:travel` 的 `semantic_target="platform"` 与 `direction="down"`，让 Mod 边移动边寻找下方平台，无须给坐标。`transport_mode="jetpack"` 保持同一次飞行控制，在平台进入局部观察后转入着陆；`ground` 使用普通步行寻路，`auto` 可选择可用的喷气背包。
 

@@ -6,6 +6,7 @@ public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
         org.maiwithu.maicraft.client.chat.ChatTypingTest.main(args);
         ChatSessionTest.main(args);
+        org.maiwithu.maicraft.intent.ChatAbilityTest.main(args);
         MenuVisibilityTest.main(args);
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);

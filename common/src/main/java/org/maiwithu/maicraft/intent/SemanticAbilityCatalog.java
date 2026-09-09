@@ -29,6 +29,11 @@ public final class SemanticAbilityCatalog {
 
     private static JsonObject describeContract(String ability) {
         return switch (ability) {
+            case ChatAbilityAdapter.ABILITY -> contract(
+                    "Open the real game chat box, visibly type one complete message or slash-prefixed command, then submit it once through native chat handling. Uses the current player's permissions and loader command hooks. No foreground window or keyboard simulation is required. Existing human chat, containers and manual pause menus are preserved; an invisible background focus-loss pause may be replaced. Human input/Esc cancels automation, and task pause retains the draft. Success means submitted_to_client, not confirmed server delivery or command execution. Inspect Attention for responses; reuse one execute request_key for transport retries and never resend an uncertain submission automatically.",
+                    targets(), fields(
+                            field("text", "string", "Required single line, 1-256 UTF-16 characters. A leading / submits a command; otherwise sends public player chat. Uses vanilla whitespace normalization. No control characters or section-sign formatting; Chinese and complete Unicode graphemes are supported."),
+                            field("typing_interval_ms", "integer", "Time between displayed characters, 50-1000 ms, default 100. A slow client may take longer; it never bursts to catch up. The completed draft remains visible for 250 ms before automatic submission.")));
             case MachineAbilityAdapter.INSPECT -> contract(
                     "Mark and inspect an existing machine, including Create, AE2, Mekanism and mixed assemblies. Returns bounded relative structure, state, candidate connections, evidence limits and an expiring snapshot_id for LLM analysis. Complete means the requested volume was observed, not that an entire network was discovered.",
                     targets("current_place", "coordinates", "landmark", "area", "prior_result"),
