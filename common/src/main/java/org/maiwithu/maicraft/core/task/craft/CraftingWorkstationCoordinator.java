@@ -28,14 +28,9 @@ import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.build.FirstPersonPlacementProbe;
 
 /**
- * Resolves the physical 3x3 crafting prerequisite without exposing body details to the LLM.
- *
- * <p>The coordinator never invents a workstation and never edits a cell directly. It selects one
- * of three bounded first-person routes: use a reachable table, approach an existing loaded table,
- * or place a carried table on a verified supported cell. When no table is carried, the planning
- * snapshot exposes the workstation item as a semantic prerequisite so the acquisition coordinator
- * can obtain and verify it before this physical coordinator resumes. The owning crafting task
- * executes the returned move/build child and feeds failures back through {@link #reject(Directive)}.</p>
+ * 为需要 3×3 的合成找工作台：能用身边的就用，远处已有的可以走过去，也可以摆出背包里的工作台。
+ * 这里只决定下一步，不自己移动或摆方块；缺工作台物品时把需求交回取物流程。
+ * 当前通过 CraftingTableBlock 及其子类识别可自动寻找的工作台，不是识别全部能提供合成界面的模组方块。
  */
 public final class CraftingWorkstationCoordinator {
     private static final double REACH = 4.5D;
@@ -111,7 +106,7 @@ public final class CraftingWorkstationCoordinator {
         indexedTables = List.of();
     }
 
-    /** Remember a table only after its placed block has been observed in the synchronized world. */
+    /** 登记供后续回收的临时工作台；这里只查当前位置可用，放置来源是否可信必须由调用方保证。 */
     public static synchronized void rememberTemporaryTable(
             LocalPlayer player, BlockPos pos) {
         if (!usableTable(player, pos)) return;
@@ -126,6 +121,7 @@ public final class CraftingWorkstationCoordinator {
      * player's replacement block at the same coordinates.
      */
     public static synchronized Block temporaryTable(LocalPlayer player, BlockPos pos) {
+        // 读取时只核对方块类型；若别人换成同类型工作台，这份记录目前无法区分。
         if (pos == null) return null;
         Map<Long, Block> entries = TEMPORARY_TABLES.get(player.clientLevel);
         if (entries == null) return null;
@@ -151,6 +147,7 @@ public final class CraftingWorkstationCoordinator {
 
     /** Read-only feasibility snapshot shared by recipe ranking. */
     public static PlanningSnapshot inspect(LocalPlayer player) {
+        // 给合成规划一个只读结论：工作台已就绪、可走近／摆放、需要先取得物品，或还在搜索。
         List<Block> tables = craftingTableBlocks();
         TargetIndex.register(player.clientLevel, tables);
         TableSearch search;
@@ -202,6 +199,7 @@ public final class CraftingWorkstationCoordinator {
 
     /** Resolve the next bounded physical step from fresh client facts. */
     public Directive next(LocalPlayer player, BlockPos preferredStation) {
+        // 身边可用的已有台优先；否则有随身台且能摆就先摆，最后才考虑走较远的路或继续搜索。
         start(player);
         BlockPos preferred = usableTable(player, preferredStation)
                         && !rejectedStations.contains(preferredStation.asLong())
@@ -257,6 +255,7 @@ public final class CraftingWorkstationCoordinator {
 
     /** Reject only the failed physical route; another table or placement site may still work. */
     public void reject(Directive directive) {
+        // 失败的工作台和失败的摆放位置分别记，不能一个位置摆不下就把所有工作台都判为不可用。
         if (directive == null) return;
         switch (directive.action()) {
             case READY, MOVE_TO_EXISTING -> {
@@ -304,6 +303,7 @@ public final class CraftingWorkstationCoordinator {
 
     private static TableSearch nearestIndexedTable(
             LocalPlayer player, Set<Long> rejected, List<Block> tables) {
+        // 多查“已拒绝数量加一”个候选，过滤失败位置后仍能找到下一个，而不是一直拿同一个最近点。
         BlockPos origin = player.blockPosition();
         int wantedCandidates = rejected.size() + 1;
         TargetIndex.Result result = TargetIndex.query(
@@ -349,6 +349,7 @@ public final class CraftingWorkstationCoordinator {
 
     private static BlockPos placementSite(
             LocalPlayer player, Set<Long> rejected, Block workstation) {
+        // 先围绕玩家当前高度找附近地板，再补查地表高度；这样普通洞穴也能有摆工作台的位置。
         BlockPos origin = PlayerNav.playerFeet(player);
         for (int radius = 1; radius <= PLACEMENT_RADIUS; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -376,6 +377,7 @@ public final class CraftingWorkstationCoordinator {
 
     private static boolean validSite(
             LocalPlayer player, BlockPos cell, Block workstation) {
+        // 当前要求可替换、无液体、不占玩家身体、上方有空隙、下方有支撑，并且已有能放置它的站位。
         BlockPos feet = PlayerNav.playerFeet(player);
         if (!player.level().isLoaded(cell)
                 || !player.level().getBlockState(cell).canBeReplaced()

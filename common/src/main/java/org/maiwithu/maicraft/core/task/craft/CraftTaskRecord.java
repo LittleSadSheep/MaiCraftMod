@@ -5,15 +5,15 @@ import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** One recipe-book craft through a real client menu. */
+/** 一次具体配方的合成单：要额外产出多少、要取几批结果、每批应有几件，以及是否只能原地操作。 */
 public final class CraftTaskRecord extends TaskRecord {
     static { TaskFactory.register(CraftTaskRecord.class, CraftCompanionTask::new); }
     public final ResourceLocation recipeId;
-    /** Additional output promised by the planner, before unavoidable recipe-batch rounding. */
+    /** 本次要新增的产物数量，不是最终背包总数；配方每批产量可能让实际新增略多。 */
     public final int count;
-    /** Exact number of result-slot takes authorized for this task; zero means a legacy record. */
+    /** 允许拿取结果的准确批数，零表示旧调用方未记录，由执行时重新推导。 */
     public final int plannedBatches;
-    /** Exact recipe result count expected from each authorized take; zero means a legacy record. */
+    /** 每批结果应有几件，执行时会核对配方是否仍一致，防止刷新配方后按旧数量操作。 */
     public final int outputPerBatch;
     public final BlockPos station;
     public boolean inPlace;

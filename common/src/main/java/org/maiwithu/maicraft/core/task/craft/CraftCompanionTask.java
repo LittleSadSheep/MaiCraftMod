@@ -52,7 +52,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Receipt-driven recipe placement, result take, and menu close. */
+/** 实际合成：找或摆工作台，打开合成界面，一批批摆配方、拿成品、放回剩料并关界面，最后尝试收回自己的临时工作台。 */
 public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRecord> {
     private static final double AIM_CONVERGENCE_DOT = Math.cos(Math.toRadians(1.0D));
     /** Network synchronization windows, not total task caps. */
@@ -132,6 +132,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     @Override protected void onStart() {
+        // 重新核对客户端当前配方和每批产量，避免沿用已经改变的计划；这里只接受普通合成配方。
         var context = ClientRuntime.requireContext(player);
         var manager = context.connection().getRecipeManager();
         for (RecipeHolder<?> candidate : manager.getRecipes()) {
@@ -174,6 +175,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         station = r.station;
         boolean compatibleMenu = hasCraftGrid(
                 requiresTable ? 3 : 2, requiresTable ? 3 : 2);
+        // 已经有合适合成格就直接用；界面不合适先关掉，确实需要 3×3 时才安排工作台。
         if (compatibleMenu) {
             stage = Stage.PLACE;
         } else if (player.containerMenu != player.inventoryMenu
@@ -186,6 +188,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     @Override protected TaskState onTick() {
+        // 正在走近或摆工作台时先推进那项小任务；否则按当前阶段只做一次菜单或回收操作。
         if (surfaceChild != null) return tickSurfaceChild();
         return switch (stage) {
             case CLOSE_WRONG_MENU -> closeWrongMenu();
@@ -202,6 +205,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState closeWrongMenu() {
+        // 先等旧菜单真正关闭，再准备新工作台或使用背包合成格，不在两个界面之间混用槽位。
         var context = ClientRuntime.requireContext(player);
         if (menuReceipt == null) {
             menuReceipt = context.menus().close(context, 20);
@@ -222,6 +226,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState prepareSurface() {
+        // inPlace 用于不能为了合成离开当前位置的流程；普通合成则可走近已有工作台或摆随身工作台。
         if (r.inPlace) {
             if (station == null || !CraftingWorkstationCoordinator.usableTable(player,station)
                     || visibleStationHit() == null) {
@@ -282,6 +287,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
      */
     private TaskState prepareExistingStation(
             CraftingWorkstationCoordinator.Directive directive) {
+        // 找到了具体工作台就保持这个目标；先尝试当前视线，够不着或看不见再走到可操作的位置。
         BlockPos target = directive.position();
         if (!CraftingWorkstationCoordinator.usableTable(player, target)) {
             workstation.reject(directive);
@@ -323,6 +329,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
 
     private TaskState startAlternativeStationStance(
             CraftingWorkstationCoordinator.Directive directive) {
+        // 到桌边不一定能看到可用的面，再找一个明确可见的精确站位；不要因为一个站位不行就放弃整张工作台。
         rejectedStationStances.add(PlayerNav.playerFeet(player).asLong());
         BlockPos stance = FirstPersonInteractionTargeting.nearestVisibleStand(
                 player, directive.position(), 4.5D, rejectedStationStances);
@@ -350,6 +357,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState tickSurfaceChild() {
+        // 接近或摆放结束后读取结果，再回到准备工作台阶段重新判断当前世界。
         Task active = surfaceChild;
         TaskRecord activeRecord = surfaceRecord;
         TaskState terminal = runChild(active);
@@ -364,8 +372,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         surfaceDirective = null;
 
         if (terminal != TaskState.SUCCESS || result == null || !result.success()) {
-            // A native effect can commit immediately before a child receipt times out. World fact
-            // outranks the failed wrapper: never consume a table and then pretend it was absent.
+            // 即使子任务失败，现场有工作台也可以继续使用；当前还会把它登记成自己的临时工作台，但存在不等于自己放的。
             if (completed.action() == CraftingWorkstationCoordinator.Action.PLACE_CARRIED
                     && CraftingWorkstationCoordinator.usableTable(
                             player, completed.position())) {
@@ -428,6 +435,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState openStation() {
+        // 先解除摆方块时的潜行，真正转头看准同一张工作台，再右键并等对应合成界面出现。
         var context = ClientRuntime.requireContext(player);
         // Building deliberately sneaks while clicking support. Opening a station must explicitly
         // release that one-tick posture or vanilla treats right-click as bypass-use.
@@ -576,6 +584,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private void rememberTemporaryStation(BlockPos pos) {
+        // 当前只记录这个位置上已有可用工作台，没有在本方法里核对是哪次放置和材料消耗产生的。
         stationPlaced = true;
         CraftingWorkstationCoordinator.rememberTemporaryTable(player, pos);
         Block temporary = CraftingWorkstationCoordinator.temporaryTable(player, pos);
@@ -596,6 +605,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState placeRecipe() {
+        // 一次只放一批配方；光标和合成格必须先为空，避免挪走用户原先放在里面的东西。
         var context = ClientRuntime.requireContext(player);
         if (menuReceipt == null && !craftingMenuReady()) return TaskState.RUNNING;
         if (menuReceipt == null) {
@@ -658,6 +668,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState takeResult() {
+        // 取成品前再核对种类、属性、每批数量和背包容量；只普通点击拿一批，不用会连续合成的快捷转移。
         var context = ClientRuntime.requireContext(player);
         if (menuReceipt == null && !craftingMenuReady()) return TaskState.RUNNING;
         if (menuReceipt == null) {
@@ -719,6 +730,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState stowResult() {
+        // 成品先在鼠标光标上，再找背包里合适的位置放下；确认光标减少、目标槽和背包按同样数量增加才算搬成功。
         var context = ClientRuntime.requireContext(player);
         if (menuReceipt == null && !craftingMenuReady()) return TaskState.RUNNING;
         if (menuReceipt == null) {
@@ -781,6 +793,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState returnCraftingGrid() {
+        // 每批之后把合成格剩余物品放回背包，并确认还是同一个菜单和合成格；清好再做下一批或结束。
         var context = ClientRuntime.requireContext(player);
         if (menuReceipt != null) {
             menuReceipt = context.menus().poll(context, menuReceipt);
@@ -851,6 +864,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private boolean craftingMenuReady() {
+        // 任务每次动槽位前都要求实际界面已显示，并等前一个菜单操作稳定；仅存在隐藏的 InventoryMenu 不够。
         InputDriver.halt(player);
         var context = ClientRuntime.requireContext(player);
         // InventoryMenu exists even with no screen. Every batch and grid/cursor move must wait
@@ -859,6 +873,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState closeMenu() {
+        // 成品和剩料都已放好，最后等界面关闭确认；之后才考虑拆回临时工作台。
         var context = ClientRuntime.requireContext(player);
         if (menuReceipt == null) {
             menuReceipt = context.menus().close(context, 20);
@@ -875,11 +890,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         return TaskState.FAILED;
     }
 
-    /**
-     * A table placed by this client is travelling equipment, not a disposable build. Reclaim it
-     * while the body is still at the verified interaction stance, before a following gather task
-     * can descend or cross terrain that makes the old station expensive to reach again.
-     */
+    /** 合成后尝试收回登记过的临时工作台；没有空间、工作台没加载或不适合回收时，留在原地并说明。 */
     private TaskState beginTemporaryStationRecovery() {
         if (!requiresTable || temporaryStation == null || temporaryStationBlock == null) {
             return TaskState.SUCCESS;
@@ -923,6 +934,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState reclaimTemporaryStation() {
+        // 只对记录中的同类型工作台发起挖掘；方块已经变了则只处理尚未确认的旧挖掘，不改挖新方块。
         if (temporaryStation == null || temporaryStationBlock == null) {
             return finishStationRecovery(false,
                     "the temporary crafting table identity was lost before recovery");
@@ -968,6 +980,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState collectTemporaryStation() {
+        // 拆掉工作台后，只追踪这次新出现的同类掉落，并看背包是否增加；不扫描附近全部同类物品去凑数。
         if (recoveredStationInInventory()) {
             return finishStationRecovery(true,
                     "the temporary crafting table was broken and returned to the main inventory");
@@ -1074,6 +1087,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState finishStationRecovery(boolean recovered, String detail) {
+        // 回收失败不改写已经完成的合成结果，记录“工作台没收回”即可；这里与狩猎的副产物处理规则不同。
         stationRecovered = recovered;
         stationRecoveryDetail = detail;
         stopNav();
@@ -1084,6 +1098,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
 
     @Override
     public boolean mustSettleBeforeSatisfiedCancellation() {
+        // 已经往合成格放料或拿结果后，总取物任务即使数量已够也要先让这里归还物品、关菜单并处理临时工作台。
         // Before the result click there is no committed craft to finish: an externally satisfied
         // parent may cancel and cleanup will simply return the grid. Once the click is submitted,
         // however, its receipt, menu close, and recovery of a self-placed temporary workstation
@@ -1105,6 +1120,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private TaskState beginGridReturnFailure(String message, FailureType type) {
+        // 先记住失败原因并转去清理合成格，不能直接返回失败把用户的原料留在菜单中。
         pendingFailureMessage = message;
         pendingFailureType = type;
         afterGridReturn = null;
@@ -1129,6 +1145,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private int findStowDestination(ItemStack cursor) {
+        // 优先合并到相同物品和属性的现有堆，再考虑空格，减少占用背包格数。
         for (int pass = 0; pass < 2; pass++) {
             for (int inventorySlot = 0; inventorySlot < PlayerInv.BUILDABLE_SLOTS;
                     inventorySlot++) {
@@ -1146,6 +1163,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private int menuSlotForInventory(int inventorySlot) {
+        // 界面槽号不一定等于背包槽号，通过所属容器和内部编号找到对应关系，不把固定数字硬套到不同菜单。
         for (int menuSlot = 0; menuSlot < player.containerMenu.slots.size(); menuSlot++) {
             Slot slot = player.containerMenu.getSlot(menuSlot);
             if (slot.container == player.getInventory()
@@ -1155,6 +1173,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private int destinationCapacity(Slot destination, ItemStack sample) {
+        // 目标必须属于玩家背包且允许放入，已有物品还要属性一致，再取物品与槽位各自容量限制的较小值。
         if (destination.container != player.getInventory() || !destination.mayPlace(sample)) {
             return 0;
         }
@@ -1187,6 +1206,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private boolean stowMoveApplied(LocalPlayer observedPlayer) {
+        // 同时看鼠标光标、背包总增量和指定目标槽，减少把无关库存变化当作本次转移的风险。
         if (stowDestinationSlot < 0
                 || stowDestinationSlot >= observedPlayer.containerMenu.slots.size()) return false;
         int expectedCursor = stowCursorBefore - stowExpectedMove;
@@ -1238,6 +1258,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private boolean cleanupMoveApplied(LocalPlayer observedPlayer) {
+        // 返还原料时要求原合成槽清空，且同属性原料在背包里正好增加对应数量。
         if (cleanupGridSlot < 0
                 || cleanupGridSlot >= observedPlayer.containerMenu.slots.size()) return false;
         return observedPlayer.containerMenu.getSlot(cleanupGridSlot).getItem().isEmpty()
@@ -1261,6 +1282,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private static int componentInventoryCount(LocalPlayer observedPlayer, ItemStack sample) {
+        // 合成过程按物品和全部附加属性一致来数，不能把不同附魔、颜色或数据的同类型物品混作一份回执。
         int count = 0;
         int limit = Math.min(
                 PlayerInv.BUILDABLE_SLOTS, observedPlayer.getInventory().items.size());
@@ -1308,6 +1330,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     private static boolean requiresThreeByThree(RecipeHolder<?> holder) {
+        // 有形状配方看宽高，其他配方按非空原料格数判断；这个方法没有询问自定义配方自己的尺寸规则。
         if (!(holder.value() instanceof CraftingRecipe crafting)) return true;
         if (crafting instanceof ShapedRecipe shaped) {
             return shaped.getWidth() > 2 || shaped.getHeight() > 2;
@@ -1316,6 +1339,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     @Override protected void cleanup() {
+        // 结束时停身体、挖掘和工作台扫描，安排菜单关闭；当前 surfaceChild 只 stop，没有调用其 result 做完整清理。
         InputDriver.halt(player);
         if (surfaceChild != null) {
             surfaceChild.stop(player, Task.StopReason.REPLACED);
@@ -1345,6 +1369,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         super.cleanup();
     }
     @Override protected Map<String, Object> resultData() {
+        // 把真正完成的批数、产物数、合成格清理和工作台回收分开说明，不能用“配方已点过”代替这些结果。
         Map<String, Object> data = new HashMap<>();
         data.put("recipe", r.recipeId.toString());
         data.put("crafted", crafted);
