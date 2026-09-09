@@ -17,17 +17,18 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Registry and world-dependent blueprint expansion, driven in slices after file-only parsing. */
+/**
+ * 把已读好的蓝图转换成游戏里的施工目标：查方块、旋转位置、计算材料，并挑出允许保留的装饰数据。
+ * 这些步骤需要当前世界，因此留在客户端线程分批处理；磁盘读取已由 BlueprintFiles 完成。
+ */
 public final class BlueprintStore {
 
     private BlueprintStore() {}
 
     /**
-     * 展开结果:目标格集 + 旋转后的占地尺寸 + 方块实体数据 + 待生成的摆设实体
-     * + <b>加载时就掉掉的格数</b>。
-     *
-     * <p>最后那个数不是给日志看的:掉格必须有账。不记的话,一张一千格的图纸掉了两百
-     * 格,任务会报"八百格全部达标",而缺的那五分之一无人知晓。
+     * 一次展开的结果：要施工的格子、旋转后的尺寸、装饰数据、摆设实体和各格的特殊材料要求。
+     * dropped 记录因方块不支持或材料无法确定等原因跳过的格子；床头等会自动生成的另一半不算丢失。
+     * 实体被过滤、重复坐标被覆盖，以及未知名字被读成空气，目前都不会增加 dropped。
      */
     public record Loaded(List<BuildTaskRecord.Target> targets, Vec3i size,
                          java.util.Map<Long, CompoundTag> blockEntityData,
@@ -35,7 +36,9 @@ public final class BlueprintStore {
                          java.util.Map<Long, List<BuildTaskRecord.CellNeed>> cellNeeds,
                          int dropped) {}
 
-    /** Resolves only registry/world-dependent facts, in bounded client-thread slices. */
+    /**
+     * 保存展开进度，每次处理一小批；上一批做到哪里，下一次就从哪里继续。
+     */
     public static final class Loader {
         private static final long SLICE_NANOS = 2_000_000L;
         private static final int ENTRIES_PER_SLICE = 128;
@@ -70,13 +73,17 @@ public final class BlueprintStore {
             };
         }
 
-        /** Null means unfinished; individual mod callbacks remain atomic within this soft deadline. */
+        /**
+         * 先展开材料表，再展开格子，最后展开摆设实体。返回 null 表示还没处理完。
+         * 每次最多处理 128 项，并在项目之间检查约 2 毫秒的时间预算；单次模组回调本身不能被这里中途打断。
+         */
         public Loaded tick(LocalPlayerContext context) {
             context.requireCurrent();
             ClientLevel level = context.level();
             long deadline = System.nanoTime() + SLICE_NANOS;
             int remaining = ENTRIES_PER_SLICE;
             while (paletteIndex < paletteTag.size() && remaining-- > 0 && System.nanoTime() < deadline) {
+                // 方块名交给原版解析；原版对未知名字会返回空气，这里尚未把这种情况单独判为导入失败。
                 palette.add(NbtUtils.readBlockState(level.holderLookup(Registries.BLOCK),
                         paletteTag.getCompound(paletteIndex++)).rotate(rotation));
             }
@@ -108,6 +115,7 @@ public final class BlueprintStore {
                 }
                 int rx;
                 int rz;
+                // 先围绕蓝图矩形旋转本地格子，再加锚点得到世界坐标。整数格编号从 0 开始，所以边长要减 1。
                 switch (quarters) {
                     case 1 -> { rx = sz - 1 - z; rz = x; }
                     case 2 -> { rx = sx - 1 - x; rz = sz - 1 - z; }
@@ -180,6 +188,7 @@ public final class BlueprintStore {
                 double ez = at.getDouble(2);
                 double rx;
                 double rz;
+                // 实体位置可以在格子内部，旋转的是连续坐标，不像整数格编号那样减 1。
                 switch (quarters) {
                     case 1 -> { rx = sz - ez; rz = ex; }
                     case 2 -> { rx = sx - ex; rz = sz - ez; }

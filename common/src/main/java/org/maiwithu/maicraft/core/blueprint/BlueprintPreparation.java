@@ -23,12 +23,16 @@ import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 
-/** One cancellable preparation task, then the existing build task; no late callback can dispatch work. */
+/**
+ * 先在后台读文件，再分多次游戏更新把蓝图变成施工目标，最后按请求生成说明或启动建筑任务。
+ * 后台线程只交回读取结果；真正开始施工要等本任务的 tick 再次运行。取消后不会由后台回调另开施工。
+ */
 public final class BlueprintPreparation implements Task {
     public interface Report {
-        /** Null means the next report slice should run on a later tick. */
+        /** 返回 null 表示说明还没整理完，下次游戏更新继续；非 null 是最终结果。 */
         TaskResult tick(LocalPlayer player, BlueprintStore.Loaded loaded);
     }
+    // 一次只读一个文件，最多再排队四个请求；超过容量时提交会被拒绝。
     private static final ThreadPoolExecutor IO = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(4), Thread.ofPlatform().daemon(true).name("maicraft-blueprint-io").factory());
 
@@ -54,6 +58,7 @@ public final class BlueprintPreparation implements Task {
             this.build = build;
         }
 
+        // 只转交实际建筑子任务确认过的位置；读文件成功本身不证明角色已经到达某处。
         @Override public Position internalVerifiedPosition() {
             return executedRecord instanceof InternalPositionReceipt receipt
                     ? receipt.internalVerifiedPosition() : null;
@@ -94,6 +99,7 @@ public final class BlueprintPreparation implements Task {
     @Override public void start(LocalPlayer player) {
         Path gameDirectory = ClientRuntime.requireContext(player).minecraft().gameDirectory.toPath()
                 .toAbsolutePath().normalize();
+        // 先移掉已取消的排队请求，再提交本次读取。
         IO.purge();
         if (request.file == null) listing = IO.submit(() -> BlueprintFiles.list(gameDirectory));
         else read = IO.submit(() -> BlueprintFiles.read(gameDirectory, request.file));
@@ -101,6 +107,7 @@ public final class BlueprintPreparation implements Task {
 
     @Override public TaskState tick(LocalPlayer player) {
         if (outcome != null) return outcome.success() ? TaskState.SUCCESS : TaskState.FAILED;
+        // 建筑已经启动时，按子任务自己的截止时间继续；前面的文件准备没有另设时间上限。
         if (child != null) {
             TaskState state = childRecord.getState().isTerminal() ? childRecord.getState()
                     : player.level().getGameTime() >= childRecord.getDeadlineGameTime()
@@ -121,6 +128,7 @@ public final class BlueprintPreparation implements Task {
                 listing = null;
                 return TaskState.SUCCESS;
             }
+            // 文件没读完就立即返回，保持游戏继续运行；读完后每次只展开一小批方块。
             if (prepared == null) {
                 if (loader == null) {
                     if (!read.isDone()) return TaskState.RUNNING;
@@ -136,6 +144,7 @@ public final class BlueprintPreparation implements Task {
                 if (outcome == null) return TaskState.RUNNING;
                 return outcome.success() ? TaskState.SUCCESS : TaskState.FAILED;
             }
+            // 只有文件读取、展开都完成，且请求确实要建造，才创建并启动建筑子任务。
             childRecord = request.build.apply(player, prepared);
             request.executedRecord = childRecord;
             prepared = null;
@@ -157,6 +166,7 @@ public final class BlueprintPreparation implements Task {
         }
     }
 
+    // 取出建筑任务的最终结果，并写回记录；子任务没有给结果时按失败处理。
     private void finishChild(TaskState terminal) {
         outcome = child.result(terminal);
         if (outcome == null) outcome = TaskResult.fail("blueprint build ended without a result");
@@ -164,6 +174,7 @@ public final class BlueprintPreparation implements Task {
         child = null;
     }
 
+    // 临时让出控制权时保留准备进度；其他停止原因会取消读取，并丢掉尚未施工的展开结果。
     @Override public void stop(LocalPlayer player, StopReason why) {
         if (child != null) child.stop(player, why);
         if (why != StopReason.PREEMPTED) cancelPreparation();
@@ -177,6 +188,7 @@ public final class BlueprintPreparation implements Task {
         IO.purge();
     }
 
+    // 最终结束时先停止准备；若建筑还在运行，让建筑子任务按同一结束原因收尾并给出结果。
     @Override public TaskResult result(TaskState terminal) {
         cancelPreparation();
         if (child != null) {

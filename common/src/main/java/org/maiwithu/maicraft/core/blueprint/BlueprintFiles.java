@@ -16,7 +16,10 @@ import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 
-/** File-only import boundary. No Minecraft instance, registry, player, or world access. */
+/**
+ * 从磁盘读取蓝图并检查文件结构。这里只处理文件中的数字和文本，不查询游戏世界或方块注册表。
+ * 方块名字是否存在、旋转后应放在哪里，由后续 BlueprintStore.Loader 在客户端线程处理。
+ */
 final class BlueprintFiles {
     static final long MAX_INPUT_BYTES = 16L * 1024 * 1024;
     static final long MAX_NBT_BYTES = 64L * 1024 * 1024;
@@ -24,6 +27,8 @@ final class BlueprintFiles {
 
     private BlueprintFiles() {}
 
+    // 只列出两个指定目录的第一层文件，同名蓝图只显示一次，最后按名字排序。
+    // 为了显示尺寸，每个名字会实际读取并转换一次；某张图损坏时保留它的名字并显示错误。
     static List<Map<String, Object>> list(Path gameDirectory) throws IOException {
         Map<String, Map<String, Object>> entries = new LinkedHashMap<>();
         for (Path root : roots(gameDirectory)) {
@@ -54,6 +59,8 @@ final class BlueprintFiles {
         return entries.entrySet().stream().sorted(Map.Entry.comparingByKey()).map(Map.Entry::getValue).toList();
     }
 
+    // 先查 schematics，再查 config/maicraft/blueprints；同目录内按 EXTENSIONS 的顺序找。
+    // 找到的第一份文件若损坏会直接报错，不会继续尝试同名的其他格式。
     static CompoundTag read(Path gameDirectory, String name) throws IOException {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("blueprint name is required");
         for (Path root : roots(gameDirectory)) {
@@ -70,6 +77,7 @@ final class BlueprintFiles {
                 } catch (RuntimeException | com.mojang.brigadier.exceptions.CommandSyntaxException invalid) {
                     throw new IllegalArgumentException("blueprint " + name + " cannot be parsed: " + invalid.getMessage(), invalid);
                 }
+                // 把 Litematic 和 Sponge 格式先换成统一的尺寸、材料表和格子列表，后续只处理这一种内部结构。
                 tag = switch (extension) {
                     case ".litematic" -> BlueprintFormats.fromLitematic(tag);
                     case ".schem" -> BlueprintFormats.fromSchem(tag);
@@ -86,6 +94,7 @@ final class BlueprintFiles {
         return List.of(gameDirectory.resolve("schematics"), gameDirectory.resolve("config/maicraft/blueprints"));
     }
 
+    // 去掉路径里的 . 和 .. 后检查它仍在指定目录内；这是路径文字检查，不会解析符号链接的实际去向。
     static Path resolve(Path root, String filename) {
         Path base = root.toAbsolutePath().normalize();
         Path file = base.resolve(filename).normalize();
@@ -95,7 +104,7 @@ final class BlueprintFiles {
         return file;
     }
 
-    /** Enforces the byte budget during reading too, if a file grows after the size check. */
+    /** 边读边累计字节，防止文件在检查大小之后继续增长；取消任务时也在这里停止读取。 */
     static InputStream limited(InputStream input, long limit) {
         return new FilterInputStream(input) {
             private long consumed;
@@ -113,6 +122,7 @@ final class BlueprintFiles {
                 account(count);
                 return count;
             }
+            // 跳过的数据也实际经过 read，这样仍会计入大小限制并检查取消。
             @Override public long skip(long count) throws IOException {
                 byte[] buffer = new byte[4096];
                 long skipped = 0;
@@ -126,7 +136,7 @@ final class BlueprintFiles {
         };
     }
 
-    /** Validate encoded sizes before any registry lookup or client-thread target expansion. */
+    /** 检查三维尺寸、条目数量、格子坐标和材料表下标；此时还不检查材料表里的方块名字与属性。 */
     static void validate(CompoundTag tag) {
         ListTag size = tag.getList("size", Tag.TAG_INT);
         if (size.size() != 3 || size.getInt(0) <= 0 || size.getInt(1) <= 0 || size.getInt(2) <= 0) {
@@ -153,6 +163,7 @@ final class BlueprintFiles {
                 }
             }
         }
+        // 摆设实体的位置可以带小数；这里只要求三个有限数值，没有要求它们落在蓝图尺寸以内。
         for (Tag value : entities) {
             ListTag pos = ((CompoundTag) value).getList("pos", Tag.TAG_DOUBLE);
             if (pos.size() != 3 || !Double.isFinite(pos.getDouble(0))

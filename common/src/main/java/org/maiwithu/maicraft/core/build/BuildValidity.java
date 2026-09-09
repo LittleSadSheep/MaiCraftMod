@@ -35,24 +35,10 @@ public final class BuildValidity {
             TrapDoorBlock.HALF));
 
     /**
-     * 对账<b>只看</b>这些属性——白名单,不是黑名单。
-     *
-     * <p>一块方块的状态里,真正由"作者"决定的只有摆放姿态这一小撮:朝向、
-     * 上下半、轴向、合页在左在右、附着面、旋转档位。其余绝大多数是<b>世界
-     * 自己算出来的</b>:树叶的 distance、楼梯的拐角形状、栅栏与墙的连接、
-     * 红石的电平与走向、草方块顶上有没有雪、门此刻开着还是关着……蓝图里存的
-     * 这些值往往是过期或物理不可达的(用示意图工具把方块整片贴进世界时会把它们冻住),
-     * 照字面比对必然陷进"放下去被世界改写、判不符、拆了重放、又被改写"的
-     * 死循环——而且改写者不止是世界:我们自己的寻路为了过去就会推开刚装好
-     * 的门。
-     *
-     * <p>这里刻意用白名单。黑名单是开放集合:每来一个新方块就可能带一个新的
-     * 派生属性,只能被咬一次补一条,永远补不完(实测树叶、栅栏门开合、栅栏门
-     * 朝向连着咬了三次)。白名单是封闭集合:作者能决定的姿态就这么十几种,
-     * 一次定完,此后任何新方块都自动落在正确的一侧。
-     *
-     * <p>方块种类本身仍然严格比对(见 {@link #sameBlockState});被忽略的只是
-     * 同一种方块内部那些不归我们管的状态位。
+     * 验收时，默认只逐项比较下面列出的摆放属性，例如楼梯朝向、半砖上下半和门的合页。
+     * 列表外的属性不参与这里的比较，例如楼梯拐角、红石信号、门是否打开。
+     * 注意：雪层数、蜡烛数量也没有列入；调用者若没有另外要求精确比较，同一种方块就可能算完成。
+     * 因此这张表表示目前程序检查的范围，不能理解成“作者能决定的属性已经全部包括在内”。
      */
     private static final Set<Property<?>> AUTHORED_PROPERTIES = Set.copyOf(List.of(
             BlockStateProperties.FACING,
@@ -72,6 +58,8 @@ public final class BuildValidity {
 
     private BuildValidity() {}
 
+    // 先应用用户设置的放宽规则，再比较方块。desired 为 null 表示这一格没有目标要求。
+    // itemVerify=true 用于检查这次准备放下的状态：不采用“保留任意已有方块”和替代材料两项放宽。
     public static boolean valid(BlockState current, BlockState desired, boolean itemVerify) {
         if (desired == null) {
             return true;
@@ -108,9 +96,8 @@ public final class BuildValidity {
         }
         NavSettings settings = NavSettings.get();
         List<String> ignoredProps = settings.buildIgnoreProperties();
-        // 栅栏门的朝向会被"开门"这个动作本身改写:原版里从门朝向的反面推门,
-        // 门会翻转过来面向你。所以对栅栏门而言朝向不是工程量,是开关的副作用,
-        // 拿它对账同样会陷进"装好—被推开—重装"的拉锯。
+        // 推开栅栏门可能让它转向相反方向，所以这里直接跳过其朝向。
+        // 当前也会放过转错九十度的门，并没有只忽略开门造成的一百八十度翻转。
         boolean gate = first.getBlock() instanceof net.minecraft.world.level.block.FenceGateBlock;
         for (Property<?> property : AUTHORED_PROPERTIES) {
             if (!first.hasProperty(property) || !second.hasProperty(property)) {
@@ -122,6 +109,7 @@ public final class BuildValidity {
             if (settings.buildIgnoreDirection && ORIENTATION_PROPERTIES.contains(property)) {
                 continue;
             }
+            // 用户还可以按属性名放宽验收；这会影响使用本方法的所有建筑任务。
             if (ignoredProps.contains(property.getName())) {
                 continue;
             }

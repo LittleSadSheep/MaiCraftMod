@@ -13,18 +13,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 加权调色板:一条指令的方块参数可以是一族方块,而不是单一方块。
- *
- * <p>一整面同色的墙是"一眼假"的头号来源。真实建筑的表面从来不是纯色——石墙里
- * 掺苔石与裂石,木墙里掺原木与去皮木。把混搭做进原语层,每一处平面自动带质感,
- * 不必让模型逐格去想,也不必把一面墙拆成十几条指令。
- *
- * <p>写法:{@code "stone_bricks*8, mossy_stone_bricks, cracked_stone_bricks"}。
- * 省略权重即为 1;只写一种就是单方块。
- *
- * <p>取样按<b>位置哈希</b>,不用随机数发生器:同一格永远取到同一个方块。于是
- * 预览与施工一致、重跑一致、断点续建也一致——这三件事任缺其一,玩家看到的房子
- * 就会和确认过的那张不是同一栋。
+ * 把材料字符串变成选料规则，例如 stone_bricks*8,mossy_stone_bricks*2 表示大约八成石砖、两成苔石砖。
+ * 每个坐标用固定计算结果选材料，因此同一份规则重新预览或继续施工时不会重新洗牌。
+ * 比例用于分配每格的选择机会，不保证一面十格的墙恰好分成八格和两格。
  */
 public final class BuildPalette {
 
@@ -36,6 +27,7 @@ public final class BuildPalette {
 
     private BuildPalette(List<Entry> entries) {
         this.entries = List.copyOf(entries);
+        // 总权重用 int 相加，没有溢出检查；超大权重可能把总数算小，Math.max 只能保证最后至少为 1。
         int sum = 0;
         for (Entry e : entries) {
             sum += e.weight();
@@ -63,6 +55,7 @@ public final class BuildPalette {
             if (star > 0) {
                 String tail = token.substring(star + 1).trim();
                 try {
+                    // 省略权重默认为 1；写成 0 或负数也会改成 1，并不表示禁用这种材料。
                     weight = Math.max(1, Integer.parseInt(tail));
                     token = token.substring(0, star).trim();
                 } catch (NumberFormatException ignored) {
@@ -82,19 +75,9 @@ public final class BuildPalette {
     }
 
     /**
-     * 把一个 block_id 解析成方块 + 计费用的物品。<b>按方块注册表查,不按物品。</b>
-     *
-     * <p>此前这里走 {@code ToolArgs.parseItem}——那是背包工具的入口,它把 AIR 当
-     * "未知物品"拒掉。这条守卫对吃/丢/取是对的(不能吃空气),对建造是错的:建造
-     * 的世界是方块,而 {@code air} 恰恰是我们自己在工具描述里承诺过的"清空这一格"。
-     * 后果是两处 {@code if (item == AIR)} 的分支全成了死代码,而模型照着文档写
-     * {@code minecraft:air} 会收到一句 {@code unknown item: air}——名字明明是对的,
-     * 它无从判断问题出在哪,只能换个写法反复重试。实测 60 次 build 调用被拒 22 次,
-     * 其中 18 次就是 air 与 water。
-     *
-     * <p>能不能建这件事本身不在这里判——它和图纸入口共用
-     * {@link org.maiwithu.maicraft.core.build.BuildStates#unbuildableReason};这边把它
-     * 当拒绝理由抛出去,那边把它当跳过条件。两处各判各的迟早会分叉。
+     * 按方块名字查注册表，并找施工需要携带的物品。空气允许作为“清空这一格”的目标。
+     * 未知名字、把状态写进名字的写法，以及建造功能不支持的方块都会在这里被拒绝。
+     * 这条入口没有世界信息，只用 materialItem(block) 查材料；蓝图导入可以另用带世界参数的方法。
      */
     public static Entry resolve(String id, int weight) {
         String trimmed = id.trim();
@@ -135,10 +118,8 @@ public final class BuildPalette {
     }
 
     /**
-     * 取这一格该用哪个方块。
-     *
-     * <p>位置哈希而非随机数:调色板的意义是"看起来自然",不是"每次都不同"。
-     * 每次都不同反而是灾难——玩家点头确认的那张预览和最终盖出来的会是两栋房子。
+     * 按坐标算出一个落在总权重内的数，再依次减去各材料的权重；先减到负数的材料被选中。
+     * 只有一种材料时直接返回它，不做坐标计算。
      */
     public Entry pick(BlockPos pos) {
         if (entries.size() == 1) {
@@ -156,10 +137,8 @@ public final class BuildPalette {
     }
 
     /**
-     * 建造域共用的确定性位置哈希(murmur 尾混合)。调色板选料与 scatter
-     * 撒点都以"确定性"为卖点(预览与施工一致、重跑一致、断点续建一致),
-     * 此前两处共享魔数却各写一套混合步骤——将来一处改了另一处没改,
-     * 表现就是预览和成品不一致。混合器只此一份。
+     * 把三个坐标混合成一个固定数字，供混合选料和撒点共同使用。
+     * 这里不保存随机种子；相同坐标每次得到相同数字。
      */
     public static long positionHash(int x, int y, int z) {
         long h = x * 341873128712L

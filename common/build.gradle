@@ -3,6 +3,7 @@ plugins {
     id 'net.neoforged.moddev'
 }
 
+// 公共模块借助 NeoForm 编译 Minecraft API，使用指定映射；有访问转换配置时才额外启用。
 neoForge {
     neoFormVersion = neo_form_version
     // Automatically enable AccessTransformers if the file exists
@@ -16,6 +17,7 @@ neoForge {
     }
 }
 
+// Mixin 等依赖供编译和注解处理使用，游戏运行时由加载器提供；测试可另有专门的运行依赖。
 dependencies {
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
     compileOnly group: 'org.ow2.asm', name: 'asm', version: '9.7'
@@ -33,6 +35,7 @@ dependencies {
     testRuntimeOnly "org.lwjgl:lwjgl:3.3.3:natives-${nativePlatform}${nativeSuffix}"
 }
 
+// 把公共 Java 源码与资源目录作为可供两个加载器模块取用的产物。公共模块不反过来解析这两份配置。
 configurations {
     commonJava {
         canBeResolved = false
@@ -51,8 +54,10 @@ artifacts {
 
 // Run the machine boundary regressions without introducing a test-framework dependency.
 // NeoForm exposes Minecraft on main's compile classpath only; standalone tests need the same types.
+// 独立 main 测试也需要 Minecraft 类型，把公共编译类路径补给测试；它们不依赖 JUnit 自动发现。
 sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
 sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
+// 机器与建造测试由这个入口顺序运行，并纳入 check。工作目录放在 build 下，避免测试日志散落项目根目录。
 tasks.register('machineRegression', JavaExec) {
     group = 'verification'
     description = 'Checks machine evidence, design contracts and native request boundaries.'
@@ -67,6 +72,7 @@ tasks.register('machineRegression', JavaExec) {
 }
 tasks.named('check') { dependsOn tasks.named('machineRegression') }
 
+// 导航回归入口，限制整组运行时间，检查路径、取消、移动、落地和交通相关行为。
 tasks.register('navigationRegression', JavaExec) {
     group = 'verification'
     description = 'Checks path cancellation, bounded tick execution, door passage and physical progress.'
@@ -83,6 +89,7 @@ tasks.register('navigationRegression', JavaExec) {
 
 tasks.named('check') { dependsOn tasks.named('navigationRegression') }
 
+// 菜单与输入回归入口，检查可见界面、动作确认、物品选择及任务收尾。
 tasks.register('guiRegression', JavaExec) {
     group = 'verification'
     description = 'Checks rendered GUI gates, menu timing and task cleanup boundaries.'
@@ -99,6 +106,7 @@ tasks.register('guiRegression', JavaExec) {
 
 tasks.named('check') { dependsOn tasks.named('guiRegression') }
 
+// 知识资源与只读 HTTP 回归入口；资源包加入类路径，让原版注册信息能在无游戏窗口时初始化。
 tasks.register('knowledgeRegression', JavaExec) {
     group = 'verification'
     description = 'Checks progressive MCP resources, Ponder extraction and read-only HTTP behavior.'
@@ -115,6 +123,7 @@ tasks.register('knowledgeRegression', JavaExec) {
 
 tasks.named('check') { dependsOn tasks.named('knowledgeRegression') }
 
+// 事件通知和等待回归入口。check 依赖这几组 JavaExec，而不是只依赖 Gradle 默认 test。
 tasks.register('attentionRegression', JavaExec) {
     group = 'verification'
     description = 'Checks attention delivery, task state and event-driven waiting.'
