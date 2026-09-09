@@ -24,21 +24,19 @@ import static org.maiwithu.maicraft.core.integration.machine.layout.SemanticMach
  */
 final class MachineLayoutAeNetworks {
     static final String DENSE = "ae2:fluix_covered_dense_cable";
-    record Leaf(String name, String blockId, Pos position, List<Side> sides) {}
+    record Leaf(String id, String name, String blockId, Pos position, List<Side> sides) {}
     private static final Set<String> CHANNEL_DEVICES = Set.of("ae2:drive", "ae2:interface", "ae2:pattern_provider",
             "ae2:1k_crafting_storage", "ae2:terminal", "ae2:pattern_encoding_terminal", "ae2:crafting_terminal");
     private MachineLayoutAeNetworks() {}
 
-    static void prepare(JsonObject design, MachineLayoutWork work, Bounds bounds, Map<String,Leaf> leaves) {
+    static void prepare(JsonObject design, MachineLayoutWork work, Bounds bounds,
+                        Map<String,List<String>> groups, Map<String,Leaf> leaves) {
         if (!leaves.isEmpty() && !work.registry.itemExists(DENSE)) {
             work.fail("ae_dense_cable_unavailable", "The installed registry lacks the native dense-cable part required by the network planner."); return;
         }
-        Map<String,List<String>> groups = new LinkedHashMap<>(); Map<String,String> parent = new LinkedHashMap<>();
-        for (JsonElement e : design.getAsJsonArray("components")) {
-            MachineLayoutRouting.checkpoint(); JsonObject c=e.getAsJsonObject();
-            String name=c.get("name").getAsString();int count=c.get("count").getAsInt();List<String> names=new ArrayList<>();
-            for(int i=0;i<count;i++){String expanded=count==1?name:name+"["+i+"]";names.add(expanded);parent.put(expanded,expanded);}groups.put(name,names);
-        }
+        // 使用布局器已经展开的实例编号；不能再从显示名和 count 推导一套可能重名的身份。
+        Map<String,String> parent = new LinkedHashMap<>();
+        groups.values().forEach(ids -> ids.forEach(id -> parent.put(id, id)));
         for(JsonElement e:design.getAsJsonArray("connections")) {
             MachineLayoutRouting.checkpoint();JsonObject edge=e.getAsJsonObject();if(!edge.get("medium").getAsString().equals("ae_network"))continue;
             List<String> from=groups.get(edge.get("from").getAsString()),to=groups.get(edge.get("to").getAsString());
@@ -51,19 +49,19 @@ final class MachineLayoutAeNetworks {
         }
         parent.keySet().forEach(name->work.aeNetworks.put(name,root(parent,name)));
         Set<String> moduleOwners=new LinkedHashSet<>();
-        work.modules.forEach(e->{var m=e.getAsJsonObject();if(m.get("module").getAsString().startsWith("ae2:"))moduleOwners.add(m.get("component").getAsString());});
+        work.modules.forEach(e->{var m=e.getAsJsonObject();if(m.get("module").getAsString().startsWith("ae2:"))moduleOwners.add(m.get("instance_id").getAsString());});
         Map<String,Integer> demand=new LinkedHashMap<>();List<Cell> all=new ArrayList<>(work.cells.values());all.addAll(work.attachments);
         for(Cell c:all)if(c.owner().startsWith("component:")&&CHANNEL_DEVICES.contains(c.id()))demand.merge(c.owner().substring(10),1,Integer::sum);
-        Map<String,List<Leaf>> networks=new LinkedHashMap<>();leaves.values().forEach(l->networks.computeIfAbsent(work.aeNetworks.get(l.name),ignored->new ArrayList<>()).add(l));
+        Map<String,List<Leaf>> networks=new LinkedHashMap<>();leaves.values().forEach(l->networks.computeIfAbsent(work.aeNetworks.get(l.id),ignored->new ArrayList<>()).add(l));
         JsonArray plans=new JsonArray();
         for(var entry:networks.entrySet()) {
             MachineLayoutRouting.checkpoint();String network=entry.getKey();List<Leaf> members=entry.getValue();
             List<Leaf> explicit=members.stream().filter(l->l.blockId.equals("ae2:controller")).toList();
-            int count=members.stream().mapToInt(l->demand.getOrDefault(l.name,0)).sum();
+            int count=members.stream().mapToInt(l->demand.getOrDefault(l.id,0)).sum();
             JsonObject report=new JsonObject();report.addProperty("network",network);report.addProperty("planned_required_channels",count);
             report.addProperty("terminal_branch_capacity",8);report.addProperty("channel_mode_verified",false);report.addProperty("backbone_item",DENSE);plans.add(report);
             if(explicit.size()>1){work.fail("ae_separate_controllers","Separate explicitly declared controllers cannot share one grid; request a connected controller multiblock.");continue;}
-            boolean modules=members.stream().anyMatch(l->moduleOwners.contains(l.name));
+            boolean modules=members.stream().anyMatch(l->moduleOwners.contains(l.id));
             if(!modules&&explicit.isEmpty()){
                 report.addProperty("backbone_capacity",8);
                 if(count>8)work.fail("ae_controller_required","An ad-hoc network cannot serve "+count+" planned channels under standard AE rules; include a controller or cluster module.");
@@ -80,7 +78,7 @@ final class MachineLayoutAeNetworks {
             if(explicit.isEmpty())work.add(new Cell(controller,"ae2:controller",Map.of(),false,"ae_controller:"+network));
             JsonArray branches=new JsonArray();Set<Side> used=new LinkedHashSet<>();int branchIndex=0;
             for(List<Leaf> bin:bins){
-                String owner="ae_branch:"+network+":"+branchIndex++;Set<String> names=new LinkedHashSet<>();bin.forEach(l->names.add(l.name));
+                String owner="ae_branch:"+network+":"+branchIndex++;Set<String> names=new LinkedHashSet<>();bin.forEach(l->names.add(l.id));
                 for(Cell c:new ArrayList<>(work.cells.values()))if(c.id().equals(DENSE)&&c.owner().startsWith("component:")&&names.contains(c.owner().substring(10)))work.cells.put(c.position(),new Cell(c.position(),c.id(),c.properties(),c.part(),owner));
                 JsonObject branch=branch(work,bounds,controller,bin,members,demand,owner,used);
                 if(branch==null){work.fail("ae_branch_route_unresolved","Cannot route an isolated 32-channel branch for "+network+"; enlarge the site or change its physical constraints.");break;}branches.add(branch);
@@ -93,9 +91,9 @@ final class MachineLayoutAeNetworks {
 
     // 先排频道需求多的设备组，把每组放进第一个还能容纳它的三十二频道出口；一个组不会再拆到多个出口。
     private static List<List<Leaf>> bins(List<Leaf> members,Map<String,Integer> demand){
-        List<Leaf> sorted=new ArrayList<>(members);sorted.sort(Comparator.<Leaf>comparingInt(l->demand.getOrDefault(l.name,0)).reversed());
+        List<Leaf> sorted=new ArrayList<>(members);sorted.sort(Comparator.<Leaf>comparingInt(l->demand.getOrDefault(l.id,0)).reversed());
         List<List<Leaf>> bins=new ArrayList<>();List<Integer> loads=new ArrayList<>();
-        for(Leaf l:sorted){int n=demand.getOrDefault(l.name,0),chosen=-1;for(int i=0;i<loads.size();i++)if(loads.get(i)+n<=32){chosen=i;break;}
+        for(Leaf l:sorted){int n=demand.getOrDefault(l.id,0),chosen=-1;for(int i=0;i<loads.size();i++)if(loads.get(i)+n<=32){chosen=i;break;}
             if(chosen<0){chosen=bins.size();bins.add(new ArrayList<>());loads.add(0);}bins.get(chosen).add(l);loads.set(chosen,loads.get(chosen)+n);}
         return bins;
     }
@@ -127,12 +125,12 @@ final class MachineLayoutAeNetworks {
                 if(route==null){unresolved=owner+" via "+face+" cannot reach "+leaf.name+" at "+leaf.position+" from "+controller;found=false;break;}
                 for(Cell c:route.cells())attempt.putIfAbsent(c.position(),c);
                 if(attempt.size()+work.attachments.size()>SemanticMachineLayout.MAX_TARGETS){found=false;break;}
-                JsonObject p=new JsonObject();p.addProperty("component",leaf.name);p.add("endpoint_offset",position(leaf.position));JsonArray cells=new JsonArray();route.cells().forEach(c->cells.add(position(c.position())));p.add("route",cells);paths.add(p);
+                JsonObject p=new JsonObject();p.addProperty("component",leaf.name);p.addProperty("instance_id",leaf.id);p.add("endpoint_offset",position(leaf.position));JsonArray cells=new JsonArray();route.cells().forEach(c->cells.add(position(c.position())));p.add("route",cells);paths.add(p);
             }
             if(!found)continue;
             work.cells.clear();work.cells.putAll(attempt);used.add(face);
             JsonObject result=new JsonObject();result.addProperty("face",face.label());result.addProperty("owner",owner);
-            result.addProperty("planned_required_channels",members.stream().mapToInt(l->demand.getOrDefault(l.name,0)).sum());result.addProperty("capacity",32);result.add("paths",paths);return result;
+            result.addProperty("planned_required_channels",members.stream().mapToInt(l->demand.getOrDefault(l.id,0)).sum());result.addProperty("capacity",32);result.add("paths",paths);return result;
         }
         work.fail("ae_branch_search_exhausted",unresolved);return null;
     }

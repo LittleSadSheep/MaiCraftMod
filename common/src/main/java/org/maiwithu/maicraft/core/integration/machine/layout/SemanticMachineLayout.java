@@ -30,7 +30,7 @@ public final class SemanticMachineLayout {
         boolean supportsState(String blockId, Map<String, String> properties);
     }
     public record Result(boolean buildable, JsonObject blueprint, JsonObject report) {}
-    private record Instance(String name, String blockId, String role, Pos position, MachineLayoutCatalog.Profile profile,
+    private record Instance(String id, String name, String blockId, String role, Pos position, MachineLayoutCatalog.Profile profile,
                             MachineLayoutModules.Module module) {}
     private record Endpoint(String blockId, Pos position, List<Side> sides) {}
     private static final List<Side> RESOURCE_SIDES = List.of(Side.EAST, Side.WEST, Side.SOUTH, Side.UP, Side.DOWN);
@@ -95,16 +95,17 @@ public final class SemanticMachineLayout {
             for (int i = 0; i < count; i++, index++) {
                 MachineLayoutRouting.checkpoint();
                 Pos at = new Pos(firstX + index % columns * spacing, 0, firstZ + index / columns * spacing);
-                // 多台设备用“名称[编号]”命名；当前未避免用户本就起了同样名字，后续按名字存表时可能相互覆盖。
+                // 编号只由本次展开顺序确定；显示名仍保留“名称[编号]”，但不再充当实例身份。
                 String instanceName = count == 1 ? name : name + "[" + i + "]";
-                Instance instance = new Instance(instanceName, id, component.get("role").getAsString(), at, profile, module);
+                Instance instance = new Instance("instance_" + index, instanceName, id, component.get("role").getAsString(), at, profile, module);
                 instances.add(instance);
                 if (module == null) {
-                    work.add(new Cell(at, id, profile.state(), false, "component:" + instanceName));
+                    work.add(new Cell(at, id, profile.state(), false, "component:" + instance.id));
                     work.clearance.add(at.step(Side.NORTH)); work.clearance.add(at.step(Side.NORTH).step(Side.UP));
                 } else installModule(work, instance, bounds);
                 JsonObject row = new JsonObject();
                 row.addProperty("name", instanceName); row.addProperty("block_id", id); row.addProperty("role", instance.role);
+                row.addProperty("instance_id", instance.id);
                 row.add("offset", position(module == null ? at : at.plus(module.coreOffset())));
                 row.addProperty("interface_evidence", module == null ? profile.evidence() : "audited process module " + module.id());
                 work.components.add(row);
@@ -118,11 +119,16 @@ public final class SemanticMachineLayout {
         if (!work.errors.isEmpty()) return work.finish();
         // 先把 AE2 设备按声明的网络分组，并为有控制器的网络分配不同出口，再处理各条连接。
         Map<String,MachineLayoutAeNetworks.Leaf> aeLeaves = new LinkedHashMap<>();
-        for (List<Instance> group : groups.values()) for (Instance instance : group) {
-            Endpoint port = endpoint(instance, "ae_network", false);
-            if (port != null) aeLeaves.put(instance.name, new MachineLayoutAeNetworks.Leaf(instance.name, instance.blockId, port.position, port.sides));
+        Map<String,List<String>> instanceGroups = new LinkedHashMap<>();
+        for (var group : groups.entrySet()) {
+            instanceGroups.put(group.getKey(), group.getValue().stream().map(Instance::id).toList());
+            for (Instance instance : group.getValue()) {
+                Endpoint port = endpoint(instance, "ae_network", false);
+                if (port != null) aeLeaves.put(instance.id,
+                        new MachineLayoutAeNetworks.Leaf(instance.id, instance.name, instance.blockId, port.position, port.sides));
+            }
         }
-        MachineLayoutAeNetworks.prepare(design, work, bounds, aeLeaves);
+        MachineLayoutAeNetworks.prepare(design, work, bounds, instanceGroups, aeLeaves);
         if (!work.errors.isEmpty()) return work.finish();
         int edgeIndex = 0;
         for (JsonElement e : design.getAsJsonArray("connections")) {
@@ -160,11 +166,11 @@ public final class SemanticMachineLayout {
                     + " lacks verified endpoint capabilities; arbitrary medium labels do not establish compatibility.");
             return;
         }
-        if (medium.equals("ae_network") && work.aeTopologyNetworks.contains(work.aeNetworks.get(source.name))) {
+        if (medium.equals("ae_network") && work.aeTopologyNetworks.contains(work.aeNetworks.get(source.id))) {
             recordAeConnection(work, source, destination, from, to, edge, owner);
             return;
         }
-        String routeOwner = medium.equals("ae_network") ? "ae_network:" + work.aeNetworks.get(source.name) : owner;
+        String routeOwner = medium.equals("ae_network") ? "ae_network:" + work.aeNetworks.get(source.id) : owner;
         boolean processOutput = source.module != null && source.module.id().startsWith("create:") && Set.of("items", "fluids").contains(medium);
         String outputItem = edge.has("item_id") ? edge.get("item_id").getAsString() : edge.has("resource") ? edge.get("resource").getAsString() : work.expectedOutput;
         MachineLayoutItemOutputs.Output filtered = processOutput && medium.equals("items") && outputItem != null
@@ -183,6 +189,7 @@ public final class SemanticMachineLayout {
         }
         JsonObject row = new JsonObject();
         row.addProperty("id", owner); row.addProperty("from", source.name); row.addProperty("to", destination.name);
+        row.addProperty("from_instance_id", source.id); row.addProperty("to_instance_id", destination.id);
         row.add("source_offset", position(from.position)); row.add("destination_offset", position(to.position));
         row.addProperty("medium", medium); row.addProperty("purpose", edge.get("purpose").getAsString());
         row.addProperty("transport_id", transport); row.addProperty("source_side", route.sourceSide().label());
@@ -223,9 +230,10 @@ public final class SemanticMachineLayout {
     }
 
     private static void recordAeConnection(MachineLayoutWork work, Instance source, Instance target, Endpoint from, Endpoint to, JsonObject edge, String owner) {
-        List<Pos> path = MachineLayoutAeNetworks.connectionPath(work, from.position, to.position, work.aeNetworks.get(source.name));
+        List<Pos> path = MachineLayoutAeNetworks.connectionPath(work, from.position, to.position, work.aeNetworks.get(source.id));
         if (path == null) { work.fail("ae_network_path_missing", "Compiled controller branches do not physically connect " + source.name + " and " + target.name); return; }
         JsonObject row = new JsonObject(); row.addProperty("id", owner); row.addProperty("from", source.name); row.addProperty("to", target.name);
+        row.addProperty("from_instance_id", source.id); row.addProperty("to_instance_id", target.id);
         row.addProperty("medium", "ae_network"); row.addProperty("purpose", edge.get("purpose").getAsString());
         row.add("source_offset", position(from.position)); row.add("destination_offset", position(to.position));
         row.addProperty("physical_path_compiled", true); row.addProperty("resource_transfer_verified", false); row.addProperty("transport_id", MachineLayoutAeNetworks.DENSE);
@@ -249,7 +257,7 @@ public final class SemanticMachineLayout {
             MachineLayoutRouting.checkpoint();
             Pos at = instance.position.plus(c.position());
             if (!bounds.contains(at)) work.fail("module_outside_site", instance.name + " extends outside the surveyed dimensions");
-            work.add(new Cell(at, c.id(), c.properties(), c.part(), "component:" + instance.name));
+            work.add(new Cell(at, c.id(), c.properties(), c.part(), "component:" + instance.id));
         }
         for (Pos clear : module.clearance()) {
             Pos at = instance.position.plus(clear);
@@ -271,7 +279,8 @@ public final class SemanticMachineLayout {
         }
         JsonObject report = module.commissioning().deepCopy();
         for (String key : List.of("min_offset", "max_offset")) if (report.has(key)) report.add(key, position(instance.position.plus(MachineLayoutModules.from(report.getAsJsonArray(key)))));
-        report.addProperty("module", module.id()); report.addProperty("component", instance.name); work.modules.add(report);
+        report.addProperty("module", module.id()); report.addProperty("component", instance.name);
+        report.addProperty("instance_id", instance.id); work.modules.add(report);
         work.pending("module_commissioning", instance.name, report.get("requirements").getAsString());
     }
 
