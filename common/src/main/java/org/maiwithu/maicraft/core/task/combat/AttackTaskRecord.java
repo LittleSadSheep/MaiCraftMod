@@ -9,10 +9,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * {@code attack} 的进度账本:请求的实体 id、每个 id 的终态(打倒/丢失/够不着)与出手次数。
- *
- * <p>近战与远程曾是两个工具、两份账本,差别只在措辞("defeated/hits" 对 "destroyed/shots"),
- * 为此有三个抽象的词汇钩子。现在只有一个工具,措辞也就只有一套,钩子跟着消失。
+ * 保存要打哪些实体、是否自动自卫、是否严格限制攻击对象，以及每个目标的当前处理结果。
+ * 这份任务单只记编号和统计，不自己观察死亡或判断能否攻击；结果分类由 AttackCompanionTask 写入。
  */
 public final class AttackTaskRecord extends TaskRecord {
 
@@ -65,6 +63,7 @@ public final class AttackTaskRecord extends TaskRecord {
     public void unreachable(int id) { unreachable.add(id); }
 
     /** 出手一次(挥击或射出一箭)。 */
+    // 记录一次攻击动作。当前调用方对近战在点击确认后记数，对远程在箭发射后记数，因此不是统一的命中次数。
     public void strike(int id) {
         strikes++;
         strikesByEntity.merge(id, 1, Integer::sum);
@@ -72,6 +71,7 @@ public final class AttackTaskRecord extends TaskRecord {
 
     public int strikes(int id) { return strikesByEntity.getOrDefault(id, 0); }
 
+    // 按击败、丢失、不可达的顺序给状态；这些集合没有互斥校验，重复登记时按这个优先顺序显示。
     public String status(int id) {
         if (defeated.contains(id)) return "defeated";
         if (lost.contains(id)) return "lost";
@@ -79,6 +79,7 @@ public final class AttackTaskRecord extends TaskRecord {
         return "pending";
     }
 
+    // 只要已被归到上述任一结束类别，就不再主动选择这个目标。
     public boolean terminal(int id) {
         return defeated.contains(id) || lost.contains(id) || unreachable.contains(id);
     }

@@ -43,21 +43,9 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
- * {@code attack}:打掉指定的实体,<b>近战还是远程由身体判,不由模型判</b>。
- *
- * <h2>为什么合成一个工具</h2>
- * 模型在派发那一刻知道的是"打谁";不知道的是等她走到时还有多远、有没有视线、还剩几支箭、
- * 那东西够不够得着——这些每 tick 都在变,只有身体读得到。让模型选弓还是剑,等于要它拿着
- * 过期信息做决定,还顺带引入一整类错误(派远程攻击而背包里没箭)。
- *
- * <h2>三套武器学,一个判据</h2>
- * 挥击(冷却与无敌帧)、射击(弹道与拉弓)、躲避(势场),各自是真正不同的东西;
- * 选哪一套则只有一处判据 {@link AttackPlan},本能链用的也是同一处。
- *
- * <h2>会炸的东西</h2>
- * 爬行者<b>引信点着之前就是一只普通怪</b>:她够得着 4 格、它 3 格才点火,中间那条一格宽的带
- * 能打到它而不触发。点着了再退也来得及——引信 30 刻,而爆炸伤害到 6 格就归零,从 3 格退出去
- * 疾跑只要十来刻。末影水晶不适用:它没有引信,一打就炸。详见 {@link Menace}。
+ * 把一场战斗组织成观察敌人、选武器、攻击、走位或撤退，并在判定击败后收集掉落物。
+ * 明确目标模式保存待攻击的实体编号；自卫模式从正在威胁玩家的敌人中选择目标。
+ * 攻击与移动在同一刻分别推进，但共享同一个玩家和动作接口；它们仍需协调手中物品、举盾及未确认的操作。
  */
 public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskRecord> {
 
@@ -193,6 +181,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     @Override
+    // 先处理死亡和拾取阶段，再观察战场、选择目标，依次推进举盾、攻击和走位。
+    // 进入拾取阶段后这里直接返回 tickLoot，不再经过本刻的危险评估；见 A37。
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
         if (phase == Phase.LOOT) return tickLoot();
@@ -255,6 +245,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * <p>点名模式下"被授权"是模型给的那份清单;无差别模式下是"这一刻在追我的"——会分裂的怪
      * 裂出来的新 id 因此自动进场,而点名的清单一裂开就作废了。
      */
+    // 先找附近 Enemy 类别生物，另外补进明确指定的目标。
+    // “正在攻击我”与“允许作为主目标”分别记录，严格授权模式还会限制顺手反击的对象。
     private Battlefield surveyField() {
         hostiles = Menace.hostilesAround(player, FIELD_RADIUS);
         List<Battlefield.Foe> foes = new ArrayList<>();
@@ -290,6 +282,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 }
             }
         }
+        // 这里仅为判断有没有武器而扫描，传入的目标却是玩家自己；具体对手的特殊加伤没有参与这一轮选装。
         Loadout loadout = Loadout.forTarget(player, player);
         return new Battlefield(
                 Menace.effectiveHealth(player),
@@ -315,6 +308,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     /** 把已经有结果的目标记进账本(死了 / 不见了)。 */
+    // 逐个检查本任务涉及的目标：观察到死亡则记击败；目标离开客户端后，没有出手记录的记丢失。
+    // 目前只要曾有 strike，离开客户端也记击败；远程 strike 甚至只代表发射成功，这个推断见 A36。
     private void settleFinishedTargets() {
         for (int id : r.indiscriminate ? List.copyOf(touchedIds) : r.entityIds) {
             if (r.terminal(id)) {
@@ -346,6 +341,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
     }
 
+    // 看到伤害或击败等进展就延长任务预算，避免确实正在作战却被最初的固定时限截断。
     private void renewCombatProgress() {
         r.extendDeadlineTo(player.level().getGameTime() + COMBAT_PROGRESS_LEASE_TICKS);
     }
@@ -362,6 +358,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * <p>只在 NO-PATH 落定那一刻取一次样。搜索烧完整个预算才给得出这个结论,不是抖出来
      * 的;而"这一刻恰好没弹道"确实会抖,所以它不单独构成放弃 —— 两个条件同时成立才算。
      */
+    // 近战找不到路时，先检查还能不能射到；不能射才把目标标为不可达，能射则留给远程方案。
     private void judgeNoPath(Entity foe) {
         noPath.add(foe.getId());
         if (Loadout.forTarget(player, foe).hasRanged() && shotExistsTo(foe)) {
@@ -381,6 +378,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     /** 打完了 —— 名单清空(点名),或没人再追她(无差别)。 */
+    // 清场模式结束时直接成功；明确目标列表只要有一个击败也会成功，并在文字里提示未完成数量。
+    // 这里没有要求指定列表全部完成，是否应采用部分成功由审计记录 D11 留待决定。
     private TaskState finish() {
         InputDriver.halt(player);
         stopNav();
@@ -429,6 +428,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * 这套判据与 PR #13 的 {@code ShieldCombatPolicy} 同源,只是去掉了"冷却好了放盾"
      * 那一步 —— 既然能边举边砍,那一步是多余的。
      */
+    // 近处有危险且副手拿着可用盾时尝试举盾；开始使用后这里直接等，不按 ShieldPlan 的攻击时机松盾。
+    // 危险离开时调用 stop 松盾；这份持续使用记录可能已被近战操作覆盖，见 A35。
     private void tickShield() {
         if (bowFighting) {
             return;
@@ -482,6 +483,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      *
      * @param field 这一刻的局面,复用 onTick 已经扫好的那份
      */
+    // 先把上一次近战点击结算，再在够得着的实体中选本次攻击者。
+    // strictAuthorized 才会排除未获准的对象；默认模式允许对附近威胁顺手反击。
     private void tickWeapon(Battlefield field) {
         if (meleeAction != null) {
             Entity planned = liveEntity(meleeVictimId);
@@ -535,6 +538,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (victim == null) {
             return;
         }
+        // 武器选择没完成就等；失败时仅清掉选择器，下次重新扫描。同一副手候选因此会重复失败（A34）。
         if (loadout.hasMelee()) {
             FirstPersonActionGate.Status selected = meleeSelection.select(player, loadout.melee().slot());
             if (selected != FirstPersonActionGate.Status.READY) {
@@ -553,6 +557,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     /** A vanilla sweeping sword hit must not splash an unlisted living entity. */
+    // 严格授权时，目标周围若有其他未授权的活生物就暂不挥击，防止横扫伤到旁边的实体。
     private boolean strictMeleeClear(Entity victim) {
         return player.level().getEntities(player, victim.getBoundingBox().inflate(1.5D),
                 candidate -> candidate instanceof LivingEntity living
@@ -590,6 +595,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * <p>{@code MELEE} 与 {@code CLOSE_IN} 共用这一段 —— 它们只差"要不要挥",站位是一样的。
      * 分开写的时候,姿态一变就会拆掉刚算好的路径,而击退每砍一刀就让姿态变一次。
      */
+    // 围着目标保持战斗距离，同时绕开其他危险；只有真正无路可走才把目标送去远程可达性判断。
     private PlayerNav.Status driveApproach() {
         if (nav == null) {
             // <b>没有目标也要走。</b>判据的 SKIRMISH 可以是"对全场的"(挑不出能打的,但还有
@@ -682,6 +688,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * <h2>被围住的时候</h2>
      * 没有合格的格子也不会失败:引擎的七档 {@code bestSoFar} 会交出这次搜索里最好的一段。
      */
+    // 有目标时，要求走到它周围的一圈合适距离，并避开敌群；没主目标时只要求离威胁远一点。
+    // 弓使用更大的间距，近战则尝试站在“我能打到它、它不容易打到我”的区域。
     private NavGoal standoffGoal() {
         // 躲避场只收敌对生物:它们才有危险半径。目标本身归下面的环管——点名的猪牛鸡不是
         // 敌对生物,不在这份名单里,但照样是要走过去打的目标。"有没有目标"与"附近有没有怪"
@@ -741,6 +749,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // ==================== 远程 ====================
 
+    // 先检查距离和弹道，再把弓弩拿到主手，最后推进拉弓／装填／发射。
+    // 离得太远或没有弹道时继续等待走位，不凭估计盲射。
     private TaskState shootAt(Loadout loadout) {
         Loadout.Pick weapon = loadout.ranged();
         if (weapon == null) {
@@ -806,6 +816,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (shot.tick(aim, target)) {
             boolean fired = shot.fired();
             shot = null;
+            // 这里给发射成功记一次 strike，没有等待这一箭真正命中目标。
             if (fired) {
                 r.strike(target.getId());
                 misfires = 0;
@@ -838,6 +849,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      *
      * <p>三十二格是<b>跑的目标</b>,不是状态的出口:跑到了就没什么可跑的,判据自会改口。
      */
+    // 周围已没有敌对类别生物就结束撤退；否则尝试找远处落点，并定期按敌人新位置重新寻路。
     private TaskState tickFlee() {
         var around = Menace.hostilesAround(player, Menace.FLEE_DISTANCE);
         if (around.isEmpty()) {
@@ -884,6 +896,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 stopNav();
                 haven = null;
             }
+            // 当前只要导航不是 FAILED 就清零，连仍在计算路线的 RUNNING 也算；这会冲掉跨多刻的失败次数（A39）。
             retreatFailures = 0;
         }
         return TaskState.RUNNING;
@@ -918,6 +931,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // ==================== 拾荒 ====================
 
+    // 任何目标被判为击败后，立即停止追击并转去拾取；同刻多个死亡地点合到同一轮收集。
     private void beginLoot(int sourceEntityId, Vec3 where) {
         stopNav();
         abortShot();
@@ -933,6 +947,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         phase = Phase.LOOT;
     }
 
+    // 等死亡掉落物出现，走近后让游戏自然拾取，再核对背包增加与物品消失。
+    // 走不到、合进旧物品堆、来源不清或消失后没看到入包，都可能让战斗任务失败。
     private TaskState tickLoot() {
         loot.discover();
         boolean deathStreamOpen = loot.settling();
@@ -965,6 +981,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
             case NONE -> { }
         }
+        // 地上看不到待收物品后还要核对是否真的收好了；确认没有遗留问题才回到战斗阶段。
         if (loot.live().isEmpty()) {
             switch (loot.vanishState()) {
                 case WAITING_FOR_INVENTORY_SYNC -> {
@@ -1047,6 +1064,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
     }
 
+    // 这份摘要只是整个任务期间背包的正增加量，包含任何来源；具体战利品归属证据另在 loot.report。
     private Map<String, Integer> lootGained() {
         Map<Item, Integer> now = new HashMap<>();
         snapshotInventory(now);
@@ -1059,6 +1077,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     @Override
+    // 结束时依次停射击、近战和举盾，清物品选择，松开身体输入，再停止导航。
+    // 这些 stop 仍可能受共享动作记录冲突影响，不能把清掉字段等同于动作已在游戏中结束。
     protected void cleanup() {
         abortShot();
         if (meleeAction != null) meleeAction.stop();
@@ -1091,6 +1111,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     @Override
+    // 只要已经发起过攻击／射击或进入拾取，即使上层材料够了也要求本战斗先继续收尾；
+    // 这里的范围包含后续战斗和战利品，不只是等待已发出的一次点击，见 D08。
     public boolean mustSettleBeforeSatisfiedCancellation() {
         // A native attack/use packet can already be in flight while the confirmed strike ledger is
         // still zero.  Treat the first concrete hand action as the transaction boundary; otherwise

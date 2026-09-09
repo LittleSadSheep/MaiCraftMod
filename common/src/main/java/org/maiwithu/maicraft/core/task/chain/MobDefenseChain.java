@@ -21,26 +21,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 危险来了就<b>自动开一场战斗</b>——然后把打法完全交给 {@code attack}。
- *
- * <h2>它不再自己打</h2>
- * 这条链曾经是一整套独立的战斗系统:自己选武器、自己追、自己退。于是同一件事有了两份实现,
- * 两层还会为身体互相抢——她在十格外射爬行者,链子把她拽开,拉到一半的弓作废;拉开又交还,
- * 弓刚拉起来链子又拽。
- *
- * <p>现在它只做一件事:<b>判断该不该开打,然后派一场 {@link AttackCompanionTask}</b>。
- * 挥击、弹道、走位、退避、扛不扛得住,全归那一份判据,和模型自己派的 {@code attack} 走的是
- * 同一段代码。<b>走位也是战斗的一部分</b>,不该由另一个系统代管。
- *
- * <h2>为什么仍然是一条反射链,而不是直接换掉她手上的活</h2>
- * 反射链是<b>抢占 + 归还</b>:她挖着矿被打断,打完矿照样接着挖({@code stop(PREEMPTED)} 明确
- * 不动逻辑字段)。若改成顶掉当前任务槽,挖矿就真没了——持久化存的是那次工具调用而不是进度,
- * 重派等于从头挖一遍。
- *
- * <h2>什么算危险</h2>
- * 看的是<b>它已经逼到多近</b>:还远就有时间(模型看得见它,该由模型决定),近了就没有提前量,
- * 当场接管。这条线按威胁类型取自 {@link Menace}——爬行者 7.5(引信开始倒退的距离)、
- * 末影水晶 12(爆炸威力的两倍)、寻常怪 {@link #MELEE_DANGER}。
+ * 附近出现正在伤害玩家的近距离敌人时，暂时接管当前工作并用普通战斗任务自卫。
+ * 危险短暂消失后保留一小段观察时间，避免刚拉开一点距离就把工作还回去，再马上被同一只怪打断。
+ * 它没有另一套攻击动作，实际打斗、撤退和拾取都交给 AttackCompanionTask。
  */
 public final class MobDefenseChain implements Task, Reflex {
 
@@ -88,6 +71,7 @@ public final class MobDefenseChain implements Task, Reflex {
      * 不是等几秒再试一次,而是{@code cornered} 那一维——退不掉就打。
      */
     @Override
+    // 健康尚可且已有明确战斗任务时先让它处理；自己一旦创建了自卫任务，就持续获得执行机会直到该任务结束。
     public boolean canRun(LocalPlayer companion) {
         long now = companion.level().getGameTime();
         // 有人正在替这条本能干活(模型派的 attack),就别抢 —— 除非她已经扛不住,
@@ -105,6 +89,7 @@ public final class MobDefenseChain implements Task, Reflex {
         return dangerLastSeenTick != NEVER && now - dangerLastSeenTick < CALM_GRACE_TICKS;
     }
 
+    // 既识别直接的 attack 任务，也识别总目标当前步骤的 maicraft:combat，避免自卫重复抢同一场战斗。
     private static boolean explicitCombatTaskActive() {
         TaskRecord active = CompanionTickDispatcher.current();
         if (active == null) return false;
@@ -118,6 +103,7 @@ public final class MobDefenseChain implements Task, Reflex {
     }
 
     @Override
+    // 有近处危险就刷新最后危险时刻；还没开打则创建自卫战斗，已经开打就继续同一个 fight。
     public TaskState tick(LocalPlayer companion) {
         if (!dangersNear(companion).isEmpty()) {
             dangerLastSeenTick = companion.level().getGameTime();
@@ -142,6 +128,7 @@ public final class MobDefenseChain implements Task, Reflex {
      * <p>不设截止时间——它的终点是"没人再追我",由 {@code attack} 自己判;
      * 给一个闹钟只会在打到一半时把她扔在原地。
      */
+    // 记下开始时的危险数量和红心生命，报告自动接管原因，然后创建使用普通战斗逻辑的自卫任务。
     private void begin(LocalPlayer companion) {
         long now = companion.level().getGameTime();
         initialDangerCount = dangersNear(companion).size();
@@ -162,6 +149,7 @@ public final class MobDefenseChain implements Task, Reflex {
     /** 长到等同于没有截止时间;终点由"没人再追我"说了算。 */
     private static final long NO_DEADLINE = 20L * 60L * 60L * 24L;
 
+    // 取出战斗结果并让它执行清理，再清掉自卫状态、松开输入和报告剩余威胁。
     private void end(LocalPlayer companion, TaskState state) {
         String line = fight.result(state).message();
         fight = null;
@@ -177,6 +165,7 @@ public final class MobDefenseChain implements Task, Reflex {
                 "[maicraft-defense] hit danger and handled it on instinct — {}", line);
     }
 
+    // 只报告开始和结束时看到的威胁数与红心差，不把它冒充精确的攻击伤害或资源消耗账单。
     private void finishAttention(LocalPlayer companion, String outcome) {
         if (!attentionActive) return;
         int remaining = dangersNear(companion).size();
@@ -190,6 +179,7 @@ public final class MobDefenseChain implements Task, Reflex {
     }
 
     @Override
+    // 被更紧急的行为打断时保留 fight，之后继续；其他停止原因也只停止这份任务，没有在这里把 fight 置空。
     public void stop(LocalPlayer companion, StopReason why) {
         if (fight != null) {
             // 被更急的链抢走(摔落、换气):只松开身体,这场仗的状态一个不动,回来接着打。
@@ -230,6 +220,8 @@ public final class MobDefenseChain implements Task, Reflex {
      * <p>模型自己派的 {@code attack} 已经认领的目标同样不算:那场仗有人管了。但她扛不住时
      * 一律接管——那一档只有本能看得见。
      */
+    // 先取 Enemy 类别生物，再要求它是最近伤害来源或正在追打玩家，最后检查是否已经太近。
+    // 第一层会排除愤怒的狼等非 Enemy 攻击者，哪怕它已是最近伤害来源（A38）。
     private List<Mob> dangersNear(LocalPlayer companion) {
         LivingEntity attacker = companion.getLastHurtByMob();
         List<Mob> near = new ArrayList<>();
