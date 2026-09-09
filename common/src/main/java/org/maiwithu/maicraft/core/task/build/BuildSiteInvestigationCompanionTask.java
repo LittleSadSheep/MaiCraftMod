@@ -39,8 +39,8 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * Bounded read-observe/move/reobserve loop for semantic construction.
- * Movement is always a normal first-person MoveTo child with terrain alteration disabled.
+ * 附近没有合适地块时，让角色走到已加载的候选位置，重新观察；地块确认后把固定方案交给普通建筑任务。
+ * 勘察移动不允许改地形；只把可站位置当作去看一看的候选，不因地图上看着合适就当成建造成功。
  */
 public final class BuildSiteInvestigationCompanionTask
         extends AbstractCompanionTask<BuildSiteInvestigationTaskRecord> {
@@ -112,6 +112,7 @@ public final class BuildSiteInvestigationCompanionTask
     }
 
     @Override
+    // 记录开始勘察时的位置作为总活动范围中心；目标地点则另外用作探索方向和实际选址范围中心。
     protected void onStart() {
         origin = player.blockPosition().immutable();
         focus = SemanticBuildPlanner.investigationAnchor(r.goal, player, IntentRuntime.get());
@@ -123,6 +124,7 @@ public final class BuildSiteInvestigationCompanionTask
     protected TaskState onTick() {
         double bodyDistance = horizontalDistance(origin, player.blockPosition());
         farthestBodyDistance = Math.max(farthestBodyDistance, bodyDistance);
+        // 勘察阶段离起点超过 384 格加 12 格容差就停止；已经交给建筑子任务后不再用这条移动范围判断。
         if (stage != Stage.BUILD && bodyDistance > r.maxDistance + SCOPE_TOLERANCE) {
             stopMove(TaskState.FAILED);
             return stopInvestigation("site_investigation_left_bound",
@@ -136,6 +138,7 @@ public final class BuildSiteInvestigationCompanionTask
         };
     }
 
+    // 每次移动结束都重新观察：先回干地，再确认进入目标附近，最后问规划器这片已加载地形是否能建。
     private TaskState observeThenContinue() {
         scanCycles++;
         if (bodyInWater()) {
@@ -164,10 +167,8 @@ public final class BuildSiteInvestigationCompanionTask
     }
 
     /**
-     * A build survey never uses a water-surface path node as its observation stance. When travel
-     * hands us a body in water, inspect loaded columns in true nearest-first order and make one exact
-     * first-person move onto dry support. The scan is sliced across ticks so a wide open-water
-     * view cannot stall rendering.
+     * 角色还在水里时，先寻找周围已加载的干地。按水平距离从近到远逐列检查，不按实际路径长度或高度排序。
+     * 每刻最多检查 192 列，保留进度；找到后用精确站位移动，走不到的坐标记下来再试其他候选。
      */
     private TaskState continueToDryShore() {
         ClientLevel level = player.clientLevel;
@@ -212,6 +213,7 @@ public final class BuildSiteInvestigationCompanionTask
                 observedButUnreachable ? FailureType.NO_PATH : FailureType.TARGET_LOST);
     }
 
+    // 没有地块就选下一处观察位置；所有候选已试过或没有安全干地时，报告勘察耗尽。
     private TaskState continueToFrontier() {
         Candidate candidate = nextCandidate();
         if (candidate == null) return exhausted(
@@ -225,6 +227,7 @@ public final class BuildSiteInvestigationCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 每段移动先给九十秒；移动任务若持续确认前进可延长自己的期限，父任务会跟着延长。
     private void startMove(Candidate candidate) {
         BlockPos target = candidate.feet();
         activeMoveCandidate = candidate;
@@ -281,6 +284,7 @@ public final class BuildSiteInvestigationCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 移动子任务说成功后，仍要检查身体真的在那格干地；沿岸候选还需重新看到岸边水陆证据。
     private boolean verifyMoveArrival(Candidate candidate) {
         if (candidate == null) return false;
         ClientLevel level = player.clientLevel;
@@ -298,6 +302,7 @@ public final class BuildSiteInvestigationCompanionTask
                 || shorelineEvidence(level, actualFeet);
     }
 
+    // 复用 BuildTool 生成同样的建筑或供料任务，但捕获为当前任务的子任务，防止另派任务替换掉勘察流程。
     private TaskState startFrozenBuild(JsonObject arguments) {
         AtomicReference<TaskRecord> captured = new AtomicReference<>();
         AtomicReference<String> immediate = new AtomicReference<>();
@@ -319,12 +324,19 @@ public final class BuildSiteInvestigationCompanionTask
                     FailureType.INTERNAL);
         }
         buildRecord = captured.get();
+        r.projectPlan(buildRecord instanceof BuildTaskRecord plan ? plan
+                : buildRecord instanceof org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord supply
+                ? supply.plan : null);
+        r.projectPlan(buildRecord instanceof BuildTaskRecord plan ? plan
+                : buildRecord instanceof org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord supply
+                ? supply.plan : null);
         r.extendDeadlineTo(buildRecord.getDeadlineGameTime());
         buildChild = TaskFactory.create(player, buildRecord);
         stage = Stage.BUILD;
         return TaskState.RUNNING;
     }
 
+    // 把子任务的期限、成功或取消结果接回来；选址成功本身不代表房子已盖完。
     private TaskState tickBuild() {
         TaskState terminal;
         if (player.level().getGameTime() >= buildRecord.getDeadlineGameTime()) {
@@ -354,6 +366,7 @@ public final class BuildSiteInvestigationCompanionTask
         return TaskState.FAILED;
     }
 
+    // 优先朝目标及其左右偏转方向探索，再加入八个常规方向；最后选分数最高且没在附近试过的位置。
     private Candidate nextCandidate() {
         ClientLevel level = player.clientLevel;
         BlockPos current = player.blockPosition();
@@ -384,6 +397,7 @@ public final class BuildSiteInvestigationCompanionTask
                 .orElse(null);
     }
 
+    // 方向只决定去哪里取候选；靠近未加载区域、走得较远会加分，需要滨水建筑时岸边证据另加较高分。
     private void addCandidateToward(
             ClientLevel level, BlockPos current, double dx, double dz,
             int semanticBias, List<Candidate> out) {
@@ -400,6 +414,7 @@ public final class BuildSiteInvestigationCompanionTask
         out.add(new Candidate(frontier, score, shore, CandidateKind.SURVEY_FRONTIER));
     }
 
+    // 沿这个方向从 72 格远处向回每八格取样，只试至少 16 格外的已加载干地，并非逐格搜索整片范围。
     private BlockPos loadedFrontierToward(
             ClientLevel level, BlockPos current, int desiredX, int desiredZ) {
         double dx = desiredX - current.getX();
@@ -417,6 +432,7 @@ public final class BuildSiteInvestigationCompanionTask
         return null;
     }
 
+    // 只围绕该列地表高度上方两格到下方八格找干燥落脚点，避开危险方块、农田、作物和方块实体。
     private BlockPos safeDrySurfaceFeet(ClientLevel level, int x, int z) {
         int aroundY = Math.clamp(player.getBlockY(),
                 level.getMinBuildHeight() + 2, level.getMaxBuildHeight() - 3);
@@ -445,6 +461,7 @@ public final class BuildSiteInvestigationCompanionTask
                 || state.is(Blocks.NETHER_WART) || state.is(Blocks.SWEET_BERRY_BUSH);
     }
 
+    // 在周围二十格内间隔五格抽样；至少看到三个水面样本和三个干地样本才加岸边分，不在此判断最终码头长度。
     private boolean shorelineEvidence(ClientLevel level, BlockPos landFeet) {
         if (!BlockHelper.isDryStandable(level, landFeet)) return false;
         int water = 0;
@@ -471,6 +488,7 @@ public final class BuildSiteInvestigationCompanionTask
                 || level.getFluidState(feet.above()).is(FluidTags.WATER);
     }
 
+    // 预先排列 72 格圆内各列，按水平距离排序；排除当前同一列，寻找干地时不重新生成这张表。
     private static List<ShoreOffset> dryShoreOffsets() {
         List<ShoreOffset> offsets = new ArrayList<>();
         int radiusSquared = MAX_LEG_DISTANCE * MAX_LEG_DISTANCE;
@@ -485,6 +503,7 @@ public final class BuildSiteInvestigationCompanionTask
         return List.copyOf(offsets);
     }
 
+    // 离以前候选水平八格以内就算同一片已试区域，无论之前是到达还是失败，避免在相邻位置反复打转。
     private boolean alreadyAttempted(BlockPos candidate) {
         double radiusSquared = (double) FRONTIER_SAMPLE_STEP * FRONTIER_SAMPLE_STEP;
         for (BlockPos attempted : attemptedFrontiers) {
@@ -504,6 +523,7 @@ public final class BuildSiteInvestigationCompanionTask
         dryShoreSearchIndex = 0;
     }
 
+    // 只查参考高度上四格到下十格：必须为水源，且上方流体为空；水面上方是否有实体方块不在这里判断。
     private static boolean sourceWaterSurface(
             ClientLevel level, int x, int z, int aroundY) {
         for (int y = aroundY + 4; y >= aroundY - 10; y--) {
@@ -516,6 +536,7 @@ public final class BuildSiteInvestigationCompanionTask
         return false;
     }
 
+    // 四个方向各看 16 格和 32 格外的区块，越多未加载区块说明越接近目前观察边缘。
     private static int boundaryScore(ClientLevel level, BlockPos pos) {
         int score = 0;
         for (Direction direction : Direction.Plane.HORIZONTAL) {
@@ -542,12 +563,14 @@ public final class BuildSiteInvestigationCompanionTask
         return TaskState.FAILED;
     }
 
+    // 总探索圆以任务开始位置为圆心；不会因为一路前进就把允许范围跟着挪走。
     private boolean insideScope(double x, double z) {
         double dx = x - origin.getX();
         double dz = z - origin.getZ();
         return dx * dx + dz * dz <= (double) r.maxDistance * r.maxDistance;
     }
 
+    // 实际选址另要求靠近语义目标，半径为 336 格；它与起点的 384 格范围同时生效。
     private boolean insideSemanticSurveyScope(BlockPos pos) {
         if (focus == null) return true;
         double dx = pos.getX() - focus.x();
@@ -568,6 +591,7 @@ public final class BuildSiteInvestigationCompanionTask
         return value == null ? fallback : value.toString();
     }
 
+    // 只从建筑成功结果里取已经核对过的场地坐标，不把路途中试探的观察位置作为建筑回执。
     private void retainVerifiedPosition() {
         if (buildResult == null || buildResult.data() == null) return;
         Object raw = buildResult.data().get("verified_position");
@@ -610,6 +634,7 @@ public final class BuildSiteInvestigationCompanionTask
     }
 
     @Override
+    // 报告勘察次数、走到哪里以及建筑子结果。site_verified 只表示地块通过检查，建筑是否成功另在 construction 中说明。
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("scope", "loaded_client_observation_and_first_person_frontiers");

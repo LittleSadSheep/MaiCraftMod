@@ -7,17 +7,28 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Internal semantic build-site investigation. No generated position is an input or receipt. */
+/**
+ * 保存“找地块并完成建筑”的内部任务；输入是语义建造目标，禁止直接混入逐格 ops。
+ * 活动半径固定为 384 格；最终位置只由实际建筑结果写入，不来自尚未验证的候选地块。
+ */
 public final class BuildSiteInvestigationTaskRecord extends TaskRecord
         implements InternalPositionReceipt {
     public static final String TOOL_NAME = SemanticBuildPlanner.SITE_INVESTIGATION_TOOL;
     public static final int MAX_DISTANCE = 384;
-    /** Initial lease only; live Move/Build child deadlines are propagated by the parent task. */
+    /** 最初给两分钟；之后父任务跟随有进展的移动或建筑子任务延长，并非固定两分钟后必停。 */
     public static final long INITIAL_LIVENESS_LEASE_TICKS = 2L * 60L * 20L;
 
     public final Goal goal;
     public final int maxDistance;
     private Position verifiedPosition;
+    private BuildTaskRecord projectPlan;
+
+    void projectPlan(BuildTaskRecord plan) { projectPlan = plan; }
+    public BuildTaskRecord projectPlan() { return projectPlan; }
+    private BuildTaskRecord projectPlan;
+
+    void projectPlan(BuildTaskRecord plan) { projectPlan = plan; }
+    public BuildTaskRecord projectPlan() { return projectPlan; }
 
     static {
         TaskFactory.register(BuildSiteInvestigationTaskRecord.class,
@@ -37,7 +48,7 @@ public final class BuildSiteInvestigationTaskRecord extends TaskRecord
         this.maxDistance = MAX_DISTANCE;
     }
 
-    /** Forces runner registration during Mod initialization. */
+    /** 调用空方法也会触发本类初始化，执行上面的静态工厂注册。 */
     public static void ensureRegistered() {}
 
     void retainVerifiedPosition(Position position) {
