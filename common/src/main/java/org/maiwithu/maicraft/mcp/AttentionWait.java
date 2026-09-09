@@ -14,7 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-/** One cancellable subscription. All snapshots, including the deadline read, run on the client executor. */
+/** 处理“等有新消息再回复”：用事件通知和超时计时器等待，不阻塞游戏线程，也不接管玩家。 */
 final class AttentionWait extends CompletableFuture<JsonElement> implements RuntimeFacade.ManagedCall {
     private static final ScheduledExecutorService DEADLINES = Executors.newSingleThreadScheduledExecutor(
             work -> Thread.ofPlatform().daemon().name("maicraft-attention-deadline").unstarted(work));
@@ -27,6 +27,7 @@ final class AttentionWait extends CompletableFuture<JsonElement> implements Runt
         this.snapshot = snapshot;
         this.client = client;
         whenComplete((ignored, failure) -> {
+            // 回复、失败或取消后，都删掉订阅并取消计时器，不能让已结束的等待继续占资源。
             close(subscription.getAndSet(null));
             ScheduledFuture<?> timer = deadline.getAndSet(null);
             if (timer != null) timer.cancel(false);
@@ -37,12 +38,13 @@ final class AttentionWait extends CompletableFuture<JsonElement> implements Runt
             Function<Consumer<JsonElement>, AutoCloseable> subscribe, Executor client, int waitMs) {
         AttentionWait wait = new AttentionWait(snapshot, client);
         wait.dispatch(() -> {
+            // 先看一次当前状态；任务如果已经结束或正在等人回答，就没必要继续等新事件。
             wait.read(false);
             if (wait.isDone()) return;
             AutoCloseable handle = subscribe.apply(ignored -> wait.dispatch(() -> wait.read(false)));
             wait.subscription.set(handle);
             if (wait.isDone()) { close(wait.subscription.getAndSet(null)); return; }
-            // Catch an event between the initial read and listener registration.
+            // 订阅后再看一次，补上“第一次查看完、还没订阅上”这小段间隙可能发生的消息。
             wait.read(false);
             if (wait.isDone()) return;
             ScheduledFuture<?> timer = DEADLINES.schedule(
@@ -57,6 +59,7 @@ final class AttentionWait extends CompletableFuture<JsonElement> implements Runt
     }
 
     private void read(boolean timedOut) {
+        // 有值得回复的变化就立即回复；一直没变化时，到时间返回 timeout，它不表示游戏任务超时。
         if (isDone()) return;
         JsonObject current = snapshot.get();
         if (!"idle".equals(current.get("wake_reason").getAsString())) complete(current);
@@ -67,6 +70,7 @@ final class AttentionWait extends CompletableFuture<JsonElement> implements Runt
     }
 
     private void dispatch(Runnable work) {
+        // 读取任务和世界状态仍交给游戏线程；消息通知或计时器所在的线程不能直接读取可变游戏对象。
         if (isDone()) return;
         try {
             client.execute(() -> {
@@ -78,7 +82,7 @@ final class AttentionWait extends CompletableFuture<JsonElement> implements Runt
     }
 
     @Override public RuntimeFacade.CancellationDisposition cancelCall() {
-        // Only the read wait is cancelled. This operation never owns or cancels the game task.
+        // 取消的是“等回复”这次请求，不是游戏里的任务；玩家正在做的事继续由原任务负责。
         return cancel(false) ? RuntimeFacade.CancellationDisposition.CANCELLED_WHILE_WAITING
                 : RuntimeFacade.CancellationDisposition.SETTLED;
     }

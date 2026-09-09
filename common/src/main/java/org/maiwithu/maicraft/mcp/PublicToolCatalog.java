@@ -172,6 +172,7 @@ final class PublicToolCatalog {
     }
 
     static JsonArray definitions() {
+        // 给每个客户端一份接口定义副本，避免调用者修改返回内容时把所有人的工具定义也改掉。
         JsonArray array = new JsonArray();
         TOOLS.forEach(tool -> array.add(tool.deepCopy()));
         return array;
@@ -182,6 +183,7 @@ final class PublicToolCatalog {
     }
 
     static JsonObject validateAndNormalize(String name, JsonElement rawArguments) {
+        // 复制请求后补默认值、查格式，不直接改调用者传进来的原对象。
         if (rawArguments == null || rawArguments.isJsonNull()) {
             rawArguments = new JsonObject();
         }
@@ -200,6 +202,7 @@ final class PublicToolCatalog {
     }
 
     private static void validatePerceive(JsonObject value) {
+        // 不同查看方式接受不同字段，例如等待时长只属于 Attention，文档地址只属于知识读取。
         only(value, "view", "focus", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit", "server_id");
         defaults(value, "view", "situation", "after_cursor", 0, "wait_ms", 0,
                 "limit", 10, "server_id", "minecraft-server");
@@ -233,6 +236,7 @@ final class PublicToolCatalog {
     }
 
     private static void validatePlan(JsonObject value) {
+        // 计划请求必须给完整目标；这里先查结构，能力自己的参数名和值规则还会在 IntentRuntime 检查。
         only(value, "goal", "server_id");
         defaults(value, "server_id", "minecraft-server");
         require(value, "goal");
@@ -241,6 +245,7 @@ final class PublicToolCatalog {
     }
 
     private static void validateExecute(JsonObject value) {
+        // 目标与旧计划编号必须二选一，不允许同时提交后让执行端猜该用哪份。
         only(value, "goal", "plan_id", "request_key", "server_id");
         defaults(value, "server_id", "minecraft-server");
         boolean hasGoal = present(value, "goal");
@@ -253,6 +258,7 @@ final class PublicToolCatalog {
     }
 
     private static void validateTask(JsonObject value) {
+        // list 无需任务编号；控制单项任务必须有编号；answer 还要说明正在回答哪个问题、选哪一项。
         only(value, "action", "task_id", "request_key", "answer", "limit", "server_id");
         defaults(value, "limit", 20, "server_id", "minecraft-server");
         String action = string(value, "action", 1, 16, false);
@@ -282,6 +288,7 @@ final class PublicToolCatalog {
             if (present(details, "parameters")) object(details, "parameters");
             if (present(details, "goal")) validateGoal(object(details, "goal"), 0);
             boolean changesSemanticGoal = "recover".equals(choice) || "replace_goal".equals(choice);
+            // 改目标用 details.goal，普通重试调整参数用 details.parameters，不能把两种含义混着传。
             if (changesSemanticGoal && !present(details, "goal")) {
                 throw bad(choice + " requires one semantic details.goal");
             }
@@ -297,6 +304,7 @@ final class PublicToolCatalog {
     }
 
     private static void validateGoal(JsonObject goal, int depth) {
+        // 限制嵌套深度和每一层子目标数量；当前没有在这里累计展开后的总步骤数。
         if (depth > 32) throw bad("goal nesting is too deep");
         only(goal, "ability", "outcome", "target", "parameters", "preferences", "constraints", "children");
         defaults(goal, "parameters", new JsonObject(), "preferences", new JsonObject(),
@@ -306,6 +314,7 @@ final class PublicToolCatalog {
         string(goal, "outcome", 1, 500, false);
         if (present(goal, "target")) validateTarget(object(goal, "target"));
         object(goal, "parameters");
+        // 这里仅确认 parameters 是对象，不检查里面 count 等各能力参数的整数类型或数值范围。
         object(goal, "preferences");
         JsonArray constraints = array(goal, "constraints", 32);
         constraints.forEach(item -> validateConstraint(asObject(item, "constraint")));
@@ -330,6 +339,7 @@ final class PublicToolCatalog {
     }
 
     private static void validateTarget(JsonObject target) {
+        // 坐标目标必须有位置，其他目标不能夹带位置；地标、人物等要有名字，引用前一步要说明引用关系。
         only(target, "kind", "label", "position", "relation");
         String kind = string(target, "kind", 1, 32, false);
         if (!TARGET_KINDS.contains(kind)) throw bad("target kind has an unsupported value");
@@ -357,6 +367,7 @@ final class PublicToolCatalog {
     }
 
     private static void validateConstraint(JsonObject constraint) {
+        // 这里只看条件描述的格式；条件种类是否真的支持，在语义契约里继续检查。
         only(constraint, "kind", "description", "hard", "parameters");
         defaults(constraint, "hard", true, "parameters", new JsonObject());
         resource(string(constraint, "kind", 1, 256, false), "constraint kind");
@@ -396,6 +407,7 @@ final class PublicToolCatalog {
     }
 
     private static void defaults(JsonObject object, Object... pairs) {
+        // 只给缺失字段补值；明确写了 null 的字段不会在这里被替换成默认值。
         for (int i = 0; i < pairs.length; i += 2) {
             String key = (String) pairs[i];
             if (!object.has(key)) {
@@ -462,6 +474,7 @@ final class PublicToolCatalog {
     }
 
     private static long longInteger(JsonObject object, String key, long min, long max) {
+        // 协议层整数使用精确转换，小数和超出 long 的数字直接拒绝，再检查业务允许范围。
         require(object, key);
         JsonElement element = object.get(key);
         if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {

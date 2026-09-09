@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/** RuntimeFacade backed by the active LocalPlayer and the single Task scheduler. */
+/** 把 MCP 请求接到当前游戏玩家：读世界、登记目标、控制任务、整理对外回复；不另外运行一套游戏逻辑。 */
 public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     private static final MaiCraftRuntimeFacade INSTANCE = new MaiCraftRuntimeFacade();
@@ -55,6 +55,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     @Override
     public CompletionStage<JsonElement> perceive(JsonObject arguments) {
+        // 文档可以离线读，周边地形要分几刻采样，等任务消息则挂起回复；其他查询交给游戏线程当次处理。
         if ("knowledge".equals(arguments.get("view").getAsString())) return knowledge(
                 org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary.perceptionRequest(arguments));
         if("surroundings".equals(arguments.get("view").getAsString())) return observeSurroundings(arguments);
@@ -65,6 +66,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return onClient(() -> perceiveOnClient(arguments));
     }
     private CompletionStage<JsonElement> observeSurroundings(JsonObject arguments) {
+        // 记住这次查看的是哪个玩家，等地形采样准备好后再整理周边信息；中途换玩家就拒绝旧结果。
         var result=new CompletableFuture<JsonElement>();
         onClient(()->{
             if(result.isDone()) return new JsonObject();
@@ -85,6 +87,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     @Override
     public CompletionStage<JsonElement> plan(JsonObject arguments) {
+        // 先确认任务记忆属于当前世界，再检查目标并登记计划；此时不接管玩家，也不开始走路。
         return onClient(() -> {
             Minecraft minecraft = requireWorld();
             intents.bindForRequest(minecraft, minecraft.player);
@@ -98,7 +101,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     @Override
     public CompletionStage<JsonElement> execute(JsonObject arguments) {
-        // 返回的是接单回执。持续动作由游戏 tick 推进，调用方用 next_attention 等待进度、问题或终态。
+        // 回复表示已登记任务，不表示事情已经做完；调用者拿 next_attention 继续等进度和结果。
         return onClient(() -> {
             Minecraft minecraft = requireWorld();
             LocalPlayer player = minecraft.player;
@@ -106,6 +109,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             Goal goal;
             UUID planId = null;
             if (arguments.has("plan_id") && !arguments.get("plan_id").isJsonNull()) {
+                // 可以直接提交目标，也可以引用先前存好的计划；不存在的计划不能凭编号重建。
                 planId = UUID.fromString(arguments.get("plan_id").getAsString());
                 Plan plan = intents.plan(planId);
                 if (plan == null) throw new IllegalArgumentException("unknown or expired plan_id: " + planId);
@@ -131,10 +135,11 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         });
     }
 
-    /** This is the execution entry's sole body-control boundary; local design never enters it. */
+    /** 普通执行先请求接管玩家，创建任务失败时撤回新请求；只展示房屋设计时不用接管。 */
     static IntentTaskRecord dispatchExecution(Goal goal, LocalPlayer player, Supplier<IntentTaskRecord> execute) {
         if (IntentRuntime.isReadOnlyDesign(goal)) return execute.get();
         ClientActorBoundary.AutomationRequest control = ClientRuntime.requestAutomationControl(player);
+        // 重复 request_key 的查重在 execute.get() 内部发生，因此这一步可能在发现“旧任务已存在”前执行。
         try { return execute.get(); }
         catch (RuntimeException failure) {
             ClientRuntime.rollbackAutomationControl(control);
@@ -165,6 +170,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private JsonElement perceiveOnClient(JsonObject arguments) {
+        // 状态、能力、任务和地标都在这里分流；除 Attention 外，这一路先要求玩家处于一个可用世界。
         if ("attention".equals(arguments.get("view").getAsString())) return attentionOnClient(arguments);
         Minecraft minecraft = requireWorld();
         LocalPlayer player = minecraft.player;
@@ -223,11 +229,13 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private JsonElement taskOnClient(JsonObject arguments) {
+        // 查询或控制的是 MCP 的 UUID 总任务编号，不是内部 t 开头的动作编号。
         Minecraft minecraft = requireWorld();
         LocalPlayer player = minecraft.player;
         intents.bindForRequest(minecraft, player);
         String action = arguments.get("action").getAsString();
         if ("list".equals(action)) {
+            // 带 request_key 时只找对应请求；否则按最近顺序列出任务，方便断线后找回上次接单结果。
             JsonArray tasks = new JsonArray();
             String requestKey = nullableString(arguments, "request_key");
             if (requestKey != null) {
@@ -251,12 +259,14 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             case "get" -> {
             }
             case "pause" -> {
+                // 这里只写暂停标记并发消息；是否已安全停下，需要后面的身体调度器实际处理。
                 if (!record.pause(now, "paused_by_mcp")) {
                     throw new IllegalStateException("task is already terminal");
                 }
                 intents.paused(record, "Paused by MCP request");
             }
             case "resume" -> {
+                // 从磁盘恢复的任务只存在于任务记录里，继续前要重新放入调度器；这可能替换当前任务。
                 intents.requireCurrentBinding(record);
                 boolean restoredDetached = record.restoredDetached();
                 if (!record.resume()) {
@@ -273,6 +283,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 intents.resumed(record);
             }
             case "cancel" -> {
+                // 当前只会取消仍在调度器里的任务；尚未 resume 的恢复记录在这里会被判为不能取消。
                 if (record.getState().isTerminal()) {
                     throw new IllegalStateException("task is already terminal");
                 }
@@ -281,6 +292,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 }
             }
             case "answer" -> {
+                // 先核对答复参数，再接受问题编号和选项；死亡后的复活／旁观有单独的游戏操作流程。
                 if (record.restoredDetached()) {
                     intents.requireCurrentBinding(record);
                 }
@@ -327,6 +339,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private JsonObject situation(LocalPlayer player) {
+        // 直接读取当前身体状态和背包摘要；这些是观察结果，不表示某个目标已经完成。
         JsonObject result = new JsonObject();
         result.addProperty("dimension", player.level().dimension().location().toString());
         result.add("position", position(player));
@@ -360,6 +373,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private JsonObject surroundings(LocalPlayer player, String focus, int limit) {
+        // 汇总附近实体、告示牌、可走区域和船／电梯；大范围地形来自此前分刻准备的采样。
         JsonObject result = new JsonObject();
         result.add("position", position(player));
         result.addProperty("dimension", player.level().dimension().location().toString());
@@ -391,10 +405,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    /**
-     * Aggregate local geometry into decision references. This deliberately
-     * reports regions and risks, not a raw block dump.
-     */
+    /** 把脚下附近的可走区域和危险汇总出来，方便调用者判断下一步，不逐格列出全部方块。 */
     private JsonObject localDecisionSummary(LocalPlayer player, int hostileCount) {
         JsonObject summary = org.maiwithu.maicraft.core.tools.perception.LocalFloorSense.describe(player);
         if (hostileCount > 0) {
@@ -406,6 +417,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return summary;
     }
     private JsonObject abilities(String focus) {
+        // 当前 available=true 只表示这个能力名已注册，不检查是否装了对应模组、带了材料或具备实际执行条件。
         JsonArray abilities = new JsonArray();
         for (String ability : IntentRuntime.KNOWN_ABILITIES.stream().sorted().toList()) {
             if (focus != null && !focus.equals(ability)) continue;
@@ -425,6 +437,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private JsonObject landmarks(LocalPlayer player) {
+        // 列出已记住的地点名及是否在当前维度；精确坐标留在 Mod 里，调用者用地点名引用。
         JsonArray entries = new JsonArray();
         String currentDimension = player.level().dimension().location().toString();
         for (IntentRuntime.Landmark landmark : intents.landmarks()) {
@@ -448,6 +461,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     static JsonObject taskSnapshot(IntentTaskRecord record) {
+        // 完整查询包含原始目标、当前步骤、已完成结果和失败尝试；最后再附暂停、待答问题或最终结果。
         JsonObject result = new JsonObject();
         result.addProperty("task_id", record.externalId().toString());
         if (record.planId() != null) result.addProperty("plan_id", record.planId().toString());
@@ -486,6 +500,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("attempts", attempts);
 
         boolean terminalState = record.getState().isTerminal() || record.terminalSnapshot() != null;
+        // 已结束的任务只展示结束结果，不再带旧的“正在执行”“暂停”或“等回答”，避免状态互相矛盾。
         if (!terminalState && record.activeExecution() != null) {
             result.add("active_execution", record.activeExecution());
         }
@@ -510,7 +525,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    /** Surface the current failed-step ledger directly while retaining it in decision.context. */
+    /** 失败时把“哪些已做、哪些未做”提到回复外层，调用者不必深入失败背景才能找到。 */
     private static void copyEffectLedger(JsonObject target, JsonObject decisionContext) {
         if (decisionContext == null || !decisionContext.has("failure")
                 || !decisionContext.get("failure").isJsonObject()) return;
@@ -560,6 +575,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private static JsonArray inventorySummary(LocalPlayer player) {
+        // 按物品类型合并主背包数量，多的排前面；装备和副手在另一个字段单独显示。
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (ItemStack stack : player.getInventory().items) {
             if (stack.isEmpty()) continue;
@@ -579,6 +595,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private static JsonObject equipmentSummary(LocalPlayer player) {
+        // 分开列出主手、副手和四件护甲，保留耐久信息，避免混在普通背包总数里看不清。
         JsonObject result = new JsonObject();
         addStack(result, "main_hand", player.getMainHandItem());
         addStack(result, "off_hand", player.getOffhandItem());
@@ -621,6 +638,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private static String publicState(IntentTaskRecord record) {
+        // 结束结果优先；没结束时，等回答比普通暂停更具体；都没有才使用内部 RUNNING 等状态。
         if (record.terminalSnapshot() != null) return record.terminalSnapshot().state().name().toLowerCase();
         if (record.getState().isTerminal()) return record.getState().name().toLowerCase();
         if (record.decisionSnapshot() != null) return "waiting_for_decision";
@@ -651,12 +669,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return minecraft;
     }
 
-    /**
-     * Wait for semantic attention without holding the client thread. The listener
-     * only snapshots the in-memory feed and completes a future; transport I/O is
-     * owned by the MCP handler. Resource notifications remain advisory and never
-     * initiate model sampling from inside the Mod.
-     */
+    /** 订阅任务消息后等回复；游戏仍照常运行，是否因此唤醒模型由外部 MCP 客户端决定。 */
     private CompletionStage<JsonElement> waitForAttention(JsonObject arguments) {
         return AttentionWait.start(() -> attentionOnClient(arguments), intents::subscribeAttention,
                 work -> Minecraft.getInstance().execute(work), arguments.get("wait_ms").getAsInt());
@@ -670,7 +683,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private static CompletionStage<JsonElement> onClient(Supplier<? extends JsonElement> operation) {
-        // HTTP 请求可能来自网络线程；统一切到客户端线程读写任务和世界状态，避免与游戏更新并发冲突。
+        // 网络线程不直接碰游戏对象，排到客户端线程处理；请求还没开始就被取消时，排队的代码不会再执行。
         ClientCallFuture future = new ClientCallFuture();
         Runnable work = () -> {
             if (!future.begin()) return;
@@ -695,6 +708,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     private static final class ClientCallFuture extends CompletableFuture<JsonElement>
             implements RuntimeFacade.ManagedCall {
+        // 记录“还在排队”还是“已经开始”，网络超时时才知道能否保证这次请求没改变任何事情。
         private static final int QUEUED = 0;
         private static final int RUNNING = 1;
         private static final int WAITING = 2;
@@ -733,6 +747,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
         @Override
         public RuntimeFacade.CancellationDisposition cancelCall() {
+            // 尚未开始可以撤回；已经开始则只报告无法撤回，不能把一个已开工请求说成什么都没做。
             while (true) {
                 int current = state.get();
                 if (current == QUEUED && state.compareAndSet(QUEUED, CANCELLED)) {

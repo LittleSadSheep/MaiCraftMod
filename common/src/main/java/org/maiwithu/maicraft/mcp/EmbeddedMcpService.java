@@ -44,7 +44,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * An in-process Streamable HTTP MCP endpoint backed by one injected runtime.
+ * 游戏进程里的 MCP 网络服务：接收请求、检查连接和格式，再把实际工作交给 RuntimeFacade。
+ * 一个网络连接不是一个游戏任务；断开连接或停止等回复，不等于取消已经开始的游戏任务。
  */
 public final class EmbeddedMcpService implements AutoCloseable {
     public static final URI ATTENTION_URI = URI.create("maicraft://attention");
@@ -78,7 +79,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
     }
 
-    /** Starts the endpoint once. Repeated calls while running are no-ops. */
+    /** 启动本地端口、网络线程和消息订阅；已经启动时不重复开一个服务。 */
     public synchronized void start() throws IOException {
         if (server != null) return;
         stopping.set(false);
@@ -92,6 +93,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         HttpServer newServer = null;
         AutoCloseable newSubscription = null;
         try {
+            // 先在局部变量里准备各部分；任何一步失败都关闭已创建的资源，全部成功后才记为服务已启动。
             newServer = HttpServer.create(new InetSocketAddress(config.host(), config.port()), 0);
             newServer.createContext(ENDPOINT, this::handle);
             newServer.setExecutor(newExecutor);
@@ -132,9 +134,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         return sessions.size();
     }
 
-    /**
-     * Stops accepting work without waiting for game-thread calls or running tasks.
-     */
+    /** 停止接收网络请求，关闭消息等待和连接；游戏任务的清理由 ClientRuntime 另外负责。 */
     public synchronized void stop() {
         if (server == null && executor == null && maintenance == null) return;
         stopping.set(true);
@@ -168,6 +168,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void handle(HttpExchange exchange) throws IOException {
+        // 先查是否停服、浏览器来源是否允许、口令是否正确，再按 POST／GET／DELETE 处理请求。
         try {
             if (stopping.get()) {
                 sendStatus(exchange, 503, "MCP endpoint is stopping");
@@ -201,6 +202,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void handlePost(HttpExchange exchange) throws IOException {
+        // 普通 MCP 请求用 JSON；先检查内容类型和大小，再解析 JSON-RPC 方法与请求编号。
         String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
         if (contentType == null || !contentType.toLowerCase(Locale.ROOT).startsWith("application/json")) {
             sendStatus(exchange, 415, "Content-Type must be application/json");
@@ -238,6 +240,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
 
         boolean notification = id == null;
+        // 没有请求编号的是通知，不返回普通调用结果；初始化完成和取消等待的通知在这里处理。
         if (notification) {
             Session session = requireSession(exchange);
             if (session == null || !validVersionHeader(exchange, session)) return;
@@ -280,6 +283,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void handleInitialize(HttpExchange exchange, JsonElement id, JsonElement rawParams) throws IOException {
+        // 协商协议版本并分配连接编号，返回四个工具和知识／任务消息资源的使用说明。
         JsonObject params = optionalObject(rawParams);
         String requested = params.has("protocolVersion") && params.get("protocolVersion").isJsonPrimitive()
                 ? params.get("protocolVersion").getAsString()
@@ -324,6 +328,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private JsonElement dispatch(
             Session session, String method, JsonElement rawParams, JsonElement requestId) {
+        // 工具调用、资源读取和消息订阅在这里分流；不知道的方法明确返回“不支持”。
         return switch (method) {
             case "ping" -> new JsonObject();
             case "tools/list" -> listTools();
@@ -344,6 +349,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private JsonObject callTool(Session session, JsonObject params, JsonElement requestId) {
+        // 接口参数合法才转给游戏运行时；等待回复在网络线程完成，不让游戏线程停在这里。
         only(params, "name", "arguments", "_meta");
         optionalMeta(params);
         String name = requiredString(params, "name");
@@ -358,6 +364,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         String requestKey = null;
         if (PublicToolCatalog.EXECUTE.equals(name)) {
+            // 调用者没给去重编号时，用连接、请求编号和参数生成一个；主动跨连接重试需要保留返回的编号。
             requestKey = nullableString(arguments, "request_key");
             if (requestKey == null) {
                 requestKey = automaticRequestKey(session, requestId, arguments);
@@ -367,6 +374,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         PendingAttention pending = PublicToolCatalog.PERCEIVE.equals(name)
                 && "attention".equals(nullableString(arguments, "view")) ? new PendingAttention() : null;
+        // 只登记 Attention 的可取消等待；取消网络等待不应顺手取消玩家正在做的任务。
         String callId = GSON.toJson(requestId);
         if (pending != null && session.attentionCalls.putIfAbsent(callId, pending) != null)
             throw new RpcException(-32600, "Duplicate active attention request id");
@@ -392,6 +400,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             return toolError("attention_wait_cancelled", "Attention wait cancelled; the game task is unchanged.",
                     false, true, null);
         } catch (TimeoutException exception) {
+            // 回复超时后先问运行时请求是否已开始；已开始的操作不能承诺“什么都没发生”。
             RuntimeFacade.CancellationDisposition cancellation = cancelRuntimeCall(stage);
             boolean mutating = mutatesSemanticState(name, arguments);
             boolean outcomeKnown = !mutating || cancellation
@@ -437,6 +446,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private JsonObject readResource(JsonObject params) {
+        // Attention 资源读任务消息；其他地址交给知识库。这里只读资源，不启动目标执行。
         only(params, "uri", "_meta");
         optionalMeta(params);
         String uri = requiredString(params, "uri");
@@ -478,6 +488,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private JsonObject knowledgeRequest(JsonObject request) {
+        // 知识库错误保留自己的错误码；超时只撤回读取请求，不推断游戏内的任务失败。
         CompletionStage<JsonElement> stage = null;
         try {
             stage = runtime.knowledge(request);
@@ -497,6 +508,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static JsonObject knowledgeToolResult(JsonObject value) {
+        // 文档正文直接作为文本内容返回，结构化部分只放地址和格式，避免同一大段正文重复出现两遍。
         JsonArray content = new JsonArray(), metadata = new JsonArray();
         for (JsonElement element : value.getAsJsonArray("contents")) {
             JsonObject document = element.getAsJsonObject(), text = new JsonObject(), info = new JsonObject();
@@ -517,6 +529,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void handleGet(HttpExchange exchange) throws IOException {
+        // GET 建立持续消息连接；这里只发“资源更新了”的通知，真正的任务状态仍要读取 Attention。
         String accept = exchange.getRequestHeaders().getFirst("Accept");
         if (accept == null || !accept.contains("text/event-stream")) {
             exchange.getResponseHeaders().set("Allow", "POST, DELETE");
@@ -549,6 +562,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void handleDelete(HttpExchange exchange) throws IOException {
+        // 删除的是这个 MCP 连接及其等待请求，不是游戏里的任务记录。
         Session session = requireSession(exchange);
         if (session == null || !validVersionHeader(exchange, session)) return;
         sessions.remove(session.id, session);
@@ -558,6 +572,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void publishAttentionUpdate() {
+        // 游戏线程只把通知放进队列，不能在这里向慢网络连接写数据，否则会拖住游戏更新。
         JsonObject notification = attentionNotification();
         sessions.values().forEach(session -> {
             // Never perform socket work on the Minecraft publication thread.
@@ -577,6 +592,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private Session createSession(String negotiatedVersion) {
+        // 每次初始化创建新连接编号；顺便清理过期连接，并保持连接总数有上限。
         reapSessionsSafely();
         Session created = new Session(UUID.randomUUID().toString(), negotiatedVersion);
         sessions.put(created.id, created);
@@ -598,6 +614,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void trimSessions() {
+        // 超过六十四个连接时，关闭最久没活动的那些；不会因为连接一直增长而无限占用资源。
         int overflow = sessions.size() - MAX_SESSIONS;
         if (overflow <= 0) return;
         List<Session> oldest = new ArrayList<>(sessions.values());
@@ -609,6 +626,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private Session requireSession(HttpExchange exchange) throws IOException {
+        // 普通请求必须带初始化得到的连接编号；过期编号要重新初始化，不能当新连接直接使用。
         String id = exchange.getRequestHeaders().getFirst(SESSION_HEADER);
         if (id == null || id.isBlank()) {
             sendStatus(exchange, 400, "MCP session header is required");
@@ -624,6 +642,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private boolean validVersionHeader(HttpExchange exchange, Session session) throws IOException {
+        // 已写明版本时必须与初始化协商的一致；未写时按旧版本兼容处理。
         String supplied = exchange.getRequestHeaders().getFirst(VERSION_HEADER);
         String effective = supplied == null ? "2025-03-26" : supplied;
         if (!SUPPORTED_VERSIONS.contains(effective)) {
@@ -639,6 +658,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private String readBody(HttpExchange exchange) throws IOException {
+        // 先看声明长度，再在读取过程中累计真实长度；不能只信请求头，否则分块请求可以绕过大小限制。
         String lengthHeader = exchange.getRequestHeaders().getFirst("Content-Length");
         if (lengthHeader != null) {
             try {
@@ -666,6 +686,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private boolean authenticated(String authorization) {
+        // 配置了口令才检查 Bearer；默认空口令表示不启用这一项检查。
         if (config.bearerToken().isBlank()) return true;
         if (authorization == null || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) return false;
         byte[] expected = config.bearerToken().getBytes(StandardCharsets.UTF_8);
@@ -674,6 +695,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private boolean validOrigin(String origin) {
+        // 浏览器带来源时只允许本机的三个常用地址；没有来源头的普通 MCP 客户端继续走其他检查。
         if (origin == null || origin.isBlank()) return true;
         try {
             URI uri = URI.create(origin);
@@ -715,6 +737,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static JsonObject toolResult(JsonElement value, boolean isError) {
+        // 普通工具结果同时提供 JSON 文本和结构化对象，兼容两种读取方式；错误标记由调用方给出。
         JsonElement payload = nonNull(value);
         String text = GSON.toJson(payload);
         JsonObject contentItem = new JsonObject();
@@ -740,6 +763,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private static JsonObject toolError(
             String code, String message, boolean retryable, boolean outcomeKnown,
             String requestKey, JsonObject details) {
+        // 分清“能否重试”和“知不知道上次结果”；结果不明时优先建议按 request_key 查原任务。
         JsonObject error = new JsonObject();
         error.addProperty("code", code);
         error.addProperty("message", message);
@@ -786,6 +810,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private Duration requestTimeout(String toolName, JsonObject arguments) {
+        // Attention 本身可能要等三十秒，网络超时要加上这段主动等待时间，不能十五秒就先掐断它。
         Duration base = config.requestTimeout();
         if (PublicToolCatalog.PERCEIVE.equals(toolName)
                 && "attention".equals(nullableString(arguments, "view"))
@@ -807,6 +832,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private static RuntimeFacade.CancellationDisposition cancelRuntimeCall(
             CompletionStage<JsonElement> stage) {
+        // 优先使用运行时提供的准确撤回状态；没有此接口时只能按普通 Future 的取消结果判断。
         if (stage == null) return RuntimeFacade.CancellationDisposition.SETTLED;
         if (stage instanceof RuntimeFacade.ManagedCall managed) return managed.cancelCall();
         return stage.toCompletableFuture().cancel(false)
@@ -816,6 +842,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private static String automaticRequestKey(
             Session session, JsonElement requestId, JsonObject normalizedArguments) {
+        // 对连接编号、请求编号和当前 JSON 文本取哈希；这里不是按“语义等价”判断两份参数是否相同。
         JsonObject semanticArguments = normalizedArguments.deepCopy();
         semanticArguments.remove("request_key");
         String material = session.id + "\n" + GSON.toJson(idOrNull(requestId))
@@ -961,6 +988,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static final class PendingAttention {
+        // 取消通知可能比实际等待对象更早到达，先记下 cancelled，等对象装上来再补取消。
         private CompletionStage<JsonElement> stage;
         private boolean cancelled;
         synchronized void attach(CompletionStage<JsonElement> next) {
@@ -974,6 +1002,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static final class Session {
+        // 保存一个 MCP 客户端连接的版本、消息订阅和活动时间，不保存玩家的业务目标。
         private final String id;
         private final String version;
         private final AtomicBoolean attentionSubscribed = new AtomicBoolean();
@@ -1001,6 +1030,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
 
         private void attach(SseConnection next) {
+            // 同一连接只保留一个消息输出通道；新通道接上时关闭旧通道，断线与替换竞争时再复查一次。
             touch();
             if (closed.get()) {
                 next.close();
@@ -1025,6 +1055,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
 
         private void close() {
+            // 只关闭一次，并取消还在等消息的请求；已经提交到游戏里的普通 execute 任务不在此列表中。
             if (!closed.compareAndSet(false, true)) return;
             attentionCalls.values().forEach(PendingAttention::cancel);
             attentionCalls.clear();
@@ -1034,6 +1065,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static final class SseConnection implements AutoCloseable {
+        // 只留一个待发“有更新”通知就够了；客户端收到后会读取最新状态，不需要缓存每条提醒。
         private final HttpExchange exchange;
         private final OutputStream output;
         private final Runnable activity;
@@ -1058,6 +1090,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
 
         private void writeLoop() throws InterruptedException {
+            // 有通知就发通知，没有则每十五秒发心跳维持连接；网络错误只结束这条消息通道。
             try {
                 writeComment("connected");
                 while (!done.get()) {
