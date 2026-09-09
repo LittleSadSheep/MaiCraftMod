@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.task.supply;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.SharedConstants;
@@ -33,6 +34,7 @@ public final class BuildSupplyPreviewTest {
                 "unobserved registry alternatives cannot replace the design or trigger sample acquisition");
         check(SemanticBuildMaterialBinding.select(family, id -> id.equals(modded) ? 64 : 0).equals(modded),
                 "carried modded variants remain eligible without a vanilla whitelist");
+        exactPaletteKeepsWallAndTrim();
 
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
         FlatLevel level = (FlatLevel) memory.allocateInstance(FlatLevel.class);
@@ -69,6 +71,27 @@ public final class BuildSupplyPreviewTest {
         decision.set(Decision.CANCELLED);
         check(task.onTick() == TaskState.CANCELLED, "cancel before approval prevents all acquisition");
         System.out.println("BuildSupplyPreviewTest: frozen review precedes all supply actions");
+    }
+
+    private static void exactPaletteKeepsWallAndTrim() {
+        var wall = new BuildTaskRecord.Target(Blocks.OAK_PLANKS, Items.OAK_PLANKS,
+                BlockPos.ZERO, "oak wall", null, null, null);
+        var trim = new BuildTaskRecord.Target(Blocks.SPRUCE_PLANKS, Items.SPRUCE_PLANKS,
+                BlockPos.ZERO.above(), "spruce trim", null, null, null);
+        var plan = new BuildTaskRecord("exact-palette", 1000, List.of(wall, trim), false);
+        var proposal = SemanticBuildMaterialBinding.propose(plan, false);
+        var selected = new LinkedHashMap<ResourceLocation, ResourceLocation>();
+        for (var family : proposal.families()) {
+            selected.put(family.groupId(), SemanticBuildMaterialBinding.select(family,
+                    id -> id.getPath().equals("spruce_planks") ? 64 : 0));
+        }
+        var bound = SemanticBuildMaterialBinding.bind(plan, proposal, selected);
+        check(bound.targets.getFirst().desiredState().is(Blocks.OAK_PLANKS)
+                        && bound.targets.get(1).desiredState().is(Blocks.SPRUCE_PLANKS),
+                "a specified palette preserves oak wall and spruce trim even when only spruce is carried");
+        check(proposal.groups().size() == 2 && proposal.families().stream()
+                        .allMatch(family -> family.alternatives().size() == 1),
+                "exact materials have independent supply requirements and no substitute variants");
     }
 
     private static final class FlatLevel extends ClientLevel {

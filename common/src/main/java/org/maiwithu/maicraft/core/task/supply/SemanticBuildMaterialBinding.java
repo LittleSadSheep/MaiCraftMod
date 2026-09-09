@@ -101,7 +101,9 @@ final class SemanticBuildMaterialBinding {
             int count = target.materialCount();
             if (count <= 0 || !(target.item() instanceof BlockItem blockItem)) continue;
             ResourceLocation id = BuiltInRegistries.ITEM.getKey(target.item());
-            Kind kind = kind(blockItem.getBlock(), id);
+            // Exact palettes may deliberately mix variants of the same shape. Keeping only
+            // the family would collapse e.g. oak walls and spruce trim into one block type.
+            Kind kind = broadenMaterialFamilies ? kind(blockItem.getBlock(), id) : Kind.EXACT;
             String identity = kind == Kind.EXACT ? "exact:" + id : kind.name().toLowerCase(Locale.ROOT);
             Accumulator accumulator = accumulators.computeIfAbsent(
                     identity, ignored -> new Accumulator(identity, kind));
