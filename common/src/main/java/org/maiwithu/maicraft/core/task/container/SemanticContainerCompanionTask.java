@@ -50,7 +50,11 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Receipt-driven first-person container executor; slots and positions stay internal. */
+/**
+ * 完成“往箱子存、从箱子取、把背包调整到指定数量”的整条流程。
+ * 顺序是找容器、走近、打开、认清菜单两边、先算好容量、一笔一笔搬并核对数量，最后关闭。
+ * 这既包含物品目标，也包含选箱子和旁人接近等规则；这些附加限制在审计记录中单独列出供判断。
+ */
 public final class SemanticContainerCompanionTask
         extends AbstractCompanionTask<SemanticContainerTaskRecord> {
     private static final double REACH = 4.5D;
@@ -147,6 +151,7 @@ public final class SemanticContainerCompanionTask
         };
     }
 
+    // 先确认没有别的菜单占着，再按物品、容器类型、地标和保护范围找候选；未知保护地标会直接拒绝。
     private TaskState survey() {
         if (player.containerMenu != player.inventoryMenu) {
             return failFinal("menu_busy", "Another synchronized menu is already open; MaiCraft "
@@ -179,6 +184,7 @@ public final class SemanticContainerCompanionTask
                 .thenComparingLong(c -> c.position().asLong()));
         List<Candidate> namedMatches = candidates.stream().filter(Candidate::nameMatches).toList();
         if (!namedMatches.isEmpty()) candidates = new ArrayList<>(namedMatches);
+        // 默认要求只剩一个候选。当前按方块实体计数，双箱两个半边会被算作两个候选，见 A50。
         if (r.selection == SemanticContainerTaskRecord.Selection.UNIQUE && candidates.size() != 1) {
             return failFinal("ambiguous_container", "Several loaded containers match. Choose "
                     + "selection=nearest or narrow the block type or landmark.", FailureType.UNKNOWN);
@@ -215,6 +221,8 @@ public final class SemanticContainerCompanionTask
                 .filter(label -> IntentRuntime.get().landmark(label) == null).toList();
     }
 
+    // 只扫描已加载区块里的容器方块实体，不读未加载区域。
+    // 保护和去重都以单个方块位置为单位，没有把一个大箱子的两半当成同一容器（A50／A52）。
     private List<Candidate> loadedCandidates(BlockPos center) {
         List<Candidate> result = new ArrayList<>();
         ClientLevel level = player.clientLevel;
@@ -254,6 +262,7 @@ public final class SemanticContainerCompanionTask
         return result;
     }
 
+    // 以每个保护地标为中心，把十二格距离内的容器位置排除；这里没有检查关联的大箱子另一半。
     private boolean insideProtectedLandmark(BlockPos position) {
         for (String label : r.protectedLabels) {
             IntentRuntime.Landmark landmark = IntentRuntime.get().landmark(label);
@@ -266,6 +275,7 @@ public final class SemanticContainerCompanionTask
         return false;
     }
 
+    // 走近前反复核对目标方块是否还在、附近是否出现其他玩家；到达几何距离后才开始开箱。
     private TaskState approach() {
         if (!targetStillValid()) return failFinal("container_target_changed",
                 "The selected block is no longer the same loaded container.",
@@ -301,6 +311,8 @@ public final class SemanticContainerCompanionTask
         };
     }
 
+    // 检查当前没有意外菜单、容器没有明确锁定，再通过普通右键子任务打开。
+    // 这里没指定手持物品，会沿用玩家当前手里的东西；打开失败时的物品兜底风险见 A29。
     private TaskState open() {
         if (player.containerMenu != player.inventoryMenu) {
             return failFinal("menu_changed_before_open", "A menu appeared before MaiCraft opened "
@@ -321,6 +333,7 @@ public final class SemanticContainerCompanionTask
                 MouseButton.RIGHT, target.position(), 0, null), Purpose.OPEN);
     }
 
+    // 等右键带来的菜单真正出现并显示，要求鼠标上没有残留物品，再记录玩家侧、容器侧和整份菜单状态。
     private TaskState waitMenu() {
         if (player.containerMenu != player.inventoryMenu) {
             openedMenu = true;
@@ -356,6 +369,8 @@ public final class SemanticContainerCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 先分出玩家前 36 格和外部格；原版箱子、潜影盒、漏斗、发射器和熔炉有已知规则。
+    // 其他 Mod 菜单只接受能按普通槽类和单一容器解释的布局，AE2 虚拟槽转交专用能力。
     private MenuView classify(AbstractContainerMenu menu) {
         if (specializedStorage(target.blockId())
                 || specializedStorage(menu.getClass().getName())) {
@@ -406,6 +421,8 @@ public final class SemanticContainerCompanionTask
                 knownStorage, !knownStorage && !knownMachine);
     }
 
+    // 菜单没换、物品没被别人改动、鼠标为空且旁人条件通过后，才计算要搬多少。
+    // 即使最终数量已经满足，也是先开箱走到这里才发现不需要搬。
     private TaskState plan() {
         if (!menuValid()) return menuLost("The synchronized container menu changed before planning.");
         if (otherPlayerNearTarget()) return failFinal("other_player_near_container",
@@ -446,6 +463,7 @@ public final class SemanticContainerCompanionTask
         return TaskState.RUNNING;
     }
 
+    // deposit 固定存入，withdraw 固定取出；balance 比较背包数量，多了存、少了取。
     private Direction direction(int playerCount) {
         return switch (r.operation) {
             case DEPOSIT -> Direction.DEPOSIT;
@@ -454,6 +472,8 @@ public final class SemanticContainerCompanionTask
         };
     }
 
+    // balance 把背包调到 target_count；普通存取若给 target_count，则只补足目的侧的差额。
+    // 给 count 就搬指定数量；两者都省略时搬源侧全部匹配物品。
     private int requestedAmount(int playerCount, int containerCount, Direction selectedDirection) {
         if (r.operation == SemanticContainerTaskRecord.Operation.BALANCE) {
             return Math.abs(playerCount - r.targetCount);
@@ -476,6 +496,7 @@ public final class SemanticContainerCompanionTask
     }
 
     /** Builds the complete bounded plan before the first click; failure leaves both sides untouched. */
+    // 在菜单副本上先完整分配目标容量，确认每个源格允许取出、每个目标格允许放入，才开始真实点击。
     private Planning buildPlan(Direction selectedDirection, int amount) {
         List<Integer> sources = selectedDirection == Direction.DEPOSIT
                 ? view.playerSlots() : view.containerSlots();
@@ -537,6 +558,7 @@ public final class SemanticContainerCompanionTask
         return Planning.ok(moves);
     }
 
+    // 先合并相同种类及组件的已有堆叠，再用空格；同时考虑物品上限和目标槽自己的容量限制。
     private List<Allocation> allocate(ItemStack source, int amount, List<Integer> destinations,
             AbstractContainerMenu menu, List<ItemStack> simulated) {
         List<Allocation> result = new ArrayList<>();
@@ -565,6 +587,8 @@ public final class SemanticContainerCompanionTask
         return remaining == 0 ? List.copyOf(result) : List.of();
     }
 
+    // 每笔开始前核对菜单及内容没有被外界改动，再交给低层搬运任务执行。
+    // 这里的其他玩家检查只在笔与笔之间进行，长子任务内部不会每刻回来检查。
     private TaskState transfer() {
         if (planIndex >= plan.size()) {
             goalSatisfied = goalSatisfied();
@@ -604,6 +628,8 @@ public final class SemanticContainerCompanionTask
                 List.of(pendingMove.move()), false), Purpose.TRANSFER);
     }
 
+    // 低层说完成后，父任务再核对所选物品：玩家侧增加多少，容器侧就应减少多少，反向存入同理。
+    // 对不上就停并标记结果不确定，不继续按旧计划盲点。
     private TaskState verifyTransfer() {
         if (!menuValid() || pendingMove == null) {
             outcomeUncertain = true;
@@ -645,6 +671,7 @@ public final class SemanticContainerCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 最后按用户目标检查：balance 要背包恰好等于目标；补足模式要求目的侧至少达到目标；普通搬运要求累计量相等。
     private boolean goalSatisfied() {
         if (r.operation == SemanticContainerTaskRecord.Operation.BALANCE) {
             return lastPlayerCount == r.targetCount;
@@ -656,6 +683,8 @@ public final class SemanticContainerCompanionTask
         return movedCount == plannedAmount;
     }
 
+    // 已经回到无界面的背包就结束；否则创建关闭当前菜单的子任务。
+    // 它没有绑定原菜单身份，因此 menuLost 的错误归属会让它关掉替换菜单（A51）。
     private TaskState cleanupMenu() {
         if (player.containerMenu == player.inventoryMenu && ClientRuntime.requireContext(player).minecraft().screen == null) {
             openedMenu = false;
@@ -668,6 +697,7 @@ public final class SemanticContainerCompanionTask
                 childId("close"), childDeadline(30L * 20L)), Purpose.CLOSE);
     }
 
+    // 开箱、搬运、关箱都有自己的子任务。子任务结束先取结果并清理，再按用途继续下一阶段或记录失败。
     private TaskState tickChild() {
         TaskState terminal = runChild(activeChild);
         if (terminal == null) {
@@ -744,6 +774,7 @@ public final class SemanticContainerCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 必须还是原来那个菜单对象、编号和类型，且它正在显示；仅仅菜单名字相似不够。
     private boolean menuValid() {
         return view != null && player.containerMenu != player.inventoryMenu
                 && player.containerMenu == view.menu()
@@ -752,12 +783,14 @@ public final class SemanticContainerCompanionTask
                 && player.containerMenu.getClass() == expectedMenuClass;
     }
 
+    // 当前代码把任何新出现的外部菜单也标成“本任务打开”，会进入关闭流程；这是 A51 的归属问题。
     private TaskState menuLost(String message) {
         outcomeUncertain |= effectsStarted;
         openedMenu = player.containerMenu != player.inventoryMenu;
         return failFinal("container_menu_lost", message, FailureType.TARGET_LOST);
     }
 
+    // 保留最早的失败原因，先处理还开的菜单再给最终失败；已经确认的搬运量不会清零。
     private TaskState failFinal(String code, String message, FailureType type) {
         if (failureMessage == null) {
             failureCode = code;
@@ -788,6 +821,7 @@ public final class SemanticContainerCompanionTask
                 Vec3.atCenterOf(target.position())) <= REACH * REACH;
     }
 
+    // 只要箱子周围各方向扩六格的盒形范围内有另一位活着、非旁观的玩家，就阻止继续；不检查对方是否实际操作箱子。
     private boolean otherPlayerNearTarget() {
         if (target == null) return false;
         AABB bounds = new AABB(target.position()).inflate(OTHER_PLAYER_RADIUS);
@@ -824,6 +858,7 @@ public final class SemanticContainerCompanionTask
         return r.itemIds.contains(BuiltInRegistries.ITEM.getKey(stack.getItem()));
     }
 
+    // 把整份菜单的槽内物品、数量、组件摘要及鼠标物品记录成文字，下一笔前比较是否有外部变化。
     private static String fingerprint(AbstractContainerMenu menu) {
         StringBuilder result = new StringBuilder(menu.getClass().getName())
                 .append(':').append(menu.containerId).append('|');
@@ -876,6 +911,7 @@ public final class SemanticContainerCompanionTask
         return lease;
     }
 
+    // 任务被取消等情况会停止子任务并尝试关菜单；当前只 stop 子任务，没有调用它的 result 来完成全部清理。
     @Override protected void cleanup() {
         stopNav();
         if (activeChild != null) {
@@ -895,6 +931,7 @@ public final class SemanticContainerCompanionTask
         super.cleanup();
     }
 
+    // 分别报告已确认搬运数量、最后观察的两边库存、目标是否满足和是否仍有不确定结果，供上层决定后续工作。
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("operation", r.operation.name().toLowerCase(Locale.ROOT));

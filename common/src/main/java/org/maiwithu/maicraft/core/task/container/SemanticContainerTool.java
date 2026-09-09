@@ -16,7 +16,10 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 
-/** Internal executor; public callers name inventory outcomes, never menu mechanics. */
+/**
+ * 内部语义容器入口，接受“存什么、取什么、要多少和选哪个区域的容器”，不要求调用方提供槽号。
+ * 参数转成任务单后，后续每刻执行和结果确认由容器任务负责。
+ */
 public final class SemanticContainerTool implements MaiCraftTool {
     @Override public String name() { return SemanticContainerTaskRecord.TOOL_NAME; }
 
@@ -66,6 +69,7 @@ public final class SemanticContainerTool implements MaiCraftTool {
     }
 
     @Override
+    // 合并 item_id 与 item_ids、解析标签和数量，创建语义容器任务；具体是否能找到容器由任务调查。
     public void onGameCall(
             String toolCallId, JsonObject args, LocalPlayer player, Consumer<String> reply) {
         LinkedHashSet<ResourceLocation> ids = new LinkedHashSet<>();
@@ -131,6 +135,7 @@ public final class SemanticContainerTool implements MaiCraftTool {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
+    // 缺省返回 null；当前 getAsInt 仍会截断小数，再做范围检查，不是严格整数校验，见 A10。
     private static Integer optionalInteger(
             JsonObject object, String key, int minimum, int maximum) {
         if (!object.has(key) || object.get(key).isJsonNull()) return null;

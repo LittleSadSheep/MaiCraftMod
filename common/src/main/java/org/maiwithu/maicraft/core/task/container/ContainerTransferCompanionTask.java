@@ -15,7 +15,10 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Cursor-safe, live-state container transfer task. */
+/**
+ * 按给定菜单槽位逐笔搬物品：快速移动，或先拿到鼠标上再放入／交换，最后处理鼠标残留物品。
+ * 它不负责寻找箱子，开始前应已经打开正确菜单。部分步骤成功后失败，不会自动撤回已经完成的所有搬运。
+ */
 public final class ContainerTransferCompanionTask
         extends AbstractCompanionTask<ContainerTransferTaskRecord> {
     /** Confirmed native menu changes keep a large transfer alive; pending receipts do not. */
@@ -40,6 +43,8 @@ public final class ContainerTransferCompanionTask
         super(player, record);
     }
 
+    // 每刻只推进一小步，先确认菜单还是原来那个，再等待上一次点击结果。
+    // 最后一笔成功后，按 closeAfter 决定保留菜单给父任务检查，还是关闭后结束。
     @Override protected TaskState onTick() {
         var context = ClientRuntime.requireContext(player);
         if (phase == Phase.CLOSE) return closeCompleted(context);
@@ -109,6 +114,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.SUCCESS;
     }
 
+    // 检查源格、目标格和数量；同一格搬给自己算零件完成。整堆可快速移动，也可拾起后放到指定格。
     private TaskState beginMove(ContainerTransferTaskRecord.Move move) {
         if (!validSlot(move.from()) || (move.to() >= 0 && !validSlot(move.to()))) {
             return beginFailure("transfer references an unavailable menu slot");
@@ -136,6 +142,7 @@ public final class ContainerTransferCompanionTask
         }
         ItemStack destination = player.containerMenu.getSlot(move.to()).getItem();
         destinationBefore = destination.copy();
+        // 目标格是别的物品时，只有 count=0 的整堆操作才允许交换；指定精确数量时不擅自交换整堆。
         if (!destination.isEmpty() && !ItemStack.isSameItemSameComponents(destination, source)) {
             if (move.count() != 0) {
                 return beginFailure("destination slot " + move.to()
@@ -155,6 +162,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 快速移动只观察源格是否改变；当前没有读取实际减少量，后面却把 requested 整堆记为已搬（A49）。
     private TaskState submitQuick(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
         ItemStack before = player.containerMenu.getSlot(move.from()).getItem().copy();
         receipt = context.menus().click(
@@ -164,6 +172,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 先把源物品拿到鼠标上；当前确认种类和组件匹配，没有在这一阶段核对准确数量。
     private TaskState submitPickup(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
         receipt = context.menus().click(
                 context, move.from(), 0, ClickType.PICKUP,
@@ -177,6 +186,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 右键放一个，通过鼠标上的数量少一来确认；要放几件就重复几次，剩余的随后还给源格。
     private TaskState submitOne(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
         int before = player.containerMenu.getCarried().getCount();
         receipt = context.menus().click(
@@ -187,6 +197,8 @@ public final class ContainerTransferCompanionTask
     }
 
     /** A full compatible stack is one ordinary left click, not one right click per item. */
+    // 整堆放入一般要求目标格增加指定数量、鼠标清空。
+    // 调用方明确允许机器立即消耗时，可改用源格准确扣减与鼠标清空来确认，不要求机器槽长期保留原物品。
     private TaskState submitAll(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
         receipt = context.menus().click(
                 context, move.to(), 0, ClickType.PICKUP,
@@ -226,6 +238,7 @@ public final class ContainerTransferCompanionTask
                 && source.getCount() == expectedRemaining;
     }
 
+    // 交换后应由目标格装着原源物品，鼠标拿着原目标物品，接下来再把它还到源格。
     private TaskState submitSwap(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
         receipt = context.menus().click(
                 context, move.to(), 0, ClickType.PICKUP,
@@ -243,6 +256,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 把鼠标上剩下的物品放回原来源格；确认鼠标已空。它不是撤销此前所有已经成功的搬运。
     private TaskState submitReturn(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
         receipt = context.menus().click(
                 context, move.from(), 0, ClickType.PICKUP,
@@ -251,6 +265,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 确认后才换阶段和记数量。快速移动当前直接记 requested，部分容量场景会误报整堆完成。
     private void afterConfirmedClick() {
         switch (phase) {
             case QUICK -> completeMove(requested);
@@ -284,6 +299,7 @@ public final class ContainerTransferCompanionTask
         requested = 0; movedThis = 0; swapMode = false; wholePlacement = false;
     }
 
+    // 失败时若鼠标还拿着东西且源格有效，先尝试放回；放回后仍报告原失败，不把回收鼠标物品当任务成功。
     private TaskState beginFailure(String reason) {
         pendingFailure = reason;
         if (!player.containerMenu.getCarried().isEmpty() && moveIndex < r.moves.size()
@@ -299,6 +315,8 @@ public final class ContainerTransferCompanionTask
     private static boolean same(ItemStack a, ItemStack b) {
         return a.getCount() == b.getCount() && ItemStack.isSameItemSameComponents(a, b);
     }
+    // 只有玩家还在同一个菜单时才安排关闭；替换成别的菜单时不向它做回退或关闭。
+    // 外层父任务也应保留这个限制，不能在这里正确停手后又把新菜单关掉（A51）。
     @Override protected void cleanup() {
         if (menu != null && player.containerMenu == menu && (!completed || r.closeAfter)
                 && (receipt == null || receipt.terminal() || receipt.kind() != MenuReceipt.Kind.CLOSE)) {

@@ -11,7 +11,10 @@ import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 
-/** Read-only validation and planning for synchronized container transfers. */
+/**
+ * 把一组已知菜单槽位的搬运要求检查后转成低层任务；不负责打开箱子或猜哪个槽是材料。
+ * 若所有要求都是原格搬给原格，就直接返回无需操作的成功结果。
+ */
 public final class ContainerOps {
 
     private static final long MIN_TIMEOUT_TICKS = 30L * 20L;
@@ -30,6 +33,7 @@ public final class ContainerOps {
      * Freeze only the menu identity and semantic requests. Slot contents remain live facts owned by
      * the cross-tick task, so later moves can depend on changes made by earlier moves.
      */
+    // 这里只验证已经打开并显示的外部菜单与槽号；玩家自己的背包界面不被这个入口接受。
     public Plan plan(List<Move> moves, LocalPlayer self, ToolContext context) {
         AbstractContainerMenu menu = self.containerMenu;
         if (menu == null || menu == self.inventoryMenu
@@ -62,6 +66,7 @@ public final class ContainerOps {
 
             // QUICK_MOVE is defined by the live menu and always routes the whole stack. An exact
             // count therefore applies only to an explicit destination.
+            // 没给目的槽时统一用快速移动，忽略 count；有目的槽但数量缺省或非正时，按整堆处理。
             int count = destination < 0 || move.count() == null || move.count() <= 0
                     ? 0 : move.count();
             planned.add(new ContainerTransferTaskRecord.Move(move.from(), destination, count));
@@ -72,6 +77,7 @@ public final class ContainerOps {
                     Map.of("completed_moves", 0)));
         }
 
+        // 按预计点击次数给初始等待预算，限制在半分钟到十分钟；实际有确认进展时任务还会续期。
         long timeout = Math.clamp(20L + estimatedClicks * 25L,
                 MIN_TIMEOUT_TICKS, MAX_INITIAL_LEASE_TICKS);
         return new Plan(new ContainerTransferTaskRecord(

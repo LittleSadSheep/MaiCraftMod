@@ -13,7 +13,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Dispatch synchronized, receipt-owned transfers in the currently open container GUI. */
+/**
+ * 内部的按槽号搬运入口。调用方先看当前菜单，再给一组有顺序的来源、目的地和数量。
+ * 它不把 Inventory 下标自动理解成菜单槽号，两者必须由调用方正确区分。
+ */
 public final class TransferTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();
@@ -34,6 +37,7 @@ public final class TransferTool implements MaiCraftTool {
     }
 
     @Override
+    // to 和 count 使用 nullable 字段：格式声明要求字段存在但允许 null；文字中的 OMIT 与该声明并不完全一致。
     public Map<String, Object> parameterSchema() {
         return Schema.object()
                 .objectArray("moves", "Transfers to run in order (one whole job per call).", item -> item
@@ -47,6 +51,7 @@ public final class TransferTool implements MaiCraftTool {
     }
 
     @Override
+    // 解析列表后先做只读检查；无效或无需操作时立即回复，其余交给逐刻搬运任务。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer self, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         ContainerOps.Plan plan = impl.plan(

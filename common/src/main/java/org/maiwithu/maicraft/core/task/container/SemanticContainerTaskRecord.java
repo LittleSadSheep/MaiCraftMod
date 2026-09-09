@@ -10,7 +10,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** A semantic inventory outcome against one real loaded block container. */
+/**
+ * 保存存取目标、物品选择、数量、容器范围与保护地标；复制列表并检查相互冲突的参数。
+ * 这里只定义要求，不存菜单槽位，具体选箱子和分配槽位由 SemanticContainerCompanionTask 完成。
+ */
 public final class SemanticContainerTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "manage_container";
     public static final int DEFAULT_RADIUS = 32;
@@ -60,6 +63,7 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
     public final List<String> protectedLabels;
     public final int radius;
 
+    // 明确物品编号组与物品标签只能二选一；具体搬多少与目标数量也不能同时给，balance 必须给目标数量。
     public SemanticContainerTaskRecord(
             String toolCallId,
             long deadlineGameTime,
@@ -115,6 +119,7 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
         this.blockId = blockId;
         this.landmarkLabel = landmarkLabel == null || landmarkLabel.isBlank()
                 ? null : landmarkLabel.trim();
+        // 默认要求能唯一确定容器；允许任选最近的容器时，需要明确选择 NEAREST。
         this.selection = selection == null ? Selection.UNIQUE : selection;
 
         LinkedHashSet<String> labels = new LinkedHashSet<>();
