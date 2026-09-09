@@ -25,16 +25,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Causally bounded collection of drops created by targets defeated in one combat beat.
- *
- * <p>The client is not told a mob-drop parent id. The strongest evidence it can actually prove
- * is therefore a conjunction: the item id did not exist in the pre-kill snapshot, its client age
- * dates its spawn to the target's death, and its observed position and velocity are compatible
- * with having left the recorded death position. {@link ItemEntity#getOwner()} cannot strengthen
- * that proof because the
- * thrower/pickup-target fields are not synchronized to this client. A merely nearby old stack is
- * never collected. If a new drop merges into such a stack, the causal portion cannot be separated
- * from somebody else's items, so the merge is reported as ambiguous and left alone.</p>
+ * 围绕本轮死亡地点追踪可能的战利品，再结合背包变化判断哪些收到了、哪些还在地上、哪些解释不清。
+ * 客户端没有掉落物所属怪物的直接字段，所以这里使用出现时间和移动距离等线索推断，不能保证来源绝对正确。
+ * 与旧物品混成一堆时不直接整堆拿走，而是报告无法分开的部分；是否因此让战斗失败由外层任务决定。
  */
 final class LootSweep {
 
@@ -51,6 +44,7 @@ final class LootSweep {
     private static final int VANISH_RECONCILE_TICKS = 10;
 
     private final LocalPlayer player;
+    // 分别记住原来就在地上的物品、本轮候选物品和已经确认的背包增加量，不能把它们当成同一份数量。
     private final Map<Integer, Integer> preexistingCounts = new HashMap<>();
     private final Map<Integer, Item> preexistingItems = new HashMap<>();
     private final Map<Integer, Vec3> preexistingPositions = new HashMap<>();
@@ -111,6 +105,7 @@ final class LootSweep {
      * Snapshot every item the client already knows before a lethal hit.  Scoping this snapshot to
      * an arbitrary corpse radius made an old item crossing that radius look newly spawned.
      */
+    // 记下当前客户端能渲染的所有地上物品，不只死亡地点附近；后来看到同一编号就知道它不是刚出现。
     void rememberPreexisting() {
         for (Entity entity : player.clientLevel.entitiesForRendering()) {
             if (entity instanceof ItemEntity item && !item.isRemoved()) {
@@ -122,6 +117,7 @@ final class LootSweep {
     }
 
     /** Begin a new post-kill synchronization window. */
+    // 开始一轮死亡掉落收集：清掉上一轮的临时等待和候选，保留整个战斗的累计统计，并记下此刻背包。
     void begin(int sourceEntityId, BlockPos where) {
         Set<Integer> staleBaseline = new HashSet<>();
         for (int id : preexistingCounts.keySet()) {
@@ -161,6 +157,8 @@ final class LootSweep {
         }
     }
 
+    // 目标的死亡动画还没结束，或刚结束不到额外一刻时，继续允许新掉落进入观察。
+    // 这里按客户端看见的生命周期等待，不是服务器明确宣布掉落物已经全部发送。
     boolean settling() {
         long now = player.level().getGameTime();
         for (DeathWitness death : deaths) {
@@ -189,6 +187,7 @@ final class LootSweep {
      * the pre-kill id/count snapshot plus spawn-time and trajectory evidence. A simultaneous local
      * inventory decrease for the same item type is specific evidence that this body dropped it.
      */
+    // 在接收窗口内，用出现时间、位置和速度寻找本轮产物。只算可能相关但证据不够的，记为待解释而不直接拾取。
     void discover() {
         if (!active) return;
         boolean admissionOpen = settling();
@@ -216,6 +215,7 @@ final class LootSweep {
                             item.blockPosition().immutable(), match.reason()));
                     rememberAsPreexisting(item);
                 }
+            // 旧物品堆变大时，当前直接记成与本轮产物合堆，没有检查它离死亡地点多远；会误计远处无关变化（A41）。
             } else if (admissionOpen && item.getItem().getCount() > before) {
                 // A causal drop may have merged into an old stack, but the units cannot be
                 // separated. Never take the old stack; expose the uncertain causal units.
@@ -228,6 +228,7 @@ final class LootSweep {
         }
     }
 
+    // 本轮物品堆变大时，看看有没有同种旧物品刚消失；若可能混入旧物品，就停止把整堆直接收走。
     private void observeTrackedGrowth(ItemEntity item) {
         int id = item.getId();
         int trackedBefore = trackedCounts.getOrDefault(id, item.getItem().getCount());
@@ -244,6 +245,7 @@ final class LootSweep {
         trackedCounts.put(id, item.getItem().getCount());
     }
 
+    // 接受一个新产物前也尝试扣除可能合入的旧物品；无法分开时记录疑似属于本轮的部分，并留在地上。
     private void admit(ItemEntity item) {
         Item type = item.getItem().getItem();
         int current = item.getItem().getCount();
@@ -275,6 +277,8 @@ final class LootSweep {
 
     private record CausalMatch(boolean strong, boolean plausible, String reason) { }
 
+    // 用当前时间减物品的客户端存活刻数估计出现时间，并按速度估算它能从死亡点移动多远。
+    // 时间相差一刻以内且位置符合估算才算较强线索；这仍是估计，客户端没有“来自哪只怪”的直接编号。
     private CausalMatch causalMatch(ItemEntity item) {
         long now = player.level().getGameTime();
         long estimatedSpawn = now - Math.max(0, item.tickCount);
@@ -321,6 +325,8 @@ final class LootSweep {
                 "new entity id, death-consistent spawn age and physically compatible trajectory");
     }
 
+    // 记录死亡附近原来存在、现在不见的物品数量，供后面估计合堆。
+    // 这里没有直接证明消失原因；物品也可能被其他玩家捡走或卸载。
     private void observePreexistingDisappearances() {
         for (var entry : preexistingItems.entrySet()) {
             int id = entry.getKey();
@@ -338,6 +344,7 @@ final class LootSweep {
         }
     }
 
+    // 把尚未分配的旧物品消失数量按物品种类扣给当前合堆猜测，同一份数量不重复使用。
     private int consumeVanishedPreexisting(Item item, int maximum) {
         if (maximum <= 0) return 0;
         int available = unmatchedVanishedPreexistingByItem.getOrDefault(item, 0);
@@ -349,6 +356,7 @@ final class LootSweep {
         return consumed;
     }
 
+    // 背包里这种物品比本轮开始时少，就把新看到的同类物品当作可能由玩家丢出；没有读取真实丢弃者。
     private boolean locallyDroppedDuringSweep(ItemEntity item) {
         Item type = item.getItem().getItem();
         return inventoryCount(type) < inventoryAtSweepStart.getOrDefault(type, 0);
@@ -368,6 +376,7 @@ final class LootSweep {
         return false;
     }
 
+    // 返回本轮仍能看到、没有因混堆跳过、且当前允许尝试靠近的物品。
     List<ItemEntity> live() {
         List<ItemEntity> out = new ArrayList<>();
         for (int id : tracked) {
@@ -380,6 +389,7 @@ final class LootSweep {
         return out;
     }
 
+    // 清掉已经看不到的实体编号和局部记录；是否真的进了背包，还要用 vanishState 另查。
     void prune() {
         tracked.removeIf(id -> {
             Entity entity = player.clientLevel.getEntity(id);
@@ -405,6 +415,8 @@ final class LootSweep {
      * expansion 0.5.  The previous all-axis {@code inflate(1)} stopped a full block too early on
      * uneven ground and then misdiagnosed the perfectly free inventory as full.
      */
+    // 靠近到原版拾取范围后，先等拾取延迟；连续三次确认无容量才报背包满。
+    // 有容量却连续二十次仍未入包，则报告拾取未发生。
     PickupContact pickupContact() {
         ItemEntity item = nearest().orElse(null);
         if (item == null || !insideServerTouchQuery(item)) {
@@ -453,6 +465,7 @@ final class LootSweep {
                 + "; no_capacity_contact_ticks=" + noCapacityContactTicks;
     }
 
+    // 与物品在同一个方块格里，不代表身体已经碰到它；这种情况需要再往实际物品位置挪一点。
     boolean needsFineApproach() {
         ItemEntity item = nearest().orElse(null);
         return item != null && !insideServerTouchQuery(item)
@@ -467,6 +480,7 @@ final class LootSweep {
      * Do not treat a removed ItemEntity as collected until item conservation balances against
      * synchronized inventory gain or another still-live attributed stack (the normal merge case).
      */
+    // 物品没了但背包还没对上数量时，再等十刻同步；仍对不上就报告未确认，不能直接说捡到了。
     VanishState vanishState() {
         Map<Item, Integer> unaccounted = unaccountedByItem();
         if (unaccounted.isEmpty()) {
@@ -486,6 +500,7 @@ final class LootSweep {
                 + "; ambiguous_merge=" + named(sweepAmbiguous);
     }
 
+    // 记下这次走不到的物品位置、玩家位置和物品附近方块形态，避免在条件完全没变时反复找同一条路。
     void noteApproachFailure() {
         nearest().ifPresent(item -> {
             long fingerprint = localWorldFingerprint(item.blockPosition());
@@ -500,6 +515,7 @@ final class LootSweep {
         });
     }
 
+    // 玩家移动、物品移动或附近地形变化时，撤销这次不可达记录，让寻路重新试；否则继续跳过。
     private boolean approachMayBeRetried(ItemEntity item) {
         BlockedApproach blocked = blockedApproaches.get(item.getId());
         if (blocked == null) return true;
@@ -528,6 +544,7 @@ final class LootSweep {
         return live().stream().min(Comparator.comparingDouble(player::distanceToSqr));
     }
 
+    // 结算本轮背包新增量并保留累计数，再关闭窗口、清掉追踪列表；不是把剩余实体自动收进背包。
     void finish() {
         // Keep the baseline: an unreachable/ambiguous stack remains pre-existing for later kills.
         settleCurrentSweepCollection();
@@ -549,6 +566,7 @@ final class LootSweep {
         return ambiguousMergedCount;
     }
 
+    // 死亡还没结束、仍有物品或数量对不上、来源／可达性有问题，都要求外层继续处理这一轮。
     boolean mustSettle() {
         return active && (settling()
                 || !live().isEmpty()
@@ -591,6 +609,7 @@ final class LootSweep {
                 .toList().toString();
     }
 
+    // 分别返回推定来源数量、背包确认增加、地上剩余、走不到、合堆与未解释的差额，不把它们统称为已收获。
     Map<String, Object> report() {
         Map<Item, Integer> confirmed = new HashMap<>(collectedFromSettledSweeps);
         if (active) {
@@ -631,6 +650,7 @@ final class LootSweep {
         return out;
     }
 
+    // 已收集最多取“本轮推定产量”和“实际背包增加量”中的较小者，避免仅因背包多了很多就夸大产出。
     private void settleCurrentSweepCollection() {
         for (var entry : sweepAttributed.entrySet()) {
             int gain = Math.max(0, inventoryCount(entry.getKey())
@@ -674,6 +694,7 @@ final class LootSweep {
         return out;
     }
 
+    // 推定属于本轮的总数，扣掉背包增加、仍在地上、已记录混堆和不可达部分，剩下的是还解释不了的去向。
     private Map<Item, Integer> unaccountedByItem() {
         Map<Item, Integer> gains = currentSweepInventoryGain();
         Map<Item, Integer> liveCounts = allTrackedLiveCounts();
@@ -714,6 +735,7 @@ final class LootSweep {
         else counts.remove(item);
     }
 
+    // 按完整物品编号排序后生成可报告的数量表，保证同样的结果每次输出顺序一致。
     private static Map<String, Integer> named(Map<Item, Integer> counts) {
         Map<String, Integer> out = new LinkedHashMap<>();
         counts.entrySet().stream()

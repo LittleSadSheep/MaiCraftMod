@@ -13,13 +13,17 @@ import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.act.Ballistics;
 import org.maiwithu.maicraft.core.combat.Loadout;
 
-/** One bow/crossbow shot, submitted and reconciled through the native first-person port. */
+/**
+ * 把一发弓箭或弩箭分成跨刻操作：选好的武器开始使用，等待拉弓／装填，瞄准后松开或再次点击。
+ * 本对象记住阶段和动作记录；走到射程内、选择武器、提供预测瞄点都由外层战斗任务负责。
+ */
 final class RangedShot {
     private static final int BOW_RELEASE_TICKS = 15;
     private static final int BOW_MAX_DRAW_TICKS = 40;
     private static final int CROSSBOW_LOAD_TIMEOUT = 80;
     static final double AIM_THRESHOLD_DEGREES = 1.5;
 
+    // 按阶段记住：开始使用、拉弓／装弩、准备发射、松开装填、等待发射结果，最后成功或失败。
     private enum State { STARTING, USING, READY_TO_FIRE, RELEASING_LOAD, FIRING, DONE, MISFIRE }
     private final LocalPlayer player;
     private final boolean crossbow;
@@ -38,6 +42,7 @@ final class RangedShot {
     static boolean stillHolding(boolean crossbow, ItemStack stack) {
         return crossbow ? stack.getItem() instanceof CrossbowItem : stack.getItem() instanceof BowItem;
     }
+    // 按拉弓时间估计箭速比例，最多满弓；这里算比例，不代表已经装好箭或射出去。
     static double bowPowerForTicks(int ticks) {
         double draw = ticks / 20.0;
         return Math.min(1.0, Math.max(0.0, (draw * draw + draw * 2.0) / 3.0));
@@ -49,6 +54,7 @@ final class RangedShot {
         return crossbow ? crossbowSpeed : bowFullSpeed * bowPowerForTicks(Math.max(BOW_RELEASE_TICKS, held + 1));
     }
 
+    // 一次只推进当前阶段。返回 true 表示这一轮已经结束，是否真的按这里规则判为发射还要看 fired。
     boolean tick(Ballistics.Aim aim, Entity target) {
         switch (state) {
             case STARTING -> startUse();
@@ -64,6 +70,7 @@ final class RangedShot {
     boolean fired() { return fired; }
     boolean aboutToRelease() { return crossbow ? state == State.READY_TO_FIRE : held >= BOW_RELEASE_TICKS - 1; }
 
+    // 还在使用弓弩时请求松开；已经发出的箭不能撤回。这里只发停止请求，没有等待它确认完。
     void abort() {
         if (receipt == null || receipt.kind() != NativeActionReceipt.Kind.USE_ITEM || !player.isUsingItem()) return;
         var context = ClientRuntime.requireContext(player);
@@ -71,6 +78,8 @@ final class RangedShot {
         state = State.MISFIRE;
     }
 
+    // 当前无论弩是否已装填，都先使用一次物品，再观察手中变化或使用状态。
+    // 对已装填弩，这一下原版就会直接发射，并不是开始装填；这里尚未检查瞄准角度，见 A40。
     private void startUse() {
         var context = ClientRuntime.requireContext(player);
         if (receipt == null) {
@@ -92,6 +101,7 @@ final class RangedShot {
                 ? State.READY_TO_FIRE : State.USING;
     }
 
+    // 使用状态中断就结束为失败。弩等装填时间到后松开；弓至少拉十五刻并尽量等准星对齐。
     private void tickUsing(Ballistics.Aim aim, Entity target) {
         if (!player.isUsingItem()) { state = State.MISFIRE; return; }
         held++;
@@ -102,6 +112,7 @@ final class RangedShot {
             return;
         }
         double angle = Ballistics.angleDegrees(player.getViewVector(1.0f), aim.direction());
+        // 当前拉到四十刻会强制松开，不再要求 1.5° 内对准；它可能沿实际错误视角发射，见 A42。
         if (canRelease(angle, held, BOW_RELEASE_TICKS) || held >= BOW_MAX_DRAW_TICKS) {
             pendingAim = aim; pendingTarget = target;
             var context = ClientRuntime.requireContext(player);
@@ -116,6 +127,7 @@ final class RangedShot {
         state = State.RELEASING_LOAD;
     }
 
+    // 松开装填得到确认且弩确实显示已装填，才进入待发射；同时清掉旧记录，允许下一次右键。
     private void settleLoadRelease() {
         var context = ClientRuntime.requireContext(player);
         receipt = context.actions().poll(context, receipt);
@@ -125,6 +137,7 @@ final class RangedShot {
         receipt = null;
     }
 
+    // 已经装填好时等实际视线接近弹道方向，再右键发射。这里还要求旧 receipt 已清空。
     private void tickReady(Ballistics.Aim aim, Entity target) {
         if (Ballistics.angleDegrees(player.getViewVector(1.0f), aim.direction()) > AIM_THRESHOLD_DEGREES) return;
         var context = ClientRuntime.requireContext(player);
@@ -137,6 +150,8 @@ final class RangedShot {
         }
     }
 
+    // 等待公共动作接口的结果；弓此时等的是“使用已停止”，弩等的是手中物品改变。
+    // 这些条件没有直接观察箭生成，更没有确认命中；上层不能把 fired 当成击中或击败证据。
     private void settleFire() {
         var context = ClientRuntime.requireContext(player);
         receipt = context.actions().poll(context, receipt);
