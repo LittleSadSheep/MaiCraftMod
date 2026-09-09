@@ -42,6 +42,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
         terrain=new RegionalTerrain(player.position()); lastPosition=player.position();
     }
     protected TaskState onTick() {
+        // 走地面时分段找候选，飞行时持续观察；先处理已经开始的那一段，不每刻重新选交通方式。
         var ctx=ClientRuntime.requireContext(player);
         if(player.position().distanceToSqr(lastPosition)>.04) {
             lastPosition=player.position(); r.extendDeadlineTo(player.level().getGameTime()+600);
@@ -53,6 +54,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
         }
         boolean wantsFlight=walk==null && (r.mode==TransportMode.JETPACK || r.mode==TransportMode.AUTO
                 && (goal.direction().y!=0 || groundExhausted) && JetpackNativeAdapter.inspect(ctx).controllable());
+        // auto 在上下方向搜索或地面候选用尽时可转飞行；明确 jetpack 则直接尝试飞行控制。
         if(flight!=null || wantsFlight) {
             if(TransportRuntime.occupied() && !TransportRuntime.owns(this)) return TaskState.RUNNING;
             if(flight==null) flight=new JetpackFlightSession(new RegionalFlightTarget(goal),NavigationSafetyContext.forbiddenBodyCells());
@@ -77,6 +79,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
                 .sorted(Comparator.comparingDouble(s->groundScore(goal,player.position(),s)))
                 .map(RegionalTerrain.Surface::point).findFirst().orElse(null);
         if(next==null || legs>=128) {
+            // 地面最多尝试一百二十八段；auto 若有可用背包再换飞行，否则说明目前没有可尝试的已加载候选。
             if(r.mode==TransportMode.AUTO && JetpackNativeAdapter.inspect(ctx).controllable()) {
                 groundExhausted=true; return TaskState.RUNNING;
             }
@@ -90,6 +93,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
         walk=new MoveToCompanionTask(player,record); return TaskState.RUNNING;
     }
     static double groundScore(RegionalGoal goal,Vec3 position,RegionalTerrain.Surface surface) {
+        // 已经符合最终区域且像平台的候选优先，否则在较近和沿目标方向前进之间打分。
         return (goal.matches(surface.point()) && surface.platform() ? 0 : 1000)
                 + surface.point().distanceTo(position)-goal.progress(surface.point())*2;
     }
@@ -108,6 +112,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
         return TaskState.SUCCESS;
     }
     public void stop(LocalPlayer player,StopReason reason) {
+        // 当前对暂停和取消都结束交通控制；恢复后如何处理该结果，与通用 TransportNavigator 的暂停逻辑不同。
         if(walk!=null) walk.stop(player,reason);
         TransportRuntime.cancel(this); super.stop(player,reason);
     }

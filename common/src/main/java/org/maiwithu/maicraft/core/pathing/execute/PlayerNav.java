@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
-/** Task-facing navigation contract. The embedded Baritone runtime owns all route execution. */
+/** 给走路、挖矿、施工等任务用的统一导航入口，实际交给 TransportNavigator 协调步行与交通，再由 Baritone 走路线。 */
 public final class PlayerNav {
     public enum Status { RUNNING, ARRIVED, FAILED }
 
@@ -43,7 +43,7 @@ public final class PlayerNav {
         return new PlayerNav(player, speed, reached, compiled, contextProvider);
     }
 
-    /** Goal suppliers are revalidated on every tick, including task-specific protection cells. */
+    /** 当前与普通 to 使用同一实现，每刻都会重新读取目标；这个名字保留给旧调用方。 */
     public static PlayerNav toRevalidating(LocalPlayer player, Supplier<GoalCompiler.Compiled> compiled,
                                           double speed, BooleanSupplier reached, ContextProvider contextProvider) {
         return to(player, compiled, speed, reached, contextProvider);
@@ -75,6 +75,7 @@ public final class PlayerNav {
     }
 
     private static Supplier<GoalCompiler.Compiled> bare(Supplier<NavGoal> goals) {
+        // 普通目标不附加专门保护格；调用者有特殊保护要求时，要通过目标或 ContextProvider 明确传入。
         return () -> {
             NavGoal goal = goals.get();
             return goal == null ? null : new GoalCompiler.Compiled(goal, LongSets.emptySet());
@@ -82,7 +83,8 @@ public final class PlayerNav {
     }
 
     private PlayerNav(LocalPlayer player, double speed, BooleanSupplier reached,
-                      Supplier<GoalCompiler.Compiled> compiledSupplier, ContextProvider contextProvider) {
+                       Supplier<GoalCompiler.Compiled> compiledSupplier, ContextProvider contextProvider) {
+        // speed 当前只用于判断是否允许冲刺（至少 1.0），并没有按这个小数直接调玩家的移动速度。
         navigator = new TransportNavigator(player, compiledSupplier, reached,
                 contextProvider == null ? ContextProvider.DEFAULT : contextProvider, speed >= 1.0);
     }
@@ -101,6 +103,7 @@ public final class PlayerNav {
     public PlayerNav walkingOnly() { return withTransportMode(TransportMode.GROUND); }
 
     public interface ContextProvider {
+        // 当前 Baritone 使用 permit 和下面两个 embedded 方法；forSearch／forExecution 是保留的旧成本接口。
         /** 缺省:只走不改。接近类动作全部用它,忘了指定也只会更保守。 */
         ContextProvider DEFAULT = of(TerrainPermit.PRESERVE);
         ContextProvider WATER_ONLY = of(TerrainPermit.WATER_ONLY);

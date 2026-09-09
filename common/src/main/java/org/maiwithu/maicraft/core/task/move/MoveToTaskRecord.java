@@ -6,28 +6,9 @@ import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
 /**
- * Typed task descriptor for the {@code goto} tool. The goal type is chosen
- * by WHICH inputs are supplied: the LLM picks its intent by filling only the
- * fields it means.
- * <ul>
- *   <li>{@code x} + {@code z} (no {@code y}) → {@link Kind#COLUMN}:
- *       walk to that location, Y auto-resolved to the surface.
- *       The default "go there" — a guessed Y can never make it unreachable.</li>
- *   <li>{@code x} + {@code y} + {@code z} → {@link Kind#BLOCK}:
- *       one exact cell (a verified-reachable spot).</li>
- *   <li>{@code y} only → {@link Kind#YLEVEL}:
- *       change elevation to that height.</li>
- *   <li>{@code block} only (no coordinates) → {@link Kind#FIND}:
- *       scan for the nearest block of that kind and walk up beside it,
- *       never touching it.</li>
- * </ul>
- * Coordinates are nullable ({@code null} = "not supplied"); the deadline-based
- * timeout is handled by the base class.
- *
- * <p>{@code mayAlterTerrain} is the model's explicit consent to dig through, bridge
- * or pillar on the way. Without it the walk never changes a block (see
- * {@code TerrainPermit}); when the only route would, the failure lists exactly which
- * blocks and the model decides whether to re-send with consent.
+ * 移动任务单：给 x/z 就只要求水平位置，给 x/y/z 就再要求高度，只给 y 则改变高度，只给方块名则先找方块。
+ * 是否必须准确站到一格由 exact 决定；普通公开移动默认允许附近到达，内部工作站位可使用严格构造方法。
+ * 路上能否挖地形、搭路或临时放落地保护物品，各自有独立开关，不能从“要去那里”自动推断。
  */
 public final class MoveToTaskRecord extends TaskRecord implements InternalPositionReceipt {
 
@@ -76,6 +57,7 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
                             Double x, Double y, Double z, String block, boolean mayAlterTerrain,
                             boolean allowWaterBucketFall, TransportMode transportMode, boolean allowLandingAssists) {
+        // 保留的内部构造入口默认精确；公开 MoveToTool 使用下面的完整参数入口，默认值不同。
         this(toolCallId, deadlineGameTime, x, y, z, block, mayAlterTerrain, allowWaterBucketFall,
                 transportMode, allowLandingAssists, true, 0, 0);
     }
@@ -102,10 +84,7 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
         this.verticalTolerance = verticalTolerance;
     }
 
-    /**
-     * Build an internal exact-body movement contract without adding another LLM-visible field to
-     * {@code goto}. The supplied cell is already a process-owned, observed stance candidate.
-     */
+    /** 内部任务已选好必须站到的位置时使用，例如放方块和操作机器，不接受长途旅行的宽松到达误差。 */
     public static MoveToTaskRecord strictStance(
             String toolCallId, long deadlineGameTime, BlockPos target, boolean mayAlterTerrain) {
         return strictStance(toolCallId, deadlineGameTime, target, mayAlterTerrain, TransportMode.AUTO);
@@ -124,6 +103,7 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     }
 
     org.maiwithu.maicraft.core.pathing.calc.NavGoal coordinateGoal() {
+        // 把坐标和误差转换成导航的“哪些位置算到了”；方块搜索先找到真实候选后才有这一目标。
         var target = new BlockPos(x == null ? 0 : (int) Math.floor(x), y == null ? 0 : (int) Math.floor(y),
                 z == null ? 0 : (int) Math.floor(z));
         return switch (kind) {
@@ -144,11 +124,7 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
         return verifiedPosition;
     }
 
-    /**
-     * Map supplied inputs → goal kind (arity decides intent, expressed here as
-     * named nullable fields). Throws a teaching error for ambiguous
-     * combos so the LLM learns the valid shapes.
-     */
+    /** 按填写的字段确定移动种类；例如只给 x 或同时给方块名和坐标，会拒绝让调用者改清楚。 */
     private static Kind resolveKind(Double x, Double y, Double z, String block) {
         boolean hasX = x != null, hasY = y != null, hasZ = z != null;
         if (block != null) {
@@ -179,6 +155,7 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
      * 工具 id 不写进来,需要它的地方(运行时状态的 tool 属性、派发回执)本来就有。
      */
     public String describe() {
+        // 这是状态面板的简短说明，不是到达证明；实际完成位置要等执行器确认后才保存。
         String where = switch (kind) {
             case BLOCK -> "走向 " + (int) (double) x + "," + (int) (double) y + "," + (int) (double) z;
             case COLUMN -> "走向 x=" + (int) (double) x + " z=" + (int) (double) z;

@@ -14,27 +14,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * {@code goto} on the companion player body — a coordinate walk whose goal
- * type is chosen by which coordinates were supplied
- * ({@link MoveToTaskRecord.Kind}):
- * <ul>
- *   <li>{@link MoveToTaskRecord.Kind#COLUMN} → {@link NavGoal#column}:
- *       reach the (x,z) location at any height — the default "go there", a wrong/
- *       absent Y can never make it unreachable;</li>
- *   <li>{@link MoveToTaskRecord.Kind#BLOCK} → {@link NavGoal#exact}: occupy exactly
- *       that cell; whatever occupies it has to be dug out, which only a goto with
- *       may_alter_terrain may do (the block form is how the caller says "walk up
- *       beside it instead");</li>
- *   <li>{@link MoveToTaskRecord.Kind#YLEVEL} → {@link NavGoal#yLevel}:
- *       reach a target elevation.</li>
- * </ul>
- * The planner is untouched; only the goal/arrival/result semantics differ per kind.
- * Results always echo the ACTUAL position reached (and the real ground height) so
- * the model learns the terrain and which intent to use next time.
- *
- * <p>Nav-only reactive task: it drives {@link PlayerNav} with a custom settle loop
- * (no "act" step), so it grows on {@link AbstractCompanionTask} directly rather than
- * {@code GoToThenDoTask}.
+ * 执行一次移动：到坐标附近、准确站到某格、改变高度，或找到某种方块走到旁边。
+ * 具体路线由 PlayerNav 负责；这里决定何时开始、找不到路怎么办，以及玩家真的到达后怎样报告结果。
+ * x/y/z 都有也不一定要求精确站位，是否精确由 exact 与到达误差共同决定。
  */
 public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskRecord> {
 
@@ -88,6 +70,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     @Override
     protected void onStart() {
+        // 已经坐船且目标适合驾船时先走水路；找某种方块则先扫描，其他目标直接准备导航。
         landingBaseline = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.observation().revision();
         // 载具处置:坐在船上且有明确去处,先驾船——船腿走到离目标最近的水格,
         // 靠岸后接步行(见 tickBoatLeg)。其余情况(矿车没有舵、马的寻路仍按步行
@@ -126,9 +109,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     "[maicraft-task] goto start kind=FIND block={}", r.block);
             return;
         }
-        // Already there: don't build a nav (and don't extend the deadline). The first
-        // onTick observes reached() and returns SUCCESS — same outcome as the old
-        // start-time short-circuit, one tick later per the base's lifecycle.
+        // 已经符合到达条件时不用新建导航，下一次 tick 就可以报告成功。
         if (reached()) return;
         startWalkingNav();
     }
@@ -149,9 +130,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // here — the progress lease below takes over once the journey is under way).
         long extra = Math.min(MAX_EXTRA_TICKS, 600 + (long) (repDistance() * TICKS_PER_BLOCK));
         r.extendDeadlineTo(player.level().getGameTime() + extra);
-        // BLOCK targets go through the compiled front door so the target cell is
-        // SACRED when solid — the route may neither dig through nor bury the very
-        // block it was asked to reach. COLUMN/YLEVEL have no block objective.
+        // 完整坐标与只给水平坐标使用各自的到达范围；BLOCK 在此表示坐标目标，不是 FIND 的方块类型搜索。
         nav = (r.kind == MoveToTaskRecord.Kind.BLOCK
                 ? PlayerNav.to(player, this::blockCompiled, WALK_SPEED, this::reached, terrain())
                 : PlayerNav.toGoal(player, this::goal, WALK_SPEED, this::reached, terrain()))
@@ -160,11 +139,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 "[maicraft-task] goto start kind={} target={},{},{} solid={}",
                 r.kind, bx, by, bz,
                 r.kind == MoveToTaskRecord.Kind.BLOCK && targetCellSolid());
-        // Highlight the ACTUAL requested cell (not the path's best-effort end) so the overlay
-        // box sits on the real target — e.g. a BLOCK goal under/over water that the path can
     }
 
-    /** The navigation goal for this move's kind. */
+    /** 将任务单里的目的地要求交给导航；找方块时用已经选出的候选位置。 */
     private NavGoal goal() {
         return switch (r.kind) {
             case BLOCK -> blockGoal();
@@ -198,38 +175,15 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 player.level(), player.getX(), player.getY(), player.getZ());
     }
 
-    /**
-     * Live arrival — DOUBLE membership: the feet cell AND the supported
-     * fake-start cell must both satisfy the goal. The second gate is what keeps
-     * transient cell-entry from counting as arrival: a pillar's final jump puts
-     * the feet in the goal cell at the APEX a tick before its support block is
-     * placed, and a bridge's final backplace hovers the feet into the goal cell
-     * while sneak-clinging to the previous block's edge — in both states the
-     * body has no support under the goal cell yet, pathStart resolves to the
-     * neighbouring supported cell, and arrival is (correctly) withheld until
-     * the block is actually placed and stood on. Declaring success on the
-     * feet-only test stopped the nav mid-move: the place never fired and the
-     * halt released the sneak that was holding the body on the edge — the
-     * "one block short, one step too far" fall.
-     */
+    /** 到达不能只看脚刚碰到目标格：还要看脚下支撑是否也在目标范围内，避免起跳到最高点就停下导致坠落。 */
     private boolean reached() {
         boolean supportedGoalMembership = inGoalCell(feet())
                 && inGoalCell(org.maiwithu.maicraft.core.pathing.moves.Movement.pathStart(player));
-        // An exact stance is a fact about the live body, not just two pathing cells.
-        // During a jump both cells can briefly name the destination before vanilla physics has
-        // actually put the player on its support. Every full-coordinate target has this contract.
+        // 精确站位还要真的落地；非精确移动允许在水中到达，但不把普通空中经过当作已到达。
         return supportedGoalMembership && (player.onGround() || !r.requiresStrictStance() && player.isInWater());
     }
 
-    /**
-     * PlayerNav deliberately exposes search-goal satisfaction as ARRIVED even when the caller's
-     * stronger body predicate is still false. For a strict stance, one such state is healthy and
-     * transient: the feet have entered the exact goal cell and ordinary gravity is still settling
-     * the body onto an observed standable support. Keep observing that physical transition without
-     * a retry/tick counter. If the body leaves the cell, the stance stops being landable, or the
-     * body is held up by another locomotion medium, this returns false and the candidate is rejected
-     * normally; the semantic parent can then choose a different observed stance.
-     */
+    /** 已进入准确目标格、只是还没落地时继续等重力落下；游泳、攀爬、飞行或悬浮不能当成同一种落地过程。 */
     private boolean strictLandingInProgress() {
         if (!r.requiresStrictStance() || player.onGround() || !inGoalCell(feet())) {
             return false;
@@ -268,6 +222,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     @Override
     protected TaskState onTick() {
+        // 先处理已经开始的交通和导航，再判断是否到达；飞行刚碰地、电梯刚到楼层，都可能还没完成收尾。
         observeLanding();
         // An existing nav must consume its native completion before task cleanup can stop it.
         // Cabin floor contact or jetpack touchdown alone does not finish exit/mode restoration.
@@ -295,22 +250,15 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             fail(blockedMessage("no path"), FailureType.NO_PATH);
             return TaskState.FAILED;
         }
-        // Progress lease: renew only for a real active segment with recent physical progress,
-        // or an asynchronous plan that is demonstrably still in flight. stallTicks() historically
-        // reads zero when there is no segment; using it alone made PlayerNav's latched ARRIVED
-        // state renew forever while a strict body merely waited for gravity. Plan consumption,
-        // NOT goal distance, remains the liveness signal: healthy routes routinely move away from
-        // the goal (skirting a lake, spiraling down), and the flat initial budget cannot price
-        // terrain (a dig-heavy route once died one block short).
+        // 路线仍有实际进展或正在后台算路就延长时间；绕湖可能暂时离目标更远，不能只用距离缩短判断进展。
+        // 已到目标格、只等落地时不无限续期，避免身体悬着不落也永远不超时。
         boolean awaitingStrictLanding = strictLandingInProgress();
         if (!awaitingStrictLanding && (nav.planningInFlight()
                 || nav.hasRecentPhysicalProgress(PROGRESS_GRACE_TICKS))) {
             long now = player.level().getGameTime();
             r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
         }
-        // Track passive progress toward the goal: the planner stops at the water surface
-        // above an underwater target, but the body keeps drifting toward it on its own (it
-        // sinks). Reset the settle timer whenever we get closer.
+        // 另外记录身体是否仍在靠近，例如水中自然下沉；越接近就重新开始计算“等待稳定”的时间。
         double d = repDistance();
         if (d < bestDist - 0.1) {
             bestDist = d;
@@ -322,9 +270,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
                 if (!nav.isSafeToCancel()) yield TaskState.RUNNING;
-                // PlayerNav also reports ARRIVED when its search goal is satisfied but the live
-                // supported-body predicate is not. Full coordinates must reject that candidate
-                // rather than hand a nearby body position downstream.
+                // 导航说路线到头了，还要按玩家实际身体检查；exact 任务不能用附近的落脚点替代。
                 if (r.requiresStrictStance()) {
                     if (reached()) {
                         yield successAtBody();
@@ -349,8 +295,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 yield successAtBody();
             }
             case FAILED -> {
-                // Transport failures with effects or uncertain receipts are reported as UNKNOWN.
-                // Proximity must not turn those failures into arrival, another candidate, or a retry.
+                // 交通已经可能产生副作用而结果不明时，不因“已经很近”就当成功，也不自动换目标重试。
                 if (nav.failType() == FailureType.UNKNOWN) {
                     fail(blockedMessage(nav.failReason()), nav.failType());
                     yield TaskState.FAILED;
@@ -362,11 +307,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                             .withTransportMode(r.transportMode).withTerrainProbe();
                     yield TaskState.RUNNING;
                 }
-                // The planner can't get closer. In water, keep waiting while the body is
-                // still drifting toward the goal (sinking onto an underwater target); give
-                // up only once it's stopped making progress (bobbing at the surface below an
-                // out-of-reach above-water target). So the body settles onto an underwater
-                // goal but bails under an unreachable air one. On land a failure is final.
+                // 水中可能还会自然漂近或下沉，非精确移动再等一小段时间；一直没有靠近就继续处理失败。
                 if (!r.requiresStrictStance()
                         && player.isInWater() && settleTicks < MAX_SETTLE_TICKS) {
                     yield TaskState.RUNNING;
@@ -375,12 +316,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 if (!r.requiresStrictStance() && closeEnoughToSucceed()) {
                     yield successAtBody();
                 }
-                // Recovery ladder — ONE retry rung, land nav only: re-plan accepting
-                // anywhere within NEAR_SUCCESS_RADIUS of the destination. Goal-consistent,
-                // not scope creep: a stop within that radius already counts as arrival
-                // (closeEnoughToSucceed above), the retry just lets the SEARCH aim for it.
-                // YLEVEL has no looser near-equivalent (its goal is already any-x/z), and
-                // the water-settle path above is untouched.
+                // 旧兼容逻辑允许水平误差为零的非精确目标再试一次附近三格；这可能放宽调用者明确给出的零误差。
                 if (!r.requiresStrictStance() && r.horizontalRadius == 0 && !nearRetried && !player.isInWater()
                         && r.kind != MoveToTaskRecord.Kind.YLEVEL
                         && r.kind != MoveToTaskRecord.Kind.FIND) {
@@ -411,6 +347,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
      * 目标就在水上时她留在船里,不往水里跳。船留在原地,那是她的船,不是垃圾。
      */
     private TaskState tickBoatLeg() {
+        // 船走不下去时可以停船后换步行继续；整项移动是否成功，仍要按总目的地判断。
         // 船腿的续约与步行段同一制式:还在消耗航线就把期限保持在租约窗口里
         if (boatLeg.progressing()) {
             long now = player.level().getGameTime();
@@ -437,8 +374,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return TaskState.RUNNING;
     }
 
-    /** The retry rung's loosened goal — the destination widened to the SAME radius that
-     *  already counts as arrival ({@link #NEAR_SUCCESS_RADIUS}), never wider. */
+    /** 失败后的再试目标：完整坐标仍用原范围，只给 x/z 时改成附近三格。 */
     private NavGoal nearRetryGoal() {
         if (r.kind == MoveToTaskRecord.Kind.BLOCK) {
             return blockGoal();
@@ -464,10 +400,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         };
     }
 
-    /** Did we get close enough to the destination to call it done (teaching success)?
-     *  Requires solid footing (or water — the settle path): as a live arrival
-     *  predicate on the near-retry nav this must not fire during a mid-air jump
-     *  or a sneak-hover over the edge, for the same reason as {@link #reached}. */
+    /** 找路失败后是否仍可接受当前落脚点；COLUMN 的零半径会在这里按三格算，高度目标也额外接受一格偏差。 */
     private boolean closeEnoughToSucceed() {
         if (!player.onGround() && !player.isInWater()) {
             return false;
@@ -488,7 +421,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return dx * dx + dz * dz;
     }
 
-    /** Capture only a terminal verified arrival; failed/cancelled movement has no handoff receipt. */
+    /** 到达后保存实际位置，供后续引用；如果途中落地保护已经确认失败，则不能只因到达就报告成功。 */
     private TaskState successAtBody() {
         observeLanding();
         if (Boolean.TRUE.equals(landingFacts.get("complete")) && Boolean.TRUE.equals(landingFacts.get("failed"))) {
@@ -550,6 +483,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     @Override
     protected Map<String, Object> resultData() {
+        // 记录最终身体位置和途中落地保护情况；哪些坐标能公开给模型由外层结果整理决定。
         int gy = player.blockPosition().getY();
         Map<String, Object> data = new HashMap<>();
         data.put("final_x", player.getX());
@@ -563,7 +497,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return data;
     }
 
-    /** Success copy — always names the real position so the model learns the terrain. */
+    /** 按目标类型说明到达结果；此处是内部文字，外层还可能删去具体坐标。 */
     @Override
     protected String successMessage() {
         int gy = player.blockPosition().getY();
@@ -603,8 +537,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return String.format("%.0f,%d,%.0f", player.getX(), gy, player.getZ());
     }
 
-    /** Release the nav (base) and drop a FIND lookup that is still walking rings for a
-     *  destination nobody is going to any more. */
+    /** 结束后停导航、取消还没完成的找方块扫描，并停止当前船只控制。 */
     @Override
     protected void cleanup() {
         super.cleanup();

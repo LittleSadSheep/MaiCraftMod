@@ -9,9 +9,10 @@ import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloors;
 import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloorTaskRecord;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
-/** Observe first, select a synchronized floor, then run the existing complete elevator transport. */
+/** 处理“坐电梯去某层”：先读已加载电梯与楼层，需要时走近同步楼层，让调用者选层后再真正乘坐。 */
 final class ElevatorTravelIntent {
     static boolean applies(Goal goal) {
+        // 明确填了电梯编号／楼层，或只要求电梯而没给别的目的地时，使用这套选层流程。
         var p=goal.parameters();
         if(p.has("elevator_id") || p.has("elevator_floor")) return true;
         return "elevator".equals(string(p,"transport_mode")) && !p.has("destination") && !p.has("block") && !p.has("block_id")
@@ -33,6 +34,7 @@ final class ElevatorTravelIntent {
         if(p.has("exact") && p.get("exact").getAsBoolean()) throw new IllegalArgumentException("an elevator floor is a region, not one exact cell");
     }
     static IntentAction choose(Goal goal,List<ElevatorFloors.Elevator> elevators,long tick) {
+        // 没给电梯编号时取观察列表中的第一台；先拿到它的同步楼层，再决定能否选到指定目标层。
         validate(goal);
         String id=string(goal.parameters(),"elevator_id");
         UUID identity=id==null ? null : UUID.fromString(id);
@@ -41,6 +43,7 @@ final class ElevatorTravelIntent {
         String floor=string(goal.parameters(),"elevator_floor");
         boolean ask=floor==null || floor.equals("ask");
         if(elevator.floors().isEmpty() || ask && !elevator.readyForDecision()) {
+            // 还不知道楼层不等于没有楼层：先创建观察任务，成功后重新判断原移动目标，不把观察成功当成乘梯成功。
             var observation=new ElevatorFloorTaskRecord("elevator-floor-observation",tick+1200,elevator.id(),null,ask);
             return new IntentAction.Native(observation,true);
         }
