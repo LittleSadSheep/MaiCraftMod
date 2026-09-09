@@ -28,6 +28,7 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.entity.EntityTypeTest;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -126,6 +127,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         @Override public int getMinBuildHeight() { return 0; }
         @Override public long getGameTime() { return time; }
         @Override public List<Entity> getEntities(Entity entity, AABB bounds, Predicate<? super Entity> filter) { return List.of(); }
+        @Override public <T extends Entity> List<T> getEntities(
+                EntityTypeTest<Entity, T> type, AABB bounds, Predicate<? super T> filter) { return List.of(); }
     }
 
     private static final class LoadedChunks extends ClientChunkCache {

@@ -45,6 +45,7 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.MachineSealingTest.main(args);
         CompanionCancellationTest.main(args);
         SleepSafetyTest.main(args);
+        FishingBiteTest.main(args);
         org.maiwithu.maicraft.core.inventory.StockEvidenceTest.main(args);
         org.maiwithu.maicraft.core.integration.create.CreateStockObservationTest.main(args);
         org.maiwithu.maicraft.core.integration.ae2.Ae2ScreenAccessTest.main(args);

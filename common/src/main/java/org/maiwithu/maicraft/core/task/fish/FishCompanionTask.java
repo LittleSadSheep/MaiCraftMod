@@ -42,7 +42,7 @@ import java.util.Set;
 /**
  * 按阶段钓鱼：确定站位和水面、拿竿瞄准、抛出、等咬钩、收回并捡战利品，然后再来一竿。
  * 请求次数按成功收获的竿数计算，不保证每竿都是鱼；原版也可能给垃圾和宝藏。
- * 当前咬钩字段用错端，以及失败重抛时的动作记录混用，分别见 A62、A63。
+ * 咬钩依据客户端同步状态；失败重抛时的动作记录混用仍见审计 A63。
  */
 public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecord> {
 
@@ -301,8 +301,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return TaskState.RUNNING;
     }
 
-    // 鱼钩消失、钩住实体、没落入水或等太久时重试。判断咬钩的当前字段是服务端计时器 nibble，
-    // 它不随客户端的咬钩同步标志更新，因此正常咬钩可能始终识别不到，见 A62。
+    // 鱼钩消失、钩住实体、没落入水或等太久时重试；收到客户端同步的咬钩状态后才收竿。
     private TaskState waitForBite() {
         FishingHook hook = player.fishing;
         if (hook == null || hook.isRemoved()) {
@@ -316,8 +315,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             return failedCast("the hook caught an entity instead of landing cleanly", true);
         }
 
-        int nibble = ((FishingHookAccessor) (Object) hook).maicraft$getNibble();
-        if (isBiteWindow(nibble)) {
+        if (((FishingHookAccessor) (Object) hook).maicraft$isBiting()) {
             beginLootCollection();
             return TaskState.RUNNING;
         }
@@ -775,10 +773,6 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
     private static double waterSurfaceY(BlockPos target) {
         return target.getY() + WATER_SURFACE_OFFSET;
-    }
-
-    static boolean isBiteWindow(int nibbleTicks) {
-        return nibbleTicks > 0;
     }
 
     private void discardHook() {
