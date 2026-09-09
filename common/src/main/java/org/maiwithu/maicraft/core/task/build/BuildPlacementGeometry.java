@@ -243,6 +243,7 @@ final class BuildPlacementGeometry {
 
     /** True for the final state or for a receipt-confirmable intermediate of a bounded multi-use. */
     static boolean isProgress(BuildTaskRecord.Target target, BlockState before, BlockState after) {
+        if (after.equals(before)) return false;
         if (target.matches(after)) return true;
         // Machine-authored custom state must not be reinterpreted as a generic accumulation step.
         if (!target.matchesExactProperties(after)) return false;
@@ -252,9 +253,7 @@ final class BuildPlacementGeometry {
         if (desired.getBlock() instanceof SlabBlock
                 && desired.hasProperty(BlockStateProperties.SLAB_TYPE)
                 && desired.getValue(BlockStateProperties.SLAB_TYPE) == SlabType.DOUBLE) {
-            return !after.isAir() && (!before.is(after.getBlock())
-                    || (before.hasProperty(BlockStateProperties.SLAB_TYPE)
-                    && before.getValue(BlockStateProperties.SLAB_TYPE) != SlabType.DOUBLE));
+            return !before.is(after.getBlock());
         }
 
         // Snow layers, candles, eggs, pickles and modded stackable blocks expose the same monotone
