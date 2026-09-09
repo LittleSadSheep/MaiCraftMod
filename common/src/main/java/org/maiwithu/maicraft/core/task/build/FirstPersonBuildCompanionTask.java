@@ -19,8 +19,6 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
-import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
-import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
@@ -58,7 +56,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private static final long BUILD_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
     private static final int PREFLIGHT_BUDGET = 24;
     private static final int USE_TIMEOUT = 40;
-    private static final int CREATIVE_TIMEOUT = 30;
 
     private enum Phase { PREFLIGHT, SELECT, CLEAR_NAV, CLEAR, PLACE_NAV, WORKSITE, SELECT_ITEM,
         AIM, WAIT_USE, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, ROUTE_VERIFY }
@@ -99,6 +96,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Phase phase = Phase.PREFLIGHT;
     private boolean preflightDone, providerRegistered, uncertain;
     private int preflightAt, queueAt, clearAt, gestureAt, useCount;
+    private BuildPlacementConfirmation lastUseConfirmation;
     private int verifyAt, scaffoldAt;
     private List<CellPlan> queue = new ArrayList<>();
     private CellPlan cell;
@@ -119,12 +117,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> lastPlacementRejection = Map.of();
     private Map<String, Object> lastAimObservation = Map.of();
     private double aimError;
-    private NativeActionReceipt useReceipt, creativeReceipt;
-    private VisibleMenuSession creativeMenu = new VisibleMenuSession();
+    private NativeActionReceipt useReceipt;
+    private final CreativeBuildMaterialSupply creativeMaterials = new CreativeBuildMaterialSupply();
     private BuildTraversabilityVerifier.Result traversabilityResult;
     private BuildTraversabilityVerifier.Verification traversabilityScan;
-    private int creativeSlot = -1;
-    private ItemStack creativeStack = ItemStack.EMPTY;
     private FirstPersonActionGate selection = new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private final LinkedHashSet<Long> verifyFailed = new LinkedHashSet<>();
@@ -204,9 +200,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.CANCELLED;
         if (preflightDone) registerProvider();
         drainScaffolds();
-        return BuildTickPipeline.advance(() -> phase, this::stepPhase,
+        TaskState result = BuildTickPipeline.advance(() -> phase, this::stepPhase,
                 () -> phase != Phase.WAIT_USE && phase != Phase.CLEAR_CREATIVE
                         && ClientRuntime.requireContext(player).mutationAvailable());
+        if (result == TaskState.SUCCESS && player.getAbilities().instabuild && creativeMaterials.hasOwned(player)) {
+            phase = Phase.CLEAR_CREATIVE;
+            return TaskState.RUNNING;
+        }
+        return result;
     }
 
     private TaskState stepPhase() {
@@ -517,7 +518,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (useCount > 0) { worksite = null; worksiteSearch = null; worksiteSearched = true; }
         Vec3 approaching = worksite != null ? worksite.feet()
                 : nav != null && gesture != null ? Vec3.atBottomCenterOf(gesture.stance()) : null;
-        if (useCount == 0 && !isTemporary(cell) && creativeSlot < 0 && selectNearbyPlacement(approaching)) return TaskState.RUNNING;
+        if (useCount == 0 && !isTemporary(cell) && selectNearbyPlacement(approaching)) return TaskState.RUNNING;
         BuildPlacementGeometry.Gesture nearby = BuildPlacementGeometry.currentGesture(player, cell.target(), targets,
                 candidate -> placementAttempts.allows(cell.target(), candidate));
         if (nearby != null) {
@@ -527,7 +528,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         // 一种放法不通就试下一种；站位必须精确到指定格，不能像长途旅行那样“附近就算到了”。
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
-        if (useCount == 0 && !worksiteSearched && !isTemporary(cell) && creativeSlot < 0) {
+        if (useCount == 0 && !worksiteSearched && !isTemporary(cell)) {
             stopNav(); phase = Phase.WORKSITE; return TaskState.RUNNING;
         }
         if (worksite != null) return walkToWorksite();
@@ -655,44 +656,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState selectItemTick() {
         placementPostureAndMotion();
-        // 生存模式从实际背包拿材料；创造模式缺材料时借一个空快捷栏格临时放入，之后还要清掉。
-        if (creativeReceipt != null) {
-            LocalPlayerContext ctx = ClientRuntime.requireContext(player);
-            creativeReceipt = ctx.actions().poll(ctx, creativeReceipt);
-            if (!creativeReceipt.terminal()) return TaskState.RUNNING;
-            if (creativeReceipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-                failAt(cell.target().pos(), "creative staging not confirmed: " + creativeReceipt.detail(),
-                        FailureType.UNKNOWN, "creative_stage_failed",
-                        creativeReceipt.status() == NativeActionReceipt.Status.UNCERTAIN);
-                return TaskState.FAILED;
-            }
-            if (!creativeMenu.close(ctx)) return TaskState.RUNNING;
-            creativeReceipt = null;
-            creativeMenu = new VisibleMenuSession();
-        }
         if (matches(cell.target(), cell.generated())) {
-            if (!creativeMenu.close(ClientRuntime.requireContext(player))) return TaskState.RUNNING;
-            creativeMenu = new VisibleMenuSession();
             finishPlaced();
             return TaskState.RUNNING;
         }
-        int slot = inventory.findSlot(cell.target().item(), true);
-        if (slot < 0 && player.getAbilities().instabuild) {
-            if (creativeSlot < 0) creativeSlot = emptyHotbar();
-            if (creativeSlot < 0) {
-                failAt(cell.target().pos(), "creative placement needs an empty hotbar slot",
-                        FailureType.NO_SPACE, "no_creative_staging_slot", false); return TaskState.FAILED;
-            }
-            if (creativeStack.isEmpty()) {
-                LocalPlayerContext ctx = ClientRuntime.requireContext(player);
-                if (!creativeMenu.inventoryReady(ctx)) return TaskState.RUNNING;
-                creativeStack = new ItemStack(cell.target().item(), 1);
-                creativeReceipt = ctx.actions().creativeSetSlot(
-                        ctx, creativeSlot, creativeStack, CREATIVE_TIMEOUT);
-                return TaskState.RUNNING;
-            }
-            slot = creativeSlot;
-        }
+        int slot;
+        // Finish any native swap before reconciling ownership against its post-swap inventory.
+        if (selection.started()) slot = selection.requestedSlot();
+        else if (player.getAbilities().instabuild) {
+            var status = creativeMaterials.ensure(ClientRuntime.requireContext(player), cell.target().item(), creativeNeeds());
+            if (status == CreativeBuildMaterialSupply.Status.FAILED) return creativeSupplyFailed();
+            if (status == CreativeBuildMaterialSupply.Status.WAITING) return TaskState.RUNNING;
+            slot = creativeMaterials.slot();
+        } else slot = inventory.findSlot(cell.target().item(), true);
         if (slot < 0) {
             missing.clear();
             missing.putAll(currentShortfall());
@@ -700,11 +676,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.NO_MATERIAL, "material_exhausted", false); return TaskState.FAILED;
         }
         FirstPersonActionGate.Status status = selection.select(player, slot);
+        creativeMaterials.swapped(player, selection.takeConfirmedSwap());
         if (status == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;
         if (status == FirstPersonActionGate.Status.FAILED) {
             failAt(cell.target().pos(), "item selection failed: " + selection.failure(),
                     FailureType.UNKNOWN, "item_selection_failed", false); return TaskState.FAILED;
         }
+        if (!player.getMainHandItem().is(cell.target().item())) { selection.reset(); return TaskState.RUNNING; }
         phase = Phase.AIM; aimConvergence.reset(); aimProgress.reset(); lastAimObservation = Map.of();
         return TaskState.RUNNING;
     }
@@ -712,6 +690,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState aimTick() {
         // 先真正转头到位，复查视线会点到哪，再预测会放成什么状态，并检查是否把自己或生物卡进方块。
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
+        if (!player.getMainHandItem().is(cell.target().item())) {
+            selection.reset(); phase = Phase.SELECT_ITEM; return TaskState.RUNNING;
+        }
         Vec3 eye = player.getEyePosition();
         Vec3 desired = gesture.point().subtract(eye).normalize();
         aimError = Math.toDegrees(Math.acos(Math.clamp(player.getViewVector(1).normalize().dot(desired), -1, 1)));
@@ -753,7 +734,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
         aimWaitReason = "placement_submitted";
         useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
-                confirmation(cell, frozen), USE_TIMEOUT);
+                confirmation(cell, frozen, placedPrimary), USE_TIMEOUT);
         phase = Phase.WAIT_USE; return TaskState.RUNNING;
     }
 
@@ -858,34 +839,42 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private void finishPlaced() {
         if (isTemporary(cell) && useCount > 0)
             confirmedScaffold(cell.target().pos(), player.level().getBlockState(cell.target().pos()));
-        // 记下这一格完成；如果借用了创造快捷栏，还要先归还。当前 placed 计数也会包含期间由外界放成的格子。
+        // Keep creative materials available for later cells instead of clearing the slot per click.
         r.placedOne(); renewBuildProgress(); markComplete(cell);
-        if (creativeSlot >= 0 && !creativeStack.isEmpty()) {
-            phase = Phase.CLEAR_CREATIVE;
-        } else finishCell();
+        finishCell();
     }
 
     private TaskState clearCreativeTick() {
-        // 清除为本次施工临时放入的创造物品，等清除确认并关好物品栏，再做下一格。
-        LocalPlayerContext ctx = ClientRuntime.requireContext(player);
-        if (creativeReceipt == null) {
-            if (!creativeMenu.inventoryReady(ctx)) return TaskState.RUNNING;
-            creativeReceipt = ctx.actions().creativeSetSlot(
-                    ctx, creativeSlot, ItemStack.EMPTY, CREATIVE_TIMEOUT);
-            return TaskState.RUNNING;
-        }
-        creativeReceipt = ctx.actions().poll(ctx, creativeReceipt);
-        if (!creativeReceipt.terminal()) return TaskState.RUNNING;
-        if (creativeReceipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-            failAt(cell.target().pos(), "temporary creative item was not cleared: "
-                            + creativeReceipt.detail(), FailureType.UNKNOWN, "creative_cleanup_failed",
-                    creativeReceipt.status() == NativeActionReceipt.Status.UNCERTAIN);
-            return TaskState.FAILED;
-        }
-        if (!creativeMenu.close(ctx)) return TaskState.RUNNING;
-        creativeReceipt = null; creativeSlot = -1; creativeStack = ItemStack.EMPTY;
-        creativeMenu = new VisibleMenuSession();
-        finishCell(); return TaskState.RUNNING;
+        var status = creativeMaterials.releaseUnused(ClientRuntime.requireContext(player), creativeNeeds());
+        if (status == CreativeBuildMaterialSupply.Status.FAILED) return creativeSupplyFailed();
+        if (status == CreativeBuildMaterialSupply.Status.WAITING) return TaskState.RUNNING;
+        beginVerify(); return TaskState.RUNNING;
+    }
+
+    private TaskState creativeSupplyFailed() {
+        failAt(cell == null ? siteMin : cell.target().pos(), creativeMaterials.failure(), creativeMaterials.failureType(),
+                "creative_material_supply_failed", creativeMaterials.uncertain());
+        return TaskState.FAILED;
+    }
+
+    private java.util.function.ToIntFunction<Item> creativeNeeds() {
+        return new java.util.function.ToIntFunction<>() {
+            private Map<Item, Integer> next;
+            public int applyAsInt(Item item) {
+                if (next == null) {
+                    next = new HashMap<>(); int order = 0;
+                    for (int i = queueAt; i < queue.size(); i++, order++) {
+                        var pending = queue.get(i);
+                        if (pending.target().costsMaterial() && !matches(pending.target(), pending.generated()))
+                            next.putIfAbsent(pending.target().item(), order);
+                    }
+                    // A target changed after verification still needs its cached material.
+                    for (var target : r.targets) if (target.costsMaterial() && (!player.level().isLoaded(target.pos())
+                            || !target.matches(player.level().getBlockState(target.pos())))) next.putIfAbsent(target.item(), order++);
+                }
+                return next.getOrDefault(item, CreativeBuildInventory.NO_FUTURE_USE);
+            }
+        };
     }
 
     private TaskState deferOrFail() {
@@ -1172,26 +1161,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         };
     }
 
-    private NativeConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before) {
-        // 主格和另一半都达到要求才完全确认；支持叠加的中间状态也算本次点击有进展，其余变化按不一致处理。
-        return ctx -> {
-            if (!ctx.level().isLoaded(plan.target().pos())) return NativeConfirmation.Verdict.PENDING;
-            if (matches(ctx, plan)) return NativeConfirmation.Verdict.APPLIED;
-            BlockState old = before.get(plan.target().pos().asLong());
-            BlockState live = ctx.level().getBlockState(plan.target().pos());
-            if (BuildPlacementGeometry.isProgress(plan.target(), old, live))
-                return NativeConfirmation.Verdict.APPLIED;
-            boolean unchanged = live.equals(old);
-            for (BuildPlacementGeometry.GeneratedCell effect : plan.generated()) {
-                if (!ctx.level().isLoaded(effect.pos())) return NativeConfirmation.Verdict.PENDING;
-                BlockState was = before.get(effect.pos().asLong());
-                BlockState now = ctx.level().getBlockState(effect.pos());
-                unchanged &= now.equals(was);
-                if (!now.equals(was) && !BuildValidity.valid(now, effect.expected(), false))
-                    return NativeConfirmation.Verdict.DIVERGED;
-            }
-            return unchanged ? NativeConfirmation.Verdict.PENDING : NativeConfirmation.Verdict.DIVERGED;
-        };
+    private NativeConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before, BlockState predicted) {
+        lastUseConfirmation = new BuildPlacementConfirmation(plan.target(), plan.generated(), before, predicted);
+        return lastUseConfirmation;
     }
 
     private Map<Long, BlockState> freeze(CellPlan plan) {
@@ -1215,16 +1187,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         for (BuildPlacementGeometry.GeneratedCell effect : generated)
             if (!player.level().isLoaded(effect.pos())
                     || !BuildValidity.valid(player.level().getBlockState(effect.pos()),
-                    effect.expected(), false)) return false;
-        return true;
-    }
-
-    private static boolean matches(LocalPlayerContext ctx, CellPlan plan) {
-        if (!ctx.level().isLoaded(plan.target().pos())
-                || !plan.target().matches(ctx.level().getBlockState(plan.target().pos()))) return false;
-        for (BuildPlacementGeometry.GeneratedCell effect : plan.generated())
-            if (!ctx.level().isLoaded(effect.pos())
-                    || !BuildValidity.valid(ctx.level().getBlockState(effect.pos()),
                     effect.expected(), false)) return false;
         return true;
     }
@@ -1267,11 +1229,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
     private boolean inReach(BlockPos pos) {
         return player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)) <= 20.25;
-    }
-    private int emptyHotbar() {
-        for (int i = 0; i < Math.min(9, player.getInventory().getContainerSize()); i++)
-            if (player.getInventory().getItem(i).isEmpty()) return i;
-        return -1;
     }
 
     private void bounds() {
@@ -1405,6 +1362,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 "placed_blocks", r.placed(), "cleared_blocks", r.broken(),
                 "temporary_supports_remaining", r.scaffoldLedger().snapshot().size()));
         if (phase == Phase.AIM) data.put("placement", placementDiagnostics());
+        data.put("creative_materials", creativeMaterials.progress());
         if (worksiteProgress != null || worksite != null) data.put("worksite", worksiteProgress());
         if (!lastPlacementRejection.isEmpty()) data.put("last_placement_rejection", lastPlacementRejection);
         return Map.copyOf(data);
@@ -1441,32 +1399,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         drainScaffolds(); unregisterProvider(); super.stop(companion, why); InputDriver.halt(player);
     }
     @Override protected void cleanup() {
-        // 永久结束时再释放预览、挖掘和菜单，并尽力清掉创造临时物品；已经实际建好的方块不会自动拆回去。
+        // 结束时释放预览、挖掘和菜单；中断保留创造材料与已建方块，正常完成先经过材料清理阶段。
         BuildPreviewGate.release(r);
         if (digger.current() != null) digger.cancel();
         drainScaffolds(); unregisterProvider(); InputDriver.halt(player); selection.reset();
         aimConvergence.reset();
-        retireCreativeReceipt();
-        bestEffortCreativeCleanup(); retireCreativeReceipt();
-        creativeMenu.cleanup(player); super.cleanup();
-    }
-    private void retireCreativeReceipt() {
-        if (creativeReceipt == null || creativeReceipt.terminal()) return;
-        try {
-            LocalPlayerContext ctx = ClientRuntime.requireContext(player);
-            ctx.actions().retireOneShotForTaskBoundary(ctx, creativeReceipt, "creative build task ended");
-        } catch (RuntimeException unavailable) { /* Actor revocation owns old-body receipts. */ }
-    }
-    private void bestEffortCreativeCleanup() {
-        if (creativeSlot < 0 || creativeStack.isEmpty() || !player.getAbilities().instabuild) return;
-        ItemStack live = player.getInventory().getItem(creativeSlot);
-        if (!ItemStack.isSameItemSameComponents(live, creativeStack)) return;
-        try {
-            LocalPlayerContext ctx = ClientRuntime.requireContext(player);
-            if (MenuVisibility.inventoryVisible(ctx.minecraft(), player)
-                    && (creativeReceipt == null || creativeReceipt.terminal()) && ctx.menus().ensureVisible(ctx))
-                creativeReceipt = ctx.actions().creativeSetSlot(ctx, creativeSlot, ItemStack.EMPTY, CREATIVE_TIMEOUT);
-        } catch (RuntimeException ignored) { }
+        creativeMaterials.stop(player); super.cleanup();
     }
 
     @Override
@@ -1480,12 +1418,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("stopped_phase", phase.name().toLowerCase(java.util.Locale.ROOT));
         if (phase == Phase.AIM && !lastAimObservation.isEmpty()) data.put("placement", lastAimObservation);
         if (!lastPlacementRejection.isEmpty()) data.put("last_placement_rejection", lastPlacementRejection);
+        if (lastUseConfirmation != null && failureCode != null) data.put("placement_confirmation",
+                lastUseConfirmation.diagnostics(player.level()::isLoaded, player.level()::getBlockState));
         data.put("site_min", siteMin == null ? "-" : siteMin.toShortString());
         data.put("site_max", siteMax == null ? "-" : siteMax.toShortString());
 
         if (!required.isEmpty()) data.put("required_materials", itemCounts(required));
         Map<Item, Integer> outstanding = preflightDone ? currentShortfall() : missing;
-        if (!outstanding.isEmpty()) data.put("missing_materials", itemCounts(outstanding));
+        if (!outstanding.isEmpty()) data.put(r.consumeMaterials || !player.getAbilities().instabuild
+                ? "missing_materials" : "unstocked_creative_materials", itemCounts(outstanding));
         if (!unsupported.isEmpty()) data.put("unsupported_cells", List.copyOf(unsupported));
         if (!blocked.isEmpty()) data.put("blocked_cells", List.copyOf(blocked));
         if (failureCode != null) data.put("failure_code", failureCode);
@@ -1502,13 +1443,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 .map(this::position).toList();
         if (!remainingScaffolds.isEmpty()) data.put("remaining_scaffolds", remainingScaffolds);
 
-        if (creativeSlot >= 0 && !creativeStack.isEmpty()
-                && ItemStack.isSameItemSameComponents(
-                player.getInventory().getItem(creativeSlot), creativeStack)) {
-            data.put("temporary_creative_slot_pending_cleanup", creativeSlot);
-            data.put("temporary_creative_item",
-                    BuiltInRegistries.ITEM.getKey(creativeStack.getItem()).toString());
-        }
+        if (!creativeMaterials.retained().isEmpty()) data.put("retained_creative_materials", creativeMaterials.retained());
 
         if (traversabilityResult != null) {
             data.put("traversability_verification", traversabilityResult.evidence());

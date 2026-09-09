@@ -7,6 +7,7 @@ public final class GuiRegressionSuite {
         MenuVisibilityTest.main(args);
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);
+        BlockUseConfirmationTest.main(args);
         BodyControlInputTest.main(args);
         BodyPostureObservationTest.main(args);
         BodyCameraSmoothingTest.main(args);
@@ -23,7 +24,11 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementGestureTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildAimRetryTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildPlacementConfirmationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildWorksitePlannerTest.main(args);
+        org.maiwithu.maicraft.core.task.build.CreativeBuildInventoryTest.main(args);
+        org.maiwithu.maicraft.core.task.build.CreativeBuildRetentionTest.main(args);
+        CreativeBuildSupplyMenuTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldLedgerTest.main(args);
         org.maiwithu.maicraft.core.task.build.MachineSealingTest.main(args);
         CompanionCancellationTest.main(args);
