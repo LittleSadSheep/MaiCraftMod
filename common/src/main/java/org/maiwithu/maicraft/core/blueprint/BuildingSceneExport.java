@@ -32,7 +32,7 @@ public final class BuildingSceneExport {
             Files.createDirectories(directory);
             Path temporary = Files.createTempFile(directory, ".scene-", ".tmp");
             try {
-                if (format.equals("json")) Files.writeString(temporary, blueprint.toString());
+                if (format.equals("json")) Files.writeString(temporary, BuildingSceneBlocks.export(blueprint).toString());
                 else NbtIo.writeCompressed(structure(blueprint), temporary);
                 try { Files.move(temporary, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
@@ -55,6 +55,7 @@ public final class BuildingSceneExport {
 
     public static CompoundTag structure(JsonObject blueprint) {
         org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateWire(blueprint);
+        blueprint = BuildingSceneBlocks.export(blueprint);
         List<Integer> min = minimum(blueprint);
         int[] size = {1, 1, 1};
         ListTag blocks = new ListTag(), palette = new ListTag();

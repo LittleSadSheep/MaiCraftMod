@@ -20,7 +20,8 @@ public final class BuildingSceneResources {
         var minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.level == null) throw KnowledgeException.missing(uri);
         var entry = BuildingSceneStore.current().load(parts[1], minecraft.level.dimension().location().toString());
-        var document = parts[0].equals("scene") ? entry.scene() : BuildingSceneCompiler.compile(entry.scene());
+        var document = parts[0].equals("scene") ? entry.scene()
+                : org.maiwithu.maicraft.core.blueprint.BuildingSceneBlocks.export(BuildingSceneCompiler.compile(entry.scene()));
         return new KnowledgeDocument(uri, "build." + parts[0], "Building model " + entry.sceneId(),
                 "Retained authored model; does not prove construction completion", document.toString(), "application/json");
     }

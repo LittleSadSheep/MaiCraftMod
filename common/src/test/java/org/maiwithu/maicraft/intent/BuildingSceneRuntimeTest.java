@@ -58,6 +58,12 @@ public final class BuildingSceneRuntimeTest {
         check(net.minecraft.nbt.NbtIo.readCompressed(file, net.minecraft.nbt.NbtAccounter.unlimitedHeap()).equals(structure), "compressed NBT export round trips");
         var json = BuildingSceneExport.write(directory, id, blueprint, "json");
         check(JsonParser.parseString(java.nio.file.Files.readString(json)).equals(blueprint), "JSON preserves negative offsets and exact materials");
+        JsonObject leaves = JsonParser.parseString("{\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:oak_leaves\"}]}").getAsJsonObject();
+        var leafBlueprint = org.maiwithu.maicraft.core.blueprint.BuildingSceneBlocks.export(leaves);
+        check(leafBlueprint.getAsJsonArray("blocks").get(0).getAsJsonObject().getAsJsonObject("properties")
+                .get("persistent").getAsString().equals("true"), "export must retain the same non-decaying leaf default as construction");
+        check(BuildingSceneExport.structure(leaves).getList("palette", net.minecraft.nbt.Tag.TAG_COMPOUND)
+                .getCompound(0).getCompound("Properties").getString("persistent").equals("true"), "NBT and JSON must share effective defaults");
         JsonObject bad = p.deepCopy(); bad.addProperty("style", "replace author's palette"); rejects(runtime, bad);
         bad = p.deepCopy(); bad.getAsJsonObject("scene").getAsJsonArray("objects").get(0).getAsJsonObject().add("clicks", new JsonArray()); rejects(runtime, bad);
         bad = new JsonObject(); bad.addProperty("operation", "update_scene"); bad.addProperty("scene_id", id);

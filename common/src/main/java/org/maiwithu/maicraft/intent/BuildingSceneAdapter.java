@@ -10,16 +10,13 @@ import java.util.Map;
 import java.util.function.Predicate;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneExport;
-import org.maiwithu.maicraft.core.build.BuildStates;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneBlocks;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.task.TaskResult;
 
@@ -114,18 +111,8 @@ final class BuildingSceneAdapter {
             if (cell.has("part") || cell.has("nbt") && !cell.getAsJsonObject("nbt").isEmpty())
                 throw new IllegalArgumentException("Building models require ordinary blocks; native parts and NBT configuration need machine abilities");
             String id = cell.get("block_id").getAsString();
-            var key = ResourceLocation.parse(id);
-            if (!BuiltInRegistries.BLOCK.containsKey(key)) throw new IllegalArgumentException("Unknown model material: " + id);
-            BlockState state = BuiltInRegistries.BLOCK.get(key).defaultBlockState();
+            BuildingSceneBlocks.resolve(cell);
             JsonObject properties = cell.has("properties") ? cell.getAsJsonObject("properties") : new JsonObject();
-            for (var property : properties.entrySet()) state = property(state, property.getKey(), property.getValue().getAsString());
-            BlockState normalized = BuildStates.normalize(state);
-            if (normalized.getBlock() != state.getBlock()) throw new IllegalArgumentException("Unsupported model block state: " + id);
-            for (String property : properties.keySet()) {
-                var definition = state.getBlock().getStateDefinition().getProperty(property);
-                if (!state.getValue(definition).equals(normalized.getValue(definition)))
-                    throw new IllegalArgumentException("Construction cannot preserve " + id + "." + property);
-            }
             JsonObject op = new JsonObject();
             op.addProperty("op", "set"); op.addProperty("block_id", id);
             var offset = cell.getAsJsonArray("offset");
@@ -145,15 +132,6 @@ final class BuildingSceneAdapter {
         args.addProperty("material_policy", policy.equals("specified") ? "ordinary" : policy);
         if (parameters.has("protected_labels")) args.add("protected_labels", parameters.get("protected_labels").deepCopy());
         return args;
-    }
-
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static BlockState property(BlockState state, String name, String value) {
-        Property property = state.getBlock().getStateDefinition().getProperty(name);
-        if (property == null) throw new IllegalArgumentException("Unknown block property: " + name);
-        var parsed = property.getValue(value);
-        if (parsed.isEmpty()) throw new IllegalArgumentException("Invalid block property: " + name + "=" + value);
-        return state.setValue(property, (Comparable) parsed.get());
     }
 
     private static Map<String, Object> metadata(BuildingSceneStore.Entry entry) {
