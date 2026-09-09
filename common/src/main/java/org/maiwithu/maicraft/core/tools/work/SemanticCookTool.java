@@ -17,7 +17,10 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 
-/** Internal furnace-family capability. Public MCP callers use maicraft:cook. */
+/**
+ * 内部加工入口，接收最终要多少成品及可使用哪些原料来源和燃料。
+ * 当前能执行普通熔炉、高炉和烟熏炉；营火偏好会被解析，但执行任务会明确报告尚不支持。
+ */
 public final class SemanticCookTool implements MaiCraftTool {
     @Override public String name() { return SemanticCookTaskRecord.TOOL_NAME; }
 
@@ -58,6 +61,7 @@ public final class SemanticCookTool implements MaiCraftTool {
     }
 
     @Override
+    // 解析目标、燃料与来源策略，按数量给初始时限，再建立持续加工任务；这里不会直接往炉子里放物品。
     public void onGameCall(
             String toolCallId, JsonObject args, LocalPlayer player, Consumer<String> reply) {
         ResourceLocation itemId = resource(args.get("item_id"), "item_id");
@@ -117,6 +121,7 @@ public final class SemanticCookTool implements MaiCraftTool {
                 && object.get(key).isJsonPrimitive() ? object.get(key).getAsString() : null;
     }
 
+    // 当前先用 getAsInt 转数值，再压到允许范围；小数仍可能被截断，不是严格整数校验。
     private static int integer(JsonObject object, String key, int fallback, int min, int max) {
         if (!object.has(key) || object.get(key).isJsonNull()) return fallback;
         try { return Math.clamp(object.get(key).getAsInt(), min, max); }

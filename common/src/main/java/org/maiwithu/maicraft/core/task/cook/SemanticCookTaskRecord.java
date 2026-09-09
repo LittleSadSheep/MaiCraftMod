@@ -14,7 +14,10 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Semantic final-inventory cooking request; no routes, positions, menu slots or clicks. */
+/**
+ * 保存加工目标、设备／配方偏好、允许燃料、取材来源和是否允许伤害生物。
+ * 保护标签会传给前置取材任务；具体来源估价和炉子操作由 SemanticCookCompanionTask 处理。
+ */
 public final class SemanticCookTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "cook";
     public static final int MAX_FINAL_COUNT = 256;
@@ -53,6 +56,7 @@ public final class SemanticCookTaskRecord extends TaskRecord {
         TaskFactory.register(SemanticCookTaskRecord.class, SemanticCookCompanionTask::new);
     }
 
+    // 目标物品必须存在；明确指定的每种燃料也必须被普通熔炉燃料规则识别。列表复制并去重，防止调用方后来改动。
     public SemanticCookTaskRecord(
             String toolCallId,
             long deadlineGameTime,
@@ -91,6 +95,7 @@ public final class SemanticCookTaskRecord extends TaskRecord {
         }
         this.allowedFuelIds = List.copyOf(new ArrayList<>(fuels));
         LinkedHashSet<SemanticAcquireTaskRecord.Source> sources = new LinkedHashSet<>();
+        // 总允许使用已有背包物品；没有给来源时采用默认来源，但剔除 COOK，避免加工为了原料再递归加工。
         sources.add(SemanticAcquireTaskRecord.Source.INVENTORY);
         if (allowedSources == null || allowedSources.isEmpty()) {
             for (SemanticAcquireTaskRecord.Source source

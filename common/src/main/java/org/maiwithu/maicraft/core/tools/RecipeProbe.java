@@ -9,11 +9,8 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * 读配方表的安全口。整合包里的配方什么都干得出来:空输入 {@code assemble} 返回
- * null 而不是抛异常、ingredient 列表或其 {@code getItems()} 返回 null(实测
- * ATM10 里的 gear 类配方)。判据对齐 JEI 的 {@code CategoryRecipeValidator}:
- * 枚举期只走 {@code getResultItem} 这条全生态踩实的展示路,产出的 null 与异常
- * 一律折成 EMPTY,坏一条丢一条——一条坏配方杀掉整个遍历才是事故。
+ * 查询配方时的小保护层，防止某个 Mod 配方的读取异常让整次查找失败。
+ * 方法名中的 usable 只表示这些字段读得出来，不代表配方一定能在当前玩家和设备上完成。
  */
 public final class RecipeProbe {
 
@@ -25,6 +22,7 @@ public final class RecipeProbe {
     }
 
     /** 探一次产出:null 与异常一律折成 EMPTY,调用方只看 {@code isEmpty()}。 */
+    // 配方读取抛运行时异常或返回 null 时按空产物处理，让一个坏配方不阻断整个查询；原因不会由此方法单独返回。
     public static ItemStack probe(Supplier<ItemStack> supplier) {
         try {
             ItemStack result = supplier.get();
@@ -39,6 +37,8 @@ public final class RecipeProbe {
      * {@code getItems()} 都不为 null。craft 的摆料、盘点、缺料描述都在这道门
      * 之后,过了门就不必层层判空。
      */
+    // 这里只确认材料列表及每个材料的候选数组能读取、不是 null。
+    // 不保证数组非空、物品当前可获得，或本项目执行器能处理该配方的所有组件条件。
     public static boolean usableIngredients(Recipe<?> recipe) {
         try {
             List<Ingredient> ings = recipe.getIngredients();

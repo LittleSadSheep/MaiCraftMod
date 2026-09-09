@@ -57,7 +57,11 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Receipt-driven furnace-family executor; all concrete operations stay internal. */
+/**
+ * 完成一批加工：挑配方和炉子、备原料和燃料、打开并装入、等烧好、确认收回成品，必要时再做下一批。
+ * 目标是主背包最终达到指定数量，不是新加工数量；原先已有的也算。
+ * 等待时会关掉界面，并记住这批放在哪台炉子里；重新打开后核对投入与产出，再决定哪些东西能取。
+ */
 public final class SemanticCookCompanionTask
         extends AbstractCompanionTask<SemanticCookTaskRecord> {
     private static final long UNAVAILABLE_COST = 1_000_000_000_000L;
@@ -123,6 +127,7 @@ public final class SemanticCookCompanionTask
     private BlockPos stationReturnStance;
     private long nextCookCheckTick;
     private long closedWaitStartedTick;
+    // 本批装入多少原料、已经取回多少成品，单独记账；背包目标总数还包含开工前已有的物品。
     private int ownedInputLoaded;
     private int ownedOutputTaken;
     private int takeInventoryBefore;
@@ -164,6 +169,7 @@ public final class SemanticCookCompanionTask
     @Override protected void onStart() { initialOutputCount = outputCount(); }
 
     @Override
+    // 先看目标数量是否已够，再继续未结束的子任务。收货和收回剩料正在确认时，不能因背包一时增长就跳过确认。
     protected TaskState onTick() {
         boolean outputTransferSettling = phase == Phase.VERIFY_OUTPUT
                 || phase == Phase.VERIFY_CLEAN_INPUT
@@ -205,6 +211,7 @@ public final class SemanticCookCompanionTask
      * Reopen and reconcile that exact batch before normal cleanup; only an uncommitted cook may
      * jump directly to the terminal cleanup phase.
      */
+    // 数量够了只是不再开新批次；炉里还有本任务的原料时，要回去核对并收尾，不能直接丢下正在加工的这一批。
     private void routeFinishRequest() {
         if (!finishRequested || phase == Phase.CLEANUP || phase == Phase.COMPLETE
                 || phase == Phase.VERIFY_OUTPUT || phase == Phase.VERIFY_CLEAN_INPUT) {
@@ -232,6 +239,7 @@ public final class SemanticCookCompanionTask
     }
 
     @Override
+    // 关着界面等炉子加工时，没到检查时刻就暂不要求执行；火熄灭或设备变化也可能提前唤起检查。
     public boolean canRun(LocalPlayer companion) {
         return phase != Phase.WAIT_CLOSED || closedWaitDue(companion);
     }
@@ -251,6 +259,7 @@ public final class SemanticCookCompanionTask
                         net.minecraft.world.level.block.state.properties.BlockStateProperties.LIT);
     }
 
+    // 先找能产出目标的配方，再估原料、燃料和设备的准备成本，从认为可行的组合里选择一组。
     private TaskState resolve() {
         List<Candidate> candidates = candidates();
         if (candidates.isEmpty()) {
@@ -258,6 +267,7 @@ public final class SemanticCookCompanionTask
                     "No smelting, blasting, smoking or campfire recipe produces " + r.itemId + ".",
                     FailureType.NO_MATERIAL);
         }
+        // 能识别营火配方，但本版本不执行营火操作；明确要求营火时报告不支持，不改用炉子偷偷替代。
         if (r.preference == SemanticCookTaskRecord.Preference.CAMPFIRE) {
             boolean available = candidates.stream().anyMatch(c -> c.device == Device.CAMPFIRE);
             return failOrClean(
@@ -317,6 +327,8 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 从客户端已收到的配方表读加工结果，展开第一种原料的物品种类；读出异常的配方略过。
+    // 这里保存 Item 而非完整 ItemStack，组件敏感的特殊配方需要另查是否能完整表达。
     private List<Candidate> candidates() {
         List<Candidate> result = new ArrayList<>();
         var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
@@ -346,6 +358,8 @@ public final class SemanticCookCompanionTask
         return result;
     }
 
+    // FASTEST 优先比较单次烧制时间，再看准备成本；其他偏好先看准备成本。
+    // 这不是把走路、备料和全部批次耗时相加后的总完成时间。
     private Comparator<ResolvedCandidate> candidateComparator() {
         Comparator<ResolvedCandidate> preparation = Comparator
                 .comparingLong(ResolvedCandidate::preparationCost)
@@ -380,6 +394,8 @@ public final class SemanticCookCompanionTask
         return null;
     }
 
+    // 明确列出的燃料优先按许可范围选；没列时只考虑煤、木炭、木材、竹子等这里列出的普通燃料。
+    // 主要比较获取成本和烧剩的时间；PRESERVE_RARE 改用固定燃料优先表，不是真正读取物品稀有度。
     private FuelChoice chooseFuel(Candidate cooking) {
         List<Item> choices = new ArrayList<>();
         if (!r.allowedFuelIds.isEmpty()) {
@@ -430,6 +446,8 @@ public final class SemanticCookCompanionTask
         return item == Items.STICK ? 5 : 6;
     }
 
+    // 按“这一批所需烧制时间 ÷ 单份燃料时间”向上取整。
+    // 当前读取的是普通熔炉燃料表，没有对高炉／烟熏炉的实际燃烧时间减半，见 A57。
     private FuelChoice fuelChoice(Candidate cooking, Item item, int raw) {
         int burn = AbstractFurnaceBlockEntity.getFuel().getOrDefault(item, 0);
         if (burn <= 0) return null;
@@ -441,6 +459,7 @@ public final class SemanticCookCompanionTask
     }
 
     /** Build a compact ordinary-crafting graph once; it is evidence, never an executor. */
+    // 为了估计备料成本，本类另外整理了一份合成关系；只保存产物种类、数量、材料替代组及是否需要工作台。
     private Map<Item, List<CraftRoute>> indexCraftRoutes() {
         Map<Item, List<CraftRoute>> indexed = new HashMap<>();
         var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
@@ -479,6 +498,7 @@ public final class SemanticCookCompanionTask
         return Map.copyOf(indexed);
     }
 
+    // 候选物品列表完全相同的材料格合成一组，并数这种材料用了几格，避免重复遍历相同要求。
     private static List<IngredientGroup> ingredientGroups(CraftingRecipe recipe) {
         Map<List<Item>, Integer> uses = new LinkedHashMap<>();
         for (Ingredient ingredient : recipe.getIngredients()) {
@@ -503,6 +523,8 @@ public final class SemanticCookCompanionTask
      * relative preparation cost, not a promise: live child receipts remain authoritative and can
      * reject a candidate so RESOLVE tries the next finite plan.
      */
+    // 先扣除当前背包已有量，再估直接来源或递归合成的成本；递归最多四层，并阻止沿同一路径绕回同一物品。
+    // 这里的估计没有共用一份消耗后的库存，不同需求可能重复计算同一批存货。
     private long acquisitionCost(
             Item item, int required, Set<Item> lineage, int depth) {
         if (required <= 0) return 0L;
@@ -548,6 +570,8 @@ public final class SemanticCookCompanionTask
         return best;
     }
 
+    // 当前只估采矿、允许伤害时的狩猎和交易；储存来源在外层另算。
+    // 允许列表里的 NEARBY 没有在这份估计里实现，可能在委托真实获取任务前就被判不可行（A58）。
     private long directSourceCost(Item item, int missing) {
         ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(item);
         if (itemId == null) return UNAVAILABLE_COST;
@@ -596,6 +620,7 @@ public final class SemanticCookCompanionTask
                 || dimensions.contains(player.level().dimension().location());
     }
 
+    // 一次读取周围已加载的小范围方块，按种类记最近距离，供估价和判断有没有设备；不读取未加载地形。
     private Map<Block, Long> snapshotNearbyBlocks() {
         Map<Block, Long> distances = new HashMap<>();
         BlockPos origin = player.blockPosition();
@@ -630,6 +655,7 @@ public final class SemanticCookCompanionTask
         return total;
     }
 
+    // 还欠上一炉的结果时先回到原设备核对；新批次则根据产物和燃料堆叠上限决定装多少原料。
     private TaskState prepare() {
         if (stationClaimed && ownedInputLoaded > 0) {
             if (stationPos == null) {
@@ -658,6 +684,8 @@ public final class SemanticCookCompanionTask
                 (int) Math.min(64L, 64L * fuelBurnTicks / candidate.recipe.getCookingTime()));
         batchRaw = Math.min(raw, Math.min(maxByOutput, maxByFuel));
         batchFuel = ceilDiv((long) batchRaw * candidate.recipe.getCookingTime(), fuelBurnTicks);
+        // 原料和燃料是同种物品时，实际准备要求两份用途的数量相加。
+        // 但前面的估价把同一库存分别算给了原料和燃料，可能选错燃料并误要求补料，见 A61。
         if (candidate.input == fuel) {
             int sharedNeed = batchRaw + batchFuel;
             if (PlayerInv.buildableCount(player.getInventory(), candidate.input) < sharedNeed) {
@@ -678,6 +706,8 @@ public final class SemanticCookCompanionTask
             phase = Phase.VALIDATE;
             return TaskState.RUNNING;
         }
+        // 先选最近的同类设备；只有没找到任何这种方块时才考虑放自己的设备。
+        // 当前不先筛空闲状态，选到忙炉后也不试另一台空炉，见 A59。
         if (stationPos == null
                 || !player.level().getBlockState(stationPos).is(candidate.device.block)) {
             stationPos = nearest(candidate.device.block, 32, 16);
@@ -714,6 +744,8 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 需要补料时先关自己开的菜单，再把需求交给语义取物任务，并传递允许来源、伤害与保护标签。
+    // 去掉 COOK 来源，避免为了本次加工原料又递归开启加工任务。
     private TaskState acquire(Item item, int finalCount, Purpose purpose) {
         if (openedMenu) {
             replenishAfterClose = true;
@@ -731,6 +763,7 @@ public final class SemanticCookCompanionTask
         return start(child, purpose);
     }
 
+    // 回到已选设备附近并重新右键；上一批仍在里面时必须保留那个位置，不能随便换另一台同类设备。
     private TaskState openStation() {
         if (stationPos == null || (player.level().isLoaded(stationPos)
                 && !player.level().getBlockState(stationPos).is(candidate.device.block))) {
@@ -766,6 +799,7 @@ public final class SemanticCookCompanionTask
                 MouseButton.RIGHT, stationPos, 0, null), Purpose.OPEN_STATION);
     }
 
+    // 等炉类菜单出现、显示且类型与配方对应；未打开时有限重试，出现错误菜单时只安排关闭并报错。
     private TaskState waitMenu() {
         if (player.containerMenu instanceof AbstractFurnaceMenu) {
             openedMenu = true;
@@ -810,6 +844,7 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 首次使用要求原料、燃料、成品和活动进度都为空，之后才把自己装入的这一批记作本任务所有。
     private TaskState validateMenu() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null || !menuMatches()) return menuLost();
@@ -847,6 +882,8 @@ public final class SemanticCookCompanionTask
         return transferTo(candidate.input, batchRaw, 0, Purpose.LOAD_INPUT);
     }
 
+    // 先考虑剩余燃烧时间和燃料格里的存量，再补足本批需要的燃料。
+    // 燃料格也按普通熔炉表折算，所以高炉／烟熏炉在这里同样会多算可用时间（A57）。
     private TaskState loadFuel() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null) return menuLost();
@@ -869,6 +906,7 @@ public final class SemanticCookCompanionTask
     }
 
     /** Loading a slot is not proof that the server accepted and started the recipe. */
+    // 看到原料减少或成品出现就核对产出；否则等燃烧时间和加工进度真的开始，再关界面等待。
     private TaskState confirmStart() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null) return menuLost();
@@ -926,6 +964,7 @@ public final class SemanticCookCompanionTask
                 childId("wait-close"), childDeadline(30L * 20L)), Purpose.CLOSE_WAIT);
     }
 
+    // 用菜单里的总耗时、当前进度和剩余原料数估计整批完成时刻，并给后续检查留一点时间。
     private void scheduleClosedCheck(AbstractFurnaceMenu menu) {
         int total = Math.max(1, data(menu, 3) > 0
                 ? data(menu, 3) : candidate.recipe.getCookingTime());
@@ -937,6 +976,8 @@ public final class SemanticCookCompanionTask
         r.extendDeadlineTo(nextCookCheckTick + COOK_PROGRESS_LEASE_TICKS);
     }
 
+    // 没到时间就继续等；玩家此时开着别的菜单也先等待，不去关它。
+    // 需要回炉子时走到之前记住的站位，再打开同一工作站。
     private TaskState waitClosed() {
         openedMenu = false;
         if (!closedWaitDue(player)) return TaskState.RUNNING;
@@ -973,6 +1014,8 @@ public final class SemanticCookCompanionTask
     }
 
     /** Reconcile only quantities this task can prove it put into an initially empty machine. */
+    // 核对本批账：装入量减去炉内剩余量，应等于已加工的原料数；对应成品应在结果槽或已经被本任务取走。
+    // 数量不合就停止触碰内容，避免把外来的物品当自己的；当前一次不合就报外部变化，未等待分批同步。
     private TaskState reconcileBatch() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null || !menuMatches()) return menuLost();
@@ -1040,6 +1083,7 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 结果槽原来有多少，主背包就应准确增加多少；低层快速搬运说完成也不能替代这一步。
     private TaskState verifyOutputTake() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null || !menuMatches()) return menuLost();
@@ -1058,6 +1102,8 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 从当前菜单的玩家侧收集所需物品格，再生成逐笔搬入炉子的操作。
+    // 装原料／燃料允许放入后立即被机器消耗，不强求它们一直原样留在目标槽。
     private TaskState transferTo(
             Item item, int count, int destination, Purpose purpose) {
         List<ContainerTransferTaskRecord.Move> moves = new ArrayList<>();
@@ -1096,6 +1142,8 @@ public final class SemanticCookCompanionTask
                 player.containerMenu.containerId, moves, false), purpose);
     }
 
+    // 本任务认为炉类菜单是自己打开时，才尝试收尾；先核对本批成品，再把确认属于本任务的剩余原料收回。
+    // 留下剩余燃料，不尝试在仍可能烧制时强行取出它。
     private TaskState cleanupMachine() {
         if (!openedMenu || !(player.containerMenu instanceof AbstractFurnaceMenu menu)) {
             openedMenu = false;
@@ -1140,6 +1188,7 @@ public final class SemanticCookCompanionTask
         phase = Phase.CLEANUP;
     }
 
+    // 收回剩余原料后，要看到原料槽清空且主背包准确增加预期数量，才继续收尾。
     private TaskState verifyCleanupInput() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null || !menuMatches()) return menuLost();
@@ -1160,6 +1209,7 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 有失败就以失败结束，目标已够就结束；否则清掉上一批的数量记录并准备下一批，设备位置可继续保留。
     private TaskState finishCleanup() {
         if (failureMessage != null) {
             phase = Phase.COMPLETE;
@@ -1184,6 +1234,7 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 本类会检查子任务自己的截止时间，到时停止并取超时结果；正常结束也调用 result，让子任务完成清理。
     private TaskState tickChild() {
         TaskState terminal;
         if (activeRecord != null
@@ -1258,6 +1309,7 @@ public final class SemanticCookCompanionTask
                 }
                 phase = Phase.PREPARE;
             }
+            // 新批次按设备类型走近后重新找附近设备；恢复旧批次时保留原设备位置，避免把旧产物算到另一台。
             case MOVE_STATION -> {
                 if (openMode == OpenMode.RESUME_BATCH) {
                     if (stationPos == null || !player.level().isLoaded(stationPos)
@@ -1329,6 +1381,8 @@ public final class SemanticCookCompanionTask
     }
 
     /** A pre-effect prerequisite failure rejects only that finite plan and re-runs cost selection. */
+    // 还没装入加工材料、没有菜单待处理且上次结果不确定性未置位时，可换配方原料、燃料或设备重试。
+    // 当前“原料准备失败”会排除整个原料候选，即使真正短缺来自它同时被选作燃料（A61）。
     private boolean retryAnotherPreparationPlan(Purpose purpose, TaskResult result) {
         if (effectsStarted || openedMenu || uncertain(result)) return false;
         switch (purpose) {
@@ -1396,6 +1450,7 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 保留最早失败原因；炉里还有确认属于本任务的原料时先核对这一批，否则只关闭而不认领现有内容。
     private TaskState failOrClean(String code, String message, FailureType type) {
         rememberFailure(code, message, type);
         if (openedMenu && player.containerMenu instanceof AbstractFurnaceMenu) {
@@ -1426,6 +1481,7 @@ public final class SemanticCookCompanionTask
     }
 
     /** Close a menu after ownership evidence diverged, without moving any machine slot. */
+    // 停止认领和回收当前槽里的东西，仅尝试关闭相符类型的菜单，避免在来源已不明时继续拿取。
     private TaskState closeWithoutClaimingContents(
             String code, String message, FailureType type) {
         rememberFailure(code, message, type);
@@ -1493,6 +1549,7 @@ public final class SemanticCookCompanionTask
         return player.containerMenu instanceof AbstractFurnaceMenu menu ? menu : null;
     }
 
+    // 当前只按普通炉、高炉或烟熏炉的菜单类型判断，没有绑定本次打开的菜单实例／编号；不同同类菜单也会通过（A60）。
     private boolean menuMatches() {
         return switch (candidate.device) {
             case FURNACE -> player.containerMenu instanceof FurnaceMenu;
@@ -1502,6 +1559,7 @@ public final class SemanticCookCompanionTask
         };
     }
 
+    // 读取菜单同步的数据：燃烧剩余时间、燃料总时长、加工进度和单次总时长；未提供的下标按零处理。
     private int data(AbstractFurnaceMenu menu, int index) {
         List<net.minecraft.world.inventory.DataSlot> data =
                 ((MenuDataSlotsAccessor) (Object) menu).maicraft$dataSlots();
@@ -1527,6 +1585,7 @@ public final class SemanticCookCompanionTask
                         player.getInventory(), device.block.asItem()) > 0;
     }
 
+    // 只按同种方块和距离找最近位置，没有检查里面有没有别人放的东西，或当前能否走到。
     private BlockPos nearest(Block block, int horizontal, int vertical) {
         BlockPos origin = player.blockPosition();
         BlockPos best = null;
@@ -1549,6 +1608,7 @@ public final class SemanticCookCompanionTask
         return best;
     }
 
+    // 没有现成设备时，从近到远找五格范围内可放的位置，先试玩家附近高度，再试地表高度。
     private BlockPos placementSite() {
         BlockPos origin = player.blockPosition();
         for (int radius = 1; radius <= 5; radius++) {
@@ -1570,6 +1630,7 @@ public final class SemanticCookCompanionTask
         return null;
     }
 
+    // 要放的位置可替换、不占玩家身体，脚下有可托住的表面；真正放置还交给建造任务检查。
     private boolean validSite(BlockPos cell) {
         if (!player.level().isLoaded(cell)
                 || !player.level().getBlockState(cell).canBeReplaced()
@@ -1588,6 +1649,7 @@ public final class SemanticCookCompanionTask
         return rawRemaining(candidate);
     }
 
+    // 用目标缺额除以每份原料产量，向上取整得到至少需要加工多少份；一份原料可能产生多个成品。
     private int rawRemaining(Candidate cooking) {
         int missing = Math.max(0, r.count - outputCount());
         return Math.max(1, ceilDiv(missing, cooking.outputCount));
@@ -1611,6 +1673,7 @@ public final class SemanticCookCompanionTask
         return lease;
     }
 
+    // 父任务至少比子任务晚一刻到期，留给父任务读取和处理子任务超时结果，避免同时截止先被外层截走。
     private void extendParentPast(long childDeadline) {
         // One extra tick lets the parent observe and report a child lease expiry;
         // equality would make TaskSlot time out the parent before tickChild runs.
@@ -1619,6 +1682,7 @@ public final class SemanticCookCompanionTask
     }
 
     @Override
+    // 上层发现材料已够时，正在装料、收货、退料或处理已认领批次，仍必须先让本类完成必要的确认与收尾。
     public boolean mustSettleBeforeSatisfiedCancellation() {
         // Once a synchronized workstation mutation has started, an inventory fact can become
         // visible before its receipt and the close/cleanup tail settle. Let the semantic parent
@@ -1646,6 +1710,7 @@ public final class SemanticCookCompanionTask
     }
 
     @Override
+    // 任务整体被结束时停止子任务、尝试关闭当前使用过的菜单并停导航；已成功放置的设备和已经发生的加工不会撤销。
     protected void cleanup() {
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
@@ -1668,6 +1733,7 @@ public final class SemanticCookCompanionTask
     }
 
     @Override
+    // 报告现在背包是否达到目标、选择了什么配方和设备、准备失败的历史以及是否仍有未确认效果，供上层决定后续。
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         int observed = outputCount();
