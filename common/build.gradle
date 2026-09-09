@@ -26,6 +26,13 @@ dependencies {
     annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
 }
 
+    // MeshData index-order regressions exercise native buffers without opening an OpenGL window.
+    def nativeOs = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT)
+    def nativeArch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+    def nativePlatform = nativeOs.contains('win') ? 'windows' : nativeOs.contains('mac') ? 'macos' : 'linux'
+    def nativeSuffix = nativeArch in ['aarch64', 'arm64'] ? '-arm64' :
+            nativeArch in ['x86', 'i386', 'i686'] ? '-x86' : nativeArch.startsWith('arm') ? '-arm32' : ''
+    testRuntimeOnly "org.lwjgl:lwjgl:3.3.3:natives-${nativePlatform}${nativeSuffix}"
 configurations {
     commonJava {
         canBeResolved = false

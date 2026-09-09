@@ -33,11 +33,9 @@ final class PreviewMeshSection implements AutoCloseable {
     final List<Map.Entry<BlockPos, BlockState>> cells = new ArrayList<>();
     final List<PreviewPart> parts = new ArrayList<>();
     private final VertexBuffer[] models = new VertexBuffer[3];
+    private final MeshData.SortState[] sortStates = new MeshData.SortState[3];
+    private final PreviewSectionRefresh refresh = new PreviewSectionRefresh();
     private VertexBuffer outlines, partModels;
-    private long nextCheck;
-    private int worldHash;
-    private Vec3 sortedFrom;
-    boolean built;
     int fallbackModels;
 
     PreviewMeshSection(BlockPos origin) {
@@ -46,12 +44,10 @@ final class PreviewMeshSection implements AutoCloseable {
                 origin.getX() + 4, origin.getY() + 4, origin.getZ() + 4);
     }
 
-    boolean needsRefresh(Minecraft minecraft, long now) {
-        if (!built) return true;
-        if (now < nextCheck) return false;
-        nextCheck = now + 1000;
-        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
-        return hash(minecraft) != worldHash || sortedFrom.distanceToSqr(camera) > 1;
+    boolean built() { return refresh.built(); }
+
+    PreviewSectionRefresh.Work refreshWork(Minecraft minecraft, Vec3 camera, long now) {
+        return refresh.required(now, camera, () -> hash(minecraft));
     }
 
     private int hash(Minecraft minecraft) {
@@ -120,8 +116,7 @@ final class PreviewMeshSection implements AutoCloseable {
                 MeshData mesh = modelUsable[pass] ? model[pass].build() : null;
                 if (mesh == null) continue;
                 ByteBufferBuilder memory = pass == 0 ? solidMemory : pass == 1 ? cutoutMemory : translucentMemory;
-                mesh.sortQuads(memory, VertexSorting.byDistance((float) (camera.x - origin.getX()),
-                        (float) (camera.y - origin.getY()), (float) (camera.z - origin.getZ())));
+                sortStates[pass] = mesh.sortQuads(memory, sorting(origin, camera));
                 models[pass] = upload(mesh);
             }
             MeshData edges = line.build();
@@ -129,10 +124,25 @@ final class PreviewMeshSection implements AutoCloseable {
             MeshData partData = partMesh.build();
             if (partData != null) partModels = upload(partData);
         } finally { VertexBuffer.unbind(); }
-        built = true;
-        worldHash = hash(minecraft);
-        sortedFrom = camera;
-        nextCheck = now + 1000;
+        refresh.rebuilt(hash(minecraft), camera, now);
+    }
+
+    /** Camera movement changes draw order, not block models, outline vertices or GPU buffer identity. */
+    void resort(Vec3 camera) {
+        for (int pass = 0; pass < models.length; pass++) {
+            if (models[pass] == null || sortStates[pass] == null) continue;
+            try (ByteBufferBuilder memory = new ByteBufferBuilder(4096)) {
+                models[pass].bind();
+                // uploadIndexBuffer consumes the Result; the retained centroids own no native memory.
+                models[pass].uploadIndexBuffer(sortStates[pass].buildSortedIndexBuffer(memory, sorting(origin, camera)));
+            } finally { VertexBuffer.unbind(); }
+        }
+        refresh.sorted(camera);
+    }
+
+    static VertexSorting sorting(BlockPos origin, Vec3 camera) {
+        return VertexSorting.byDistance((float) (camera.x - origin.getX()),
+                (float) (camera.y - origin.getY()), (float) (camera.z - origin.getZ()));
     }
 
     private static VertexBuffer upload(MeshData mesh) {
@@ -156,9 +166,11 @@ final class PreviewMeshSection implements AutoCloseable {
     }
 
     @Override public void close() {
-        for (int i = 0; i < models.length; i++) { if (models[i] != null) models[i].close(); models[i] = null; }
+        for (int i = 0; i < models.length; i++) {
+            if (models[i] != null) models[i].close(); models[i] = null; sortStates[i] = null;
+        }
         if (outlines != null) outlines.close();
         if (partModels != null) partModels.close();
-        outlines = null; partModels = null; built = false;
+        outlines = null; partModels = null; refresh.reset();
     }
 }

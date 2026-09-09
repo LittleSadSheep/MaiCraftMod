@@ -47,31 +47,30 @@ public final class PreviewRenderer {
                 && section.bounds.getCenter().distanceToSqr(position) < 128 * 128
                 && frustum.isVisible(section.bounds)).sorted(Comparator.comparingDouble(section ->
                 section.bounds.getCenter().distanceToSqr(position))).toList();
-        long deadline = System.nanoTime() + 4_000_000;
+        PreviewFrameBudget budget = new PreviewFrameBudget();
         long now = System.currentTimeMillis();
-        int remaining = 512;
         PreviewWorldView world = new PreviewWorldView(session, minecraft.level);
         // Fresh visible geometry has priority; every section eventually receives a refresh slot.
         for (PreviewMeshSection section : visible) {
-            if (!section.built) {
+            if (!section.built()) {
+                if (!budget.claim(PreviewSectionRefresh.Work.REBUILD, section.workSize())) break;
                 section.rebuild(minecraft, session, world, centres, outline, position, now);
-                remaining -= section.workSize();
-                if (remaining <= 0 || System.nanoTime() >= deadline) break;
             }
         }
-        for (int i = 0; i < visible.size() && remaining > 0 && System.nanoTime() < deadline; i++) {
+        for (int i = 0; i < visible.size() && budget.hasTime(); i++) {
             PreviewMeshSection section = visible.get(Math.floorMod(refreshCursor++, visible.size()));
-            if (section.needsRefresh(minecraft, now)) {
+            var work = section.refreshWork(minecraft, position, now);
+            if (!budget.claim(work, section.workSize())) continue;
+            if (work == PreviewSectionRefresh.Work.REBUILD)
                 section.rebuild(minecraft, session, world, centres, outline, position, now);
-                remaining -= section.workSize();
-            }
+            else section.resort(position);
         }
         draw(visible, PreviewRenderTypes.SOLID, 0, view, projection, position);
         draw(visible, PreviewRenderTypes.CUTOUT, 1, view, projection, position);
         draw(visible, PreviewRenderTypes.PARTS, 3, view, projection, position);
         draw(visible, PreviewRenderTypes.TRANSLUCENT, 2, view, projection, position);
         draw(visible, PreviewRenderTypes.OUTLINE, 4, view, projection, position);
-        long ready = visible.stream().filter(section -> section.built).count();
+        long ready = visible.stream().filter(PreviewMeshSection::built).count();
         int fallback = visible.stream().mapToInt(section -> section.fallbackModels).sum();
         minecraft.gui.setOverlayMessage(Component.literal("MaiCraft 蓝图 · " + session.title()
                 + " · " + session.decision() + " · 可见区块 " + ready + "/" + visible.size()
