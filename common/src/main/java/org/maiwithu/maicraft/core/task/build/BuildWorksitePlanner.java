@@ -19,7 +19,10 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 
-/** Incremental, read-only selection of a worksite that covers several currently placeable cells. */
+/**
+ * 寻找能从一个站位连续放多格的位置，减少每放一块就重新走路。这里只选站位和点击方案，不执行动作。
+ * 候选必须能沿当前到目标的地面直线通道到达；需要绕障碍的路线留给后续其他导航处理。
+ */
 final class BuildWorksitePlanner {
     private static final long SLICE_NANOS = 4_000_000;
 
@@ -66,6 +69,7 @@ final class BuildWorksitePlanner {
                             .thenComparing(BuildOrder.BUILD_ORDER)).toList();
         }
 
+        // 每次按工作项数量和约四毫秒推进，保存候选与评分进度；返回已有最佳方案不代表所有候选都查完。
         Progress advance(int workBudget) {
             long deadline = System.nanoTime() + SLICE_NANOS;
             for (int work = 0; work < Math.max(0, workBudget) && System.nanoTime() < deadline; work++) {
@@ -80,6 +84,7 @@ final class BuildWorksitePlanner {
                     } else finishCandidate();
                     continue;
                 }
+                // 先只给目前有可点击支撑的目标生成站位范围，并按每四格分区，便于后续查附近目标。
                 if (preparedAt < seeds.size()) {
                     var target = seeds.get(preparedAt++);
                     if (supported(target)) {
@@ -112,6 +117,7 @@ final class BuildWorksitePlanner {
             return false;
         }
 
+        // 先查周围分区，再保留距估计眼睛位置六格以内的目标，最后按施工顺序检查。这里用固定 1.62 格眼高。
         private List<BuildTaskRecord.Target> nearby(Vec3 feet) {
             List<BuildTaskRecord.Target> result = new ArrayList<>();
             BlockPos base = bucket(BlockPos.containing(feet));
@@ -144,6 +150,7 @@ final class BuildWorksitePlanner {
         private BlockPos row;
         private int x, end = -1;
 
+        // 每个目标周围生成横向各四格、向下两格和向上一格的候选；同一 y/z 行的重叠 x 区间合并。
         void add(BlockPos target) {
             for (int dy = -2; dy <= 1; dy++) for (int dz = -4; dz <= 4; dz++) {
                 var ranges = rows.computeIfAbsent(new BlockPos(0, target.getY() + dy, target.getZ() + dz),
@@ -161,6 +168,7 @@ final class BuildWorksitePlanner {
             }
         }
 
+        // 按已合并的区间逐格取候选，不把整片范围提前展开成大量 BlockPos。
         BlockPos next() {
             if (rowIterator == null) rowIterator = rows.entrySet().iterator();
             while (x > end) {
@@ -175,6 +183,7 @@ final class BuildWorksitePlanner {
         }
     }
 
+    // 先选可施工格数多的位置，再选走动距离短的位置；仍相同时按施工顺序和坐标稳定排序。
     private static int compare(Worksite a, Worksite b) {
         int count = Integer.compare(b.coverage(), a.coverage());
         if (count != 0) return count;

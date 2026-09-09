@@ -6,12 +6,8 @@ import net.minecraft.core.BlockPos;
 import java.util.List;
 
 /**
- * Internal, planner-authored endpoints for proving that a completed semantic build is usable.
- *
- * <p>This is deliberately separate from the public semantic goal and from per-cell construction
- * targets. The planner names only the human-scale connections that the finished structure must
- * provide; {@link BuildTraversabilityVerifier} re-reads the actual client world and proves those
- * connections instead of trusting planner claims.
+ * 规划器列出建完后必须能通行的位置，例如屋外、门口、各层房间和码头两端。
+ * 这些坐标是需要验证的要求，不是已通过的证明；BuildTraversabilityVerifier 会重新读取现场检查。
  */
 public record BuildTraversabilityContract(
         Cell exteriorApproach,
@@ -32,7 +28,9 @@ public record BuildTraversabilityContract(
         }
     }
 
-    /** Inclusive bounds for feet positions reachable inside the structure. */
+    /**
+     * 室内可走脚下格的范围，最小和最大边界都包含。它不是整个建筑所有墙、顶和地基的范围。
+     */
     public record Bounds(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
         public boolean contains(BlockPos pos) {
             return pos.getX() >= minX && pos.getX() <= maxX
@@ -48,9 +46,13 @@ public record BuildTraversabilityContract(
         }
     }
 
-    /** A continuous climbable column connecting all generated storeys. */
+    /**
+     * 要求一列从 bottomY 连到 topY 的可攀爬方块，用于连接楼层；当前表达不了拐弯楼梯。
+     */
     public record VerticalLink(int x, int z, int bottomY, int topY) {}
 
-    /** Straight centre-line of a dock, from the house/shore side to the deck end. */
+    /**
+     * 从岸边到码头末端的中心线；验收器要求同高度、沿 x 或 z 的直线。
+     */
     public record DockPath(Cell houseSide, Cell deckEnd) {}
 }

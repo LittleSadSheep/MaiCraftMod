@@ -9,7 +9,10 @@ import java.util.function.ToIntFunction;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-/** Task-owned creative materials; decisions never mutate the inventory or claim existing supplies. */
+/**
+ * 记住创造模式施工时临时拿出的材料，避免清理时动到玩家原本的物品。这里只做选择和记账，不直接改背包。
+ * 记录范围是普通三十六格，不包括盔甲和副手；数量、组件或位置出现未确认变化，就放弃清理权。
+ */
 public final class CreativeBuildInventory {
     public static final int NO_FUTURE_USE = Integer.MAX_VALUE;
     private static final int MAIN_SLOTS = 36;
@@ -21,7 +24,10 @@ public final class CreativeBuildInventory {
 
     private final Map<Integer, ItemStack> owned = new TreeMap<>();
 
-    /** nextUse is a remaining-plan distance; NO_FUTURE_USE means this material is finished. */
+    /**
+     * 先找已有同种材料，其次找空格；背包满了，只能换掉本任务仍能确认归属的一格材料。
+     * 要换时优先选以后最晚用到或不再需要的材料；玩家原有物品不会成为候选。
+     */
     public Selection choose(Item wanted, List<ItemStack> inventory, ToIntFunction<Item> nextUse) {
         reconcile(inventory);
         int empty = -1;
@@ -39,7 +45,9 @@ public final class CreativeBuildInventory {
         return candidate < 0 ? blocked() : choice(Kind.EVICT, candidate, owned.get(candidate));
     }
 
-    /** Cleanup can be deferred until a native mutation is available without discarding needed stacks. */
+    /**
+     * 挑出一格后续计划完全不再需要的自有材料，供调用方逐格清理；没有可清理项时返回 BLOCKED。
+     */
     public Selection unused(List<ItemStack> inventory, ToIntFunction<Item> nextUse) {
         reconcile(inventory);
         for (var entry : owned.entrySet()) {
@@ -49,7 +57,9 @@ public final class CreativeBuildInventory {
         return blocked();
     }
 
-    /** Call only after the native empty-slot -> expected-stack creative receipt was confirmed. */
+    /**
+     * 调用者必须先确认一次原版“空格变成指定物品”的动作。这里再核对槽位、数量和组件一致，才登记归属。
+     */
     public boolean confirmedCreated(int slot, ItemStack expected, List<ItemStack> inventory) {
         reconcile(inventory);
         if (!valid(slot, inventory) || expected.isEmpty() || !same(expected, inventory.get(slot))) return false;
@@ -58,8 +68,8 @@ public final class CreativeBuildInventory {
     }
 
     /**
-     * Call once per confirmed swap, before reconciling its post-swap inventory. The before values
-     * must be copies captured when that native swap was submitted. User supplies remain unowned.
+     * 原版换槽动作已确认后，把自有材料的归属一起转到新槽位。交换前的物品必须是提交动作时留的副本。
+     * 先转移再统一核对，避免把正常换到快捷栏误当成玩家移动而丢掉记录。
      */
     public void confirmedSwap(int first, int second, ItemStack firstBefore, ItemStack secondBefore,
                               List<ItemStack> inventory) {
@@ -73,18 +83,23 @@ public final class CreativeBuildInventory {
         reconcile(inventory);
     }
 
+    // 只有登记值、换槽前的值和目的槽位的现值三者一致，才把归属跟到新槽位。
     private void transfer(ItemStack signature, ItemStack before, int destination, List<ItemStack> inventory) {
         if (signature != null && same(signature, before) && same(signature, inventory.get(destination)))
             owned.put(destination, signature);
     }
 
-    /** Any count/component change or unobserved move relinquishes cleanup rights, without guessing. */
+    /**
+     * 核对登记物品还在原槽位且数量和组件完全一致；有变化就删记录，不猜新位置，也不认领相似物品。
+     */
     public void reconcile(List<ItemStack> inventory) {
         owned.entrySet().removeIf(entry -> !valid(entry.getKey(), inventory)
                 || !same(entry.getValue(), inventory.get(entry.getKey())));
     }
 
-    /** Exact copies suitable for guarded task-end cleanup; armour and offhand are never returned. */
+    /**
+     * 返回仍能确认归属的材料副本，供结束时逐格核对后清理；不能用返回列表直接假定它们之后也没变。
+     */
     public List<Selection> owned(List<ItemStack> inventory) {
         reconcile(inventory);
         List<Selection> result = new ArrayList<>();

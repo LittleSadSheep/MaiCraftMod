@@ -19,7 +19,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
-/** Read-only, incremental proof of the finished structure's walking and climbing routes. */
+/**
+ * 建完后只读检查入口、房间、楼层连接和码头是否符合通行要求，不让角色实际走一遍。
+ * 检查分多次游戏更新推进。它使用下方自己的格子通行判断，不能等同于原版完整身体碰撞或导航。
+ */
 public final class BuildTraversabilityVerifier {
     private BuildTraversabilityVerifier() {}
 
@@ -68,6 +71,7 @@ public final class BuildTraversabilityVerifier {
 
         public Result tick() { return tick(CELLS_PER_TICK); }
 
+        // 一次最多推进指定数量的步骤，并在步骤之间检查约两毫秒预算；null 表示还没检查完，完成后一直返回同一结果。
         Result tick(int cellBudget) {
             if (cellBudget < 1) throw new IllegalArgumentException("positive scan budget required");
             long started = System.nanoTime();
@@ -99,6 +103,7 @@ public final class BuildTraversabilityVerifier {
             }
         }
 
+        // 没有要求时返回“未要求验证”；有要求时先核对必要端点、范围和门的上下两半。
         private void initialize() {
             if (contract == null) { result = ok(Map.of("contract", "not_requested")); return; }
             if (contract.exteriorApproach() == null || contract.entranceDoor() == null
@@ -139,6 +144,7 @@ public final class BuildTraversabilityVerifier {
             if (startWalkingLine(outside, door)) phase = Phase.ENTRANCE;
         }
 
+        // 入口和码头只支持同层直线，不会在这里自动绕障碍或搜索台阶路线。
         private boolean startWalkingLine(BlockPos from, BlockPos to) {
             if (from.getY() != to.getY() || from.getX() != to.getX() && from.getZ() != to.getZ()) {
                 fail("invalid_straight_path_contract", "a planner-authored entrance or dock path is not a straight level line", from);
@@ -165,6 +171,7 @@ public final class BuildTraversabilityVerifier {
             return false;
         }
 
+        // 逐一确认室内范围覆盖的区块已加载，全部通过后才检查楼层连接或开始查室内连通。
         private void scanChunk() {
             BlockPos pos = new BlockPos(Math.max(bounds.minX(), chunkX * 16), bounds.minY(),
                     Math.max(bounds.minZ(), chunkZ * 16));
@@ -184,6 +191,7 @@ public final class BuildTraversabilityVerifier {
             phase = Phase.VERTICAL;
         }
 
+        // 沿要求的同一列逐格检查：必须可攀爬、身体位置通过本类检查，有朝向时背后还要有承重面。
         private void scanVerticalCell() {
             var link = contract.verticalLink();
             BlockPos pos = new BlockPos(link.x(), verticalY, link.z());
@@ -201,6 +209,7 @@ public final class BuildTraversabilityVerifier {
             else verticalY++;
         }
 
+        // 从进门后的第一格开始扩展可达位置，下一次更新从保存的队列继续，不重复扫描入口。
         private void beginFlood() {
             if (!standable(level, inside)) {
                 fail("interior_entry_blocked", "the cell immediately inside the door is not a valid standing place", inside);
@@ -211,6 +220,7 @@ public final class BuildTraversabilityVerifier {
             phase = Phase.FLOOD;
         }
 
+        // 每格尝试四个水平方向；只有当前或相邻格可攀爬时才尝试上下移动，没有普通台阶上下跨格规则。
         private void expandInteriorCell() {
             if (frontier.isEmpty()) { phase = Phase.WAYPOINTS; return; }
             BlockPos current = frontier.removeFirst();
@@ -229,6 +239,7 @@ public final class BuildTraversabilityVerifier {
             frontier.addLast(pos);
         }
 
+        // 每个指定房间或楼层落脚点都必须在范围内、可站且已从入口连到；完成后再单独检查码头中心线。
         private void scanWaypoint() {
             if (waypointIndex < contract.floorWaypoints().size()) {
                 var cell = contract.floorWaypoints().get(waypointIndex++);
@@ -252,6 +263,7 @@ public final class BuildTraversabilityVerifier {
             if (startWalkingLine(dock.houseSide().pos(), dock.deckEnd().pos())) phase = Phase.DOCK;
         }
 
+        // 只有前面各阶段都通过才输出已验证的连接数量；结果描述的是这些检查项，不是实走完成。
         private void finish() {
             Map<String, Object> evidence = new LinkedHashMap<>();
             evidence.put("status", "verified");
@@ -275,6 +287,7 @@ public final class BuildTraversabilityVerifier {
         }
     }
 
+    // 能读到水平朝向时查背后的支撑面；没有可用朝向属性则直接通过这一步，不推断模组的其他附着规则。
     private static boolean supportedClimbable(World level, BlockPos pos, BlockState state) {
         Direction facing = null;
         if (state.hasProperty(BlockStateProperties.HORIZONTAL_FACING)) {
@@ -298,6 +311,7 @@ public final class BuildTraversabilityVerifier {
         return door.distManhattan(inside) == 1 && dx1 == dx2 && dz1 == dz2;
     }
 
+    // 脚、头、脚下都要已加载。脚在可攀爬方块中可不另有地板，否则脚下必须无流体且顶面承重。
     private static boolean standable(World level, BlockPos feet) {
         if (!level.isLoaded(feet) || !level.isLoaded(feet.above())
                 || !level.isLoaded(feet.below())) return false;
@@ -310,6 +324,8 @@ public final class BuildTraversabilityVerifier {
                 && support.isFaceSturdy(level.level(), floor, Direction.UP);
     }
 
+    // 当前规则把所有门和可攀爬方块直接当作可通过，也容许局部高度不超过半格的碰撞体。
+    // 脚和头调用的是同一规则：头部半砖也会被放过；门是否能手开、是否有电源没有在这里验证。
     private static boolean bodyClear(World level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         if (!state.getFluidState().isEmpty()) return false;

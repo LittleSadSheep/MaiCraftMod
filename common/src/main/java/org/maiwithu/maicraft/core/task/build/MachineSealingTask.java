@@ -19,7 +19,10 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Walk out through the reserved entrance, then close it using the ordinary native builder/supply path. */
+/**
+ * 机器内部施工结束后，从预留洞口走到外面，再用普通建筑任务封住洞口。
+ * 实际封口期间持续要求人在外侧，其他机器格子受保护，避免封口取材或走路时拆掉已完成部分。
+ */
 final class MachineSealingTask extends AbstractCompanionTask<MachineSealingTaskRecord> {
     private final Level world;
     private Task child;
@@ -37,6 +40,7 @@ final class MachineSealingTask extends AbstractCompanionTask<MachineSealingTaskR
         if (child != null) return tickClosure();
         if (sealed >= r.seals.size()) return TaskState.SUCCESS;
         var seal = r.seals.get(sealed);
+        // 已封好的洞口直接计为完成；只有需要新放方块的洞口才要求这次先走到外面。
         if (matches(seal)) { sealed++; return TaskState.RUNNING; }
         if (!PlayerNav.playerFeet(player).equals(seal.outside()) || !seal.onOutside(player.position())) {
             if (nav == null) nav = PlayerNav.toGoal(player, () -> NavGoal.exact(seal.outside()), 1,
@@ -49,6 +53,7 @@ final class MachineSealingTask extends AbstractCompanionTask<MachineSealingTaskR
             return TaskState.RUNNING;
         }
         stopNav();
+        // 生存模式封口仍要备料，创造模式直接建；预览交给父流程管理，不为每个洞口重复展示。
         boolean consume = !WorkProfile.of(player).freeMaterials();
         BuildTaskRecord build = new BuildTaskRecord(r.getToolCallId() + "-closure-" + sealed,
                 r.getDeadlineGameTime(), seal.targets(), false, consume, consume);
@@ -65,6 +70,7 @@ final class MachineSealingTask extends AbstractCompanionTask<MachineSealingTaskR
         return TaskState.RUNNING;
     }
 
+    // 保留机器全部目标，排除本次要封的两格以及外侧人的脚和头，给封口留下操作空间。
     static List<BlockPos> sealingProtection(List<BlockPos> allCells, MachineSealingTaskRecord.Seal seal) {
         return allCells.stream().filter(pos -> !seal.isOpening(pos)
                 && !pos.equals(seal.outside()) && !pos.equals(seal.outside().above())).toList();
@@ -75,6 +81,7 @@ final class MachineSealingTask extends AbstractCompanionTask<MachineSealingTaskR
                 && target.matches(world.getBlockState(target.pos())));
     }
 
+    // 等待建筑或供料子任务结束，再同时核对结果、洞口方块和外侧身体位置；只听到子任务成功还不够。
     private TaskState tickClosure() {
         TaskState state = world.getGameTime() >= childRecord.getDeadlineGameTime() ? TaskState.TIMEOUT : runChild(child);
         r.extendDeadlineTo(childRecord.getDeadlineGameTime());
@@ -92,6 +99,7 @@ final class MachineSealingTask extends AbstractCompanionTask<MachineSealingTaskR
     }
 
     private TaskState failure(String code, String message) { failureCode = code; fail(message, FailureType.NO_PATH); return TaskState.FAILED; }
+    // 本任务结束时，仍在运行的子任务也要停止并结算为取消，随后执行公共导航清理。
     @Override protected void cleanup() {
         if (child != null) { child.stop(player, StopReason.REPLACED); child.result(TaskState.CANCELLED); child = null; }
         super.cleanup();

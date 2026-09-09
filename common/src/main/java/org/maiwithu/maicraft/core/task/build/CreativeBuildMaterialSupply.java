@@ -15,7 +15,10 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 
-/** Native slot transactions around a task-owned creative cache, never a per-block loan. */
+/**
+ * 负责创造模式的取料和清理动作：打开可见背包、申请原版改槽、等待确认，再更新材料归属。
+ * 材料可跨多个施工格保留，之后还要用就不每放一块取还一次。
+ */
 final class CreativeBuildMaterialSupply {
     enum Status { READY, WAITING, FAILED }
     private final CreativeBuildInventory inventory = new CreativeBuildInventory();
@@ -28,6 +31,7 @@ final class CreativeBuildMaterialSupply {
     private org.maiwithu.maicraft.core.FailureType failureType = org.maiwithu.maicraft.core.FailureType.UNKNOWN;
     private Map<String, Integer> retained = Map.of();
 
+    // 先等待上一次改槽结束，再找所需材料。已有材料可直接选用；需要腾位时先清空自有材料，下次再取新材料。
     Status ensure(LocalPlayerContext context, Item wanted, ToIntFunction<Item> nextUse) {
         Status settled = settle(context);
         if (settled != Status.READY) return settled;
@@ -49,6 +53,7 @@ final class CreativeBuildMaterialSupply {
         return write(context, selection, after);
     }
 
+    // 一次只清理一个不再需要的自有材料；全部处理完才关闭本任务打开的背包界面。
     Status releaseUnused(LocalPlayerContext context, ToIntFunction<Item> nextUse) {
         Status settled = settle(context);
         if (settled != Status.READY) return settled;
@@ -62,6 +67,7 @@ final class CreativeBuildMaterialSupply {
         return write(context, selection, ItemStack.EMPTY);
     }
 
+    // 背包必须已显示、本刻允许修改，且槽位仍与选择时一致，才提交一次改槽；不满足就留待下次。
     private Status write(LocalPlayerContext context, CreativeBuildInventory.Selection selection, ItemStack after) {
         if (!menu.inventoryReady(context) || !context.mutationAvailable()) return Status.WAITING;
         ItemStack before = context.player().getInventory().getItem(selection.slot());
@@ -73,6 +79,7 @@ final class CreativeBuildMaterialSupply {
         return Status.WAITING;
     }
 
+    // 只有确认已应用才继续；结果不确定或变成了别的内容时停止，避免在未结清的槽位上接着改。
     private Status settle(LocalPlayerContext context) {
         if (failure != null) return Status.FAILED;
         if (receipt == null) return Status.READY;
@@ -89,7 +96,7 @@ final class CreativeBuildMaterialSupply {
         return Status.READY;
     }
 
-    /** Must run before observing inventory after the selector's confirmed native swap. */
+    /** 选择器把材料换到快捷栏后，先转移归属记录，再读取新的背包快照。 */
     void swapped(LocalPlayer player, FirstPersonActionGate.ConfirmedSwap swap) {
         if (swap == null) return;
         var snapshot = snapshot(player);
@@ -105,7 +112,7 @@ final class CreativeBuildMaterialSupply {
     boolean uncertain() { return uncertain; }
     org.maiwithu.maicraft.core.FailureType failureType() { return failureType; }
 
-    /** Failed/cancelled structures retain useful materials; no extra destructive slot writes here. */
+    /** 失败或取消时结束尚未结清的改槽并清理界面；这里保留背包材料，不再另发清空槽位操作。 */
     void stop(LocalPlayer player) {
         if (receipt != null && !receipt.terminal()) {
             try {
@@ -128,6 +135,7 @@ final class CreativeBuildMaterialSupply {
     private Status fail(String reason, boolean uncertain) {
         failure = reason; this.uncertain = uncertain; phase = "failed"; return Status.FAILED;
     }
+    // 汇总仍属本任务的材料，供进度和最终结果说明“还留了什么”；不把玩家物品算进去。
     private void observe(List<ItemStack> snapshot) {
         Map<String, Integer> items = new LinkedHashMap<>();
         for (var entry : inventory.owned(snapshot)) {
@@ -136,6 +144,7 @@ final class CreativeBuildMaterialSupply {
         }
         retained = Map.copyOf(items);
     }
+    // 复制普通背包的物品，避免随后换槽或数量变化把之前的比较依据一起改掉。
     static List<ItemStack> snapshot(LocalPlayer player) {
         List<ItemStack> result = new ArrayList<>();
         for (int slot = 0; slot < Math.min(36, player.getInventory().getContainerSize()); slot++)

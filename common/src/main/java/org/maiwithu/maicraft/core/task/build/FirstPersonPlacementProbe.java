@@ -9,16 +9,16 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 
-/** Read-only proof that the ordinary build lane can place one block from a real stance. */
+/**
+ * 只读检查某一方块能否从现成站位放下，主要用于临时工作台选址；不在这里移动或放置。
+ */
 public final class FirstPersonPlacementProbe {
 
     private FirstPersonPlacementProbe() {}
 
     /**
-     * Returns whether a block item has at least one loaded, already standable first-person
-     * gesture for {@code target}.  This is stricter than the general construction preflight:
-     * large builds may create an accounted scaffold, whereas temporary utility-block placement
-     * must not silently turn a missing stance into a terrain-editing job.
+     * 必须是方块物品，并且能找到已加载、当前就能站的点击方案。
+     * 与大型建筑的预检不同，这里不为放一个临时工作台额外计划搭桥或垫高。
      */
     public static boolean hasExistingStance(
             LocalPlayer player, Block block, BlockPos target) {
@@ -34,6 +34,7 @@ public final class FirstPersonPlacementProbe {
                 player, placement, targets, stance -> standable(player, stance));
     }
 
+    // 这份站位判断要求脚和头所在整格没有碰撞或流体，脚下顶面能承重；它没有按半格脚高检查半砖站位。
     private static boolean standable(LocalPlayer player, BlockPos feet) {
         BlockPos head = feet.above();
         BlockPos floor = feet.below();

@@ -15,7 +15,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.material.FluidState;
 
-/** Runs the actual resumable verifier against Minecraft collision states without launching a game. */
+/** 用模拟世界检查分批验收：大房间、单步续查、隔墙、缺失区块和长码头；不启动游戏或让角色实走。 */
 public final class BuildTraversabilityVerifierTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();
@@ -49,6 +49,7 @@ public final class BuildTraversabilityVerifierTest {
         System.out.println("BuildTraversabilityVerifierTest: passed");
     }
 
+    // 按给定预算反复推进真实验收器，检查每次读格次数有上限，并确认完成后的查询结果稳定。
     private static BuildTraversabilityVerifier.Result scan(TestWorld world, Predicate<BlockPos> loaded,
             BuildTraversabilityContract contract, int budget) {
         var scan = BuildTraversabilityVerifier.begin(world, loaded, contract);
@@ -76,6 +77,7 @@ public final class BuildTraversabilityVerifierTest {
         return new BuildTraversabilityContract.Cell(x, y, z);
     }
 
+    // 场景有一整层石地板、木门和可选完整隔墙；没有覆盖铁门控制或头部半砖等碰撞细节。
     private static final class TestWorld implements BlockGetter {
         private final boolean partition;
         private final int entranceZ;
