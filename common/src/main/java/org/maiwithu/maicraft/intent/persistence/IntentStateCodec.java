@@ -28,7 +28,7 @@ public final class IntentStateCodec {
     public static final int MAX_TASKS = 256;
     public static final int MAX_REQUEST_KEYS = 512;
     public static final int MAX_LANDMARKS = 256;
-    private static final int MAX_STEPS = 256;
+    private static final int MAX_STEP_FOOTPRINTS = 256;
     private static final int MAX_ATTEMPTS = 64;
     private static final int MAX_OPTIONS = 32;
     private static final int MAX_TEXT = 4_096;
@@ -73,7 +73,7 @@ public final class IntentStateCodec {
             Map<String, UUID> requestKeys,
             List<IntentRuntime.Landmark> landmarks) {}
 
-    /** 检查目标的 JSON 能否完整保存；这里检查每层内容的大小，没有检查组合目标展开后的总步数。 */
+    /** 检查目标内容与大小；实际步骤完整保存，整个检查点仍受状态存储层的字节上限约束。 */
     public static void requirePersistableGoal(Goal goal) {
         safeGoal(goal);
     }
@@ -142,13 +142,13 @@ public final class IntentStateCodec {
         if (task.planId() != null) value.addProperty("plan_id", task.planId().toString());
         value.add("goal", safeGoal(task.goal()));
         JsonArray steps = new JsonArray();
-        task.steps().stream().limit(MAX_STEPS).forEach(step -> steps.add(safeGoal(step)));
-        // 当前只保存前二百五十六步，但下面的 step_index 不会一起裁剪；过长任务可能丢步骤或无法恢复。
+        task.steps().forEach(step -> steps.add(safeGoal(step)));
+        // 已接受的步骤不能在保存时截短，进度与按步骤关联的结果也必须一同保全。
         value.add("steps", steps);
         value.addProperty("step_index", task.stepIndex());
 
         JsonArray completed = new JsonArray();
-        task.stepResults().stream().limit(MAX_STEPS).forEach(step -> {
+        task.stepResults().forEach(step -> {
             JsonObject item = new JsonObject();
             item.addProperty("index", step.index());
             item.addProperty("ability", bounded(step.ability()));
@@ -163,7 +163,6 @@ public final class IntentStateCodec {
         JsonArray internalPositions = new JsonArray();
         task.internalPositionReceipts().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
-                .limit(MAX_STEPS)
                 .forEach(entry -> {
                     JsonObject item = new JsonObject();
                     item.addProperty("step_index", entry.getKey());
@@ -176,7 +175,6 @@ public final class IntentStateCodec {
         JsonArray internalAreaProtections = new JsonArray();
         task.internalAreaProtectionReceipts().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
-                .limit(MAX_STEPS)
                 .forEach(entry -> {
                     JsonObject item = new JsonObject();
                     item.addProperty("step_index", entry.getKey());
@@ -304,13 +302,14 @@ public final class IntentStateCodec {
     }
 
     private static TaskSnapshot decodeTask(JsonObject value) {
-        // 有保存下来的实际步骤就用它，没有才从原始目标重建；所以被截短但非空的列表不会自动补全。
+        // 使用实际保存的步骤；前置或替换任务可能改变列表，不能用原始目标覆盖这些调整。
         UUID id = UUID.fromString(text(value, "id"));
         UUID planId = value.has("plan_id")
                 ? UUID.fromString(value.get("plan_id").getAsString()) : null;
         Goal goal = decodeGoal(value.getAsJsonObject("goal"));
         List<Goal> steps = new ArrayList<>();
-        for (JsonElement element : array(value, "steps", MAX_STEPS)) {
+        // 文件总大小已由状态存储层限制，步骤数量不再另套容易截断有效任务的固定上限。
+        for (JsonElement element : array(value, "steps")) {
             steps.add(decodeGoal(element.getAsJsonObject()));
         }
         if (steps.isEmpty()) steps.addAll(goal.executableSteps());
@@ -329,7 +328,7 @@ public final class IntentStateCodec {
         }
 
         List<IntentTaskRecord.StepSnapshot> completed = new ArrayList<>();
-        for (JsonElement element : array(value, "completed_steps", MAX_STEPS)) {
+        for (JsonElement element : array(value, "completed_steps", steps.size())) {
             JsonObject item = element.getAsJsonObject();
             int completedIndex = integer(item, "index", completed.size());
             if (completedIndex < 0 || completedIndex >= steps.size()) {
@@ -349,7 +348,7 @@ public final class IntentStateCodec {
         }
 
         Map<Integer, Goal.WorldPosition> internalPositions = new LinkedHashMap<>();
-        for (JsonElement element : array(value, "internal_positions", MAX_STEPS)) {
+        for (JsonElement element : array(value, "internal_positions", steps.size())) {
             // 位置必须来自已经完成的步骤；正在尝试或失败的步骤不能授权后续任务使用其位置。
             JsonObject item = element.getAsJsonObject();
             int positionStepIndex = integer(item, "step_index", -1);
@@ -370,7 +369,7 @@ public final class IntentStateCodec {
 
         Map<Integer, List<InternalAreaProtectionReceipt.Footprint>>
                 internalAreaProtections = new LinkedHashMap<>();
-        for (JsonElement element : array(value, "internal_area_protections", MAX_STEPS)) {
+        for (JsonElement element : array(value, "internal_area_protections", steps.size())) {
             // 同样只恢复已经完成步骤测出的保护范围，并拒绝同一步重复保存多份记录。
             JsonObject item = element.getAsJsonObject();
             int protectionStepIndex = integer(item, "step_index", -1);
@@ -379,7 +378,7 @@ public final class IntentStateCodec {
                         "persisted internal area receipt is outside completed progress");
             }
             List<InternalAreaProtectionReceipt.Footprint> footprints = new ArrayList<>();
-            for (JsonElement footprintElement : array(item, "footprints", MAX_STEPS)) {
+            for (JsonElement footprintElement : array(item, "footprints", MAX_STEP_FOOTPRINTS)) {
                 JsonObject footprint = footprintElement.getAsJsonObject();
                 String label = footprint.has("semantic_label")
                         && footprint.get("semantic_label").isJsonPrimitive()
@@ -505,16 +504,20 @@ public final class IntentStateCodec {
     }
 
     private static JsonArray array(JsonObject root, String key, int maximum) {
-        // 缺少列表按空列表兼容；已经存在但类型不对或数量过多，则拒绝整份内容，不静默截取。
-        if (!root.has(key)) return new JsonArray();
-        if (!root.get(key).isJsonArray()) {
-            throw new IllegalArgumentException(key + " must be an array");
-        }
-        JsonArray array = root.getAsJsonArray(key);
+        JsonArray array = array(root, key);
         if (array.size() > maximum) {
             throw new IllegalArgumentException(key + " exceeds its persisted bound");
         }
         return array;
+    }
+
+    private static JsonArray array(JsonObject root, String key) {
+        // 缺少列表按空列表兼容；类型不对就拒绝，不能把损坏的数据静默转成空列表。
+        if (!root.has(key)) return new JsonArray();
+        if (!root.get(key).isJsonArray()) {
+            throw new IllegalArgumentException(key + " must be an array");
+        }
+        return root.getAsJsonArray(key);
     }
 
     private static JsonObject worldPosition(Goal.WorldPosition position) {
