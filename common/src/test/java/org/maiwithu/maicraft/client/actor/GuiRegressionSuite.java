@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.client.actor;
 /** Actual visibility-policy checks and architecture guards; live UI clicks still need a game. */
 public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
+        org.maiwithu.maicraft.client.chat.ChatTypingTest.main(args);
         MenuVisibilityTest.main(args);
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);
