@@ -9,8 +9,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import org.lwjgl.glfw.GLFW;
 
-/** LocalPlayer input takeover with F8 human override and one-tick leases. */
+/**
+ * 把本地玩家的键盘和转头交给自动任务，也负责按 F8 后还给玩家。
+ * 任务每一刻都要重新说“继续前进”或“继续看向这里”；漏发时自动松键，不让旧输入一直生效。
+ */
 public final class DefaultBodyControlPort implements BodyControlPort {
+    // controlledPlayer 是已接管的玩家，requestedPlayer 是正在等待接管的玩家。
+    // 先记住玩家原来的键盘输入对象，交回控制时才能恢复它。
     private LocalPlayer controlledPlayer;
     private LocalPlayer requestedPlayer;
     private Input humanInput;
@@ -20,6 +25,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     private boolean toggleWasDown;
     private long requestRevision;
     private long activeTick;
+    // 每条移动、转头指令都带当前游戏刻的编号。下一刻没有重新发出，就不再沿用。
     private long movementLease = Long.MIN_VALUE;
     private long lookLease = Long.MIN_VALUE;
     private Movement movement = Movement.STOPPED;
@@ -45,6 +51,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     boolean effectiveAutomationRequested() { return automationRequested && !reviewSuspended; }
 
     /** Human inspection releases input without creating a fresh grant on confirmation. */
+    // 让玩家查看预览时先还回键盘，但保留自动任务想继续操作的请求。
     void suspendForReview(boolean suspended) {
         if (reviewSuspended == suspended) return;
         reviewSuspended = suspended;
@@ -52,6 +59,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     @Override
+    // 只保存本刻想按哪些键；真正写进玩家输入发生在本刻收尾。
     public void applyMovement(Movement movement, long leaseTickRevision) {
         requireLease(leaseTickRevision);
         this.movement = movement;
@@ -60,12 +68,14 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     @Override
+    // 移动算法也可以给出“朝向变了以后该按哪些键”。转镜头时再算一次，避免仍按旧朝向走。
     public void applySteering(Steering steering, float currentYaw, long leaseTickRevision) {
         applyMovement(steering.atYaw(currentYaw), leaseTickRevision);
         this.steering = steering;
     }
 
     @Override
+    // 记录想看的方向，左右转角绕回一圈之内，上下视角限制在垂直范围内。
     public void requestLook(float yaw, float pitch, long leaseTickRevision) {
         requireLease(leaseTickRevision);
         targetYaw = Mth.wrapDegrees(yaw);
@@ -74,6 +84,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     @Override
+    // 取消继续转头，同时清除转动惯性，避免下一次看向别处时继承旧速度。
     public void clearLook() {
         targetYaw = null;
         targetPitch = null;
@@ -84,6 +95,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     @Override
+    // 需要立即瞄准时直接转到目标角度，不经过后面的缓慢转头。
     public void requestImmediateLook(float yaw, float pitch, long leaseTickRevision) {
         requestLook(yaw,pitch,leaseTickRevision);
         cameraYaw = targetYaw; cameraPitch = targetPitch;
@@ -93,6 +105,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     @Override
+    // 松开移动键并停止转头。挖掘、使用物品等动作由 actions 管理，不在这里结束。
     public void releaseAll() {
         movement = Movement.STOPPED;
         steering = null;
@@ -103,7 +116,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     void beginTick(long tickRevision) {
         activeTick = tickRevision;
-        // A command from an earlier tick is never allowed to stick.
+        // 上一刻按着前进，不代表这一刻还要前进；执行器必须每刻重新发出指令。
         if (movementLease != tickRevision) { movement = Movement.STOPPED; steering = null; }
         if (lookLease != tickRevision) {
             targetYaw = null;
@@ -113,9 +126,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     /**
-     * Register explicit MCP authority for the named body. Attachment is deliberately deferred to
-     * {@link #fulfillAutomationRequest(LocalPlayer)} at the next actor tick so task submission can
-     * never mutate LocalPlayer input outside the actor boundary.
+     * 先登记“要接管这个玩家”，到后续玩家更新时才安装自动输入。
+     * 这样提交请求的线程不用直接改玩家正在使用的键盘对象。
      */
     AutomationRequest requestAutomation(LocalPlayer player) {
         if (player == null || player.input == null) {
@@ -134,6 +146,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return new AutomationRequest(requestRevision, true);
     }
 
+    // 提交任务失败时，只能撤销这次刚创建、尚未接管的请求。
+    // 若后来的请求已改变编号，或已经接管身体，就不能拿旧请求把它关掉。
     void rollbackAutomationRequest(AutomationRequest request) {
         if (request == null || !request.created() || request.revision() != requestRevision
                 || controlledPlayer != null) {
@@ -143,8 +157,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     /**
-     * Restore the old body's native Input and either carry or revoke the logical request. The
-     * caller may preserve it only after validating the scheduler's portal handoff token.
+     * 换维度或重生会更换玩家对象，先还回旧对象的键盘输入。
+     * 调用方确认这是允许继续的传送后，可保留自动接管请求；否则取消。
      */
     void bodyReplaced(LocalPlayer replacement, boolean preserveRequest) {
         boolean exactPendingTarget = automationRequested && controlledPlayer == null
@@ -157,7 +171,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         cancelAutomationRequest();
     }
 
-    /** Attach a pending explicit request. Returns true only when a new BotInput was installed. */
+    /** 请求仍有效、玩家对象也匹配时，才实际安装自动输入；这次装好了才返回 true。 */
     boolean fulfillAutomationRequest(LocalPlayer player) {
         if (!effectiveAutomationRequested() || automationOwnsControls()) return false;
         if (player == null || player.input == null
@@ -168,7 +182,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return automationOwnsControls();
     }
 
-    /** Returns true when F8 changed requested ownership during this tick. */
+    /** F8 从没按变成按下时切换一次；一直按着不会每刻来回切换。 */
     boolean pollHumanOverride(LocalPlayer player, long windowHandle) {
         boolean down = GLFW.glfwGetKey(windowHandle, GLFW.GLFW_KEY_F8) == GLFW.GLFW_PRESS;
         boolean toggled = down && !toggleWasDown;
@@ -195,6 +209,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return automationRequested;
     }
 
+    // 只把当前这一个玩家、这一刻的指令写出去。没有新转头要求时，以玩家现有视角为准。
     void endTick(DefaultLocalPlayerContext context) {
         if (!context.isCurrent() || !automationOwnsControls() || controlledPlayer != context.player()) return;
         BotInput input = botInput;
@@ -212,6 +227,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         writeMovement(player, input, context.minecraft().screen);
     }
 
+    // 箱子等界面打开时停止走路；没有界面或只有聊天框时才允许移动。
     private void writeMovement(LocalPlayer player, BotInput input, Screen screen) {
         Movement command = movementLease == activeTick && permitsWorldMovement(screen)
                 ? steering == null ? movement : steering.atYaw(player.getYRot()) : Movement.STOPPED;
@@ -234,6 +250,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     /** Advance the same physical first-person camera once per rendered frame. */
+    // 画面每刷新一帧都推进一点转头，因此镜头不必等下一次游戏刻才跳动。
     void renderFrame(LocalPlayer player) {
         if (!automationOwnsControls() || player == null || player != controlledPlayer
                 || targetYaw == null || targetPitch == null) {
@@ -257,6 +274,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         detachBody();
     }
 
+    // 只恢复自己替换过的输入对象；其他 Mod 已经换走它时，不覆盖对方的新对象。
     private void detachBody() {
         LocalPlayer player = controlledPlayer;
         BotInput injected = botInput;
@@ -269,6 +287,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         humanInput = null;
     }
 
+    // 保存原来的键盘输入，换上自动输入，并从玩家当前视角开始接管。
     private void attachBody(LocalPlayer player) {
         if (automationOwnsControls() && controlledPlayer == player) return;
         detachBody();
@@ -284,6 +303,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         writeStoppedInput();
     }
 
+    // 没有自动控制权，或拿着上一刻的编号，都拒绝写入新输入。
     private void requireLease(long leaseTickRevision) {
         if (!automationOwnsControls()) throw new IllegalStateException("automation does not own the body");
         if (leaseTickRevision != activeTick) throw new IllegalArgumentException("input lease is not for the active tick");
@@ -304,6 +324,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         if (controlledPlayer != null) controlledPlayer.setSprinting(false);
     }
 
+    // 按实际经过的时间转动；卡顿后单次最多按 0.05 秒推进，避免镜头一下跳过很远。
     private void advanceLook(LocalPlayer player, long nowNanos) {
         if (!cameraInitialized) synchronizeCamera(player);
         float dt;
@@ -336,10 +357,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     /**
-     * Critically damped second-order response. It preserves angular velocity across frames,
-     * explicitly clamps at the target on any numerical crossing, so a moving target cannot
-     * make the camera ring or overshoot, and bounds angular acceleration so big turns ramp
-     * into and out of their cruise rate (an S-curve) instead of panning linearly.
+     * 左右转头走较短的一边。例如从 179° 转到 -179°，只转 2°，不用反向绕 358°。
+     * 具体快慢交给下面的平滑计算。
      */
     static AxisStep smoothDampAngle(
             float current, float target, float velocity,
@@ -348,6 +367,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return smoothDamp(current, unwrappedTarget, velocity, smoothTime, maxSpeed, dt);
     }
 
+    // 记住上一帧转多快，再逐渐靠近目标。距离很远时先限制本次追赶距离，
+    // 越接近目标越慢，避免急停和来回晃动。
     static AxisStep smoothDamp(
             float current, float target, float velocity,
             float smoothTime, float maxSpeed, float dt) {
@@ -363,15 +384,13 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         float nextVelocity = (velocity - omega * temporary) * decay;
         float output = adjustedTarget + (change + temporary) * decay;
 
-        // S-curve shaping: the bare spring reaches its cruise rate within a couple of
-        // frames, which reads as a linear pan across a big turn. Bounded angular
-        // acceleration supplies the ease-in; the spring's convergence supplies the
-        // ease-out. Displacement stays consistent with the limited rate.
+        // 限制转头速度每帧能增加多少，并按这个速度限制角度变化，让起步也慢慢加速。
         float maxDeltaV = ANGULAR_ACCELERATION * dt;
         nextVelocity = Mth.clamp(nextVelocity, velocity - maxDeltaV, velocity + maxDeltaV);
         float maxStep = Math.max(Math.abs(velocity), Math.abs(nextVelocity)) * dt;
         output = current + Mth.clamp(output - current, -maxStep, maxStep);
 
+        // 算出的角度若已经越过本次目标，就停在目标；目标换到另一边时也不继续朝旧方向滑。
         float desiredDirection = adjustedTarget - current;
         if ((desiredDirection > 0.0f && output >= adjustedTarget)
                 || (desiredDirection < 0.0f && output <= adjustedTarget)) {
@@ -379,8 +398,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             nextVelocity = 0.0f;
         } else if ((desiredDirection > 0 && output < current)
                 || (desiredDirection < 0 && output > current)) {
-            // A changed target can leave velocity pointing away from it. Do not drift
-            // past the current angle and then visibly reverse to find the target again.
+            // 清掉朝错误方向的旧速度，下一帧重新朝新目标转。
             output = current;
             nextVelocity = 0;
         }
@@ -388,8 +406,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     private static void applyCamera(LocalPlayer player, float yaw, float pitch) {
-        // Disable vanilla's second, linear tick interpolation: this method already runs at render
-        // cadence and supplies the curved sample that both the visible camera and native ray use.
+        // 头、身体和镜头都使用同一角度；把上一帧角度也同步，避免原版再插一次中间画面。
         player.setYRot(yaw);
         player.setYHeadRot(yaw);
         player.setYBodyRot(yaw);

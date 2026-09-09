@@ -10,11 +10,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /**
- * Compatibility surface from the imported movement algorithms to the single first-person body.
- *
- * <p>The adapter stores only primitive commands for the active tick. It asks
- * {@link ClientRuntime} for a fresh context on every call and never retains a player, world or
- * context across ticks.</p>
+ * 供移动算法使用的简短按键接口，例如朝前走、跳一下、看向一个方块。
+ * 它把同一游戏刻的几个要求合成一组输入；每次都重新获取当前玩家，避免换维度后还操作旧对象。
+ * 真正的控制权检查和输入写入在 BodyControlPort，挖掘与右键动作不由此类管理。
  */
 public final class InputDriver {
     private static long commandTick = Long.MIN_VALUE;
@@ -27,6 +25,7 @@ public final class InputDriver {
     private InputDriver() {
     }
 
+    // 朝目标的水平方向转头并按前进；这里不寻路，也不检查前面能否通过。
     public static void stepToward(LocalPlayer player, Vec3 target, boolean sprint) {
         LocalPlayerContext context = context(player);
         if (context == null) return;
@@ -36,6 +35,7 @@ public final class InputDriver {
         applyMovement(player, 1.0f, 0.0f, false, false, sprint);
     }
 
+    // 从眼睛到目标点算出左右、上下两个角度，再交给身体控制器转头。
     public static void lookAt(LocalPlayer player, Vec3 point) {
         Vec3 delta = point.subtract(player.getEyePosition());
         double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
@@ -50,6 +50,7 @@ public final class InputDriver {
         context.body().requestLook(yaw, pitch, context.tickRevision());
     }
 
+    // 给本刻已有的移动指令加上跳跃，不清掉同刻的前进或潜行。
     public static void jump(LocalPlayer player) {
         LocalPlayerContext context = context(player);
         if (context == null) return;
@@ -58,6 +59,7 @@ public final class InputDriver {
         flush(context);
     }
 
+    // 改变本刻潜行状态，同时重新判断这种状态下能否疾跑。
     public static void sneak(LocalPlayer player, boolean on) {
         LocalPlayerContext context = context(player);
         if (context == null) return;
@@ -98,6 +100,7 @@ public final class InputDriver {
         flush(context);
     }
 
+    // 用完整的一组要求覆盖本刻按键；越界的前后、左右数值压到 -1～1。
     public static void applyMovement(
             LocalPlayer player,
             float requestedForward,
@@ -143,6 +146,7 @@ public final class InputDriver {
         return context.body().automationOwnsControls() ? context : null;
     }
 
+    // 首次进入新的一刻时从全松键开始；同一刻的多次 jump、sneak 调用可以叠加。
     private static void resetFor(LocalPlayerContext context) {
         if (commandTick == context.tickRevision()) return;
         commandTick = context.tickRevision();
@@ -153,6 +157,7 @@ public final class InputDriver {
         sprinting = false;
     }
 
+    // 把合并后的本刻按键一次交给身体控制器，由它在合适的更新时机写入玩家。
     private static void flush(LocalPlayerContext context) {
         context.body().applyMovement(
                 new BodyControlPort.Movement(forward, strafe, jumping, sneaking, sprinting),
