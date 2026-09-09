@@ -22,7 +22,7 @@ public final class BrainChains {
 
     private BrainChains() {}
 
-    /** 注册一条链工厂。{@code order} 小者先(平局裁决用,与优先级无关)。 */
+    /** 登记一种自动自救行为；order 越小越先检查，例如同一刻既缺氧又遇怪时，先检查的行为先执行。 */
     public static synchronized void register(int order, Supplier<Task> factory) {
         ENTRIES.add(new Entry(order, factory));
     }

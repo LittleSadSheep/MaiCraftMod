@@ -42,6 +42,7 @@ public final class TimerRegistry {
     }
 
     public Timer set(UUID playerUuid, long nowGameTime, int seconds, String reason) {
+        // 只记“什么时候提醒”，不用走路或停下手头工作；SetTimerTool 已把秒数限制在允许范围内。
         if (list(playerUuid).size() >= MAX_PER_COMPANION) {
             return null;
         }
@@ -68,10 +69,12 @@ public final class TimerRegistry {
     }
 
     public static long remainingSeconds(Timer timer, long nowGameTime) {
+        // 不足一秒仍显示一秒；到期后归零，不显示负数。
         return (Math.max(0L, timer.dueGameTime() - nowGameTime) + 19L) / 20L;
     }
 
     public static void tick(LocalPlayer player) {
+        // 每过二十个游戏刻查一次（正常速度约一秒）；没有调用这里时，即使已经到点也不会提醒。
         long now = player.level().getGameTime();
         TimerRegistry registry = INSTANCE;
         if (registry.nextSweepGameTime != Long.MIN_VALUE && now < registry.nextSweepGameTime) {
@@ -95,6 +98,7 @@ public final class TimerRegistry {
     }
 
     private void fireDue(LocalPlayer player, long nowGameTime) {
+        // 先找出全部到期提醒，再逐个显示并删掉；这里只让自己看到消息，不向服务器发聊天。
         List<Timer> due = new ArrayList<>();
         for (Timer timer : dueAt(nowGameTime)) {
             if (timer.companion().equals(player.getUUID())) {

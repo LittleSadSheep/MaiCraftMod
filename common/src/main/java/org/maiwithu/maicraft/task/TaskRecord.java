@@ -4,34 +4,17 @@ import org.maiwithu.maicraft.task.TaskResult;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Mutable descriptor of an in-flight task. The {@link org.maiwithu.maicraft.agent.tool.MaiCraftTool tool layer}
- * builds one record per LLM {@code tool_call} and enqueues it;
- * {@code CompanionTickDispatcher} picks it up (running the matching
- * {@link CompanionTask}), drives lifecycle, and writes a
- * {@link TaskResult} back before completion.
+ * 一张“任务单”：记下要做什么、最晚何时做完、现在做到什么状态、最后结果如何。
+ * 例如移动任务单还会记目的地，但它自己不会走路；{@link TaskFactory} 会找到负责走路的代码。
  *
- * <h2>Type pattern</h2>
- * Concrete subclasses (e.g. {@code MoveToTaskRecord}) carry the typed input
- * parameters as final fields. {@link CompanionTaskFactory} dispatches the queue
- * head against the registered record types — no reflection at runtime, just one
- * {@code instanceof} check per record at the dispatch boundary.
- *
- * <h2>Threading</h2>
- * Records are constructed off-tick (in the LLM async callback) and read on
- * the server tick thread. The "construct off-tick" is followed by a hop
- * through {@code server.execute(...)} into the tick thread before the record
- * is enqueued, so the happens-before is established by the executor's queue —
- * no fields need to be {@code volatile}.
- *
- * <h2>Why not a record (Java {@code record} keyword)</h2>
- * State transitions ({@link TaskState}, {@link TaskResult}) need to be
- * mutable. Subclass-style {@code class} fits.
+ * <p>游戏运行时，这张单子由 Minecraft 客户端的主线程读写。网络请求也先交给这个线程处理，
+ * 避免两边同时改任务状态；这个类自己没有加锁。
+ * 这里的 t 开头短编号供内部使用，MCP 对外的总任务另有一个 UUID 编号。
  */
 public abstract class TaskRecord {
 
     private static final AtomicLong ID_SOURCE = new AtomicLong();
 
-    /** Monotonically increasing internal id; only used for logging / dedup. */
     /**
      * 常驻任务的"期限":一个永远不会到的游戏刻。
      *
@@ -44,11 +27,7 @@ public abstract class TaskRecord {
     private final long id;
     /** Stable name of the originating tool (matches {@code MaiCraftTool.name()}). */
     private final String toolName;
-    /**
-     * The {@code id} field from the LLM's {@code tool_call} — must be echoed
-     * verbatim in the {@code tool_call_id} of the role:tool response, or the
-     * upstream API responds 400.
-     */
+    /** 记住“是谁发起了这次调用”，任务结束时才能把结果送回正确的调用者。 */
     private final String toolCallId;
     /**
      * Game-tick (level.getGameTime()) at which this record times out. Stamped
@@ -62,7 +41,7 @@ public abstract class TaskRecord {
 
     private TaskState state = TaskState.PENDING;
     private TaskResult result;
-    /** 异步派发的记录:受理时已经回执过 tool_call,收尾改走 task_finished 事件。 */
+    /** 保留旧接口的“异步任务”标记；当前结果仍统一由 LocalToolDispatcher 送回。 */
     private boolean async;
     /** 首次进入 RUNNING 的游戏刻;task_status 用它报已耗时。-1 = 还没开跑。 */
     private long startedGameTime = -1;
@@ -92,15 +71,10 @@ public abstract class TaskRecord {
     public final void markAsync() { this.async = true; }
     public final boolean isAsync() { return async; }
 
-    /**
-     * Prefix of the synthetic tool-call ids MaiCraftActuator mints for external (MCP)
-     * invocations — disjoint from the LLM's ids. The async wind-down keys off this
-     * to route completion: internal tasks fire a task_finished event to the built-in
-     * brain; external ones don't (their driver polls task_status instead).
-     */
+    /** 用 mcp- 开头标记来自 MCP 的调用；任务开始、结束等对外消息由 IntentRuntime 发送。 */
     public static final String EXTERNAL_CALL_PREFIX = "mcp-";
 
-    /** True if an external brain (MCP) dispatched this task, not the built-in LLM. */
+    /** 只看调用编号是否以 mcp- 开头，不检查任务是否已开始操作玩家。 */
     public final boolean isExternalCall() {
         return toolCallId != null && toolCallId.startsWith(EXTERNAL_CALL_PREFIX);
     }

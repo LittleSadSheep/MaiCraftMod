@@ -45,6 +45,7 @@ public final class CompanionTickDispatcher {
             return;
         }
         bind(player);
+        // 检查提醒是否到期也放在这里。因此上层不让自动任务运行时，提醒也不会弹出。
         TimerRegistry.tick(player);
         brain.tick(player);
     }
@@ -117,6 +118,8 @@ public final class CompanionTickDispatcher {
     /** Authorise one semantic task to survive the LocalPlayer replacement caused by a portal. */
     public static long prepareDimensionHandoff(
             String destinationDimension, BlockPos portalPosition, Block portalBlock) {
+        // 先记住“这个玩家正在为这个任务走进这扇门”，换世界后才能认出该继续哪件事。
+        // 只说“我要去下界”还不够，必须看到附近确实有传送门；这次确认只在接下来三十秒内有效。
         requireClientThread();
         if (destinationDimension == null || destinationDimension.isBlank()) throw new IllegalArgumentException("destination dimension is required");
         TaskRecord active = brain == null ? null : brain.current();
@@ -239,6 +242,7 @@ public final class CompanionTickDispatcher {
     }
 
     private static void bind(LocalPlayer player) {
+        // 玩家重生后名字和 UUID 没变，但游戏里的玩家对象可能已换了；旧任务不能继续操作旧对象。
         if (player == null) {
             throw new IllegalArgumentException("local player is required");
         }
@@ -259,6 +263,7 @@ public final class CompanionTickDispatcher {
     }
 
     private static boolean detachExpectedHandoff() {
+        // 真正离开世界时，再检查是不是刚才那件任务、那扇门；检查过就删掉，不能留给下一趟旅行用。
         Handoff expected = expectedHandoff;
         if (expected == null) return false;
         expectedHandoff = null;
@@ -281,6 +286,7 @@ public final class CompanionTickDispatcher {
     }
 
     private static void resumePendingHandoff(LocalPlayer player) {
+        // 到了新世界，确认还是同一玩家、同一服务器，而且确实到了目的维度；否则取消旧任务。
         Handoff pending = pendingHandoff;
         if (pending == null) return;
         ClientPacketListener connection = Minecraft.getInstance().getConnection();
@@ -380,6 +386,7 @@ public final class CompanionTickDispatcher {
 
     private static Set<Long> connectedPortalCells(
             ClientLevel level, BlockPos origin, Block portalBlock, int limit) {
+        // 从入口向上下前后左右找相连的传送门方块；只看已加载的区域，最多找到指定数量就停。
         Set<Long> cells = new HashSet<>();
         ArrayDeque<BlockPos> open = new ArrayDeque<>();
         open.add(origin.immutable());

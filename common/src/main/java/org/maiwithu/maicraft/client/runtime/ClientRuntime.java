@@ -69,6 +69,7 @@ public final class ClientRuntime {
         // 中途因预览或人工接管而返回时，仍需通过 finally 收尾，不能遗留上一轮的按键或原生动作。
         requireClientThread(minecraft);
         org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime.tick();
+        // 即使玩家正在自己操作，也继续观察世界和更新预览，让 MCP 能看到当前发生了什么。
         tickStage = "observing";
         org.maiwithu.maicraft.core.inventory.StockEvidence.observe(minecraft.player);
         PathCaches.clientTick(minecraft.player);
@@ -107,6 +108,7 @@ public final class ClientRuntime {
                 return;
             }
             if (GameplayAttentionMonitor.blocksAutomation(context.player())) {
+                // 例如死亡后还在等待决定，就先不运行自动任务；自动自救也一起停在这里。
                 tickStage = "attention_required";
                 intents.tickPersistence(minecraft, context.player());
                 GameplayAttentionMonitor.afterSemanticBind(context.player());
@@ -126,6 +128,7 @@ public final class ClientRuntime {
             // ownerless native action.  Keep the semantic task intact and resume next tick; trying
             // to advance a new child now would violate the one-native-mutation boundary.
             if (!context.mutationAvailable()) {
+                // 这一刻已经为旧动作做过一次游戏操作，就等下一刻再做新事；目前连只查条件的任务也会等。
                 tickStage = "settling_native_action";
                 intents.tickPersistence(minecraft, context.player());
                 GameplayAttentionMonitor.afterSemanticBind(context.player());
@@ -239,6 +242,7 @@ public final class ClientRuntime {
     }
 
     private static void bodyGone(boolean saveSemanticState) {
+        // 先记住“刚才做到哪了”，再停止旧玩家的任务；反过来会只记下“任务已取消”，下次就接不上了。
         EmbeddedBaritoneRuntime.bodyGone();
         org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.abandon();
         if (saveSemanticState) IntentRuntime.get().bodyUnavailable();

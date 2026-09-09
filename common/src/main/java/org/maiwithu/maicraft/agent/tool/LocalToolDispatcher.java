@@ -24,6 +24,7 @@ public final class LocalToolDispatcher {
 
     /** Submit one internal capability call to the Minecraft client thread. */
     public static void ship(ToolCall call) {
+        // 先登记调用编号，再交给游戏线程处理；相同编号不能同时执行两次，后来的那次会被拒绝。
         if (call == null) {
             throw new IllegalArgumentException("call is required");
         }
@@ -42,6 +43,7 @@ public final class LocalToolDispatcher {
     }
 
     private static void invokeOnClient(Minecraft minecraft, ToolCall call) {
+        // 查信息可以马上回复；走路、挖矿等要等游戏里做完，再由调度器把结果送回来。
         try {
             LocalPlayer player = minecraft.player;
             if (player == null || minecraft.level == null || minecraft.gameMode == null) {
@@ -65,6 +67,7 @@ public final class LocalToolDispatcher {
 
     /** Complete a parked call exactly once. Task settlement uses this same path. */
     public static void deliver(String toolCallId, String resultJson) {
+        // 先从“等待结果”的名单中删掉，再回复；这样即使重复通知结束，也只会回复一次。
         ToolCall call = IN_FLIGHT.remove(toolCallId);
         if (call != null) call.complete(resultJson);
     }
@@ -84,6 +87,7 @@ public final class LocalToolDispatcher {
 
     /** Forget calls from a world that is no longer active. */
     public static void forget(UUID playerUuid) {
+        // 这里只删除这个玩家还在等的调用，不通知它们“已取消”；等待者不会因此收到结果。
         IN_FLIGHT.values().removeIf(call -> playerUuid.equals(call.ctx().entityUuid()));
     }
 
