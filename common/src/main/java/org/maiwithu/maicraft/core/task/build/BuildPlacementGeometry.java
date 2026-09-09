@@ -51,10 +51,12 @@ final class BuildPlacementGeometry {
 
     private static final double REACH = 4.45;
     private static final double[] FACE_SAMPLES = {0.25, 0.50, 0.75};
+    private static final double[] SIDE_HEIGHT_SAMPLES = {0.25, 0.375, 0.625, 0.75};
     private static final Direction[] SUPPORT_ORDER = {
             Direction.DOWN, Direction.NORTH, Direction.SOUTH,
             Direction.WEST, Direction.EAST, Direction.UP
     };
+    private static final List<BlockPos> STANCE_OFFSETS = createStanceOffsets();
 
     record Gesture(BlockPos stance, BlockPos clicked, Direction face, Vec3 point,
                    float yaw, float pitch, boolean sneak, String proof) {
@@ -151,14 +153,14 @@ final class BuildPlacementGeometry {
         if (!live.isAir() && (live.canBeReplaced()
                 || (live.is(target.block()) && maximumUses(target) > 1)))
             gesturesAt(player, target, stage, target.pos(), Direction.UP, player.position(),
-                    true, true, candidates);
+                    true, true, false, allowed, candidates);
         for (Direction toward : SUPPORT_ORDER) {
             BlockPos clicked = target.pos().relative(toward);
             Direction face = toward.getOpposite();
             if (stage.support(clicked, face))
-                gesturesAt(player, target, stage, clicked, face, player.position(), false, true, candidates);
+                gesturesAt(player, target, stage, clicked, face, player.position(), false, true, false, allowed, candidates);
         }
-        return candidates.stream().filter(allowed).min(Comparator.comparingDouble(g ->
+        return candidates.stream().min(Comparator.comparingDouble(g ->
                 Math.abs(net.minecraft.util.Mth.wrapDegrees(g.yaw() - player.getYRot()))
                         + Math.abs(g.pitch() - player.getXRot()))).orElse(null);
     }
@@ -203,34 +205,78 @@ final class BuildPlacementGeometry {
     private static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
                                       Map<Long, BuildTaskRecord.Target> targets, boolean firstOnly,
                                       Predicate<BlockPos> stanceAllowed) {
-        if (!(target.item() instanceof BlockItem)) {
-            return List.of();
-        }
-        List<Gesture> out = new ArrayList<>();
-        BlockPos placeAt = target.pos();
-        BuildPlacementStage stage = new BuildPlacementStage(player.level(), player.level()::isLoaded,
-                targets, target, firstOnly);
+        // Compatibility for synchronous utility probes and standalone callers. Construction
+        // retains PlanSearch across ticks and must never drain this adapter on the client thread.
+        var search = new PlanSearch(player, target, targets, firstOnly, firstOnly, stanceAllowed);
+        while (!search.advance(Integer.MAX_VALUE).complete()) { }
+        return search.results();
+    }
 
-        // Replaceable blocks with their own outline (grass, snow layers, an existing slab being
-        // doubled) can be clicked directly.  Adjacent support faces cover ordinary placement.
-        BlockState live = player.level().isLoaded(placeAt)
-                ? player.level().getBlockState(placeAt) : null;
-        if (live != null && !live.isAir()
-                && (live.canBeReplaced()
-                || (live.is(target.block()) && maximumUses(target) > 1))) {
-            enumerateForClicked(player, target, stage, placeAt, Direction.UP, true,
-                    firstOnly, stanceAllowed, out);
-            if (firstOnly && !out.isEmpty()) return List.copyOf(out);
+    record PlanProgress(boolean complete, int probeCount, int gestureCount, int stanceChecks) {}
+
+    /** Complete finite enumeration, yielding between individual face probes instead of whole targets. */
+    static final class PlanSearch {
+        private static final long SLICE_NANOS = 4_000_000;
+        private final LocalPlayer player;
+        private final BuildTaskRecord.Target target;
+        private final BuildPlacementStage stage;
+        private final boolean firstOnly;
+        private final Predicate<BlockPos> stanceAllowed;
+        private final List<Gesture> found = new ArrayList<>();
+        private FaceProbe support;
+        private List<AABB> boxes = List.of();
+        private Vec3 feet;
+        private int supportAt, stanceAt = STANCE_OFFSETS.size(), pointAt, pointCount, probeCount, stanceChecks;
+        private boolean complete;
+
+        PlanSearch(LocalPlayer player, BuildTaskRecord.Target target, Map<Long, BuildTaskRecord.Target> targets) {
+            this(player, target, targets, false, false, ignored -> true);
         }
-        for (Direction towardSupport : SUPPORT_ORDER) {
-            BlockPos clicked = placeAt.relative(towardSupport);
-            Direction face = towardSupport.getOpposite();
-            if (!stage.support(clicked, face)) continue;
-            enumerateForClicked(player, target, stage, clicked, face, false,
-                    firstOnly, stanceAllowed, out);
-            if (firstOnly && !out.isEmpty()) break;
+
+        PlanSearch(LocalPlayer player, BuildTaskRecord.Target target, Map<Long, BuildTaskRecord.Target> targets,
+                   boolean preflight, boolean firstOnly, Predicate<BlockPos> stanceAllowed) {
+            this.player = player; this.target = target; this.firstOnly = firstOnly; this.stanceAllowed = stanceAllowed;
+            stage = new BuildPlacementStage(player.level(), player.level()::isLoaded, targets, target, preflight);
+            complete = !(target.item() instanceof BlockItem);
         }
-        return List.copyOf(out);
+
+        PlanProgress advance(int workBudget) {
+            long deadline = System.nanoTime() + SLICE_NANOS;
+            for (int work = 0; work < Math.max(0, workBudget) && !complete && System.nanoTime() < deadline; work++) {
+                if (pointAt < pointCount) {
+                    int sample = pointAt++;
+                    double[] first = firstSamples(support.face()), second = secondSamples(support.face());
+                    int perBox = first.length * second.length;
+                    Vec3 point = facePoint(support.clicked(), boxes.get(sample / perBox), support.face(),
+                            first[(sample % perBox) / second.length], second[sample % second.length]);
+                    probeCount++;
+                    var gesture = gestureAtPoint(player, target, stage, support, feet, point, false, ignored -> true);
+                    if (gesture != null) { found.add(gesture); if (firstOnly) complete = true; }
+                } else if (stanceAt < STANCE_OFFSETS.size()) {
+                    BlockPos stance = target.pos().offset(STANCE_OFFSETS.get(stanceAt++)); stanceChecks++;
+                    if (!stanceAllowed.test(stance) || !stage.bodyCellAvailable(stance)) continue;
+                    feet = Vec3.atBottomCenterOf(stance); pointAt = 0;
+                    pointCount = boxes.size() * firstSamples(support.face()).length * secondSamples(support.face()).length;
+                } else if (supportAt <= SUPPORT_ORDER.length) {
+                    boolean direct = supportAt == 0;
+                    Direction toward = direct ? Direction.DOWN : SUPPORT_ORDER[supportAt - 1]; supportAt++;
+                    BlockPos clicked = direct ? target.pos() : target.pos().relative(toward);
+                    if (direct) {
+                        BlockState live = player.level().isLoaded(clicked) ? player.level().getBlockState(clicked) : null;
+                        if (live == null || live.isAir() || !(live.canBeReplaced()
+                                || live.is(target.block()) && maximumUses(target) > 1)) continue;
+                    } else if (!stage.support(clicked, toward.getOpposite())) continue;
+                    support = faceProbe(stage, clicked, toward.getOpposite(), direct);
+                    boxes = support.shape().toAabbs(); stanceAt = boxes.isEmpty() ? STANCE_OFFSETS.size() : 0;
+                } else complete = true;
+            }
+            return new PlanProgress(complete, probeCount, found.size(), stanceChecks);
+        }
+
+        List<Gesture> results() {
+            if (!complete) throw new IllegalStateException("placement enumeration is still pending");
+            return List.copyOf(found);
+        }
     }
 
     /** Runtime prediction uses the actual crosshair hit and current camera rotation. */
@@ -238,7 +284,7 @@ final class BuildPlacementGeometry {
                               BlockHitResult hit, float yaw, float pitch) {
         if (!(target.item() instanceof BlockItem)) return null;
         return predictedState(player, new ItemStack(target.item()), hit, yaw, pitch,
-                player.isSecondaryUseActive());
+                player.isSecondaryUseActive(), target.pos());
     }
 
     /** True for the final state or for a receipt-confirmable intermediate of a bounded multi-use. */
@@ -281,24 +327,6 @@ final class BuildPlacementGeometry {
         return Math.max(1, target.materialCount());
     }
 
-    private static void enumerateForClicked(LocalPlayer player, BuildTaskRecord.Target target,
-                                             BuildPlacementStage stage,
-                                             BlockPos clicked, Direction face, boolean direct,
-                                             boolean firstOnly,
-                                             Predicate<BlockPos> stanceAllowed,
-                                             List<Gesture> out) {
-        BlockPos placeAt = target.pos();
-        for (BlockPos stance : candidateStances(placeAt)) {
-            if (firstOnly && !out.isEmpty()) return;
-            if (!stanceAllowed.test(stance)
-                    || !stage.bodyCellAvailable(stance)) continue;
-            gesturesAt(player, target, stage, clicked, face,
-                    new Vec3(stance.getX() + .5, stance.getY(), stance.getZ() + .5),
-                    direct, false, out);
-            if (firstOnly && !out.isEmpty()) return;
-        }
-    }
-
     private static void gesturesAt(LocalPlayer player, BuildTaskRecord.Target target,
                                     BuildPlacementStage stage, BlockPos clicked, Direction face,
                                     Vec3 feet, boolean direct, boolean live, List<Gesture> out) {
@@ -309,39 +337,53 @@ final class BuildPlacementGeometry {
                                     BuildPlacementStage stage, BlockPos clicked, Direction face,
                                     Vec3 feet, boolean direct, boolean live, boolean firstOnly,
                                     Predicate<Gesture> allowed, List<Gesture> out) {
-        BlockState state = stage.state(clicked);
-        boolean sneak = BuildPlacementInteraction.requiresSneak(state);
-        Vec3 eye = feet.add(0, player.getEyeHeight(sneak ? Pose.CROUCHING : Pose.STANDING), 0);
-        VoxelShape shape = state.getShape(stage, clicked);
-        for (Vec3 point : facePoints(clicked, shape, face)) {
-            if (eye.distanceToSqr(point) > REACH * REACH || !stage.rayClear(eye, point, clicked)) continue;
-            BlockHitResult hit = shape.clip(eye, point, clicked);
-            if (hit == null || hit.isInside() || hit.getDirection() != face
-                    || hit.getLocation().distanceToSqr(point) > 1.0e-6) continue;
-            float yaw = AimGeometry.yawTo(eye, point), pitch = AimGeometry.pitchTo(eye, point);
-            Gesture gesture = new Gesture(BlockPos.containing(feet), clicked, face, point, yaw, pitch,
-                    sneak, direct ? "replaceable target face" : "adjacent support face");
-            if (!allowed.test(gesture)) continue;
-            if (live ? provesLiveGesture(player, target, gesture) : provesGesture(player, target, gesture)) {
+        FaceProbe probe = faceProbe(stage, clicked, face, direct);
+        for (Vec3 point : facePoints(clicked, probe.shape(), face)) {
+            Gesture gesture = gestureAtPoint(player, target, stage, probe, feet, point, live, allowed);
+            if (gesture != null) {
                 out.add(gesture);
                 if (firstOnly) return;
             }
         }
     }
 
+    private record FaceProbe(BlockPos clicked, Direction face, boolean direct, boolean sneak, VoxelShape shape) {}
+
+    private static FaceProbe faceProbe(BuildPlacementStage stage, BlockPos clicked, Direction face, boolean direct) {
+        BlockState state = stage.state(clicked);
+        return new FaceProbe(clicked, face, direct, BuildPlacementInteraction.requiresSneak(state), state.getShape(stage, clicked));
+    }
+
+    private static Gesture gestureAtPoint(LocalPlayer player, BuildTaskRecord.Target target,
+                                         BuildPlacementStage stage, FaceProbe probe, Vec3 feet, Vec3 point,
+                                         boolean live, Predicate<Gesture> allowed) {
+        Vec3 eye = feet.add(0, player.getEyeHeight(probe.sneak() ? Pose.CROUCHING : Pose.STANDING), 0);
+        if (eye.distanceToSqr(point) > REACH * REACH) return null;
+        float yaw = AimGeometry.yawTo(eye, point), pitch = AimGeometry.pitchTo(eye, point);
+        Gesture gesture = new Gesture(BlockPos.containing(feet), probe.clicked(), probe.face(), point, yaw, pitch,
+                probe.sneak(), probe.direct() ? "replaceable target face" : "adjacent support face");
+        if (!allowed.test(gesture)) return null;
+        if (!stage.rayClear(eye, point, probe.clicked())) return null;
+        BlockHitResult hit = probe.shape().clip(eye, point, probe.clicked());
+        if (hit == null || hit.isInside() || hit.getDirection() != probe.face()
+                || hit.getLocation().distanceToSqr(point) > 1.0e-6) return null;
+        return (live ? provesLiveGesture(player, target, gesture) : provesGesture(player, target, gesture)) ? gesture : null;
+    }
+
     private static boolean provesLiveGesture(LocalPlayer player, BuildTaskRecord.Target target, Gesture gesture) {
         BlockState predicted = predictedState(player, new ItemStack(target.item()), gesture.syntheticHit(),
-                gesture.yaw(), gesture.pitch(), gesture.sneak());
+                gesture.yaw(), gesture.pitch(), gesture.sneak(), target.pos());
         return predicted != null && (target.acceptsPlacedState(predicted)
                 || isProgress(target, player.level().getBlockState(target.pos()), predicted));
     }
 
     private static boolean provesGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                          Gesture gesture) {
-        if (target.itemPlace()) return true;
-        BlockState predicted = predictedState(player, new ItemStack(target.item()), gesture.syntheticHit(),
-                gesture.yaw(), gesture.pitch(), gesture.sneak());
-        if (predicted != null && (target.acceptsPlacedState(predicted)
+        NativePlacement placement = predictPlacement(player, new ItemStack(target.item()), gesture.syntheticHit(),
+                gesture.yaw(), gesture.pitch(), gesture.sneak(), target.pos());
+        if (placement != null && !placement.pos().equals(target.pos())) return false;
+        BlockState predicted = placement == null ? null : placement.state();
+        if (predicted != null && (target.itemPlace() || target.acceptsPlacedState(predicted)
                 || isProgress(target, player.level().isLoaded(target.pos())
                         ? player.level().getBlockState(target.pos())
                         : net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), predicted))) {
@@ -394,28 +436,39 @@ final class BuildPlacementGeometry {
     }
 
     static List<BlockPos> candidateStances(BlockPos target) {
+        return STANCE_OFFSETS.stream().map(target::offset).toList();
+    }
+
+    private static List<BlockPos> createStanceOffsets() {
         List<BlockPos> out = new ArrayList<>();
         for (int dy : new int[]{-1, 0, -2, 1}) {
-            int y = target.getY() + dy;
             for (int radius : new int[]{1, 2, 3, 4}) {
                 for (int dx = -radius; dx <= radius; dx++) {
                     for (int dz = -radius; dz <= radius; dz++) {
                         if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
-                        out.add(new BlockPos(target.getX() + dx, y, target.getZ() + dz));
+                        out.add(new BlockPos(dx, dy, dz));
                     }
                 }
             }
         }
-        out.sort(Comparator.comparingDouble(p -> p.distSqr(target)));
-        return out;
+        out.sort(Comparator.comparingDouble(p -> p.distSqr(BlockPos.ZERO)));
+        return List.copyOf(out);
     }
 
     static List<Vec3> facePoints(BlockPos clicked, VoxelShape shape, Direction face) {
         // Clip against the union from the actual eye later: hidden/internal box faces cannot win.
         List<Vec3> points = new ArrayList<>();
-        for (AABB box : shape.toAabbs()) for (double a : FACE_SAMPLES) for (double b : FACE_SAMPLES)
+        for (AABB box : shape.toAabbs()) for (double a : firstSamples(face)) for (double b : secondSamples(face))
             points.add(facePoint(clicked, box, face, a, b));
         return points;
+    }
+
+    private static double[] firstSamples(Direction face) {
+        return face.getAxis() == Direction.Axis.X ? SIDE_HEIGHT_SAMPLES : FACE_SAMPLES;
+    }
+
+    private static double[] secondSamples(Direction face) {
+        return face.getAxis() == Direction.Axis.Z ? SIDE_HEIGHT_SAMPLES : FACE_SAMPLES;
     }
 
     private static Vec3 facePoint(BlockPos clicked, AABB box, Direction face, double a, double b) {
@@ -445,7 +498,15 @@ final class BuildPlacementGeometry {
     }
 
     private static BlockState predictedState(LocalPlayer player, ItemStack stack, BlockHitResult hit,
-                                             float yaw, float pitch, boolean sneak) {
+                                             float yaw, float pitch, boolean sneak, BlockPos target) {
+        NativePlacement placement = predictPlacement(player, stack, hit, yaw, pitch, sneak, target);
+        return placement != null && placement.pos().equals(target) ? placement.state() : null;
+    }
+
+    private record NativePlacement(BlockPos pos, BlockState state) {}
+
+    private static NativePlacement predictPlacement(LocalPlayer player, ItemStack stack, BlockHitResult hit,
+                                                     float yaw, float pitch, boolean sneak, BlockPos target) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
         Vec3 look = direction(yaw, pitch);
         Direction[] nearest = Direction.values();
@@ -471,7 +532,11 @@ final class BuildPlacementGeometry {
                     return nearest.clone();
                 }
             };
-            return blockItem.getBlock().getStateForPlacement(context);
+            // The native item can replace the clicked support instead of placing beside it
+            // (e.g. merging the same slab). A correct state at that other cell proves nothing here.
+            BlockPos destination = context.getClickedPos();
+            return new NativePlacement(destination, destination.equals(target)
+                    ? blockItem.getBlock().getStateForPlacement(context) : null);
         } catch (RuntimeException ignored) {
             return null;
         }
