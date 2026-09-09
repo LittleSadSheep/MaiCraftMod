@@ -32,11 +32,8 @@ import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.entity.InputDriver;
 
 /**
- * The one embedded Baritone body clock.
- *
- * <p>Upstream's Minecraft tick mixin is intentionally not registered. MaiCraft calls this once,
- * after its semantic winner has run and while the actor lease is still open. That prevents both
- * double ticking and a second {@code LocalPlayer.input} owner.</p>
+ * 全局只保留一个实际操纵玩家的 Baritone 实例。每次由当前任务提出驱动要求，再在角色更新末尾统一推进导航和输入。
+ * 新导航要等旧导航能安全交接；这里也负责世界切换、保护范围更新、行走视角以及游泳／落地时的输入衔接。
  */
 public final class EmbeddedBaritoneRuntime {
     private static long lastSwimDriveTick = Long.MIN_VALUE;
@@ -60,6 +57,7 @@ public final class EmbeddedBaritoneRuntime {
         return physicalObstacles;
     }
 
+    // 大型物理结构观察每五刻或移动四格后刷新一次；Create 移动结构每次重新合入，供路线避障使用。
     private static void refreshPhysicalObstacles(LocalPlayer player) {
         long tick = player.level().getGameTime();
         if (physicalObservationOrigin == null || tick < physicalObservationTick
@@ -142,6 +140,7 @@ public final class EmbeddedBaritoneRuntime {
             boolean sprintAllowed) {
         requireClientThread();
         IBaritone baritone = backend();
+        // 已有别的导航占用身体时，把新请求排为待接手，并让旧导航先到达安全停止位置。
         if (owner != null && owner != navigator) {
             EmbeddedBaritoneNavigator previous = owner;
             queuePendingStart(new PendingStart(navigator, compiled, permit, sprintAllowed));
@@ -243,6 +242,7 @@ public final class EmbeddedBaritoneRuntime {
             return;
         }
         boolean requested = current.consumeDriveRequest();
+        // 普通推进需要本次调度允许且导航提出驱动请求；已经失去调用者但仍要安全落地的旧导航，可继续必要收尾。
         boolean drive = current.requiresOrphanContinuation()
                 || (schedulerAllowsBodyWork && requested);
         if (!drive) {
@@ -340,6 +340,7 @@ public final class EmbeddedBaritoneRuntime {
     }
 
     /** Called only after MLG has resolved a legal continuation, before it writes this tick's inputs. */
+    // 确认已经错过原落脚面后，解除旧路线的控制，把后续救援交给专门落地逻辑。
     public static boolean handOffMissedLanding(LocalPlayer player) {
         if (!canHandOffMissedLanding(player)) return false;
         var previous = owner;
@@ -496,6 +497,7 @@ public final class EmbeddedBaritoneRuntime {
     }
 
     /** Called by the adapted upstream input behavior while the actor lease is open. */
+    // 把 Baritone 请求的按键交给角色输入层；游泳、收回落地用品或乘船救援有更具体的控制要求时，采用这些要求。
     public static void applyInputState(InputOverrideHandler input) {
         if (backend == null || owner == null) return;
         var player = backend.getPlayerContext().player();
@@ -578,6 +580,7 @@ public final class EmbeddedBaritoneRuntime {
      * aim so falls and jumps keep their control. Precision block-interaction aims bypass
      * all of this so digging and placing keep exact rotations.</p>
      */
+    // 实际点击所需的精确瞄准直接交给视角层；普通走路用缓慢改变的路线朝向，地面视角保持略向下。
     public static void requestLook(float yaw, float pitch, boolean precisionAim) {
         if (backend == null || owner == null || backend.getPlayerContext().player() == null) return;
         var player = backend.getPlayerContext().player();
@@ -643,6 +646,7 @@ public final class EmbeddedBaritoneRuntime {
         // permit 门控(allowParkourPlace)。
         settings.allowParkour.value = true;
         configureTerrain(settings, permit);
+        // 当前关闭 Baritone 自行整理普通背包的行为；这条桥只直接支持已在快捷栏中的选择，不能据携带总量推定马上可用。
         settings.allowInventory.value = false;
         settings.acceptableThrowawayItems.value = ScaffoldMaterials.of(
                 baritone.getPlayerContext().player());
@@ -650,6 +654,7 @@ public final class EmbeddedBaritoneRuntime {
                 "[embedded-path] {}", message.getString());
     }
 
+    // 把本次许可明确写到 Baritone：能否挖、能否搭路、能否用水桶分别从这份许可决定，不沿用上一次导航的状态。
     static void configureTerrain(Settings settings, TerrainPermit permit) {
         org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.configure(permit);
         settings.allowBreak.value = permit.mayAlter();

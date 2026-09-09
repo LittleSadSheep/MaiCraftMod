@@ -19,16 +19,7 @@ import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
 import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 
 /**
- * A read-only second opinion for a preserve-mode path failure.
- *
- * <p>The probe runs the embedded Baritone A* once more with break, placement, downward digging,
- * and water-bucket falling enabled in a private {@link CalculationContext}. It never installs or
- * executes the returned path. Its only output is Baritone's calculation result plus a terrain
- * bill evaluated against the exact frozen block snapshot used during search.</p>
- *
- * <p>{@link #submit} must be called from the Minecraft client thread because constructing a
- * thread-safe {@code BlockStateInterface} copies the loaded chunk view there. The expensive A*
- * itself runs on the bounded path worker pool with the ordinary primary/failure budgets.</p>
+ * 保持地形的导航失败后，另做一次允许在计算中考虑挖掘搭路的搜索，返回可能要改哪些格。它只生成建议，不创建执行路线。
  */
 public final class EmbeddedBaritoneTerrainProbe {
 
@@ -67,6 +58,7 @@ public final class EmbeddedBaritoneTerrainProbe {
         long failureTimeout = Baritone.settings().failureTimeoutMS.value;
         ProbeFuture future = new ProbeFuture(search);
 
+        // 后台计算前后都检查是否取消；取消时也通知搜索器停止，不能只把等待结果的对象丢掉。
         PathPlannerPool.submit(() -> {
             if (future.isCancelled()) return null;
             PathCalculationResult calculation = search.calculate(primaryTimeout, failureTimeout);

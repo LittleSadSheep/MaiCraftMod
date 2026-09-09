@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.core.pathing.debug;
 import java.util.List;
 import net.minecraft.world.phys.Vec3;
 
-/** Immutable display data from an already selected route; never participates in path calculation. */
+/**
+ * 给路径调试显示保存当前位置前一格起、最多五百一十二个路径点，并修正当前位置下标；它不控制导航。
+ */
 public record NavigationPathSnapshot(List<Vec3> points, int currentIndex, Vec3 destination, Vec3 steeringTarget) {
     public static final int MAX_POINTS = 512;
 

@@ -26,12 +26,8 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.entity.InputDriver;
 
 /**
- * MaiCraft's stable {@link PlayerNav} contract backed by the embedded Baritone engine.
- *
- * <p>This object contains task-local meaning (goal supplier, arrival predicate, permissions,
- * progress and failure receipt). The shared runtime contains only the one physical pathing body.
- * No timeout or distance gate is added here: Baritone owns segment calculation and replanning;
- * the calling semantic task retains its existing progress lease.</p>
+ * 保存一趟导航的任务含义：目标会不会变、到达与失败状态、地形许可、已经做过的改动和最近进展。
+ * 具体寻路交给共享运行器；暂停、失败或到达时若还在跳跃／下落，要先等能安全交接再停止。
  */
 public final class EmbeddedBaritoneNavigator {
     private final LocalPlayer player;
@@ -145,6 +141,7 @@ public final class EmbeddedBaritoneNavigator {
         if (reached.getAsBoolean()) return arriveWhenSafe();
         if (player.isPassenger()) player.stopRiding();
 
+        // 每次重新取目标要求；位置、半径或保护条件变化时，需要更新路线，不能只比较对象是不是同一个。
         GoalCompiler.Compiled fresh = compiledSupplier.get();
         if (fresh == null) return failWhenSafe(FailureType.TARGET_LOST, "target lost");
         NavGoal freshGoal = fresh.goal();
@@ -184,6 +181,7 @@ public final class EmbeddedBaritoneNavigator {
         return PlayerNav.Status.RUNNING;
     }
 
+    // 保持地形时找不到路，可额外只计算“假如允许改地形会怎样”；这份计算不会真的挖掘或放置。
     private PlayerNav.Status diagnoseNoPath() {
         String detail = "Baritone found no path to " + plannedCenter.toShortString();
         if (!terrainProbeRequested || permit != TerrainPermit.PRESERVE) {
@@ -254,6 +252,7 @@ public final class EmbeddedBaritoneNavigator {
                             + "bridging, pillaring and water placement" + partial
                             + "; the probe did not establish a complete route and executed nothing");
         }
+        // 第二次计算找到无需改动的路时，当前仍返回本次失败并建议重试，没有把第二次路线直接接着执行。
         if (bill.isEmpty()) {
             return failWhenSafe(FailureType.NO_PATH,
                     "the preserve calculation failed, but a read-only second calculation reached "
@@ -289,6 +288,7 @@ public final class EmbeddedBaritoneNavigator {
         return arrive();
     }
 
+    // 先记住失败原因；动作尚不适合停下时继续完成必要的落地收尾，期间不把原因覆盖成别的错误。
     private PlayerNav.Status failWhenSafe(FailureType type, String reason) {
         pendingArrival = false;
         pendingPause = false;
@@ -379,8 +379,8 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     /**
-     * Preserve PlayerNav's historical "search satisfied" handoff without accepting a transient
-     * mid-jump/mid-fall node. The caller's stronger predicate still wins whenever it is true.
+     * 当前还允许一种到达方式：玩家已站稳，实际脚位和搜索起点都在目标格范围内。
+     * 因此即使任务提供的 reached 回调尚未通过，也可能返回 ARRIVED；任务仍需检查距离、视线等自己的完成条件。
      */
     private boolean hasStableSearchMembership() {
         BlockPos now = feet();
@@ -485,6 +485,7 @@ public final class EmbeddedBaritoneNavigator {
         EmbeddedBaritoneRuntime.abandon(this);
     }
 
+    // 暂停并不总是立即松开全部控制；空中需要保持动作才能安全落地时，先记下暂停请求。
     public void pause() {
         driveRequested = false;
         if (!isSafeToCancel()) {

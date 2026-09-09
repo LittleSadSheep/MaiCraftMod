@@ -27,11 +27,8 @@ import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /**
- * Serializes Baritone's hand gestures through MaiCraft's one native-action slot.
- *
- * <p>Baritone still decides which low-level movement input it wants, but it never calls the game
- * mode directly. A click becomes a cross-tick receipt and only synchronized world facts may add a
- * mutation to the owning navigator's {@code TerrainBill}.</p>
+ * 把 Baritone 的左键、右键和快捷栏选择请求转成项目统一的原生操作，并跟踪每次操作的观察结果。
+ * 普通移动按键由运行器另行提交；落地救援在这里优先交给专门控制器，避免与普通点击抢操作机会。
  */
 final class EmbeddedBaritoneActionBridge {
     private static final int USE_CONFIRM_TICKS = 20;
@@ -59,6 +56,7 @@ final class EmbeddedBaritoneActionBridge {
             EmbeddedBaritoneNavigator navigator,
             InputOverrideHandler input) {
         if (context == null || navigator == null || context.player() == null) return;
+        // 前一位导航还有操作记录时先处理它，不能把旧结果算给新导航。
         if (receiptOwner != null && receiptOwner != navigator) {
             suspend(context, receiptOwner, "navigation ownership changed");
             if (receipt != null) return;
@@ -221,6 +219,7 @@ final class EmbeddedBaritoneActionBridge {
         }
     }
 
+    // 持续挖掘每次都重新检查按键、准星目标和保护许可；条件不再满足时发出停止挖掘。
     private void continueOrCancelBreak(LocalPlayerContext context, boolean leftRequested) {
         if (receipt == null || pendingKind != PendingKind.BREAK) return;
         HitResult trace = receiptOwner == null ? null : receiptOwner.objectMouseOver();
@@ -269,6 +268,7 @@ final class EmbeddedBaritoneActionBridge {
         ItemStack held = context.player().getItemInHand(hand);
         boolean terrainItem = held.getItem() instanceof BlockItem;
 
+        // 普通开门走通行交互分支，检查身体禁入范围；它与挖掘、放置所需的地形修改许可不同。
         if (openable) {
             BlockPos otherHalf = otherDoorHalf(clicked, clickedState);
             // Protecting a structure from mining/placement must still allow its doors to work.
@@ -317,6 +317,7 @@ final class EmbeddedBaritoneActionBridge {
             InteractionHand hand, BlockHitResult hit, BlockPos clicked, BlockState beforeClicked,
             BlockPos actual, BlockState beforeActual, boolean mutatesTerrain, boolean preserveSupport) {
         List<NativeConfirmation> confirmations = new ArrayList<>();
+        // 当前右键只看点击格或预计作用格有没有变化；这里没有逐项检查最终方块，也没有声明必须等待服务器方块序号确认。
         confirmations.add(NativeConfirmation.blockChanged(clicked, beforeClicked));
         if (actual != null && !actual.equals(clicked) && beforeActual != null) {
             confirmations.add(NativeConfirmation.blockChanged(actual, beforeActual));
@@ -360,6 +361,7 @@ final class EmbeddedBaritoneActionBridge {
         terrainUse = mutatesTerrain;
     }
 
+    // 确认成功才把动作计入导航进展和改动记录；当前失败或不确定记录也会在末尾清掉，后续仍有按键请求时可能再次提交。
     private void settle(LocalPlayerContext context) {
         NativeActionReceipt current = receipt;
         if (current == null) return;
@@ -405,6 +407,7 @@ final class EmbeddedBaritoneActionBridge {
         clearReceipt();
     }
 
+    // 按观察到的空气、实体方块和流体变化记账；这只记录该操作窗口里的差异，不能证明每个变化都来自这次点击。
     private static void recordWorldDelta(
             LocalPlayerContext context,
             EmbeddedBaritoneNavigator navigator,

@@ -7,11 +7,8 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.BlockPos;
 
 /**
- * Immutable task policy copied into each embedded Baritone calculation context.
- *
- * <p>The semantic task remains the authority for protected mutations and forbidden body cells.
- * Worker threads never read MaiCraft's client-thread {@code ThreadLocal}; they receive this frozen
- * snapshot when Baritone creates the calculation context.</p>
+ * 把当前导航的保护要求交给 Baritone：哪些格不能改，哪些格身体不能进入。每次先复制集合，再整体替换当前版本。
+ * 身体禁入格同时列为不可修改；只禁止修改的格并不自动禁止身体进入。
  */
 public final class EmbeddedBaritonePolicy {
     private static volatile Snapshot current = Snapshot.EMPTY;

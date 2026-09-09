@@ -1,6 +1,9 @@
 package org.maiwithu.maicraft.core.pathing.baritone;
 
-/** Progress evidence for a navigation lease. An accepted action or a pending plan is not evidence. */
+/**
+ * 记录导航最近是否有实际进展：位置累计变化至少四分之一格，或确认完成一次原生操作。首次采样只记起点，不算进展。
+ * 这里不要求一直更接近终点，绕路时也可以续期；是否走偏或卡住由其他导航逻辑判断。
+ */
 final class NavigationProgress {
     private static final double MIN_DISPLACEMENT_SQUARED = 0.25 * 0.25;
     private double x, y, z;

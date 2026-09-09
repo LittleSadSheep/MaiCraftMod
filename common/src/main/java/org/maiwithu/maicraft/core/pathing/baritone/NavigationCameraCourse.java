@@ -2,7 +2,10 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 
 import net.minecraft.util.Mth;
 
-/** One course turn budget per actor tick, even when multiple movements finish in that tick. */
+/**
+ * 让普通行走视角少来回晃：偏差超过二十五度才开始转，缩到十五度以内停止，每次更新最多转九度。
+ * 同一次更新多次请求都从本刻起始角度算，避免请求次数越多转得越快。
+ */
 final class NavigationCameraCourse {
     private boolean initialized, turning, tickStartTurning, tickStartedInitialized;
     private float yaw, tickStartYaw;
