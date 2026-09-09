@@ -15,15 +15,9 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 跨 tick 的第一人称身体动作:对准手边的床、使用并确认真的睡着。
- *
- * <p>走 {@code TaskDispatch} 的同步任务槽，工具调用等到原生动作回执结算。
- * <b>它到"躺下"为止就结束了</b>,不会挂着等天亮:她躺下之后模型该拿回控制权去说话或安排
- * 别的,而不是被一个几分钟的任务锁住。
- *
- * <p>不自己找床、不自己走路:那两件事 {@code scan_blocks} 和 {@code goto} 已经各有一个统一
- * 的实现,再包一份进来就是第三个入口。而且拆开之后模型看得见中间结果——床有几张、多远、
- * 走不走得过去,它能据此改主意;包成一个"去睡觉"的黑盒,这些它一个都不知道。
+ * 内部“上床”工具：让身边的床变成一项睡觉任务，等游戏确认已经躺下才回复。
+ * 找远处的床、走过去、必要时摆床，由外层 AbilityAdapter 的睡觉流程安排。
+ * 它不等天亮；若还要等天亮，需要再执行等待条件的步骤。
  */
 public final class SleepTool implements MaiCraftTool {
 
@@ -61,6 +55,7 @@ public final class SleepTool implements MaiCraftTool {
 
     @Override
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer self, Consumer<String> reply) {
+        // 先确定床在哪；不具备开始条件就立即说明原因，可以开始才把任务交给调度器。
         Args a = GSON.fromJson(args, Args.class);
         SleepOps.Plan plan = impl.plan(
                 a == null ? null : a.x(),

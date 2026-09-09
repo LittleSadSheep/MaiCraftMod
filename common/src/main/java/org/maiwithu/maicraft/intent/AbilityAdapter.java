@@ -21,8 +21,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 把外部模型提交的结构化业务目标转换成内部工具、原生任务或待回答的问题。
- * 这里只识别已约定的能力和字段；自然语言由外部模型理解，Mod 不会猜测任意一句话的含义。
+ * 把模型填好的目标翻译成下一步该做什么，例如“去营地”变成调用移动工具。
+ * 这里按 ability 和参数字段分支，不直接理解用户随口说的一句话。
+ * 返回的也不一定是动作：可能要继续找信息，或者先问调用者怎么决定。
  */
 final class AbilityAdapter {
 
@@ -34,7 +35,7 @@ final class AbilityAdapter {
 
     static IntentAction adapt(
             Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
-        // 按能力归属分流。新增能力时，参数说明、允许字段和这里的执行映射需要一起维护。
+        // 机器能力交给机器适配器，战斗、交互等交给通用适配器，其余在下面逐项处理。
         if (MachineAbilityAdapter.supports(goal.ability())) {
             return MachineAbilityAdapter.adapt(goal, player, runtime, continuationToken);
         }
@@ -78,6 +79,7 @@ final class AbilityAdapter {
             Goal goal, IntentTaskRecord.DecisionAnswer answer,
             LocalPlayer player, IntentRuntime runtime, UUID continuationToken,
             JsonObject priorFailure) {
+        // 重试前先看上次结果是否允许重复；例如机器可能已经被部分修改，不能不明情况再做一遍。
         if ("retry".equals(answer.choice())
                 && !RecoveryAdvisor.ordinaryRetryAllowed(priorFailure)) {
             return new IntentAction.Decision(
@@ -88,17 +90,18 @@ final class AbilityAdapter {
                 ? details.getAsJsonObject("parameters")
                 : details;
         JsonObject merged = goal.parameters();
+        // 把答复里新给的参数覆盖到本次执行使用的目标上，再重新选择动作。
         merge(merged, updates);
         return adapt(goal.withParameters(merged), player, runtime, continuationToken);
     }
 
     private static IntentAction remember(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 地点必须有一个以后能引用的短名字；普通地点与需要保护的聚居地由 area_role 明确区分。
         JsonObject parameters = goal.parameters();
         String label = string(parameters, "label");
         if (label == null && goal.target() != null) label = goal.target().label();
         if (label == null || label.isBlank()) {
-            // 标签是地标唯一的长期句柄;拿整句 outcome 顶替会造出一个又长又没法引用的
-            // "地标"(实测踩过这个坑)。缺标签就明说,让模型带 label 重发。
+            // 例如记成“西岸营地”，以后才能说去这个名字的地方；缺名字时不拿整句任务描述凑数。
             return decision(goal,
                     "remember_place needs a short durable label (parameter \"label\"),"
                             + " e.g. \"western shore camp\".",
@@ -130,6 +133,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction sleep(Goal goal, LocalPlayer player) {
+        // 先找已加载区域里的床；查询分多刻进行，没有查完就等，不把“暂时没找到”当作“没有”。
         java.util.Set<Block> bedBlocks = BuiltInRegistries.BLOCK
                 .getTag(BlockTags.BEDS)
                 .map(tag -> tag.stream().map(holder -> holder.value())
@@ -156,6 +160,7 @@ final class AbilityAdapter {
                 }
                 Block bed = player.clientLevel.getBlockState(beds.hits().getFirst()).getBlock();
                 String bedId = BuiltInRegistries.BLOCK.getKey(bed).toString();
+                // 找到床后安排两步：先走到这种床旁边，再调用“上床”工具。
                 JsonObject travel = new JsonObject();
                 travel.addProperty("block", bedId);
                 return new IntentAction.Chain(List.of(
@@ -165,6 +170,7 @@ final class AbilityAdapter {
         }
 
         String carriedBed = inventoryBed(player);
+        // 世界里没有找到床，再看背包有没有；有床则找位置放下，之后仍按“走过去、上床”执行。
         if (carriedBed != null) {
             if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
                 return waitForNightDecision(goal);
@@ -208,6 +214,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction waitForNightDecision(Goal goal) {
+        // 目前的处理是询问要不要先等到夜里，并不会在睡觉任务里自动等，也不会反复点床。
         return decision(goal,
                 "A usable bed is available, but the observed world is currently daytime and not thundering. MaiCraft will not click it repeatedly or pretend sleep succeeded.",
                 List.of(
@@ -217,6 +224,7 @@ final class AbilityAdapter {
     }
 
     private static String inventoryBed(LocalPlayer player) {
+        // 按物品栏顺序找第一件对应床方块的物品；这里的名称用于后面的放置和找床。
         for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
             var stack = player.getInventory().getItem(slot);
             if (!stack.isEmpty() && stack.getItem() instanceof BlockItem item
@@ -228,6 +236,8 @@ final class AbilityAdapter {
     }
 
     private static BedSite nearbyBedSite(LocalPlayer player) {
+        // 从附近一圈圈找能放床的两格，床头可以朝四个水平方向。
+        // 这里每列只看最高的非树叶地形上方，没围绕玩家当前高度找室内或洞穴地板。
         BlockPos origin = player.blockPosition();
         for (int radius = 1; radius <= 5; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -251,6 +261,7 @@ final class AbilityAdapter {
     }
 
     private static boolean validBedCell(LocalPlayer player, BlockPos cell) {
+        // 床要占的位置必须能被替换，上方不挡人，下面要能托住床；床头和床尾分别检查。
         if (!player.clientLevel.isLoaded(cell)
                 || !player.clientLevel.getBlockState(cell).canBeReplaced()
                 || !player.clientLevel.getBlockState(cell.above()).getCollisionShape(
@@ -266,9 +277,11 @@ final class AbilityAdapter {
     private record BedSite(BlockPos foot, Direction facing) {}
 
     private static IntentAction travel(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 先分清用户想去哪：指定电梯楼层、某艘船、一个方向的平台、方块、坐标，或还没找到的地区。
         if(ElevatorTravelIntent.applies(goal)) return ElevatorTravelIntent.adapt(goal,player);
         JsonObject parameters = new JsonObject();
         if (goal.parameters().has("structure_id")) {
+            // 这里的 structure_id 是已观察到的船体编号；当前登船入口只走喷气背包方案。
             if (goal.target() != null || goal.parameters().has("destination") || goal.parameters().has("semantic_target")
                     || goal.parameters().has("biome_id") || goal.parameters().has("biome_tag"))
                 throw new IllegalArgumentException("structure_id names one physical vessel; do not combine it with another destination");
@@ -282,7 +295,7 @@ final class AbilityAdapter {
         TravelDestination destination = TravelDestination.fromGoal(goal);
         TransportMode mode = TransportMode.parse(string(goal.parameters(), "transport_mode"));
         String discovery=exploreTarget(goal);
-        // 平台类型与方向分开表达；这里只整理搜索条件，具体落脚点由移动中的地形观察决定。
+        // “往下找个平台”还没有坐标；这里只记方向和搜索范围，边移动边观察时再确定落脚处。
         if ("platform".equals(discovery)) {
             if (destination!=null || goal.target()!=null && !"nearest".equals(goal.target().kind())
                     || goal.parameters().has("block_id") || goal.parameters().has("block")
@@ -305,10 +318,12 @@ final class AbilityAdapter {
         String block = string(goal.parameters(), "block_id");
         if (block == null) block = string(goal.parameters(), "block");
         if (block != null) {
+            // 找某种方块是走到它旁边能操作的位置，不是让玩家站进那个方块，因此不接受 exact=true。
             if (bool(goal.parameters(), "exact", false))
                 throw new IllegalArgumentException("exact=true needs located x/y/z coordinates; a block search only selects an approach stance");
             parameters.addProperty("block", block);
         } else if (destination != null) {
+            // 已给出目的地时，先确认在当前维度；别的维度必须先完成跨维度旅行。
             if (destination.dimension() != null
                     && !destination.dimension().equals(player.level().dimension().location().toString())) {
                 return decision(goal, "Travel destination is in another dimension; reach that dimension first.",
@@ -321,6 +336,7 @@ final class AbilityAdapter {
             if (position == null) {
                 Goal.SemanticTarget semantic = goal.target();
                 if (isNamedPlace(semantic)) {
+                    // “营地”没记住时先询问，不能拿玩家现在的位置代替，也不能把名字猜成生物群系。
                     return unresolvedNamedPlaceDecision(
                             goal, semantic, player, runtime, "Travel");
                 }
@@ -341,6 +357,7 @@ final class AbilityAdapter {
                                     option("cancel", "Cancel travel.")));
                 }
                 if (mode == TransportMode.JETPACK || mode == TransportMode.ELEVATOR) {
+                    // 海岸／群系探索在这里被限定为 ground 或 auto；指定飞行／电梯必须先有已定位的终点。
                     return decision(goal, "Jetpack or elevator travel needs a located destination first; "
                                     + "an undiscovered coast or biome cannot supply a verified transport endpoint.",
                             List.of(option("replace_goal", "Choose coordinates or a remembered destination, "
@@ -375,6 +392,7 @@ final class AbilityAdapter {
             parameters.addProperty("z", position.z());
         }
         if (parameters.has("x")) {
+            // 只有已经定位的坐标移动才把到达误差交给移动工具；找区域有自己的一套完成判断。
             parameters.addProperty("exact", bool(goal.parameters(), "exact", false));
             for (String precision : List.of("horizontal_radius", "vertical_tolerance")) {
                 if (goal.parameters().has(precision))
@@ -393,6 +411,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction travelDimension(Goal goal) {
+        // 只告诉底层要去哪一维度、最多找多远；传送门的位置和实际穿门步骤由跨维度任务负责。
         JsonObject parameters = goal.parameters();
         String destination = string(parameters, "destination_dimension");
         Goal.SemanticTarget target = goal.target();
@@ -423,6 +442,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction findStructure(Goal goal) {
+        // 这里的结构是村庄、要塞等世界建筑类型；与 travel 里用于登船的 structure_id 含义不同。
         JsonObject parameters = goal.parameters();
         String structure = string(parameters, "structure_id");
         Goal.SemanticTarget target = goal.target();
@@ -456,6 +476,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction defeatEnderDragon(Goal goal) {
+        // 当前要求显式填写 allow_combat；参数没给时先询问，不把能力名本身当作这个布尔开关。
         JsonObject parameters = goal.parameters();
         if (!bool(parameters, "allow_combat", false)) {
             return decision(goal,
@@ -478,6 +499,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction reachMilestone(Goal goal) {
+        // 只接受列出的四个进度目标；接下来要进下界、找要塞还是打龙，由里程碑任务拆步骤。
         JsonObject parameters = goal.parameters();
         String milestone = string(parameters, "milestone");
         Goal.SemanticTarget target = goal.target();
@@ -509,6 +531,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction obtainElytra(Goal goal) {
+        // 把搜索范围及战斗、珍贵消耗品等允许项交给找鞘翅任务；这里不决定路线或攻击目标。
         JsonObject parameters = goal.parameters();
         JsonObject args = new JsonObject();
         args.addProperty("max_search_distance",
@@ -530,6 +553,7 @@ final class AbilityAdapter {
     }
 
     private static String exploreTarget(Goal goal) {
+        // 按优先顺序取探索类型、群系 ID、群系标签，最后才读 nearest 目标里的名字或关系描述。
         String target = string(goal.parameters(), "semantic_target");
         if (target == null) target = string(goal.parameters(), "biome_id");
         if (target == null) {
@@ -547,6 +571,8 @@ final class AbilityAdapter {
     }
 
     private static IntentAction craft(Goal goal) {
+        // 对外的 craft 实际调用“凑齐物品”：只允许背包现有物品和合成，不自动挖矿或向容器取货。
+        // count 是背包最终要有多少，已达到数量就无需再合成；中间配方由取物任务继续拆解。
         JsonObject parameters = goal.parameters();
         String item = itemId(goal, parameters);
         if (item == null) {
@@ -565,6 +591,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction cook(Goal goal) {
+        // 烹饪要的成品、总数量、允许的燃料和原料来源传给烹饪任务；炉子菜单怎么操作留给它处理。
         JsonObject parameters = goal.parameters();
         String item = itemId(goal, parameters);
         if (item == null) {
@@ -587,6 +614,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction trade(Goal goal) {
+        // 只指定想换到的物品和愿意支付的物品等条件；具体商人、交易项和点击顺序由交易任务选择。
         JsonObject parameters = goal.parameters();
         String item = itemId(goal, parameters);
         if (item == null) {
@@ -606,10 +634,12 @@ final class AbilityAdapter {
     }
 
     private static IntentAction build(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 房屋尺寸、地形与材料会影响实际方案，把这些交给专门的建造规划器处理。
         return SemanticBuildPlanner.plan(goal, player, runtime);
     }
 
     private static IntentAction lightArea(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 先确定照亮哪个地方；找不到点名的地点时先询问，不能改成照亮玩家脚下。
         JsonObject parameters = goal.parameters();
         Goal.WorldPosition center = position(goal, player, runtime);
         Goal.SemanticTarget target = goal.target();
@@ -638,6 +668,7 @@ final class AbilityAdapter {
                 && !parameters.get("radius").isJsonNull();
         boolean resolveLoadedComponent = (target != null && "area".equals(target.kind()))
                 || !explicitRadius;
+        // 指定 area 或未给半径时，交给照明任务从附近已加载方块判断区域边界。
         String coverage = string(parameters, "coverage");
         if (coverage == null) coverage = "most";
         if (!List.of("all", "most", "crop_growth", "player_visibility").contains(coverage)) {
@@ -665,6 +696,7 @@ final class AbilityAdapter {
         }
         if ("central_unplanted".equals(placementPreference)
                 && !"crop_growth".equals(coverage)) {
+            // 当前把“放在中央未种植处”限定为农作物照明，其他照明目的在这里拒绝这一偏好。
             return decision(goal,
                     "central_unplanted placement_preference is only valid for crop_growth coverage.",
                     List.of(option("replace_goal", "Use crop_growth coverage or choose another placement preference."),
@@ -708,6 +740,7 @@ final class AbilityAdapter {
 
     private static IntentAction connectPower(
             Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
+        // 动力源和接收端必须能对应到当前维度的已知位置，再交给机械连接任务查接口、布线和施工。
         JsonObject parameters = goal.parameters();
         String sourceLabel = string(parameters, "source_label");
         String destinationLabel = string(parameters, "target_label");
@@ -765,6 +798,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction acquire(Goal goal) {
+        // 可以指定某件物品、一组可替代物品或物品标签；至少要有一种选择方式，否则不知道要取什么。
         JsonObject parameters = goal.parameters();
         boolean hasItem = parameters.has("item_id")
                 && parameters.get("item_id").isJsonPrimitive()
@@ -795,6 +829,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction waitFor(Goal goal, LocalPlayer player) {
+        // after_s 表示至少先等多久，不是最长等多久；到点后条件还没满足，仍会继续等。
         JsonObject parameters = goal.parameters();
         int seconds = integer(parameters, "after_s", 1, 0, 3600);
         String condition = string(parameters, "condition");
@@ -809,6 +844,7 @@ final class AbilityAdapter {
 
     private static IntentAction.Decision decision(Goal goal, String question,
                                                    List<IntentTaskRecord.DecisionOption> options) {
+        // 给这一个问题分配新编号，附上所属目标；后面的答复必须带回这个编号才能被接受。
         JsonObject context = new JsonObject();
         context.addProperty("ability", goal.ability());
         context.addProperty("outcome", goal.outcome());
@@ -821,6 +857,7 @@ final class AbilityAdapter {
     }
 
     private static Goal.WorldPosition position(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 真要在世界里做事时，只使用当前地点或当前维度的已知位置，不能拿别的维度的坐标直接行动。
         Goal.SemanticTarget target = goal.target();
         if (target == null) return null;
         if ("current_place".equals(target.kind())) return currentPosition(player);
@@ -836,6 +873,7 @@ final class AbilityAdapter {
 
     private static Goal.WorldPosition namedPosition(
             String label, LocalPlayer player, IntentRuntime runtime) {
+        // current_place 是专用值，表示玩家脚下；其他名字只从已经记住的地点表里找。
         if (label == null || label.isBlank()) return null;
         if ("current_place".equals(label)) return currentPosition(player);
         IntentRuntime.Landmark landmark = runtime.landmark(label);
@@ -851,6 +889,7 @@ final class AbilityAdapter {
     private static IntentAction unresolvedNamedPlaceDecision(
             Goal goal, Goal.SemanticTarget target, LocalPlayer player,
             IntentRuntime runtime, String action) {
+        // 分清“这个名字没记住”和“地方在另一个维度”，把原因说明白后让调用者选择下一步。
         String label = target.label() == null || target.label().isBlank()
                 ? "the requested named place" : "'" + target.label() + "'";
         IntentRuntime.Landmark landmark = target.label() == null
@@ -874,6 +913,7 @@ final class AbilityAdapter {
 
     private static String namedEndpointIssue(
             String endpoint, String label, LocalPlayer player, IntentRuntime runtime) {
+        // 给机械连接的某一端生成具体错误说明：没填名字、没记住，或不在当前维度。
         if (label == null || label.isBlank()) return endpoint + "_label is missing";
         if ("current_place".equals(label)) return endpoint + " current_place is unavailable";
         IntentRuntime.Landmark landmark = runtime.landmark(label);
@@ -887,6 +927,7 @@ final class AbilityAdapter {
     private static String destinationEndpointIssue(
             Goal.SemanticTarget target, String label,
             LocalPlayer player, IntentRuntime runtime) {
+        // 引用前一步结果失败，和普通地标名字没找到，是两类不同问题，分别报告。
         if (target != null && "prior_result".equals(target.kind())) {
             return "destination prior_result did not match one authoritative earlier successful place";
         }
@@ -898,6 +939,7 @@ final class AbilityAdapter {
 
     private static Goal.WorldPosition rememberPosition(
         Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 记忆位置不要求玩家现在就在那个维度；和“马上前往／施工”的位置检查不同。
         Goal.SemanticTarget target = goal.target();
         if (target == null) return null;
         if ("current_place".equals(target.kind())) return currentPosition(player);
@@ -951,6 +993,7 @@ final class AbilityAdapter {
     }
 
     private static int integer(JsonObject object, String key, int fallback, int min, int max) {
+        // 未填时用默认值，超出范围时直接压到边界值；本方法不会告诉调用者数值被裁剪。
         int value = object.has(key) && object.get(key).isJsonPrimitive()
                 ? object.get(key).getAsInt()
                 : fallback;
@@ -969,6 +1012,7 @@ final class AbilityAdapter {
     }
 
     private static void merge(JsonObject target, JsonObject source) {
+        // 按字段覆盖，并复制 JSON 内容，避免后面修改答复对象时连旧目标也一起变了。
         for (var entry : source.entrySet()) {
             target.add(entry.getKey(), entry.getValue().deepCopy());
         }
@@ -976,29 +1020,34 @@ final class AbilityAdapter {
 }
 
 sealed interface IntentAction {
-    /** Evidence is still being scanned; adapt the same goal again on the next client tick. */
+    /** 信息还没查完，下一个游戏刻继续判断同一目标。 */
     enum Pending implements IntentAction { INSTANCE }
-    /** Read-only semantic evidence, already bounded by its producer. */
+    /** 不用再做动作，直接交回结果；可附上 Mod 自己确认过的位置供后续步骤使用。 */
     record Report(org.maiwithu.maicraft.task.TaskResult result,
                   Goal.WorldPosition verifiedPosition) implements IntentAction {}
-    /** Typed native child sharing the existing body scheduler and protection context. */
+    /** 已经创建好具体任务单，交给总任务逐步执行。 */
     record Native(org.maiwithu.maicraft.task.TaskRecord record,boolean reobserveAfterSuccess) implements IntentAction {
         Native(org.maiwithu.maicraft.task.TaskRecord record) { this(record,false); }
     }
+    /** 按顺序执行一组内部工具，例如先摆床、再走过去、最后躺下。 */
     record Chain(List<Tool> actions) implements IntentAction {
         public Chain {
             actions = List.copyOf(actions);
             if (actions.isEmpty()) throw new IllegalArgumentException("intent action chain cannot be empty");
         }
     }
+    /** 调用一个内部工具；参数暂存为 JSON 文本，真正调用时再解析。 */
     record Tool(String toolName, String argumentsJson) implements IntentAction {
         JsonObject arguments() {
             return JsonParser.parseString(argumentsJson).getAsJsonObject();
         }
     }
+    /** 只记下地点名字和位置，不要求玩家移动。 */
     record Remember(
             String label, Goal.WorldPosition position,
             IntentRuntime.LandmarkAreaRole areaRole) implements IntentAction {}
+    /** 到指定游戏刻后开始查条件，满足才完成。 */
     record Wait(String condition, long notBeforeGameTime) implements IntentAction {}
+    /** 当前无法自行继续，暂停并等待调用者回答这个问题。 */
     record Decision(IntentTaskRecord.DecisionSnapshot snapshot) implements IntentAction {}
 }

@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.core.data;
 
 import net.minecraft.world.level.Level;
 
-/** One authoritative interpretation of the vanilla 24,000-tick day clock. */
+/** 按一天二万四千个游戏刻划分凌晨、白天、傍晚和夜晚，供状态显示与等待任务使用。 */
 public final class WorldTimeSemantics {
 
     public enum Phase {
@@ -26,10 +26,12 @@ public final class WorldTimeSemantics {
     private WorldTimeSemantics() {}
 
     public static long timeOfDay(Level level) {
+        // 总时间可能已过许多天，这里只取当天走到了哪一刻；负时间也会落在合法的一天范围内。
         return Math.floorMod(level.getDayTime(), 24_000L);
     }
 
     public static long dayIndex(Level level) {
+        // 计算已经过了多少整天，与当天的时刻分开返回。
         return Math.floorDiv(level.getDayTime(), 24_000L);
     }
 
@@ -38,6 +40,7 @@ public final class WorldTimeSemantics {
     }
 
     public static Phase phase(long dayTime) {
+        // 这里用固定时刻区分四段，不根据洞穴亮度、天气或维度的天空效果推测昼夜。
         long time = Math.floorMod(dayTime, 24_000L);
         if (time <= 999L || time >= 23_000L) return Phase.DAWN;
         if (time <= 11_999L) return Phase.DAY;
@@ -46,6 +49,7 @@ public final class WorldTimeSemantics {
     }
 
     public static boolean isDaytime(Level level) {
+        // 对“等天亮”的判断，凌晨和傍晚也算非夜间；只有 NIGHT 返回 false。
         return phase(level) != Phase.NIGHT;
     }
 
@@ -54,6 +58,7 @@ public final class WorldTimeSemantics {
     }
 
     public static boolean canAttemptSleep(Level level) {
+        // 当前只按“雷暴或上述夜间”判断，不检查这个维度能否用床，也不检查附近怪物和床是否被占用。
         return level.isThundering() || isNighttime(level);
     }
 }

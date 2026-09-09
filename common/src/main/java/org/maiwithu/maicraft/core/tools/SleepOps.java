@@ -11,7 +11,7 @@ import net.minecraft.world.level.block.state.properties.BedPart;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.sleep.SleepTaskRecord;
 
-/** Read-only bed target resolution for the receipt-owned sleep task. */
+/** 把“用哪张床”变成具体睡觉任务：只找身边的床，不走路、不放床，也不在这里点击。 */
 public final class SleepOps {
 
     private static final int REACH_H = 3;
@@ -26,6 +26,7 @@ public final class SleepOps {
 
     public Plan plan(
             Integer x, Integer y, Integer z, LocalPlayer self, ToolContext context) {
+        // 要么完整指定一张床的坐标，要么不指定、使用附近的床；缺一个坐标时不能猜。
         boolean anyCoordinate = x != null || y != null || z != null;
         boolean allCoordinates = x != null && y != null && z != null;
         if (anyCoordinate && !allCoordinates) {
@@ -35,6 +36,7 @@ public final class SleepOps {
                 ? headOf(self, new BlockPos(x, y, z))
                 : nearestBedHeadInReach(self);
         if (bedHead == null) {
+            // 没找到床就说明原因；背包里有床时给出摆床建议，但这个内部工具不会自己扩大行动范围。
             String carried = carriedBed(self);
             String base = allCoordinates
                     ? "there is no loaded bed at those coordinates"
@@ -51,6 +53,7 @@ public final class SleepOps {
     }
 
     private static BlockPos nearestBedHeadInReach(LocalPlayer self) {
+        // 在脚下方块的水平三格、上下两格内找床头，按直线距离取最近的；是否挡视线由睡觉任务再查。
         BlockPos me = self.blockPosition();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
@@ -71,6 +74,7 @@ public final class SleepOps {
     }
 
     private static BlockPos headOf(LocalPlayer self, BlockPos pos) {
+        // 一张床占两格。点到床尾时，按床的朝向找到床头，让后续任务使用统一的位置。
         if (!self.level().isLoaded(pos)) {
             return null;
         }
@@ -87,6 +91,7 @@ public final class SleepOps {
     }
 
     private static String carriedBed(LocalPlayer self) {
+        // 只查看普通背包里的床，拼出给调用者看的提示，不切换手持物品。
         int usableSlots = Math.min(36, self.getInventory().getContainerSize());
         for (int slot = 0; slot < usableSlots; slot++) {
             ItemStack stack = self.getInventory().getItem(slot);
