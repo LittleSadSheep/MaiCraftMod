@@ -38,4 +38,5 @@ runs
 *.generated.md
 .vscode
 docs/
+AGENTS.md
 experiments/
