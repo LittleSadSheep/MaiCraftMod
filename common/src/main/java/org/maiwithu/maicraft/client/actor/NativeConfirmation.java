@@ -16,6 +16,9 @@ public interface NativeConfirmation {
 
     Verdict observe(LocalPlayerContext context);
     default int stableTicksRequired() { return 2; }
+    /** Placement receipts may require the server to finish reconciling this use's prediction. */
+    default boolean requiresBlockAcknowledgement() { return false; }
+    default Verdict observeAcknowledged(LocalPlayerContext context) { return observe(context); }
     /** 调用方已拥有服务器发来的新实体证据时，不再多等一次稳定刻。 */
     static NativeConfirmation serverObservedEntity(NativeConfirmation evidence) {
         return new NativeConfirmation() {

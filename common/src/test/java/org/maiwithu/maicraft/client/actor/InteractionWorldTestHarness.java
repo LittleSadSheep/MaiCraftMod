@@ -58,6 +58,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         ActorControlTestHarness.field(LocalPlayer.class, "clientLevel").set(player, level);
         ActorControlTestHarness.field(Entity.class, "level").set(player, level);
         ActorControlTestHarness.field(Player.class, "inventory").set(player, inventory);
+        ActorControlTestHarness.field(Player.class, "abilities").set(player, new net.minecraft.world.entity.player.Abilities());
         ActorControlTestHarness.field(Player.class, "attributes").set(player,
                 new net.minecraft.world.entity.ai.attributes.AttributeMap(Player.createAttributes().build()));
         ActorControlTestHarness.field(Entity.class, "eyeHeight").setFloat(player, 1.62F);
@@ -103,7 +104,10 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         global.set(null, previous);
     }
 
-    public static final class TestLevel extends ClientLevel {
+    public static final class TestLevel extends ClientLevel implements BlockUseAcknowledgement {
+        public int blockSequence, acknowledgedSequence;
+        @Override public int maicraft$currentBlockSequence() { return blockSequence; }
+        @Override public int maicraft$acknowledgedBlockSequence() { return acknowledgedSequence; }
         LevelChunkSection section;
         LoadedChunks chunks;
         public int blockReads, searches;
@@ -138,6 +142,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         private UseMode() { super(null, null); }
         @Override public InteractionResult useItem(Player player, InteractionHand hand) { items++; return InteractionResult.PASS; }
         @Override public InteractionResult useItemOn(LocalPlayer player, InteractionHand hand, BlockHitResult hit) {
+            ((TestLevel) player.level()).blockSequence++;
             blocks++; return InteractionResult.PASS;
         }
     }

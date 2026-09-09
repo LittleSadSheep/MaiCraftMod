@@ -9,6 +9,7 @@
   ],
   "client": [
     "ClientLevelBlockChangeMixin",
+    "BlockUseAcknowledgementMixin",
     "BoatCatchPacketMixin",
     "MachineBlockEntityReceiptMixin",
     "MekanismContainerSyncMixin",

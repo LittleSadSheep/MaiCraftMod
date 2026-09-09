@@ -127,11 +127,19 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         // 发一次普通方块右键，再用调用者给的条件查结果；游戏本身可能先在客户端预测放置效果。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
+        BlockUseConfirmation acknowledged = null;
+        if (confirmation.requiresBlockAcknowledgement()) {
+            if (!(current.level() instanceof BlockUseAcknowledgement sequences))
+                throw new IllegalStateException("native block acknowledgement hook is unavailable");
+            acknowledged = new BlockUseConfirmation(confirmation, sequences);
+        }
         current.claimMutation();
         NativeActionReceipt receipt = oneShot(
-                NativeActionReceipt.Kind.USE_BLOCK, current, confirmation, timeoutTicks);
+                NativeActionReceipt.Kind.USE_BLOCK, current,
+                acknowledged == null ? confirmation : acknowledged, timeoutTicks);
         try {
             var result = current.gameMode().useItemOn(current.player(), hand, hit);
+            if (acknowledged != null) acknowledged.submitted();
             if (result.shouldSwing()) current.player().swing(hand);
         } catch (RuntimeException failure) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
