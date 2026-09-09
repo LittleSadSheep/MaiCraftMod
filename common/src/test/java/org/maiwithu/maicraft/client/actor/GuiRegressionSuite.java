@@ -18,12 +18,17 @@ public final class GuiRegressionSuite {
         PreviewControlTest.main(args);
         org.maiwithu.maicraft.client.preview.PreviewSessionTest.main(args);
         org.maiwithu.maicraft.client.preview.PreviewVisibilityTest.main(args);
+        org.maiwithu.maicraft.client.preview.PreviewRefreshTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPreviewCancellationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementStageTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTemporarySupportPlanTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementGestureTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildAimRetryTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildPrecisionAimTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildPlacementDestinationTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildPlacementBudgetTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildTaskSearchBudgetTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementConfirmationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildWorksitePlannerTest.main(args);
         org.maiwithu.maicraft.core.task.build.CreativeBuildInventoryTest.main(args);
