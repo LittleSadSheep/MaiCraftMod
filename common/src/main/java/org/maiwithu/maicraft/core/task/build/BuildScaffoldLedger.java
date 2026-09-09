@@ -23,10 +23,11 @@ final class BuildScaffoldLedger {
     boolean owns(BlockPos pos, BlockState current) { return current.equals(placed.get(pos)); }
     Map<BlockPos, BlockState> snapshot() { return Map.copyOf(placed); }
 
-    /** Only explicit plan air can gain this exception; inherited protection always wins. */
+    /** Empty cells outside the finished solid plan can host removable supports; protection wins. */
     boolean permits(BuildTaskRecord.Target target, BlockState current, boolean protectedByOwner) {
-        return !protectedByOwner && target != null && target.desiredState().isAir()
-                && current.getFluidState().isEmpty() && (current.isAir() || owns(target.pos(), current));
+        return !protectedByOwner && (target == null || target.desiredState().isAir())
+                && current.getFluidState().isEmpty()
+                && (current.isAir() || target != null && owns(target.pos(), current));
     }
 
     LongSet navigationProtection(LongSet base, LongSet inherited, LongSet additional,

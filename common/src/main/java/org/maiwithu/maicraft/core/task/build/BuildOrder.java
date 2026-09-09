@@ -30,14 +30,14 @@ public final class BuildOrder {
 
     /** 施工顺序的唯一定义(公开是为了让测试直接钉住它,而不是靠副作用间接猜)。 */
     public static final Comparator<BuildTaskRecord.Target> BUILD_ORDER = Comparator
-            .comparingInt((BuildTaskRecord.Target t) -> needsSupport(t.desiredState()) ? 1 : 0)
-            .thenComparingInt(t -> t.pos().getY())
+            .comparingInt((BuildTaskRecord.Target t) -> t.pos().getY())
+            .thenComparingInt(t -> needsSupport(t.desiredState()) ? 1 : 0)
             .thenComparingInt(BuildOrder::stage)
             .thenComparingInt(t -> t.pos().getZ())
             .thenComparingInt(t -> (t.pos().getZ() & 1) == 0 ? t.pos().getX() : -t.pos().getX());
 
     /**
-     * 这一格立不立得住:要依托别的方块的算<b>贴附件</b>,推到第二趟。
+     * 依托别的方块的贴附件排在同层骨架之后；不要等封顶后才尝试进入房内安装。
      *
      * <p>按方块类型判,不按"能不能存活"现场试——现场试要有支撑才知道答案,而主趟
      * 正是支撑还没长出来的时候。类型是封闭集合,一次列完;"能不能存活"是开放的,
