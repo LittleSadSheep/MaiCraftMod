@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.core.pathing.goals;
 import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 import net.minecraft.core.BlockPos;
 
-/** 精确单格目标:三轴全等才算到达。 */
+/**
+ * 旧的精确格目标：三轴相同才到达，估价分成水平与高差。当前主目标入口在 NavGoal，这个旧类只有同组旧目标之间的依赖。
+ */
 public class GoalBlock implements Goal {
 
     public final int x;

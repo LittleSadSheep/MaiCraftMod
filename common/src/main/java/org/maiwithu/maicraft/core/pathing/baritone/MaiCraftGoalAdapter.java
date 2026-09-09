@@ -6,7 +6,9 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 
-/** Baritone's search contract backed by the exact same goal vocabulary used by MaiCraft tasks. */
+/**
+ * 把项目的目标判断交给 Baritone：把三个坐标转成脚位格，再转发到达判断和搜索估价；这里不额外增加距离或高度条件。
+ */
 final class MaiCraftGoalAdapter implements Goal {
     private final NavGoal delegate;
 

@@ -4,9 +4,7 @@ import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 import net.minecraft.core.BlockPos;
 
 /**
- * 逃离目标:与所有威胁点的 XZ 距离都拉开到指定值即到达;
- * 可选 maintainY 要求同时保持指定高度。启发式为"到最近威胁点的
- * XZ 估价"取负——越远越优;维持高度时按 0.6/1.5 加权混入高度项。
+ * 旧的逃离目标：与所有起点拉开水平距离，指定高度时还必须到该层。当前没有主流程入口；NavGoal 内有独立的现用目标表达。
  */
 public class GoalRunAway implements Goal {
 
@@ -24,6 +22,7 @@ public class GoalRunAway implements Goal {
             throw new IllegalArgumentException("逃离目标至少需要一个威胁点");
         }
         this.from = from.clone();
+        // 这个旧实现把距离平方截成整数，带小数的距离不会完整保留；当前没有主流程调用它。
         this.distanceSq = (int) (distance * distance);
         this.maintainY = maintainY;
         this.costHeuristic = NavSettings.get().costHeuristic;

@@ -3,20 +3,7 @@ package org.maiwithu.maicraft.core.pathing.goals;
 import org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities.Threat;
 
 /**
- * 走到一个目标跟前,<b>路上绕开别的威胁</b>。
- *
- * <h2>为什么要有</h2>
- * 纯跟随目标会挑最短的路,而最短的路常常从第二只怪身上碾过去——她去打一只骷髅,途中穿过
- * 三只僵尸,到了跟前血已经见底。走位本来就是战斗的一部分,不该等到"要逃了"才开始算。
- *
- * <h2>目标自己不进势场</h2>
- * 这是这个目标最容易写错的地方:她要打的那只<b>也是</b>敌对生物,若它也在势场里,它会把她
- * 推开——于是她永远走不到跟前,而估价还一路显示"在接近"。排除工作在调用方做,这里只负责
- * 把给进来的两样加起来。
- *
- * <h2>两项的量纲</h2>
- * 吸引项是<b>真实的走路成本</b>(与其它目标同源);排斥项是 {@link GoalAvoidEntities} 那片
- * 势场,靠 {@code penaltyFactor} 折进同一个量纲。调大势场她愿意多绕,调小则从怪边上擦过去。
+ * 旧的组合目标：既要接近目标，也要离开威胁范围；估价只取接近部分。当前没有主流程入口，NavGoal 中的同类组合有自己的实现。
  */
 public class GoalApproachAvoiding implements Goal {
 

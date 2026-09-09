@@ -11,20 +11,9 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * What the search is trying to reach. Until
- * now arrival semantics were written five times in five places (the search's
- * tolerance hack, goto's radius, three hand-rolled "stand next to X"
- * pickers); a goal object makes the search terminate, the heuristic aim and
- * the caller assert against the SAME definition.
- *
- * <p>Node-domain only: {@link #isAt} judges feet CELLS during the search.
- * Live-entity arrival predicates (exact doubles, reach distances) remain the
- * task layer's business — they answer a different question ("is my body close
- * enough") than the search's ("may this node end the path").
- *
- * <p>工厂产物均为具名嵌套类(参数以 final 字段暴露):桥接层按类型识别
- * 工厂产物并直映射到新内核目标族;匿名实现(任务层手写的自定义目标)
- * 无法识别,走通用包装。行为与先前的匿名类逐字相同。
+ * 集中描述导航走到哪里算到达：精确格、某个高度、目标附近、方块旁边，或远离威胁。
+ * 这里判断的是脚所在的导航格；玩家真实距离、视线、能否实际点击，仍由任务执行器继续检查。
+ * 不同目标还提供搜索估价和一个代表位置；代表位置不一定是应站的位置，例如避险目标的代表点在威胁附近。
  */
 public interface NavGoal {
 
@@ -39,27 +28,23 @@ public interface NavGoal {
     /** 降一格的乐观成本(坠落两格耗时之半)。 */
     double DESCEND_ONE_BLOCK = ActionCosts.FALL_N_BLOCKS_COST[2] / 2.0;
 
-    /** May a path legitimately end at this feet cell? */
+    /**
+     * 判断路线是否可以在这个脚位格结束；不在这里移动玩家或验证实际交互。
+     */
     boolean isAt(BlockPos feet);
 
-    /** Admissible lower bound (ticks) on the remaining cost from {@code from}. */
+    /**
+     * 给搜索比较候选位置的估计分数。部分宽松到达目标仍朝中心估价，避险还会加入惩罚，因此这里没有统一的最短路下界保证。
+     */
     double heuristic(BlockPos from);
 
-    /** Representative position — diagnostics, goal-moved checks, locate math. */
+    /**
+     * 返回用于定位、诊断和发现目标移动的代表点；单高度目标的 X/Z 为零，并不表示要求玩家去世界原点。
+     */
     BlockPos center();
 
     /**
-     * Stable, immutable description of the goal's arrival and heuristic semantics.
-     *
-     * <p>Live-goal suppliers commonly rebuild an equivalent object every client tick. Object
-     * identity, the representative {@link #center()} alone, and periodic refreshes therefore
-     * cannot decide whether an in-flight search is stale: identity/periodic refresh churns a
-     * healthy search, while center-only comparison misses radius, member and threat changes.
-     * Embedded navigation compares this value instead.
-     *
-     * <p>The built-in goal vocabulary is covered centrally by {@link SemanticFingerprint#of}.
-     * A custom implementation whose semantics depend on anything besides its concrete class and
-     * center must override this method and return a fingerprint containing those parameters.
+     * 把类型和具体要求变成可比较的值；位置相同但半径或威胁变化时，也能认出目标已经不同。
      */
     default SemanticFingerprint semanticFingerprint() {
         return SemanticFingerprint.of(this);
@@ -120,6 +105,7 @@ public interface NavGoal {
             }
             // There is one legacy anonymous goal whose only varying parameter is its center.
             // Future custom goals with additional parameters must override semanticFingerprint().
+            // 无法识别的自定义目标默认只比较类名和代表位置；有其他会变化的要求时，应由自定义实现提供自己的比较值。
             return key("custom:" + goal.getClass().getName(), goal.center().asLong());
         }
 
@@ -140,21 +126,7 @@ public interface NavGoal {
     // ---- the shared octile + vertical point bound ----
 
     /**
-     * Octile horizontal distance (× walk cost) plus a vertical term — the
-     * admissible point-to-point bound every concrete goal builds on. Downward
-     * must cost &gt; 0 (see {@link #DESCEND_ONE_BLOCK}): with a free
-     * down-direction every node straight above a deep target scored h == 0
-     * and partial paths collapsed to the start node.
-     *
-     * <p>Known weight inconsistency (deliberate legacy parity): the weighted-A*
-     * factor {@code COST_HEURISTIC} (3.563) is folded into the XZ term only,
-     * while the vertical terms ({@code JUMP_ONE_BLOCK} / {@code DESCEND_ONE_BLOCK})
-     * are unweighted — the split the verified behaviour was tuned on. Normalizing
-     * the weights is a flagged follow-up, not something to "fix" in passing.
-     *
-     * <p>Adapter contract: {@code heuristic()} / {@code isAt()} implementations
-     * must not retain the {@code BlockPos} argument (adapters may reuse a
-     * mutable cursor across calls); read x/y/z (or compare/measure) and return.
+     * 按横向直走／斜走以及上下高差估算到中心点的费用；这个帮助方法自身不知道目标允许多大的到达范围。
      */
     static double pointBound(BlockPos goal, BlockPos from) {
         double dx = Math.abs(goal.getX() - from.getX());
@@ -362,7 +334,9 @@ public interface NavGoal {
 
     // ---- 工厂产物(具名,参数可读;行为与原匿名类逐字一致) ----
 
-    /** {@link #exact} 的产物:三轴全等才到达。 */
+    /**
+     * 脚位格的三轴必须与指定格相同。实际身体是否站稳由调用者检查。
+     */
     final class Exact implements NavGoal {
         public final BlockPos goal;
 
@@ -383,7 +357,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #column} 的产物:任意高度的 XZ 列。 */
+    /**
+     * 只要求进入指定 X/Z 的水平范围，不限制高度；未知高度的普通移动使用这种目标。
+     */
     final class Column implements NavGoal {
         public final int x;
         public final int z;
@@ -416,7 +392,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #yLevel} 的产物:任意 XZ 的 Y 层。 */
+    /**
+     * 只要求脚位达到指定高度，X/Z 可以不同。
+     */
     final class YLevel implements NavGoal {
         public final int level;
 
@@ -440,7 +418,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #near} 的产物:三维欧氏球邻域。 */
+    /**
+     * 脚位进入目标周围的三维球体就算到达；搜索仍按中心点排序。
+     */
     final class Near implements NavGoal {
         public final BlockPos goal;
         public final double radius;
@@ -457,10 +437,7 @@ public interface NavGoal {
         }
 
         @Override public double heuristic(BlockPos from) {
-            // The heuristic IS the full point bound — the radius
-            // only relaxes isAt, it is NOT subtracted from the aim. (Slightly
-            // inadmissible, deliberately: aiming at the centre keeps node ordering
-            // and the best-so-far partial stable.)
+            // 到达时允许进圈即可，搜索排序仍指向中心；这是当前为了稳定部分路线而保留的选择，不保证估值总小于剩余最短费用。
             return pointBound(goal, from);
         }
 
@@ -469,7 +446,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #ring} 的产物:环形站位带。 */
+    /**
+     * 只看水平距离，要求既不过近也不过远；内圈不小于外圈时，当前实现把内圈改为零。
+     */
     final class Ring implements NavGoal {
         public final BlockPos goal;
         public final double inner;
@@ -504,7 +483,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #nearGround} 的产物:水平半径 + 目标高度 ±1 的地面邻域。 */
+    /**
+     * 水平进入半径范围，并且与指定高度相差不超过允许值；它本身不读取地面支撑。
+     */
     final class NearGround implements NavGoal {
         public final BlockPos goal;
         public final double radius;
@@ -537,7 +518,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #adjacent} 的产物:水平正交贴邻、目标高度 ±1。 */
+    /**
+     * 水平紧邻目标一格，上下可相差一格；不允许只在同一列上下接近。
+     */
     final class Adjacent implements NavGoal {
         public final BlockPos goal;
 
@@ -564,7 +547,9 @@ public interface NavGoal {
     }
 
     /** {@link #getToBlock} 的产物:身高修正的 Manhattan 贴脸邻域。 */
-    /** {@link #mineStance} 的产物:贴着,且脚不高于它。 */
+    /**
+     * 提供侧面或下方的挖掘脚位范围，排除站在矿石上方；实际挖掘距离和视线仍由矿工检查。
+     */
     final class MineStance implements NavGoal {
         public final BlockPos ore;
 
@@ -597,6 +582,7 @@ public interface NavGoal {
         }
     }
 
+    // 允许从旁边、上方或下方接近方块，把角色身体高度计入格距；这里只描述接近范围。
     final class GetToBlock implements NavGoal {
         public final BlockPos goal;
 
@@ -624,7 +610,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #composite} 的产物:任一成员满足即到达,h 取成员最小值。 */
+    /**
+     * 一组候选中满足任意一个就算到达，搜索取最有希望的一项；平均位置只用于定位和诊断。
+     */
     final class Composite implements NavGoal {
         public final java.util.List<NavGoal> members;
         private final BlockPos centroid;
@@ -671,7 +659,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #mineColumn} 的产物:矿柱站位带(脚位在矿至矿下 maxBelow 格)。 */
+    /**
+     * 脚位必须在矿石正下方同一列，最多低指定格数；不包含侧面站位。
+     */
     final class MineColumn implements NavGoal {
         public final BlockPos ore;
         public final int maxBelow;
@@ -710,8 +700,7 @@ public interface NavGoal {
     }
 
     /**
-     * {@link #avoid} 的产物。判定与估价<b>都转交给内核目标</b>,不在这里再写一份公式——
-     * 同一片势场若两处各算各的,调参时必然只改到一处。
+     * 要求离每个威胁都足够远，复用 GoalAvoidEntities 的脱身条件和远近惩罚。
      */
     final class Avoid implements NavGoal {
         public final GoalAvoidEntities engine;
@@ -750,7 +739,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #approachAvoiding} 的产物。判定归吸引项,估价是吸引项加势场。 */
+    /**
+     * 既要达到原目标，又要离威胁足够远；路线估价含避险惩罚，但判断是否正在接近时只看原目标。
+     */
     final class ApproachAvoiding implements NavGoal {
         public final NavGoal approach;
         public final GoalAvoidEntities repulsion;
@@ -788,7 +779,9 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #runAway} 的产物:持高度外逃,永不"到达"。 */
+    /**
+     * 持续向远离起点的方向搜索，并偏好保持指定高度；自身永不宣告到达，需要调用者决定何时停止。
+     */
     final class RunAway implements NavGoal {
         public final BlockPos from;
         public final int maintainY;

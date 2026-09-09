@@ -2,7 +2,9 @@ package org.maiwithu.maicraft.core.pathing.goals;
 
 import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 
-/** XZ 目标:任意高度,水平坐标相等即到达。 */
+/**
+ * 旧的水平目标：只比较 X/Z，高度不限；水平距离按直走加斜走估计。当前只供同组旧目标使用。
+ */
 public class GoalXZ implements Goal {
 
     private static final double SQRT_2 = Math.sqrt(2);

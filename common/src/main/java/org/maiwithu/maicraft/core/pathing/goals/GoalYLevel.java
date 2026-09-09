@@ -2,7 +2,9 @@ package org.maiwithu.maicraft.core.pathing.goals;
 
 import org.maiwithu.maicraft.core.pathing.moves.ActionCosts;
 
-/** 高度目标:到达指定 Y 层即可,水平位置不限。 */
+/**
+ * 旧的高度目标：只比较 Y，上升和下降用不同参考耗时。当前只供同组旧目标使用。
+ */
 public class GoalYLevel implements Goal {
 
     public final int level;

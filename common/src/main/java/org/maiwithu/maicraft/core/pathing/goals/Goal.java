@@ -1,8 +1,7 @@
 package org.maiwithu.maicraft.core.pathing.goals;
 
 /**
- * 搜索目标:成员判定 + 启发式下界。heuristic 单位与动作成本一致
- * (tick),按乐观估计给出从 (x,y,z) 到目标的剩余成本。
+ * 约定如何判断到达、如何给位置估价。多数旧具体目标已无主流程入口，GoalAvoidEntities 仍使用这个接口并被 NavGoal 复用。
  */
 public interface Goal {
 
