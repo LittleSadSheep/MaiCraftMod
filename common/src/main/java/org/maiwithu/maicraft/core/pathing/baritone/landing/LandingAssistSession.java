@@ -21,7 +21,11 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 
-/** Native placement, observed protection, stable touchdown and attributable cleanup for one fall. */
+/**
+ * 执行一次完整落地救援：选办法、补料或准备手持、抓时机只提交一次放置、确认站稳，再尝试回收自己的辅助物。
+ * 水和干草另要求观察到实际接触；不同办法的确认条件不完全相同。
+ * 失败后也要收尾；落到别处、辅助物被改变或回收后不安全时，会保留物品在现场并如实报告。
+ */
 public final class LandingAssistSession {
     private static final java.util.concurrent.atomic.AtomicLong EPISODES = new java.util.concurrent.atomic.AtomicLong();
     private long episode;
@@ -90,6 +94,7 @@ public final class LandingAssistSession {
         initialDrop = Math.max(0,context.player().getY()-plan.feet().getY());
         initialDownwardSpeed = Math.max(0,-context.player().getDeltaMovement().y);
     }
+    // 自动方案先选已有或已携带的免伤办法；需要时才原地补料，失败后仍可考虑船或已在现场的可生存干草。
     private boolean materialReady(LocalPlayerContext context) {
         if (automaticCandidates == null || materialBound) return true;
         boolean noDamageCandidate = automaticCandidates.stream().anyMatch(candidate -> candidate.kind() != LandingAssistPlan.Kind.HAY);
@@ -159,6 +164,7 @@ public final class LandingAssistSession {
         return plan.existing() ? LandingAssistPlan.existingSafe(plan.kind(), context.level().getBlockState(plan.cell()))
                 : preparation.acceptHeld(context) && LandingAssistPlan.canPlace(plan.kind(), context.level(), plan.cell());
     }
+    // 离地前核对落点没变、身体放得下、物品准备好，并让喷气背包退出会干扰地面跳落的模式。
     public boolean prepare(LocalPlayerContext context) {
         observeStart(context);
         if (boat!=null) return boat.prepare(context) && prepareGroundFlight(context);
@@ -366,6 +372,7 @@ public final class LandingAssistSession {
         } catch (RuntimeException unavailable) { fail("native landing submission became uncertain: " + unavailable.getMessage()); }
     }
 
+    // 放置确认和回收确认分别处理；结果没确认就记失败，不再次盲放同一件落地用品。
     private void settle(LocalPlayerContext context) {
         try {
             if (cleaning && receipt.kind() == NativeActionReceipt.Kind.BREAK_BLOCK && !receipt.terminal()
@@ -394,6 +401,7 @@ public final class LandingAssistSession {
         } catch (RuntimeException unavailable) { receipt = null; fail("landing confirmation unavailable: " + unavailable.getMessage()); }
     }
 
+    // 回收前再次核对所有权、保护和移除后的支撑；找不到可靠点击或超过回收窗口就把物品留在原处。
     private void clean(LocalPlayerContext context) {
         if (cleanupStarted == Long.MIN_VALUE) cleanupStarted = context.tickRevision();
         if (context.tickRevision() - cleanupStarted >= 80) {
@@ -619,6 +627,7 @@ public final class LandingAssistSession {
         return c.level().clip(new ClipContext(eye, eye.add(c.player().getViewVector(1).scale(c.player().blockInteractionRange())),
                 ClipContext.Block.OUTLINE, pickup ? ClipContext.Fluid.SOURCE_ONLY : ClipContext.Fluid.NONE, c.player()));
     }
+    // 当前普通生命或黄心减少都会记为受伤；黄心效果自然到期也会触发，不能在这里区分来源。
     public static boolean healthDecreased(float beforeHp, float beforeAbsorption, float hp, float absorption) {
         return Float.isFinite(beforeHp) && hp < beforeHp - 0.001F
                 || Float.isFinite(beforeAbsorption) && absorption < beforeAbsorption - 0.001F;
@@ -634,6 +643,7 @@ public final class LandingAssistSession {
         return plan.kind() != LandingAssistPlan.Kind.HAY
                 || plan.survives(FallDamageBudget.capture(context.player()), context.player().getY(), true);
     }
+    // 干草允许记录减伤后的存活；其他方式要求没有观察到生命损失，水还必须观察到实际接触水并清零摔落距离。
     private void finish(String outcome) {
         complete = true;
         if (plan.kind() == LandingAssistPlan.Kind.HAY) {

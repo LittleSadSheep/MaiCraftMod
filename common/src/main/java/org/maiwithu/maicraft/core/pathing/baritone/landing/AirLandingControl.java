@@ -5,7 +5,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 
-/** One horizontal controller shared by air steering and its short reachability prediction. */
+/**
+ * 根据离落点的距离和当前水平惯性，计算空中往哪个方向推，并估计剩余下落时间内能否移到那里；不直接改变玩家位置。
+ */
 public final class AirLandingControl {
     private AirLandingControl() { }
     private static Vec3 input(Vec3 position, Vec3 velocity, Vec3 target) {
@@ -20,6 +22,7 @@ public final class AirLandingControl {
         return new BodyControlPort.Movement((float)(-command.x*Math.sin(angle)+command.z*Math.cos(angle)),
                 (float)(command.x*Math.cos(angle)+command.z*Math.sin(angle)),false,sneak,false);
     }
+    // 最多模拟二百次更新，逐步检查身体碰撞和区块加载；触地时水平误差小于约半格才接受这个候选。
     static boolean reachable(LocalPlayer player, BlockPos feet) {
         double surface = feet.getY()-1 + baritone.pathing.movement.CollisionGeometry.supportHeight(player.level(),feet.below());
         double gravity = player.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.GRAVITY);

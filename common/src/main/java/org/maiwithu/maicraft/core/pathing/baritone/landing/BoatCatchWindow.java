@@ -6,7 +6,10 @@ import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
-/** One already-owned boat rescue may interact before vanilla reports this tick's ground contact. */
+/**
+ * 在玩家位置包发出前，把一次已登记的落地上船机会交回对应控制器，尽量抓住很短的乘船时机。
+ * 玩家、身体版本或控制权改变就作废旧机会；不能让上一具身体的请求继续操作现在的玩家。
+ */
 public final class BoatCatchWindow {
     private static BoatLandingAssist active;
     private static WeakReference<LocalPlayer> player=new WeakReference<>(null);

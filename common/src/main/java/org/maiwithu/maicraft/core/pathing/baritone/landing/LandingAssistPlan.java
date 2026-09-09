@@ -19,7 +19,10 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
 
-/** Logical native landing mechanism, never a claim that a held item has already prevented damage. */
+/**
+ * 描述一项落地办法：用水、蛛网、藤蔓、黏液块、干草或船，放在哪一格、点哪一面，以及是不是利用已有物体。
+ * 计划不会自行放置；执行器还要准备物品、核对准星并确认真实落地。
+ */
 public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPos clicked,
                                 Direction face, boolean existing, Vec3 hitPoint) {
     public LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPos clicked, Direction face, boolean existing) {
@@ -84,6 +87,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
                     player.getBbWidth(), Math.max(1.8, player.getBbHeight()));
         }
 
+        // 先列许可范围内可利用的现有落点，再列背包有材料且现场能放的方案；水在蒸发维度不参与。
         public List<LandingAssistPlan> plans(BlockGetter view, BlockPos feet, Predicate<BlockPos> protectedCell) {
             List<LandingAssistPlan> plans = new ArrayList<>();
             BlockState target = view.getBlockState(feet);
@@ -146,6 +150,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         }
 
         /** Carried aids come first; missing supplies remain conditional plans, never inventory evidence. */
+        // 允许补料时，额外列出“材料还可尝试取得”的方案；因此被列为候选不表示目前已经拿着该物品。
         public List<LandingAssistPlan> automaticCandidates(BlockGetter view, BlockPos feet,
                                                           Predicate<BlockPos> protectedCell, boolean maySupply) {
             var result = new ArrayList<>(plans(view, feet, protectedCell));
@@ -163,6 +168,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         }
     }
 
+    // 已有浆果丛必须尚未长大，蛛网和藤蔓要在重置摔落的标签中；仅看到同名方块还不够。
     public static boolean existingSafe(Kind kind, BlockState state) {
         if (!kind.matches(state)) return false;
         return switch (kind) {
@@ -208,6 +214,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
                 org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.of(kind.block.defaultBlockState()), includeAccumulated);
     }
 
+    // 只回收已确认由本次放下、状态仍与记录相同且未被保护的物体，避免收走原有设施或后来改变的方块。
     public static boolean canRecover(boolean confirmedOwnPlacement, BlockState recorded,
                                      BlockState current, boolean protectedCell) {
         return confirmedOwnPlacement && recorded != null && !recorded.isAir()

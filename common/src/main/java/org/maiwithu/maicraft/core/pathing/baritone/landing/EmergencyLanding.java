@@ -11,7 +11,10 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
-/** Unexpected-fall trigger support; all preparation, placement and recovery stay in the shared session. */
+/**
+ * 意外下落时寻找可救援的落点：先看正下方，再看附近两格内能在剩余时间移到的位置，优先用水。
+ * 只根据已加载且能解释的碰撞表面计划，不把无法转换到世界坐标的物理结构射线当作普通地板。
+ */
 public final class EmergencyLanding {
     private EmergencyLanding() {}
     public static boolean triggered(LocalPlayer player) {
@@ -72,6 +75,7 @@ public final class EmergencyLanding {
                 ? hit.getBlockPos().above() : null;
     }
     /** A running fall keeps its already selected support and steering while adopting self-rescue. */
+    // 紧急救援使用落地辅助许可，并允许检查是否能补到材料；候选还要通过身体空间和干草减伤后能否生存的检查。
     public static LandingAssistSession find(LocalPlayerContext context, BlockPos feet) {
         if (!context.level().isLoaded(feet) || !context.level().isLoaded(feet.below())) return null;
         var inventory = LandingAssistPlan.InventorySnapshot.capture(context.player(), TerrainPermit.LANDING_ONLY,
@@ -117,6 +121,7 @@ public final class EmergencyLanding {
         }, player.getYRot(), context.tickRevision());
     }
     /** Center plus four body corners, preserving the original closest native-collider probe. */
+    // 从身体中心和四个角向下读碰撞，选最先可能接触的地面；不能只看中心射线而漏掉擦到的台阶或边缘。
     private static BlockPos groundBelow(LocalPlayer player) {
         var level = player.level();
         double top = Math.min(player.getY(), level.getMaxBuildHeight());

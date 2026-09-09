@@ -17,11 +17,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
-/** Native stationary-boat landing. A falling boat is never treated as an immunity device:
- * Boat.checkFallDamage can propagate damage to riders through Entity.causeFallDamage.
- * A unique new entity can be caught before its inventory/variant packets arrive. Ownership and
- * recovery still require inventory consumption and the matching boat item. Boarding alone
- * does not complete the fall: wait for rideTick reset, stable support and native Shift dismount.
+/**
+ * 按阶段完成落地上船：准备物品、放船、确认看到船、瞄准乘坐、等船与玩家稳定，再用原生潜行下船。
+ * 只有确认是本次创建的船才尝试回收；利用已有船完成救援时，会把船留在世界里。
  */
 public final class BoatLandingAssist {
     public enum State { RUNNING, SETTLED, FAILED }
@@ -87,6 +85,7 @@ public final class BoatLandingAssist {
         lastTick = ctx.tickRevision();
         if (epoch < 0) { epoch = ctx.bodyEpoch(); revision = ctx.controlRevision();
             entryHealth = ctx.player().getHealth(); entryAbsorption = ctx.player().getAbsorptionAmount(); }
+        // 身体或控制权已更换就结束旧流程；同一次角色更新不会重复推进相同阶段。
         if (epoch != ctx.bodyEpoch() || revision != ctx.controlRevision() || !ctx.permitsNativeActions()) return fail("boat landing body authority changed");
         if (phase == Phase.RECOVER) {
             if (!recovery.tick(ctx)) { if (recovery.aim() != null) aim = recovery.aim(); look(ctx, aim); return State.RUNNING; }
@@ -122,6 +121,7 @@ public final class BoatLandingAssist {
         if(!owned && plan.item()!=null && boat.getPickResult().is(plan.item()) && !beforeBoats.contains(boatId)
                 && (ctx.player().isCreative() || count(ctx.player(),plan.item())<beforeItems)) owned=true;
         aim = boat.getBoundingBox().getCenter();
+        // 上船要求船仍有支撑、没有乘客、玩家伸手够得着且真实准星命中；空中另登记位置包前的短暂机会。
         if (phase == Phase.MOUNT) {
             if(plan.airborne()) BoatCatchWindow.arm(this,ctx);
             if (!supported(ctx,boat) || !boat.getPassengers().isEmpty()) return fail("landing boat is moving, falling or occupied");
@@ -146,6 +146,7 @@ public final class BoatLandingAssist {
                     ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING), 30);
             return State.RUNNING;
         }
+        // 先确认真的坐在指定船里且摔落距离已经重置，再寻找安全下船点；下船后还要复查站稳和生命值。
         if (phase == Phase.RIDING) {
             if (!boatId.equals(vehicleId(ctx.player()))) return fail("boat mount confirmation diverged");
             if (!stable(ctx, boat) || lastTick <= boardedTick || ctx.player().fallDistance > 0.01F) return State.RUNNING;
@@ -209,6 +210,7 @@ public final class BoatLandingAssist {
         if(plan.airborne()) BoatCatchWindow.arm(this,ctx);
         return State.RUNNING;
     }
+    // 先确认附近只新出现了一条服务器船实体，允许抓住上船时机；是否属于自己另用物品种类和库存减少证据判断。
     private NativeConfirmation.Verdict observePlacement(LocalPlayerContext ctx) {
         java.util.List<UUID> candidates = new java.util.ArrayList<>();
         java.util.List<UUID> matchingItems = new java.util.ArrayList<>();
@@ -319,6 +321,7 @@ public final class BoatLandingAssist {
     public boolean cleanupPending() {
         return receipt != null && !receipt.terminal() || preparation != null && preparation.cleanupPending();
     }
+    // 取消后停止新的放船／上船请求；如果已经坐上船，仍保留必要的安全下船收尾。
     public void cancel(LocalPlayerContext ctx) {
         BoatCatchWindow.clear(this);
         cancelled = true;

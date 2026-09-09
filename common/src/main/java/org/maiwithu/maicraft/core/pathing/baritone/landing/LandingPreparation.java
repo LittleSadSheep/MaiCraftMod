@@ -7,7 +7,10 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 
-/** Stage a carried item through native inventory actions before departure or within the fall window. */
+/**
+ * 把落地用品准备到手里：能用现成手持时直接用，需要取背包物品时先打开自己的库存、移到快捷栏并关好界面。
+ * 普通准备要求站稳；紧急准备可在空中尝试，但时间不足时只考虑更快的现成手持或快捷栏。
+ */
 public final class LandingPreparation {
     private final Item item;
     private final VisibleMenuSession menus = new VisibleMenuSession();
@@ -99,6 +102,7 @@ public final class LandingPreparation {
                     || java.util.stream.IntStream.range(0,9).anyMatch(slot -> context.player().getInventory().getItem(slot).is(item));
             if (!quick) return fail("carried inventory transfer cannot finish before the landing action window");
         }
+        // 当前只要普通背包也有同物品就走完整准备；它会跳过后面的现成手持判断，可能反而重选另一格同物品。
         if (inventoryTouched || java.util.stream.IntStream.range(9,36).anyMatch(slot ->
                 context.player().getInventory().getItem(slot).is(item))) return tick(context);
         if (failed) return false;
@@ -134,6 +138,7 @@ public final class LandingPreparation {
             fail("owned inventory closure could no longer be reconciled: " + changedOwner.getMessage());
         }
     }
+    // 准备被打断时先收完选栏记录和自己打开的库存，随后返回失败，让上层改用已经在手的后备物。
     private boolean closeInterrupted(LocalPlayerContext context) {
         if (selection != null) {
             selection = context.actions().poll(context, selection);

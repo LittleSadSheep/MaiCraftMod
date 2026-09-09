@@ -22,7 +22,10 @@ import org.maiwithu.maicraft.core.task.craft.CraftCompanionTask;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Prepare one landing boat, then reuse the native spawn/mount/dismount controller. */
+/**
+ * 为一次落地上船准备普通船：可以复用观察到的空船、取现有物品，或在还有时间时尝试原地合成，再交给上船控制器。
+ * 真正触地却还没上船时报告救援失败；收尾仍继续处理自己发起的库存、合成和船操作。
+ */
 final class LandingBoatRescue {
     private static final List<Item> ITEMS = List.of(Items.OAK_BOAT,Items.SPRUCE_BOAT,Items.BIRCH_BOAT,
             Items.JUNGLE_BOAT,Items.ACACIA_BOAT,Items.DARK_OAK_BOAT,Items.MANGROVE_BOAT,Items.CHERRY_BOAT,Items.BAMBOO_RAFT);
@@ -109,6 +112,7 @@ final class LandingBoatRescue {
                 existing==null ? item : null,existing,landing.aimPoint(),true));
         ready=true; return true;
     }
+    // 只从当前同步配方中找已有材料可合成的普通船；需要工作台时只检查眼前可直接交互的工作台，不为此另走远路。
     private boolean startCraft(LocalPlayerContext context) {
         craftTried=true;
         if (context.connection()==null) return false;

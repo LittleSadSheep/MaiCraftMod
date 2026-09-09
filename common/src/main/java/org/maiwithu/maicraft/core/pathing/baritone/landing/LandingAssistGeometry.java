@@ -11,7 +11,9 @@ import net.minecraft.world.level.material.FluidState;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
 
-/** Check the full body and neighboring protrusions around the actual assisted support height. */
+/**
+ * 检查某种落地办法放好后，角色身体是否放得下、脚下是否能得到支撑；回收前还要检查拿走辅助物后能否安全站住。
+ */
 public final class LandingAssistGeometry {
     private LandingAssistGeometry() {}
     public static boolean safeAfterRemoval(BlockGetter world, Predicate<BlockPos> loaded, LandingAssistPlan plan,
@@ -30,6 +32,7 @@ public final class LandingAssistGeometry {
                 if (!loaded.test(cell) || forbiddenBody.contains(cell.asLong())) return false;
             return true;
         }
+        // 新放黏液块或干草会把落脚面抬高一格；检查身体位置时也跟着抬高，不能还按原来的空气格判断。
         boolean raisedSupport = plan.kind().solidSupport() && !plan.existing();
         BlockPos physicalFeet = raisedSupport ? plan.feet().above() : plan.feet();
         BlockGetter geometry = new BlockGetter() {

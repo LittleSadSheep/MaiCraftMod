@@ -13,7 +13,10 @@ import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 
-/** One bounded reflex acquisition. The caller supplies items already suitable for the landing. */
+/**
+ * 落地用品不足时做一次有时间上限的原地 AE2 取物尝试，并负责关好相关界面。优先水等免伤办法，干草保留为减伤后备。
+ * 同一身体、世界和控制权内才继续；已经尝试过的失败供料不再循环重发。
+ */
 public final class LandingMaterialSupply {
     public enum State { AVAILABLE, ACQUIRING, CLEANING, UNAVAILABLE }
     public record Result(State state, ResourceLocation itemId, String detail) {
@@ -58,6 +61,7 @@ public final class LandingMaterialSupply {
         if (lastTick == context.tickRevision()) return result;
         lastTick = context.tickRevision();
         ResourceLocation carried = carried(context);
+        // 有免伤用品就不启动 AE2；只有干草且时间还够时，会先尝试取得更好的候选。
         if (session == null && carried != null && (!carried.equals(HAY)
                 || remainingTicks <= ACTION_RESERVE_TICKS || accepted.stream().allMatch(HAY::equals)))
             return available(carried, carried.equals(HAY)
@@ -79,6 +83,7 @@ public final class LandingMaterialSupply {
                 acquisitionAttempted = true;
                 session = begin.apply(context.player(), new Ae2ResourceSupply.Request(List.of(group), allowCrafting));
             }
+            // 已经拿到合适物品、快进入操作窗口或补料超过二百四十刻，就停止新取物并结清已有事务。
             stopping |= carried != null && !carried.equals(HAY) || remainingTicks <= ACTION_RESERVE_TICKS
                     || context.tickRevision() - started >= MAX_SUPPLY_TICKS;
             Optional<Ae2ResourceSupply.Outcome> outcome = stopping

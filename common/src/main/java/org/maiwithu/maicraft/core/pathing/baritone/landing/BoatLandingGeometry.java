@@ -13,7 +13,9 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** Geometry mirrors BoatItem's actual POV hit and a vanilla boat's 1.375 x 0.5625 dimensions. */
+/**
+ * 落地上船共用的空间检查：船能放在哪里、身体是否会卡住、视线是否畅通，以及周围哪里可以下船站住。
+ */
 final class BoatLandingGeometry {
     static AABB boatBox(Vec3 at) { return new AABB(at.x-0.6875, at.y+0.001, at.z-0.6875, at.x+0.6875, at.y+0.5625, at.z+0.6875); }
     static Vec3 support(BlockGetter view, Predicate<BlockPos> loaded, BlockPos landing) {
@@ -88,6 +90,7 @@ final class BoatLandingGeometry {
         for (int offset=-90;offset<=90;offset+=30) if (exit(view, loaded, spawn, 1.375, width, height, boatYaw+offset) != null) return true;
         return false;
     }
+    // 当前只接受与船底几乎同高度的下船支撑；没有在这里搜索更高或更低的一层。
     static Vec3 exit(BlockGetter view, Predicate<BlockPos> loaded, Vec3 spawn, double boatWidth,
                      double width, double height, float yaw) {
         Vec3 at = spawn.add(dismountOffset(boatWidth, width, yaw));
@@ -98,6 +101,7 @@ final class BoatLandingGeometry {
         return clear(view, loaded, new AABB(at.x-width/2, at.y+0.001, at.z-width/2,
                 at.x+width/2, at.y+height, at.z+width/2)) ? at : null;
     }
+    // 沿有限长度的视线检查区块是否已加载，未知区块不能作为已确认的放船或上船视线。
     private static boolean loadedRay(Predicate<BlockPos> loaded, Vec3 from, Vec3 to) {
         int count = Math.max(1, (int)Math.ceil(from.distanceTo(to)*4));
         if (count > 512) return false;

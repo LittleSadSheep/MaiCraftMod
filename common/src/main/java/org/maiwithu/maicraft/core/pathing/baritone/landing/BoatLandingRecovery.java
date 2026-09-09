@@ -17,9 +17,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** Optional cleanup of the exact inventory-backed boat created by one landing session.
- * It runs only after safe dismount; a failed eligibility check leaves the boat intact.
- * Entity destruction is not recovery: a matching inventory increment is required.
+/**
+ * 可选地回收本次创建的空船：先检查站稳、背包容量和周围安全地面，再攻击船，观察掉落物与库存增加。
+ * 条件不满足、掉落物不唯一或超时就把未回收结果报告出来，不把“船消失了”直接当作物品已拿回。
  */
 final class BoatLandingRecovery {
     private final UUID boatId;
@@ -95,6 +95,7 @@ final class BoatLandingRecovery {
                 || !room(ctx, new ItemStack(item))) return false;
         // The vanilla item drop can scatter before its pickup delay expires; prove the nearby
         // pickup area is dry and walkable before dismantling anything.
+        // 拆船前当前要求周围九个位置都能从玩家处安全走到，用来降低掉落物落在无法回收位置的风险。
         for (int x=-1;x<=1;x++) for (int z=-1;z<=1;z++) {
             if (!walkable(ctx, new Vec3(boat.getX()+x, boat.getY(), boat.getZ()+z))) return false;
         }
@@ -118,6 +119,7 @@ final class BoatLandingRecovery {
     static boolean capacity(ItemStack slot, ItemStack drop) {
         return slot.isEmpty() || ItemStack.isSameItemSameComponents(slot, drop) && slot.getCount()+drop.getCount() <= slot.getMaxStackSize();
     }
+    // 船确实不在了，并且对应物品数量至少增加一件，才把回收记为完成。
     static boolean recoveredIntoInventory(boolean boatPresent, int currentItems, int expectedItems) {
         return !boatPresent && expectedItems > 0 && currentItems >= expectedItems;
     }

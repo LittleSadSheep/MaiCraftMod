@@ -2,7 +2,9 @@ package org.maiwithu.maicraft.core.pathing.baritone.landing;
 
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
-/** Captured into each calculation before worker execution, like the embedded terrain settings. */
+/**
+ * 保存当前导航允许的落地手段和最近一次救援状态；本轮自动补料失败后先不重复补料，新导航配置时重新允许尝试。
+ */
 public final class LandingAssistPolicy {
     private static volatile TerrainPermit permit = TerrainPermit.PRESERVE;
     private static volatile boolean automaticSupplyAllowed = true;

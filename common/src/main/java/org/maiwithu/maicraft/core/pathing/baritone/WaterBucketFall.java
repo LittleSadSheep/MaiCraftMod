@@ -14,7 +14,9 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** Shared fall-planning and native bucket-use geometry, including replaceable plants and waterlogging. */
+/**
+ * 落地放水的规则与瞄准帮助：识别水源和含水方块，找脚下可点击表面，确认一桶水实际会进入哪一格。
+ */
 public final class WaterBucketFall {
     private WaterBucketFall() {}
 
@@ -23,6 +25,7 @@ public final class WaterBucketFall {
     }
 
     /** Source-water collision can be checked without pretending a waterlogged solid disappeared. */
+    // 只为检查地形把水临时视为排掉；含水半砖等仍保留其实体外形，不把它们整个当空气。
     public static BlockState dryGeometry(BlockState state) {
         if (state.is(Blocks.WATER)) return Blocks.AIR.defaultBlockState();
         return state.hasProperty(BlockStateProperties.WATERLOGGED)
@@ -46,6 +49,7 @@ public final class WaterBucketFall {
     }
 
     /** The POV bucket ray hits a plant's outline, so the source is above its exposed top. */
+    // 脚下有会被水冲走的低矮植物时，最多向上越过两格，找实际可见的放水位置。
     public static BlockPos exposedWaterCell(BlockGetter world, BlockPos feet) {
         BlockPos source = feet;
         for (int blocks=0;blocks<2;blocks++) {
@@ -88,6 +92,7 @@ public final class WaterBucketFall {
                 ? hit.getBlockPos() : hit.getBlockPos().relative(hit.getDirection())).immutable();
     }
 
+    // 回收需要是本次放下的、未受保护的可舀水源；不因为已经落进水里就取得这格原有水的所有权。
     public static boolean canRecover(BlockState water, boolean placedByThisFall, boolean protectedTarget) {
         return placedByThisFall && !protectedTarget && water.getBlock() instanceof BucketPickup && sourceWater(water);
     }

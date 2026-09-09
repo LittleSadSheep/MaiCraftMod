@@ -16,7 +16,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
-/** Immutable planning facts; never retains a player, world, inventory stack or boat entity. */
+/**
+ * 在规划时保存玩家的交互距离、体型、随身普通船和附近静止空船，供落地上船方案检查；目前最多记录三十二条船。
+ */
 public record BoatLandingSnapshot(BlockPos source, Vec3 eye, double blockReach, double entityReach,
                                   double width, double height, Item boatItem, List<BoatFact> boats) {
     public record BoatFact(UUID uuid, Vec3 position, AABB box, float yaw) {}
@@ -27,6 +29,7 @@ public record BoatLandingSnapshot(BlockPos source, Vec3 eye, double blockReach, 
     public BoatLandingSnapshot { source = source.immutable(); boats = List.copyOf(boats); }
     public static BoatLandingSnapshot empty() { return new BoatLandingSnapshot(BlockPos.ZERO, Vec3.ZERO, 0, 0, 0.6, 1.8, null, List.of()); }
     /** Planned departure needs time for native spawn and mount feedback; an ongoing fall still tries its best. */
+    // 按下落过程估算能否先放船、下一次更新上船、再留一次更新确认；每一步都要在撞上船体前留得出时间。
     public boolean airborneWindow(double drop, double gravity, double downwardSpeed) {
         if (!Double.isFinite(drop) || !Double.isFinite(gravity) || !Double.isFinite(downwardSpeed)
                 || drop<=0 || gravity<=0 || downwardSpeed<0) return false;
@@ -57,6 +60,7 @@ public record BoatLandingSnapshot(BlockPos source, Vec3 eye, double blockReach, 
         return new BoatLandingSnapshot(PlayerNav.playerFeet(player), player.getEyePosition(),
                 player.blockInteractionRange(), player.entityInteractionRange(), player.getBbWidth(), player.getBbHeight(), item, boats);
     }
+    // 先尝试目标旁已有的可交互空船，再考虑手里的船；还必须预先找到安全下船空间。
     public Plan plan(BlockGetter view, BlockPos from, BlockPos landing, Predicate<BlockPos> loaded) {
         if (!source.equals(from) || boatItem == null && boats.isEmpty()) return null;
         Vec3 spawn = BoatLandingGeometry.support(view, loaded, landing);
