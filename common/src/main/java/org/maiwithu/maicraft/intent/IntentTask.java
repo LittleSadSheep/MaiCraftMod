@@ -36,8 +36,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
- * 一个业务目标的执行外壳：保存当前步骤，启动具体动作子任务，并在失败时请求外部决策。
- * 调度器只选择这个父任务；子任务由父任务逐 tick 推进，不单独争抢全局任务槽。
+ * 把“我想做成这件事”一步步做出来，例如先取材料，再建房子。
+ * 这个类记住当前做哪一步，并调用负责走路、挖矿等具体动作的任务；遇到做不下去的情况就询问调用者。
+ * 调度器只看到这个总任务，里面的小任务由这里推进，不会把总任务挤走。
  */
 final class IntentTask implements Task {
 
@@ -82,6 +83,7 @@ final class IntentTask implements Task {
 
     @Override
     public boolean canRun(LocalPlayer ignored) {
+        // 总任务被暂停时不主动争取执行机会；能否马上停下，还要由外层判断当前动作是否安全。
         return !record.paused();
     }
 
@@ -106,12 +108,14 @@ final class IntentTask implements Task {
     }
 
     private TaskState tickSemanticParent() {
+        // 所有步骤都记为完成后，才报告整个目标成功。
         if (record.stepIndex() >= record.steps().size()) {
             terminalResult = successResult();
             return TaskState.SUCCESS;
         }
 
         IntentTaskRecord.DecisionAnswer answer = record.takeAnswer();
+        // 先处理调用者刚给的答复：取消、跳过、先补一个条件，或者修改目标后继续。
         if (answer != null) {
             if ("cancel".equals(answer.choice()) || "cancel_task".equals(answer.choice())) {
                 mechanicalContinuations.clear();
@@ -125,6 +129,7 @@ final class IntentTask implements Task {
                 return TaskState.RUNNING;
             }
             if ("skip".equals(answer.choice())) {
+                // “跳过”也会把这一步记为已处理，结果文字注明是人为跳过，并不说明游戏里真的做成了。
                 discardContinuation(currentGoal());
                 completeStep(TaskResult.ok("step skipped by explicit decision"));
                 return record.stepIndex() >= record.steps().size() ? TaskState.SUCCESS : TaskState.RUNNING;
@@ -139,7 +144,7 @@ final class IntentTask implements Task {
             return begin(resolved);
         }
 
-        // 已经开始的子任务先继续执行；不能每个 tick 都重新转换目标、创建一份新任务。
+        // 正在走路就继续走这条路，不能每一刻都重新创建“去目的地”的任务。
         if (child != null) {
             return tickChild();
         }
@@ -156,6 +161,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState begin(IntentAction action) {
+        // 目标转换后可能是“还在准备”“直接给出结果”“做一项动作”“等待条件”或“需要询问”。
         if (action == IntentAction.Pending.INSTANCE) return TaskState.RUNNING;
         if (action instanceof IntentAction.Report report) {
             if (!report.result().success()) return failStep(TaskState.FAILED, report.result());
@@ -166,10 +172,12 @@ final class IntentTask implements Task {
             return afterImmediate();
         }
         if (action instanceof IntentAction.Native nativeAction) {
+            // 某些动作只是为了看清情况，例如靠近电梯读楼层；做完还得回来重新判断原目标。
             reobserveAfterChild=nativeAction.reobserveAfterSuccess();
             return beginNative(nativeAction.record());
         }
         if (action instanceof IntentAction.Chain nextChain) {
+            // 一组内部动作按顺序做，记住做到第几个，每次只启动当前那个。
             chain = nextChain.actions();
             chainIndex = 0;
             return beginTool(chain.getFirst());
@@ -198,6 +206,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginTool(IntentAction.Tool action) {
+        // 根据内部工具名找到实现，例如 goto 对应移动；缺少实现时报告失败，不假装接单成功。
         MaiCraftTool tool = ToolRegistry.resolve(action.toolName());
         if (tool == null) {
             return failStep(
@@ -212,7 +221,7 @@ final class IntentTask implements Task {
                 + record.stepIndex() + "-" + (++childSerial);
         try {
             withExplicitAreaProtection(() -> {
-                // 内部工具原本会向全局任务槽提交记录；在此截获后作为 child，避免它替换自己的父任务。
+                // 工具原本会把任务交给总调度器；这里先接住，把它当作总任务里的小步骤执行。
                 TaskDispatch.captureNext(captured::set, () ->
                         tool.onGameCall(childCallId, action.arguments(), player, immediate::set));
                 return null;
@@ -225,6 +234,7 @@ final class IntentTask implements Task {
         }
 
         if (captured.get() != null) {
+            // 工具交回一张任务单，说明还要在游戏里继续做；立即返回的文字不能当作已完成。
             return beginNative(captured.get());
         }
 
@@ -241,6 +251,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
+            // 记住这一步的任务单，创建对应执行代码，只做第一次准备；后续每刻继续同一个对象。
             childRecord = nextRecord;
             childRecord.setState(TaskState.RUNNING);
             childRecord.markStarted(player.level().getGameTime());
@@ -268,6 +279,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState tickChild() {
+        // 先检查小任务自己的截止时间。总任务暂停时，这个时间目前不会一起往后推。
         if (player.level().getGameTime() >= childRecord.getDeadlineGameTime()) {
             childRecord.setState(TaskState.TIMEOUT);
         } else {
@@ -283,7 +295,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState finishChild() {
-        // 子任务结束先收取结果、释放输入，再决定推进步骤还是请求恢复；动作完成不必然等于整个目标完成。
+        // 小任务做完后先收结果、松开按键，再决定做下一步还是询问；“材料取完了”还不等于“房子建好了”。
         Task finishingChild = child;
         TaskRecord finishingRecord = childRecord;
         boolean reobserve=reobserveAfterChild;
@@ -300,10 +312,11 @@ final class IntentTask implements Task {
             if (child == finishingChild) clearChild();
         }
         if (result == null) result = defaultResult(state);
-        // 有些子任务只补齐了观察条件；成功后重新评估当前目标，不直接把业务步骤记为完成。
+        // 如果只是靠近电梯读到了楼层，就重新判断该去哪层，不能把“读到楼层”当成“已到目的地”。
         if(result.success() && reobserve) return TaskState.RUNNING;
         if (finishingRecord instanceof org.maiwithu.maicraft.core.task.build.BuildTaskRecord
                 && MachineAbilityAdapter.supports(currentGoal().ability())) {
+            // 机器方块搭好了，只能证明外形完成；不能据此说机器已经通电、运转或产出了物品。
             Map<String, Object> machineData = new LinkedHashMap<>(result.data());
             machineData.put("machine_geometry_verified", result.success());
             machineData.put("machine_production_verified", false);
@@ -331,6 +344,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState finishToolSuccess(TaskResult result) {
+        // 内部动作串还没做完就继续下一个；全部成功后，才把这一个目标步骤记为完成。
         if (!chain.isEmpty()) {
             chainIndex++;
             if (chainIndex < chain.size()) return TaskState.RUNNING;
@@ -343,6 +357,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState applySemanticAnswer(IntentTaskRecord.DecisionAnswer answer) {
+        // recover 表示“先做这件事，再重试原任务”；replace_goal 表示“原来这一步改做别的”。
         JsonObject details = answer.details();
         if (!details.has("goal") || !details.get("goal").isJsonObject()) {
             return requestDecision(RecoveryAdvisor.invalidSemanticAnswer(
@@ -371,7 +386,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState failStep(TaskState state, TaskResult result) {
-        // 子任务失败先记下这次尝试，再进入待决策状态；不在这里盲目重试，也不立即丢掉整个业务目标。
+        // 记下这次为什么失败，再询问接下来怎么办；保留总目标，等待重试、补条件、换目标或取消。
         TaskState failureState = state == null ? TaskState.FAILED : state;
         // A failed/abandoned execution can never authorize a later prior_result binding.
         record.discardInternalStepPosition(record.stepIndex());
@@ -395,6 +410,7 @@ final class IntentTask implements Task {
 
     /** Add one stable semantic effect ledger to every failed step before it crosses MCP. */
     private TaskResult withEffectLedger(TaskResult failure) {
+        // 失败时一起告诉调用者：前面哪些事已经做了，当前和后面还有哪些没做，避免重复开工。
         Map<String, Object> data = new LinkedHashMap<>(failure.data());
         data.put("completed_effects", completedEffects());
         data.put("remaining_effects", remainingEffects());
@@ -437,6 +453,7 @@ final class IntentTask implements Task {
 
     /** Return only the failed result for this exact still-current semantic step. */
     private JsonObject currentFailureResult() {
+        // 只有“当前这一步、当前这个目标”的失败才能拿来决定重试；改过目标后不能误用旧原因。
         List<IntentTaskRecord.AttemptSnapshot> attempts = record.attempts();
         if (attempts.isEmpty() || record.stepIndex() >= record.steps().size()) return null;
         IntentTaskRecord.AttemptSnapshot latest = attempts.getLast();
@@ -449,6 +466,7 @@ final class IntentTask implements Task {
     }
 
     private void captureMechanicalContinuation(Goal goal, TaskResult raw) {
+        // 机械连接可能已经装好一部分。记住内部给的恢复编号，下次重试才能核对并接着做，避免重复装配。
         if (goal == null || !("maicraft:connect_mechanical_power".equals(goal.ability())
                 || (MachineAbilityAdapter.MODIFY.equals(goal.ability())
                     && goal.parameters().has("operation")
@@ -489,6 +507,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState tickWait() {
+        // 先等到允许检查的时间，再看天色、血量或饱食度；条件没满足就继续等，不主动做其他事。
         if (player.level().getGameTime() < wait.notBeforeGameTime()) return TaskState.RUNNING;
         boolean satisfied = switch (wait.condition()) {
             case "elapsed" -> true;
@@ -532,6 +551,7 @@ final class IntentTask implements Task {
      * The LLM names the relationship; it never copies coordinates between steps.
      */
     private Goal resolvedCurrentGoal() {
+        // “去前面那一步找到的地方”要换成 Mod 自己确认过的位置，不能只凭文字猜坐标。
         Goal goal = currentGoal();
         Goal.SemanticTarget target = goal.target();
         if (target == null || !"prior_result".equals(target.kind())) return goal;
@@ -541,6 +561,7 @@ final class IntentTask implements Task {
     }
 
     private Goal.WorldPosition reportedPosition(Goal.SemanticTarget target) {
+        // 从已成功的步骤里找位置。只有一个时直接使用；有多个时按名称和描述匹配，打平则不擅自选。
         List<ReportedPosition> candidates = new ArrayList<>();
         List<IntentTaskRecord.StepSnapshot> completed = record.stepResults();
         for (int index = completed.size() - 1; index >= 0; index--) {
@@ -601,6 +622,7 @@ final class IntentTask implements Task {
     }
 
     private static int semanticScore(String query, ReportedPosition candidate) {
+        // 这是文字相似度打分，不是另一个大模型：描述、能力名和词片段重合越多，分数越高。
         if (query == null || query.isBlank()) return 0;
         String needle = normalizeSemanticText(query);
         IntentTaskRecord.StepSnapshot step = candidate.step();
@@ -627,6 +649,7 @@ final class IntentTask implements Task {
     }
 
     private static List<String> semanticUnits(String normalized) {
+        // 英文按空格拆词并排除 there 等泛指词；中文还拆出连续两个字，便于匹配较长描述的一部分。
         List<String> result = new ArrayList<>();
         for (String token : normalized.split(" +")) {
             if (token.length() < 2 || List.of(
@@ -673,6 +696,7 @@ final class IntentTask implements Task {
 
     @Override
     public void stop(LocalPlayer ignored, StopReason reason) {
+        // 临时暂停只通知小任务停下，保留它做到哪；取消或离开旧玩家则还要收取结果、移走小任务。
         Task stoppingChild = child;
         TaskRecord stoppingRecord = childRecord;
         if (stoppingChild == null) {
@@ -718,6 +742,7 @@ final class IntentTask implements Task {
 
     @Override
     public TaskResult result(TaskState terminal) {
+        // 总任务结束前，如果还有小任务就先停止；把部分完成的情况保留下来，并且只发一次结束消息。
         if (child != null) {
             stop(player, StopReason.REPLACED);
         }
@@ -777,6 +802,7 @@ final class IntentTask implements Task {
     }
 
     private static TaskResult parseImmediate(String json) {
+        // 把立即回复的 JSON 换成统一结果；不合法的回复按工具失败处理，附加 data 暂存为 tool_data。
         try {
             JsonObject value = JsonParser.parseString(json).getAsJsonObject();
             boolean success = value.has("success") && value.get("success").getAsBoolean();
@@ -817,6 +843,7 @@ final class IntentTask implements Task {
     }
 
     private void refreshProtectionCache() {
+        // 只有当前目标明确点名要保护的区域才生效；把那些区域里不能挖、不能放、不能走的格子交给导航。
         String dimension = player.level().dimension().location().toString();
         int step = record.stepIndex();
         if (step == cachedProtectionStep && dimension.equals(cachedProtectionDimension)) return;
@@ -942,6 +969,7 @@ final class IntentTask implements Task {
     }
 
     private static Map<String, Object> sanitizeMap(Map<String, Object> source) {
+        // 对外回复前，按字段名删掉内部使用的坐标、路径、槽位等；嵌套的 Map、列表和 JSON 也继续检查。
         if (source == null || source.isEmpty()) return Map.of();
         Map<String, Object> clean = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : source.entrySet()) {
@@ -1017,6 +1045,7 @@ final class IntentTask implements Task {
     }
 
     private static Object sanitizeEntry(String key, Object value) {
+        // 已经实际挖过的方块是供人核查的事实，因此这个字段例外保留位置，最多列出三十二块。
         if (!"confirmed_harvests".equals(key)) return sanitizeValue(value);
         // Committed block changes are auditable world evidence, not a replayable planned route.
         var json = new com.google.gson.Gson().toJsonTree(value);

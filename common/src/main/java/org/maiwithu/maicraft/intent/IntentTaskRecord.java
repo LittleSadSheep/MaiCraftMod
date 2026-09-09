@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-/** TaskRecord used by the public semantic-intent surface. */
+/** MCP 总任务的任务单：记住总目标、做到了哪一步、为什么暂停，以及正在等调用者回答什么。 */
 public final class IntentTaskRecord extends TaskRecord {
 
     private static final int MAX_ATTEMPTS = 64;
@@ -73,6 +73,7 @@ public final class IntentTaskRecord extends TaskRecord {
             DecisionAnswer pendingAnswer,
             TerminalSnapshot terminal,
             long restoredGameTime) {
+        // 只恢复目标和已经确认的结果，不恢复旧路线或菜单操作；没做完的任务先暂停，等明确要求继续。
         IntentTaskRecord record = new IntentTaskRecord(
                 externalId, planId, goal, Objects.requireNonNull(bindingKey, "bindingKey"));
         record.steps.clear();
@@ -140,6 +141,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     void observeExecution(Map<String, Object> progress, long gameTime) {
+        // 复制最近一次看到的执行进度，查询者读到的是这次观察的内容，不持有会继续变化的任务对象。
         activeExecution = PROGRESS_JSON.toJsonTree(progress).getAsJsonObject();
         activeExecution.addProperty("observed_game_time", gameTime);
     }
@@ -159,6 +161,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     void addStepResult(StepSnapshot snapshot) {
+        // 先记下这一步的结果，再把“当前步骤”往后挪一格，并通知保存功能有新内容。
         stepResults.add(snapshot);
         stepIndex++;
         changed();
@@ -193,12 +196,14 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     void addAttempt(AttemptSnapshot snapshot) {
+        // 同一步可以失败多次，只保留最近六十四次尝试，避免历史越积越大。
         attempts.add(snapshot);
         while (attempts.size() > MAX_ATTEMPTS) attempts.remove(0);
         changed();
     }
 
     void insertRecovery(Goal recovery) {
+        // 例如造炉子缺石头：把“找石头”插在“造炉子”前面，找齐后还会回到造炉子这一步。
         List<Goal> expanded = expandedSteps(recovery, "recovery");
         // Insert every prerequisite before the failed step in one semantic-plan mutation. The
         // original step stays immediately after the expansion, so it is retried only after the
@@ -213,6 +218,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     void replaceCurrent(Goal replacement) {
+        // 调用者改变主意：替换还没做成的这一步，已完成的步骤和后续步骤保留。
         if (stepIndex >= steps.size()) {
             throw new IllegalStateException("there is no current semantic step to replace");
         }
@@ -236,6 +242,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     public boolean pause(long gameTime, String reason) {
+        // 这里只记“暂停”和原因，不直接松按键；调度器之后根据这个标记决定是否继续调用执行代码。
         if (getState().isTerminal()) return false;
         if (pause == null) {
             pause = new PauseSnapshot(reason, gameTime, decision == null ? null : decision.id());
@@ -245,6 +252,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     public boolean resume() {
+        // 还有问题没回答时不能直接继续，必须先 answer；已经结束的任务也不能当作暂停任务恢复。
         if (getState().isTerminal() || decision != null) return false;
         pause = null;
         changed();
@@ -252,6 +260,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     void requestDecision(DecisionSnapshot next, long gameTime) {
+        // 有新问题时，旧答复作废，并暂停任务，等这一个问题得到有效回答。
         decision = Objects.requireNonNull(next, "decision");
         pendingAnswer = null;
         pause = new PauseSnapshot("waiting_for_decision", gameTime, next.id());
@@ -259,6 +268,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     public boolean answer(UUID decisionId, String choice, JsonObject details) {
+        // 问题编号和选项都必须匹配，防止迟到的答复被用到另一个问题上；接受后下一次执行再处理。
         if (getState().isTerminal() || terminal != null) return false;
         if (decision == null || !decision.id().equals(decisionId) || !decision.accepts(choice)) return false;
         pendingAnswer = new DecisionAnswer(decisionId, choice,
@@ -270,6 +280,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     DecisionAnswer takeAnswer() {
+        // 答复只取一次，避免每个游戏刻都重复执行同一个“重试”决定。
         DecisionAnswer answer = pendingAnswer;
         pendingAnswer = null;
         if (answer != null) changed();
@@ -277,6 +288,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     void terminal(TaskState state, TaskResult result, long gameTime) {
+        // 最后结果确定后，清掉暂停、待答问题和未处理答复；结束的任务不再等待人回答。
         if (!state.isTerminal()) throw new IllegalArgumentException("terminal receipt requires a terminal state");
         terminal = new TerminalSnapshot(state, result == null ? "{}" : result.toJson(), gameTime);
         setState(state);
