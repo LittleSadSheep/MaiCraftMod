@@ -63,7 +63,7 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
                 + receipt.detail(), FailureType.UNKNOWN);
         return TaskState.FAILED;
     }
-    /** 丢掉这次点击和瞄准的等待记录；这段代码不会主动叫醒已经睡着的玩家。 */
+    /** 丢掉任务自己的点击和瞄准记录；当前没有退役动作端口里的待确认点击，也不会主动叫醒已睡着的玩家。 */
     @Override protected void cleanup() { receipt = null; aimConvergence.reset(); }
     @Override protected String successMessage() { return "sleeping in bed"; }
     @Override protected String cancelledMessage() { return "sleep interrupted"; }

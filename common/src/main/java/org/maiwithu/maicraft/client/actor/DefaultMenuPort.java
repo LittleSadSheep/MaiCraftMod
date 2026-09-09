@@ -6,7 +6,7 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 
-/** Default one-click-at-a-time menu port using MultiPlayerGameMode. */
+/** 实际操作玩家菜单：一次点一个槽位或配方，等结果明确后再接受下一次；也负责任务结束时关好界面。 */
 public final class DefaultMenuPort implements MenuPort {
     String diagnosticState() {
         return active == null ? "none" : active.kind() + ":" + active.status()
@@ -19,6 +19,7 @@ public final class DefaultMenuPort implements MenuPort {
 
     @Override
     public boolean ensureVisible(LocalPlayerContext context) {
+        // 先停移动。需要背包界面时打开它，并等它真的绘制过；不会直接在隐藏的物品栏对象上点击。
         DefaultLocalPlayerContext current = requireSubmission(context);
         current.body().releaseAll();
         if (closingMenu != null) return false;
@@ -45,7 +46,8 @@ public final class DefaultMenuPort implements MenuPort {
 
     @Override
     public MenuReceipt click(LocalPlayerContext context, int slot, int button, ClickType clickType,
-                             MenuConfirmation confirmation, int timeoutTicks) {
+                              MenuConfirmation confirmation, int timeoutTicks) {
+        // 检查旧点击已结束、当前菜单可见、槽位合法，再发这一次点击并记住之前的菜单版本。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
         requireVisible(current);
@@ -65,7 +67,8 @@ public final class DefaultMenuPort implements MenuPort {
 
     @Override
     public MenuReceipt swapInventoryToHotbar(LocalPlayerContext context, int sourceInventorySlot,
-                                             int hotbarSlot, int timeoutTicks) {
+                                              int hotbarSlot, int timeoutTicks) {
+        // 只把普通背包第九格以后的物品换到快捷栏；交换前复制两边物品，之后必须证明它们真的对调。
         DefaultLocalPlayerContext current = requireSubmission(context);
         if (sourceInventorySlot < 9 || sourceInventorySlot > 35) {
             throw new IllegalArgumentException("sourceInventorySlot must be a non-hotbar main inventory slot");
@@ -99,7 +102,8 @@ public final class DefaultMenuPort implements MenuPort {
 
     @Override
     public MenuReceipt placeRecipe(LocalPlayerContext context, RecipeHolder<?> recipe, boolean shift,
-                                   MenuConfirmation confirmation, int timeoutTicks) {
+                                    MenuConfirmation confirmation, int timeoutTicks) {
+        // 通过游戏的配方簿功能摆配方，不自己往合成格填假物品；是否摆成功由调用者的结果条件判断。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
         requireVisible(current);
@@ -119,6 +123,7 @@ public final class DefaultMenuPort implements MenuPort {
 
     @Override
     public MenuReceipt close(LocalPlayerContext context, int timeoutTicks) {
+        // 已经没有界面、光标和背包合成格都为空时直接完成；否则记下正在关闭的菜单，逐刻处理。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
         AbstractContainerMenu menu = current.player().containerMenu;
@@ -137,6 +142,7 @@ public final class DefaultMenuPort implements MenuPort {
     }
 
     private void advanceClose(DefaultLocalPlayerContext current, MenuReceipt receipt) {
+        // 只关当时那一个菜单；等最后操作被显示过并且本刻还有操作机会，再调用原版关闭流程。
         if (current.player().containerMenu != closingMenu) {
             closingMenu = null;
             receipt.finish(MenuReceipt.Status.UNCERTAIN, "the menu changed before its GUI could be closed");
@@ -172,6 +178,7 @@ public final class DefaultMenuPort implements MenuPort {
     @Override
     public MenuReceipt closeForTaskBoundary(
             LocalPlayerContext context, int timeoutTicks, String boundaryReason) {
+        // 任务结束时可以先把旧的未确认点击标为不确定，再创建关闭请求，避免旧点击一直占位而关不了菜单。
         requireSubmission(context);
         if (active != null && !active.terminal() && active.kind() == MenuReceipt.Kind.CLOSE) return active;
         if (active != null && !active.terminal()) {
@@ -187,6 +194,7 @@ public final class DefaultMenuPort implements MenuPort {
 
     @Override
     public MenuReceipt poll(LocalPlayerContext context, MenuReceipt receipt) {
+        // 先核对玩家和菜单没被替换，再看槽位的期望变化；一次菜单版本变化本身不说明具体哪项操作产生了它。
         context.requireCurrent();
         requireActive(receipt);
         if (receipt.terminal()) return receipt;
@@ -235,6 +243,7 @@ public final class DefaultMenuPort implements MenuPort {
                             "the exact synchronized menu postcondition confirmed the transaction");
                 } else if (receipt.appliedStableWithoutRevision(
                         context.tickRevision(), unacknowledgedStabilityTicks(context))) {
+                    // 没有菜单版本更新时，目前允许本地期望状态稳定一段时间后当作成功，不是收到了专门的服务器确认。
                     // MultiPlayerGameMode applies menu clicks optimistically before the server can
                     // correct them. When an accepted click produces no stateId update, absence of
                     // a correction beyond one observed RTT plus a small tick margin is the only
@@ -267,11 +276,7 @@ public final class DefaultMenuPort implements MenuPort {
         return receipt;
     }
 
-    /**
-     * Stable positive evidence substitutes for an omitted server slot echo only after enough time
-     * for a rejection/correction to make a round trip. The two-tick margin covers server tick and
-     * client packet scheduling; bounds keep stale/unknown latency data within the receipt window.
-     */
+    /** 根据已知延迟估计无回显时要等多久，但当前最多十个客户端刻；高延迟时可能短于实际往返时间。 */
     private static int unacknowledgedStabilityTicks(LocalPlayerContext context) {
         var info = context.connection().getPlayerInfo(context.player().getUUID());
         long latencyMillis = info == null ? 0L : Math.max(0, info.getLatency());
@@ -291,6 +296,7 @@ public final class DefaultMenuPort implements MenuPort {
      * before automation releases the menu.
      */
     void revokeForHumanHandoff(net.minecraft.client.player.LocalPlayer player, String reason) {
+        // 人工接管时结束旧等待并走原版关闭；光标上的物品由游戏正常返还或按溢出规则处理。
         if (active != null && !active.terminal()) {
             active.finish(MenuReceipt.Status.UNCERTAIN, reason);
         }
@@ -327,6 +333,7 @@ public final class DefaultMenuPort implements MenuPort {
     }
 
     private void requireIdle() {
+        // 还有上一项菜单操作没确认时不能再点，避免后续结果无法对应到哪次点击。
         if (active != null && !active.terminal()) {
             throw new IllegalStateException("a menu transaction is already awaiting confirmation");
         }
@@ -338,6 +345,7 @@ public final class DefaultMenuPort implements MenuPort {
         }
     }
     void advance(LocalPlayerContext context) {
+        // 即使原任务对象已经结束，动作入口仍继续完成挂着的关闭，并在此期间阻止新任务用同一刻再操作。
         MenuReceipt receipt = active;
         if (receipt != null && !receipt.terminal()) {
             poll(context, receipt);

@@ -8,7 +8,7 @@ import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
-/** A displayed menu, including a rendered frame, is required before automated transactions. */
+/** 管理菜单可见性的等待：界面必须对应当前菜单，并在改变后真正绘制过，自动化才可以点下一次。 */
 public final class MenuVisibility {
     private static Screen renderedScreen;
     private static long renderedFrame;
@@ -37,6 +37,7 @@ public final class MenuVisibility {
     }
 
     boolean ready(LocalPlayerContext context) {
+        // 同时满足菜单对象匹配、最少等待刻数和新画面帧；有菜单对象但没显示出来不算就绪。
         observe(context);
         return observedScreen != null && matches(context.minecraft(), context.player().containerMenu)
                 && context.tickRevision() >= readyTick
@@ -44,6 +45,7 @@ public final class MenuVisibility {
     }
 
     void observe(LocalPlayerContext context) {
+        // 换了界面或菜单对象，就重新等四刻并要求再绘制一帧，避免刚打开就连点。
         Screen screen = context.minecraft().screen;
         AbstractContainerMenu menu = context.player().containerMenu;
         if (screen != observedScreen || menu != observedMenu) {
@@ -55,6 +57,7 @@ public final class MenuVisibility {
     }
 
     void changed(LocalPlayerContext context) {
+        // 每次操作后至少再等两刻和一帧，让上一次结果有显示出来的机会。
         observe(context);
         readyTick = Math.max(readyTick, context.tickRevision() + 2);
         afterFrame = renderedFrame;

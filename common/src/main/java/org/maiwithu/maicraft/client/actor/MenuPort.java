@@ -4,9 +4,9 @@ package org.maiwithu.maicraft.client.actor;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.crafting.RecipeHolder;
 
-/** Serialized client menu transactions. A later click is forbidden until the prior receipt settles. */
+/** 菜单操作接口：前一次还没结束就不能点下一次；查询结果本身不发新点击。 */
 public interface MenuPort {
-    /** Open the player inventory if needed; wait for the matching GUI and a visible action cadence. */
+    /** 必要时显示玩家背包，并等对应界面真正可操作。 */
     boolean ensureVisible(LocalPlayerContext context);
 
     /** Mark a GUI operation submitted through a mod's native protocol. */
@@ -26,11 +26,7 @@ public interface MenuPort {
 
     MenuReceipt close(LocalPlayerContext context, int timeoutTicks);
 
-    /**
-     * End a menu owned by a terminating task. Any older pending menu receipt is first retired so
-     * it cannot prevent the close submission; the returned close receipt remains owned by this
-     * port and will continue to be advanced at the actor boundary even after the task is gone.
-     */
+    /** 任务结束时先结束旧等待再关菜单；即使原任务对象被移走，动作入口也会继续完成这次关闭。 */
     MenuReceipt closeForTaskBoundary(
             LocalPlayerContext context, int timeoutTicks, String boundaryReason);
 

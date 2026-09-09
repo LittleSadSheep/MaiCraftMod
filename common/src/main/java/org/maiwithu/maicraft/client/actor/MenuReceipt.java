@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.client.actor;
 
 import java.util.UUID;
 
-/** Receipt for exactly one menu click, recipe placement, or close request. */
+/** 一次菜单操作的等待记录：保存原菜单编号和版本、期望结果，以及何时算等待超时。 */
 public final class MenuReceipt {
     public enum Kind { CLICK, SWAP_TO_HOTBAR, PLACE_RECIPE, CLOSE }
     public enum Status { PENDING, CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, DIVERGED, UNCERTAIN }
@@ -52,6 +52,7 @@ public final class MenuReceipt {
     boolean allowContainerChange() { return allowContainerChange; }
     MenuConfirmation confirmation() { return confirmation; }
     boolean appliedStableWithoutRevision(long tickRevision, int requiredStableTicks) {
+        // 没收到新版本但画面已像成功时，从首次匹配开始计时；是否允许靠这种等待推断成功，由菜单端口决定。
         if (unacknowledgedAppliedSince == Long.MIN_VALUE) {
             unacknowledgedAppliedSince = tickRevision;
             return false;
@@ -62,6 +63,7 @@ public final class MenuReceipt {
         unacknowledgedAppliedSince = Long.MIN_VALUE;
     }
     void finish(Status status, String detail) {
+        // 已结束的结果不会在这里被后来的槽位回滚改写，因此不能过早给出确定结论。
         if (terminal()) return;
         this.status = status;
         this.detail = detail;
