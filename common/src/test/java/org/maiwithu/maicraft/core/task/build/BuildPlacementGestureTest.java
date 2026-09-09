@@ -95,7 +95,32 @@ public final class BuildPlacementGestureTest {
                             && BuildPlacementGeometry.liveGestureFrom(h.player, adjacent, Map.of(), h.player.position()) == null,
                     "feet penetrating the slab are still rejected by both geometry paths");
         }
+        diagonalWallCornersRejectEveryPlanningEntry();
         System.out.println("BuildPlacementGestureTest: passed");
+    }
+
+    private static void diagonalWallCornersRejectEveryPlanningEntry() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.position(new Vec3(6.5, 1, 6.5));
+            var target = new BuildTaskRecord.Target(Blocks.STONE, Items.STONE,
+                    new BlockPos(7, 2, 7), "beyond touching wall corners", null, null, null);
+            h.set(target.pos().below(), Blocks.STONE.defaultBlockState());
+            for (int y = 1; y <= 3; y++) {
+                h.set(new BlockPos(6, y, 7), Blocks.STONE.defaultBlockState());
+                h.set(new BlockPos(7, y, 6), Blocks.STONE.defaultBlockState());
+            }
+            check(BuildPlacementGeometry.currentGesture(h.player, target, Map.of()) == null,
+                    "current stance cannot place through a zero-width diagonal corner");
+            check(BuildPlacementGeometry.liveGestureFrom(h.player, target, Map.of(), h.player.position()) == null,
+                    "worksite candidates cannot certify the same impossible corner click");
+            var search = new BuildPlacementGeometry.PlanSearch(h.player, target, Map.of(), false, false,
+                    h.player.blockPosition()::equals);
+            while (!search.advance(256).complete()) { }
+            check(search.results().isEmpty(), "incremental planning shares the same corner rejection");
+            h.position(new Vec3(7.5, 1, 8.5));
+            check(BuildPlacementGeometry.currentGesture(h.player, target, Map.of()) != null,
+                    "walking around to the open side still yields a real placement gesture");
+        }
     }
 
     private static void check(boolean condition, String message) {

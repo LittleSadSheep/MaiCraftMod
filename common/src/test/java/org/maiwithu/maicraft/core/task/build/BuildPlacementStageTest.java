@@ -45,6 +45,7 @@ public final class BuildPlacementStageTest {
         check(checkedLayers == 18, "test includes every interior layer and the final roof");
         rejectsActualObstructions(plan, interior);
         partialShapesLeaveRealRayOpenings();
+        sharedCornersNeedRealClearance();
         System.out.println("BuildPlacementStageTest: passed; checked 18 closed-volume construction layers");
     }
 
@@ -67,6 +68,34 @@ public final class BuildPlacementStageTest {
         world.cells.put(slab, Blocks.STONE.defaultBlockState());
         check(!stage.rayClear(new Vec3(.5, 65.75, .5), new Vec3(3.1, 65.75, .5), clicked),
                 "full blocks still block the open-half ray");
+    }
+
+    private static void sharedCornersNeedRealClearance() {
+        TestWorld world = new TestWorld();
+        var active = target(new BlockPos(2, 65, 2), false);
+        BlockPos clicked = active.pos().below();
+        BlockPos left = new BlockPos(1, 65, 2), right = new BlockPos(2, 65, 1);
+        var stage = new BuildPlacementStage(world, pos -> true, Map.of(), active, false);
+        // Feet are at (1.5, 64, 1.5): both the standing and crouching rays cross the upper wall corner.
+        Vec3 point = new Vec3(2.5, 64.9999, 2.5);
+        world.cells.put(left, Blocks.STONE.defaultBlockState());
+        world.cells.put(right, Blocks.STONE.defaultBlockState());
+        for (double eyeHeight : new double[]{1.62, 1.27})
+            check(!stage.rayClear(new Vec3(1.5, 64 + eyeHeight, 1.5), point, clicked),
+                    "touching walls cannot be clicked through their zero-width shared corner");
+        world.cells.remove(left);
+        check(stage.rayClear(new Vec3(1.5, 65.62, 1.7), point, clicked),
+                "a nearby ray with actual clearance around the remaining wall stays available");
+        world.cells.put(left, Blocks.GLASS_PANE.defaultBlockState());
+        world.cells.put(right, Blocks.GLASS_PANE.defaultBlockState());
+        check(stage.rayClear(new Vec3(1.5, 65.62, 1.5), point, clicked),
+                "partial outlines leave a real gap even when their block cells touch at a corner");
+        world.cells.clear();
+        Map<Long, BuildTaskRecord.Target> future = Map.of(
+                left.asLong(), target(left, false), right.asLong(), target(right, false));
+        var live = new BuildPlacementStage(world, pos -> true, future, active, false);
+        check(live.rayClear(new Vec3(1.5, 65.62, 1.5), point, clicked),
+                "planned walls do not become live corner occluders before they have been built");
     }
 
     private static void rejectsActualObstructions(Map<Long, BuildTaskRecord.Target> plan, BuildTaskRecord.Target active) {

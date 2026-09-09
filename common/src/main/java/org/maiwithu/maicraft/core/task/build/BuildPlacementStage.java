@@ -7,6 +7,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -14,6 +15,8 @@ import net.minecraft.world.phys.Vec3;
  * 预检可以把较早的目标当作已完成；真正施工时一律读现场，避免把还没盖的屋顶当成已经挡住视线。
  */
 final class BuildPlacementStage implements BlockGetter {
+    // A small stability margin around actual outlines prevents aiming through zero-width shared edges.
+    private static final double RAY_CLEARANCE = 1.0 / 64.0;
     private final BlockGetter world;
     private final Predicate<BlockPos> loaded;
     private final Map<Long, BuildTaskRecord.Target> targets;
@@ -66,17 +69,22 @@ final class BuildPlacementStage implements BlockGetter {
         return state(feet.below()).getFluidState().isEmpty();
     }
 
-    // 沿视线大约每十二分之一格取样，遇到的方块再按真实外形检查遮挡；当前目标和被点击格交给放置检查。
+    // Enumerate the short ray's bounding cells: point sampling skips both walls at a shared corner.
+    // Inflate the actual outline boxes, not the whole block, so slabs, stairs and panes retain real gaps.
     boolean rayClear(Vec3 from, Vec3 to, BlockPos clicked) {
-        Vec3 delta = to.subtract(from);
-        int samples = Math.max(2, (int) Math.ceil(delta.length() * 12));
-        BlockPos previous = null;
-        for (int i = 1; i < samples; i++) {
-            BlockPos cell = BlockPos.containing(from.add(delta.scale(i / (double) samples)));
-            if (cell.equals(clicked) || cell.equals(active.pos()) || cell.equals(previous)) continue;
-            previous = cell;
-            if (state(cell).getShape(this, cell).clip(from, to, cell) != null) return false;
+        AABB bounds = new AABB(from, to).inflate(RAY_CLEARANCE);
+        for (BlockPos cell : BlockPos.betweenClosed(BlockPos.containing(bounds.minX, bounds.minY, bounds.minZ),
+                BlockPos.containing(bounds.maxX, bounds.maxY, bounds.maxZ))) {
+            if (cell.equals(clicked) || cell.equals(active.pos())) continue;
+            // Cull cells before reading shapes; all callers already cap the ray to interaction reach.
+            if (!intersectsRay(new AABB(cell).inflate(RAY_CLEARANCE), from, to)) continue;
+            for (AABB box : state(cell).getShape(this, cell).toAabbs())
+                if (intersectsRay(box.move(cell).inflate(RAY_CLEARANCE), from, to)) return false;
         }
         return true;
+    }
+
+    private static boolean intersectsRay(AABB box, Vec3 from, Vec3 to) {
+        return box.contains(from) || box.contains(to) || box.clip(from, to).isPresent();
     }
 }
