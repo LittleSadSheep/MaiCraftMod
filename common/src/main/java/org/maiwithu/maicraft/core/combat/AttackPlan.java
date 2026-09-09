@@ -3,18 +3,9 @@ package org.maiwithu.maicraft.core.combat;
 import org.maiwithu.maicraft.core.combat.Battlefield.Foe;
 
 /**
- * 这一刻该做什么、对谁做。<b>本能派的仗与模型派的 {@code attack} 问的是同一个函数</b>
- * ——爬行者该退多远,不该在反射里写一遍、在工具里再写一遍。
- *
- * <h2>输入是整个局面,不是一个目标</h2>
- * 见 {@link Battlefield}。"该不该躲"是全场的事,"打谁"也要看全场(挑最近的、跳过打不了的、
- * 记得上一刻打的那只)。把这些挂在单目标的描述上,每加一个考量就多一个字段,而且顺序一乱
- * 就出现"她在打史莱姆,苦力怕在旁边点火"这种局面。
- *
- * <h2>它有记忆</h2>
- * {@link #decide} 收上一刻的决定。两处需要:<b>迟滞</b>(已经在挥击时,目标退开一点点不该
- * 让她立刻重新起步寻路)与<b>承诺</b>(选中一只就打完再换,否则一群会分裂的怪里"最近那只"
- * 每刻都在变,她永远在转向)。没有记忆的判据只能靠调用方在外面打补丁。
+ * 看这一刻的战场，建议继续近战、用弓、撤退或结束。
+ * 它只读传入的数据，不控制玩家。上一刻选中的敌人还能打时尽量继续打它，避免在一群怪之间不断换目标。
+ * 真正的移动、挥击、举盾和拾取由 AttackCompanionTask 执行，这里不保证这些后续动作一定成功。
  */
 public final class AttackPlan {
 
@@ -73,6 +64,7 @@ public final class AttackPlan {
     /**
      * @param last 上一刻的决定;第一次传 {@code null}
      */
+    // 依次判断是否要逃、选谁打、用近战还是弓。低血量或没武器会先考虑撤退，除非已被判定无路可退。
     public static Move decide(Battlefield b, Move last) {
         // ① 扛不住 —— 一切"怎么打"的讨论都以她还站得住为前提。
         if (outmatched(b.effectiveHealth()) && !b.cornered()) {
@@ -113,6 +105,7 @@ public final class AttackPlan {
      * 打谁。<b>先打近的,但选定之后打完再换</b>——每刻按距离重选的话,一群会分裂的史莱姆里
      * "最近那只"每刻都在变,她永远在转向,而每次转向都会拆掉刚算好的路径。
      */
+    // 上次目标仍允许打就继续盯住它；否则在能打的候选里选最近者，同距时用编号稳定顺序。
     private static Foe pick(Battlefield b, Move last) {
         Foe kept = last == null ? null : b.byId(last.foeId());
         if (kept != null && fightable(b, kept)) {
@@ -138,6 +131,7 @@ public final class AttackPlan {
      * 候选的话,判据会在安全线上一格 AVOID、一格 ABANDON 地来回跳——放弃后下一刻又被选回来,
      * 实测每秒三轮。躲它归 ② 那一档,不归"打谁"。
      */
+    // 这里只选获准攻击的目标。已经准备爆炸的目标还要求有远程武器，避免计划贴脸去打。
     private static boolean fightable(Battlefield b, Foe f) {
         if (!f.authorized()) {
             return false;
@@ -161,6 +155,7 @@ public final class AttackPlan {
      * <p><b>"走不到又射不到"不在这儿处理</b>:那一只根本不该还是目标。任务层在寻路判出
      * NO-PATH 那一刻就把它撤了授权,{@link #fightable} 自然选不中它。
      */
+    // 有远程武器时，爆炸危险、近战走不到或没有近战武器，都倾向用弓；其他情况继续近战走位。
     private static Action actionAgainst(Battlefield b, Foe foe) {
         if (!b.hasRanged()) {
             return Action.SKIRMISH;   // 没弓:走得到走不到都只能凑近了打

@@ -12,21 +12,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemAttributeModifiers;
 
 /**
- * 这把武器<b>打这个目标</b>能打多少——用来在自己的几把武器之间排序。
- *
- * <h2>为什么不能只读物品的攻击力</h2>
- * 攻击力是个与目标无关的常数,于是一把亡灵杀手 V 的铁剑打僵尸会输给一把光板钻石剑,
- * 而实际正相反。但 1.21 的条件附魔求值只接受服务端世界；第一人称客户端不能伪造
- * {@code ServerLevel}。这里因此只计算客户端可验证的武器属性与物品自身加伤，条件附魔
- * 留给服务端在真实攻击时裁决，不为了排序偷读服务端世界。
- *
- * <h2>算了什么,没算什么</h2>
- * 算:武器自带的攻击力 + 附魔对该目标的加成 + 物品自身的额外伤害
- * ({@link Item#getAttackDamageBonus},重锤的下坠加伤走这里)。
- *
- * <p>没算:力量效果、暴击、目标的护甲与抗性。<b>不是漏了,是它们不改变排序</b>——
- * 力量是加同一个常数,护甲与抗性是乘同一个系数,暴击是乘 1.5,三者对每把候选武器
- * 施加的都是同一个单调变换。要的既然只是"哪把最狠",算它们纯属白算。
+ * 为挑近战武器估一个比较分，不是计算这一击实际会扣多少血。
+ * 当前只计算固定攻击力加成和物品自身的额外伤害；不计算附魔、挥动速度、暴击、目标护甲等完整战斗效果。
+ * 所以“分数更大”只代表这份简化估算更高，不能保证对每个目标都更合适。
  */
 public final class WeaponDamage {
 
@@ -37,6 +25,7 @@ public final class WeaponDamage {
      *
      * @return 该武器打该目标的相对强弱;弓弩这类攻击力为零的返回 0,它们不走近战这条路
      */
+    // 先取武器在主手时增加的固定攻击力，再加物品自身对目标的额外伤害；没有固定加伤就按零分。
     public static double against(Player attacker, Entity target, ItemStack weapon) {
         if (weapon.isEmpty()) {
             return 0.0;
@@ -53,6 +42,7 @@ public final class WeaponDamage {
      * 物品给主手加的那一档攻击力。只认 {@code ADD_VALUE}:乘法档改的是"已经加完的总额",
      * 脱离基础值单看没有意义,而这里比较的正是各把武器各自的那一档。
      */
+    // 只累加主手 ATTACK_DAMAGE 的 ADD_VALUE 项。乘法属性、攻击速度和条件附魔不参与本次排序。
     public static double flatAttackDamage(ItemStack stack) {
         if (stack.isEmpty()) {
             return 0.0;

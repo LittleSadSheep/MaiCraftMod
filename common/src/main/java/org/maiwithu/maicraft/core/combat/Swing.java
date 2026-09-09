@@ -1,8 +1,8 @@
 package org.maiwithu.maicraft.core.combat;
 
 /**
- * 什么时候可以挥这一下。<b>全仓只此一处</b>——挥击时机曾经在两个地方各写一份阈值
- * (任务里 0.99、身体动作里 0.95),同一个判断给出两种答案,而两处都在打同一只怪。
+ * 集中给出近战距离估算和挥击等待条件。
+ * 这里返回“可以尝试打”，真正是否瞄准、隔墙、命中，还要由后面的第一人称交互检查。
  */
 public final class Swing {
 
@@ -25,6 +25,7 @@ public final class Swing {
     private Swing() {}
 
     /** 她这一刻能够到多远,<b>眼睛到碰撞箱</b>——原版那条射线的长度。 */
+    // 当前把触及距离至少按三格计算；若玩家属性被降低到三格以下，这个下限仍会保留。
     public static double reachOf(double nativeInteractionRange) {
         return Math.max(MIN_REACH, nativeInteractionRange);
     }
@@ -39,6 +40,7 @@ public final class Swing {
      * <p>差别不小:大史莱姆宽 2.04,光半宽就一格出头。按 3.0 硬比会把它判成"够不着",
      * 而原版玩家是打得到的——判据与站位都要这个数,不是那个 3.0。
      */
+    // 战斗目标距离按实体位置算，因此加上目标半个宽度，近似表示手能碰到身体表面。
     public static double reachTo(double nativeInteractionRange, double targetWidth) {
         return reachOf(nativeInteractionRange) + targetWidth / 2.0;
     }
@@ -50,6 +52,7 @@ public final class Swing {
      * @param targetRecovering 目标还在受击无敌帧里,现在打上去伤害会被吞掉
      * @param attackStrengthScale 原版的攻击充能({@code getAttackStrengthScale})
      */
+    // 刚换武器、目标还在短暂无敌期，或攻击条没恢复到 95%，都先等；否则允许尝试挥击。
     public static boolean mayStrike(boolean weaponChanged, boolean targetRecovering,
                                     float attackStrengthScale) {
         return !weaponChanged && !targetRecovering && attackStrengthScale >= ATTACK_READY;

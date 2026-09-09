@@ -1,21 +1,8 @@
 package org.maiwithu.maicraft.core.combat;
 
 /**
- * 举不举盾。<b>攻击冷却没好就举,好了就放下砍</b> —— 真人玩家的节奏。
- *
- * <h2>为什么不是"挨打就举"也不是"一直举着"</h2>
- * 原版的盾有三条硬约束,它们把形状定死了:
- *
- * <ul>
- *   <li>举起来要<b>五刻</b>才开始挡({@code shieldBlockingDelay}) —— 挨打那一刻才举,来不及</li>
- *   <li>举着<b>会减速</b> —— 一直举着就走不了位,拉不开距离</li>
- *   <li>举盾和拉弓抢同一个 {@code useItem} —— 弓战斗时根本轮不到它</li>
- * </ul>
- *
- * <p>而"攻击冷却没好"这段窗口本来就什么都做不了,减速的代价正好落在这儿,五刻的延迟也
- * 由这段窗口吸收(剑的冷却是十二刻半)。
- *
- * <p>这套判据与 PR #13 的 {@code ShieldCombatPolicy} 一致 —— 那边先想到的。
+ * 描述一种“攻击冷却时举盾、准备攻击时松盾”的选择规则，返回建议，不真正按键。
+ * 目前只保留这份规则，实际战斗没有接入这个 decide 方法；改这里不会自动改变玩家的举盾行为。
  */
 public final class ShieldPlan {
 
@@ -41,6 +28,8 @@ public final class ShieldPlan {
      * @param shieldRaised   这一刻盾已经举着
      * @param attackReady    攻击充能到位,见 {@link Swing#ATTACK_READY}
      */
+    // 正在吃东西等其他使用动作就等；已经举盾且能攻击了就松盾；攻击冷却没好且盾可用就举盾。
+    // 这是独立的判断函数。当前生产源码没有调用它，真实举盾流程在 AttackCompanionTask.tickShield。
     public static Decision decide(boolean shieldUsable, boolean usingOtherItem,
                                   boolean shieldRaised, boolean attackReady) {
         if (usingOtherItem) {

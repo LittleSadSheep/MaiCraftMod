@@ -3,23 +3,8 @@ package org.maiwithu.maicraft.core.combat;
 import java.util.List;
 
 /**
- * 这一刻的<b>整个局面</b>:她自己,加上场上每一个敌对生物。
- *
- * <h2>为什么不是"她和当前目标"</h2>
- * 判据曾经只描述一个目标,于是"该不该躲"这种全局的事没地方放——实测她在打三格外的史莱姆,
- * 苦力怕就在三点三格外,判据一无所知。往单目标的描述上挂全局字段是兜底,不是修:每多一个
- * 全局考量就多一个字段,而"打谁"本身也需要看全场(挑最近的、跳过打不了的、上一刻打的那只)。
- *
- * <p>所以输入就是局面本身,{@link AttackPlan} 从局面里同时得出<b>做什么</b>和<b>对谁做</b>。
- *
- * @param effectiveHealth 按护甲折算后她还扛得住多少,见 {@link Menace#effectiveHealth}
- * @param meleeReach      她这一刻够得着多远
- * @param hasMelee        背包里有近战武器(拳头不算——赤手对上会还手的东西不是一条出路)
- * @param hasRanged       有能立刻用的弓弩(带箭,或已上弦的弩)
- * @param cornered        <b>退不掉</b>:退避的寻路连续失败。与 {@code Foe.reachable} 对称
- *                        ——一个说"走得到吗"(决定该不该走过去打),一个说"退得掉吗"
- *                        (决定该不该退)。退不掉时站着挨打是确定的死,背水一战至少有机会。
- * @param foes            场上的敌对生物,顺序不重要
+ * 交给战斗判断的一张当刻快照：玩家大致能扛多久、有什么武器、是否退不出去，以及附近目标情况。
+ * Foe 里的 authorized 表示允许主动选择它；engaging 表示它正在攻击玩家。两者不是同一件事。
  */
 public record Battlefield(double effectiveHealth,
                           double meleeReach,
@@ -50,6 +35,7 @@ public record Battlefield(double effectiveHealth,
 
         }
 
+    // 在这一刻的候选列表中按编号找目标；不重新读世界，离开本次列表就返回 null。
     public Foe byId(int id) {
         for (Foe f : foes) {
             if (f.id() == id) {

@@ -9,14 +9,12 @@ import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * 打这个目标,近战用哪把、远程用哪把。<b>两条路各挑一把,不排成一张总榜</b>——
- * 它们不可比:弓的攻击力是 0(伤害在箭上),放进同一张按攻击力排的榜里永远垫底,
- * 于是背着弓的她照样会去拿石剑贴脸。够不够得着由 {@link AttackPlan} 判,这里只负责
- * "每条路上最好的那把是哪把"。
+ * 分别挑一把近战武器和一把远程武器，供战斗任务按距离选择。
+ * 近战按 WeaponDamage 的简化分数挑，弓弩按是否已装填和固定优先顺序挑；不会把物品直接换到手里。
  */
 public final class Loadout {
 
-    /** 一把武器和它所在的格子。{@code slot} 交给 {@code holdInHand}。 */
+    /** 一把候选武器及其背包编号；真正拿到手里还要经过 FirstPersonActionGate。 */
     public record Pick(int slot, ItemStack stack, double score) {}
 
     private final Pick melee;
@@ -29,12 +27,12 @@ public final class Loadout {
         this.rangedCharged = rangedCharged;
     }
 
-    /** 近战最狠的那把;赤手空拳时 null。 */
+    /** 按简化伤害分选出的近战武器，没有候选时为 null。 */
     public Pick melee() {
         return melee;
     }
 
-    /** 能立刻用的远程武器;没有弓弩、或有弓弩没箭时 null。 */
+    /** 有弹药或已经装填的弓弩候选；不保证它现在就在能直接使用的栏位。 */
     public Pick ranged() {
         return ranged;
     }
@@ -64,6 +62,7 @@ public final class Loadout {
         Pick bow = null;
         Pick loadableCrossbow = null;
 
+        // 这里扫描整个 Inventory，包括副手；后面的选择器只接受前 36 格，范围不一致，见 A34。
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty()) {
@@ -91,6 +90,7 @@ public final class Loadout {
             }
         }
 
+        // 固定优先顺序：已装填弩、有箭的弓、可装填弩。同类取先找到的，没有再比较附魔或耐久。
         Pick ranged = chargedCrossbow != null ? chargedCrossbow
                 : bow != null ? bow
                 : loadableCrossbow;

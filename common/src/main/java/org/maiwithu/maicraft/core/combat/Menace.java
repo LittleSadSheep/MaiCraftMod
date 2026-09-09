@@ -17,22 +17,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 「离它多近算危险」——每一只怪一个<b>危险半径</b>,判据和寻路都问这一个数。
- *
- * <h2>半径不是写死的,是从碰撞箱推的</h2>
- * 原版 {@code Mob.isWithinMeleeAttackRange} 判的是"它的碰撞箱水平撑开
- * {@code DEFAULT_ATTACK_REACH} 之后与她的碰撞箱相交",所以够得着多远取决于<b>两边的宽度</b>
- * ——蜘蛛宽 1.4、僵尸宽 0.6,差大半格。换个模组怪、换个体型,半径自己跟着变。
- *
- * <h2>会炸的按别的东西算</h2>
- * 爬行者不近战,它的危险是引信:没点着时危险半径是<b>点火线</b>(走进去它就开始烧),
- * 点着之后是<b>爆炸伤害范围</b>。两行,而且两个数都来自原版。
- *
- * <h2>只有一种度量</h2>
- * 全部是<b>中心到中心的距离</b>。判据拿实体坐标比,寻路拿格心比,而半径里已经含了格心到
- * 格内最远点那半格({@link #CELL_SLACK})——所以"格心算出来安全"就保证"实际位置也安全"。
- * 两边各用各的度量时,判据说"快躲"、寻路说"你已经躲开了",导航一建就到达、一步不走,
- * 她站在原地被打死。
+ * 估计战斗中应离目标多远，以及玩家是否该撤退。
+ * 近战范围按体型近似，苦力怕和末影水晶的爆炸范围有专门规则；其他 Mod 的特殊攻击没有在这里逐个识别。
+ * 这些值用于走位偏好与保守避险，不是原版最终伤害计算。
  */
 public final class Menace {
 
@@ -93,6 +80,7 @@ public final class Menace {
      * 它<b>现在就要炸了</b>。爬行者只在引信点着之后才算:点着之前它就是一只普通怪,
      * 而末影水晶<b>没有引信</b>,打它的那一刻就炸,所以无条件成立。
      */
+    // 末影水晶一直按可爆炸处理；苦力怕则等到开始膨胀或已被点燃才按爆炸危险处理。
     public static boolean armed(Entity entity) {
         return entity instanceof EndCrystal || fusing(entity);
     }
@@ -104,6 +92,7 @@ public final class Menace {
      * <p>看两件事:天生敌对({@link #hostile}),或者<b>这一刻正针对着她</b> ——
      * 后者接住被激怒的铁傀儡、狼、僵尸猪灵,它们不是 {@code Enemy} 但打起人来一样疼。
      */
+    // 敌对类别和爆炸物先算威胁；其他生物只有明确以自己为攻击目标才算。
     public static boolean threatens(Entity foe, Entity self) {
         if (hostile(foe) || explodes(foe)) {
             return true;
@@ -122,6 +111,7 @@ public final class Menace {
      *
      * <p>含 {@link #CELL_SLACK},所以可以直接拿格心去比。
      */
+    // 寻路按格子中心走，因此在危险半径外再加一点余量，照顾身体从格子边缘经过的情况。
     public static double dangerRadius(Entity foe, Entity self) {
         return rawDangerRadius(foe, self) + CELL_SLACK;
     }
@@ -134,6 +124,7 @@ public final class Menace {
      * 已经超过她够得着的 3.30 —— 窗口是负的,她永远不能挥这一刀,只能绕着走。而点着之后
      * 引信有整整 30 刻,那时再退完全来得及。
      */
+    // 准备爆炸时用爆炸范围；其他威胁用按体型估出的近战范围。非威胁返回零。
     public static double rawDangerRadius(Entity foe, Entity self) {
         if (!threatens(foe, self)) {
             return 0.0;   // 它不会打她 —— 走上去揍就是了
@@ -181,6 +172,8 @@ public final class Menace {
      *
      * @return 折算后的有效血量;没有护甲时就等于血量本身
      */
+    // 假定每次受到八点普通伤害，按护甲和韧性估算减伤后，用红心生命折成大致可承伤量。
+    // 这里没有把吸收黄心、抗性等完整因素算进去，不能当作精确生存时间。
     public static double effectiveHealth(LivingEntity self) {
         float health = self.getHealth();
         float afterArmor = CombatRules.getDamageAfterAbsorb(self, NOMINAL_HIT,
@@ -209,6 +202,7 @@ public final class Menace {
     }
 
     /** 半径内所有活着的敌对生物,不管它有没有盯上她。 */
+    // 只查 Enemy 类别的活生物，再按实际距离筛选。愤怒的狼等不属于 Enemy 的攻击者不会进入这份列表。
     public static List<Mob> hostilesAround(Entity self, double radius) {
         List<Mob> found = new ArrayList<>();
         for (Mob m : self.level().getEntitiesOfClass(Mob.class,
@@ -226,6 +220,7 @@ public final class Menace {
      * <p>这就是走位环的<b>内沿</b> —— 离每一只都出了它够得着的距离。外沿是她的够到距离,
      * 由调用方给。带宽因此约 1.28 格,比格量化误差 0.71 宽出一截。
      */
+    // 把传入的活实体转换成寻路要避开的区域；是否应该把某只生物传进来由调用方决定。
     public static List<GoalAvoidEntities.Threat> field(LivingEntity victim,
                                                        Iterable<? extends Entity> mobs) {
         List<GoalAvoidEntities.Threat> threats = new ArrayList<>();
@@ -239,6 +234,7 @@ public final class Menace {
     }
 
     /** 这一只此刻是不是已经进了它的危险半径。判据与寻路同一把尺子、同一套坐标。 */
+    // 按玩家所在格的水平中心比较安全距离，不在这里判断墙壁遮挡或高度差能否隔开危险。
     public static boolean tooClose(Entity foe, LivingEntity self) {
         return !GoalAvoidEntities.clearOf(self.getBlockX() + 0.5, self.getBlockZ() + 0.5,
                 foe.getX(), foe.getZ(), dangerRadius(foe, self));

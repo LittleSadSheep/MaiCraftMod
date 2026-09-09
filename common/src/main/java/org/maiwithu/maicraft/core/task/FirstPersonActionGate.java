@@ -8,9 +8,9 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 
 /**
- * Per-task gate for selecting a real hotbar item. Receipts deliberately live on the task instance:
- * no later body action may assume a selection or inventory swap until the server-synchronized
- * result has settled on a later client tick.
+ * 供任务反复调用的“把这格物品拿到主手”步骤。
+ * 快捷栏里的物品可以直接切换；背包里的物品先显示背包、搬到快捷栏，等确认后关界面再使用。
+ * 返回 RUNNING 时还没准备好，调用方不能把它当成已经拿到手里。
  */
 public final class FirstPersonActionGate {
     public enum Status { RUNNING, READY, FAILED }
@@ -28,6 +28,8 @@ public final class FirstPersonActionGate {
     private VisibleMenuSession menuSession = new VisibleMenuSession();
     private LocalPlayer owner;
 
+    // 持续推进同一次物品选择：先确认背包交换，再关界面，最后确认快捷栏选中。
+    // 交换后重新查找物品可能得到快捷栏的新编号，所以先把旧交换结算，再检查编号是否真的变了。
     public Status select(LocalPlayer player, int inventorySlot) {
         owner = player;
         // A confirmed main-inventory -> hotbar swap necessarily changes where a caller that
@@ -47,6 +49,7 @@ public final class FirstPersonActionGate {
             return Status.RUNNING; // keep selection as a separate, later-tick native mutation
         }
 
+        // 这里只支持背包和快捷栏前 36 格；副手、盔甲栏位不能经此方法搬到主手。
         if (inventorySlot < 0 || inventorySlot >= Math.min(36, player.getInventory().getContainerSize())) {
             failure = "inventory slot is unavailable: " + inventorySlot;
             return Status.FAILED;
@@ -60,6 +63,7 @@ public final class FirstPersonActionGate {
         }
         if (requestedInventorySlot == -1) requestedInventorySlot = inventorySlot;
         LocalPlayerContext context = ClientRuntime.requireContext(player);
+        // 已选好后仍要保证界面允许世界操作；ready 记的是选择已完成，没有重新核对该格后来是否换了物品。
         if (ready) return menuSession.worldReady(context) ? Status.READY : Status.RUNNING;
 
         if (selecting != null) {
@@ -109,6 +113,7 @@ public final class FirstPersonActionGate {
     }
 
     /** Close any inventory screen opened while staging, including interrupted transactions. */
+    // 结束菜单会话并忘记本次选择；这里只清掉 selecting 变量，没有退役动作端口中可能仍待确认的快捷栏选择。
     public void reset() {
         if (owner != null) menuSession.cleanup(owner);
         menuSession = new VisibleMenuSession();
