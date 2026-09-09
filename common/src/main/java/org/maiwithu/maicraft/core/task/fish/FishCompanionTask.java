@@ -39,7 +39,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Tick-driven vanilla fishing from a nearby water surface. */
+/**
+ * 按阶段钓鱼：确定站位和水面、拿竿瞄准、抛出、等咬钩、收回并捡战利品，然后再来一竿。
+ * 请求次数按成功收获的竿数计算，不保证每竿都是鱼；原版也可能给垃圾和宝藏。
+ * 当前咬钩字段用错端，以及失败重抛时的动作记录混用，分别见 A62、A63。
+ */
 public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecord> {
 
     private enum Phase { POSITION, PREPARE, AIM, WAIT, COLLECT, COOLDOWN }
@@ -109,6 +113,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     }
 
     @Override
+    // 先处理找站位和收战利品；其他阶段确认鱼竿拿在主手，再推进抛竿、等咬钩或短暂冷却。
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
 
@@ -143,6 +148,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         };
     }
 
+    // 找到一组站位和水面后走到站位；找不到路会排除这一站位，最多换三次，而不是一直撞同一条路。
     private TaskState positionForFishing() {
         if (stance == null || target == null) {
             FishingSetup setup = findFishingSetup();
@@ -185,6 +191,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         };
     }
 
+    // 已经站在干燥地面时，只看从原地能否抛到水面，找不到就失败；
+    // 只有当前不是干燥站位时，才搜索附近其他站位。这是 D21 记录的状态依赖限制。
     private FishingSetup findFishingSetup() {
         BlockPos current = feet();
         if (isDryStance(current) && !rejectedStances.contains(current)) {
@@ -220,6 +228,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return null;
     }
 
+    // 先收回已有鱼钩，再重查站位、水面和轨迹；准备好后进入瞄准，不在这里直接抛竿。
     private TaskState prepare() {
         if (player.fishing != null) {
             discardHook();
@@ -259,6 +268,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return TaskState.RUNNING;
     }
 
+    // 实际视角转好后才提交抛竿，看到玩家关联了新的鱼钩才记一次抛竿。
+    // 但 rodReceipt 也被收竿使用；失败重抛时若留着旧收竿结果，这里会把它误当新抛竿完成（A63）。
     private TaskState aimAndCast() {
         if (!isCastableSurface(target) || !trajectoryClear(player.getEyePosition(), target)) {
             return failedCast("the selected water surface became obstructed", true);
@@ -290,6 +301,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return TaskState.RUNNING;
     }
 
+    // 鱼钩消失、钩住实体、没落入水或等太久时重试。判断咬钩的当前字段是服务端计时器 nibble，
+    // 它不随客户端的咬钩同步标志更新，因此正常咬钩可能始终识别不到，见 A62。
     private TaskState waitForBite() {
         FishingHook hook = player.fishing;
         if (hook == null || hook.isRemoved()) {
@@ -327,6 +340,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
      * loot is launched toward the owner, but a bank, slab or ledge can intercept
      * it several blocks away (the exact failure seen in ordinary play-testing).
      */
+    // 先等收竿确认，再等战利品飞回身边；必要时走近拾取，并检查物品消失是否对应背包增加。
     private TaskState collectCaughtLoot() {
         if (rodReceipt != null) {
             var context = ClientRuntime.requireContext(player);
@@ -440,6 +454,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         }
         int expectedUnits = caught.attributableUnits();
         int receivedUnits = caught.receivedTrackedUnits(player);
+        // 没来得及看见地上实体时，当前退而使用任意背包正增长作为收获线索；这不能独自证明物品来自本次钓鱼。
         boolean receivedBeforeVisible = expectedUnits == 0
                 && caught.totalInventoryUnitGain(player) > 0;
         if ((expectedUnits > 0 && receivedUnits < expectedUnits)
@@ -451,6 +466,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                     FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
+        // 这里累计的是完成一次收获，不是物品件数；一竿钓到垃圾或宝藏也会计一次。
         r.caughtOne();
         Constants.LOG.debug("[maicraft-fish] caught-and-received={}/{} casts={} lootUnits={}",
                 r.caught(), r.requested, r.casts(), Math.max(receivedUnits, 1));
@@ -468,6 +484,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return lootReceipt != null && lootReceipt.received(player);
     }
 
+    // 收竿前先记地上已有物品和背包数量，之后把新看到的东西拿来比较，避免直接把旧物品算成本次产出。
     private void beginLootCollection() {
         caught.clear();
         abandonedLoot.clear();
@@ -530,6 +547,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return TaskState.RUNNING;
     }
 
+    // 先尝试收竿，再按原因决定是否排除这个水面；连续五次失败就结束。
+    // 这里回到 PREPARE，却没有单独等待并清空收竿记录，导致 A63 的阶段混用。
     private TaskState failedCast(String reason, boolean rejectTarget) {
         BlockPos failedTarget = target;
         discardHook();
@@ -563,6 +582,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         rejectedTargets.clear();
     }
 
+    // 只有鱼钩仍在、主手是鱼竿且没有待处理记录时才右键；等玩家的鱼钩引用消失来确认收回。
     private void reelIn() {
         if (player.fishing == null || !player.getMainHandItem().is(Items.FISHING_ROD)
                 || rodReceipt != null) return;
@@ -573,6 +593,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                 30);
     }
 
+    // 当前只认原版鱼竿，且会扫描副手；后面的主手选择器不接受副手槽号，同 A34 的范围不一致。
     private int findRodSlot() {
         var inventory = player.getInventory();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
@@ -582,6 +603,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return -1;
     }
 
+    // 只在水平四到十格、上下四格内找水源，偏好约六格远、周围水面较多的位置，再检查方块轨迹。
     private BlockPos findCastTarget(BlockPos fromStance, Vec3 eye) {
         List<BlockPos> candidates = new ArrayList<>();
         for (int dy = -CAST_SEARCH_Y; dy <= CAST_SEARCH_Y; dy++) {
@@ -622,6 +644,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return count;
     }
 
+    // 只认水源最上层，而且上方碰撞形状为空；流动水和顶上有实物挡住的水不作为目标。
     private boolean isCastableSurface(BlockPos pos) {
         var fluid = player.level().getFluidState(pos);
         if (!fluid.is(FluidTags.WATER) || !fluid.isSource()) return false;
@@ -630,6 +653,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                 .getCollisionShape(player.level(), pos.above()).isEmpty();
     }
 
+    // 身体两格无流体、可以穿过，脚下能站，才视为干燥站位；这里按方块判断支撑。
     private boolean isDryStance(BlockPos pos) {
         return player.level().getFluidState(pos).isEmpty()
                 && player.level().getFluidState(pos.above()).isEmpty()
@@ -667,6 +691,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                 eye.z + dz * scale);
     }
 
+    // 按估算的抛竿方向逐步模拟下坠和减速，最多八十步；任何一小段碰到方块就拒绝。
+    // 这里没有检查沿途实体，鱼钩实际钩住实体时才在等待阶段处理。
     private boolean trajectoryClear(Vec3 eye, BlockPos target) {
         double tx = target.getX() + 0.5;
         double tz = target.getZ() + 0.5;
@@ -708,6 +734,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return solvePitchDegrees(distance, waterSurfaceY(target) - eye.y);
     }
 
+    // 在向上 45° 到向下 55° 之间反复折半试角度，看模拟飞到目标距离时是偏高还是偏低。
     static double solvePitchDegrees(double horizontalDistance, double targetHeight) {
         double low = -45.0;
         double high = 55.0;
@@ -723,6 +750,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return (low + high) * 0.5;
     }
 
+    // 从初速度开始，每步先加下坠再按比例减速；抵达目标水平距离时用该步中的比例估算高度。
     static double trajectoryHeightAtDistance(double horizontalDistance, double pitchDegrees) {
         double pitch = Math.toRadians(pitchDegrees);
         double horizontalVelocity = 0.6 * Math.cos(pitch) + 0.5;
@@ -758,6 +786,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     }
 
     @Override
+    // 被打断时收回鱼钩；已进入拾取阶段的物品仍保留跟踪，其他非找站位阶段重新准备位置。
     public void stop(LocalPlayer companion, StopReason why) {
         boolean wasPositioning = phase == Phase.POSITION;
         boolean wasCollecting = phase == Phase.COLLECT;
@@ -773,6 +802,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     }
 
     @Override
+    // 结束时停移动、尝试收竿、清掉鱼竿选择和拾取记录。丢掉局部记录不代表公共动作等待已经结束。
     protected void cleanup() {
         InputDriver.halt(player);
         discardHook();

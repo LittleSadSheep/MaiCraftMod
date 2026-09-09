@@ -2,12 +2,15 @@ package org.maiwithu.maicraft.core.task.fish;
 
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Typed descriptor and live progress for the {@code fish} background task. */
+/**
+ * 保存钓鱼的请求次数和当前进度，分别统计抛过几竿、确认收获几次。
+ * 这里不读取咬钩或背包，实际观察与计数由 FishCompanionTask 完成。
+ */
 public final class FishTaskRecord extends TaskRecord {
 
     public static final String TOOL_NAME = "fish";
 
-    /** 要钓几条;<b>0 = 一直钓</b>(常驻,直到主人换掉这件活)。 */
+    /** 要完成几次收获；0 不按次数结束，但仍可能因为失败、超时设置或用户取消而停止。 */
     public final int requested;
 
     private int caught;

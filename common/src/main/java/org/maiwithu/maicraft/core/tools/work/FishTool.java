@@ -13,7 +13,10 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Fish from a nearby water surface using the vanilla fishing-rod interaction. */
+/**
+ * 内部钓鱼入口，只接收收获次数并安排持续任务，不在工具入口直接操作鱼钩。
+ * 当前依赖原版鱼竿和附近水面，不负责长距离寻找群系。
+ */
 public final class FishTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();
@@ -49,6 +52,7 @@ public final class FishTool implements MaiCraftTool {
     }
 
     @Override
+    // 没给次数就建不按次数截止的任务；给了则压到 1～64，并按每次九十秒、至少两分钟给初始预算。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion,
                              Consumer<String> reply) {
         Args parsed = GSON.fromJson(args, Args.class);
