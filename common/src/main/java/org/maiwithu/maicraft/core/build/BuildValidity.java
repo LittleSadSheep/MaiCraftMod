@@ -58,6 +58,8 @@ public final class BuildValidity {
 
     private BuildValidity() {}
 
+    public static boolean isPlacementProperty(Property<?> property) { return AUTHORED_PROPERTIES.contains(property); }
+
     // 先应用用户设置的放宽规则，再比较方块。desired 为 null 表示这一格没有目标要求。
     // itemVerify=true 用于检查这次准备放下的状态：不采用“保留任意已有方块”和替代材料两项放宽。
     public static boolean valid(BlockState current, BlockState desired, boolean itemVerify) {

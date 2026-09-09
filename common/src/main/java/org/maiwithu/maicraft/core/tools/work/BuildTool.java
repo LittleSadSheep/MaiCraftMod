@@ -371,11 +371,19 @@ public final class BuildTool implements MaiCraftTool {
     private static List<BuildTaskRecord.Target> resolveTargets(List<OpSpec> ops, boolean exactStates) {
         List<BuildTaskRecord.Target> expanded = new ArrayList<>();
         for (OpSpec op : ops) {
-            for (var target : expandOp(op)) expanded.add(exactStates
+            var authored = new java.util.LinkedHashSet<>(op.properties() == null ? java.util.Set.<String>of() : op.properties().keySet());
+            if (op.facing() != null) authored.add("facing");
+            if (op.axis() != null) authored.add("axis");
+            for (var target : expandOp(op)) {
+                var requested = new java.util.LinkedHashSet<>(authored);
+                if (op.half() != null) requested.add(target.desiredState().hasProperty(
+                        net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE) ? "type" : "half");
+                expanded.add(exactStates
                     ? new BuildTaskRecord.Target(target.desiredState(), target.item(), target.pos(), target.label(),
                             target.facing(), target.axis(), target.topHalf(), false,
-                            op.properties() == null ? java.util.Set.of() : op.properties().keySet(), true)
+                            requested, true, requested)
                     : target);
+            }
         }
         // 单指令流:顺序即语义,后写覆盖先写,去重保留最后一笔
         Map<Long, BuildTaskRecord.Target> byPos = new LinkedHashMap<>();

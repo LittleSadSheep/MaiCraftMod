@@ -327,7 +327,13 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
      */
     public record Target(BlockState desiredState, Item item, BlockPos pos, String label,
                          Direction facing, Direction.Axis axis, Boolean topHalf,
-                         boolean itemPlace, java.util.Set<String> exactProperties, boolean strictIdentity) {
+                         boolean itemPlace, java.util.Set<String> exactProperties, boolean strictIdentity,
+                         java.util.Set<String> finalProperties) {
+        public Target(BlockState desiredState, Item item, BlockPos pos, String label,
+                      Direction facing, Direction.Axis axis, Boolean topHalf, boolean itemPlace,
+                      java.util.Set<String> exactProperties, boolean strictIdentity) {
+            this(desiredState, item, pos, label, facing, axis, topHalf, itemPlace, exactProperties, strictIdentity, null);
+        }
         public Target(BlockState desiredState, Item item, BlockPos pos, String label,
                       Direction facing, Direction.Axis axis, Boolean topHalf, boolean itemPlace,
                       java.util.Set<String> exactProperties) {
@@ -355,11 +361,12 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
                     || !(item instanceof net.minecraft.world.item.BlockItem)) {
                 return this;
             }
-            return new Target(desiredState, item, pos, label, facing, axis, topHalf, true, exactProperties, strictIdentity);
+            return new Target(desiredState, item, pos, label, facing, axis, topHalf, true, exactProperties, strictIdentity, finalProperties);
         }
 
         public Target {
             exactProperties = exactProperties == null ? java.util.Set.of() : java.util.Set.copyOf(exactProperties);
+            finalProperties = finalProperties == null ? null : java.util.Set.copyOf(finalProperties);
             desiredState = Objects.requireNonNull(desiredState, "desiredState");
             // 目标状态先经过 BuildStates 的统一整理，再检查显式属性是否合法；具体会整理哪些属性要看该类。
             desiredState = org.maiwithu.maicraft.core.build.BuildStates.normalize(desiredState);
@@ -370,6 +377,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
                     throw new IllegalArgumentException("unknown exact block property " + property);
                 }
             }
+            if (finalProperties != null && !exactProperties.containsAll(finalProperties))
+                throw new IllegalArgumentException("final properties must be explicitly authored");
             if (facing != null && facingOf(desiredState) == null) {
                 throw new IllegalArgumentException(desiredState.getBlock().getName().getString()
                         + " does not support facing");
@@ -456,6 +465,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         }
 
         public boolean matches(BlockState state) {
+            if (finalProperties != null) return matchesProperties(state, finalProperties);
             if (!matchesExactProperties(state)) return false;
             if (itemPlace) {
                 // 普通物品放置先核对显式属性，再接受同方块或相同翻译键的模组替代品；并非对全部状态逐项相等。
@@ -467,7 +477,26 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         }
 
         public boolean acceptsPlacedState(BlockState state) {
+            if (finalProperties != null) {
+                var placement = finalProperties.stream().filter(name -> BuildValidity.isPlacementProperty(
+                        desiredState.getBlock().getStateDefinition().getProperty(name))).collect(java.util.stream.Collectors.toSet());
+                return matchesProperties(state, placement);
+            }
             return matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true);
+        }
+
+        /** Existing material/geometry positions are reusable; authored important states are verified at the end. */
+        public boolean constructionMatches(BlockState state) {
+            return finalProperties == null ? matches(state) : state != null && state.getBlock() == desiredState.getBlock();
+        }
+
+        private boolean matchesProperties(BlockState state, java.util.Set<String> properties) {
+            if (state == null || state.getBlock() != desiredState.getBlock()) return false;
+            for (String name : properties) {
+                var property = desiredState.getBlock().getStateDefinition().getProperty(name);
+                if (!state.hasProperty(property) || !state.getValue(property).equals(desiredState.getValue(property))) return false;
+            }
+            return true;
         }
 
         /** 明确点名的机器属性必须逐项一致，strictIdentity 还要求方块类型完全相同。 */

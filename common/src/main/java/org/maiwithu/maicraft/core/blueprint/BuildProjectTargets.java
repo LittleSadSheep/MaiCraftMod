@@ -41,6 +41,10 @@ public final class BuildProjectTargets {
             JsonArray exact = new JsonArray();
             target.exactProperties().stream().sorted().forEach(exact::add);
             row.add("exact_properties", exact);
+            if (target.finalProperties() != null) {
+                JsonArray required = new JsonArray(); target.finalProperties().stream().sorted().forEach(required::add);
+                row.add("final_properties", required);
+            }
             result.add(row);
         }
         return result;
@@ -76,9 +80,17 @@ public final class BuildProjectTargets {
             // 普通解析完成后，再恢复原来明确要求精确比较的属性及物品放置模式，避免续建时验收标准变宽。
             LinkedHashSet<String> exact = new LinkedHashSet<>();
             row.getAsJsonArray("exact_properties").forEach(value -> exact.add(value.getAsString()));
+            java.util.Set<String> finalProperties = null;
+            if (row.has("final_properties")) {
+                var names = new LinkedHashSet<String>(); row.getAsJsonArray("final_properties").forEach(value -> names.add(value.getAsString()));
+                finalProperties = names;
+            } else if (row.get("strict_identity").getAsBoolean()) {
+                // Existing explicit projects keep declared requirements but defer their verification until the end.
+                finalProperties = java.util.Set.copyOf(exact);
+            }
             result.add(new BuildTaskRecord.Target(target.desiredState(), BuiltInRegistries.ITEM.get(item),
                     target.pos(), target.label(), target.facing(), target.axis(), target.topHalf(),
-                    row.get("item_place").getAsBoolean(), exact, row.get("strict_identity").getAsBoolean()));
+                    row.get("item_place").getAsBoolean(), exact, row.get("strict_identity").getAsBoolean(), finalProperties));
         }
         return List.copyOf(result);
     }
