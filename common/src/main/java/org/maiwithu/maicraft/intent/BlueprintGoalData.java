@@ -5,11 +5,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 
-/** Typed structure data is inspected by its blueprint schema, not by execution-script key filters. */
+/** 合法蓝图本来就有方块坐标，检查目标时不能把这些坐标误当成鼠标脚本一概拒绝。 */
 public final class BlueprintGoalData {
     private BlueprintGoalData() {}
 
-    /** Returns a detached inspection view. The actual goal keeps its complete blueprint and evidence. */
+    /** 复制一份目标，只从检查用的副本中移走已验证蓝图；原目标仍保留完整方块数据。 */
     public static JsonObject instructionView(Goal goal) {
         JsonObject view = goal.toJson();
         stripValidatedBlueprints(goal, view);
@@ -17,6 +17,7 @@ public final class BlueprintGoalData {
     }
 
     private static void stripValidatedBlueprints(Goal goal, JsonObject view) {
+        // 只有明确声明支持蓝图的机器能力才适用例外；其他地方塞入同名字段，仍要经过普通检查。
         JsonObject parameters = view.getAsJsonObject("parameters");
         JsonElement operation = parameters.get("operation");
         boolean declared = MachineAbilityAdapter.DESIGN.equals(goal.ability())
@@ -28,6 +29,7 @@ public final class BlueprintGoalData {
             JsonElement blueprint = parameters.get("blueprint");
             if (!blueprint.isJsonObject()) throw new IllegalArgumentException("blueprint must be an object");
             MachineBlueprintDocument.validateWire(blueprint.getAsJsonObject());
+            // 先证明是合法蓝图，再从普通脚本字段检查中排除它，不能靠起名 blueprint 绕过验证。
             parameters.remove("blueprint");
         }
         for (int i = 0; i < goal.children().size(); i++)

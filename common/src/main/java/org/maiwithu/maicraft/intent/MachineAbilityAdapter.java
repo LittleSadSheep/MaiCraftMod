@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Semantic machine evidence and bounded, verified native operations; no model-authored clicks. */
+/** 把“查看、设计、操作、修改或建造机器”交给相应实现；用户只给目标，具体放置和菜单点击由 Mod 负责。 */
 final class MachineAbilityAdapter {
     static final String INSPECT = "maicraft:inspect_machine";
     static final String DESIGN = "maicraft:design_machine";
@@ -39,6 +39,7 @@ final class MachineAbilityAdapter {
     static boolean supports(String ability) { return ABILITIES.contains(ability); }
 
     static IntentAction adapt(Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
+        // 先按操作种类检查参数，再实际查看或创建任务；缺条件时给出明确问题，不直接开工。
         try {
             validate(goal);
             return switch (goal.ability()) {
@@ -60,7 +61,7 @@ final class MachineAbilityAdapter {
         }
     }
 
-    /** Validate operation-specific contracts at plan time, including silently ignored fields. */
+    /** 计划阶段也按具体操作检查字段，例如“开菜单”与“取物品”需要的参数不同，不能传了又被忽略。 */
     static void validate(Goal goal) {
         JsonObject p = goal.parameters();
         switch (goal.ability()) {
@@ -71,6 +72,7 @@ final class MachineAbilityAdapter {
                 if (goal.target() == null) throw bad("inspect_machine requires an explicit semantic target");
             }
             case DESIGN -> {
+                // 通用设计可以没有场地；如果指定某处机器，就要求带上那处机器的观察编号。
                 only(p, "design", "blueprint", "blueprint_uri", "snapshot_id");
                 validateLayoutSource(p, true);
                 if (p.has("snapshot_id")) {
@@ -82,6 +84,7 @@ final class MachineAbilityAdapter {
                 String operation = requiredString(p, "operation", 64);
                 switch (operation) {
                     case "close_menu" -> {
+                        // 关的是本流程现在打开的菜单，不能借这个操作顺便点名另一台机器。
                         only(p, "operation", "allow_use");
                         bool(p, "allow_use", false);
                         if (goal.target() != null) throw bad("close_menu acts on this workflow's currently open menu; omit target");
@@ -94,6 +97,7 @@ final class MachineAbilityAdapter {
                         requireMachineTarget(goal);
                     }
                     case "deposit", "withdraw" -> {
+                        // 取物或放物绑定刚才看过的菜单及其中一项，不能一边引用菜单、一边另选机器。
                         only(p, "operation", "menu_receipt_id", "entry_index", "item_id", "count", "allow_use");
                         requiredString(p, "menu_receipt_id", 36);
                         if (!p.has("entry_index")) throw bad("entry_index must name an entry in the latest machine_menu observation");
@@ -112,6 +116,7 @@ final class MachineAbilityAdapter {
                         requireMachineTarget(goal);
                     }
                     case "ae2_supply" -> {
+                        // 此分支要求 nearest 不带名称；外层 PublicToolCatalog 目前却要求 nearest 带名称，公开请求会冲突。
                         only(p, "operation", "item_id", "count", "allow_crafting", "allow_use");
                         requiredString(p, "item_id", 256);
                         integer(p, "count", 1, 1, 256);
@@ -127,6 +132,7 @@ final class MachineAbilityAdapter {
                 }
             }
             case MODIFY -> {
+                // 修改目前分为连接动力和按蓝图改方块，两种操作各自接受不同参数。
                 String operation = requiredString(p, "operation", 64);
                 if ("connect_mechanical_power".equals(operation)) {
                     only(p, "operation", "snapshot_id", "source_label", "allow_modify");
@@ -156,6 +162,7 @@ final class MachineAbilityAdapter {
     }
 
     private static IntentAction inspect(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 在指定位置读机器周围的方块并给观察结果一个编号，同时记住机器的地点名；命名不等于允许修改。
         Goal.WorldPosition position = resolve(goal.target(), player, runtime);
         JsonObject p = goal.parameters();
         String label = optionalString(p, "label", 160);
@@ -171,6 +178,7 @@ final class MachineAbilityAdapter {
     }
 
     private static IntentAction design(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 组件关系图交给后台算布局，明确蓝图则直接检查；报告里的“审阅完成”不表示设计一定能建成。
         JsonObject p = goal.parameters();
         var layout = compileLayout(p, player);
         if (layout == null) return IntentAction.Pending.INSTANCE;
@@ -194,12 +202,13 @@ final class MachineAbilityAdapter {
             report.add("observed_context", context);
         }
         report.add("layout_compiler", layout.report());
-        // Completing a review never asserts that the design is valid or that it was constructed.
+        // 返回成功只是完成了检查，调用者还要看报告中哪些条件未满足，不能据此说机器已建好。
         return new IntentAction.Report(TaskResult.ok("Machine design review completed; inspect validation and unresolved obligations before proposing work.",
                 Map.of("design_review", report)), null);
     }
 
     private static IntentAction operate(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 真正开关、存取或用 AE2 前检查 allow_use；这里只创建任务单，后续在游戏中等待实际效果确认。
         JsonObject p = goal.parameters();
         if (!bool(p, "allow_use", false)) throw bad("machine_use_not_authorized: set allow_use only when the player's instructions authorize this operation; marking another player's machine is not permission");
         long deadline = player.level().getGameTime() + 3 * 60 * 20;
@@ -215,6 +224,7 @@ final class MachineAbilityAdapter {
                     integer(p, "count", 1, 1, 64)));
         }
         if ("ae2_supply".equals(requiredString(p, "operation", 64))) {
+            // AE2 由原生终端接口取物；允许合成时也只能提交网络里已经有的合成样板。
             if (!Ae2ResourceSupply.available()) throw bad("AE2 native terminal integration unavailable: " + Ae2ResourceSupply.availabilityDetail());
             String item = requiredString(p, "item_id", 256);
             if (!registered(item, false)) throw bad("unknown requested item: " + item);
@@ -227,6 +237,7 @@ final class MachineAbilityAdapter {
         if ("open_menu".equals(operation)) {
             BlockPos machine = snapshot.center();
             if (p.has("component_index")) {
+                // component_index 指的是这份观察列表里的第几块，换另一份观察就不能沿用同一个数字。
                 int index = integer(p, "component_index", 0, 0, 767);
                 var observed = snapshot.report().getAsJsonArray("relative_blocks");
                 if (index >= observed.size()) throw bad("component_index is not present in this machine observation");
@@ -249,11 +260,11 @@ final class MachineAbilityAdapter {
     }
 
     private static IntentAction modify(Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
+        // 应用蓝图与新建共用施工流程；连接动力则创建专门的 Create 任务，并保留原网络。
         JsonObject p = goal.parameters();
         if (!bool(p, "allow_modify", false)) throw bad("machine_modification_not_authorized: set allow_modify when the player's instructions authorize this change");
         if ("apply_blueprint".equals(p.get("operation").getAsString())) return build(goal, player, runtime);
-        // A native continuation is already bound to the original route, body and endpoints.
-        // Its receipt replaces the consumed survey; the Create executor revalidates it before work.
+        // 如果上次留下了可恢复编号，使用它核对原来的连接，避免重复装已经放好的部分；否则需要新观察。
         MachineSnapshots.Snapshot snapshot = continuationToken == null ? boundSnapshot(goal, player, runtime) : null;
         BlockPos destination = snapshot == null ? block(resolve(goal.target(), player, runtime)) : snapshot.center();
         String sourceLabel = requiredString(p, "source_label", 160);
@@ -274,6 +285,7 @@ final class MachineAbilityAdapter {
     }
 
     private static IntentAction build(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 布局算完后再核对场地观察是否仍有效；图形方案、允许替换哪些方块和供料策略一起交给施工任务。
         JsonObject p = goal.parameters();
         if (!bool(p, "allow_modify", false)) throw bad("machine_build_not_authorized: the player's instructions must authorize building this machine");
         var layout = compileLayout(p, player);
@@ -286,6 +298,7 @@ final class MachineAbilityAdapter {
                     && design.getAsJsonObject("constraints").get("preserve_existing").getAsBoolean())
                 throw bad("replace_existing conflicts with the design's preserve_existing constraint");
             BlockPos anchor = design == null ? snapshot.center() : MachineConstructionPlan.floorAnchor(snapshot.center(), layout);
+            // 明确蓝图的偏移从观察中心算；自动生成布局则先换算地板锚点，两类输入的定位规则不同。
             var plan = MachineConstructionPlan.compile(anchor, layout, replace, bool(p, "replace_block_entities", false));
             List<String> protectedLabels = p.has("protected_labels")
                     ? java.util.stream.StreamSupport.stream(p.getAsJsonArray("protected_labels").spliterator(), false)
@@ -296,6 +309,7 @@ final class MachineAbilityAdapter {
                     snapshot.dimension(), SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(
                             optionalString(p, "material_policy", 64)), protectedLabels);
             MachineSnapshots.consume(snapshot);
+            // 一份观察只用于发起一次修改，即使后面的施工失败，也要重新观察才可另开一份修改任务。
             return new IntentAction.Native(task);
         }
         JsonObject context = new JsonObject();
@@ -314,6 +328,7 @@ final class MachineAbilityAdapter {
     }
 
     private static void validateLayoutSource(JsonObject p, boolean allowDesign) {
+        // 布局来源只能三选一：组件关系图、完整蓝图或已导出的教程蓝图地址；禁止同时给多份让执行端猜。
         int count = (p.has("design") ? 1 : 0) + (p.has("blueprint") ? 1 : 0) + (p.has("blueprint_uri") ? 1 : 0);
         if (count != 1 || (!allowDesign && p.has("design")))
             throw bad(allowDesign ? "Supply exactly one of design, blueprint or blueprint_uri"
@@ -333,6 +348,7 @@ final class MachineAbilityAdapter {
     }
 
     private static void validateConstructionOptions(JsonObject p) {
+        // 允许拆带数据的机器／箱子，必须先允许普通替换，不能把两个许可写成互相矛盾的组合。
         boolean replace = bool(p, "replace_existing", false);
         if (bool(p, "replace_block_entities", false) && !replace)
             throw bad("replace_block_entities requires replace_existing=true");
@@ -340,6 +356,7 @@ final class MachineAbilityAdapter {
     }
 
     private static SemanticMachineLayout.Result compileLayout(JsonObject p, LocalPlayer player) {
+        // 关系图需要计算具体布局；蓝图已经给出每格目标，只需按方块规则解析和检查。
         if (p.has("design")) return MachineLayoutJobs.poll(player, p.getAsJsonObject("design"));
         JsonObject blueprint = p.has("blueprint") ? p.getAsJsonObject("blueprint")
                 : PonderBlueprintStore.resolve(requiredString(p, "blueprint_uri", 2048));
@@ -357,6 +374,7 @@ final class MachineAbilityAdapter {
     }
 
     private static MachineSnapshots.Snapshot boundSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 同时核对观察编号、机器名字和位置，不能用甲机器的观察去授权修改乙机器。
         MachineSnapshots.Snapshot snapshot = MachineSnapshots.requireFresh(player,
                 requiredString(goal.parameters(), "snapshot_id", 36));
         Goal.WorldPosition target = resolve(goal.target(), player, runtime);
@@ -367,6 +385,7 @@ final class MachineAbilityAdapter {
     }
 
     private static void requireMachineTarget(Goal goal) {
+        // 大多数机器操作只能引用已记住的地点名，不接受再叠加坐标或关系描述。
         if (goal.target() == null || !Set.of("landmark", "area").contains(goal.target().kind())
                 || goal.target().label() == null || goal.target().label().isBlank()
                 || goal.target().position() != null || goal.target().relation() != null) {
@@ -375,6 +394,7 @@ final class MachineAbilityAdapter {
     }
 
     private static Goal.WorldPosition resolve(Goal.SemanticTarget target, LocalPlayer player, IntentRuntime runtime) {
+        // 读取当前地点、坐标或已记地标，确认属于当前维度；找不到时不随便找附近另一台机器代替。
         if (target == null) throw bad("machine_target_missing");
         String dimension = player.level().dimension().location().toString();
         Goal.WorldPosition resolved = switch (target.kind()) {
@@ -420,6 +440,7 @@ final class MachineAbilityAdapter {
         return p.get(key).getAsBoolean();
     }
     private static int integer(JsonObject p, String key, int fallback, int min, int max) {
+        // 机器参数使用精确整数转换，拒绝小数和溢出，然后再检查范围；不会默默把数值压到边界。
         if (!p.has(key)) return fallback;
         try {
             if (!p.get(key).isJsonPrimitive() || !p.getAsJsonPrimitive(key).isNumber()) throw bad(key + " must be an integer");

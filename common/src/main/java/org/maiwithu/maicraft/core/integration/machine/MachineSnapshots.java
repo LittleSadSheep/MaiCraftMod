@@ -11,7 +11,7 @@ import java.lang.ref.WeakReference;
 import java.util.LinkedHashMap;
 import java.util.UUID;
 
-/** Client-thread, bounded observation receipts. Never restored as mutation authority. */
+/** 暂存玩家刚查看过的机器：保留名字、位置、方块状态和观察编号，后续操作先核对是否仍是那台机器。 */
 public final class MachineSnapshots {
     private static final int MAX_SNAPSHOTS = 16;
     private static final long MAX_AGE_TICKS = 1_200;
@@ -30,6 +30,7 @@ public final class MachineSnapshots {
     private MachineSnapshots() {}
 
     private static void bind(LocalPlayer player) {
+        // 换世界或换账号就丢弃旧观察；这些短期观察不是可以跨存档恢复的操作许可。
         if (level.get() != player.level() || !player.getUUID().equals(playerId)) {
             SNAPSHOTS.clear();
             level = new WeakReference<>(player.level());
@@ -38,6 +39,7 @@ public final class MachineSnapshots {
     }
 
     public static Snapshot inspect(LocalPlayer player, String label, BlockPos center, int radius) {
+        // 现场观察结构，同时记录附近确实看到的 AE2 终端，供后续寻找原生取物入口使用。
         bind(player);
         JsonObject report = MachineSurvey.inspect(player, center, radius);
         int observedRadius = report.get("radius").getAsInt();
@@ -61,6 +63,7 @@ public final class MachineSnapshots {
         aeEvidence.addProperty("detail", aeAccess.detail());
         report.add("ae2_access_evidence", aeEvidence);
         String id = UUID.randomUUID().toString();
+        // 每次查看都给新编号，最多缓存十六份，正常游戏速度下一份有效约一分钟。
         report.remove("center");
         report.addProperty("snapshot_id", id);
         report.addProperty("label", label);
@@ -76,7 +79,7 @@ public final class MachineSnapshots {
         return snapshot;
     }
 
-    /** Fresh, complete same-session evidence only. This does not grant mutation authority. */
+    /** 要用于操作时，再检查编号、时效、结构是否看完整，以及当前方块是否与观察时一致。 */
     public static Snapshot requireFresh(LocalPlayer player, String id) {
         bind(player);
         Snapshot snapshot = SNAPSHOTS.get(id);
@@ -86,6 +89,7 @@ public final class MachineSnapshots {
             throw new IllegalArgumentException("machine_snapshot_expired: inspect the machine again");
         }
         if (!snapshot.report().get("structure_complete").getAsBoolean()) {
+            // 这里只要求方块结构完整，电力、流体等额外运行数据不完整，不会单独挡住这一步。
             throw new IllegalArgumentException("machine_structure_incomplete: move closer or inspect a smaller area with complete block-state geometry; optional telemetry and adjacency details need not be complete");
         }
         if (!snapshot.fingerprint().equals(MachineSurvey.fingerprint(player, snapshot.center(), snapshot.radius()))) {
@@ -94,10 +98,11 @@ public final class MachineSnapshots {
         return snapshot;
     }
 
-    /** A mutation consumes its receipt even if its subsequent native result is uncertain. */
+    /** 一旦用观察发起修改，就删掉编号；即使操作结果不确定，也不能用旧观察再开一次修改。 */
     public static void consume(Snapshot snapshot) { SNAPSHOTS.remove(snapshot.id()); }
 
     public static JsonObject summaries(LocalPlayer player) {
+        // 这里列的是缓存概况和年龄，不重新扫描结构；显示 complete 也不代表机器现在一定还没变。
         bind(player);
         JsonArray entries = new JsonArray();
         for (Snapshot snapshot : SNAPSHOTS.values()) {
