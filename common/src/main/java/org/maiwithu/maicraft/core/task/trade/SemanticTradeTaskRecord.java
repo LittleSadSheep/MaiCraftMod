@@ -11,7 +11,10 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Semantic final-inventory trade request; concrete merchants, offers and menu actions are internal. */
+/**
+ * 保存交易目标：背包最终要多少、可选商人类别、允许花哪些物品，以及避开的地标。
+ * 没有保存商人编号或报价下标，具体对象由执行任务在已加载世界里选择。
+ */
 public final class SemanticTradeTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "trade_items";
     public static final int MAX_FINAL_COUNT = 256;
@@ -44,6 +47,7 @@ public final class SemanticTradeTaskRecord extends TaskRecord {
         TaskFactory.register(SemanticTradeTaskRecord.class, SemanticTradeCompanionTask::new);
     }
 
+    // 检查目标物品和允许支付的物品都存在，合并重复的支付物品与保护标签；最终数量限制在 1～256。
     public SemanticTradeTaskRecord(
             String toolCallId,
             long deadlineGameTime,

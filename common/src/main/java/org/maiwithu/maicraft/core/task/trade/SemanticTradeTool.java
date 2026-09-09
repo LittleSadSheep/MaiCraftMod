@@ -15,7 +15,10 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 
-/** Internal merchant executor. Public callers express only the semantic inventory outcome. */
+/**
+ * 内部交易入口，只接收想获得什么、最终数量和商人／付款策略。
+ * 具体找谁、用哪项报价以及怎样点菜单由 SemanticTradeCompanionTask 处理。
+ */
 public final class SemanticTradeTool implements MaiCraftTool {
     @Override public String name() { return SemanticTradeTaskRecord.TOOL_NAME; }
 
@@ -29,6 +32,7 @@ public final class SemanticTradeTool implements MaiCraftTool {
     }
 
     @Override
+    // 这是参数格式说明；allowed_payment_items 的文字目前说省略可用任意付款，执行器实际默认只允许绿宝石。
     public Map<String, Object> parameterSchema() {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("item_id", property("string", "Requested namespaced trade output."));
@@ -53,6 +57,7 @@ public final class SemanticTradeTool implements MaiCraftTool {
     }
 
     @Override
+    // 解析目标和支付策略后，按目标数量给初始时限，再建立持续交易任务；不在工具入口直接买卖。
     public void onGameCall(
             String toolCallId, JsonObject args, LocalPlayer player, Consumer<String> reply) {
         ResourceLocation itemId = resource(args.get("item_id"), "item_id");
@@ -117,6 +122,7 @@ public final class SemanticTradeTool implements MaiCraftTool {
                 ? object.get(key).getAsString() : null;
     }
 
+    // 现有读取会先把 JSON 转成整数再压到范围内，小数和超范围值并非都被严格拒绝。
     private static int integer(
             JsonObject object, String key, int fallback, int minimum, int maximum) {
         if (!object.has(key) || object.get(key).isJsonNull()) return fallback;

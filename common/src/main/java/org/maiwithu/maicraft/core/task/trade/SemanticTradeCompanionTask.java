@@ -38,10 +38,9 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * First-person, receipt-driven vanilla merchant executor.
- *
- * <p>The record names only a final inventory fact and semantic safety policy. Runtime entity ids,
- * paths, offer indices and menu slots never leave this internal task.
+ * 为了让背包达到指定物品数量，寻找商人、打开交易界面、挑报价、放付款物品、取结果，最后退还余款并关闭。
+ * 已经有的物品会计入目标；只要求最终数量，不保证每一份都来自本轮交易。
+ * 当前有单报价库存、默认报价选择和付款前空间等额外限制，具体例子见 A53～A56。
  */
 public final class SemanticTradeCompanionTask
         extends AbstractCompanionTask<SemanticTradeTaskRecord> {
@@ -127,6 +126,8 @@ public final class SemanticTradeCompanionTask
     }
 
     @Override
+    // 目标是背包最终至少有这么多物品，已经够了就请求收尾；正在执行的付款／收货子任务先结束。
+    // 目前这个提前满足分支会绕过开头的菜单占用检查，再去关闭原本打开的界面，见 A56。
     protected TaskState onTick() {
         if (outputCount() >= r.count && !finishRequested) {
             finishRequested = true;
@@ -153,6 +154,7 @@ public final class SemanticTradeCompanionTask
         };
     }
 
+    // 只找已加载范围内的成年村民／流浪商人，按距离排列；先拒绝未知保护地标，避免错误理解保护范围。
     private TaskState survey() {
         if (player.containerMenu != player.inventoryMenu) {
             return failFinal(
@@ -210,6 +212,7 @@ public final class SemanticTradeCompanionTask
         };
     }
 
+    // 当前只要商人有自定义名字就全部排除；另外排除保护地标水平十二格内的商人，不看高度差。
     private List<String> protectionReasons(AbstractVillager candidate) {
         List<String> reasons = new ArrayList<>();
         if (candidate.hasCustomName()) reasons.add("named");
@@ -234,6 +237,7 @@ public final class SemanticTradeCompanionTask
                 <= (long) LANDMARK_PROTECTION_RADIUS * LANDMARK_PROTECTION_RADIUS;
     }
 
+    // 依次尝试候选商人，出手前重查它是否仍活着、成年并未受保护，再创建走近并右键的子任务。
     private TaskState openNext() {
         while (merchantCursor < merchants.size()) {
             merchant = merchants.get(merchantCursor++);
@@ -253,6 +257,7 @@ public final class SemanticTradeCompanionTask
         return exhausted();
     }
 
+    // 等待商人菜单出现并实际显示；超出等待窗口后尝试收尾并换下一位商人。
     private TaskState waitMenu() {
         if (player.containerMenu instanceof MerchantMenu) {
             openedMenu = true;
@@ -276,6 +281,8 @@ public final class SemanticTradeCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 从卖出目标物品的报价中筛选库存、付款许可、可支付数量、报价选择和背包空间。
+    // 当前每个报价都必须独自满足全部缺额，不能把两项各十份的报价合起来凑二十份，见 A53。
     private TaskState selectOffer() {
         MerchantMenu menu = merchantMenu();
         if (menu == null) {
@@ -332,10 +339,12 @@ public final class SemanticTradeCompanionTask
             PaymentPlan nextPayment = paymentPlan(menu, offer);
             if (nextPayment == null || !affordableForTrades(menu, offer, trades)) continue;
             enoughCurrency = true;
+            // 这里用默认选择去匹配支付组合，没有向原版选择具体报价；同价商品在后面时可能一直被前面商品盖住（A54）。
             MerchantOffer resolved = menu.getOffers().getRecipeFor(
                     nextPayment.paymentA, nextPayment.paymentB, 0);
             if (resolved != offer) continue;
             unambiguous = true;
+            // 空间按付款前的背包计算，没有把即将移出的支付物品腾出的格算进去（A55）。
             if (outputCapacity(result) < missing) continue;
             enoughSpace = true;
             plans.add(new OfferPlan(
@@ -355,6 +364,7 @@ public final class SemanticTradeCompanionTask
             phase = Phase.CLEANUP;
             return TaskState.RUNNING;
         }
+        // 在通过检查的报价中，按总支付件数、交易次数、报价下标排序；不同物品的件数没有换算成同一种价值。
         offerPlan = plans.stream().min(Comparator
                 .comparingInt((OfferPlan plan) ->
                         plan.paymentUnits * plan.requiredTrades)
@@ -370,6 +380,7 @@ public final class SemanticTradeCompanionTask
 
     private record GroupChoice(int a, int b) {}
 
+    // 没明确列出支付物品时只允许绿宝石；给了列表后，报价的两种支付物品都必须在名单中。
     private boolean paymentAllowed(MerchantOffer offer) {
         if (r.allowedPaymentIds.isEmpty()) {
             if (!offer.getCostA().getItem().equals(Items.EMERALD)) return false;
@@ -397,6 +408,7 @@ public final class SemanticTradeCompanionTask
         return offer.getCostA().getCount() + offer.getCostB().getCount();
     }
 
+    // 给下一笔交易凑出两格支付物品。相同物品但组件不同会分组，避免把无法堆叠的物品混放到同一支付格。
     private PaymentPlan paymentPlan(MerchantMenu menu, MerchantOffer offer) {
         ItemStack costA = offer.getCostA();
         ItemStack costB = offer.getCostB();
@@ -439,6 +451,7 @@ public final class SemanticTradeCompanionTask
                 List.copyOf(facts));
     }
 
+    // 在分组数量副本上反复扣除每笔成本，判断按当前这一个报价能否付完整个缺额；不真的扣背包。
     private boolean affordableForTrades(
             MerchantMenu menu, MerchantOffer offer, int trades) {
         List<PaymentGroup> groups = paymentGroups(menu);
@@ -456,6 +469,7 @@ public final class SemanticTradeCompanionTask
         return true;
     }
 
+    // 先从够付第一格的组里挑较小组，再尝试第二格；两格用同组时先临时扣除第一格数量，避免重复计算。
     private static GroupChoice chooseGroups(
             List<PaymentGroup> groups,
             ItemCost costA,
@@ -491,6 +505,7 @@ public final class SemanticTradeCompanionTask
         return null;
     }
 
+    // 商人菜单第 3～38 格对应玩家主背包和快捷栏；按物品及组件完全相同来汇总，不包含副手或盔甲。
     private static List<PaymentGroup> paymentGroups(MerchantMenu menu) {
         List<PaymentGroup> groups = new ArrayList<>();
         for (int slot = 3; slot < Math.min(39, menu.slots.size()); slot++) {
@@ -509,6 +524,7 @@ public final class SemanticTradeCompanionTask
         return groups;
     }
 
+    // 把一笔要付的数量分配到具体背包来源格，生成搬入商人支付格的步骤；available 防止两种成本重复使用同一份物品。
     private static boolean allocate(
             MerchantMenu menu,
             int[] available,
@@ -543,6 +559,7 @@ public final class SemanticTradeCompanionTask
         return capacity;
     }
 
+    // 出钱前确认还是原来那条报价，并重新查背包可支付物品；当前仍依赖默认报价匹配，没有真正选择 offerIndex。
     private TaskState pay() {
         MerchantMenu menu = merchantMenu();
         if (menu == null) return menuLost(false);
@@ -578,6 +595,7 @@ public final class SemanticTradeCompanionTask
                 menu.containerId, payment.moves, false), Purpose.PAY);
     }
 
+    // 只有支付格和结果格看起来满足所选交易，才从结果槽快速取出；取出后还要检查背包目标物品确实增加。
     private TaskState take() {
         MerchantMenu menu = merchantMenu();
         if (menu == null) return menuLost(true);
@@ -602,6 +620,8 @@ public final class SemanticTradeCompanionTask
                 Purpose.TAKE);
     }
 
+    // 已认领的商人菜单先把两格剩余付款物品收回，再关闭。
+    // 其他当前界面也会落到关闭分支，没有检查 openedMenu／openRequested，因此已有目标物品也可能触发无关关闭（A56）。
     private TaskState cleanupMenu() {
         if (player.containerMenu == player.inventoryMenu && ClientRuntime.requireContext(player).minecraft().screen == null) {
             openedMenu = false;
@@ -627,6 +647,7 @@ public final class SemanticTradeCompanionTask
                 childId("close"), childDeadline(30L * 20L)), Purpose.CLOSE);
     }
 
+    // 关闭后清掉本次商人和报价状态：有失败就结束，物品够了就成功，否则按计划尝试下一位商人。
     private TaskState afterClosed() {
         openRequested = false;
         menuClaimed = false;
@@ -652,6 +673,7 @@ public final class SemanticTradeCompanionTask
                 FailureType.INTERNAL);
     }
 
+    // 把开交易界面、付款、拿结果、退还余款和关闭分别交给子任务；拿结果不确定时不盲目再买一次。
     private TaskState tickChild() {
         TaskState terminal = runChild(activeChild);
         if (terminal == null) {
@@ -730,6 +752,7 @@ public final class SemanticTradeCompanionTask
                                     + "increasing in the real main inventory.",
                             FailureType.UNKNOWN);
                 }
+                // 只观察目标物品总数有增长就记一笔完成；没有在这里核对完整付款消耗或准确产出数量。
                 completedTrades++;
                 r.extendDeadlineTo(player.level().getGameTime() + TRADE_PROGRESS_LEASE_TICKS);
                 effectsStarted = false;
@@ -770,6 +793,7 @@ public final class SemanticTradeCompanionTask
                 FailureType.TARGET_LOST);
     }
 
+    // 所有候选都试完后，从已观察的原因中选一个主要解释；缺钱、没空间、没货与付款许可不同，不统一叫找不到商人。
     private TaskState exhausted() {
         if (outputCount() >= r.count) {
             finishRequested = true;
@@ -828,6 +852,7 @@ public final class SemanticTradeCompanionTask
         observations.merge(code, 1, Integer::sum);
     }
 
+    // 当前只检查菜单类型，没有绑定最初打开的那个菜单对象或编号；换成另一个商人菜单也会通过。
     private MerchantMenu merchantMenu() {
         return player.containerMenu instanceof MerchantMenu menu ? menu : null;
     }
@@ -853,6 +878,7 @@ public final class SemanticTradeCompanionTask
     }
 
     @Override
+    // 取消等结束场景会停子任务并尝试关界面；没有追回已经完成的交易，也没有把消费过的货币当作仍在背包。
     protected void cleanup() {
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
@@ -872,6 +898,7 @@ public final class SemanticTradeCompanionTask
     }
 
     @Override
+    // 报告最终背包数、已完成笔数、最后选择的支付要求与观察到的失败原因，另列结果是否仍不确定。
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         int observed = outputCount();
