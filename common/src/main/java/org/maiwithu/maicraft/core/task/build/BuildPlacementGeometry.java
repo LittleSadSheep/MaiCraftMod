@@ -34,18 +34,8 @@ import java.util.Map;
 import java.util.function.Predicate;
 
 /**
- * Pure, read-only placement geometry shared by build preflight and live execution.
- *
- * <p>A gesture is deliberately more concrete than a desired block state: it freezes a feet cell,
- * the block face to click, and the point on that face.  The task still has to walk there, turn the
- * real camera, raytrace the real crosshair and submit a native use receipt.  This class merely
- * proves before construction starts that at least one such first-person gesture can express the
- * requested authored state.</p>
- *
- * <p>For ordinary and modded {@link BlockItem}s the proof asks the item/block itself through
- * {@code getStateForPlacement}; it does not maintain a block whitelist.  The small fallback for a
- * standing/wall item is needed only when its future support is itself part of the still-unbuilt
- * plan, so the live level quite correctly refuses the hypothetical placement during preflight.</p>
+ * 为每个施工格寻找能从第一人称完成的点击：人站在哪里、点哪块的哪个面、看向哪里，以及是否要蹲下。
+ * 这里检查距离、身体空间、视线和原版预计放置状态，不发送右键；执行器之后还要实际转头并等操作确认。
  */
 final class BuildPlacementGeometry {
 
@@ -78,7 +68,7 @@ final class BuildPlacementGeometry {
 
     private BuildPlacementGeometry() {}
 
-    /** Secondary halves are verified as effects of their primary item use, never clicked again. */
+    // 遇到床头或门上半时，找到真正需要主动放下的床脚或下半坐标。
     static BlockPos primaryOf(BuildTaskRecord.Target target) {
         BlockState desired = target.desiredState();
         if (desired.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
@@ -94,7 +84,7 @@ final class BuildPlacementGeometry {
         return target.pos();
     }
 
-    /** Cells a vanilla one-item placement creates in addition to the primary cell. */
+    // 列出这次放置会顺带生成的另一半，供保护检查和操作后的确认共同使用。这里只识别已列出的两格结构。
     static List<GeneratedCell> generatedBy(BuildTaskRecord.Target target) {
         BlockState desired = target.desiredState();
         if (desired.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
@@ -112,34 +102,32 @@ final class BuildPlacementGeometry {
         return List.of();
     }
 
-    /**
-     * Enumerate bounded, physically achievable gestures.  The returned list is immutable and may
-     * safely be retained by a task across ticks; it contains no player/world/context reference.
-     */
+    /** 同步枚举这一格的点击候选，返回不可变列表；可留到后续使用，但执行时仍要重新检查现场。 */
     static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
                               Map<Long, BuildTaskRecord.Target> targets) {
         return plan(player, target, targets, false, ignored -> true);
     }
 
-    /** Cheap preflight proof; a negative result still exhausts the complete finite search. */
+    /** 预检找到一个候选就返回；若没有候选，会同步查完整个有限范围，不能保证耗时很短。 */
     static boolean hasAnyGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                  Map<Long, BuildTaskRecord.Target> targets) {
         return !plan(player, target, targets, true, ignored -> true).isEmpty();
     }
 
-    /** Same placement proof, restricted to caller-approved physical stance cells. */
+    /** 同样的预检，但只允许调用者认可的站位；这份额外条件会直接影响能否找到候选。 */
     static boolean hasAnyGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                  Map<Long, BuildTaskRecord.Target> targets,
                                  Predicate<BlockPos> stanceAllowed) {
         return !plan(player, target, targets, true, stanceAllowed).isEmpty();
     }
 
-    /** A reachable native gesture from the actual feet position, without centering on a path cell. */
+    /** 使用角色真实脚下位置的入口，不要求先移到某格中心。 */
     static Gesture currentGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                    Map<Long, BuildTaskRecord.Target> targets) {
         return currentGesture(player, target, targets, ignored -> true);
     }
 
+    // 从角色现在的真实脚高找点击方案，允许站在半砖上；多个方案都成立时，优先选转头幅度小的。
     static Gesture currentGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                    Map<Long, BuildTaskRecord.Target> targets, Predicate<Gesture> allowed) {
         if (!(target.item() instanceof BlockItem) || !player.level().isLoaded(target.pos())) return null;
@@ -163,12 +151,13 @@ final class BuildPlacementGeometry {
                         + Math.abs(g.pitch() - player.getXRot()))).orElse(null);
     }
 
-    /** A native-state proof from hypothetical feet, using only existing world support and shapes. */
+    /** 试算给定站位的原版放置结果，支撑和遮挡只读当前世界。 */
     static Gesture liveGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
                                    Map<Long, BuildTaskRecord.Target> targets, Vec3 feet) {
         return liveGestureFrom(player, target, targets, feet, ignored -> true);
     }
 
+    // 从给定的真实站位找第一个可行点击，供一处站位连放多格使用；不一定选转头最少的方案。
     static Gesture liveGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
                                    Map<Long, BuildTaskRecord.Target> targets, Vec3 feet,
                                    Predicate<Gesture> allowed) {
@@ -191,7 +180,7 @@ final class BuildPlacementGeometry {
         return null;
     }
 
-    /** Feet can rest within a partial block's cell while the actual body remains above its shape. */
+    // 把角色当前身体盒平移到候选脚下，检查周围真实碰撞和流体，再检查目标方块放下后不会卡住身体。
     private static boolean bodyClearFrom(LocalPlayer player, BuildTaskRecord.Target target,
                                          BuildPlacementStage stage, Vec3 feet) {
         AABB body = player.getBoundingBox().move(feet.subtract(player.position())).deflate(1.0e-5);
@@ -210,16 +199,16 @@ final class BuildPlacementGeometry {
     private static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
                                       Map<Long, BuildTaskRecord.Target> targets, boolean firstOnly,
                                       Predicate<BlockPos> stanceAllowed) {
-        // Compatibility for synchronous utility probes and standalone callers. Construction
-        // retains PlanSearch across ticks and must never drain this adapter on the client thread.
+        // 供仍要求同步结果的辅助检查使用；正常施工保存 PlanSearch，让后续游戏更新接着推进。
         var search = new PlanSearch(player, target, targets, firstOnly, firstOnly, stanceAllowed);
+        // 这是同步兼容入口：内部虽然分片检查，但在这里立即接着跑到结束，不会真的等下一刻。
         while (!search.advance(Integer.MAX_VALUE).complete()) { }
         return search.results();
     }
 
     record PlanProgress(boolean complete, int probeCount, int gestureCount, int stanceChecks) {}
 
-    /** Complete finite enumeration, yielding between individual face probes instead of whole targets. */
+    // 保存“哪个支撑面、哪个站位、面上的哪个点”三个进度。实际施工可每刻只推进少量检查，避免从头反复找。
     static final class PlanSearch {
         private static final long SLICE_NANOS = 4_000_000;
         private final LocalPlayer player;
@@ -245,6 +234,7 @@ final class BuildPlacementGeometry {
             complete = !(target.item() instanceof BlockItem);
         }
 
+        // 一项工作只推进一个取样点、一个站位或一个支撑面；最多约四毫秒，下次从剩余进度继续。
         PlanProgress advance(int workBudget) {
             long deadline = System.nanoTime() + SLICE_NANOS;
             for (int work = 0; work < Math.max(0, workBudget) && !complete && System.nanoTime() < deadline; work++) {
@@ -257,12 +247,14 @@ final class BuildPlacementGeometry {
                     probeCount++;
                     var gesture = gestureAtPoint(player, target, stage, support, feet, point, false, ignored -> true);
                     if (gesture != null) { found.add(gesture); if (firstOnly) complete = true; }
+                // 批量预检使用格子底部中心作脚下位置；半格高度的当前站位另由 currentGesture 处理。
                 } else if (stanceAt < STANCE_OFFSETS.size()) {
                     BlockPos stance = target.pos().offset(STANCE_OFFSETS.get(stanceAt++)); stanceChecks++;
                     if (!stanceAllowed.test(stance) || !stage.bodyCellAvailable(stance)) continue;
                     feet = Vec3.atBottomCenterOf(stance); pointAt = 0;
                     pointCount = boxes.size() * firstSamples(support.face()).length * secondSamples(support.face()).length;
                 } else if (supportAt <= SUPPORT_ORDER.length) {
+                    // 先试直接点目标格里的可覆盖方块或同类可叠加方块，再试目标周围六个支撑面。
                     boolean direct = supportAt == 0;
                     Direction toward = direct ? Direction.DOWN : SUPPORT_ORDER[supportAt - 1]; supportAt++;
                     BlockPos clicked = direct ? target.pos() : target.pos().relative(toward);
@@ -278,13 +270,14 @@ final class BuildPlacementGeometry {
             return new PlanProgress(complete, probeCount, found.size(), stanceChecks);
         }
 
+        // 全部枚举结束后才允许取最终列表，避免调用者把尚未找完误认为没有方案。
         List<Gesture> results() {
             if (!complete) throw new IllegalStateException("placement enumeration is still pending");
             return List.copyOf(found);
         }
     }
 
-    /** Runtime prediction uses the actual crosshair hit and current camera rotation. */
+    /** 执行前用真实准星落点、视角和当前蹲下状态，再试算一次原版放置结果。 */
     static BlockState predict(LocalPlayer player, BuildTaskRecord.Target target,
                               BlockHitResult hit, float yaw, float pitch) {
         if (!(target.item() instanceof BlockItem)) return null;
@@ -292,11 +285,12 @@ final class BuildPlacementGeometry {
                 player.isSecondaryUseActive(), target.pos());
     }
 
-    /** True for the final state or for a receipt-confirmable intermediate of a bounded multi-use. */
+    // 确认多次点击中的一次是否向目标靠近：状态必须有变化；已完成直接通过，双层半砖允许先放第一片。
+    // 其余整数属性必须不倒退、不超过目标，并至少一项增加。精确属性检查在前，因此明确要求精确数量时不能靠这里放宽。
     static boolean isProgress(BuildTaskRecord.Target target, BlockState before, BlockState after) {
         if (after.equals(before)) return false;
         if (target.matches(after)) return true;
-        // Machine-authored custom state must not be reinterpreted as a generic accumulation step.
+        // 当前先要求明确列出的精确属性已经相等，再考虑中间进度；精确指定的数量属性也会受此限制。
         if (!target.matchesExactProperties(after)) return false;
         BlockState desired = target.desiredState();
         if (after.getBlock() != desired.getBlock()) return false;
@@ -307,8 +301,7 @@ final class BuildPlacementGeometry {
             return !before.is(after.getBlock());
         }
 
-        // Snow layers, candles, eggs, pickles and modded stackable blocks expose the same monotone
-        // integer shape.  A confirmed use may advance one step; it may never overshoot or regress.
+        // 雪、蜡烛等可能要逐次增加；这里统一按整数属性判断，不逐个识别哪些模组整数确实代表数量。
         boolean advanced = false;
         for (var property : desired.getProperties()) {
             if (!(property instanceof net.minecraft.world.level.block.state.properties.IntegerProperty p)
@@ -323,6 +316,7 @@ final class BuildPlacementGeometry {
         return advanced && authoredPropertiesCompatibleExceptProgress(target, after);
     }
 
+    // 双层半砖最多需要两次使用，其他目标按材料数量估计，至少为一次；它不是成功次数。
     static int maximumUses(BuildTaskRecord.Target target) {
         if (target.desiredState().getBlock() instanceof SlabBlock
                 && target.desiredState().hasProperty(BlockStateProperties.SLAB_TYPE)
@@ -359,6 +353,7 @@ final class BuildPlacementGeometry {
         return new FaceProbe(clicked, face, direct, BuildPlacementInteraction.requiresSneak(state), state.getShape(stage, clicked));
     }
 
+    // 先按站立或蹲下眼高算角度，要求点击点在 4.45 格内、未被失败记录排除、视线通畅且真的命中所选面。
     private static Gesture gestureAtPoint(LocalPlayer player, BuildTaskRecord.Target target,
                                          BuildPlacementStage stage, FaceProbe probe, Vec3 feet, Vec3 point,
                                          boolean live, Predicate<Gesture> allowed) {
@@ -375,6 +370,7 @@ final class BuildPlacementGeometry {
         return (live ? provesLiveGesture(player, target, gesture) : provesGesture(player, target, gesture)) ? gesture : null;
     }
 
+    // 现场方案必须能预测出落在目标格的状态，并达到目标或形成允许的中间进度。
     private static boolean provesLiveGesture(LocalPlayer player, BuildTaskRecord.Target target, Gesture gesture) {
         BlockState predicted = predictedState(player, new ItemStack(target.item()), gesture.syntheticHit(),
                 gesture.yaw(), gesture.pitch(), gesture.sneak(), target.pos());
@@ -395,17 +391,15 @@ final class BuildPlacementGeometry {
             return true;
         }
 
-        // If every possible state of this block satisfies the authored-state contract, the exact
-        // orientation is intentionally irrelevant (lantern hanging/waterlogged and similar world
-        // properties fall here).  This remains generic for mod blocks.
+        // 预检的现场可能还没有计划支撑。如果目标接受这种方块的所有状态，即使暂时预测不出，也保留候选。
+        // 这只是预检放宽，执行前还要由现场预测确认，不能直接据此发放置动作。
         if (target.item() instanceof BlockItem blockItem
                 && blockItem.getBlock() == target.block()
                 && acceptsEveryState(target)) {
             return true;
         }
 
-        // A standing/wall item may return null solely because its planned support does not exist
-        // yet.  The clicked outward face is exactly the authored wall-facing property.
+        // 立式／墙式共用的物品另作预检放宽：没指定精确属性，且墙上朝向与点击面一致，也先保留。
         if (target.item() instanceof StandingAndWallBlockItem
                 && gesture.face().getAxis().isHorizontal()
                 && target.exactProperties().isEmpty()) {
@@ -420,6 +414,7 @@ final class BuildPlacementGeometry {
         return false;
     }
 
+    // 遍历这一方块注册的全部可能状态；全都可接受才说明此目标不挑摆放姿态。这里每次都会遍历，没有单独缓存。
     private static boolean acceptsEveryState(BuildTaskRecord.Target target) {
         for (BlockState possible : target.block().getStateDefinition().getPossibleStates()) {
             if (!target.acceptsPlacedState(possible)) return false;
@@ -427,6 +422,7 @@ final class BuildPlacementGeometry {
         return true;
     }
 
+    // 把待比较状态里的整数属性临时换成目标值，再比较其他摆放属性；只是构造比较用状态，不改世界。
     private static boolean authoredPropertiesCompatibleExceptProgress(
             BuildTaskRecord.Target target, BlockState state) {
         BlockState desired = target.desiredState();
@@ -444,6 +440,7 @@ final class BuildPlacementGeometry {
         return STANCE_OFFSETS.stream().map(target::offset).toList();
     }
 
+    // 预先生成四种相对高度、水平一到四格的方形边界站位，按离目标近远排序；没有正好在目标同一列的站位。
     private static List<BlockPos> createStanceOffsets() {
         List<BlockPos> out = new ArrayList<>();
         for (int dy : new int[]{-1, 0, -2, 1}) {
@@ -461,7 +458,7 @@ final class BuildPlacementGeometry {
     }
 
     static List<Vec3> facePoints(BlockPos clicked, VoxelShape shape, Direction face) {
-        // Clip against the union from the actual eye later: hidden/internal box faces cannot win.
+        // 每个小碰撞盒各取面上的点；后续用整体外形射线过滤藏在方块内部或被别的部分挡住的面。
         List<Vec3> points = new ArrayList<>();
         for (AABB box : shape.toAabbs()) for (double a : firstSamples(face)) for (double b : secondSamples(face))
             points.add(facePoint(clicked, box, face, a, b));
@@ -476,6 +473,7 @@ final class BuildPlacementGeometry {
         return face.getAxis() == Direction.Axis.Z ? SIDE_HEIGHT_SAMPLES : FACE_SAMPLES;
     }
 
+    // 在某个碰撞盒的指定面上按比例取点，再向面内缩一点，避免射线终点恰好落在表面造成误差。
     private static Vec3 facePoint(BlockPos clicked, AABB box, Direction face, double a, double b) {
         double x = 0, y = 0, z = 0;
         switch (face.getAxis()) {
@@ -495,8 +493,7 @@ final class BuildPlacementGeometry {
                 z = face == Direction.SOUTH ? box.maxZ : box.minZ;
             }
         }
-        // Pull a hair inside the clicked block so floating-point rounding keeps the ray on the
-        // intended face while the BlockHitResult still reports that exact outward direction.
+        // 内缩量为万分之一格，减少终点落在表面时的浮点误差。
         return new Vec3(clicked.getX() + x - face.getStepX() * 1.0e-4,
                 clicked.getY() + y - face.getStepY() * 1.0e-4,
                 clicked.getZ() + z - face.getStepZ() * 1.0e-4);
@@ -510,6 +507,8 @@ final class BuildPlacementGeometry {
 
     private record NativePlacement(BlockPos pos, BlockState state) {}
 
+    // 调用方块自己的放置状态计算，但把视角与蹲下状态换成候选点击的值，不实际转头或发动作。
+    // 落点仍交给原版 BlockPlaceContext 决定；若物品会放到别的格子，不能强行把它解释成目标格。
     private static NativePlacement predictPlacement(LocalPlayer player, ItemStack stack, BlockHitResult hit,
                                                      float yaw, float pitch, boolean sneak, BlockPos target) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
@@ -537,8 +536,7 @@ final class BuildPlacementGeometry {
                     return nearest.clone();
                 }
             };
-            // The native item can replace the clicked support instead of placing beside it
-            // (e.g. merging the same slab). A correct state at that other cell proves nothing here.
+            // 例如点同类半砖可能补成点击格的双层砖，而不是放到邻格；必须连落点也匹配本次目标。
             BlockPos destination = context.getClickedPos();
             return new NativePlacement(destination, destination.equals(target)
                     ? blockItem.getBlock().getStateForPlacement(context) : null);
