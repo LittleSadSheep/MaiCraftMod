@@ -5,7 +5,7 @@ import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
-/** Mutable, client-thread-owned receipt for one native action attempt. */
+/** 记住一次游戏操作的等待状态：何时提交、属于哪个玩家版本、等多久、观察到什么才算结束。 */
 public final class NativeActionReceipt {
     public enum Kind { BREAK_BLOCK, USE_BLOCK, USE_ITEM, RELEASE_ITEM, SELECT_HOTBAR, CREATIVE_SET_SLOT, MOD_PROTOCOL, ATTACK_ENTITY, INTERACT_ENTITY }
     public enum Status { PENDING, CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, CANCELLED, DIVERGED, UNCERTAIN }
@@ -34,6 +34,7 @@ public final class NativeActionReceipt {
             NativeConfirmation confirmation,
             BlockPos breakTarget,
             Direction breakFace) {
+        // 期限按客户端的动作刻计算；保存身体和控制版本，不能把旧玩家的点击结果用到新玩家身上。
         if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
         if (stableTicksRequired < 1) throw new IllegalArgumentException("stableTicksRequired must be positive");
         this.kind = kind;
@@ -64,11 +65,13 @@ public final class NativeActionReceipt {
     long lastNativeTick() { return lastNativeTick; }
     void nativeAdvanced(long tick) { lastNativeTick = tick; }
     void resetStable(long tickRevision) {
+        // 条件没满足时重置稳定计数，同一刻重复查询不会重复计数或重置。
         if (lastStableTickRevision == tickRevision) return;
         lastStableTickRevision = tickRevision;
         stableTicks = 0;
     }
     boolean countStable(long tickRevision) {
+        // 当前只数不同客户端刻的匹配次数，没有在这里等待服务器的方块预测确认序号。
         if (lastStableTickRevision != tickRevision) {
             lastStableTickRevision = tickRevision;
             stableTicks++;
@@ -76,6 +79,7 @@ public final class NativeActionReceipt {
         return stableTicks >= stableTicksRequired;
     }
     void finish(Status status, String detail) {
+        // 一旦结束就保留这个结论；后来的世界回滚不会通过这个方法重新打开已经结束的记录。
         if (terminal()) return;
         this.status = status;
         this.detail = detail;

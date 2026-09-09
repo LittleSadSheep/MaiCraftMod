@@ -8,7 +8,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 
-/** Default MultiPlayerGameMode action port. Immediate return values are never treated as success. */
+/** 真正调用游戏的挖掘、使用、攻击等操作，并保存一项待确认动作；结果由后续观察判断，不直接用 API 返回值。 */
 public final class DefaultNativeActionPort implements NativeActionPort {
     String diagnosticState() {
         return active == null ? "none" : active.kind() + ":" + active.status()
@@ -22,6 +22,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     @Override
     public NativeActionReceipt startBreaking(LocalPlayerContext context, BlockHitResult hit, int timeoutTicks) {
+        // 先检查当前控制权和有无旧动作，再占用本刻操作机会，记录目标原状态后开始挖。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
         current.claimMutation();
@@ -47,6 +48,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     @Override
     public NativeActionReceipt cancelBreaking(LocalPlayerContext context, NativeActionReceipt receipt) {
+        // 先看是否已经挖完；仍在挖才发停止，避免把刚确认完成的操作改说成取消。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireActive(receipt, NativeActionReceipt.Kind.BREAK_BLOCK);
         poll(current, receipt);
@@ -72,6 +74,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             LocalPlayerContext context,
             NativeActionReceipt receipt,
             String boundaryReason) {
+        // 任务结束时本刻可能已经用过操作机会；来不及停挖就记下来，让下一刻在新任务之前先停止。
         context.requireCurrent();
         requireActive(receipt, NativeActionReceipt.Kind.BREAK_BLOCK);
         poll(context, receipt);
@@ -101,6 +104,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     @Override
     public NativeActionReceipt continueBreaking(LocalPlayerContext context, NativeActionReceipt receipt) {
+        // 同一挖掘每刻最多推进一次，且先读取当前结果，已经完成就不再继续挥手。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireActive(receipt, NativeActionReceipt.Kind.BREAK_BLOCK);
         poll(current, receipt);
@@ -119,7 +123,8 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     @Override
     public NativeActionReceipt useBlock(LocalPlayerContext context, InteractionHand hand, BlockHitResult hit,
-                                        NativeConfirmation confirmation, int timeoutTicks) {
+                                         NativeConfirmation confirmation, int timeoutTicks) {
+        // 发一次普通方块右键，再用调用者给的条件查结果；游戏本身可能先在客户端预测放置效果。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireIdle();
         current.claimMutation();
@@ -156,6 +161,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     @Override
     public NativeActionReceipt releaseUsingItem(
             LocalPlayerContext context, NativeActionReceipt receipt) {
+        // 持续吃东西、拉弓等需要实际松开使用；新的“已停止使用”记录接替原来的使用记录。
         DefaultLocalPlayerContext current = requireSubmission(context);
         requireActive(receipt, NativeActionReceipt.Kind.USE_ITEM);
         current.claimMutation();
@@ -176,6 +182,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     @Override
     public NativeActionReceipt selectHotbar(
             LocalPlayerContext context, int slot, int timeoutTicks) {
+        // 本地切换选中槽并发包通知服务器；随后比较的 selected 字段就是这个本地值。
         DefaultLocalPlayerContext current = requireSubmission(context);
         if (slot < 0 || slot >= 9) {
             throw new IllegalArgumentException("hotbar slot must be between 0 and 8");
@@ -200,6 +207,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     @Override
     public NativeActionReceipt creativeSetSlot(
             LocalPlayerContext context, int inventorySlot, ItemStack expected, int timeoutTicks) {
+        // 只有创造模式且物品栏界面已显示才允许设置槽位；发包后等物品栏实际出现期望物品，不直接在这里改本地数量。
         DefaultLocalPlayerContext current = requireSubmission(context);
         if (inventorySlot < 0 || inventorySlot >= Math.min(
                 36, current.player().getInventory().getContainerSize())) {
@@ -258,6 +266,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             NativeConfirmation confirmation,
             int timeoutTicks,
             boolean usesMenu) {
+        // 模组菜单协议必须有可见菜单，世界控制协议则要求合适的世界界面；两者仍共用同一操作计数和等待位置。
         DefaultLocalPlayerContext current = requireSubmission(context);
         if (submission == null) throw new IllegalArgumentException("submission is required");
         if (confirmation == null) throw new IllegalArgumentException("confirmation is required");
@@ -325,6 +334,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             LocalPlayerContext context,
             NativeActionReceipt receipt,
             String boundaryReason) {
+        // 一次性操作已提交后不能假装撤销；任务结束而结果未定时标记不确定。挖掘和持续使用必须另发停止操作。
         context.requireCurrent();
         if (receipt == null) throw new IllegalArgumentException("receipt is required");
         requireActive(receipt, receipt.kind());
@@ -346,6 +356,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     @Override
     public NativeActionReceipt poll(LocalPlayerContext context, NativeActionReceipt receipt) {
+        // 先核对仍是同一身体和控制版本，再运行只读判断；当前默认累计两刻匹配，不包含服务器预测序号检查。
         context.requireCurrent();
         requireActive(receipt, receipt.kind());
         if (receipt.terminal()) return receipt;
@@ -388,6 +399,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     void revokeForBoundary(String reason) {
+        // 换身体或控制权时旧结果不再可信，结束为不确定；这里只改等待记录，不再次发世界操作。
         if (active != null && !active.terminal()) {
             active.finish(NativeActionReceipt.Status.UNCERTAIN, reason);
         }
@@ -417,6 +429,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     private void requireIdle() {
+        // 前一项操作还没结束时拒绝新操作，防止多次点击共用一份结果后分不清谁做了什么。
         if (active != null && !active.terminal()) {
             throw new IllegalStateException(
                     "a native action is already awaiting confirmation"
@@ -434,6 +447,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         }
     }
     void advance(LocalPlayerContext context) {
+        // 每刻先读旧结果；如果有任务已经结束却还没来得及松开挖掘，就先处理这次停止。
         NativeActionReceipt receipt = active;
         if (receipt == null || receipt.terminal()) {
             pendingBreakCancellationReason = null;

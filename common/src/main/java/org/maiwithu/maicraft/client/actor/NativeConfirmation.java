@@ -9,14 +9,14 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Read-only postcondition used to reconcile one submitted native action. */
+/** 操作后如何检查结果：这些回调只读当前客户端事实，本身不会再发点击，也不自动证明服务器已确认。 */
 @FunctionalInterface
 public interface NativeConfirmation {
     enum Verdict { PENDING, APPLIED, NOT_APPLIED, DIVERGED }
 
     Verdict observe(LocalPlayerContext context);
     default int stableTicksRequired() { return 2; }
-    /** A newly received entity/vehicle identity already comes from the server's entity stream. */
+    /** 调用方已拥有服务器发来的新实体证据时，不再多等一次稳定刻。 */
     static NativeConfirmation serverObservedEntity(NativeConfirmation evidence) {
         return new NativeConfirmation() {
             public Verdict observe(LocalPlayerContext context) { return evidence.observe(context); }
@@ -25,6 +25,7 @@ public interface NativeConfirmation {
     }
 
     public static NativeConfirmation blockBecomesAir(BlockPos target, BlockState before) {
+        // 挖掉目标后通常变空气；含水方块被挖掉留下原液体也算符合预期。
         BlockPos frozen = target.immutable();
         return context -> {
             if (!context.level().isLoaded(frozen)) return Verdict.PENDING;
@@ -42,6 +43,7 @@ public interface NativeConfirmation {
     }
 
     public static NativeConfirmation blockState(BlockPos target, BlockState before, BlockState expected) {
+        // 变成期望状态算匹配，还是原样继续等，变成第三种状态则报告不一致；读到的世界也可能包含本地预测。
         BlockPos frozen = target.immutable();
         return context -> {
             if (!context.level().isLoaded(frozen)) return Verdict.PENDING;
@@ -53,6 +55,7 @@ public interface NativeConfirmation {
     }
 
     public static NativeConfirmation blockChanged(BlockPos target, BlockState before) {
+        // 这里只检查“变过了”，并不证明变成了哪种指定效果，需要精确结果的调用方不能只用这一项。
         BlockPos frozen = target.immutable();
         return context -> !context.level().isLoaded(frozen)
                 ? Verdict.PENDING
@@ -71,6 +74,7 @@ public interface NativeConfirmation {
     }
 
     public static NativeConfirmation inventorySlot(int slot, ItemStack expected) {
+        // 比较指定物品栏格的种类、附加属性和数量；槽位不存在说明原上下文已经不适用。
         ItemStack frozen = expected.copy();
         return context -> {
             if (slot < 0 || slot >= context.player().getInventory().getContainerSize()) {
@@ -82,6 +86,7 @@ public interface NativeConfirmation {
     }
 
     public static NativeConfirmation entityHurt(Entity entity) {
+        // 按原实体编号寻找目标，看到血量下降或死亡即匹配；这不单独区分是哪一次攻击造成的伤害。
         int id = entity.getId();
         float health = entity instanceof LivingEntity living ? living.getHealth() : Float.NaN;
         return context -> {
@@ -93,6 +98,7 @@ public interface NativeConfirmation {
     }
 
     public static NativeConfirmation anyOf(NativeConfirmation... confirmations) {
+        // 任一条件匹配就通过；没有匹配但还有等待项就继续等，全部结束后再综合未生效或不一致。
         NativeConfirmation[] frozen = Arrays.copyOf(confirmations, confirmations.length);
         if (frozen.length == 0) throw new IllegalArgumentException("at least one confirmation is required");
         return context -> {
@@ -114,6 +120,7 @@ public interface NativeConfirmation {
     }
 
     public static NativeConfirmation hotbarSelected(int slot) {
+        // 只检查客户端当前选中的快捷栏编号；selectHotbar 自己会先设置这个本地字段，不是读取服务器确认包。
         return context -> context.player().getInventory().selected == slot
                 ? Verdict.APPLIED : Verdict.NOT_APPLIED;
     }

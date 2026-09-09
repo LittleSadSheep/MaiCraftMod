@@ -8,10 +8,8 @@ import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 
 /**
- * One coherent view of the local player for exactly one client tick.
- *
- * <p>Tasks must not retain the player, level, or connection obtained from this object. They retain
- * logical task state and ask the boundary for a fresh context on the next tick instead.</p>
+ * 当前一刻的玩家、世界、网络与动作入口。每刻重新取得，用来保证这次操作面对的是同一个有效身体。
+ * 不能把这个入口留到下一刻直接使用；任务本身可以保存进度，执行时重新核对当前身体。
  */
 public interface LocalPlayerContext {
     Minecraft minecraft();
@@ -36,16 +34,13 @@ public interface LocalPlayerContext {
 
     long tickRevision();
 
-    /** True only while this is still the current context on the client thread. */
+    /** 这份入口是否仍属于当前客户端刻和当前玩家。 */
     boolean isCurrent();
 
-    /** True while automation owns this current body/control epoch. */
+    /** 自动化是否仍允许在这份当前入口上处理游戏动作。 */
     boolean permitsNativeActions();
 
-    /**
-     * True while this actor tick's single native-mutation slot has not been consumed.  Read-only
-     * receipt polling still uses {@link #permitsNativeActions()} after a submission.
-     */
+    /** 本刻是否还可提交一次操作；已经提交后仍可读结果，但不能再提交第二次。 */
     boolean mutationAvailable();
 
     default void requireCurrent() {

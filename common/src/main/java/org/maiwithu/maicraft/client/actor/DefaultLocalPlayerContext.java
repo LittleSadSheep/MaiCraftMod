@@ -7,7 +7,7 @@ import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 
-/** Default immutable per-tick context created by {@link ClientActorBoundary}. */
+/** 保存这一刻的具体玩家和连接，所有动作最终回到创建它的 ClientActorBoundary 检查是否仍有效。 */
 public final class DefaultLocalPlayerContext implements LocalPlayerContext {
     private final ClientActorBoundary owner;
     private final Minecraft minecraft;
@@ -59,6 +59,7 @@ public final class DefaultLocalPlayerContext implements LocalPlayerContext {
     @Override public boolean isCurrent() { return owner.isCurrent(this); }
 
     void requireSubmissionAuthority() {
+        // 入口还有效也不够，玩家必须仍由自动化控制；例如 F8 已归还输入时就不能继续发操作。
         requireCurrent();
         if (!permitsNativeActions || !owner.body().automationOwnsControls()) {
             throw new IllegalStateException("automation does not own the local player");
@@ -66,6 +67,7 @@ public final class DefaultLocalPlayerContext implements LocalPlayerContext {
     }
 
     void claimMutation() {
+        // 检查控制权后占用本刻的一次操作机会，不能绕过外层计数直接多点一次。
         requireSubmissionAuthority();
         owner.claimMutation(this);
     }

@@ -6,7 +6,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 
-/** Native first-person action submission and read-only reconciliation. */
+/** 发起真实玩家操作，并提供后续查询；提交一次动作与确认它做成了是两个阶段。 */
 public interface NativeActionPort {
     NativeActionReceipt startBreaking(LocalPlayerContext context, BlockHitResult hit, int timeoutTicks);
 
@@ -51,7 +51,7 @@ public interface NativeActionPort {
             NativeConfirmation confirmation,
             int timeoutTicks);
 
-    /** Native world controls share action serialization and authority, without opening a menu. */
+    /** 不开菜单的模组世界控制，同样受玩家控制权和一次操作额度约束。 */
     NativeActionReceipt submitControlProtocol(
             LocalPlayerContext context,
             String operation,
