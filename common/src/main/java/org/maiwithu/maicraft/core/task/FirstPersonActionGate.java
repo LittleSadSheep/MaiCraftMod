@@ -14,6 +14,12 @@ import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
  */
 public final class FirstPersonActionGate {
     public enum Status { RUNNING, READY, FAILED }
+    public record ConfirmedSwap(int source, int hotbar, net.minecraft.world.item.ItemStack sourceBefore,
+                                net.minecraft.world.item.ItemStack hotbarBefore) {
+        public ConfirmedSwap { sourceBefore = sourceBefore.copy(); hotbarBefore = hotbarBefore.copy(); }
+        @Override public net.minecraft.world.item.ItemStack sourceBefore() { return sourceBefore.copy(); }
+        @Override public net.minecraft.world.item.ItemStack hotbarBefore() { return hotbarBefore.copy(); }
+    }
 
     private static final int CONFIRM_TICKS = 20;
 
@@ -27,6 +33,7 @@ public final class FirstPersonActionGate {
     private String failure = "selection was not confirmed";
     private VisibleMenuSession menuSession = new VisibleMenuSession();
     private LocalPlayer owner;
+    private ConfirmedSwap pendingSwap, confirmedSwap;
 
     // 持续推进同一次物品选择：先确认背包交换，再关界面，最后确认快捷栏选中。
     // 交换后重新查找物品可能得到快捷栏的新编号，所以先把旧交换结算，再检查编号是否真的变了。
@@ -45,6 +52,7 @@ public final class FirstPersonActionGate {
                 return Status.FAILED;
             }
             staging = null;
+            confirmedSwap = pendingSwap; pendingSwap = null;
             stagedToHotbar = true;
             return Status.RUNNING; // keep selection as a separate, later-tick native mutation
         }
@@ -95,6 +103,8 @@ public final class FirstPersonActionGate {
                 ? inventorySlot : player.getInventory().selected;
         if (inventorySlot >= 9) {
             if (!menuSession.inventoryReady(context)) return Status.RUNNING;
+            pendingSwap = new ConfirmedSwap(inventorySlot, selectedHotbarSlot,
+                    player.getInventory().getItem(inventorySlot), player.getInventory().getItem(selectedHotbarSlot));
             staging = context.menus().swapInventoryToHotbar(
                     context, inventorySlot, selectedHotbarSlot, CONFIRM_TICKS);
             return Status.RUNNING;
@@ -112,6 +122,13 @@ public final class FirstPersonActionGate {
         return failure;
     }
 
+    public boolean pending() { return staging != null || selecting != null; }
+    public boolean started() { return requestedInventorySlot >= 0 || pending(); }
+    public int requestedSlot() { return requestedInventorySlot; }
+    public ConfirmedSwap takeConfirmedSwap() {
+        ConfirmedSwap result = confirmedSwap; confirmedSwap = null; return result;
+    }
+
     /** Close any inventory screen opened while staging, including interrupted transactions. */
     // 结束菜单会话并忘记本次选择；这里只清掉 selecting 变量，没有退役动作端口中可能仍待确认的快捷栏选择。
     public void reset() {
@@ -120,6 +137,7 @@ public final class FirstPersonActionGate {
         owner = null;
         staging = null;
         selecting = null;
+        pendingSwap = null; confirmedSwap = null;
         requestedInventorySlot = -1;
         selectedHotbarSlot = -1;
         stagedToHotbar = false;
