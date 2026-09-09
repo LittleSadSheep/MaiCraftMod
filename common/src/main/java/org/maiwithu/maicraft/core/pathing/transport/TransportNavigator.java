@@ -21,8 +21,8 @@ import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
 /**
- * 移动方式的协调层，旅行和走近工作台等行为共用它。
- * 普通地面导航交给 EmbeddedBaritoneNavigator；交通方案的选择、执行和交接留在这里。
+ * 决定这一段用走路、背包飞行还是电梯；普通走路交给 Baritone，交通完成后再检查原来的目的地。
+ * 旅行和走近工作台都用它，所以到达条件仍由调用方提供，不能把“下了电梯”一概当作完成。
  */
 public final class TransportNavigator {
     private final LocalPlayer player;
@@ -64,6 +64,7 @@ public final class TransportNavigator {
     public void withTerrainProbe() { probeRequested = true; if (mode == TransportMode.GROUND) ground.withTerrainProbe(); }
 
     public PlayerNav.Status tick() {
+        // 目标或禁止进入的区域变了，先让正在进行的交通安全停下，再按新要求规划，不能直接换终点。
         if (stopped) return PlayerNav.Status.FAILED;
         var context = ClientRuntime.requireContext(player);
         var currentGoal = goals.get();
@@ -76,7 +77,7 @@ public final class TransportNavigator {
             lastPosition = player.position(); progressTick = player.level().getGameTime();
         }
         if (session != null) {
-            // 一段交通动作尚未结束时，先消费它的实际结果；不能同时启动另一种方式抢走输入。
+            // 旧交通还没结束时先等它，不同时开另一种移动方式争抢玩家按键。
             if (TransportRuntime.owns(this)) TransportRuntime.drive(this, context);
             if (transportResult == null) return PlayerNav.Status.RUNNING;
             var result = transportResult;
@@ -108,6 +109,7 @@ public final class TransportNavigator {
             failure = result.detail();
         }
         if (paused) {
+            // 暂停后重新开始时，清掉旧候选和失败状态，让导航按当前身体位置再选路线。
             paused = false; failure = null; attempted = false; forceConsumed = false; triedOffers.clear();
             ground = newGround(); targets = null; offers = List.of();
         }
@@ -117,6 +119,7 @@ public final class TransportNavigator {
         }
         if (failureType == FailureType.UNKNOWN && failure != null) return PlayerNav.Status.FAILED;
         if (targets != null) {
+            // 查找交通落点分多刻完成；目标改变时重查，查完才生成可尝试的飞行／电梯方案。
             if (currentGoal == null) { failure = "navigation destination disappeared"; return PlayerNav.Status.FAILED; }
             if (!targetFingerprint.equals(currentGoal.semanticFingerprint()) || !forbidden.equals(currentForbidden)) {
                 forbidden = LongSets.unmodifiable(new LongOpenHashSet(currentForbidden));
@@ -134,6 +137,7 @@ public final class TransportNavigator {
             }
             while (offerIndex < offers.size() && triedOffers.contains(offerKey(offers.get(offerIndex)))) offerIndex++;
             if (offerIndex < offers.size()) {
+                // 一次只试一个方案，并记住已尝试的出发点与终点，避免在同一处来回重复失败。
                 if (TransportRuntime.occupied()) return PlayerNav.Status.RUNNING;
                 var offer = offers.get(offerIndex);
                 var candidate = offer.create().get();
@@ -151,7 +155,7 @@ public final class TransportNavigator {
             }
             ground = newGround(); ground.withTerrainProbe();
         }
-        // 明确指定喷气背包或电梯时直接尝试该方式；auto 则先走地面，遇到可恢复的导航失败再找交通方案。
+        // 指定飞行或电梯就先用它；auto 先试走路，遇到无路、地形阻挡或缺搭路材料等情况再找交通。
         if (!forceConsumed && mode != TransportMode.AUTO && mode != TransportMode.GROUND) {
             forceConsumed = true; return beginTransport(context);
         }
@@ -166,6 +170,7 @@ public final class TransportNavigator {
     }
 
     private PlayerNav.Status beginTransport(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
+        // 停止旧步行并保存已改地形记录，重新开始找符合总目标且不侵入保护区的交通落点。
         var compiled = goals.get();
         if (compiled == null) { failure = "navigation destination is unavailable"; return PlayerNav.Status.FAILED; }
         journey.addAll(ground.ledger()); ground.stop(); ground = newGround();
@@ -179,7 +184,8 @@ public final class TransportNavigator {
 
     static boolean compatibleGoal(GoalCompiler.Compiled current, BlockPos destination,
                                   GoalCompiler.CompiledFingerprint original,
-                                  LongSet previousForbidden, LongSet currentForbidden) {
+                                   LongSet previousForbidden, LongSet currentForbidden) {
+        // 原目标没变，或新目标仍接受这次交通终点，才可继续这一段；禁止进入的格子变化也要重新规划。
         // Elevator hints name an intermediate floor, including an occupied workstation cell.
         // The original goal remains valid while the final ground approach is still pending.
         return current != null && destination != null
@@ -227,6 +233,7 @@ public final class TransportNavigator {
     }
     public void stop() { stopped = true; ground.stop(); TransportRuntime.cancel(this); }
     public void pause() {
+        // 步行保留原路线暂停；正在乘坐／飞行时先结束这一段，并用 paused 记住恢复时需要重新选路。
         if (session != null) { paused = true; TransportRuntime.cancel(this); }
         else ground.pause();
     }

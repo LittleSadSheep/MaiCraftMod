@@ -26,14 +26,8 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * Reusable investigate/supply/re-investigate seam for semantic parent tasks.
- *
- * <p>The parent owns the live-world plan.  This coordinator only accepts the plan's aggregate
- * final-inventory fact, delegates that one progress-driven prerequisite to {@code acquire_items}, and
- * returns a semantic receipt after coming back to the investigation site. The parent owns the
- * continuation policy: an initial supply normally triggers full re-investigation, while a parent
- * with a separately verified built prefix may re-check that prefix and the exact remaining route
- * before continuing. This coordinator itself never authorizes stale planned cells.
+ * 供料流程的共用帮助类：按总任务给的缺料需求取物，再回到出发工位附近，告诉总任务可以重新观察后继续。
+ * 它只负责材料和返程；房子怎么建、管线怎么接、原计划是否仍有效，仍由调用它的总任务判断。
  */
 public final class SemanticMaterialSupplyCoordinator {
     /** Initial no-progress lease; the active acquire record may extend it from verified progress. */
@@ -68,7 +62,7 @@ public final class SemanticMaterialSupplyCoordinator {
         }
     }
 
-    /** One aggregate material fact.  Alternatives are interchangeable for this exact demand. */
+    /** 一项材料需求：列出的物品可互相替代，最终主背包中合计数量达到 requiredFinalCount 才算够。 */
     public record Demand(
             List<ResourceLocation> acceptableItemIds,
             int requiredFinalCount,
@@ -141,7 +135,7 @@ public final class SemanticMaterialSupplyCoordinator {
                 : Math.max(childDeadline, childRecord.getDeadlineGameTime());
     }
 
-    /** Start one exact, currently observed shortage.  Parents must not call this for a met fact. */
+    /** 传入当前确实缺少的材料；已经够用时不应该再启动这一趟取料。 */
     public void begin(
             LocalPlayer player,
             String parentCallId,
@@ -170,6 +164,7 @@ public final class SemanticMaterialSupplyCoordinator {
             boolean allowHarm,
             List<String> protectedLabels,
             Iterable<BlockPos> forbiddenNavigationCells) {
+        // 同时只做一趟供料，记住出发维度和位置；取料期间仍要遵守总任务不许进入的区域。
         if (active()) throw new IllegalStateException("material supply child is already active");
         this.demand = Objects.requireNonNull(demand, "demand");
         this.materialPolicy = policy == null ? MaterialPolicy.ORDINARY : policy;
@@ -185,6 +180,7 @@ public final class SemanticMaterialSupplyCoordinator {
         investigationOrigin = player.blockPosition().immutable();
         originDimension = player.level().dimension().location().toString();
         childDeadline = now + SUPPLY_INITIAL_LEASE_TICKS;
+        // 初始留三分钟，后续可按真实进展延长；传入的 parentDeadline 当前没有用于限制这个值。
         String prefix = parentCallId == null || parentCallId.isBlank()
                 ? "semantic-work" : parentCallId;
         SemanticAcquireTaskRecord record = new SemanticAcquireTaskRecord(
@@ -206,6 +202,7 @@ public final class SemanticMaterialSupplyCoordinator {
      * The callback is normally {@code this::runChild} from an AbstractCompanionTask.
      */
     public Tick tick(LocalPlayer player, Function<Task, TaskState> childRunner) {
+        // 让总任务按原来的子任务机制推进取料，结束后还要现场数一次背包，不只信子任务一句成功。
         if (demand == null) {
             throw new IllegalStateException("no material supply child is active");
         }
@@ -233,11 +230,13 @@ public final class SemanticMaterialSupplyCoordinator {
             return new Tick(Status.FAILED, receipt, type, message);
         }
         pendingReceipt = receipt;
+        // 材料拿到了还没结束这个组合流程，接下来先返回工位；返程失败时会明确保留“材料已取得”的说明。
         pendingMessage = message;
         return tickReturn(player);
     }
 
     public void cancel(LocalPlayer player) {
+        // 停止取物子任务及返程导航，再清掉本趟状态；已经取得的物品留在玩家背包，不自动退回。
         if (child != null) {
             child.stop(player, Task.StopReason.REPLACED);
             child.result(TaskState.CANCELLED);
@@ -253,18 +252,14 @@ public final class SemanticMaterialSupplyCoordinator {
         return List.copyOf(result);
     }
 
-    /**
-     * Storage permission is a semantic policy: inspect inventory, ask AE first, permit its
-     * network crafting, then fall back to the other explicitly/default-safe sources.
-     */
+    /** 按材料策略排列来源：先背包，允许库存时先查库存；当前代码也会同时加入合成来源。 */
     public static List<SemanticAcquireTaskRecord.Source> resolveSources(
             MaterialPolicy policy,
             List<SemanticAcquireTaskRecord.Source> requested) {
         MaterialPolicy effective = policy == null ? MaterialPolicy.ORDINARY : policy;
         List<SemanticAcquireTaskRecord.Source> supplied = requested == null
                 ? List.of() : requested;
-        // An explicit STORAGE source is itself permission and must obey the documented AE-first
-        // contract even if a stale/default policy string says inventory_only.
+        // 当前认为显式 STORAGE 优先于 inventory_only；因此这两个条件冲突时不会在这里拒绝，而是开放库存和合成。
         if (effective == MaterialPolicy.INVENTORY_ONLY
                 && !supplied.contains(SemanticAcquireTaskRecord.Source.STORAGE)) {
             return List.of(SemanticAcquireTaskRecord.Source.INVENTORY);
@@ -295,6 +290,7 @@ public final class SemanticMaterialSupplyCoordinator {
 
     public static int inventoryCount(
             LocalPlayer player, List<ResourceLocation> acceptableItemIds) {
+        // 把可替代物品在主背包中的数量加总，不计装备和副手。
         int total = 0;
         for (ResourceLocation id : acceptableItemIds) {
             Item item = BuiltInRegistries.ITEM.get(id);
@@ -305,6 +301,7 @@ public final class SemanticMaterialSupplyCoordinator {
 
     private Map<String, Object> receipt(
             TaskResult result, TaskState terminal, int observed, boolean proven) {
+        // 返回需要多少、实际多少、还差多少，并保留少量失败字段；不是把内部取物任务整个对象交出去。
         Map<String, Object> receipt = new LinkedHashMap<>();
         receipt.put("purpose", demand.purpose());
         receipt.put("material_policy", materialPolicy.id());
@@ -329,10 +326,11 @@ public final class SemanticMaterialSupplyCoordinator {
         return Map.copyOf(receipt);
     }
 
-    /** Return to the investigation body position before telling the parent to re-plan. */
+    /** 当前要求回到原出发位置两格内才报告供料流程完成；拿到材料但回不去仍返回失败，供总任务决定。 */
     private Tick tickReturn(LocalPlayer player) {
         Map<String, Object> receipt = new LinkedHashMap<>(pendingReceipt);
         if (!player.level().dimension().location().toString().equals(originDimension)) {
+            // 换了维度不能拿同一组坐标当原工位，也不自动决定再过一次传送门。
             receipt.put("goal_satisfied", false);
             receipt.put("failure_code", "supply_return_world_changed");
             receipt.put("requires_decision", true);
@@ -364,6 +362,7 @@ public final class SemanticMaterialSupplyCoordinator {
                     return returnNavigation.tick();
                 });
         if (status == PlayerNav.Status.RUNNING) {
+            // 返程仍在算路或有身体进展时给它时间，避免取完材料后正常返程被初始估计打断。
             if (returnNavigation.planningInFlight()) {
                 childDeadline++;
             } else if (returnNavigation.hasRecentPhysicalProgress(
@@ -399,6 +398,7 @@ public final class SemanticMaterialSupplyCoordinator {
     }
 
     private static FailureType failureType(TaskResult result, TaskState terminal) {
+        // 优先保留超时／取消，再尝试读子任务原因；完全没有结构化原因时默认按缺料处理。
         if (terminal == TaskState.TIMEOUT || result != null && result.timedOut()) {
             return FailureType.TIMED_OUT;
         }
@@ -456,6 +456,7 @@ public final class SemanticMaterialSupplyCoordinator {
     }
 
     private void clear() {
+        // 只清本次供料的记忆；停止仍在活动的任务或导航要由调用方先做，不能仅丢掉引用。
         child = null;
         childRecord = null;
         demand = null;

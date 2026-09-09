@@ -14,13 +14,14 @@ import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorTrav
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 
-/** Rank only observed capabilities; selecting an offer does not claim its corridor is verified. */
+/** 将当前观察到能尝试的飞行／电梯方案按估计耗时排序；只是挑候选，实际整段路是否可走还要执行时验证。 */
 final class TransportPlan {
     record Offer(String mode, BlockPos destination, double estimatedTicks, Supplier<TransportSession> create) {}
     record Options(List<Offer> offers, List<String> unavailable) {}
 
     static Options prepare(LocalPlayerContext context, NavGoal goal, TransportTargets targets,
-                           TransportMode mode, LongSet forbidden) {
+                            TransportMode mode, LongSet forbidden) {
+        // 按用户选的交通方式过滤候选；地面模式不会在这里新开飞行或电梯，同一楼层不重复生成电梯候选。
         List<Offer> offers = new ArrayList<>();
         List<String> unavailable = new ArrayList<>();
         if (targets.destinations().isEmpty()) unavailable.add("no supported, unobstructed landing satisfies the destination; " + targets.diagnostic());
@@ -40,8 +41,7 @@ final class TransportPlan {
                 elevator(context, destination.feet(), forbidden, offers, unavailable);
             }
         }
-        // A distant destination may be outside the loaded view. A registered elevator can still
-        // bring the body to that floor, where the original navigation goal is re-evaluated.
+        // 远处终点可能没加载，但已知电梯仍可先把玩家送到目标高度，再由原导航继续找最终位置。
         if (offers.isEmpty() && mode != TransportMode.JETPACK && mode != TransportMode.GROUND) {
             for (BlockPos hint : elevatorHints(goal, context.player().blockPosition())) {
                 if (floors.add(hint.getY())) elevator(context, hint, forbidden, offers, unavailable);
@@ -52,6 +52,7 @@ final class TransportPlan {
     }
 
     static List<BlockPos> elevatorHints(NavGoal goal, BlockPos origin) {
+        // 从已有目标提取有限的楼层线索；不能把随便一种自定义目标都猜成固定电梯终点。
         var pending = new ArrayDeque<NavGoal>(); pending.add(goal);
         List<BlockPos> result = new ArrayList<>();
         int examined = 0;

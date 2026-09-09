@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
-/** Bounded discovery of dry, collision-verified static transport endpoints. No live world is retained. */
+/** 在目标范围里找可安全站稳的静态落点；分刻检查已加载方块，不把未知或被挡住的位置当落点。 */
 public final class TransportTargets {
     private static final int MAX_GOALS = 256, MAX_CANDIDATES = 8192, MAX_RESULTS = 32;
     private static final int MAX_RADIUS = 8, MAX_PER_TICK = 128;
@@ -40,7 +40,8 @@ public final class TransportTargets {
 
     /** Pure constructor used by geometry tests; all arguments are logical values. */
     TransportTargets(GoalCompiler.Compiled compiled, Vec3 origin, double width, double height,
-                     int minY, int maxY, LongSet forbiddenBodyCells) {
+                      int minY, int maxY, LongSet forbiddenBodyCells) {
+        // 先把组合目标拆成待检查的小区域；只复制目标和身体尺寸，不把活世界对象带到后续状态里。
         this.origin = origin;
         this.width = width;
         this.height = height;
@@ -70,6 +71,7 @@ public final class TransportTargets {
     }
 
     boolean tick(BlockGetter view, Predicate<BlockPos> loaded) {
+        // 每刻最多查一百二十八个位置并尽量控制在一毫秒内，总数也有限；达到预算会注明截断，不代表全世界已查完。
         long deadline = System.nanoTime() + 1_000_000L;
         int budget = 0;
         while (!pending.isEmpty() && budget < MAX_PER_TICK && (budget == 0 || System.nanoTime() < deadline)) {
@@ -88,6 +90,7 @@ public final class TransportTargets {
             unloaded |= probe.unloaded();
             unknown |= probe.unknown();
             if (probe.destination() != null) {
+                // 合格落点按离出发点的距离排列，最多保留三十二个，并记录还有候选被省略。
                 destinations.add(probe.destination());
                 destinations.sort(Comparator.comparingDouble(d -> d.landingPoint().distanceToSqr(origin)));
                 if (destinations.size() > MAX_RESULTS) {
@@ -111,6 +114,7 @@ public final class TransportTargets {
     }
 
     private void add(NavGoal goal) {
+        // 不同目标生成不同的检查范围：准确位置查一格，只给 x/z 则沿高度查，未知自定义目标不猜中心点。
         int currentY = Math.max(minY + 1, Math.min(maxY - 1, (int) Math.floor(origin.y)));
         if (goal instanceof NavGoal.Exact exact) {
             region(goal, exact.goal, 0, exact.goal.getY(), exact.goal.getY());
@@ -146,6 +150,7 @@ public final class TransportTargets {
     }
 
     private void near(NavGoal goal, double radius, int vertical) {
+        // 实际最多检查水平八格；用户范围更大时保留“没有穷尽”的标记。
         if (!Double.isFinite(radius) || radius < 0) { unknown = true; return; }
         int bounded = (int) Math.min(MAX_RADIUS, Math.ceil(radius));
         truncated |= radius > MAX_RADIUS;
@@ -158,7 +163,7 @@ public final class TransportTargets {
         if (low <= high) pending.add(new Region(goal, center, radius, low, high));
     }
 
-    /** Lazy box enumeration, with axis coordinates nearest the anchor visited first. */
+    /** 不一次生成成千上万坐标，而是记住检查序号，每次取下一个，优先从靠近参考点的轴坐标开始。 */
     private static final class Region {
         final NavGoal goal;
         final BlockPos center;

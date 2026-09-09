@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.core.pathing.transport;
 import java.util.Map;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** One native transport leg, driven by the same first-person actor as ordinary navigation. */
+/** 一段实际交通动作的共同接口，例如飞到落点或乘梯到某层；总导航负责把这些段接成完整旅行。 */
 public interface TransportSession {
     enum State { RUNNING, SUCCEEDED, FAILED }
 
@@ -20,19 +20,19 @@ public interface TransportSession {
         }
     }
 
-    /** Called at most once per actor tick; all native effects use that tick's action ports. */
+    /** 每个游戏刻做一步，返回仍在进行、成功或失败；具体操作必须通过当前玩家的动作接口。 */
     Result tick(LocalPlayerContext context);
 
-    /** Request a controlled exit. The runtime continues ticking this session until it settles. */
+    /** 请求安全停止；提出请求后可能还要继续几刻落地或出梯，不能立即丢弃控制。 */
     void requestStop();
 
-    /** Manual takeover or body/world loss: release owned local inputs without further world actions. */
+    /** 人工接管或玩家消失时直接释放旧输入，不再为旧身体做更多游戏操作。 */
     void abandon();
 
-    /** True only when pausing can safely hand the body to another automation owner. */
+    /** 此刻是否能安全把玩家交给另一任务，例如空中尚未落地时通常不行。 */
     boolean safeToInterrupt();
 
-    /** Native movement, observed vehicle progress or a pending confirmed action keeps the task alive. */
+    /** 是否仍有应继续等待的交通进展，供上层决定是否延长执行时间。 */
     boolean livenessActive();
 
     String phase();
@@ -43,7 +43,7 @@ public interface TransportSession {
     /** Selected route for the optional developer overlay; null means no route is active. */
     default org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() { return null; }
 
-    /** Only an adapter's own staged inventory transaction may temporarily use a non-world GUI. */
+    /** 普通界面会暂停交通；实现可为自己正在处理的物品栏操作开放例外。 */
     default boolean allowsCurrentScreen(LocalPlayerContext context) {
         return org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen);
     }

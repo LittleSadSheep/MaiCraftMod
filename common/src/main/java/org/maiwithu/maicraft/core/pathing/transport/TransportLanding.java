@@ -20,7 +20,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 
-/** Read-only static landing geometry, including shape owners one cell outside the body's volume. */
+/** 检查一个落点：脚下是否有实际支撑、身体会不会撞到方块、是否踩入液体或危险区域。 */
 public final class TransportLanding {
     private static final double EPS = 1.0E-5;
     private TransportLanding() {}
@@ -28,7 +28,8 @@ public final class TransportLanding {
     private record Cell(BlockPos pos, BlockState state, List<AABB> boxes) {}
 
     public static Probe inspect(BlockGetter view, Predicate<BlockPos> loaded, BlockPos feet,
-                                double width, double height, LongSet forbidden) {
+                                 double width, double height, LongSet forbidden) {
+        // 不合法的身体尺寸或无法读取的碰撞形状都算未知；未加载与确定不可落脚分开报告。
         if (!Double.isFinite(width) || !Double.isFinite(height) || width <= 0 || width > 2 || height <= 0 || height > 4) {
             return new Probe(null, false, true);
         }
@@ -43,7 +44,8 @@ public final class TransportLanding {
     }
 
     private static TransportTargets.Destination find(BlockGetter view, BlockPos feet,
-                                                      double width, double height, LongSet forbidden) {
+                                                       double width, double height, LongSet forbidden) {
+        // 连身体外一格的方块也检查，因为栏杆等碰撞形状可能伸入身体所在的空间。
         double x = feet.getX() + 0.5, z = feet.getZ() + 0.5, half = width / 2;
         List<Cell> cells = new ArrayList<>();
         List<Double> tops = new ArrayList<>();
@@ -67,6 +69,7 @@ public final class TransportLanding {
             }
         }
         tops.sort(Comparator.reverseOrder());
+        // 先尝试较高的支撑面，再把真实宽高的身体盒放上去；支撑、头部空间和保护区都通过才返回落点。
         for (double top : tops.stream().distinct().toList()) {
             if (top < view.getMinBuildHeight() || top + height > view.getMaxBuildHeight()
                     || !BlockHelper.playerFeet(view, x, top, z).equals(feet)) continue;
@@ -86,6 +89,7 @@ public final class TransportLanding {
     }
 
     public static boolean unsafe(BlockGetter view, BlockPos pos, BlockState state) {
+        // 液体、传送门、尖石、会动或可能变形的支撑等不作为普通干燥静态落点。
         return !state.getFluidState().isEmpty() || BlockHelper.isHazard(view, pos)
                 || state.is(Blocks.POWDER_SNOW) || state.is(Blocks.NETHER_PORTAL) || state.is(Blocks.END_GATEWAY)
                 || state.is(Blocks.POINTED_DRIPSTONE) || state.is(Blocks.BIG_DRIPLEAF)
@@ -94,7 +98,7 @@ public final class TransportLanding {
                 || state.getBlock() instanceof ShulkerBoxBlock;
     }
 
-    /** Collision implementations also receive the loaded guard for their neighbor reads. */
+    /** 模组碰撞形状内部也可能读邻居，全部通过此视图，防止它偷偷把未加载位置当已知。 */
     private record LoadedView(BlockGetter delegate, Predicate<BlockPos> loaded) implements BlockGetter {
         private void check(BlockPos pos) {
             if (!loaded.test(pos)) throw new Unloaded();

@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** Single actor lease, including controlled landing/docking after the requesting task is cancelled. */
+/** 同一时刻只允许一段交通控制玩家；任务取消后，必要的落地或出梯收尾仍由这里继续推进。 */
 public final class TransportRuntime {
     private static Lease active;
     private static Map<String, Object> last = Map.of();
@@ -41,7 +41,8 @@ public final class TransportRuntime {
     private TransportRuntime() {}
 
     public static boolean acquire(Object owner, String mode, TransportSession session,
-                                  LocalPlayerContext context, Consumer<TransportSession.Result> completed) {
+                                   LocalPlayerContext context, Consumer<TransportSession.Result> completed) {
+        // 当前必须仍允许自动操作，而且不能已有另一任务在控制交通；同一个任务重复申请同一段则复用。
         context.requireCurrent();
         if (!context.permitsNativeActions()) return false;
         if (active != null) return active.owner == owner && active.session == session;
@@ -58,11 +59,13 @@ public final class TransportRuntime {
     }
 
     public static boolean canSafelySuspendActive() {
+        // 询问当前交通动作是否适合让位；判断本身出错时按不安全处理，不能直接放弃空中控制。
         if (active == null) return true;
         try { return active.session.safeToInterrupt(); } catch (RuntimeException unknown) { return false; }
     }
 
     public static void cancel(Object owner) {
+        // 只记“请求停下”，由交通实现决定怎样落地或出梯；这里不会直接关掉正在飞行的装备。
         if (!owns(owner)) return;
         active.cancelling = true;
         try { active.session.requestStop(); }
@@ -70,10 +73,11 @@ public final class TransportRuntime {
     }
 
     public static void suspendActive() {
+        // 当前“暂停”实际走取消这一段交通的流程；想恢复的上层需要在结束后重新规划。
         if (active != null) cancel(active.owner);
     }
 
-    /** The client calls this before allowing another automation owner to acquire the body. */
+    /** 新任务操作玩家之前，先把旧交通的安全停止过程走完。 */
     public static boolean tickCleanup(LocalPlayerContext context) {
         observeControl(context);
         if (active == null || !active.cancelling) return false;
@@ -82,6 +86,7 @@ public final class TransportRuntime {
     }
 
     public static TransportSession.Result drive(Object owner, LocalPlayerContext context) {
+        // 先确认还是原来的玩家和控制权；同一游戏刻最多推进一次，避免总任务和清理流程各推进一遍。
         context.requireCurrent();
         observeControl(context);
         if (!owns(owner)) return TransportSession.Result.failed("transport_not_owned", "transport body lease ended", false, true);
@@ -90,8 +95,7 @@ public final class TransportRuntime {
         if (drivenBody == context.body() && drivenEpoch == context.bodyEpoch()
                 && drivenTick == context.tickRevision()) return lease.result;
         lease.lastTick = context.tickRevision();
-        // Opening an unrelated GUI suspends control, but must not turn off a hovering pack or
-        // invent an elevator arrival. Observation resumes when world controls are available.
+        // 打开无关界面时先等，不能因此关闭悬停中的背包，也不能把没走完的电梯过程说成到达。
         if (!lease.session.allowsCurrentScreen(context)) {
             return lease.result = TransportSession.Result.running("waiting_for_world_controls");
         }
@@ -99,6 +103,7 @@ public final class TransportRuntime {
         try {
             float health = context.player().getHealth(), absorption = context.player().getAbsorptionAmount();
             if (health < lease.health || absorption < lease.absorption) {
+                // 当前只按血量或额外黄心减少判受伤，没有区分伤害与增益效果消退。
                 lease.damageObserved = true;
                 lease.cancelling = true;
                 lease.session.requestStop();
@@ -110,6 +115,7 @@ public final class TransportRuntime {
                     true, true);
             lease.errors = 0;
         } catch (RuntimeException failure) {
+            // 交通控制出错后先尝试安全停下；连续三次仍抛异常，就释放控制并报告结果不确定。
             lease.cancelling = true;
             try { lease.session.requestStop(); } catch (RuntimeException ignored) { lease.errors = 3; }
             lease.result = TransportSession.Result.running("settling_after_transport_error");
@@ -124,12 +130,13 @@ public final class TransportRuntime {
     }
 
     public static void observeControl(LocalPlayerContext context) {
+        // 玩家、控制权或存活状态变了，旧交通不能继续发操作；只放弃旧控制并报告尚需重新观察。
         if (active != null && (active.bodyEpoch != context.bodyEpoch()
                 || active.controlRevision != context.controlRevision()
                 || !context.permitsNativeActions() || !context.player().isAlive())) abandon();
     }
 
-    /** Used on manual takeover, disconnect and death. It submits no native world action. */
+    /** 人工接管、断线或死亡时，停止控制旧身体，不再发送后续交通操作。 */
     public static void abandon() {
         Lease lease = active;
         if (lease == null) return;
@@ -144,6 +151,7 @@ public final class TransportRuntime {
     }
 
     private static void finish(Lease lease) {
+        // 先空出交通位置并松开按键，再通知原任务结果；即使结果回调出错也不会留下旧控制。
         if (active == lease) active = null;
         var description = description(lease);
         description.put("mode", lease.mode);
@@ -160,6 +168,7 @@ public final class TransportRuntime {
     }
 
     public static Map<String, Object> diagnosticState() {
+        // 只提供当前或最后一段交通的排错信息，不因为查看状态就启动交通。
         if (active == null) return Map.of("active", false, "last_transport", last);
         var description = description(active);
         description.put("active", true);
