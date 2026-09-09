@@ -12,21 +12,17 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * Shared argument readers for {@link MaiCraftTool} implementations. Every tool hand-parses
- * the same handful of JSON-arg shapes — a required int, a nullable coordinate, a namespaced
- * item id — so the readers lived as private copies in a dozen tools. This collapses them
- * into one place with one set of error messages.
- *
- * <p>All throw {@link IllegalArgumentException} on malformed input; the payload handler and
- * agent loop turn that into a {@code success:false} tool result the model can read and correct.
+ * 内部工具读取 JSON 参数时可以共用这些方法，避免重复写“有没有填、物品存不存在”。
+ * 这里有些读取方法会转换或忽略错误输入，不能仅凭方法名就认为参数已经严格验证。
+ * 当前生产源码主要使用 parseItem；其他读取方法保留在这里，但没有实际调用。
  */
 public final class ToolArgs {
 
     private ToolArgs() {}
 
-    // ---- integers ----
+    // 读取数量等整数参数
 
-    /** A required integer arg. */
+    /** 必须提供该字段。现有 getAsInt 会把 1.9 读成 1，不是严格的整数校验。 */
     public static int requireInt(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) {
             throw new IllegalArgumentException("missing required argument: " + key);
@@ -38,12 +34,12 @@ public final class ToolArgs {
         }
     }
 
-    /** A required integer, clamped into {@code [min, max]}. */
+    /** 读完后把数值压到允许范围内，例如上限 64 时传入 100 会变成 64，而不是报错。 */
     public static int requireInt(JsonObject args, String key, int min, int max) {
         return Math.clamp(requireInt(args, key), min, max);
     }
 
-    /** A nullable integer arg: {@code null} when absent or JSON null. */
+    /** 没填或填 null 就返回 null；填了则沿用上面的整数转换规则。 */
     public static Integer optionalInt(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) {
             return null;
@@ -55,15 +51,15 @@ public final class ToolArgs {
         }
     }
 
-    /** An optional integer that falls back to {@code fallback} when absent. */
+    /** 没给数值时采用调用方指定的默认值。 */
     public static int optionalInt(JsonObject args, String key, int fallback) {
         Integer v = optionalInt(args, key);
         return v != null ? v : fallback;
     }
 
-    // ---- doubles ----
+    // 读取距离等可以带小数的参数
 
-    /** A required numeric arg. */
+    /** 字段必须存在且能够转成 double；这里没有另外排除无穷大或 NaN。 */
     public static double requireDouble(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) {
             throw new IllegalArgumentException("missing required argument: " + key);
@@ -75,12 +71,12 @@ public final class ToolArgs {
         }
     }
 
-    /** A required numeric arg, clamped into {@code [min, max]}. */
+    /** 数值超出边界时取边界值；NaN 仍需要调用方另行拒绝。 */
     public static double requireDouble(JsonObject args, String key, double min, double max) {
         return Math.clamp(requireDouble(args, key), min, max);
     }
 
-    /** A nullable numeric arg: {@code null} when absent or JSON null. */
+    /** 可不填的小数参数；缺省值由调用方决定。 */
     public static Double optionalDouble(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) {
             return null;
@@ -92,9 +88,9 @@ public final class ToolArgs {
         }
     }
 
-    // ---- items ----
+    // 把物品名字转换成游戏中已注册的物品
 
-    /** A required namespaced item id under {@code key}. */
+    /** 必须给物品编号，例如 minecraft:diamond。 */
     public static Item requireItem(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) {
             throw new IllegalArgumentException("missing required argument: " + key);
@@ -102,7 +98,7 @@ public final class ToolArgs {
         return parseItem(args.get(key).getAsString());
     }
 
-    /** An optional namespaced item id under {@code key}: {@code null} when absent. */
+    /** 没给物品编号就返回 null；给了就检查该物品是否存在。 */
     public static Item optionalItem(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) {
             return null;
@@ -110,7 +106,7 @@ public final class ToolArgs {
         return parseItem(args.get(key).getAsString());
     }
 
-    /** Parse a raw namespaced item id (e.g. {@code minecraft:diamond}) into a real item. */
+    /** 查物品注册表；拼错名字和 air 都报错，避免把不存在的物品当成空气继续执行。 */
     public static Item parseItem(String id) {
         ResourceLocation rl = ResourceLocation.tryParse(id);
         if (rl == null) {
@@ -124,9 +120,8 @@ public final class ToolArgs {
     }
 
     /**
-     * A lenient set of items from a string array under {@code key}: unparseable or unknown
-     * ids are skipped, and an absent / non-array arg yields an empty set — the "match
-     * everything" filter the collect/scan tools rely on.
+     * 列表中拼错或不存在的物品会被略过，重复物品只保留一次；非列表输入直接得到空集合。
+     * 若调用方把空集合解释成“不限物品”，必须注意全写错也会变成不限。目前生产调用只使用 parseItem。
      */
     public static Set<Item> itemSet(JsonObject args, String key) {
         Set<Item> out = new LinkedHashSet<>();
@@ -143,13 +138,9 @@ public final class ToolArgs {
         return out;
     }
 
-    // ---- positions ----
+    // 三个坐标必须一起给
 
-    /**
-     * An optional block coordinate from {@code x}/{@code y}/{@code z}: all three present →
-     * that position; none present → {@code null} (the caller auto-picks); a partial set is
-     * an error.
-     */
+    /** 全没填就返回 null；只填 x、漏掉 y 或 z 则报错；三个都有才组成一个方块位置。 */
     public static BlockPos optionalPos(JsonObject args) {
         boolean hasX = args.has("x") && !args.get("x").isJsonNull();
         boolean hasY = args.has("y") && !args.get("y").isJsonNull();

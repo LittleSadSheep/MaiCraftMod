@@ -6,30 +6,8 @@ import com.google.gson.JsonParser;
 import java.util.function.Consumer;
 
 /**
- * One in-flight tool call handed to {@link MaiCraftTool#invoke}. It is the entire
- * surface a tool needs to run and report back — the agent loop hands the tool
- * this object and then forgets about <em>how</em> the work happens. A tool
- * reports its result through exactly one of two verbs:
- *
- * <ul>
- *   <li>{@link #complete(String)} — "here is the result." The one verb: a tool
- *       calls it whenever and from wherever its result is ready — synchronously
- *       on the agent (client) thread, or later after handing the work to the
- *       in-process LocalPlayer scheduler (the loop completes the call later).</li>
- * </ul>
- *
- * The agent loop neither knows nor cares <em>how</em> a tool finishes — that
- * choice belongs entirely to the tool. This is the seam that makes tool execution
- * transparent to {@code EntityAgentLoop}: it dispatches a call and is notified of
- * the result, with no branch on tool category.
- *
- * <p>The engine is a scheduler, not an executor: there is exactly one verb,
- * {@link #complete(String)}. A tool does whatever it likes inside
- * {@link MaiCraftTool#invoke} — return immediately, hop a thread, send its own
- * dispatch to the LocalPlayer scheduler, proxy to an external service, hook a chat app — on
- * any thread, then calls {@link #complete} when the result is ready (the
- * scheduler waits, with only a backstop timeout). How and where the work happens
- * is none of the engine's business.
+ * 保存一次内部工具调用：编号、工具名、原始参数、玩家身份和结果回调。
+ * 它本身不会执行任务、计时或重试；这些事情由分发器及实际工具负责。
  */
 public final class ToolCall {
 
@@ -37,7 +15,7 @@ public final class ToolCall {
     private final String toolName;
     private final String rawArgs;
     private final ToolAnchor ctx;
-    private final Consumer<String> completion;   // the single "done" sink
+    private final Consumer<String> completion;   // 工具完成后，把结果交给这个回调
 
     public ToolCall(String id, String toolName, String rawArgs, ToolAnchor ctx,
                     Consumer<String> completion) {
@@ -48,22 +26,18 @@ public final class ToolCall {
         this.completion = completion;
     }
 
-    /** The LLM's {@code tool_call} id — carried through to the matching result message. */
+    /** 本次调用的编号，用于把结果与原请求对应起来。 */
     public String id() { return id; }
 
     public String toolName() { return toolName; }
 
-    /** 调用锚点:服务端只读 UUID;客户端实现另携带实体(可能已卸载为 null)。 */
+    /** 指明这次调用针对哪个玩家；这里只要求提供 UUID。 */
     public ToolAnchor ctx() { return ctx; }
 
-    /** Raw argument JSON string exactly as the model emitted it. */
+    /** 调用者传来的原始参数文本，尚未解析和检查。 */
     public String rawArgs() { return rawArgs; }
 
-    /**
-     * Parsed arguments. Throws {@link IllegalArgumentException} on malformed
-     * JSON; {@link MaiCraftTool#invoke} catches it and reports a failed result so
-     * the conversation continues.
-     */
+    /** 空文本按空对象处理；其他文本必须能解析成 JSON 对象。这里不检查工具的具体参数。 */
     public JsonObject args() {
         if (rawArgs == null || rawArgs.isBlank()) return new JsonObject();
         try {
@@ -73,7 +47,7 @@ public final class ToolCall {
         }
     }
 
-    /** The one verb: deliver the result, whenever and from wherever the tool is ready. */
+    /** 直接调用结果回调；本对象不负责防止重复回复，也不负责把回调切换到指定线程。 */
     public void complete(String resultJson) {
         completion.accept(resultJson);
     }
