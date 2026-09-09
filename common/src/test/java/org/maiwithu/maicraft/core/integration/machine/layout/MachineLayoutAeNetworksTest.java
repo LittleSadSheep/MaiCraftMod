@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Capacity and isolation checks for physical controller-face trees and initial drive contents. */
+/**
+ * 检查存储元件进入材料和装配要求，较大网络分到不同控制器面，分支不相邻串接；当前按常规频道规则测试生成格子，不读取服务器频道配置。
+ */
 public final class MachineLayoutAeNetworksTest {
     private static int checks;
     private static final SemanticMachineLayout.Registry REGISTRY=new SemanticMachineLayout.Registry(){
@@ -40,6 +42,7 @@ public final class MachineLayoutAeNetworksTest {
         d.getAsJsonArray("components").get(0).getAsJsonObject().getAsJsonObject("module_options").addProperty("storage_cells",11);
         check(!SemanticMachineLayout.compile(d,16,REGISTRY).buildable(),"eleven cells cannot be planned into a ten-slot drive");
     }
+    // 按生成格子核对各分支最多三十二频道、不同面不共用或贴邻电缆，并保留终端所在的玻璃电缆宿主。
     private static void partitionsLargeNetwork(int wanted){
         JsonObject d=graph();int full=wanted/3,remainder=wanted%3,nodes=full+remainder;
         for(int i=0;i<nodes;i++){node(d,"cluster"+i,i<full);if(i>0)edge(d,"cluster"+(i-1),"cluster"+i);}

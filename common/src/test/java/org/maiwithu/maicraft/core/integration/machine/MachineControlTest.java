@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.core.integration.machine;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 
-/** Standalone regression entry point; uses the common Minecraft runtime classpath. */
+/**
+ * 检查如何从多根拉杆中选定目标、观察立方体边界、坐标副本和请求格式；这里没有实际拨动拉杆，也没有覆盖完整执行器的保护区与空手流程。
+ */
 public final class MachineControlTest {
     private MachineControlTest() {}
 

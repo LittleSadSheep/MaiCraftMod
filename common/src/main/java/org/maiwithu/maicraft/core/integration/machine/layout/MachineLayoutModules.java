@@ -15,7 +15,10 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
 
-/** Composable process modules, with transport ports on real internal devices. */
+/**
+ * 把压机工作站、搅拌工作站、AE2 存储／合成小组、感应矩阵这些组合展开成已有模板。
+ * 连接口指向组合里真正收发资源的设备，例如压机的物品口在下面的置物台或工作盆。
+ */
 final class MachineLayoutModules {
     record Port(Pos offset, String blockId, List<Side> sides) {}
     record Module(String id, String coreBlock, List<Cell> cells, Map<String, Port> ports,
@@ -87,6 +90,7 @@ final class MachineLayoutModules {
         b.note("BasinOperatingBlockEntity requires a basin two blocks below. Verify minimum mixer speed and recipe heat requirements; this unheated station must not claim heated or superheated recipes without a separately modeled heat source.");
     }
 
+    // 生成网络设备、电缆、终端和驱动器要装的存储元件；合成小组另加样板供应器、分子装配室与合成存储器，但不会自动编码配方。
     private static void aeCluster(Builder b, boolean crafting, JsonObject component, SemanticMachineLayout.Registry registry) {
         JsonObject options = component.has("module_options") ? component.getAsJsonObject("module_options") : new JsonObject();
         for (String key : options.keySet()) if (!Set.of("storage_tier", "storage_cells").contains(key)) throw new IllegalArgumentException("unsupported AE module option: " + key);
@@ -126,6 +130,7 @@ final class MachineLayoutModules {
                 : "Drive rear, controller, energy acceptor, interface and terminal are physically connected. Verify the planned storage-cell deposit, configure interface stocking and verify powered channels plus actual storage transactions.");
     }
 
+    // 沿用感应矩阵模板，并登记施工时暂留的出入口；放好内部元件、角色退出之后才封口。
     private static void matrix(Builder b, JsonObject component, SemanticMachineLayout.Registry registry) {
         b.core = "mekanism:induction_casing";
         String tier = component.has("module_tier") ? component.get("module_tier").getAsString() : "basic";
@@ -168,6 +173,7 @@ final class MachineLayoutModules {
         void part(int x, int y, int z, String item, String side) { cells.add(new Cell(new Pos(x,y,z), item, Map.of(), side, "module")); }
         void port(String medium, boolean output, String block, int x, int y, int z, Side... sides) { ports.put(medium + (output ? ":out" : ":in"), new Port(new Pos(x,y,z), block, List.of(sides))); }
         void note(String text) { commissioning.addProperty("requirements", text); commissioning.addProperty("production_verified", false); }
+        // 先根据所有方块算出水平中间位置，再将方块与全部辅助位置一起平移，避免模板坐标偏在一边。
         Module finish() {
             clear.add(new Pos(0, 0, -1)); clear.add(new Pos(0, 1, -1));
             int minX = 0, maxX = 0, minZ = -1, maxZ = 0;

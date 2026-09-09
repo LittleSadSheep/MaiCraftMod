@@ -10,7 +10,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 
-/** Exercises imported and authored structures through the actual construction seam. */
+/**
+ * 检查当前显式蓝图入口保留负偏移、空气格和独立计划副本，拒绝无法安装的状态与未声明的生成格；大蓝图不再沿用旧的八格半径和五百一十二格限制。
+ */
 public final class MachineBlueprintDocumentTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

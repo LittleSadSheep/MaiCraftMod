@@ -11,7 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Tests native process geometry and module interface mapping, not just block inventory counts. */
+/**
+ * 检查压机和搅拌器与接料设备的距离、传动部件、AE2 组合、感应矩阵边界与施工洞口，以及不支持的模块选项；只验证生成计划。
+ */
 public final class MachineLayoutModulesTest {
     private static int checks;
     private static final SemanticMachineLayout.Registry REGISTRY = new SemanticMachineLayout.Registry() {

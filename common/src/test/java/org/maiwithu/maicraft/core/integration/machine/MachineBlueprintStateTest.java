@@ -14,7 +14,9 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.ReplaceMode;
 
-/** Opt-in exact property checks must survive the generic builder's relaxed matching conventions. */
+/**
+ * 检查机器共用状态解析及严格目标，确保明确指定的属性不被放宽；同时记录低层普通目标仍有兼容匹配规则。这里不验证各公开建造入口如何构造最终状态要求。
+ */
 public final class MachineBlueprintStateTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();

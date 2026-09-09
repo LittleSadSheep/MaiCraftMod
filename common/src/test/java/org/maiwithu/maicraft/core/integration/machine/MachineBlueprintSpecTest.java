@@ -5,7 +5,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-/** Standalone wire-boundary regression tests; no Minecraft or optional mods required. */
+/**
+ * 检查旧 MachineBlueprintSpec 格式的坐标、重复格、属性类型和五百一十二格限制。旧编译入口当前无生产调用，这些断言不能说明现用显式蓝图也有相同限制。
+ */
 public final class MachineBlueprintSpecTest {
     public static void main(String[] args) {
         var mixed = MachineBlueprintSpec.parse(json("""

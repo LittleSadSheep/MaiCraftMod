@@ -16,12 +16,11 @@ import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
- * Reviews an LLM-authored logical machine graph without reading or changing the world.
- * A graph accepted here is an explicit hypothesis, never a functioning machine or a build plan.
- * Minecraft registry access is injected so structural validation remains independently testable.
+ * 先检查机器设计写得是否完整：部件叫什么、要多少个、两端怎么连接、物品是否已安装。这里不读取场地，也不施工。
+ * 通过只表示这些声明格式有效；能不能摆下、接口能不能接通、机器能不能生产，后面分别验证。
  */
 public final class MachineDesignReview {
-    // Planning budgets bound JSON traversal and physical expansion, independently of survey radius.
+    // 设计条数与展开后的格数各有预算，不直接把勘察半径当成数量限制。
     public static final int MAX_COMPONENTS = MachinePlanningBudget.current().maxComponents();
     public static final int MAX_CONNECTIONS = MachinePlanningBudget.current().maxConnections();
     public static final int MAX_COMPONENT_COUNT = MachinePlanningBudget.current().maxTargets();
@@ -43,8 +42,7 @@ public final class MachineDesignReview {
     private record EdgeKey(String from, String to, String medium) {}
 
     /**
-     * Graph fields are strict and intentionally semantic. Exact cells, block states and placement
-     * instructions belong to a Mod-side compiler and are never accepted from the model.
+     * 这个入口接收部件与连接关系；逐格坐标和方块状态另走显式蓝图入口。按字段严格检查，并汇总最多六十四条错误。
      */
     public static JsonObject review(JsonObject design, Predicate<String> blockExists, Predicate<String> itemExists) {
         Objects.requireNonNull(blockExists, "blockExists");
@@ -96,6 +94,7 @@ public final class MachineDesignReview {
             }
         }
         if (total > MAX_TOTAL_BLOCKS) error(errors, "$.components", "total_count_exceeded", "Total component count must be at most " + MAX_TOTAL_BLOCKS + ".");
+        // 连接必须指向已声明名称，不能连接自身；同一方向的同一对部件，每种介质最多声明一条连接。
         List<Connection> connections = new ArrayList<>();
         Set<EdgeKey> edges = new HashSet<>();
         for (int i = 0; i < connectionsJson.size(); i++) {
@@ -130,6 +129,7 @@ public final class MachineDesignReview {
         return report(components, connections, expectedOutput, style, constraints, (int) total);
     }
 
+    // 把通过格式检查的设计整理成报告，列出仍需验证的事情和声明的方块数；这份数量不含连接管线及合成原料。
     private static JsonObject report(
             List<Component> components,
             List<Connection> connections,
@@ -188,6 +188,7 @@ public final class MachineDesignReview {
                 crossModConnections.computeIfAbsent(connection.medium(), ignored -> new JsonArray()).add(i);
             }
         }
+        // 跨模组只给对应介质的核对提示。例如两端都写“能量”，仍不能证明它们能直接互通。
         crossModConnections.forEach((medium, indices) -> {
             JsonObject hint = new JsonObject();
             hint.add("connection_indices", indices);
@@ -309,6 +310,7 @@ public final class MachineDesignReview {
         return result;
     }
 
+    // 这里只检查模块选项的字段、类型和整数范围；某种模块支持哪些选项，随后由具体模板再检查。
     private static JsonObject module(JsonObject component, String path, JsonArray errors) {
         JsonObject result = new JsonObject();
         if (component.has("module")) {
@@ -346,6 +348,7 @@ public final class MachineDesignReview {
         return result;
     }
 
+    // 尺寸必须是有限范围内的正整数；地形、吞吐文字和维护开关在这里仅被保存，不表示布局器已经实现它们。
     private static JsonObject constraints(JsonElement value, JsonArray errors) {
         JsonObject input = object(value, "$.constraints", errors);
         if (input == null) return null;

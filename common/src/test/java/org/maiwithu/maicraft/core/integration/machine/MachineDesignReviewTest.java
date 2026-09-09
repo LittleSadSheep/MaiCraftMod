@@ -8,7 +8,9 @@ import com.google.gson.JsonParser;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Standalone regression suite: run main with Gson; no Minecraft runtime or JUnit required. */
+/**
+ * 检查部件关系设计的字段、名称引用、数量与范围，以及报告是否保留“尚未验证机器能工作”。这里接纳自定义介质只说明格式合法，不说明已实现该介质的施工。
+ */
 public final class MachineDesignReviewTest {
     private static int checks;
     private static final Set<String> BLOCKS = Set.of("create:millstone", "create:shaft", "ae2:interface", "mekanism:energized_smelter", "minecraft:chest", "minecraft:air");
@@ -138,6 +140,7 @@ public final class MachineDesignReviewTest {
         expectError(unknownOutput, "unknown_item");
     }
 
+    // 分别试最大部件数、总数量、连接数和场地尺寸；数组超限必须在遍历注册表之前被拒绝。
     private static void enforcesAllBounds() {
         JsonObject maximumTotal = singleDesign();
         JsonArray components = maximumTotal.getAsJsonArray("components");
@@ -225,6 +228,7 @@ public final class MachineDesignReviewTest {
         check(!result.toString().contains("private runtime failure"), "does not copy arbitrary registry exception text to LLM");
     }
 
+    // 验证约束文字会被保留及低层蓝图字段另走入口；本测试没有验证维护开关或风格文字会改变实际布局。
     private static void acceptsSemanticStyleAndConstraintsButRejectsBlueprints() {
         JsonObject design = singleDesign();
         design.addProperty("style", "compact industrial workshop");

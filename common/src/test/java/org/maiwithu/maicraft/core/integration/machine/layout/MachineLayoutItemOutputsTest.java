@@ -8,7 +8,9 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
 
-/** Ensures a processing output cannot bypass its exact-item sorter or extract unprocessed inputs. */
+/**
+ * 检查分拣机是否背对取货容器、正面接出管线、过滤绑定正确成品；连接指定的中间产物优先，未知产物则保持输出关闭。
+ */
 public final class MachineLayoutItemOutputsTest {
     private static int checks;
     private static final SemanticMachineLayout.Registry REGISTRY=new SemanticMachineLayout.Registry(){

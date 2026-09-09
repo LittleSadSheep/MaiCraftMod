@@ -10,7 +10,9 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 
-/** Exercises the same compiler-to-native-task seam as build_machine, without a live client. */
+/**
+ * 检查布局转成施工单后，位置、维护空间、朝向、替换许可和共享预览要求都保留，并确认外部改报告不会改变已有计划。
+ */
 public final class MachineConstructionPlanTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

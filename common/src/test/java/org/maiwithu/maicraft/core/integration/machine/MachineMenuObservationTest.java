@@ -14,7 +14,9 @@ import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import sun.misc.Unsafe;
 
-/** A normal MCP read between ticks must not need or create native-action authority. */
+/**
+ * 构造原版箱子菜单检查只读观察：没有动作控制权也能读取，但无来源绑定就不能取得存取许可；结束后恢复替换过的客户端字段。
+ */
 public final class MachineMenuObservationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

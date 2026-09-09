@@ -17,7 +17,10 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
 
-/** Pure, registry-injected compiler. Geometry readiness never means a commissioned production line. */
+/**
+ * 把“有哪些机器、谁连谁”的设计展开成具体格子：排机器和维护空间、铺连接线、列配置与初始物品要求。
+ * 这里只根据注册信息生成计划，不访问地形；场地能否施工由后面的勘察和安装流程确认。
+ */
 public final class SemanticMachineLayout {
     public static final int MAX_RADIUS = MachinePlanningBudget.current().maxRadius();
     public static final int MAX_TARGETS = MachinePlanningBudget.current().maxTargets();
@@ -66,6 +69,7 @@ public final class SemanticMachineLayout {
         }
         if (!work.errors.isEmpty()) return work.finish();
         if (total > MAX_TARGETS) { work.fail("target_budget_exceeded", "Logical expansion exceeds the configured physical target budget."); return work.finish(); }
+        // 目前所有设备共用最大模块的占地间隔，额外留三格；小设备也按这个最大间隔排，且整体至少要求三格高。
         int spacing = span + 3;
         int columns = Math.min((width - span) / spacing + 1, Math.max(1, (int) Math.ceil(Math.sqrt(total))));
         int rows = columns < 1 ? Integer.MAX_VALUE : Math.toIntExact((total + columns - 1) / columns);
@@ -91,6 +95,7 @@ public final class SemanticMachineLayout {
             for (int i = 0; i < count; i++, index++) {
                 MachineLayoutRouting.checkpoint();
                 Pos at = new Pos(firstX + index % columns * spacing, 0, firstZ + index / columns * spacing);
+                // 多台设备用“名称[编号]”命名；当前未避免用户本就起了同样名字，后续按名字存表时可能相互覆盖。
                 String instanceName = count == 1 ? name : name + "[" + i + "]";
                 Instance instance = new Instance(instanceName, id, component.get("role").getAsString(), at, profile, module);
                 instances.add(instance);
@@ -111,6 +116,7 @@ public final class SemanticMachineLayout {
             groups.put(name, instances);
         }
         if (!work.errors.isEmpty()) return work.finish();
+        // 先把 AE2 设备按声明的网络分组，并为有控制器的网络分配不同出口，再处理各条连接。
         Map<String,MachineLayoutAeNetworks.Leaf> aeLeaves = new LinkedHashMap<>();
         for (List<Instance> group : groups.values()) for (Instance instance : group) {
             Endpoint port = endpoint(instance, "ae_network", false);
@@ -128,6 +134,7 @@ public final class SemanticMachineLayout {
                 work.fail("ambiguous_component_pairing", "Connection " + edgeIndex + " has unequal groups; specify separate named process stages or equal counts.");
                 continue;
             }
+            // 两组数量相同就逐一配对；一端只有一台时连接另一端全部；两端都多台且数量不同就拒绝猜测。
             int pairs = Math.max(sources.size(), destinations.size());
             for (int i = 0; i < pairs; i++) {
                 MachineLayoutRouting.checkpoint();
@@ -144,6 +151,7 @@ public final class SemanticMachineLayout {
         return work.finish();
     }
 
+    // 先确认两端都支持这种介质，再选具体管线；Create 加工输出若指定了成品，还要插入可配置过滤的分拣机。
     private static void connect(MachineLayoutWork work, Instance source, Instance destination, JsonObject edge, String owner, Bounds bounds) {
         String medium = edge.get("medium").getAsString(), transport = MachineLayoutCatalog.transport(medium);
         Endpoint from = endpoint(source, medium, true), to = endpoint(destination, medium, false);
@@ -195,6 +203,7 @@ public final class SemanticMachineLayout {
                 case EAST -> Side.WEST; case WEST -> Side.EAST; case UP -> Side.DOWN;
                 case DOWN -> Side.UP; case SOUTH -> Side.NORTH; case NORTH -> Side.SOUTH;
             };
+            // 普通来源使用管道拉取；已有分拣机则由它推出；加工设备未明确成品时先关闭抽取，避免把原料也抽走。
             work.configure(route.cells().get(0).position(), towardSource, medium, filtered != null ? "normal" : processOutput ? "none" : "pull");
             if (processOutput && filtered == null) work.pending("process_output_filter_required",owner,"The process receiver also exposes raw inputs. Its output connection stays disabled until an exact finished resource and supported native filter are verified.");
             work.pending("endpoint_side_configuration", owner, exactPorts + ": use native observed controls to set source output/ejection or transporter pull, destination input, exact resource filters and tank/slot selection for " + medium + ".");
@@ -202,6 +211,7 @@ public final class SemanticMachineLayout {
         }
     }
 
+    // 只对当前明确支持的 Mekanism 接口生成自动配置；电解分离器的化学输出要先确认该用哪一个储槽。
     private static void configureEndpoint(MachineLayoutWork work, Endpoint instance, Side side, String medium, String mode, String owner) {
         if (!instance.blockId.startsWith("mekanism:") || instance.blockId.endsWith("_fluid_tank") || instance.blockId.equals("mekanism:induction_port")) return;
         if (instance.blockId.equals("mekanism:electrolytic_separator") && medium.equals("chemicals") && mode.equals("output")) {
@@ -232,6 +242,7 @@ public final class SemanticMachineLayout {
         return new Endpoint(instance.blockId, instance.position, medium.equals("kinetic") ? instance.profile.shafts() : RESOURCE_SIDES);
     }
 
+    // 把模块内部相对位置统一平移到场地，方块、维护空间、配置、初始物品和最后封口的位置一起移动。
     private static void installModule(MachineLayoutWork work, Instance instance, Bounds bounds) {
         var module = instance.module;
         for (Cell c : module.cells()) {

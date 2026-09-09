@@ -15,7 +15,9 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import static org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout.position;
 
-/** One compiler transaction, retaining no executable partial plan on an unsupported obligation. */
+/**
+ * 保存一次布局计算的中间结果：设备格、电缆部件、要留空的位置、材料和待验收要求。任何错误都会让最终可执行蓝图为空。
+ */
 final class MachineLayoutWork {
     final SemanticMachineLayout.Registry registry;
     final Map<Pos, Cell> cells = new LinkedHashMap<>();
@@ -48,6 +50,7 @@ final class MachineLayoutWork {
         JsonObject row = new JsonObject(); row.addProperty("code", code); row.addProperty("scope", scope);
         row.addProperty("status", "pending"); row.addProperty("detail", detail); obligations.add(row);
     }
+    // 检查预算、安装物品和重叠；AE2 中央电缆与不同面的部件可以共格，同一槽重复占用则报错。
     void add(Cell cell) {
         if (cells.size() + attachments.size() >= SemanticMachineLayout.MAX_TARGETS) {
             fail("target_budget_exceeded", "Physical layout exceeds the configured " + SemanticMachineLayout.MAX_TARGETS + "-target construction budget."); return;
@@ -63,6 +66,7 @@ final class MachineLayoutWork {
             attachments.add(cell);
         } else cells.put(cell.position(), cell);
     }
+    // 最后核对维护空间未被占用；即使布局失败仍返回错误和材料线索，但不输出半份可施工格子。
     SemanticMachineLayout.Result finish() {
         for (Pos space : clearance) if (cells.containsKey(space)) fail("occupied_maintenance_space", "A generated component blocks reserved working space at " + space);
         boolean buildable = errors.isEmpty() && !cells.isEmpty();

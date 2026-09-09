@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import java.util.List;
 
-/** Standalone regression entry point; does not start Minecraft or require optional mods. */
+/**
+ * 检查机器类别只作为线索、只把共面的格子算相邻、输出被截断时仍保留原编号和遗漏数；勘察半径限制与施工规划预算分别处理。
+ */
 public final class MachineSurveyModelTest {
     public static void main(String[] args) {
         classifyOptionalModFamiliesWithoutPretendingConnectivity();

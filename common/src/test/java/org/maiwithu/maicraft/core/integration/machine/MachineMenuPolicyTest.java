@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import java.util.UUID;
 
-/** Standalone pure regression checks; no Minecraft or optional mod runtime is needed. */
+/**
+ * 检查哪些菜单和槽位交给专门适配，以及存取数量、编号格式和整叠／半叠拿取规则；测试对象是规则函数，不执行菜单点击。
+ */
 public final class MachineMenuPolicyTest {
     private static int checks;
     private MachineMenuPolicyTest() {}

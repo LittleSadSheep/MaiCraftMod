@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import java.util.Properties;
 
-/** Pure Java regression suite, independent of Minecraft bootstrap, system-property mutation or Gradle. */
+/**
+ * 检查各项规划预算可独立配置、非法配置会带原因回退、数量和体积溢出会拒绝，已有预算副本不受后续属性变化影响。
+ */
 public final class MachinePlanningBudgetTest {
     public static void main(String[] args) {
         var defaults = MachinePlanningBudget.defaults();

@@ -11,7 +11,10 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
 
-/** Mekanism sorters read the inventory behind them and push filtered items out of their facing side. */
+/**
+ * 在 Create 加工设备的物品出口旁放一台 Mekanism 分拣机，并接物流管；分拣机背后取货、朝正面送出。
+ * 布局成功后还登记“只提取指定成品”的过滤要求，真正写入过滤规则由装配任务完成。
+ */
 final class MachineLayoutItemOutputs {
     record Output(Cell sorter, MachineLayoutRouting.Route route) {}
     private MachineLayoutItemOutputs() {}

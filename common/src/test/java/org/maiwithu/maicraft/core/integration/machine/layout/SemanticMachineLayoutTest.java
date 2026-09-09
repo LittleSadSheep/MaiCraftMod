@@ -10,7 +10,9 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-/** Pure construction-graph invariants, with no Minecraft bootstrap or optional mod dependency. */
+/**
+ * 用假定物品与状态都存在的注册表，检查布局连接、动力换向、AE2 部件、空间限制、可重复结果和取消；实际模组接口与游戏施工另需验证。
+ */
 public final class SemanticMachineLayoutTest {
     private static int checks;
     private static final SemanticMachineLayout.Registry REGISTRY = new SemanticMachineLayout.Registry() {
@@ -63,6 +65,7 @@ public final class SemanticMachineLayoutTest {
         check(plan.report().getAsJsonArray("obligations").toString().contains("source output/ejection"), "exact side modes remain an explicit native configuration obligation");
     }
 
+    // 检查水平传动方向一致，并在上下换层后允许转向；这里只核对计划中的属性和邻接，不模拟 Create 动力网络。
     private static void compilesActualKineticTurns() {
         JsonObject graph = graph(new String[][] {{"drive", "create:shaft"}, {"buffer", "minecraft:chest"},
                 {"spare", "minecraft:barrel"}, {"mill", "create:millstone"}}, new String[][] {{"drive", "mill", "kinetic"}});
@@ -135,6 +138,7 @@ public final class SemanticMachineLayoutTest {
         check(cells(first).keySet().stream().anyMatch(k -> Math.abs(JsonParser.parseString(k).getAsJsonArray().get(0).getAsInt()) > 8), "layout is not constrained by the former eight-block survey radius");
     }
 
+    // 逐格核对报告中的管线确实存在、前后共面相邻，并接到两端设备，避免只检查“有一份路线报告”。
     private static void verifyRoutes(SemanticMachineLayout.Result plan) {
         Map<String, JsonObject> cells = cells(plan);
         Map<String, JsonArray> anchors = new HashMap<>();

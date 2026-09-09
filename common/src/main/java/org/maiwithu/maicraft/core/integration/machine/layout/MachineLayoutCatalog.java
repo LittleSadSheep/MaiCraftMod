@@ -6,7 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Installed IDs are checked separately. Profiles describe audited physical interfaces, not recipes. */
+/**
+ * 保存布局器当前认识的机器接口和默认朝向，以及每种介质默认用哪类管线。它是一张有限的适配表，不是从所有模组自动推断的能力。
+ * 存在这个方块还不够：具体物品、状态和后续配置仍要分别检查；配方与实际产量不由此表判断。
+ */
 final class MachineLayoutCatalog {
     record Profile(Map<String, String> state, Set<String> inputs, Set<String> outputs,
                    List<MachineLayoutRouting.Side> shafts, String evidence) {

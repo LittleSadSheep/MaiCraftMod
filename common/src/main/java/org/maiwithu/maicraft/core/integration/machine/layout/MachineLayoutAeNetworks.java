@@ -18,7 +18,10 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
 import static org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout.position;
 
-/** Six isolated 32-channel faces, with local glass terminal branches and one controller per network. */
+/**
+ * 安排 AE2 网络的控制器与电缆出口，按常规频道规则估算负载：无控制器八频道，控制器每面三十二频道。
+ * 当前最多安排一个控制器的六个独立出口；这些是规划假设，尚未验证服务器实际频道设置。
+ */
 final class MachineLayoutAeNetworks {
     static final String DENSE = "ae2:fluix_covered_dense_cable";
     record Leaf(String name, String blockId, Pos position, List<Side> sides) {}
@@ -88,6 +91,7 @@ final class MachineLayoutAeNetworks {
         work.report.add("ae_channel_plans",plans);
     }
 
+    // 先排频道需求多的设备组，把每组放进第一个还能容纳它的三十二频道出口；一个组不会再拆到多个出口。
     private static List<List<Leaf>> bins(List<Leaf> members,Map<String,Integer> demand){
         List<Leaf> sorted=new ArrayList<>(members);sorted.sort(Comparator.<Leaf>comparingInt(l->demand.getOrDefault(l.name,0)).reversed());
         List<List<Leaf>> bins=new ArrayList<>();List<Integer> loads=new ArrayList<>();
@@ -96,6 +100,7 @@ final class MachineLayoutAeNetworks {
         return bins;
     }
 
+    // 逐个尝试尚未使用的控制器面；在其他出口和设备组周围留空，防止不同分支接在一起。整条分支成功后才保存候选路线。
     private static JsonObject branch(MachineLayoutWork work,Bounds bounds,Pos controller,List<Leaf> members,List<Leaf> networkMembers,Map<String,Integer> demand,String owner,Set<Side> used){
         String unresolved="no unused controller face";
         List<Side> faces=new ArrayList<>(List.of(Side.EAST,Side.WEST,Side.NORTH,Side.SOUTH,Side.UP,Side.DOWN));
@@ -132,6 +137,7 @@ final class MachineLayoutAeNetworks {
         work.fail("ae_branch_search_exhausted",unresolved);return null;
     }
 
+    // 从设备组的水平中心往外找控制器位置，周围要求一块没有占用的维护区；超过搜索预算就报告找不到。
     private static Pos controllerSite(MachineLayoutWork work,Bounds bounds,List<Leaf> leaves){
         int cx=(int)leaves.stream().mapToInt(l->l.position.x()).average().orElse(0),cz=(int)leaves.stream().mapToInt(l->l.position.z()).average().orElse(0);
         int examined=0,searchBudget=org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget.current().searchVisitedBudget();
@@ -143,6 +149,7 @@ final class MachineLayoutAeNetworks {
         }return null;
     }
 
+    // 从已经生成的网络格子中追查两端是否连通；只认可同一网络及可接入的面，驱动器的正面不算网络口。
     static List<Pos> connectionPath(MachineLayoutWork work,Pos from,Pos to,String network){
         ArrayDeque<Pos> open=new ArrayDeque<>();Map<Pos,Pos> parent=new LinkedHashMap<>();open.add(from);parent.put(from,null);
         while(!open.isEmpty()){

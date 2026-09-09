@@ -18,8 +18,8 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
 
 /**
- * Bounded, read-only recipe evidence from the active connection, not a machine feasibility test.
- * Display outputs and generic item ingredients do not expose every mod's custom processing model.
+ * 从当前客户端配方表找“展示产物是指定物品”的配方，并列出能读到的普通物品原料。
+ * 最多检查四千零九十六条，输出十六条；模组的流体、化学品、动态产物和机器条件可能不在这些通用字段里。
  */
 public final class MachineRecipeEvidence {
     public static final int MAX_EXAMINED_RECIPES = 4096;
@@ -30,7 +30,9 @@ public final class MachineRecipeEvidence {
 
     private MachineRecipeEvidence() {}
 
-    /** Call on the client thread during an active actor tick; unavailable evidence is explicit. */
+    /**
+     * 在角色有效的客户端更新中只读查询。找不到展示产物不能断言没有配方，报告会保留扫描范围及未读全的原因。
+     */
     public static JsonObject inspect(LocalPlayer player, String expectedOutputId) {
         JsonObject report = base();
         JsonArray matches = report.getAsJsonArray("recipes");
@@ -105,6 +107,7 @@ public final class MachineRecipeEvidence {
         return report;
     }
 
+    // 每个配方最多列十六种原料，每种最多列十六个可替代物品样本；样本列表不是完整配方格、数量或附加组件要求。
     private static JsonObject describe(RecipeHolder<?> holder, Recipe<?> recipe, ResourceLocation output, int count) {
         JsonObject row = new JsonObject();
         JsonArray unknowns = new JsonArray();
@@ -203,6 +206,7 @@ public final class MachineRecipeEvidence {
         return false;
     }
 
+    // 报告始终保留“配方语义未完整核实”和“机器可运行未验证”，避免把展示用信息变成可执行配方保证。
     private static JsonObject base() {
         JsonObject report = new JsonObject();
         report.addProperty("source", "client_recipe_manager");

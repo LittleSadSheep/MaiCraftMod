@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.core.integration.machine.assembly;
 
 import java.util.List;
 
-/** Exact product filtering cannot be satisfied by defaults, fuzzy/tag filters, or conflicting prior rules. */
+/**
+ * 检查单条精确物品过滤如何决定新增、编辑或冲突，以及两份服务器同步缺一不可；不实际打开分拣机或发送配置请求。
+ */
 public final class MekanismFilterTest {
     public static void main(String[] args) {
         String product = "minecraft:iron_ingot";

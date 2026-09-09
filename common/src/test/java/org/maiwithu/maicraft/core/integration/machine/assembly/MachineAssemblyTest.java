@@ -13,10 +13,13 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** Installation receipts and generated physical matrix structure; no optional mod or world needed. */
+/**
+ * 检查部件安装的确认规则、模式循环、矩阵模板和同步记录的世界归属。模组状态使用替身或直接参数，测试通过不等于已完成装载模组后的真实安装。
+ */
 public final class MachineAssemblyTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        // 这一段覆盖的是已无生产调用的普通 BlockSpec 帮助代码，后面的 AE2 安装确认与同步记录仍属于现用路径。
         var furnace = MachineInstallation.block("minecraft:furnace", Direction.EAST, null);
         check(furnace.state().getValue(BlockStateProperties.HORIZONTAL_FACING) == Direction.EAST, "registry-facing request retained");
         check(furnace.exactProperties().equals(Set.of("facing")), "facing explicitly verified after placement");
@@ -65,6 +68,7 @@ public final class MachineAssemblyTest {
         check(MachineContentsTask.eligible(entries.get(3).getAsJsonObject()), "empty physical machine slots remain candidates");
         serverReceiptScopes();
 
+        // 先数默认矩阵的内外方块和端口，再检查最大尺寸、内部留空及容量不足的边界；没有让模组服务器实际判定成形。
         var plan = MekanismMatrixTemplate.compile("basic", ignored -> true, ignored -> true);
         var blocks = plan.getAsJsonArray("blocks");
         check(blocks.size() == 36, "3x3x4 matrix fills its declared volume");
@@ -127,6 +131,7 @@ public final class MachineAssemblyTest {
         stack.addProperty("empty", empty); stack.addProperty("item_id", "ae2:item_storage_cell_1k"); stack.addProperty("count", count);
         row.add("stack", stack); return row;
     }
+    // 制造两个独立客户端世界对象，证明同步编号不能跨世界借用、旧消息不能完成新观察、繁忙更新不能挤掉正在等待的位置。
     private static void serverReceiptScopes() {
         try {
             net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredMethod("handleBlockEntityData",

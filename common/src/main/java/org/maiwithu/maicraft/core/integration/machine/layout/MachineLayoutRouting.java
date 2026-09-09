@@ -12,7 +12,10 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 
-/** Bounded physical routing; distinct resource edges never silently join another conduit. */
+/**
+ * 在声明的场地范围里给两台设备找管线路径，绕开设备和维护空间；不同资源连接保持分离。
+ * AE2 同一支路的致密电缆可以复用，其他管线目前不会借用已有线路作为共用干线。
+ */
 final class MachineLayoutRouting {
     record Pos(int x, int y, int z) {
         Pos step(Side side) { return new Pos(Math.addExact(x,side.x), Math.addExact(y,side.y), Math.addExact(z,side.z)); }
@@ -46,6 +49,7 @@ final class MachineLayoutRouting {
         if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("machine layout compilation cancelled");
     }
 
+    // 尝试不同的出口和入口组合，优先复用本支路电缆，再优先距离近的组合；所有尝试共用一次搜索预算。
     static Route route(Pos from, Pos to, List<Side> fromSides, List<Side> toSides, String medium,
                        String transport, String owner, Map<Pos, Cell> occupied, Set<Pos> clearance, Bounds bounds) {
         List<Candidate> candidates = new ArrayList<>();
@@ -81,6 +85,7 @@ final class MachineLayoutRouting {
     }
 
     private record Search(List<Node> path, int searched) {}
+    // 记录走到每个格子的最少步数，优先向终点靠近；动力连接还记录传动方向，转向要通过上下换层。
     private static Search search(Pos start, Pos end, Pos from, Pos to, boolean kinetic, String transport, String owner,
                                  Map<Pos, Cell> occupied, Set<Pos> clearance, Bounds bounds, int budget) {
         PriorityQueue<Frontier> open = new PriorityQueue<>(java.util.Comparator.comparingInt(Frontier::priority)
@@ -126,6 +131,7 @@ final class MachineLayoutRouting {
         return cell != null && transport.equals(MachineLayoutAeNetworks.DENSE) && cell.id.equals(transport) && cell.owner.equals(owner);
     }
 
+    // 除了不能占住别的设备，还要避开会意外接上的相邻设备和同种管线；声明的这两个端点及本支路可复用电缆例外。
     private static boolean available(Pos at, Pos source, Pos destination, String transport, String owner,
                                      Map<Pos, Cell> occupied, Set<Pos> clearance, Bounds bounds) {
         if (!bounds.contains(at) || occupied.containsKey(at) && !reusable(occupied.get(at),transport,owner) || clearance.contains(at)) return false;
