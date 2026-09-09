@@ -7,10 +7,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * 任务会话结束的回调口:引擎在"这一次任务会话确定结束"的四个时点触发——
- * 主人 Stop、task_stop 叫停、死亡丢弃、LLM 车道空闲超过宽限期(任务结束
- * 边沿)。内容包挂钩子做自己的收尾(maicraft-core 在此释放任务作用域的
- * MAINHAND 意图钉,宪法 §5)。引擎自己不知道"钉"是什么——它只报时点。
+ * 让其他功能登记“这轮工作结束后要做什么”，例如解除手里必须拿着镐子的要求。
+ * 调度器在取消任务、失去玩家对象或长时间没有任务时调用这里；具体收尾内容由登记者负责。
  */
 public final class TaskSessionHooks {
 
@@ -18,12 +16,13 @@ public final class TaskSessionHooks {
 
     private TaskSessionHooks() {}
 
-    /** Init-time only,与其余登记口同一约定。 */
+    /** 启动时登记一项收尾动作，之后每次工作结束都会调用它。 */
     public static synchronized void onSessionEnd(Consumer<LocalPlayer> hook) {
         HOOKS.add(hook);
     }
 
     static void fireSessionEnd(LocalPlayer companion) {
+        // 按登记顺序逐项执行；当前没有在这里捕获异常，某项抛异常会阻止后面的项运行。
         for (Consumer<LocalPlayer> h : HOOKS) {
             h.accept(companion);
         }

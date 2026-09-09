@@ -1,19 +1,9 @@
 package org.maiwithu.maicraft.task;
 
 /**
- * The task-scoped release edge for the MAINHAND pin (constitution §5 /
- * spec point: 任务结束边沿解除手持钉), as a pure tick counter so it is
- * headless-testable.
- *
- * <p>Why not release on the bare {@code hasWork() true→false} edge: the client
- * ToolDispatcher is strictly serial — between two tool calls of the SAME turn
- * (equip_item result shipped, auto_mine not yet arrived) the LLM chain is
- * momentarily idle while the model thinks, and a bare-edge release would strip
- * the pin exactly between "equip the fast-breaking tool" and "mine with it",
- * defeating the pin's whole purpose. So the completion edge is debounced: the
- * release fires once the chain has stayed idle for a grace window that
- * comfortably covers inter-call model latency. The CANCEL edge (owner Stop) and
- * death stay immediate — those are handled at their call sites.
+ * 判断什么时候可以解除“手里一直拿着这个物品”的要求。
+ * 例如刚装备好镐子，下一条挖矿指令还没到，不能因为短暂没任务就马上解除要求。
+ * 因此要连续空闲一段时间才提醒调用方解除；主动取消和死亡时则由其他代码立即解除。
  */
 public final class HandPinRelease {
 
@@ -25,18 +15,16 @@ public final class HandPinRelease {
         this.graceTicks = graceTicks;
     }
 
-    /**
-     * Feed one tick of the LLM chain's busy state; returns {@code true} exactly
-     * once per work session, {@code graceTicks} after the chain last had work.
-     * New work re-arms the edge.
-     */
+    /** 每次传入“还有没有任务”；连续空闲够久时只返回一次 true，收到新任务后重新计数。 */
     public boolean tick(boolean llmBusy) {
         if (llmBusy) {
+            // 又有活干了，之前等了多久作废，从下一次空闲重新计算。
             idleTicks = 0;
             fired = false;
             return false;
         }
         if (fired) return false;
+        // 达到等待长度后只提醒一次，避免每一刻都重复解除手持要求。
         if (++idleTicks >= graceTicks) {
             fired = true;
             return true;

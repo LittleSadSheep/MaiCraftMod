@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Instant local cancellation for a task slot or timer. */
+/** 内部停止工具：按编号取消一项任务或提醒；不填编号时只停当前任务。 */
 public final class TaskStopTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();
@@ -50,6 +50,7 @@ public final class TaskStopTool implements MaiCraftTool {
         long now = player.level().getGameTime();
 
         if (wanted != null && TimerRegistry.get().cancel(player.getUUID(), wanted)) {
+            // 指定编号若对应提醒，就只删提醒，不停玩家正在做的事。
             reply.accept(TaskResult.ok("cancelled timer " + wanted,
                     Map.of("timer_id", wanted)).toJson());
             return;
@@ -59,6 +60,7 @@ public final class TaskStopTool implements MaiCraftTool {
                 ? CompanionTickDispatcher.current()
                 : CompanionTickDispatcher.find(wanted);
         if (target == null) {
+            // 没找到就返回现有编号，方便调用者重新选择，不随便取消其他任务。
             reply.accept(TaskResult.fail(nothingMatched(wanted, player, now)).toJson());
             return;
         }

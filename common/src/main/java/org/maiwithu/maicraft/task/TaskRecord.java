@@ -15,27 +15,17 @@ public abstract class TaskRecord {
 
     private static final AtomicLong ID_SOURCE = new AtomicLong();
 
-    /**
-     * 常驻任务的"期限":一个永远不会到的游戏刻。
-     *
-     * <p>期限回答的是"这件活该多久干完",而常驻任务<b>没有干完</b>——给它一个真实的
-     * 期限就是给它安排一次注定的超时。用 {@code MAX_VALUE/2} 而不是 {@code MAX_VALUE}:
-     * 被抢占时期限会 +1(见 {@code TaskSlot.freeze}),留出余量免得溢出成负数。
-     */
+    /** 跟随等任务一直做到被叫停，不设实际超时；数值留出余量，方便暂停时继续往后加时间。 */
     public static final long NO_DEADLINE = Long.MAX_VALUE / 2;
 
     private final long id;
-    /** Stable name of the originating tool (matches {@code MaiCraftTool.name()}). */
+    /** 发起这件事的内部工具名，例如 goto；用于查状态和排错。 */
     private final String toolName;
     /** 记住“是谁发起了这次调用”，任务结束时才能把结果送回正确的调用者。 */
     private final String toolCallId;
     /**
-     * Game-tick (level.getGameTime()) at which this record times out. Stamped
-     * at construction (gameTime is freeze-aware, so {@code /tick freeze} /
-     * {@code /tick rate} are accounted for automatically); a goal whose real
-     * budget depends on world state only known at start may push it later via
-     * {@link #extendDeadlineTo} (e.g. move_to scales with journey distance —
-     * the tool layer can't know that, it has no entity position).
+     * 到这个游戏刻仍未完成，就算超时。这里用游戏里的时间，不是电脑上的秒表。
+     * 开始时先给一个期限；发现路很远、仍在前进等情况时，任务可以把期限延后。
      */
     private long deadlineGameTime;
 
@@ -47,12 +37,14 @@ public abstract class TaskRecord {
     private long startedGameTime = -1;
 
     protected TaskRecord(String toolName, String toolCallId, long deadlineGameTime) {
+        // 创建单子时只分配编号和保存参数，状态仍是 PENDING（等待开始），不会在这里执行任务。
         this.id = ID_SOURCE.incrementAndGet();
         this.toolName = toolName;
         this.toolCallId = toolCallId;
         this.deadlineGameTime = deadlineGameTime;
     }
 
+    /** 以下方法只读任务单上的字段；是否开始、结束由实际执行任务的代码决定。 */
     public final long getId() { return id; }
     public final String getToolName() { return toolName; }
     public final String getToolCallId() { return toolCallId; }
@@ -60,12 +52,12 @@ public abstract class TaskRecord {
     public final TaskState getState() { return state; }
     public final TaskResult getResult() { return result; }
 
-    /** Push the deadline later (never earlier). Tick-thread only, like all reads. */
+    /** 只允许把截止时间推后，较早的时间会被忽略；游戏中在客户端主线程调用。 */
     public final void extendDeadlineTo(long gameTime) {
         if (gameTime > deadlineGameTime) deadlineGameTime = gameTime;
     }
 
-    /** LLM 可见的短任务号——受理回执、current_task、task_finished 事件三处共用。 */
+    /** 内部工具查任务时使用的 t 开头短编号；与 MCP 总任务的 UUID 是两套编号。 */
     public final String publicId() { return "t" + id; }
 
     public final void markAsync() { this.async = true; }
@@ -86,28 +78,18 @@ public abstract class TaskRecord {
     public final long getStartedGameTime() { return startedGameTime; }
 
     /**
-     * 受理它的那一刻还没过去。
-     *
-     * <p>用来分开两种"再派一个活":同一批工具调用里的第二个(模型在做计划,该拒绝
-     * ——让它拿到第一个的结果再决定),和新回合里派的(改主意了,该直接替换)。
-     *
-     * <p><b>问的是记录多老,不是任务跑了多少刻。</b>任务会休眠:{@code follow} 在主人
-     * 身边时不占身体,槽轮不到 tick,"跑过几刻"就一直是 0——拿它当判据的话,一个跟了你
-     * 十分钟的跟随任务会始终自称"刚受理",你让她顺手捡个掉落物都会被拒。
+     * 判断是否还没过刚开始的那一刻，用来识别同一刻连续派来的任务。
+     * 看的是开始时间，不是实际执行次数；例如跟随者一直站在主人旁边，也不能永远算“刚开始”。
      */
     public final boolean acceptedThisTick(long gameTime) {
         return startedGameTime >= 0 && gameTime <= startedGameTime;
     }
 
-    /** Called by {@code CompanionTickDispatcher} as the record transitions through lifecycle. */
+    /** 直接记下执行方给出的状态和结果；这里不校验“这个状态能否变成另一个状态”。 */
     public final void setState(TaskState state) { this.state = state; }
     public final void setResult(TaskResult result) { this.result = result; }
 
-    /**
-     * Short human-readable description for the {@code /maicraft debug} head
-     * overlay. Defaults to the tool name; subclasses override to append their
-     * salient parameters (e.g. {@code MoveToTaskRecord} adds the target coords).
-     */
+    /** 给状态显示和排错用的短描述；具体任务可以补上目的地等信息。 */
     public String describe() {
         return toolName;
     }

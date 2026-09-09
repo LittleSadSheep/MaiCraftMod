@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Instant local query for occupied task slots and session timers. */
+/** 内部查询工具：马上返回现在有哪些任务、还有哪些提醒，不让玩家做动作。 */
 public final class TaskStatusTool implements MaiCraftTool {
 
     @Override
@@ -44,6 +44,7 @@ public final class TaskStatusTool implements MaiCraftTool {
         Map<String, Object> data = new LinkedHashMap<>();
         List<Map<String, Object>> taskData = new ArrayList<>();
         for (TaskRecord record : records) {
+            // 已过时间从第一次开始算起，包含中途暂停；不限时任务用 -1 表示没有倒计时。
             long elapsed = record.getStartedGameTime() < 0
                     ? 0L
                     : Math.max(0L, now - record.getStartedGameTime()) / 20L;
@@ -60,6 +61,7 @@ public final class TaskStatusTool implements MaiCraftTool {
                     "description", record.describe()));
         }
         if (!taskData.isEmpty()) {
+            // 没有任务或提醒时省略对应列表，文字说明仍会明确告诉调用者当前为空。
             data.put("tasks", taskData);
         }
         if (!timers.isEmpty()) {

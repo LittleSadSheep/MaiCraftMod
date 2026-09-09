@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 
-/** 本地玩家的唯一身体调度器：每 tick 选一个执行者，并处理前后两个执行者的输入交接。 */
+/** 决定玩家这一刻做哪件事：先考虑自救，再考虑临时动作和当前任务；不能让两件事同时按键。 */
 final class CompanionBrain {
 
     private static final int HAND_PIN_GRACE_TICKS = 600;
@@ -26,9 +26,10 @@ final class CompanionBrain {
     private final Task currentProxy = new SlotProxy(current);
     private Task holder;
 
-    /** Select and advance no more than one body owner for this client tick. */
+    /** 每个游戏刻选一件事执行；需要换任务时，先让旧任务松开按键。 */
     void tick(LocalPlayer player) {
         if (handPinRelease.tick(!sync.isEmpty() || !current.isEmpty())) {
+            // 一段时间没有任务后，解除上次工作留下的手持物品锁定。
             TaskSessionHooks.fireSessionEnd(player);
         }
 
@@ -39,8 +40,8 @@ final class CompanionBrain {
                 idlePoses,
                 player);
 
-        // 优先级更高也不代表能立刻抢走身体：起跳、坠落或交通动作可能需要先走到可安全交接的位置。
-        // 空中救援若要提前接管，必须明确准备好接续控制；否则这一 tick 仍由原执行者控制。
+        // 正在跳跃、下落或乘交通工具时，突然换人控制可能摔下去；通常先让当前动作走到能安全停下的位置。
+        // 但如果原来的落地方案已经失败，而且自救任务准备好了，就允许它马上接手。
         if (holder != winner && (!EmbeddedBaritoneRuntime.canSafelySuspendActive()
                 || !org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.canSafelySuspendActive())) {
             boolean rescue = winner instanceof org.maiwithu.maicraft.core.task.chain.MLGChain mlg
@@ -50,14 +51,14 @@ final class CompanionBrain {
             if (!rescue) winner = holder;
         }
         if (holder != null && holder != winner) {
-            // 导航可能藏在旧执行者的子任务里；交接前统一暂停共享导航和交通输出，再通知旧任务让位。
+            // 先停掉旧任务的自动走路和交通控制，再通知它暂停，避免旧路线继续按键干扰新任务。
             EmbeddedBaritoneRuntime.suspendActivePhysicalOutputs();
             org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.suspendActive();
             holder.stop(player, Task.StopReason.PREEMPTED);
         }
         holder = winner;
 
-        // 没被选中的任务本 tick 没机会干活，把截止时间顺延，避免它因等待别人执行而超时。
+        // 这次没轮到的任务，给它多一刻时间；等别人干活不应该花掉自己的执行时间。
         if (winner != syncProxy) {
             sync.freeze();
         }
@@ -79,11 +80,13 @@ final class CompanionBrain {
     }
 
     void submitSync(LocalPlayer player, TaskRecord record) {
+        // 放入临时动作的位置；被替换的旧动作若产生结果，也在这里发回。
         sync.put(player, record);
         shipResults();
     }
 
     void submitCurrent(LocalPlayer player, TaskRecord record) {
+        // 更换玩家当前要做的事；具体的停止旧任务和准备新任务由 TaskSlot 处理。
         current.put(player, record);
         shipResults();
     }
@@ -100,6 +103,7 @@ final class CompanionBrain {
 
 
     List<TaskRecord> list() {
+        // 返回当前仍在等待或执行的任务；已经结束的历史不保存在这个调度器里。
         List<TaskRecord> records = new ArrayList<>(2);
         if (sync.record() != null) {
             records.add(sync.record());
@@ -123,6 +127,7 @@ final class CompanionBrain {
     }
 
     boolean cancel(LocalPlayer player, String publicId) {
+        // 未指定编号时只取消当前任务；指定编号时才去找对应任务，不误停另一件事。
         boolean cancelled = false;
         if (publicId == null || publicId.isBlank()) {
             cancelled = current.cancel(player);
@@ -140,6 +145,7 @@ final class CompanionBrain {
     }
 
     void cancelAll(LocalPlayer player) {
+        // 两个任务都结束，并停掉此时可能正在插队自救的行为，再解除本轮工作留下的物品锁定。
         boolean hadWork = !sync.isEmpty() || !current.isEmpty();
         sync.cancel(player);
         current.cancel(player);
@@ -151,11 +157,8 @@ final class CompanionBrain {
     }
 
     /**
-     * Stop a reflex which currently owns the body before forgetting scheduler ownership.
-     * Slot tasks wind themselves down through {@link TaskSlot#cancel}; stopping either proxy
-     * here would double-stop the same task.  A reflex, however, may retain an episode or a
-     * bounded movement burst across ticks, so merely clearing {@link #holder} would let it
-     * reacquire the body after the semantic task had already been cancelled.
+     * 普通任务刚才已经由 TaskSlot 停止，不要重复停；如果正在执行的是自救行为，则在这里通知它结束。
+     * 只把 holder 清空还不够，自救行为可能记着“我还没做完”，下一刻又会接着执行。
      */
     private void stopNonSlotHolder(LocalPlayer player, Task.StopReason reason) {
         Task previousHolder = holder;
@@ -170,10 +173,7 @@ final class CompanionBrain {
         }
     }
 
-    /**
-     * Detach only the current semantic parent for a previously authorised body replacement.
-     * Native child state is discarded and will be re-derived from the new world's facts.
-     */
+    /** 过传送门时停止旧世界的具体动作，只把当前总任务带走，到新世界后重新观察再继续。 */
     TaskRecord detachCurrentForHandoff(LocalPlayer player) {
         Task previousHolder = holder;
         holder = null;
@@ -194,6 +194,7 @@ final class CompanionBrain {
         return detached;
     }
     void bodyGone(LocalPlayer player) {
+        // 玩家退出、死亡或被新玩家对象替换后，旧对象上的任务都不能再执行。
         Task previousHolder = holder;
         holder = null;
         if (previousHolder != null && previousHolder != syncProxy && previousHolder != currentProxy) {
@@ -213,6 +214,7 @@ final class CompanionBrain {
     }
 
     private void shipResults() {
+        // 把结束结果逐个交回发起调用的地方；没有调用编号的内部行为无需回复。
         while (!outbox.isEmpty()) {
             TaskRecord record = outbox.removeFirst();
             String callId = record.getToolCallId();
@@ -227,6 +229,7 @@ final class CompanionBrain {
         }
     }
 
+    /** 让调度器可以像询问自救行为一样，询问“这个位置上放的任务现在能不能做”。 */
     private static final class SlotProxy implements Task {
         private final TaskSlot slot;
 
