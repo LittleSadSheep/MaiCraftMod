@@ -232,6 +232,31 @@ public final class IntentTaskRecord extends TaskRecord {
         changed();
     }
 
+    /** Freeze the physical design once compilation has produced an executable project. */
+    void retainBuildProject(String id) {
+        retainBuildProject(id, List.of());
+    }
+
+    boolean retainBuildProject(String id, List<String> savedProtectionLabels) {
+        if (id == null || stepIndex >= steps.size()) return false;
+        Goal current = steps.get(stepIndex);
+        if (!"maicraft:build".equals(current.ability())) return false;
+        JsonObject parameters = new JsonObject();
+        parameters.addProperty("project_id", id);
+        var labels = new java.util.LinkedHashSet<>(savedProtectionLabels);
+        if (current.parameters().has("protected_labels")) current.parameters().getAsJsonArray("protected_labels")
+                .forEach(value -> labels.add(value.getAsString()));
+        if (!labels.isEmpty()) {
+            var values = new com.google.gson.JsonArray();
+            labels.forEach(values::add);
+            parameters.add("protected_labels", values);
+        }
+        if (current.parameters().equals(parameters)) return false;
+        steps.set(stepIndex, current.withParameters(parameters));
+        changed();
+        return true;
+    }
+
     private static List<Goal> expandedSteps(Goal goal, String label) {
         List<Goal> expanded = List.copyOf(
                 Objects.requireNonNull(goal, label).executableSteps());

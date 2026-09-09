@@ -25,10 +25,6 @@ public final class BuildSiteInvestigationTaskRecord extends TaskRecord
 
     void projectPlan(BuildTaskRecord plan) { projectPlan = plan; }
     public BuildTaskRecord projectPlan() { return projectPlan; }
-    private BuildTaskRecord projectPlan;
-
-    void projectPlan(BuildTaskRecord plan) { projectPlan = plan; }
-    public BuildTaskRecord projectPlan() { return projectPlan; }
 
     static {
         TaskFactory.register(BuildSiteInvestigationTaskRecord.class,

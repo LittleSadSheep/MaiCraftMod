@@ -327,9 +327,6 @@ public final class BuildSiteInvestigationCompanionTask
         r.projectPlan(buildRecord instanceof BuildTaskRecord plan ? plan
                 : buildRecord instanceof org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord supply
                 ? supply.plan : null);
-        r.projectPlan(buildRecord instanceof BuildTaskRecord plan ? plan
-                : buildRecord instanceof org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord supply
-                ? supply.plan : null);
         r.extendDeadlineTo(buildRecord.getDeadlineGameTime());
         buildChild = TaskFactory.create(player, buildRecord);
         stage = Stage.BUILD;

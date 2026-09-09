@@ -251,6 +251,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
+            retainBuildProject(nextRecord);
             // 记住这一步的任务单，创建对应执行代码，只做第一次准备；后续每刻继续同一个对象。
             childRecord = nextRecord;
             childRecord.setState(TaskState.RUNNING);
@@ -291,7 +292,18 @@ final class IntentTask implements Task {
                         "child tick failed: " + safeMessage(exception)));
             }
         }
+        retainBuildProject(childRecord);
         return childRecord.getState().isTerminal() ? finishChild() : TaskState.RUNNING;
+    }
+
+    private void retainBuildProject(TaskRecord child) {
+        var plan = child instanceof org.maiwithu.maicraft.core.task.build.BuildTaskRecord build ? build
+                : child instanceof org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord supply ? supply.plan
+                : child instanceof org.maiwithu.maicraft.core.task.build.BuildSiteInvestigationTaskRecord site ? site.projectPlan()
+                : null;
+        if (plan != null && record.retainBuildProject(plan.projectId(), plan.projectProtectionLabels())) {
+            invalidateProtectionCache();
+        }
     }
 
     private TaskState finishChild() {
@@ -758,6 +770,9 @@ final class IntentTask implements Task {
         if (interruptedChildResult != null && terminal != TaskState.SUCCESS) {
             result = withInterruptedEffects(result, interruptedChildResult);
         }
+        Map<String, Object> projectData = new LinkedHashMap<>(result.data());
+        addBuildProjects(projectData);
+        result = new TaskResult(result.success(), result.message(), result.timedOut(), result.interrupted(), projectData);
         if (!terminalPublished) {
             terminalPublished = true;
             record.terminal(terminal, result, player.level().getGameTime());
@@ -1133,8 +1148,18 @@ final class IntentTask implements Task {
 
     @Override
     public Map<String, Object> progress() {
-        if (child != null) return sanitizeMap(child.progress());
-        return Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"
-                : wait != null ? "waiting_for_condition" : "preparing_step");
+        Map<String, Object> progress = new LinkedHashMap<>(child != null ? sanitizeMap(child.progress())
+                : Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"
+                : wait != null ? "waiting_for_condition" : "preparing_step"));
+        addBuildProjects(progress);
+        return Map.copyOf(progress);
+    }
+
+    private void addBuildProjects(Map<String, Object> data) {
+        List<String> ids = record.steps().stream().filter(step -> "maicraft:build".equals(step.ability()))
+                .map(Goal::parameters).filter(parameters -> parameters.has("project_id"))
+                .map(parameters -> parameters.get("project_id").getAsString()).distinct().toList();
+        if (ids.size() == 1) data.put("project_id", ids.getFirst());
+        if (!ids.isEmpty()) data.put("build_projects", ids);
     }
 }
