@@ -29,7 +29,9 @@ import net.minecraft.world.phys.Vec3;
 
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 
-/** 坠落 ≥2 格:走出边缘垂直下落到落点,超过安全高度时空中放水桶接底。 */
+/**
+ * 旧的较深下落执行器：估算落点和水桶需求，下落时对准落点，到水里后尝试收水。当前下落导航使用另一套现用实现。
+ */
 public class MovementFall extends Movement {
 
     public MovementFall(LocalPlayer player, BlockPos src, BlockPos dest) {
@@ -58,7 +60,9 @@ public class MovementFall extends Movement {
         return set;
     }
 
-    /** 重算坠落分档:本次坠落是否需要空中放水桶。 */
+    /**
+     * 旧流程根据当前现场重新计算落点是否需要水桶；这是计划判断，不是已经放水的记录。
+     */
     private boolean willPlaceBucket() {
         // 只问要不要放水桶(hasWaterBucket),与地形许可无关;MLG 放水再收回,不改世界
         CalculationContext context = new CalculationContext(player, player.level(),
@@ -84,6 +88,7 @@ public class MovementFall extends Movement {
         boolean forcedRotation = false;
         BlockState destState = level.getBlockState(dest);
         boolean isWater = destState.getFluidState().getType() instanceof WaterFluid;
+        // 落点没有水而旧费用模型要求用水桶时，先选水桶，接近落点才朝下瞄准并请求右键。
         if (!isWater && willPlaceBucket() && !feet.equals(dest)) {
             if (level.dimension() == Level.NETHER) {
                 return state.setStatus(MovementStatus.UNREACHABLE);
@@ -113,6 +118,7 @@ public class MovementFall extends Movement {
         if (feet.equals(dest) && (player.getY() - feet.getY() < 0.094 || isWater)) { // 睡莲容差
             if (isWater) {
                 // 落进自己放的水:收水再走
+                // 进入水中后尝试选空桶收水；这段旧代码没有区分这里的水是不是自己刚放下的。
                 ItemSelection emptyBucket = selectItem(stack -> stack.is(Items.BUCKET));
                 if (emptyBucket == ItemSelection.WAITING) {
                     return state.setInput(Input.JUMP, true);

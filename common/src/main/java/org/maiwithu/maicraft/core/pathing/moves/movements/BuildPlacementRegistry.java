@@ -21,7 +21,10 @@ import net.minecraft.world.phys.BlockHitResult;
 
 import java.util.function.Predicate;
 
-/** Active construction material lookup used by path movements that place blocks. */
+/**
+ * 登记当前施工任务希望怎样放方块，以及实际导航确认垫块放下或拆除后的通知。Provider 和确认回调仍由现用 Baritone 使用。
+ * 下方按位置自动选材料的分支与未确认垫块名单属于旧移动流程，不能把它们当作当前统一的施工选料逻辑。
+ */
 public final class BuildPlacementRegistry {
 
     public interface Provider {
@@ -46,7 +49,9 @@ public final class BuildPlacementRegistry {
 
     private BuildPlacementRegistry() {}
 
-    /** 寻路准备在该格放置(脚手架/垫柱/搭桥):给建造任务留回执,交付前清残料用。 */
+    /**
+     * 旧移动流程准备尝试垫块时先记位置，并没有确认方块真的放下；当前只有旧 MovementPlacement 调用它。
+     */
     public static void recordScaffold(LocalPlayer player, BlockPos placeAt) {
         if (activeProvider == null) {
             return;   // 无建造任务在册:挖矿等场景的搭桥不记账,防集合无界生长
@@ -62,7 +67,9 @@ public final class BuildPlacementRegistry {
         if (activeProvider == owner) owner.confirmedScaffoldRemoval(placeAt);
     }
 
-    /** 领走该玩家累计的放置回执(领后清空)。 */
+    /**
+     * 取走并清空旧流程累计的位置名单。这份名单是全局当前施工登记，不按传入玩家分别存储。
+     */
     public static java.util.Set<BlockPos> drainScaffold(LocalPlayer player) {
         java.util.Set<BlockPos> out = java.util.Set.copyOf(SCAFFOLD);
         SCAFFOLD.clear();
@@ -91,6 +98,7 @@ public final class BuildPlacementRegistry {
                 player, placeAt, null, player.getYRot(), player.getXRot(), select, selector);
     }
 
+    // 旧选料顺序是能放成目标状态的物品、同种方块、普通垫块；这里只供旧放置帮助类使用。
     static Movement.ItemSelection selectForLocation(
             LocalPlayer player, BlockPos placeAt, BlockHitResult hit,
             float yaw, float pitch, boolean select, Movement.ItemSelector selector) {
@@ -190,6 +198,7 @@ public final class BuildPlacementRegistry {
         return hit == null || predictedState(player, stack, hit, yaw, pitch, hand) != null;
     }
 
+    // 按候选物品和拟用视角询问原版会放成什么状态；只作预测，不执行右键。
     private static BlockState predictedState(LocalPlayer player, ItemStack stack, BlockHitResult hit,
                                              float yaw, float pitch, InteractionHand hand) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) {

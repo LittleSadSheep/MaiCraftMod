@@ -25,7 +25,9 @@ import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.SPRINT_ONE_BLOCK_COST;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_BLOCK_COST;
 
-/** 跑酷跳:助跑跃过 2-4 格空隙落到同高或高一格的落点,从不挖方块。 */
+/**
+ * 旧的跨空隙跳跃执行器：按可冲刺情况找两至四格外的落点，允许时还会尝试在落点补一块。当前未接入实际输入。
+ */
 public class MovementParkour extends Movement {
 
     private static final BlockPos[] EMPTY = new BlockPos[0];
@@ -44,13 +46,8 @@ public class MovementParkour extends Movement {
     }
 
     /**
-     * 成本:实际落点与成本写进 result。前置链:总开关、建筑高度上限、
-     * 紧邻格空(能走就不跑酷)、紧邻下方无危险、起跳净空、起跳块不是
-     * 梯/藤/楼梯/下半砖、不在(且不站)水里。逐格验证 2..maxJump
-     * (灵魂沙 2、疾跑 4、否则 3):落点柱两层净空;落点格实心 →
-     * 跑酷上升判定;落点下可站 → 平跳落点(过冲两格安全才收);
-     * 均无则需更高一层净空才能继续飞。开启跳跃放置时,从最远验证距离
-     * 往回找可放贴面(排除跳来的反方向)。
+     * 先检查起跳空间，按灵魂沙、能否冲刺决定最大跳距；从近到远找可落脚位置，还要检查冲过一点会不会遇到危险。
+     * 没有现成落点时，只有设置允许空中补垫块，才继续查可放置的落点。
      */
     public static void cost(CalculationContext context, int x, int y, int z,
                             Direction dir, MutableMoveResult res) {
@@ -251,6 +248,7 @@ public class MovementParkour extends Movement {
             // 掉下去了
             return state.setStatus(MovementStatus.UNREACHABLE);
         }
+        // 四格跳或跳到更高处会要求冲刺；偏离起点时先修正助跑位置，已经离地则继续对准目标并按需要补落脚块。
         if (dist >= 4 || ascend) {
             state.setInput(Input.SPRINT, true);
         }

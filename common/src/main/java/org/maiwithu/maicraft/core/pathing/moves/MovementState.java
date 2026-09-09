@@ -4,8 +4,7 @@ import java.util.EnumMap;
 import java.util.Map;
 
 /**
- * 移动原语每 tick 的输出:当前状态 + 期望视角(可空)+ 本 tick 要按住的键。
- * 输入表在每次 {@link Movement#update()} 应用后清空,按键不跨 tick 粘滞。
+ * 旧移动执行器本次更新的记录：到了哪个阶段、希望看向哪里、哪些键要按下或松开。它本身不控制游戏输入。
  */
 public class MovementState {
 
@@ -36,6 +35,7 @@ public class MovementState {
         return this;
     }
 
+    // 返回内部的可修改按键表；旧 Movement.update 读取后会清空，为下一次更新重新收集。
     public Map<Input, Boolean> getInputStates() {
         return inputStates;
     }

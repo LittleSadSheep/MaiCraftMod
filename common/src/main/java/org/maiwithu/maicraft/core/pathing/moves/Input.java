@@ -1,8 +1,7 @@
 package org.maiwithu.maicraft.core.pathing.moves;
 
 /**
- * 移动原语可请求的输入按键。执行层把这些抽象按键映射到实体的
- * 输入字段(zza/xxa/jump/sneak/sprint)与左右键动作。
+ * 旧 MovementState 使用的按键名称，仅用于描述想做的动作；当前 Baritone 有自己的输入枚举。
  */
 public enum Input {
     MOVE_FORWARD,

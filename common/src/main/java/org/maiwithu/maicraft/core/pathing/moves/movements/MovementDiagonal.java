@@ -27,7 +27,9 @@ import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.SPRINT_MULTIP
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_BLOCK_COST;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_OVER_SOUL_SAND_COST;
 
-/** 对角一步:斜穿到对角格(可平级或 ±1 格高差),从不挖方块,只在两角通透时绕行。 */
+/**
+ * 旧的斜向一步执行器，可按设置尝试同时升降一格；重点判断拐角是否够宽、会不会碰到危险方块。当前未接入实际输入。
+ */
 public class MovementDiagonal extends Movement {
 
     private static final double SQRT_2 = Math.sqrt(2);
@@ -44,11 +46,7 @@ public class MovementDiagonal extends Movement {
     }
 
     /**
-     * 成本。终点头顶必须通透;终点身位不通 → 对角上升档(需开关+净空);
-     * 落脚不可站 → 对角下降档(需开关+下有底);灵魂沙两端各半罚、
-     * 水面对角罚 ×√2、切角下方岩浆不可行;水中覆盖为水速;两侧绕行柱
-     * 都堵死不可行,单侧堵按 √2−ε 绕行(等效两个直步略优),全通且
-     * 非水可疾跑;最终乘 √2,降档再加落一格成本。
+     * 判断斜前方是平地、上一级还是下一级，再检查经过的两个角。两边都必须挖开时不采用这一步斜走，旁边有危险也会拒绝。
      */
     public static void cost(CalculationContext context, int x, int y, int z,
                             int destX, int destZ, MutableMoveResult res) {
@@ -263,6 +261,7 @@ public class MovementDiagonal extends Movement {
     }
 
     /** 四个角柱全通透(且不在禁疾跑的水里)才可疾跑斜穿。 */
+    // 只有拐角的四个身体格都可直接通过，且当前水中冲刺设置允许时，才请求冲刺。
     private boolean sprint() {
         Level level = player.level();
         if (MovementHelper.isLiquid(level.getBlockState(feet(player)))

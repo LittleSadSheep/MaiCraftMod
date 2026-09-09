@@ -1,8 +1,7 @@
 package org.maiwithu.maicraft.core.pathing.moves;
 
 /**
- * 一次移动成本计算的可变结果容器:落点坐标与成本。
- * 搜索循环复用同一实例,避免每条边一次分配。
+ * 旧动作费用计算临时填写的落点和费用，可反复清空再用。清空后的费用是不可走，不把默认的零坐标当作有效结果。
  */
 public final class MutableMoveResult {
 

@@ -13,13 +13,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
 /**
- * 全部移动原语 × 全部方向的枚举:搜索循环遍历它产出邻边。
- * 静态偏移的成员由 {@link #apply} 直接填结果;dynamicXZ/dynamicY
- * 的成员(下降可变坠落、对角可变高差、跑酷可变距离)覆写 apply
- * 由成本函数写入实际落点。
+ * 保留的一套旧移动动作表：每个方向可以尝试直走、上台阶、下落或跳远，并生成对应执行对象。
+ * 当前仓库没有调用这份表的入口；现用 Baritone 搜索器使用 baritone.pathing.movement.Moves，同名但不是本文件。
  */
 public enum Moves {
 
+    // 向正下方一格走和原地向上搭高各只有一个方向；接下来按四个水平方向列出普通行走和上台阶。
     DOWNWARD(0, -1, 0) {
         @Override
         public Movement apply0(CalculationContext context, BlockPos src) {
@@ -140,6 +139,7 @@ public enum Moves {
         }
     },
 
+    // 向下、斜走和跳远的落点可能随地形变化，不能只把枚举中的偏移量直接加到起点。
     DESCEND_EAST(+1, -1, 0, false, true) {
         @Override
         public Movement apply0(CalculationContext context, BlockPos src) {

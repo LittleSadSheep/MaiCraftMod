@@ -32,14 +32,8 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 移动原语执行期的放置与视线共用逻辑:五贴面枚举、贴面中心瞄点、
- * 转速受限预判命中、耗材选取、视线命中判定。
- *
- * <p>视角推进用 AimProcessor 把理想目标转角折算成"这一 tick 头实际
- * 能转到哪"(受鼠标像素量化与转速上限约束)再 raytrace。需要单 tick
- * 大幅转头的放置候选(如 Pillar 空中低头看脚下、Parkour 切换看
- * dest.below)可能判定"这一 tick 还够不到"从而推迟到下一 tick 或换面。
- * 方块中心不可视时回退到方块碰撞形状的六面心做 raytrace(边角回退)。
+ * 旧移动执行器的垫块帮助代码：找可点击面、预测视角、选材料，再告诉旧执行器是否可以按右键。
+ * 当前未接入实际移动执行；普通建造和现用 Baritone 的放置交互都有各自的现用流程。
  */
 final class MovementPlacement {
 
@@ -116,6 +110,7 @@ final class MovementPlacement {
 
         // 直视 placeAt 本体(走到这一步说明该格必是可替换的)。中心不可视
         // 时回退到方块碰撞形状的六面心,用 peek 后的实际转角做 raytrace。
+        // 先试点击目标格自身，再试水平邻格和下方支撑面；预测能点到的位置与当前已经瞄准的位置分别处理。
         for (double[] off : FACE_OFFSETS) {
             Vec3 aim = shapePoint(level, placeAt, off[0], off[1], off[2]);
             float yaw = AimGeometry.yawTo(eye, aim);
@@ -195,6 +190,7 @@ final class MovementPlacement {
                 return PlaceResult.READY_TO_PLACE;
             }
         }
+        // 已经找到可用方向但尚未对准时，只准备材料并继续等待转头；不会在这个帮助方法里直接放置。
         if (found) {
             if (wouldSneak) {
                 state.setInput(Input.SNEAK, true);
@@ -272,6 +268,7 @@ final class MovementPlacement {
         return Movement.ItemSelection.UNAVAILABLE;
     }
 
+    // 这里只检查是否携带匹配物品，旧实际选择仍由执行代理完成；当前没有该代理的绑定入口。
     private static Movement.ItemSelection containsMaterial(
             LocalPlayer player, java.util.function.Predicate<ItemStack> desired) {
         Inventory inventory = player.getInventory();

@@ -1,9 +1,7 @@
 package org.maiwithu.maicraft.core.pathing.moves;
 
 /**
- * 单个移动原语的执行状态机:
- * PREPPING(准备中,清障挖掘)→ WAITING(就绪待启动)→ RUNNING(执行中)
- * → 四种终态之一。
+ * 旧移动动作的阶段与结果。准备、等待和运行尚未结束；成功、不可到达、失败和取消都算结束，结束不等于成功。
  */
 public enum MovementStatus {
 

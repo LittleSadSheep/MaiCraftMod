@@ -33,7 +33,9 @@ import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.SPRINT_MULTIP
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_BLOCK_COST;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_OVER_SOUL_SAND_COST;
 
-/** 平移一格:走到水平相邻的同高度格,必要时挖穿两格身位或在落脚点下搭桥。 */
+/**
+ * 旧的平地前进一步执行器，包含涉水、开门和缺地面时垫块的处理。它属于未接入当前输入的旧 Movement 路径，现用 Baritone 有另一份同名实现。
+ */
 public class MovementTraverse extends Movement {
 
     /** 桥块是否一直都在(false 表示本次执行需要现搭)。 */
@@ -50,11 +52,7 @@ public class MovementTraverse extends Movement {
     }
 
     /**
-     * 成本。走路分支:落脚点可站(或霜行者可冻),水中用水速、
-     * 灵魂沙两端各计半罚、水面行走加罚,身位两格通透且非水可疾跑;
-     * 需要挖时站在梯/藤上挖速 ×5。搭桥分支:落脚点下可替换才可放,
-     * 侧贴面(排除来向)可贴按普通走速计,只能背贴时按潜行速
-     * ×(潜行/平走) 计,灵魂沙/非双层台阶/水上出发不可背贴。
+     * 有地面就计算走路加清除前方两格的费用；缺地面还要算垫块，确认有材料、可放的位置和可点击的支撑面。
      */
     public static double cost(CalculationContext context, int x, int y, int z, int destX, int destZ) {
         BlockState pb0 = context.get(destX, y + 1, destZ);
@@ -218,6 +216,7 @@ public class MovementTraverse extends Movement {
         boolean ladder = fd == Blocks.LADDER || fd == Blocks.VINE;
 
         // 木门:挡路且能开 → 看门中心右键
+        // 旧流程走到挡路的木门或栅栏门前会请求右键打开；铁门不按手动开门处理。
         if (pb0.getBlock() instanceof DoorBlock || pb1.getBlock() instanceof DoorBlock) {
             boolean notPassable = (pb0.getBlock() instanceof DoorBlock
                             && !MovementHelper.isDoorPassable(level, src, dest))
@@ -252,6 +251,7 @@ public class MovementTraverse extends Movement {
             }
         }
 
+        // 地面已存在时直接走；缺少地面时先潜行、选垫块并等待放置，必要时往回退到能点到支撑面的位置。
         boolean isTheBridgeBlockThere = MovementHelper.canWalkOn(level, positionToPlace)
                 || ladder
                 || MovementPlacement.canUseFrostWalker(player, level.getBlockState(positionToPlace));

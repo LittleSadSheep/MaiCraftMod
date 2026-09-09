@@ -31,7 +31,9 @@ import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.JUMP_ONE_BLOCK_COST;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.LADDER_UP_ONE_COST;
 
-/** 垫柱上一格:原地起跳在脚下放方块(或沿梯子/藤蔓/水柱直接上一格)。 */
+/**
+ * 旧的原地向上执行器，合并了水中上升、爬梯／藤蔓和跳起后往脚下垫块三种情况。当前未接入实际输入。
+ */
 public class MovementPillar extends Movement {
 
     public MovementPillar(LocalPlayer player, BlockPos src, BlockPos dest) {
@@ -39,11 +41,7 @@ public class MovementPillar extends Movement {
     }
 
     /**
-     * 成本。四形态:梯/藤直接爬(头顶要挖时挖速 ×5);已在水柱中
-     * 上游按爬梯价;其余为垫柱——跳跃 + 放置罚金 + 跳跃罚金 + 头顶
-     * 挖掘,悬空垫柱轻罚 +0.1。梯上不能垫、下半砖上不能垫、水上
-     * (按水面行走语义)不能垫、睡莲/地毯浮在流体上不能垫、头顶是
-     * 栅栏门不可行,头顶落沙柱只有整根都是落沙时才敢挖。
+     * 能沿梯子或水柱上升时直接算攀爬费用；普通原地搭高要计算脚下放块和头顶挖掘，并排除不适合起跳的支撑和落沙风险。
      */
     public static double cost(CalculationContext context, int x, int y, int z) {
         BlockState fromState = context.get(x, y, z);
@@ -189,6 +187,7 @@ public class MovementPillar extends Movement {
             }
             return state;
         }
+        // 爬梯或藤蔓时贴向承靠面；普通搭高则选材料、移到格子中央、减少横向漂移后跳起。
         boolean ladder = fromDown.getBlock() == Blocks.LADDER || fromDown.getBlock() == Blocks.VINE;
         boolean vine = fromDown.getBlock() == Blocks.VINE;
         Vec3 placeCenter = AimGeometry.blockCenter(positionToPlace);
@@ -284,6 +283,7 @@ public class MovementPillar extends Movement {
                     boolean crouched = player.isCrouching();
                     boolean looking = MovementPlacement.isLookingAt(player, src.below())
                             || MovementPlacement.isLookingAt(player, src);
+                    // 垫块点击同时要求已经潜行、准星命中脚下且身体升得够高，避免仍占着要放方块的空间。
                     boolean highEnough = player.getY() > dest.getY() + 0.1;
                     if (crouched && looking && highEnough) {
                         // 已蹲稳、看准、跳够高度:放块

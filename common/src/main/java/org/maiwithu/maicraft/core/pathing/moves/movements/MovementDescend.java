@@ -28,7 +28,9 @@ import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_OFF_BLOC
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_BLOCK_COST;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_OVER_SOUL_SAND_COST;
 
-/** 下一格:走下水平相邻且低一格的落点;落点更深时由成本函数移交坠落语义。 */
+/**
+ * 旧的向前下降执行器：先估算落脚高度，再决定是一格台阶还是更深的下落。其动作由旧 Movement 路径承接，当前未接入实际输入。
+ */
 public class MovementDescend extends Movement {
 
     /** 冲出边缘阶段的计 tick(前 20 tick 冲 fakeDest 加速离沿)。 */
@@ -54,9 +56,7 @@ public class MovementDescend extends Movement {
     }
 
     /**
-     * 成本。先按 落点下一格 / 落点格 / 落点上格(含落沙链)三挖序累加;
-     * 从梯/藤出发不可行;落点下二格不可站则转坠落分档;落点是梯/藤或
-     * 会被霜行者冻住则不可行(退化为平移处理);否则走离边缘 + 落一格。
+     * 先加上前方需要挖开的费用；若下一层没有可站地面，就继续向下找更低的落点，而不是一律按一格台阶计算。
      */
     public static void cost(CalculationContext context, int x, int y, int z,
                             int destX, int destZ, MutableMoveResult res) {
@@ -108,10 +108,7 @@ public class MovementDescend extends Movement {
     }
 
     /**
-     * 坠落分档:逐层向下扫,遇水(可穿、非流动、非水面行走、下有底)
-     * 即落水;遇梯/藤(净坠 ≤11 才抓得住)重置有效落速继续;可站且
-     * 净坠不超无水上限则落地;超限但有水桶且不超水桶上限则加放桶价
-     * 并返回 true(执行期需要放水桶);下半砖/不可站(如岩浆)放弃。
+     * 向下寻找水、可攀爬处或普通落地面，累计下落、爬梯、伤害或用水桶的代价；返回值表示是否要用水桶，能否走还要看结果费用。
      */
     public static boolean dynamicFallCost(CalculationContext context, int x, int y, int z,
                                           int destX, int destZ, double frontBreak,
@@ -262,8 +259,7 @@ public class MovementDescend extends Movement {
     }
 
     /**
-     * 是否需要稳走:被执行层强制;或落点前方一格"下不可穿、上两格可穿"
-     * (直冲会卡进去);或前方三格身位有危险格。
+     * 落点前方有危险或紧接着上台阶时，采用不冲过头的接近方向；也可由调用者明确要求这种方式。
      */
     public boolean safeMode() {
         if (forceSafeMode) {

@@ -22,13 +22,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
 /**
- * 移动原语抽象基类:一条"从 src 到 dest"的最小可执行动作,
- * 自带成本计算(规划期)与逐 tick 状态机(执行期)。
- *
- * <p>执行侧通用框架在 {@link #update()}:先由子类推进状态机,再叠加
- * 水中上升动作的强跳与卡墙自救,最后把本 tick 的按键表交给执行层钩子。
- * 准备阶段({@link #prepared}):等待落沙实体落定、把仍挡路的
- * toBreak 逐个交给 {@link #beginBreaking} 钩子挖掉。
+ * 旧移动执行器的共用部分：保存起终点、计算费用、处理挡路方块，并把每次更新想按的键交给执行代理。
+ * 当前没有调用 setExecutionDelegate 的地方，这套实例执行流程未接入现用输入。
+ * 静态 feet 和 pathStart 仍被 PlayerNav、移动任务使用，所以不能直接把整个文件视为无用。
  */
 public abstract class Movement {
 
@@ -97,6 +93,7 @@ public abstract class Movement {
         return cost;
     }
 
+    // 第一次需要时才计算费用；目的格禁止身体进入就直接记为不可走，重新检查必须先清掉缓存。
     public double getCost(CalculationContext context) {
         if (cost == null) {
             if (context.isForbiddenBodyCell(dest.getX(), dest.getY(), dest.getZ())) {
@@ -146,10 +143,7 @@ public abstract class Movement {
      * 属于本移动自身的 {src,dest} 集合,假起点兜住这种情形。
      */
     /**
-     * 脚位约定:实体坐标 y 加 0.1251(灵魂沙/农田顶面矮一截仍归上格),
-     * 落在台阶格里再上抬一格。执行器重定位、validPositions 与本类状态
-     * 机的到达/失败判定**全部**用这一把尺,避免半砖/灵魂沙顶面错位一格
-     * 导致 SUCCESS 推进与回退扫循环。
+     * 把玩家真实脚高换成导航使用的格编号。站在半砖或楼梯里时用上方格表示，这只是编号约定，不会移动玩家。
      */
     public static BlockPos feet(LocalPlayer player) {
         BlockPos f = BlockPos.containing(
@@ -175,10 +169,7 @@ public abstract class Movement {
     }
 
     /**
-     * 脚下不可站时的假起点:在地面 → 3×3 邻格按水平距离取最近四个,
-     * 第一个下可站、本格与上格可穿的格;空中 → 再下一格可站则用脚下格。
-     * 其余情况用脚位。与 PathingCore.pathStart 同一语义,提取为基类静态
-     * 助手供 Movement 子类(如 Downward 的 UNREACHABLE 判定)复用。
+     * 给贴着方块边缘或刚离地的玩家找可用的起点格：先看脚下，再查附近支撑，空中还会试低一格的位置。
      */
     public static BlockPos pathStart(LocalPlayer player) {
         BlockPos feet = feet(player);
@@ -222,10 +213,7 @@ public abstract class Movement {
     // ==================== 执行状态机 ====================
 
     /**
-     * 每 tick 推进一次。通用框架:强制关闭飞行能力(走地面物理)→
-     * 子类状态机 → 水中上升动作且低于目标高度时强按跳(上浮)→ 卡墙时先换上
-     * 对该方块最优工具再按左键 → 视角与按键交执行层钩子,按键先清
-     * 后设、终态清空。
+     * 旧执行流程先推进具体动作，再补水中上浮或卡墙处理，最后交出本次按键并清空按键表；没有执行代理就不会真正按键。
      */
     public MovementStatus update() {
         currentState = updateState(currentState);
@@ -260,11 +248,7 @@ public abstract class Movement {
     }
 
     /**
-     * Drive a real first-person swim stroke toward one path cell. Horizontal water traversal
-     * deliberately dips the view until vanilla enters the swimming pose, then levels out and
-     * keeps sprint-swimming. Vertical water edges use pitch plus the matching descend/surface
-     * input. The abstract path can remain on the safe water-surface lattice while the physical
-     * body travels just below it instead of repeatedly bobbing and wading.
+     * 旧水中移动规则：先让刚露出水面的角色继续换气，再按目标是否更高、更低、是否有深水选择上浮、下潜或游泳。
      */
     protected final void swimTowards(MovementState state, BlockPos target) {
         // Use the planned edge's vertical intent, not the live feet cell. Entering the real
@@ -465,6 +449,7 @@ public abstract class Movement {
         TerrainPermit permit();
     }
 
+    // 这个代理负责实际转头、按键、选物品和挖掘；当前没有绑定入口，因此下面的实例动作只能形成旧状态描述。
     private ExecutionDelegate executionDelegate;
 
     /** 注入执行代理;未注入时四个钩子为空操作(纯规划用途)。 */

@@ -1,20 +1,8 @@
 package org.maiwithu.maicraft.core.pathing.execute;
 
 /**
- * 视角步进量化器:视角变化按鼠标像素量化逼近目标,不瞬间对准。
- *
- * <p>一次步进的数学:角度差 → 按灵敏度折算成整数像素(四舍五入)→
- * 再折回角度加到当前视角上。大角度差一 tick 内即可基本转到位,但落点
- * 永远只能是像素栅格上的角度——残差在半像素以内时像素数取整为 0,
- * 视角就停在那里。这决定了"是否已对准"必须用实际视角做射线判定,
- * 而不能拿角度相等做判定。
- *
- * <p>pitch 未指定(目标 pitch 与当前相等,即"只关心 yaw")时,向
- * [-20°, 10°] 的常态区间每 tick 回正 1°。
- *
- * <p>不叠加随机视角抖动,只生成稳定、受限的第一人称转角。
- *
- * <p>纯数学类,不依赖 MC,可独立单测。
+ * 旧移动瞄准流程的角度换算：把目标转角折算成鼠标灵敏度允许的步长，并限制上下视角。当前只由旧放置和旧瞄准入口使用。
+ * Baritone 的 LookBehavior 中另有它自己同名的内部类，现用视角处理不是这里的这个类。
  */
 public final class AimProcessor {
 
@@ -42,6 +30,7 @@ public final class AimProcessor {
      * 累进,视角字段允许累积出界,只在角度比较处走短弧);pitch 步进后
      * 钳制到 [-90, 90]。目标 pitch 与当前相等视为"未指定",走回正逻辑。
      */
+    // 这里主要把角度量化到鼠标刻度，并没有按多次更新缓慢插值；目标俯仰角没变且超出平视区间时，还会朝平视方向挪一度。
     public Rotation step(float currentYaw, float currentPitch, float desiredYaw, float desiredPitch) {
         if (desiredPitch == currentPitch) {
             desiredPitch = nudgeToLevel(desiredPitch);
@@ -110,6 +99,7 @@ public final class AimProcessor {
      * @param actualYawDeg 实体当前已应用的 yaw(度)
      * @return {@code [xxa', zza']},写入实体输入字段的值
      */
+    // 把“希望沿目标朝向移动”的左右／前后输入，换算成玩家当前实际朝向下要按的方向。
     public static float[] remapInput(float xxa, float zza, float targetYawDeg, float actualYawDeg) {
         double d = Math.toRadians(targetYawDeg - actualYawDeg);
         float cos = (float) Math.cos(d);

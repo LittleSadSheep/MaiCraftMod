@@ -13,11 +13,8 @@ import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
- * 行走朝向几何:瞄点求解、视线射线、朝向角与"朝方块走"的输入落地。
- * 此前混在 {@code MovementHelper} 的方块判定库里——但这一族回答的是
- * "眼睛该看哪、身体该朝哪"而不是"这一格能不能走",被执行层
- * ({@code ExecHarness}/{@code PathExecutor})、挖掘({@code BlockDigger})
- * 与建造演出跨包共用,单独成类。
+ * 计算方块瞄准点和视角角度。角度、碰撞中心和交互距离仍被挖掘等现用代码使用。
+ * reachableAimPoint 和写入旧 MovementState 的 moveTowards 当前只被旧移动执行器使用，整理时要按方法核对。
  */
 public final class AimGeometry {
 
@@ -29,16 +26,7 @@ public final class AimGeometry {
     }
 
     /**
-     * 该格上眼睛能实际射到的第一个瞄点;全部被遮挡返回 null。
-     * 判定次序:
-     * <ol>
-     *   <li>沿当前实际视角的射线已命中该格 → 保持视线,直接返回命中点
-     *       (已注视时不再回中,避免无谓转头);</li>
-     *   <li>碰撞形状中心与六面心逐一试射:每个候选点先算理想转角,再按
-     *       视角步进量化出"本 tick 实际能转到的转角",沿该转角射线——
-     *       命中该格才算可达(没转到位的 tick 不误判可视)。</li>
-     * </ol>
-     * 触及距离取 {@link NavSettings#blockReachDistance}。
+     * 旧移动流程先看当前准星，再试目标外形中心和各面；按旧鼠标角度量化规则模拟转向，射线命中才返回该瞄准点。
      */
     public static Vec3 reachableAimPoint(net.minecraft.client.player.LocalPlayer player, BlockPos pos) {
         var level = player.level();

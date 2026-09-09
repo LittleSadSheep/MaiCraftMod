@@ -25,7 +25,9 @@ import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.JUMP_ONE_BLOC
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_BLOCK_COST;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.WALK_ONE_OVER_SOUL_SAND_COST;
 
-/** 上一格:跳上水平相邻且高一格的落点,必要时先在落点下放置方块。 */
+/**
+ * 旧的上一级台阶执行器：检查头顶和落脚处，必要时先垫一块，再找合适时机跳上去。当前没有绑定这套执行器的输入代理。
+ */
 public class MovementAscend extends Movement {
 
     /** 需要放置时,连续多少 tick 还没把块放上(用于退开自救与取消保护)。 */
@@ -43,10 +45,7 @@ public class MovementAscend extends Movement {
     }
 
     /**
-     * 成本。落点下不可站则计放置(贴面枚举排除来向,那块届时已被挖);
-     * 头顶三格外有落沙且够不成"已被清干净的沙柱"则不可行;从梯/藤、
-     * 从下半砖(目标非下半砖)不可行;下半砖三分支与灵魂沙起跳
-     * 减速按各自步速计,常规起跳含跳跃罚金;再叠三格挖掘成本。
+     * 上台阶先检查落脚处和头顶空间，缺支撑则把放置也计入费用；容易被落沙封住、从下半砖跳得不够高等情况拒绝。
      */
     public static double cost(CalculationContext context, int x, int y, int z, int destX, int destZ) {
         BlockState toPlace = context.get(destX, y, destZ);
@@ -161,6 +160,7 @@ public class MovementAscend extends Movement {
         }
 
         BlockState jumpingOnto = level.getBlockState(positionToPlace);
+        // 落脚支撑还没出现就先尝试垫块；连续十次仍没放好时加后退，重新拉开可点击距离。
         if (!MovementHelper.canWalkOn(level, positionToPlace)) {
             // 落点块还不在:潜行放置
             ticksWithoutPlacement++;
@@ -210,6 +210,7 @@ public class MovementAscend extends Movement {
                     String.format("%.3f", lateralMotion), headBonkClear(), player.onGround(),
                     jumpingOnto.getBlock().builtInRegistryHolder().key().location().getPath());
         }
+        // 横向漂移太大先不跳；头顶不宽敞时，还要接近台阶中心并减少侧偏再起跳。
         if (Math.abs(lateralMotion) > 0.1) {
             return state; // 横向还在漂,先走正再跳
         }
