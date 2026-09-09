@@ -11,9 +11,9 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 public final class PreviewCommands {
     private PreviewCommands() {}
 
-    // Dev 和 dev 两种大小写都可用；不带子命令时显示状态，preview all 恢复显示全部高度。
+    // dev 不带子命令时显示状态，preview all 恢复显示全部高度。
     public static <S> LiteralArgumentBuilder<S> attach(LiteralArgumentBuilder<S> root) {
-        root.then(dev("Dev")).then(dev("dev"));
+        root.then(dev());
         root.then(LiteralArgumentBuilder.<S>literal("preview")
                 .executes(context -> PreviewController.status())
                 .then(action("status", PreviewController::status))
@@ -36,8 +36,8 @@ public final class PreviewCommands {
         return root;
     }
 
-    private static <S> LiteralArgumentBuilder<S> dev(String name) {
-        return LiteralArgumentBuilder.<S>literal(name).executes(context -> PreviewController.status())
+    private static <S> LiteralArgumentBuilder<S> dev() {
+        return LiteralArgumentBuilder.<S>literal("dev").executes(context -> PreviewController.status())
                 .then(action("on", () -> PreviewController.dev(true)))
                 .then(action("off", () -> PreviewController.dev(false)));
     }

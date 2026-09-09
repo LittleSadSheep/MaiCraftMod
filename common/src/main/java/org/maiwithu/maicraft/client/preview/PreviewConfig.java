@@ -40,7 +40,7 @@ public final class PreviewConfig {
         Properties values = new Properties();
         values.setProperty("devMode", Boolean.toString(value));
         try (Writer writer = Files.newBufferedWriter(file)) {
-            values.store(writer, "MaiCraft client blueprint review; /maicraft Dev on|off");
+            values.store(writer, "MaiCraft client blueprint review; /maicraft dev on|off");
         }
     }
 }
