@@ -220,12 +220,13 @@ public final class IntentStateCodec {
         }
         if (task.pendingAnswerSnapshot() != null) {
             // 答复可能已经收到了，但还没轮到执行；保存它以便回来后继续处理。
-            // 这里目前用了公开结果的过滤规则，答复中合法目标的 position 等字段也会被删掉。
+            // 答复按执行请求校验并完整保存；诊断结果的脱敏规则不能改写已经接受的目标。
             IntentTaskRecord.DecisionAnswer answer = task.pendingAnswerSnapshot();
             JsonObject item = new JsonObject();
             item.addProperty("decision_id", answer.decisionId().toString());
             item.addProperty("choice", bounded(answer.choice()));
-            item.add("details", safeObject(answer.detailsJson()));
+            Goal current = task.stepIndex() < task.steps().size() ? task.steps().get(task.stepIndex()) : task.goal();
+            item.add("details", answerDetails(answer.details(), current));
             value.add("pending_answer", item);
         }
         if (task.terminalSnapshot() != null) {
@@ -417,7 +418,8 @@ public final class IntentStateCodec {
         IntentTaskRecord.DecisionSnapshot decision = value.has("decision")
                 ? decodeDecision(value.getAsJsonObject("decision")) : null;
         IntentTaskRecord.DecisionAnswer answer = value.has("pending_answer")
-                ? decodeAnswer(value.getAsJsonObject("pending_answer")) : null;
+                ? decodeAnswer(value.getAsJsonObject("pending_answer"),
+                        stepIndex < steps.size() ? steps.get(stepIndex) : goal) : null;
         IntentTaskRecord.TerminalSnapshot terminal = value.has("terminal")
                 ? decodeTerminal(value.getAsJsonObject("terminal")) : null;
         return new TaskSnapshot(
@@ -464,11 +466,31 @@ public final class IntentStateCodec {
                 safeElement(value.get("context")).toString());
     }
 
-    private static IntentTaskRecord.DecisionAnswer decodeAnswer(JsonObject value) {
+    private static IntentTaskRecord.DecisionAnswer decodeAnswer(JsonObject value, Goal current) {
         return new IntentTaskRecord.DecisionAnswer(
                 UUID.fromString(text(value, "decision_id")),
                 bounded(text(value, "choice")),
-                safeElement(value.get("details")).toString());
+                answerDetails(value.get("details"), current).toString());
+    }
+
+    private static JsonObject answerDetails(JsonElement value, Goal current) {
+        if (value == null || value.isJsonNull()) return new JsonObject();
+        if (!value.isJsonObject()) throw new IllegalArgumentException("persisted answer details must be an object");
+        JsonObject details = value.getAsJsonObject();
+        if (details.has("goal")) {
+            if (!details.get("goal").isJsonObject())
+                throw new IllegalArgumentException("persisted answer goal must be an object");
+            safeGoal(Goal.fromJson(details.getAsJsonObject("goal")));
+        } else {
+            if (details.has("parameters") && !details.get("parameters").isJsonObject())
+                throw new IllegalArgumentException("persisted answer parameters must be an object");
+            JsonObject updates = details.has("parameters") ? details.getAsJsonObject("parameters") : details;
+            JsonObject merged = current.parameters();
+            updates.entrySet().forEach(entry -> merged.add(entry.getKey(), entry.getValue().deepCopy()));
+            // 重试只带部分参数，须结合当前目标验证；合法蓝图沿用目标编码的完整性与大小检查。
+            safeGoal(current.withParameters(merged));
+        }
+        return details.deepCopy();
     }
 
     private static IntentTaskRecord.TerminalSnapshot decodeTerminal(JsonObject value) {
