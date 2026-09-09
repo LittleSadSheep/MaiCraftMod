@@ -25,6 +25,7 @@ public final class BuildingSceneRuntimeTest {
                  "objects":[{"name":"Wall","type":"MESH","primitive":"cube","location":[1,0.5,1],"dimensions":[2,1,2],"material":"Wall"},
                             {"name":"Trim","type":"MESH","primitive":"cube","location":[2.5,0.5,1],"dimensions":[1,1,2],"material":"Trim"}]}
                 """).getAsJsonObject();
+        createAndUpdateCompileOnce(scene);
         JsonObject p = new JsonObject(); p.add("scene", scene); p.addProperty("operation", "create_scene");
         Goal goal = goal(p);
         IntentRuntime runtime = IntentRuntime.get();
@@ -78,6 +79,57 @@ public final class BuildingSceneRuntimeTest {
         try { BuildingSceneAdapter.buildArguments(explicit, new Goal.WorldPosition(0,64,0,"minecraft:overworld"), new JsonObject());
             throw new AssertionError("normalized state silently changed"); } catch (IllegalArgumentException expected) { }
         System.out.println("BuildingSceneRuntimeTest: semantic model contracts, exact cells and exports passed");
+    }
+
+    private static void createAndUpdateCompileOnce(JsonObject scene) throws Exception {
+        var root = java.nio.file.Files.createTempDirectory("scene-compilation-");
+        String world = "c".repeat(64), dimension = "minecraft:overworld";
+        int[] compilations = {0};
+        java.util.function.Function<JsonObject, JsonObject> compiler = source -> {
+            compilations[0]++;
+            return BuildingSceneCompiler.compile(source);
+        };
+        var constructor = org.maiwithu.maicraft.core.blueprint.BuildingSceneStore.class.getDeclaredConstructor(
+                org.maiwithu.maicraft.intent.persistence.StateIdentity.class, java.util.function.Function.class);
+        constructor.setAccessible(true);
+        var store = constructor.newInstance(new org.maiwithu.maicraft.intent.persistence.StateIdentity(world, root), compiler);
+        try (var f = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness()) {
+            JsonObject create = new JsonObject(); create.addProperty("operation", "create_scene"); create.add("scene", scene);
+            var first = sceneReport(goal(create), f.player, store);
+            check(compilations[0] == 1, "create_scene must perform one complete compilation across adapter and storage");
+            String firstId = first.data().get("scene_id").toString();
+            var original = store.load(firstId, dimension);
+            JsonObject update = new JsonObject(); update.addProperty("operation", "update_scene"); update.addProperty("scene_id", firstId);
+            update.add("edits", JsonParser.parseString("{\"objects\":[{\"name\":\"Wall\",\"location\":[2,0.5,1]}]}"));
+            var second = sceneReport(goal(update).withTarget(null), f.player, store);
+            check(compilations[0] == 2, "update_scene must compile the edited model once, including saving");
+            var revision = store.load(second.data().get("scene_id").toString(), dimension);
+            check(revision.parentSceneId().equals(firstId) && revision.anchor().equals(original.anchor()),
+                    "the optimized update retains its parent and fixed world anchor");
+            check(store.load(firstId, dimension).scene().equals(original.scene()), "updating must preserve the original model");
+            JsonObject missing = create.deepCopy();
+            missing.getAsJsonObject("scene").getAsJsonObject("materials").getAsJsonObject("Wall")
+                    .addProperty("block_id", "missing:material");
+            try {
+                sceneReport(goal(missing), f.player, store);
+                throw new AssertionError("an unresolvable model was saved before native-state validation");
+            } catch (IllegalArgumentException expected) { }
+            try (var files = java.nio.file.Files.list(root.resolve("build-scenes").resolve(world))) {
+                check(files.count() == 2, "a failed registry check cannot publish another scene revision");
+            }
+            check(f.blockUses() == 0 && f.itemUses() == 0, "scene compilation and storage must not issue game interactions");
+        }
+    }
+
+    private static org.maiwithu.maicraft.task.TaskResult sceneReport(Goal goal, net.minecraft.client.player.LocalPlayer player,
+            org.maiwithu.maicraft.core.blueprint.BuildingSceneStore store) {
+        var action = BuildingSceneAdapter.adapt(goal, player, null,
+                preview -> { throw new AssertionError("create/update must not publish a preview"); }, () -> store);
+        check(action instanceof IntentAction.Report, "create/update must return a report instead of construction work");
+        var result = ((IntentAction.Report) action).result();
+        check(result.success() && Boolean.FALSE.equals(result.data().get("construction_started")),
+                "model creation and editing remain read-only with respect to the game world");
+        return result;
     }
 
     private static Goal goal(JsonObject p) {

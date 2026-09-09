@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -32,16 +33,23 @@ final class BuildingSceneAdapter {
     }
 
     static IntentAction adapt(Goal goal, LocalPlayer player, IntentRuntime runtime, Predicate<PreviewSession> publish) {
+        return adapt(goal, player, runtime, publish, BuildingSceneStore::current);
+    }
+
+    static IntentAction adapt(Goal goal, LocalPlayer player, IntentRuntime runtime, Predicate<PreviewSession> publish,
+                             Supplier<BuildingSceneStore> stores) {
         BuildingSceneContract.validate(goal);
         JsonObject p = goal.parameters();
         String op = BuildingSceneContract.operation(goal);
         String dimension = player.level().dimension().location().toString();
         BuildingSceneStore.Entry entry = null;
+        BuildingSceneStore store = null;
+        BuildingSceneStore.Prepared prepared = null;
         Goal.WorldPosition anchor;
         JsonObject blueprint;
         // 已有模型沿用保存时的锚点；调用者若又指定不同地点就报错，不能因角色现在站在别处而移动原设计。
         if (p.has("scene_id")) {
-            var store = BuildingSceneStore.current();
+            store = stores.get();
             entry = store.load(p.get("scene_id").getAsString(), dimension);
             anchor = entry.anchor();
             if (goal.target() != null) {
@@ -57,19 +65,26 @@ final class BuildingSceneAdapter {
             }
             JsonObject source = op.equals("update_scene")
                     ? BuildingSceneStore.applyPatch(entry.scene(), p.getAsJsonObject("edits")) : entry.scene();
-            blueprint = BuildingSceneCompiler.compile(source);
+            if (op.equals("update_scene")) {
+                prepared = store.prepare(source);
+                blueprint = prepared.blueprint();
+            } else blueprint = BuildingSceneCompiler.compile(source);
         } else {
             anchor = SemanticBuildPlanner.investigationAnchor(goal, player, runtime);
             if (anchor == null) throw new IllegalArgumentException("A new model needs an exact current_place, coordinates or remembered landmark target");
             anchor = new Goal.WorldPosition(anchor.x(), anchor.y(), anchor.z(), dimension);
-            blueprint = p.has("scene") ? BuildingSceneCompiler.compile(p.getAsJsonObject("scene")) : p.getAsJsonObject("blueprint");
+            if (p.has("scene")) {
+                store = stores.get();
+                prepared = store.prepare(p.getAsJsonObject("scene"));
+                blueprint = prepared.blueprint();
+            } else blueprint = p.getAsJsonObject("blueprint");
         }
         // 除查看信息外，其他操作先走相同的施工参数与材料检查，再决定保存、预览、导出还是施工。
         JsonObject args = buildArguments(blueprint, anchor, p);
         // 先确认注册名和状态能被当前游戏表达，再保存新版本；缺材料种类不会被换成近似方块。
         var targets = BuildTool.resolvedTargets(args.getAsJsonArray("ops"), true);
-        if (op.equals("update_scene")) entry = BuildingSceneStore.current().update(entry.sceneId(), dimension, p.getAsJsonObject("edits"));
-        if (entry == null && p.has("scene")) entry = BuildingSceneStore.current().save(p.getAsJsonObject("scene"), anchor);
+        if (op.equals("update_scene")) entry = store.updatePrepared(entry.sceneId(), dimension, prepared);
+        if (entry == null && prepared != null) entry = store.savePrepared(prepared, anchor);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("construction_started", false);
         data.put("block_count", targets.size());

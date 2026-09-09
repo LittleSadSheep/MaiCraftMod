@@ -13,7 +13,11 @@ public final class BuildingSceneStoreTest {
     public static void main(String[] args) throws Exception {
         Path root = Files.createTempDirectory("building-scene-store-");
         String world = "a".repeat(64), dimension = "minecraft:overworld";
-        var store = new BuildingSceneStore(root, world);
+        int[] compilations = {0};
+        var store = new BuildingSceneStore(new org.maiwithu.maicraft.intent.persistence.StateIdentity(world, root), source -> {
+            compilations[0]++;
+            return BuildingSceneCompiler.compile(source);
+        });
         var anchor = new Goal.WorldPosition(123, 64, -321, dimension);
         JsonObject scene = json("""
                 {"schema_version":1,"coordinate_system":"minecraft_y_up",
@@ -22,6 +26,7 @@ public final class BuildingSceneStoreTest {
                              "dimensions":[5,3,1],"material":"wood"}]}
                 """);
         var first = store.save(scene, anchor);
+        check(compilations[0] == 1, "ordinary storage still fully validates its input once");
         scene.getAsJsonArray("objects").get(0).getAsJsonObject().addProperty("name", "mutated");
         first.scene().getAsJsonArray("objects").get(0).getAsJsonObject().addProperty("name", "also mutated");
         var reopened = new BuildingSceneStore(root, world).load(first.sceneId(), dimension);
@@ -31,6 +36,7 @@ public final class BuildingSceneStoreTest {
                  "materials":{"wood":{"block_id":"minecraft:spruce_planks"}}}
                 """);
         var next = store.update(first.sceneId(), dimension, edits);
+        check(compilations[0] == 2, "ordinary updates still fully validate the edited scene once");
         check(!next.sceneId().equals(first.sceneId()) && next.parentSceneId().equals(first.sceneId()), "edits produce a new immutable revision");
         check(next.anchor().equals(anchor) && next.scene().getAsJsonArray("objects").get(0).getAsJsonObject().has("dimensions"), "partial transforms retain geometry and fixed world anchor");
         check(store.load(first.sceneId(), dimension).scene().equals(reopened.scene()), "editing does not overwrite the previous revision");
@@ -52,6 +58,22 @@ public final class BuildingSceneStoreTest {
                 "{\"remove_objects\":[\"wall\"],\"objects\":[{\"name\":\"wall\"}]}"})
             rejects(() -> BuildingSceneStore.validateEdits(json(invalid)));
         check(store.load(next.sceneId(), dimension).scene().equals(next.scene()), "failed edits preserve both revisions");
+        JsonObject preparedInput = reopened.scene();
+        var prepared = store.prepare(preparedInput);
+        int checked = compilations[0];
+        preparedInput.remove("objects");
+        prepared.blueprint().remove("blocks");
+        var preparedSave = store.savePrepared(prepared, anchor);
+        var preparedRevision = store.updatePrepared(first.sceneId(), dimension, prepared);
+        check(compilations[0] == checked, "saving a validated result must not repeat full scene compilation");
+        check(preparedSave.scene().equals(reopened.scene()) && preparedRevision.scene().equals(reopened.scene())
+                        && prepared.blueprint().has("blocks"), "input and output mutation cannot poison the validated snapshot");
+        check(preparedRevision.parentSceneId().equals(first.sceneId()) && preparedRevision.anchor().equals(anchor),
+                "reuse retains immutable revision lineage and the parent's fixed anchor");
+        rejects(() -> store.prepare(preparedInput));
+        rejects(() -> store.savePrepared(prepared, new Goal.WorldPosition(0, 0, 0, null)));
+        rejects(() -> store.updatePrepared(first.sceneId(), "minecraft:the_nether", prepared));
+        rejects(() -> new BuildingSceneStore(root, "b".repeat(64)).updatePrepared(first.sceneId(), dimension, prepared));
         // 把测试文件故意加到上限之外，确认读取会拒绝；只影响这个测试创建的临时目录。
         Files.write(source, new byte[4 * 1024 * 1024 + 1]);
         rejects(() -> store.load(first.sceneId(), dimension));

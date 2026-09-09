@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
@@ -28,14 +29,33 @@ public final class BuildingSceneStore {
     private static final int MAX_BYTES = 4 * 1024 * 1024;
     private final StateIdentity identity;
     private final Path directory;
+    private final Function<JsonObject, JsonObject> compiler;
 
     public record Entry(String sceneId, JsonObject scene, Goal.WorldPosition anchor, String parentSceneId) {
         public Entry { scene = scene.deepCopy(); }
         @Override public JsonObject scene() { return scene.deepCopy(); }
     }
 
+    /** 只能经过完整编译创建的场景快照；外部修改输入或蓝图副本都不能改变待保存内容。 */
+    public static final class Prepared {
+        private final JsonObject scene;
+        private final JsonObject blueprint;
+
+        private Prepared(JsonObject scene, Function<JsonObject, JsonObject> compiler) {
+            this.scene = scene.deepCopy();
+            this.blueprint = compiler.apply(this.scene).deepCopy();
+        }
+
+        public JsonObject blueprint() { return blueprint.deepCopy(); }
+    }
+
     public BuildingSceneStore(StateIdentity identity) {
+        this(identity, BuildingSceneCompiler::compile);
+    }
+
+    BuildingSceneStore(StateIdentity identity, Function<JsonObject, JsonObject> compiler) {
         this.identity = identity;
+        this.compiler = java.util.Objects.requireNonNull(compiler);
         directory = identity.directory().resolve("build-scenes").resolve(identity.key());
     }
 
@@ -49,20 +69,25 @@ public final class BuildingSceneStore {
     }
 
     public Entry save(JsonObject scene, Goal.WorldPosition anchor) {
+        return savePrepared(prepare(scene), anchor);
+    }
+
+    public Prepared prepare(JsonObject scene) { return new Prepared(scene, compiler); }
+
+    public Entry savePrepared(Prepared scene, Goal.WorldPosition anchor) {
         return saveVersion(scene, anchor, null);
     }
 
-    private Entry saveVersion(JsonObject scene, Goal.WorldPosition anchor, String parent) {
+    private Entry saveVersion(Prepared scene, Goal.WorldPosition anchor, String parent) {
         try { return saveChecked(scene, anchor, parent); }
         catch (IOException failure) { throw new IllegalStateException("building scene could not be saved: " + failure.getMessage(), failure); }
     }
 
-    // 保存前先完整编译一次，确认对象关系、尺寸和最终格数可接受；这一步与写文件目前都是同步完成。
-    private Entry saveChecked(JsonObject scene, Goal.WorldPosition anchor, String parent) throws IOException {
-        BuildingSceneCompiler.compile(scene);
+    // 模型已由 Prepared 完整编译验证；这里继续检查锚点和文件预算，保存同一份快照而不重复展开。
+    private Entry saveChecked(Prepared scene, Goal.WorldPosition anchor, String parent) throws IOException {
         if (anchor == null || anchor.dimension() == null || anchor.dimension().isBlank())
             throw new IllegalArgumentException("building scene needs a fixed anchor and dimension");
-        var entry = new Entry(UUID.randomUUID().toString(), scene, anchor, parent);
+        var entry = new Entry(UUID.randomUUID().toString(), scene.scene, anchor, parent);
         JsonObject root = new JsonObject();
         root.addProperty("schema_version", 1);
         root.addProperty("world_key", identity.key());
@@ -117,7 +142,13 @@ public final class BuildingSceneStore {
      */
     public Entry update(String sceneId, String dimension, JsonObject patch) {
         Entry original = load(sceneId, dimension);
-        return saveVersion(applyPatch(original.scene(), patch), original.anchor(), original.sceneId());
+        return saveVersion(prepare(applyPatch(original.scene(), patch)), original.anchor(), original.sceneId());
+    }
+
+    public Entry updatePrepared(String sceneId, String dimension, Prepared scene) {
+        // 已验证新内容仍不能绕过原版本的世界、维度和锚点检查。
+        Entry original = load(sceneId, dimension);
+        return saveVersion(scene, original.anchor(), original.sceneId());
     }
 
     // 先复制原场景，再处理删除和按名字修改；同一对象不能在一次编辑里既删除又修改，也不能重复修改。
