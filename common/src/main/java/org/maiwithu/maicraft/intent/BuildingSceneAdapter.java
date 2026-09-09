@@ -20,7 +20,9 @@ import org.maiwithu.maicraft.core.blueprint.BuildingSceneBlocks;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.task.TaskResult;
 
-/** Retain and inspect modelling objects; only build submits the compiled cells to the existing executor. */
+/**
+ * 把创建、编辑、查看、导出、预览和施工这些模型操作接到各自实现。只有 operation=build 会返回真正的建筑任务。
+ */
 final class BuildingSceneAdapter {
     private static final Gson GSON = new Gson();
     private BuildingSceneAdapter() {}
@@ -37,6 +39,7 @@ final class BuildingSceneAdapter {
         BuildingSceneStore.Entry entry = null;
         Goal.WorldPosition anchor;
         JsonObject blueprint;
+        // 已有模型沿用保存时的锚点；调用者若又指定不同地点就报错，不能因角色现在站在别处而移动原设计。
         if (p.has("scene_id")) {
             var store = BuildingSceneStore.current();
             entry = store.load(p.get("scene_id").getAsString(), dimension);
@@ -61,8 +64,9 @@ final class BuildingSceneAdapter {
             anchor = new Goal.WorldPosition(anchor.x(), anchor.y(), anchor.z(), dimension);
             blueprint = p.has("scene") ? BuildingSceneCompiler.compile(p.getAsJsonObject("scene")) : p.getAsJsonObject("blueprint");
         }
+        // 除查看信息外，其他操作先走相同的施工参数与材料检查，再决定保存、预览、导出还是施工。
         JsonObject args = buildArguments(blueprint, anchor, p);
-        // Registry/state checks precede saving and preview: an unavailable material is never substituted.
+        // 先确认注册名和状态能被当前游戏表达，再保存新版本；缺材料种类不会被换成近似方块。
         var targets = BuildTool.resolvedTargets(args.getAsJsonArray("ops"), true);
         if (op.equals("update_scene")) entry = BuildingSceneStore.current().update(entry.sceneId(), dimension, p.getAsJsonObject("edits"));
         if (entry == null && p.has("scene")) entry = BuildingSceneStore.current().save(p.getAsJsonObject("scene"), anchor);
@@ -78,6 +82,7 @@ final class BuildingSceneAdapter {
             args.add("semantic_contract", facts);
             return new IntentAction.Tool("build", args.toString());
         }
+        // 预览要求所有格子已加载且处于建造高度内；它不会为了显示远处模型主动导航或加载区块。
         if (op.equals("preview")) {
             Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
             targets.forEach(target -> {
@@ -101,6 +106,7 @@ final class BuildingSceneAdapter {
         return new IntentAction.Report(TaskResult.ok("Building model " + op + " completed; no construction was started", data), null);
     }
 
+    // 把局部偏移加到固定锚点，生成逐格 set；拒绝实体、部件和非空 NBT 配置，这些另由机器能力处理。
     static JsonObject buildArguments(JsonObject blueprint, Goal.WorldPosition anchor, JsonObject parameters) {
         org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateWire(blueprint);
         if (blueprint.has("entities") && !blueprint.getAsJsonArray("entities").isEmpty())
@@ -124,6 +130,7 @@ final class BuildingSceneAdapter {
         if (ops.size() > org.maiwithu.maicraft.core.build.BuildShapes.MAX_TOTAL_CELLS)
             throw new IllegalArgumentException("Building model exceeds the bounded construction cell budget");
         JsonObject args = new JsonObject(); args.add("ops", ops);
+        // 模型保持明确材料与精确状态；允许分批备料，默认不替换已有方块。specified 只固定材质，实际取材按 ordinary 策略执行。
         args.addProperty("exact_states", true);
         args.addProperty("replace_existing", parameters.has("replace_existing") && parameters.get("replace_existing").getAsBoolean());
         args.addProperty("allow_partial", true);
@@ -134,6 +141,7 @@ final class BuildingSceneAdapter {
         return args;
     }
 
+    // 返回可再次引用的模型编号、资源地址、父版本和锚点；construction_started=false 不代表模型已经施工。
     private static Map<String, Object> metadata(BuildingSceneStore.Entry entry) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("construction_started", false);

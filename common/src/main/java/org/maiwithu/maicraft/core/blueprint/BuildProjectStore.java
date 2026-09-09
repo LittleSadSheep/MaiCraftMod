@@ -16,7 +16,10 @@ import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 
-/** Durable world-scoped construction plans; live blocks, not saved counters, decide remaining work. */
+/**
+ * 把已经决定的建筑位置、材料和施工要求保存到当前世界的文件里，供取消或重启后续建。
+ * 不保存可信的“已完成百分比”；重新施工时仍要读取世界，判断哪些格子真正完成。
+ */
 public final class BuildProjectStore {
     private static final int MAX_BYTES = 8 * 1024 * 1024;
     private final StateIdentity identity;
@@ -37,6 +40,7 @@ public final class BuildProjectStore {
         return id;
     }
 
+    // 同一编号可更新一次确定下来的材料方案；去掉原始 ops，保存完整目标，恢复时禁止重新换材料种类。
     public void save(String id, String dimension, JsonObject arguments, List<BuildTaskRecord.Target> targets) {
         if (dimension == null || dimension.isBlank() || targets.isEmpty())
             throw new IllegalArgumentException("a build project requires a dimension and concrete targets");
@@ -54,6 +58,7 @@ public final class BuildProjectStore {
         byte[] bytes = root.toString().getBytes(StandardCharsets.UTF_8);
         if (bytes.length > MAX_BYTES) throw new IllegalArgumentException("build project exceeds storage limit");
         Path file = file(id);
+        // 先写同目录临时文件，再替换正式文件；系统不支持原子替换时退回普通替换。失败会报给调用者。
         Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
         try {
             Files.createDirectories(file.getParent());
@@ -69,6 +74,7 @@ public final class BuildProjectStore {
         }
     }
 
+    // 读取后核对版本、项目编号、世界和维度，再检查每格保存状态仍可表达；返回副本，调用方改参数不会改磁盘记录。
     public JsonObject load(String id, String dimension) {
         try {
             Path file = file(id);
@@ -94,6 +100,7 @@ public final class BuildProjectStore {
         }
     }
 
+    // 只接受标准 UUID，按世界键分目录保存，不能把项目编号当成任意文件路径。
     private Path file(String id) {
         if (id == null || !UUID.fromString(id).toString().equals(id))
             throw new IllegalArgumentException("project_id must be a canonical UUID");

@@ -15,7 +15,9 @@ import org.maiwithu.maicraft.core.build.BuildShapes;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
-/** Compiles named meshes and scoped Boolean cuts into the existing explicit blueprint JSON. */
+/**
+ * 把命名的盒子和开孔关系变成逐格蓝图。例如先定义墙，再用另一个盒子从这面墙里扣出窗洞。
+ */
 public final class BuildingSceneCompiler {
     private static final Set<String> FIELDS = Set.of("schema_version", "name", "coordinate_system", "materials", "objects");
     private static final Set<String> OBJECT_FIELDS = Set.of("name", "type", "primitive", "role", "location", "dimensions", "rotation_euler", "material", "modifiers");
@@ -23,14 +25,15 @@ public final class BuildingSceneCompiler {
     private record Model(Map<String, JsonObject> materials, Map<String, Mesh> meshes, Set<String> cutters, String coordinates, int limit) {}
     private BuildingSceneCompiler() {}
 
-    /** Check the object graph and work bounds without enumerating any voxels on the client thread. */
+    /**
+     * 只检查对象、材料、引用和工作量范围，不把每个盒子展开成方块。
+     */
     public static void validateWire(JsonObject scene) { parse(scene); }
 
     /**
-     * Blender Z-up is the default: geometric [x,y,z] maps to Minecraft [x,z,-y].
-     * Mesh faces must align with the block grid. Material state properties always use Minecraft
-     * world axes; mesh transforms affect geometry only. Later solids win overlaps, while a cut
-     * only subtracts its own mesh. Unfilled holes explicitly request air; unmentioned space is kept.
+     * 默认使用 Blender 的 z 向上坐标，转成游戏坐标 [x,z,-y]；也可明确使用游戏的 y 向上坐标。
+     * 后写的普通对象覆盖前面的对象；开孔只扣掉引用它的那一个对象，不挖掉其他对象填进来的玻璃等材料。
+     * 孔内没有其他对象时保存为空气目标，未被任何对象涉及的位置则不进入施工单。材料朝向属性仍按游戏世界轴解释。
      */
     public static JsonObject compile(JsonObject scene) {
         Model model = parse(scene);
@@ -41,6 +44,7 @@ public final class BuildingSceneCompiler {
         Map<Point, JsonObject> cells = new LinkedHashMap<>();
         JsonObject air = new JsonObject(); air.addProperty("block_id", "minecraft:air"); air.add("properties", new JsonObject());
         for (Mesh mesh : meshes.values()) {
+            // 显式 role=cutter 或被任何开孔修改器引用的对象，都只用于扣洞，不单独铺成实体。
             if (cutters.contains(mesh.name)) continue;
             List<Box> cuts = mesh.cuts.stream().map(name -> meshes.get(name).box).toList();
             Box box = mesh.box;
@@ -51,6 +55,7 @@ public final class BuildingSceneCompiler {
                     if (!cells.containsKey(at) && cells.size() >= limit) throw bad("scene exceeds the " + limit + " final block budget");
                     boolean removed = false;
                     for (Box cut : cuts) if (cut.contains(at)) { removed = true; break; }
+                    // 被扣掉的位置仅在还没有其他对象占用时补空气；正常实体则可以覆盖之前的空气或实体。
                     if (removed) cells.putIfAbsent(at, air);
                     else cells.put(at, materials.get(mesh.material));
                 }
@@ -116,6 +121,7 @@ public final class BuildingSceneCompiler {
             if (cutter == null) throw bad("Boolean cutter object not found: " + name);
             if (!cutter.cuts.isEmpty()) throw bad("Boolean cutters must be primitive meshes without modifiers: " + name);
         }
+        // 展开前分别限制单对象体积和总比较次数；重叠对象也计入工作量，不能用最后去重后的格数代替。
         long work = 0;
         int solidCount = 0;
         for (Mesh mesh : meshes.values()) if (!cutters.contains(mesh.name)) {
@@ -131,6 +137,7 @@ public final class BuildingSceneCompiler {
         return new Model(materials, meshes, cutters, coordinates, limit);
     }
 
+    // 这里仅整理材料名字与状态文本，不查游戏注册表；保存或展示前的实际材料验证由适配层继续完成。
     private static Map<String, JsonObject> materials(JsonObject source, int limit) {
         if (source.isEmpty() || source.size() > limit) throw bad("materials must contain 1.." + limit + " named states");
         Map<String, JsonObject> result = new LinkedHashMap<>();

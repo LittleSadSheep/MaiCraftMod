@@ -13,10 +13,13 @@ import org.maiwithu.maicraft.core.build.BuildShapes;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 
-/** Preserve placement semantics alongside exact states; air remains an explicit removal target. */
+/**
+ * 保存和恢复逐格施工要求：方块、物品、绝对坐标、状态、方向提示和精确验收选项。空气保留为明确清空目标。
+ */
 public final class BuildProjectTargets {
     private BuildProjectTargets() {}
 
+    // 把每格展开成可写入 JSON 的字段，属性名和属性值都使用注册定义中的名字，不保存对象引用。
     public static JsonArray encode(List<BuildTaskRecord.Target> targets) {
         JsonArray result = new JsonArray();
         for (var target : targets) {
@@ -43,6 +46,7 @@ public final class BuildProjectTargets {
         return result;
     }
 
+    // 先查材料注册名，再复用建造解析。重复坐标、材料与方块不对应、状态被解析器改写时都拒绝恢复。
     public static List<BuildTaskRecord.Target> decode(JsonArray rows) {
         if (rows == null || rows.isEmpty() || rows.size() > BuildShapes.MAX_TOTAL_CELLS)
             throw new IllegalArgumentException("invalid saved build target count");
@@ -69,6 +73,7 @@ public final class BuildProjectTargets {
             if (!BuiltInRegistries.ITEM.containsKey(item)) throw new IllegalArgumentException("saved build item is unavailable");
             if (BuiltInRegistries.ITEM.get(item) != target.item())
                 throw new IllegalArgumentException("saved build material does not match its block");
+            // 普通解析完成后，再恢复原来明确要求精确比较的属性及物品放置模式，避免续建时验收标准变宽。
             LinkedHashSet<String> exact = new LinkedHashSet<>();
             row.getAsJsonArray("exact_properties").forEach(value -> exact.add(value.getAsString()));
             result.add(new BuildTaskRecord.Target(target.desiredState(), BuiltInRegistries.ITEM.get(item),

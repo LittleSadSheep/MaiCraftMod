@@ -7,7 +7,9 @@ import com.google.gson.JsonObject;
 import java.math.BigDecimal;
 import java.util.Set;
 
-/** Grid-exact mesh transforms. Locations denote geometric centers, not block corners. */
+/**
+ * 把对象的中心位置、尺寸和直角旋转换成方块范围。location 指几何中心，例如宽三格的盒子中心可以在半格处。
+ */
 final class BuildingSceneGeometry {
     private BuildingSceneGeometry() {}
 
@@ -24,6 +26,7 @@ final class BuildingSceneGeometry {
         }
     }
 
+    // 只支持长方体和至少一轴厚度为一格的板；旋转只能绕竖直轴，转九十度时交换两个水平尺寸。
     static Box box(JsonObject object, boolean blender, int radius) {
         String type = string(object.get("type"), 16, "object.type");
         String primitive = type.equals("MESH") ? string(object.get("primitive"), 16, "object.primitive") : type;
@@ -39,6 +42,7 @@ final class BuildingSceneGeometry {
         if (Math.floorMod(turns, 2) != 0) {
             int other = blender ? 1 : 2, previous = size[0]; size[0] = size[other]; size[other] = previous;
         }
+        // 每个面的边界必须落在整数网格上，再把几何最大边界减一变成最后一格编号；无法精确对齐时直接报错。
         int[] lower = new int[3], upper = new int[3];
         for (int axis = 0; axis < 3; axis++) {
             BigDecimal center = number(location.get(axis), "location");
@@ -56,6 +60,7 @@ final class BuildingSceneGeometry {
         return result;
     }
 
+    // 角度用弧度输入，必须接近 π/2 的整数倍；其余轴不允许倾斜，不在这里猜测斜面该铺哪些格子。
     private static int rotation(JsonElement value, int upAxis) {
         if (value == null) return 0;
         JsonArray angles = vector(value, "rotation_euler");
@@ -86,6 +91,7 @@ final class BuildingSceneGeometry {
         return out;
     }
     private static JsonArray vector(JsonElement value, String field) { return array(value, 3, 3, field); }
+    // 要求精确整数并核对上下限，不能把 1.9 截成 1。
     static int integer(JsonElement value, int min, int max, String field) {
         try {
             int result = number(value, field).intValueExact();
@@ -95,7 +101,7 @@ final class BuildingSceneGeometry {
     }
     private static BigDecimal number(JsonElement value, String field) {
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) throw bad(field + " must be numeric");
-        // Bound exponent and precision before arithmetic on attacker-controlled decimal notation.
+        // 先限制数字文本长度、精度和指数，再做小数运算，避免极端数字消耗过多计算。
         try {
             if (value.getAsString().length() > 64) throw bad(field + " number is too long");
             BigDecimal result = value.getAsBigDecimal();

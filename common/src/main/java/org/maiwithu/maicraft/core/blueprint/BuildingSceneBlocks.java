@@ -8,10 +8,13 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.build.BuildStates;
 
-/** One interpretation of material defaults for preview, construction and exported blueprints. */
+/**
+ * 让模型预览、施工与导出采用相同的材料初始状态，例如默认树叶改为玩家放置后不会腐烂。
+ */
 public final class BuildingSceneBlocks {
     private BuildingSceneBlocks() {}
 
+    // 按精确注册名和属性解析；如果建造会改掉用户明确写的属性，就报不支持，而不是静默换成别的值。
     public static BlockState resolve(JsonObject cell) {
         if (!cell.has("block_id")) throw new IllegalArgumentException("Model material requires an ordinary block_id");
         String id = cell.get("block_id").getAsString();
@@ -30,7 +33,9 @@ public final class BuildingSceneBlocks {
         return normalized;
     }
 
-    /** Record defaults changed by construction, without inventing constraints for dynamic properties. */
+    /**
+     * 导出时补上建造会改变的默认属性，保证之后读取还能还原同一目标；没有变化的默认值不额外填入。
+     */
     public static JsonObject export(JsonObject blueprint) {
         JsonObject result = blueprint.deepCopy();
         for (var value : result.getAsJsonArray("blocks")) {
@@ -49,6 +54,7 @@ public final class BuildingSceneBlocks {
     private static String name(Property property, Comparable value) { return property.getName(value); }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
+    // 属性不存在或该值不在方块允许值中就拒绝；这里不会把拼错的值退回默认值。
     private static BlockState property(BlockState state, String name, String value) {
         Property property = state.getBlock().getStateDefinition().getProperty(name);
         if (property == null) throw new IllegalArgumentException("Unknown block property: " + name);

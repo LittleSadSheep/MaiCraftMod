@@ -16,7 +16,9 @@ import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.SharedConstants;
 
-/** Export a model as reusable JSON or a vanilla structure; negative local offsets are retained explicitly. */
+/**
+ * 把模型导出为可重复使用的 JSON 或原版 NBT。JSON 保留负偏移；NBT 的坐标先平移到最小角为零，并另记原偏移。
+ */
 public final class BuildingSceneExport {
     private BuildingSceneExport() {}
 
@@ -24,6 +26,7 @@ public final class BuildingSceneExport {
         return write(Minecraft.getInstance().gameDirectory.toPath().resolve("schematics"), id, blueprint, format);
     }
 
+    // 使用模型编号命名文件，重复导出同编号和格式会替换旧文件；先写临时文件，成功后才移到正式路径。
     public static Path write(Path directory, String id, JsonObject blueprint, String format) {
         java.util.UUID.fromString(id);
         if (!format.equals("json") && !format.equals("nbt")) throw new IllegalArgumentException("Export format must be json or nbt");
@@ -44,6 +47,7 @@ public final class BuildingSceneExport {
         } catch (IOException failure) { throw new IllegalStateException("Could not export building model", failure); }
     }
 
+    // 找所有格子的最小 x/y/z，供原版 NBT 平移和返回导入时应补的偏移。
     public static List<Integer> minimum(JsonObject blueprint) {
         int[] min = {Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE};
         for (var value : blueprint.getAsJsonArray("blocks")) {
@@ -53,6 +57,7 @@ public final class BuildingSceneExport {
         return List.of(min[0], min[1], min[2]);
     }
 
+    // 先验证普通方块蓝图并补齐建造会改变的默认值，再按不同方块状态合并材料表。
     public static CompoundTag structure(JsonObject blueprint) {
         org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateWire(blueprint);
         blueprint = BuildingSceneBlocks.export(blueprint);
@@ -84,6 +89,7 @@ public final class BuildingSceneExport {
         root.put("size", dimensions); root.put("palette", palette); root.put("blocks", blocks);
         root.put("entities", new ListTag());
         root.putInt("DataVersion", SharedConstants.getCurrentVersion().getDataVersion().getVersion());
+        // 传统蓝图加载器不会自动应用这个自定义偏移；重新导入时，调用者要把锚点加上返回的 minecraft_offset。
         root.putIntArray("maicraft_offset", min.stream().mapToInt(Integer::intValue).toArray());
         BlueprintFiles.validate(root);
         return root;

@@ -6,7 +6,9 @@ import java.util.List;
 import java.util.Properties;
 import java.util.function.Function;
 
-/** Owner-configurable memory/work budgets; these do not replace an installed mod's physical rules. */
+/**
+ * 限制规划占用的目标数、部件数、连线数、坐标半径和搜索量。它们是计算预算，不代表装上的模组机器物理尺寸上限。
+ */
 public final class MachinePlanningBudget {
     public static final String PROPERTY_PREFIX = "maicraft.machine.planning.";
     public static final int DEFAULT_MAX_TARGETS = 32_768;
@@ -32,6 +34,7 @@ public final class MachinePlanningBudget {
     }
 
     /** One immutable startup snapshot, so a layout cannot change resource budgets midway through planning. */
+    // 第一次使用时读取 JVM 系统属性并缓存；之后修改属性不会自动热更新这份全局预算。
     public static MachinePlanningBudget current() { return SystemBudget.INSTANCE; }
     public static MachinePlanningBudget defaults() { return new MachinePlanningBudget(ignored -> null); }
     public static MachinePlanningBudget fromProperties(Properties properties) {
@@ -52,7 +55,7 @@ public final class MachinePlanningBudget {
     public Check checkComponents(long requested) { return check(requested, maxComponents, "component"); }
     public Check checkConnections(long requested) { return check(requested, maxConnections, "connection"); }
 
-    /** Check before allocation or an int cast; wrapped arithmetic must never admit an oversized layout. */
+    /** 先核对数量再分配内存或转成 int；相加溢出时直接返回超限，不把绕回的小数值当成有效数量。 */
     public Check checkTargetSum(long first, long second) {
         if (first < 0 || second < 0) return new Check(false, "invalid_target_count", -1, maxTargets);
         try { return checkTargets(Math.addExact(first, second)); }
@@ -69,6 +72,7 @@ public final class MachinePlanningBudget {
         return new Check(requested <= limit, requested <= limit ? "within_budget" : kind + "_budget_exceeded", requested, limit);
     }
 
+    // 只能给正整数；读取失败或值无效时采用默认值，并留下诊断。半径另限制到 2×半径+1 仍能装进 int。
     private static int read(Function<String, String> source, String field, int fallback, int maximum, List<Diagnostic> issues) {
         String property = PROPERTY_PREFIX + field;
         String raw;
@@ -95,6 +99,7 @@ public final class MachinePlanningBudget {
         }
     }
 
+    // 使用懒加载保存全局预算，初始化时只记录一次无效配置提示，避免每个规划任务重复刷日志。
     private static final class SystemBudget {
         private static final MachinePlanningBudget INSTANCE = load();
         private static MachinePlanningBudget load() {

@@ -8,11 +8,14 @@ import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
-/** Familiar scene/object inspection with actual grid geometry and explicit local coordinates. */
+/**
+ * 读取场景和单个对象的结构信息，并计算转到游戏坐标后的范围；不检查世界里是否已经建好。
+ */
 public final class BuildingSceneInspection {
     private static final int PAGE_SIZE = 10;
     private BuildingSceneInspection() {}
 
+    // 先检查整个模型结构，再按每页十个对象返回；超过末页时返回空列表，而不是访问越界。
     public static JsonObject sceneInfo(JsonObject scene, int page) {
         BuildingSceneCompiler.validateWire(scene);
         if (page < 0) throw bad("scene page must be nonnegative");
@@ -42,6 +45,7 @@ public final class BuildingSceneInspection {
         throw bad("Object not found: " + name);
     }
 
+    // 补齐默认旋转、单位缩放和材料列表，标出对象是否只作开孔用途；范围是做布尔开孔之前的原始盒子范围。
     private static JsonObject describe(JsonObject scene, JsonObject object, Set<String> cutters) {
         JsonObject result = object.deepCopy();
         String name = object.get("name").getAsString();
@@ -62,8 +66,7 @@ public final class BuildingSceneInspection {
         Box bounds = box(object, blender, MachinePlanningBudget.current().maxRadius());
         JsonObject blockBounds = new JsonObject(); blockBounds.add("from", bounds.from().json()); blockBounds.add("to", bounds.to().json());
         result.add("minecraft_block_bounds", blockBounds);
-        // Blender's world_bounding_box names evaluated object transforms. Here the scene origin
-        // is the construction anchor, so these eight corners remain in the scene's local units.
+        // 字段沿用 world_bounding_box 这个名字，但八个角仍是场景局部坐标，没有加保存的世界锚点。
         JsonArray corners = new JsonArray();
         for (int x : new int[]{bounds.from().x(), bounds.to().x() + 1})
             for (int y : new int[]{bounds.from().y(), bounds.to().y() + 1})

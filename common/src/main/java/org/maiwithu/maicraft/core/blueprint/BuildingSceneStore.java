@@ -21,7 +21,9 @@ import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
-/** Immutable modeling revisions, isolated by world and bound to the original building anchor. */
+/**
+ * 保存带名字的墙体、开孔盒子等模型对象。每次编辑生成新编号并保留父版本，原版本和原世界锚点不移动。
+ */
 public final class BuildingSceneStore {
     private static final int MAX_BYTES = 4 * 1024 * 1024;
     private final StateIdentity identity;
@@ -55,6 +57,7 @@ public final class BuildingSceneStore {
         catch (IOException failure) { throw new IllegalStateException("building scene could not be saved: " + failure.getMessage(), failure); }
     }
 
+    // 保存前先完整编译一次，确认对象关系、尺寸和最终格数可接受；这一步与写文件目前都是同步完成。
     private Entry saveChecked(JsonObject scene, Goal.WorldPosition anchor, String parent) throws IOException {
         BuildingSceneCompiler.compile(scene);
         if (anchor == null || anchor.dimension() == null || anchor.dimension().isBlank())
@@ -86,6 +89,7 @@ public final class BuildingSceneStore {
         catch (IOException failure) { throw new IllegalStateException("building scene could not be loaded: " + failure.getMessage(), failure); }
     }
 
+    // 按当前世界和维度核对文件身份。这里只检查模型结构，不逐格展开；后续预览或施工再编译。
     private Entry loadChecked(String sceneId, String dimension) throws IOException {
         Path file = path(sceneId);
         byte[] bytes;
@@ -108,12 +112,15 @@ public final class BuildingSceneStore {
         return new Entry(sceneId, scene, anchor, parent);
     }
 
-    /** Merge named object edits into a new revision; missing objects remain in their original order. */
+    /**
+     * 按对象名字合并编辑并保存新版本。未提到的对象保留原顺序，新对象加在末尾；不把原版本就地覆盖。
+     */
     public Entry update(String sceneId, String dimension, JsonObject patch) {
         Entry original = load(sceneId, dimension);
         return saveVersion(applyPatch(original.scene(), patch), original.anchor(), original.sceneId());
     }
 
+    // 先复制原场景，再处理删除和按名字修改；同一对象不能在一次编辑里既删除又修改，也不能重复修改。
     public static JsonObject applyPatch(JsonObject original, JsonObject patch) {
         validateEdits(patch);
         JsonObject scene = original.deepCopy();
@@ -138,12 +145,14 @@ public final class BuildingSceneStore {
                 JsonObject object = element.getAsJsonObject(); String name = fieldString(object, "name");
                 if (!edited.add(name) || removed.contains(name))
                     throw new IllegalArgumentException("object cannot be edited twice or removed and edited: " + name);
+                // 对象字段逐项覆盖，例如只改 location 会保留原材质和尺寸；modifiers 若提供则整份替换，不逐条合并。
                 JsonObject merged = objects.containsKey(name) ? objects.get(name).deepCopy() : new JsonObject();
                 object.entrySet().forEach(entry -> merged.add(entry.getKey(), entry.getValue().deepCopy()));
                 objects.put(name, merged);
             }
         }
         JsonArray ordered = new JsonArray(); objects.values().forEach(ordered::add); scene.add("objects", ordered);
+        // 材料按名字整条覆盖：没有专门的删除材料操作，也不会按单个属性深层合并。
         if (patch.has("materials")) {
             if (!patch.get("materials").isJsonObject()) throw new IllegalArgumentException("materials must be an object");
             JsonObject materials = scene.getAsJsonObject("materials");
@@ -153,6 +162,7 @@ public final class BuildingSceneStore {
         return scene;
     }
 
+    // 编辑可只提供一部分对象字段；先查这一批字段合法，合并后再检查完整对象和引用是否齐全。
     public static void validateEdits(JsonObject patch) {
         if (patch == null || patch.isEmpty() || !Set.of("objects", "materials", "remove_objects").containsAll(patch.keySet()))
             throw new IllegalArgumentException("scene edit accepts objects, materials and remove_objects only");
@@ -225,6 +235,7 @@ public final class BuildingSceneStore {
         return object.getAsJsonArray(key);
     }
 
+    // 锚点必须是可精确放进 int 的整数，小数和超范围值不能截断后接受。
     private static int coordinate(JsonObject object, String key) {
         JsonElement value = object.get(key);
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
