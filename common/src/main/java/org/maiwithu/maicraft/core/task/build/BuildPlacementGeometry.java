@@ -135,6 +135,11 @@ final class BuildPlacementGeometry {
     /** A reachable native gesture from the actual feet position, without centering on a path cell. */
     static Gesture currentGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                    Map<Long, BuildTaskRecord.Target> targets) {
+        return currentGesture(player, target, targets, ignored -> true);
+    }
+
+    static Gesture currentGesture(LocalPlayer player, BuildTaskRecord.Target target,
+                                   Map<Long, BuildTaskRecord.Target> targets, Predicate<Gesture> allowed) {
         if (!(target.item() instanceof BlockItem) || !player.level().isLoaded(target.pos())) return null;
         BuildPlacementStage stage = new BuildPlacementStage(player.level(), player.level()::isLoaded,
                 targets, target, false);
@@ -153,9 +158,46 @@ final class BuildPlacementGeometry {
             if (stage.support(clicked, face))
                 gesturesAt(player, target, stage, clicked, face, player.position(), false, true, candidates);
         }
-        return candidates.stream().min(Comparator.comparingDouble(g ->
+        return candidates.stream().filter(allowed).min(Comparator.comparingDouble(g ->
                 Math.abs(net.minecraft.util.Mth.wrapDegrees(g.yaw() - player.getYRot()))
                         + Math.abs(g.pitch() - player.getXRot()))).orElse(null);
+    }
+
+    /** A native-state proof from hypothetical feet, using only existing world support and shapes. */
+    static Gesture liveGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
+                                   Map<Long, BuildTaskRecord.Target> targets, Vec3 feet) {
+        return liveGestureFrom(player, target, targets, feet, ignored -> true);
+    }
+
+    static Gesture liveGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
+                                   Map<Long, BuildTaskRecord.Target> targets, Vec3 feet,
+                                   Predicate<Gesture> allowed) {
+        if (!(target.item() instanceof BlockItem) || !player.level().isLoaded(target.pos())) return null;
+        BuildPlacementStage stage = new BuildPlacementStage(player.level(), player.level()::isLoaded,
+                targets, target, false);
+        AABB body = player.getBoundingBox().move(feet.subtract(player.position())).deflate(1.0e-5);
+        for (BlockPos cell : BlockPos.betweenClosed(BlockPos.containing(body.minX - 1, body.minY - 1, body.minZ - 1),
+                BlockPos.containing(body.maxX + 1, body.maxY + 1, body.maxZ + 1))) {
+            BlockState state = stage.state(cell);
+            if (!state.getFluidState().isEmpty() && body.intersects(new AABB(cell))) return null;
+            for (AABB shape : state.getCollisionShape(stage, cell).toAabbs())
+                if (shape.move(cell).intersects(body)) return null;
+        }
+        for (AABB shape : target.desiredState().getCollisionShape(stage, target.pos()).toAabbs())
+            if (shape.move(target.pos()).intersects(body)) return null;
+        List<Gesture> out = new ArrayList<>(1);
+        BlockState live = stage.state(target.pos());
+        if (!live.isAir() && (live.canBeReplaced() || (live.is(target.block()) && maximumUses(target) > 1))) {
+            gesturesAt(player, target, stage, target.pos(), Direction.UP, feet, true, true, true, allowed, out);
+            if (!out.isEmpty()) return out.getFirst();
+        }
+        for (Direction toward : SUPPORT_ORDER) {
+            BlockPos clicked = target.pos().relative(toward);
+            if (!stage.support(clicked, toward.getOpposite())) continue;
+            gesturesAt(player, target, stage, clicked, toward.getOpposite(), feet, false, true, true, allowed, out);
+            if (!out.isEmpty()) return out.getFirst();
+        }
+        return null;
     }
 
     private static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
@@ -261,6 +303,13 @@ final class BuildPlacementGeometry {
     private static void gesturesAt(LocalPlayer player, BuildTaskRecord.Target target,
                                     BuildPlacementStage stage, BlockPos clicked, Direction face,
                                     Vec3 feet, boolean direct, boolean live, List<Gesture> out) {
+        gesturesAt(player, target, stage, clicked, face, feet, direct, live, false, ignored -> true, out);
+    }
+
+    private static void gesturesAt(LocalPlayer player, BuildTaskRecord.Target target,
+                                    BuildPlacementStage stage, BlockPos clicked, Direction face,
+                                    Vec3 feet, boolean direct, boolean live, boolean firstOnly,
+                                    Predicate<Gesture> allowed, List<Gesture> out) {
         BlockState state = stage.state(clicked);
         boolean sneak = BuildPlacementInteraction.requiresSneak(state);
         Vec3 eye = feet.add(0, player.getEyeHeight(sneak ? Pose.CROUCHING : Pose.STANDING), 0);
@@ -273,8 +322,11 @@ final class BuildPlacementGeometry {
             float yaw = AimGeometry.yawTo(eye, point), pitch = AimGeometry.pitchTo(eye, point);
             Gesture gesture = new Gesture(BlockPos.containing(feet), clicked, face, point, yaw, pitch,
                     sneak, direct ? "replaceable target face" : "adjacent support face");
-            if (live ? provesLiveGesture(player, target, gesture) : provesGesture(player, target, gesture))
+            if (!allowed.test(gesture)) continue;
+            if (live ? provesLiveGesture(player, target, gesture) : provesGesture(player, target, gesture)) {
                 out.add(gesture);
+                if (firstOnly) return;
+            }
         }
     }
 
