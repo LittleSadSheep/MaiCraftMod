@@ -50,9 +50,9 @@ final class PreviewPartGeometry {
         float a = (float) box.maxX, b = (float) box.maxY, c = (float) box.maxZ;
         float[][] corners = {{x,y,z},{a,y,z},{a,b,z},{x,b,z},{x,y,c},{a,y,c},{a,b,c},{x,b,c}};
         int[][] faces = {{0,1,2,3},{5,4,7,6},{4,0,3,7},{1,5,6,2},{4,5,1,0},{3,2,6,7}};
-        for (int[] face : faces) for (int index : face) {
-            float[] point = corners[index];
-            fill.addVertex(point[0], point[1], point[2]).setColor(.35f, .75f, 1, .4f);
+        for (int[] face : faces) for (int i = face.length - 1; i >= 0; i--) {
+            float[] point = corners[face[i]];
+            fill.addVertex(point[0], point[1], point[2]).setColor(.35f, .75f, 1, 1);
         }
         LevelRenderer.renderLineBox(new PoseStack(), lines, box, .35f, .75f, 1, .9f);
     }

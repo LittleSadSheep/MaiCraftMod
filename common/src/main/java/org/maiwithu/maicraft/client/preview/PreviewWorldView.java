@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.preview;
 
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockAndTintGetter;
@@ -15,11 +14,11 @@ import net.minecraft.world.level.material.FluidState;
 /** Read-only virtual geometry; nothing is inserted into the client or server level. */
 final class PreviewWorldView implements BlockAndTintGetter {
     private final PreviewSession session;
-    private final ClientLevel level;
-    PreviewWorldView(PreviewSession session, ClientLevel level) { this.session = session; this.level = level; }
+    private final BlockAndTintGetter level;
+    PreviewWorldView(PreviewSession session, BlockAndTintGetter level) { this.session = session; this.level = level; }
     @Override public BlockState getBlockState(BlockPos pos) {
-        return session.includes(pos) ? session.cells().getOrDefault(pos, Blocks.AIR.defaultBlockState())
-                : Blocks.AIR.defaultBlockState();
+        BlockState planned = session.includes(pos) ? session.cells().get(pos) : null;
+        return planned != null ? planned : level.getBlockState(pos);
     }
     @Override public BlockEntity getBlockEntity(BlockPos pos) { return null; }
     @Override public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }

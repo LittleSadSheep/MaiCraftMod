@@ -15,8 +15,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.ItemBlockRenderTypes;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
@@ -30,9 +32,11 @@ final class PreviewMeshSection implements AutoCloseable {
     final AABB bounds;
     final List<Map.Entry<BlockPos, BlockState>> cells = new ArrayList<>();
     final List<PreviewPart> parts = new ArrayList<>();
-    private VertexBuffer models, outlines, partModels;
+    private final VertexBuffer[] models = new VertexBuffer[3];
+    private VertexBuffer outlines, partModels;
     private long nextCheck;
     private int worldHash;
+    private Vec3 sortedFrom;
     boolean built;
     int fallbackModels;
 
@@ -46,14 +50,21 @@ final class PreviewMeshSection implements AutoCloseable {
         if (!built) return true;
         if (now < nextCheck) return false;
         nextCheck = now + 1000;
-        return hash(minecraft) != worldHash;
+        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
+        return hash(minecraft) != worldHash || models[2] != null && sortedFrom.distanceToSqr(camera) > 1;
     }
 
     private int hash(Minecraft minecraft) {
         int hash = 1;
-        for (var cell : cells) hash = 31 * hash + (minecraft.level.isLoaded(cell.getKey())
-                ? minecraft.level.getBlockState(cell.getKey()).hashCode() : 0);
+        for (var cell : cells) {
+            hash = 31 * hash + stateHash(minecraft, cell.getKey());
+            for (Direction face : Direction.values()) hash = 31 * hash + stateHash(minecraft, cell.getKey().relative(face));
+        }
         return hash;
+    }
+
+    private static int stateHash(Minecraft minecraft, BlockPos pos) {
+        return minecraft.level.isLoaded(pos) ? minecraft.level.getBlockState(pos).hashCode() : 0;
     }
 
     int workSize() { return cells.size() + parts.size(); }
@@ -62,54 +73,59 @@ final class PreviewMeshSection implements AutoCloseable {
                  Vec3 camera, long now) {
         close();
         fallbackModels = 0;
-        try (ByteBufferBuilder modelMemory = new ByteBufferBuilder(262144);
+        try (ByteBufferBuilder solidMemory = new ByteBufferBuilder(262144);
+             ByteBufferBuilder cutoutMemory = new ByteBufferBuilder(65536);
+             ByteBufferBuilder translucentMemory = new ByteBufferBuilder(65536);
              ByteBufferBuilder partMemory = new ByteBufferBuilder(65536);
              ByteBufferBuilder lineMemory = new ByteBufferBuilder(65536)) {
-            BufferBuilder model = new BufferBuilder(modelMemory, VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK);
+            BufferBuilder[] model = {
+                    new BufferBuilder(solidMemory, VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK),
+                    new BufferBuilder(cutoutMemory, VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK),
+                    new BufferBuilder(translucentMemory, VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK)};
             BufferBuilder line = new BufferBuilder(lineMemory, VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
             BufferBuilder partMesh = new BufferBuilder(partMemory, VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-            PreviewVertexConsumer ghost = new PreviewVertexConsumer(model);
             PoseStack pose = new PoseStack();
             RandomSource random = RandomSource.create(0);
-            boolean modelUsable = true;
+            boolean[] modelUsable = {true, true, true};
             for (var cell : cells) {
                 BlockPos pos = cell.getKey();
                 if (!session.includes(pos)) continue;
                 BlockState desired = cell.getValue();
+                if (!minecraft.level.isLoaded(pos)) continue;
+                BlockState actual = minecraft.level.getBlockState(pos);
+                if (desired.equals(actual)) continue;
                 int x = pos.getX() - origin.getX(), y = pos.getY() - origin.getY(), z = pos.getZ() - origin.getZ();
                 if (!desired.isAir()) {
-                    if (desired.getRenderShape() == RenderShape.MODEL && modelUsable) {
+                    RenderType layer = ItemBlockRenderTypes.getChunkRenderType(desired);
+                    int pass = layer == RenderType.translucent() ? 2 : layer == RenderType.solid() ? 0 : 1;
+                    if (desired.getRenderShape() == RenderShape.MODEL && modelUsable[pass]) {
                         pose.pushPose();
                         pose.translate(x, y, z);
                         try {
-                            minecraft.getBlockRenderer().renderBatched(desired, pos, view, pose, ghost, true, random);
+                            minecraft.getBlockRenderer().renderBatched(desired, pos, view, pose, model[pass], true, random);
                         } catch (RuntimeException unsupportedModel) {
                             // A mod renderer can fail midway through a vertex. Discard this entire
                             // section's model buffer, keep its independent outline buffer valid.
-                            modelUsable = false; fallbackModels++;
+                            modelUsable[pass] = false; fallbackModels++;
                         }
                         finally { pose.popPose(); }
                     } else fallbackModels++;
                 }
-                if (!minecraft.level.isLoaded(pos)) {
-                    box(pose, line, x, y, z, .7f, .3f, 1);
-                    continue;
-                }
-                BlockState actual = minecraft.level.getBlockState(pos);
-                if (desired.equals(actual)) continue;
-                if (desired.isAir()) box(pose, line, x, y, z, 1, .2f, .25f);
-                else if (actual.isAir() || actual.canBeReplaced()) box(pose, line, x, y, z, .2f, .65f, 1);
-                else box(pose, line, x, y, z, 1, .65f, .15f);
-                if (!desired.isAir() && desired.getRenderShape() != RenderShape.MODEL)
-                    box(pose, line, x, y, z, .8f, .3f, 1);
+                if (desired.isAir()) PreviewOutlineGeometry.emit(actual, minecraft.level, pos, origin, line, 1, .2f, .25f);
+                else if (desired.getRenderShape() != RenderShape.MODEL)
+                    PreviewOutlineGeometry.emit(desired, view, pos, origin, line, .8f, .3f, 1);
+                else if (actual.isAir() || actual.canBeReplaced())
+                    PreviewOutlineGeometry.emit(desired, view, pos, origin, line, .2f, .65f, 1);
+                else PreviewOutlineGeometry.emit(desired, view, pos, origin, line, 1, .65f, .15f);
             }
             for (PreviewPart part : parts) if (session.includes(part.position()))
                 PreviewPartGeometry.emit(part, origin, centres, partMesh, line);
-            MeshData mesh = modelUsable ? model.build() : null;
-            if (mesh != null) {
-                mesh.sortQuads(modelMemory, VertexSorting.byDistance((float) (camera.x - origin.getX()),
+            for (int pass = 0; pass < model.length; pass++) {
+                MeshData mesh = modelUsable[pass] ? model[pass].build() : null;
+                if (mesh == null) continue;
+                if (pass == 2) mesh.sortQuads(translucentMemory, VertexSorting.byDistance((float) (camera.x - origin.getX()),
                         (float) (camera.y - origin.getY()), (float) (camera.z - origin.getZ())));
-                models = upload(mesh);
+                models[pass] = upload(mesh);
             }
             MeshData edges = line.build();
             if (edges != null) outlines = upload(edges);
@@ -118,12 +134,8 @@ final class PreviewMeshSection implements AutoCloseable {
         } finally { VertexBuffer.unbind(); }
         built = true;
         worldHash = hash(minecraft);
+        sortedFrom = camera;
         nextCheck = now + 1000;
-    }
-
-    private static void box(PoseStack pose, BufferBuilder lines, int x, int y, int z, float r, float g, float b) {
-        LevelRenderer.renderLineBox(pose, lines, x - .002, y - .002, z - .002,
-                x + 1.002, y + 1.002, z + 1.002, r, g, b, .8f);
     }
 
     private static VertexBuffer upload(MeshData mesh) {
@@ -138,7 +150,7 @@ final class PreviewMeshSection implements AutoCloseable {
     }
 
     void draw(int pass, Matrix4f view, Matrix4f projection, Vec3 camera) {
-        VertexBuffer buffer = pass == 0 ? models : pass == 1 ? partModels : outlines;
+        VertexBuffer buffer = pass < 3 ? models[pass] : pass == 3 ? partModels : outlines;
         if (buffer == null) return;
         Matrix4f relative = new Matrix4f(view).translate((float) (origin.getX() - camera.x),
                 (float) (origin.getY() - camera.y), (float) (origin.getZ() - camera.z));
@@ -147,9 +159,9 @@ final class PreviewMeshSection implements AutoCloseable {
     }
 
     @Override public void close() {
-        if (models != null) models.close();
+        for (int i = 0; i < models.length; i++) { if (models[i] != null) models[i].close(); models[i] = null; }
         if (outlines != null) outlines.close();
         if (partModels != null) partModels.close();
-        models = null; outlines = null; partModels = null; built = false;
+        outlines = null; partModels = null; built = false;
     }
 }

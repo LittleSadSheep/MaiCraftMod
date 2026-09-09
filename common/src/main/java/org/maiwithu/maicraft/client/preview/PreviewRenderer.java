@@ -65,9 +65,11 @@ public final class PreviewRenderer {
                 remaining -= section.workSize();
             }
         }
-        draw(visible, PreviewRenderTypes.GHOST, 0, view, projection, position);
-        draw(visible, PreviewRenderTypes.PARTS, 1, view, projection, position);
-        draw(visible, PreviewRenderTypes.OUTLINE, 2, view, projection, position);
+        draw(visible, PreviewRenderTypes.SOLID, 0, view, projection, position);
+        draw(visible, PreviewRenderTypes.CUTOUT, 1, view, projection, position);
+        draw(visible, PreviewRenderTypes.PARTS, 3, view, projection, position);
+        draw(visible, PreviewRenderTypes.TRANSLUCENT, 2, view, projection, position);
+        draw(visible, PreviewRenderTypes.OUTLINE, 4, view, projection, position);
         long ready = visible.stream().filter(section -> section.built).count();
         int fallback = visible.stream().mapToInt(section -> section.fallbackModels).sum();
         minecraft.gui.setOverlayMessage(Component.literal("MaiCraft 蓝图 · " + session.title()
@@ -82,7 +84,10 @@ public final class PreviewRenderer {
                              Matrix4f view, Matrix4f projection, Vec3 camera) {
         type.setupRenderState();
         try {
-            for (int i = visible.size() - 1; i >= 0; i--) visible.get(i).draw(pass, view, projection, camera);
+            // Opaque terrain establishes depth first; only real translucent blocks require back-to-front order.
+            if (pass == 2) {
+                for (int i = visible.size() - 1; i >= 0; i--) visible.get(i).draw(pass, view, projection, camera);
+            } else for (PreviewMeshSection section : visible) section.draw(pass, view, projection, camera);
         } finally { VertexBuffer.unbind(); type.clearRenderState(); }
     }
 
