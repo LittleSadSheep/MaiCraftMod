@@ -145,9 +145,7 @@ final class BuildPlacementGeometry {
         if (!(target.item() instanceof BlockItem) || !player.level().isLoaded(target.pos())) return null;
         BuildPlacementStage stage = new BuildPlacementStage(player.level(), player.level()::isLoaded,
                 targets, target, false);
-        if (!stage.bodyCellAvailable(player.blockPosition())) return null;
-        for (AABB box : target.desiredState().getCollisionShape(stage, target.pos()).toAabbs())
-            if (box.move(target.pos()).intersects(player.getBoundingBox())) return null;
+        if (!bodyClearFrom(player, target, stage, player.position())) return null;
         List<Gesture> candidates = new ArrayList<>();
         BlockState live = stage.state(target.pos());
         if (!live.isAir() && (live.canBeReplaced()
@@ -177,16 +175,7 @@ final class BuildPlacementGeometry {
         if (!(target.item() instanceof BlockItem) || !player.level().isLoaded(target.pos())) return null;
         BuildPlacementStage stage = new BuildPlacementStage(player.level(), player.level()::isLoaded,
                 targets, target, false);
-        AABB body = player.getBoundingBox().move(feet.subtract(player.position())).deflate(1.0e-5);
-        for (BlockPos cell : BlockPos.betweenClosed(BlockPos.containing(body.minX - 1, body.minY - 1, body.minZ - 1),
-                BlockPos.containing(body.maxX + 1, body.maxY + 1, body.maxZ + 1))) {
-            BlockState state = stage.state(cell);
-            if (!state.getFluidState().isEmpty() && body.intersects(new AABB(cell))) return null;
-            for (AABB shape : state.getCollisionShape(stage, cell).toAabbs())
-                if (shape.move(cell).intersects(body)) return null;
-        }
-        for (AABB shape : target.desiredState().getCollisionShape(stage, target.pos()).toAabbs())
-            if (shape.move(target.pos()).intersects(body)) return null;
+        if (!bodyClearFrom(player, target, stage, feet)) return null;
         List<Gesture> out = new ArrayList<>(1);
         BlockState live = stage.state(target.pos());
         if (!live.isAir() && (live.canBeReplaced() || (live.is(target.block()) && maximumUses(target) > 1))) {
@@ -200,6 +189,22 @@ final class BuildPlacementGeometry {
             if (!out.isEmpty()) return out.getFirst();
         }
         return null;
+    }
+
+    /** Feet can rest within a partial block's cell while the actual body remains above its shape. */
+    private static boolean bodyClearFrom(LocalPlayer player, BuildTaskRecord.Target target,
+                                         BuildPlacementStage stage, Vec3 feet) {
+        AABB body = player.getBoundingBox().move(feet.subtract(player.position())).deflate(1.0e-5);
+        for (BlockPos cell : BlockPos.betweenClosed(BlockPos.containing(body.minX - 1, body.minY - 1, body.minZ - 1),
+                BlockPos.containing(body.maxX + 1, body.maxY + 1, body.maxZ + 1))) {
+            BlockState state = stage.state(cell);
+            if (!state.getFluidState().isEmpty() && body.intersects(new AABB(cell))) return false;
+            for (AABB shape : state.getCollisionShape(stage, cell).toAabbs())
+                if (shape.move(cell).intersects(body)) return false;
+        }
+        for (AABB shape : target.desiredState().getCollisionShape(stage, target.pos()).toAabbs())
+            if (shape.move(target.pos()).intersects(body)) return false;
+        return true;
     }
 
     private static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,

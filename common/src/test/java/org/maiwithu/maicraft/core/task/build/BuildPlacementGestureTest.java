@@ -71,6 +71,30 @@ public final class BuildPlacementGestureTest {
             check(BuildPlacementGeometry.currentGesture(h.player, target, Map.of()) == null,
                     "a native gesture cannot exceed interaction reach");
         }
+        try (var h = new InteractionWorldTestHarness()) {
+            BlockPos slabFloor = new BlockPos(3, 0, 4);
+            h.set(slabFloor, Blocks.OAK_SLAB.defaultBlockState());
+            h.position(new Vec3(3.5, .5, 4.5));
+            for (int x : new int[]{4, 5}) {
+                var target = new BuildTaskRecord.Target(Blocks.STONE, Items.STONE,
+                        new BlockPos(x, 1, 4), "from bottom slab", null, null, null);
+                var current = BuildPlacementGeometry.currentGesture(h.player, target, Map.of());
+                check(current != null && current.stance().equals(slabFloor),
+                        "resting on a bottom slab permits reachable placement without moving to another feet cell");
+                check(BuildPlacementGeometry.liveGestureFrom(h.player, target, Map.of(), h.player.position()) != null,
+                        "current and prospective gestures must agree on the actual half-height body");
+            }
+            var adjacent = new BuildTaskRecord.Target(Blocks.STONE, Items.STONE,
+                    new BlockPos(4, 1, 4), "collision rejection", null, null, null);
+            var fillUnderfoot = new BuildTaskRecord.Target(Blocks.STONE, Items.STONE,
+                    slabFloor, "cannot fill occupied space", null, null, null);
+            check(BuildPlacementGeometry.currentGesture(h.player, fillUnderfoot, Map.of()) == null,
+                    "a new full block must not intersect the player above the existing slab");
+            h.position(new Vec3(3.5, .4, 4.5));
+            check(BuildPlacementGeometry.currentGesture(h.player, adjacent, Map.of()) == null
+                            && BuildPlacementGeometry.liveGestureFrom(h.player, adjacent, Map.of(), h.player.position()) == null,
+                    "feet penetrating the slab are still rejected by both geometry paths");
+        }
         System.out.println("BuildPlacementGestureTest: passed");
     }
 
