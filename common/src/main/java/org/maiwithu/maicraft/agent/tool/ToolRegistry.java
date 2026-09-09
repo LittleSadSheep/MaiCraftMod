@@ -27,13 +27,13 @@ public final class ToolRegistry {
                     "工具名不合规(只允许 [a-zA-Z0-9_-],1~64 字符): '" + name
                             + "' — " + tool.getClass().getName());
         }
-        // 当前先写入再检查重名，所以抛出重名异常时旧映射已经被覆盖；这不是一次没有产生变化的拒绝。
-        MaiCraftTool prior = TOOLS.put(name, tool);
+        // 名称已占用时保留原登记，再报告重名；失败不能悄悄换掉后续调用会找到的工具。
+        MaiCraftTool prior = TOOLS.putIfAbsent(name, tool);
         if (prior != null) {
             throw new IllegalStateException(
                     "Duplicate MaiCraftTool name: " + name
-                            + " (was " + prior.getClass().getName()
-                            + ", now " + tool.getClass().getName() + ")");
+                            + " (registered " + prior.getClass().getName()
+                            + ", attempted " + tool.getClass().getName() + ")");
         }
     }
 
