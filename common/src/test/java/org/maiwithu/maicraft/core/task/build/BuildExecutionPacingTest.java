@@ -49,6 +49,14 @@ public final class BuildExecutionPacingTest {
         }, () -> true);
         check(steps.get() == 8, "phase cycling must yield under a bounded tick budget");
 
+        var clock = new java.util.concurrent.atomic.AtomicLong();
+        steps.set(0);
+        BuildTickPipeline.advance(phase::get, () -> {
+            steps.incrementAndGet(); phase.incrementAndGet(); clock.addAndGet(3_000_000);
+            return TaskState.RUNNING;
+        }, () -> true, clock::get);
+        check(steps.get() == 2, "expensive phases share a tick deadline instead of each claiming a fresh budget");
+
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         BlockGetter flat = new BlockGetter() {
             public BlockState getBlockState(BlockPos pos) { return (pos.getY() == -1 ? Blocks.STONE : Blocks.AIR).defaultBlockState(); }

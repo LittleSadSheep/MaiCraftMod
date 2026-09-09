@@ -46,12 +46,13 @@ public final class BuildAimRetryTest {
             }
             var attempts = (PlacementAttemptLedger) field("placementAttempts").get(task);
             check(!attempts.allows(target, chosen), "a rejected ray is remembered by target and worksite");
-            check(BuildPlacementGeometry.currentGesture(h.player, target, Map.of(), g -> attempts.allows(target, g)) == null,
-                    "the next tick cannot reselect the rejected current worksite");
+            var alternate = BuildPlacementGeometry.currentGesture(h.player, target, Map.of(), g -> attempts.allows(target, g));
+            check(alternate != null && !alternate.point().equals(chosen.point()),
+                    "a rejected click must preserve other visible points from the same worksite");
             check(h.blockUses() == 0, "a MISS with the expected block coordinate cannot submit useBlock");
             invoke(task, "placeNavTick");
-            check(!field("phase").get(task).toString().equals("SELECT_ITEM"),
-                    "the production shortcut must move on instead of resetting the same AIM");
+            check(!field("gesture").get(task).equals(chosen),
+                    "the production shortcut must try another point instead of resetting the rejected AIM");
             check(task.resultData().containsKey("last_placement_rejection"), "terminal evidence retains the rejected aim reason");
             h.position(new Vec3(5.6, 1, 4.7));
             check(BuildPlacementGeometry.currentGesture(h.player, target, Map.of(), g -> attempts.allows(target, g)) != null,

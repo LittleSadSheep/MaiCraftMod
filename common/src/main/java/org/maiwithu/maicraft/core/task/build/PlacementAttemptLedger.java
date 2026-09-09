@@ -36,6 +36,12 @@ final class PlacementAttemptLedger {
         return rejected.getOrDefault(target.pos().asLong(), Set.of()).size();
     }
 
+    /** Nearby confirmed construction changes can open a ray, foothold or click support. */
+    void changedNear(BlockPos changed) {
+        rejected.keySet().removeIf(key -> BlockPos.of(key).distSqr(changed) <= 36);
+        stances.keySet().removeIf(key -> BlockPos.of(key).distSqr(changed) <= 36);
+    }
+
     void complete(BuildTaskRecord.Target target) {
         rejected.remove(target.pos().asLong()); stances.remove(target.pos().asLong());
     }

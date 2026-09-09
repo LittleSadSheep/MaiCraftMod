@@ -103,6 +103,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private List<BlockPos> clearQueue = List.of();
     private BlockPos clearing;
     private List<BuildPlacementGeometry.Gesture> liveGestures = List.of();
+    private BuildPlacementGeometry.PlanSearch gestureSearch;
+    private BuildPlacementGeometry.PlanProgress gestureProgress;
     private BuildPlacementGeometry.Gesture gesture;
     private boolean gestureFromCurrent;
     private Vec3 placementWalkTarget;
@@ -469,7 +471,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return switch (digger.settleGone(true)) {
                 case PROGRESSING -> TaskState.RUNNING;
                 case BROKE_TARGET -> {
-                    r.confirmedMutation(player, clearing);
+                    confirmedBlockChange(clearing);
                     r.brokeOne(); renewBuildProgress(); yield nextClear();
                 }
                 default -> {
@@ -485,7 +487,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return switch (digger.digTargetStep(clearing)) {
             case PROGRESSING -> TaskState.RUNNING;
             case BROKE_TARGET -> {
-                r.confirmedMutation(player, clearing);
+                confirmedBlockChange(clearing);
                 r.brokeOne(); renewBuildProgress(); yield nextClear();
             }
             case BROKE_OCCLUDER -> {
@@ -507,7 +509,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (clearAt < clearQueue.size()) { clearing = clearQueue.get(clearAt); phase = Phase.CLEAR_NAV; }
         else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
         else {
-            liveGestures = BuildPlacementGeometry.plan(player, cell.target(), targets);
+            liveGestures = List.of(); gestureSearch = null; gestureProgress = null;
             phase = Phase.PLACE_NAV;
         }
         return TaskState.RUNNING;
@@ -532,14 +534,22 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             stopNav(); phase = Phase.WORKSITE; return TaskState.RUNNING;
         }
         if (worksite != null) return walkToWorksite();
-        if (liveGestures.isEmpty()) liveGestures = BuildPlacementGeometry.plan(player, cell.target(), targets);
-        while (gestureAt < liveGestures.size()
-                && (!supportExists(liveGestures.get(gestureAt))
-                || !placementAttempts.allows(cell.target(), liveGestures.get(gestureAt)))) gestureAt++;
-        if (gestureAt >= liveGestures.size()) return deferOrFail();
-        gesture = liveGestures.get(gestureAt);
-        gestureFromCurrent = false;
         if (nav == null) {
+            if (liveGestures.isEmpty()) {
+                if (gestureSearch == null) {
+                    gestureSearch = new BuildPlacementGeometry.PlanSearch(player, cell.target(), targets);
+                    gestureAt = 0;
+                }
+                gestureProgress = gestureSearch.advance(64);
+                if (!gestureProgress.complete()) { InputDriver.halt(player); return TaskState.RUNNING; }
+                liveGestures = gestureSearch.results();
+            }
+            while (gestureAt < liveGestures.size()
+                    && (!supportExists(liveGestures.get(gestureAt))
+                    || !placementAttempts.allows(cell.target(), liveGestures.get(gestureAt)))) gestureAt++;
+            if (gestureAt >= liveGestures.size()) return deferOrFail();
+            gesture = liveGestures.get(gestureAt);
+            gestureFromCurrent = false;
             BlockPos stance = gesture.stance();
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), 1.0,
                     () -> PlayerNav.playerFeet(player).equals(stance), this);
@@ -574,7 +584,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (available == null) continue;
             java.util.Collections.swap(queue, queueAt, i); cell = candidate;
             placementWalkTarget = approach; stopNav();
-            liveGestures = List.of(); gestureAt = 0; useCount = 0; selection.reset(); aimConvergence.reset();
+            liveGestures = List.of(); gestureSearch = null; gestureProgress = null;
+            gestureAt = 0; useCount = 0; selection.reset(); aimConvergence.reset();
             gesture = available; gestureFromCurrent = true; phase = Phase.SELECT_ITEM; return true;
         }
         return false;
@@ -710,9 +721,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         BlockState before = player.level().getBlockState(cell.target().pos());
         BlockState predicted = BuildPlacementGeometry.predict(
                 player, cell.target(), hit, player.getYRot(), player.getXRot());
-        if (!cell.target().itemPlace() && (predicted == null
-                || (!cell.target().acceptsPlacedState(predicted)
-                && !BuildPlacementGeometry.isProgress(cell.target(), before, predicted)))) {
+        if (predicted == null || (!cell.target().itemPlace() && !cell.target().acceptsPlacedState(predicted)
+                && !BuildPlacementGeometry.isProgress(cell.target(), before, predicted))) {
             return waitForAim("native_placement_state_mismatch", aimConvergence.ready(player, gesture.point().subtract(eye)));
         }
         BlockState placedPrimary = predicted == null ? cell.target().desiredState() : predicted;
@@ -741,7 +751,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState waitForAim(String reason, boolean settled) {
         aimWaitReason = reason;
         lastAimObservation = placementDiagnostics();
-        if (settled || aimProgress.stalled(ClientRuntime.requireContext(player).tickRevision(), aimError)) {
+        // Near a slab's half-height boundary, a one-degree view tolerance is still a different click.
+        if (settled && aimError <= .05 || aimProgress.stalled(ClientRuntime.requireContext(player).tickRevision(), aimError)) {
             if (!settled) aimWaitReason = reason + "_not_progressing";
             return rejectGesture();
         }
@@ -792,7 +803,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState rejectGesture() {
         placementAttempts.reject(cell.target(), gesture);
-        placementAttempts.rejectStance(cell.target(), PlayerNav.playerFeet(player));
         lastPlacementRejection = placementDiagnostics();
         InputDriver.halt(player); stopNav(); selection.reset();
         aimConvergence.reset(); gesture = null;
@@ -819,15 +829,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.FAILED;
         }
         useCount++;
-        r.confirmedMutation(player, cell.target().pos());
-        for (BuildPlacementGeometry.GeneratedCell effect : cell.generated()) r.confirmedMutation(player, effect.pos());
+        confirmedBlockChange(cell.target().pos());
+        for (BuildPlacementGeometry.GeneratedCell effect : cell.generated()) confirmedBlockChange(effect.pos());
         if (matches(cell.target(), cell.generated())) { finishPlaced(); return TaskState.RUNNING; }
         BlockState live = player.level().getBlockState(cell.target().pos());
         if (useCount < BuildPlacementGeometry.maximumUses(cell.target())
                 && BuildPlacementGeometry.isProgress(cell.target(), Blocks.AIR.defaultBlockState(), live)) {
             // 雪层、双层台阶等需要多次放置；看到已经朝目标前进时，继续补下一次，而不是把中间状态拆掉。
             renewBuildProgress();
-            liveGestures = BuildPlacementGeometry.plan(player, cell.target(), targets);
+            liveGestures = List.of(); gestureSearch = null; gestureProgress = null;
             gestureAt = 0; gesture = null; selection.reset(); aimConvergence.reset();
             phase = Phase.PLACE_NAV;
             return TaskState.RUNNING;
@@ -842,6 +852,21 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // Keep creative materials available for later cells instead of clearing the slot per click.
         r.placedOne(); renewBuildProgress(); markComplete(cell);
         finishCell();
+    }
+
+    private void confirmedBlockChange(BlockPos pos) {
+        r.confirmedMutation(player, pos);
+        placementEnvironmentChanged(pos);
+    }
+
+    private void placementEnvironmentChanged(BlockPos pos) {
+        placementAttempts.changedNear(pos);
+        exhaustedPlacementStates.keySet().removeIf(key -> BlockPos.of(key).distSqr(pos) <= 36);
+        if (cell != null && cell.target().pos().distSqr(pos) <= 36) {
+            gestureSearch = null; gestureProgress = null;
+            liveGestures = List.of(); gestureAt = 0;
+            // Keep any active walk bound to its current gesture; re-enumerate after it settles.
+        }
     }
 
     private TaskState clearCreativeTick() {
@@ -986,7 +1011,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (worksite == null) worksiteProgress = null;
         aimProgress.reset(); aimWaitReason = "not_aiming"; aimHit = "not_checked";
         stopNav(); clearing = null; clearQueue = List.of(); clearAt = 0;
-        liveGestures = List.of(); gestureAt = 0; gesture = null;
+        liveGestures = List.of(); gestureSearch = null; gestureProgress = null; gestureAt = 0; gesture = null;
         useCount = 0; useReceipt = null; selection.reset(); aimConvergence.reset();
     }
 
@@ -1274,12 +1299,16 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         BuildTaskRecord.Target target = targets.get(placeAt.asLong());
         if (target != null && !BuildCellRules.isAirTarget(target)) return;
         if (!state.isAir() && state.getFluidState().isEmpty()) {
+            if (!r.scaffoldLedger().owns(placeAt, state)) placementEnvironmentChanged(placeAt);
             r.scaffoldLedger().confirmed(placeAt, state); scaffolds.add(placeAt.immutable());
             renewBuildProgress();
         }
     }
 
-    @Override public void confirmedScaffoldRemoval(BlockPos pos) { r.scaffoldLedger().cleared(pos); }
+    @Override public void confirmedScaffoldRemoval(BlockPos pos) {
+        if (r.scaffoldLedger().contains(pos)) placementEnvironmentChanged(pos);
+        r.scaffoldLedger().cleared(pos);
+    }
 
     @Override public boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState support) {
         // 可以借已建好的成品作支点，但不能借被明确保护的位置；落下临时支撑的位置也要单独检查。
@@ -1363,6 +1392,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 "temporary_supports_remaining", r.scaffoldLedger().snapshot().size()));
         if (phase == Phase.AIM) data.put("placement", placementDiagnostics());
         data.put("creative_materials", creativeMaterials.progress());
+        if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
+                "stance_checks", gestureProgress.stanceChecks(), "face_checks", gestureProgress.probeCount(),
+                "candidates", gestureProgress.gestureCount()));
         if (worksiteProgress != null || worksite != null) data.put("worksite", worksiteProgress());
         if (!lastPlacementRejection.isEmpty()) data.put("last_placement_rejection", lastPlacementRejection);
         return Map.copyOf(data);
