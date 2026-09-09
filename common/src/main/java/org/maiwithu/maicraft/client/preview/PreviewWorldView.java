@@ -11,7 +11,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
 
-/** Read-only virtual geometry; nothing is inserted into the client or server level. */
+/**
+ * 给模型提供只读的计划世界：当前高度范围内优先读蓝图状态，其余位置读真实世界。
+ * 所有方块实体查询返回 null，避免预览模型读取别人的箱子内容；亮度、阴影和群系颜色继续取现场。
+ */
 final class PreviewWorldView implements BlockAndTintGetter {
     private final PreviewSession session;
     private final BlockAndTintGetter level;

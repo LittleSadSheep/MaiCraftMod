@@ -11,7 +11,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 
-/** Client-thread review gate. The caller owns pausing construction and cleaning up its owner. */
+/**
+ * 管理当前这一份预览和玩家的选择。这里只维护预览状态，真正暂停、继续和结束施工由请求它的任务处理。
+ */
 public final class PreviewController {
     private static PreviewSession current;
     private static Object world;
@@ -31,7 +33,9 @@ public final class PreviewController {
         return current != null && current.decision() == Decision.WAITING;
     }
 
-    /** A repeated owner retains its frozen plan. Call release when the owning task ends. */
+    /**
+     * 施工任务申请预览。同一个 owner 再申请时沿用原方案和选择结果；结束时应按这个 owner 释放。
+     */
     public static Decision request(String owner, String dimension, String title,
                                    Map<BlockPos, BlockState> cells) {
         return request(owner, dimension, title, cells, List.of());
@@ -41,6 +45,7 @@ public final class PreviewController {
                                    Map<BlockPos, BlockState> cells, List<PreviewPart> parts) {
         initialize();
         tick(Minecraft.getInstance());
+        // 新的施工预览可以替换只读设计；已有另一个任务的施工预览时只返回等待，不替它确认或取消。
         if (current != null && current.designOnly()) release(current.owner());
         if (current != null) {
             if (current.owner().equals(owner)) return current.decision();
@@ -57,7 +62,9 @@ public final class PreviewController {
         return Decision.WAITING;
     }
 
-    /** Explicit read-only display is independent of the automatic Dev construction gate. */
+    /**
+     * 显示只读设计，不要求打开 Dev 开关，也不能用 confirm 启动施工。已有施工预览时不会把它顶掉。
+     */
     public static boolean showDesign(PreviewSession session) {
         tick(Minecraft.getInstance());
         if (!session.designOnly() || Minecraft.getInstance().level == null
@@ -71,6 +78,7 @@ public final class PreviewController {
         return true;
     }
 
+    // 只允许匹配的 owner 清掉当前预览，避免旧任务结束时误关掉新任务的蓝图。
     public static void release(String owner) {
         if (current != null && current.owner().equals(owner)) {
             current = null; world = null; PreviewRenderer.invalidate();
@@ -81,7 +89,9 @@ public final class PreviewController {
         current = null; world = null; PreviewRenderer.invalidate();
     }
 
-    /** A level replacement (including same-dimension reconnect) must revoke old approval. */
+    /**
+     * 世界对象换了就取消原预览，包括同维度断线重连；以前的确认不能继续用于新的世界。
+     */
     public static void tick(Minecraft minecraft) {
         if (current != null && world != minecraft.level) {
             current.cancel();
@@ -90,6 +100,7 @@ public final class PreviewController {
         }
     }
 
+    // 关闭 Dev 时，尚未确认的施工预览会取消；已经确认的只隐藏。只读设计继续保留。
     static int dev(boolean enabled) {
         initialize();
         if (!enabled && current != null && !current.designOnly()) {
@@ -108,6 +119,7 @@ public final class PreviewController {
         return 1;
     }
 
+    // 先核对世界是否变化，再只接受正在等待的施工预览；只读设计和已结束的选择不能再次确认。
     static int confirm() {
         tick(Minecraft.getInstance());
         if (current != null && current.designOnly()) {
@@ -127,12 +139,14 @@ public final class PreviewController {
         return 1;
     }
 
+    // 显示开关只影响绘制，不代表继续或暂停施工。
     static int visible(boolean value) {
         if (current == null) return unavailable();
         current.visible(value);
         return status();
     }
 
+    // 高度筛选只改变预览可见内容，原计划格子保留；最小高度超过最大高度时不给应用。
     static int layers(int min, int max) {
         if (current == null) return unavailable();
         if (min > max) { message("最低层必须小于等于最高层。", ChatFormatting.RED); return 0; }

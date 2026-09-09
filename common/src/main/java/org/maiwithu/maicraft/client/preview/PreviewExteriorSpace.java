@@ -14,11 +14,15 @@ import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-/** Sparse connected air volumes. Empty distance costs one interval, not one node per block. */
+/**
+ * 判断某个空隙是否连到蓝图外面，让完全封闭的内部空腔不产生外轮廓。
+ * 沿 x 把长段空白压成一个区间，不为每个空气格创建对象，因此相距很远的两块也不必填满中间体积。
+ */
 final class PreviewExteriorSpace {
     private final Map<BlockPos, Column> columns = new HashMap<>();
     private final Map<BlockPos, List<Node>> partial = new HashMap<>();
 
+    // 按固定 y/z 整理每一行。整格之间保存长空段，半砖等格子内部再保存剩余空隙，最后把面相接的空隙连起来。
     PreviewExteriorSpace(Map<BlockPos, VoxelShape> shapes) {
         Map<BlockPos, TreeMap<Integer, VoxelShape>> occupied = new HashMap<>();
         shapes.forEach((pos, shape) -> occupied.computeIfAbsent(column(pos), key -> new TreeMap<>()).put(pos.getX(), shape));
@@ -40,6 +44,7 @@ final class PreviewExteriorSpace {
             column.nodes.sort(Comparator.comparingDouble(node -> node.box.minX));
             connect(column, column);
         });
+        // 相邻行存在就连通共同开口；相邻行完全没有蓝图实体时，朝那边露出的空隙直接算通往外界。
         columns.forEach((pos, column) -> {
             for (Direction side : List.of(Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH)) {
                 Column neighbor = columns.get(pos.relative(side));
@@ -58,6 +63,7 @@ final class PreviewExteriorSpace {
         });
     }
 
+    // 先找到点所属的行与格内空隙或长空段，再检查这一组空隙是否已连到外界；不存在该行说明那里是外部空间。
     boolean contains(double x, double y, double z) {
         BlockPos pos = BlockPos.containing(x, y, z);
         Column column = columns.get(column(pos));
@@ -70,6 +76,7 @@ final class PreviewExteriorSpace {
 
     private static BlockPos column(BlockPos pos) { return new BlockPos(0, pos.getY(), pos.getZ()); }
 
+    // 两行的空隙按 x 排好序，只检查可能相碰的区间，减少逐个两两比较。
     private static void connect(Column left, Column right) {
         int first = 0;
         for (Node a : left.nodes) {
@@ -82,6 +89,7 @@ final class PreviewExteriorSpace {
         }
     }
 
+    // 只有通过有面积的共同面才算连通；仅在一点或一条边接触，不当作空气通道。
     private static boolean adjacent(AABB a, AABB b) {
         double x = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
         double y = Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY);
@@ -107,10 +115,12 @@ final class PreviewExteriorSpace {
         int rank;
         boolean outside;
         Node(AABB box) { this.box = box; }
+        // 同一片连通空隙共用一个代表节点；查询时压短查找链，避免以后每次绕很多层。
         Node root() {
             if (parent != this) parent = parent.root();
             return parent;
         }
+        // 合并相通的两组空隙，任意一组通往外界就让合并后的整组也通往外界。
         void join(Node other) {
             Node a = root(), b = other.root();
             if (a == b) return;

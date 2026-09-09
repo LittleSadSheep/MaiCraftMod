@@ -9,10 +9,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 
-/** Cable centres and face plates expose multipart layout without inventing block-entity models. */
+/**
+ * 用蓝色小方块表示中心部件、薄片表示贴面部件。只画布局示意，不按 itemId 还原真实模组模型或接线能力。
+ */
 final class PreviewPartGeometry {
     private PreviewPartGeometry() {}
 
+    // 先画该部件，再把相邻的中心部件用短线段形状接起来；相邻就连接，不额外比较部件种类。
     static void emit(PreviewPart part, BlockPos origin, Set<BlockPos> centres,
                      VertexConsumer fill, VertexConsumer lines) {
         AABB box = localBox(part.side());
@@ -33,6 +36,7 @@ final class PreviewPartGeometry {
         }
     }
 
+    // 各面薄片贴在所在格相应边缘，center 则在格子中央放一个小方块。
     static AABB localBox(String side) {
         return switch (side) {
             case "down" -> new AABB(.2, 0, .2, .8, .15, .8);
@@ -45,6 +49,7 @@ final class PreviewPartGeometry {
         };
     }
 
+    // 用八个角画六个填充面，再画边框；之后渲染器统一把填充调成半透明。
     private static void emitBox(AABB box, VertexConsumer fill, VertexConsumer lines) {
         float x = (float) box.minX, y = (float) box.minY, z = (float) box.minZ;
         float a = (float) box.maxX, b = (float) box.maxY, c = (float) box.maxZ;

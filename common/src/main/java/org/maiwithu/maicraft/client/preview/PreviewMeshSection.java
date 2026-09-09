@@ -26,7 +26,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
-/** Small (at most 64-cell) rebuild unit; finished GPU buffers stay visible across frame budgets. */
+/**
+ * 保存一个四乘四乘四小分区的模型和边框。方块改变时重建，只有相机移动时可只重排透明面的顺序。
+ */
 final class PreviewMeshSection implements AutoCloseable {
     final BlockPos origin;
     final AABB bounds;
@@ -50,6 +52,7 @@ final class PreviewMeshSection implements AutoCloseable {
         return refresh.required(now, camera, () -> hash(minecraft));
     }
 
+    // 读取本分区目标及其六个邻格的方块状态，合成变化摘要；没有把模型资源版本或方块实体数据加入摘要。
     private int hash(Minecraft minecraft) {
         int hash = 1;
         for (var cell : cells) {
@@ -65,6 +68,7 @@ final class PreviewMeshSection implements AutoCloseable {
 
     int workSize() { return cells.size() + parts.size(); }
 
+    // 先释放旧缓存，按普通、镂空、透明三类生成方块模型，并分别生成部件示意与轮廓。
     void rebuild(Minecraft minecraft, PreviewSession session, PreviewWorldView view, Set<BlockPos> centres, PreviewOutlineGeometry outline,
                  Vec3 camera, long now) {
         close();
@@ -90,6 +94,7 @@ final class PreviewMeshSection implements AutoCloseable {
                 if (!minecraft.level.isLoaded(pos)) continue;
                 outline.emit(pos, origin, line);
                 BlockState actual = minecraft.level.getBlockState(pos);
+                // 只有完整状态一模一样才省掉半透明模型；这比施工器的完成比较更严格，例如门被打开仍可能显示待修正模型。
                 if (desired.equals(actual)) continue;
                 int x = pos.getX() - origin.getX(), y = pos.getY() - origin.getY(), z = pos.getZ() - origin.getZ();
                 if (!desired.isAir()) {
@@ -101,8 +106,8 @@ final class PreviewMeshSection implements AutoCloseable {
                         try {
                             minecraft.getBlockRenderer().renderBatched(desired, pos, view, pose, model[pass], true, random);
                         } catch (RuntimeException unsupportedModel) {
-                            // A mod renderer can fail midway through a vertex. Discard this entire
-                            // section's model buffer, keep its independent outline buffer valid.
+                            // 模组模型可能只写了半个顶点就失败，整个分区的这一类模型缓存都不再使用，独立轮廓仍保留。
+                            // fallbackModels 只加这次失败和后续跳过的项，之前已画入但一同丢弃的模型没有补计。
                             modelUsable[pass] = false; fallbackModels++;
                         }
                         finally { pose.popPose(); }
@@ -128,6 +133,7 @@ final class PreviewMeshSection implements AutoCloseable {
     }
 
     /** Camera movement changes draw order, not block models, outline vertices or GPU buffer identity. */
+    // 模型顶点保留，只更新各面从远到近的绘制顺序；不再次调用方块模型生成器。
     void resort(Vec3 camera) {
         for (int pass = 0; pass < models.length; pass++) {
             if (models[pass] == null || sortStates[pass] == null) continue;
@@ -145,6 +151,7 @@ final class PreviewMeshSection implements AutoCloseable {
                 (float) (camera.y - origin.getY()), (float) (camera.z - origin.getZ()));
     }
 
+    // 上传失败时关闭刚分配的显卡缓冲区再抛出，避免本次分配泄漏。
     private static VertexBuffer upload(MeshData mesh) {
         VertexBuffer result = new VertexBuffer(VertexBuffer.Usage.STATIC);
         try {
@@ -156,6 +163,7 @@ final class PreviewMeshSection implements AutoCloseable {
         }
     }
 
+    // 把分区坐标转换成相机附近的小坐标再绘制，减少世界坐标很大时的浮点精度损失。
     void draw(int pass, Matrix4f view, Matrix4f projection, Vec3 camera) {
         VertexBuffer buffer = pass < 3 ? models[pass] : pass == 3 ? partModels : outlines;
         if (buffer == null) return;
@@ -165,6 +173,7 @@ final class PreviewMeshSection implements AutoCloseable {
         buffer.drawWithShader(relative, projection, RenderSystem.getShader());
     }
 
+    // 逐个释放三类模型、轮廓和部件缓存，并把刷新状态改成未构建，供下次重新生成。
     @Override public void close() {
         for (int i = 0; i < models.length; i++) {
             if (models[i] != null) models[i].close(); models[i] = null; sortStates[i] = null;

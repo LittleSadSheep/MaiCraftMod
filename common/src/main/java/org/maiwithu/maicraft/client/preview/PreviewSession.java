@@ -9,7 +9,9 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Immutable authored cells plus an explicit, one-way human review decision. No world writes. */
+/**
+ * 保存一份不会被调用方改写的蓝图和部件列表，再另记确认、取消、显示和切层状态；不向世界写方块。
+ */
 public final class PreviewSession {
     public enum Decision { WAITING, CONFIRMED, CANCELLED, DISABLED, DESIGN_ONLY }
     public static final int MAX_CELLS = 65_536;
@@ -33,6 +35,7 @@ public final class PreviewSession {
         this.title = Objects.requireNonNull(title);
         if (owner.isBlank() || cells.isEmpty() && parts.isEmpty() || cells.size() + parts.size() > MAX_CELLS)
             throw new IllegalArgumentException("preview requires an owner and 1.." + MAX_CELLS + " cells");
+        // 复制坐标和列表，避免调用方随后移动可变坐标或修改集合时，让已展示的方案跟着变。
         Map<BlockPos, BlockState> frozen = new LinkedHashMap<>();
         cells.forEach((pos, state) -> frozen.put(pos.immutable(), Objects.requireNonNull(state)));
         this.cells = Collections.unmodifiableMap(frozen);
@@ -51,7 +54,9 @@ public final class PreviewSession {
     public int minY() { return minY; }
     public int maxY() { return maxY; }
 
-    /** A standalone display carries no construction authorization, even after local confirm. */
+    /**
+     * 创建只读设计状态。它从来不进入 WAITING，所以调用 confirm 也不会得到施工授权。
+     */
     public static PreviewSession design(String owner, String dimension, String title,
                                         Map<BlockPos, BlockState> cells) {
         PreviewSession session = new PreviewSession(owner, dimension, title, cells);
@@ -60,13 +65,14 @@ public final class PreviewSession {
         return session;
     }
 
+    // 只有 WAITING 能转成 CONFIRMED；取消后再显示也不能恢复之前的确认。
     public boolean confirm() {
         if (decision != Decision.WAITING) return false;
         decision = Decision.CONFIRMED;
         return true;
     }
 
-    /** Invalidation also revokes an earlier confirmation; a new world must be reviewed again. */
+    /** 取消同时隐藏，并撤销已经给出的确认；若仍要施工，应由新请求重新展示和确认。 */
     public void cancel() { decision = Decision.CANCELLED; visible = false; }
     public void visible(boolean value) { visible = value; }
     public void layers(int min, int max) {

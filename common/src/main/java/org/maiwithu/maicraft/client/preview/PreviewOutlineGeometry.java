@@ -20,13 +20,17 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-/** Creases of the selected blueprint's union, independent of individual block model seams. */
+/**
+ * 把所选蓝图的方块外形合在一起，只画与外界相通的转折边，避免每块石头之间都出现网格线。
+ * 这是整份所选计划的几何计算；红色待清除边框则用下方静态方法按现场方块单独绘制。
+ */
 final class PreviewOutlineGeometry {
     private static final double EPSILON = 1e-5;
     private final Map<BlockPos, List<AABB>> boxes = new HashMap<>();
     private final Map<BlockPos, List<Edge>> edges = new LinkedHashMap<>();
     private final PreviewExteriorSpace exterior;
 
+    // 先取每格选择外形；查询失败或外形为空时用整方块代替，保证还有轮廓可看，但可能不像真实模型。
     PreviewOutlineGeometry(PreviewSession session, BlockGetter world) {
         Map<BlockPos, VoxelShape> shapes = new LinkedHashMap<>();
         Map<BlockPos, BlockPos> owners = new HashMap<>();
@@ -36,8 +40,7 @@ final class PreviewOutlineGeometry {
             try { shape = state.getShape(world, pos); }
             catch (RuntimeException unsupportedShape) { shape = Shapes.block(); }
             if (shape.isEmpty()) shape = Shapes.block();
-            // Some selection shapes protrude into adjacent cells (fences, for example).
-            // Partition their union into cells so empty-space connectivity stays exact.
+            // 栅栏等外形会伸出本格，把伸出去的部分切到对应邻格，再判断空隙与外面是否连通。
             for (AABB box : shape.toAabbs()) {
                 for (int x = (int)Math.floor(box.minX); x < Math.ceil(box.maxX); x++)
                     for (int y = (int)Math.floor(box.minY); y < Math.ceil(box.maxY); y++)
@@ -51,6 +54,7 @@ final class PreviewOutlineGeometry {
         });
         shapes.forEach((pos, shape) -> boxes.put(pos, shape.toAabbs()));
         exterior = new PreviewExteriorSpace(shapes);
+        // 每条候选边按相邻小碰撞盒的边界切段，逐段判断是否真是外轮廓，并去掉重复边。
         Set<Edge> emitted = new HashSet<>();
         shapes.forEach((pos, shape) -> shape.forAllEdges((a,b,c,d,e,f) -> {
             double[] start = {a+pos.getX(), b+pos.getY(), c+pos.getZ()};
@@ -87,6 +91,7 @@ final class PreviewOutlineGeometry {
         }
     }
 
+    // 在边的四周各取一点：只有一边或三边有实体，或两边呈对角接触时才形成转折；还必须能接触外部空气。
     private boolean crease(double[] point, int axis) {
         int occupied = 0; boolean outside = false;
         for (int quadrant = 0; quadrant < 4; quadrant++) {
@@ -101,6 +106,7 @@ final class PreviewOutlineGeometry {
         return outside && (count == 1 || count == 3 || occupied == 6 || occupied == 9);
     }
 
+    // 找一条边周围四个方向所落入的格子，用来收集可能截断这条边的形状。
     private static Set<BlockPos> quadrants(double[] point, int axis) {
         Set<BlockPos> result = new HashSet<>();
         for (int quadrant = 0; quadrant < 4; quadrant++) {
@@ -119,6 +125,7 @@ final class PreviewOutlineGeometry {
     private static int coordinate(BlockPos pos, int axis) { return axis == 0 ? pos.getX() : axis == 1 ? pos.getY() : pos.getZ(); }
     private record Edge(Vec3 from, Vec3 to) {}
 
+    // 现场红色清除轮廓先按原版面剔除规则判断哪些面露在外面，完全藏住的面不重复画。
     static int exposedFaces(BlockState state, BlockGetter world, BlockPos pos) {
         int mask = 0;
         for (Direction face : Direction.values())
@@ -147,6 +154,7 @@ final class PreviewOutlineGeometry {
                     .setColor(r, g, b, .55f).setNormal(nx, ny, nz);
         });
     }
+    // 判断一条边是否位于方块的最小或最大边界面；用很小容差处理浮点误差。
     private static int planes(double a, double b, Direction low, Direction high) {
         if (Math.abs(a - b) > 1e-6) return 0;
         return Math.abs(a) < 1e-6 ? 1 << low.ordinal() : Math.abs(a - 1) < 1e-6 ? 1 << high.ordinal() : 0;

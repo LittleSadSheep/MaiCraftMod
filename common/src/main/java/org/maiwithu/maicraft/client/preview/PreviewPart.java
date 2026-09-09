@@ -5,7 +5,9 @@ import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 
-/** Supplemental multipart intent. Geometry is explicitly illustrative, never a simulated block entity. */
+/**
+ * 记录一个多部件结构的示意位置、物品名和安装面。这里不创建真实方块实体，也不验证部件能否实际连在一起。
+ */
 public record PreviewPart(BlockPos position, String itemId, String side) {
     public PreviewPart {
         position = Objects.requireNonNull(position).immutable();

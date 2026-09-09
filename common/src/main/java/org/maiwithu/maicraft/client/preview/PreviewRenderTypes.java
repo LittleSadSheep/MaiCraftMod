@@ -7,7 +7,9 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.RenderStateShard;
 import java.util.List;
 
-/** Ghost models blend against real terrain depth without turning the blueprint opaque. */
+/**
+ * 为预览各类图形配置透明混合、纹理和深度比较。仍会被真实地形挡住，但只写颜色，不把预览写进世界的深度。
+ */
 final class PreviewRenderTypes extends RenderType {
     static final RenderType SOLID = new PreviewRenderTypes("maicraft_preview_solid", DefaultVertexFormat.BLOCK,
             VertexFormat.Mode.QUADS, true, List.of(RENDERTYPE_SOLID_SHADER, BLOCK_SHEET_MIPPED,
@@ -28,8 +30,7 @@ final class PreviewRenderTypes extends RenderType {
 
     private PreviewRenderTypes(String name, VertexFormat format, VertexFormat.Mode mode,
                                boolean sort, List<RenderStateShard> states) {
-        // 1.21.1's CompositeRenderType factory is package-private. The public RenderType
-        // constructor supports the same setup/clear state contract without reflection or ATs.
+        // 通过公开构造器依次设置和清理这些渲染状态，避免访问原版包内可见的组合工厂。
         super(name, format, mode, 262144, false, sort,
                 () -> states.forEach(RenderStateShard::setupRenderState),
                 () -> states.forEach(RenderStateShard::clearRenderState));

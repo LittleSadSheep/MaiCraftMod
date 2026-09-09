@@ -5,10 +5,13 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 
-/** Brigadier source is deliberately generic so both client command registries share one tree. */
+/**
+ * 给两个加载器挂接同一套客户端命令：开关施工预览、确认或取消、隐藏显示，以及只看某层或高度区间。
+ */
 public final class PreviewCommands {
     private PreviewCommands() {}
 
+    // Dev 和 dev 两种大小写都可用；不带子命令时显示状态，preview all 恢复显示全部高度。
     public static <S> LiteralArgumentBuilder<S> attach(LiteralArgumentBuilder<S> root) {
         root.then(dev("Dev")).then(dev("dev"));
         root.then(LiteralArgumentBuilder.<S>literal("preview")
@@ -39,6 +42,7 @@ public final class PreviewCommands {
                 .then(action("off", () -> PreviewController.dev(false)));
     }
 
+    // 把无额外参数的命令统一转给控制器，命令返回值沿用控制器的成功或失败结果。
     private static <S> LiteralArgumentBuilder<S> action(String name, java.util.function.IntSupplier action) {
         return LiteralArgumentBuilder.<S>literal(name).executes(context -> action.getAsInt());
     }

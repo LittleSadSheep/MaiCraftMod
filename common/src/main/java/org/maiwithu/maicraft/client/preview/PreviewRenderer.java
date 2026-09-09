@@ -19,7 +19,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
-/** Shared Fabric/NeoForge renderer. Entire frozen plans are retained; only visibility is bounded. */
+/**
+ * 把预览画在真实世界中。整份计划保留，实际只画相机范围内、距离小于 128 格且处于所选高度的分区。
+ * 每个分区是四格见方的小立方体；重建和排序分帧进行，图形缓存不用每帧全部重做。
+ */
 public final class PreviewRenderer {
     private static final List<PreviewMeshSection> sections = new ArrayList<>();
     private static PreviewSession cached;
@@ -37,6 +40,7 @@ public final class PreviewRenderer {
             clear(); return;
         }
         if (!session.visible() || !session.dimension().equals(minecraft.level.dimension().location().toString())) return;
+        // 切换方案、切层或检测到模型查询对象更换时，先清缓存并同步重算整张图的轮廓；这一步在下方帧预算之前。
         if (cached != session || minY != session.minY() || maxY != session.maxY()
                 || resourceManager != minecraft.getBlockRenderer().getBlockModelShaper()) reset(session, minecraft);
         Vec3 position = camera.getPosition();
@@ -50,7 +54,7 @@ public final class PreviewRenderer {
         PreviewFrameBudget budget = new PreviewFrameBudget();
         long now = System.currentTimeMillis();
         PreviewWorldView world = new PreviewWorldView(session, minecraft.level);
-        // Fresh visible geometry has priority; every section eventually receives a refresh slot.
+        // 先生成还没画出的可见分区，再从上次游标继续轮询已经显示的分区，避免始终只刷新最前面几块。
         for (PreviewMeshSection section : visible) {
             if (!section.built()) {
                 if (!budget.claim(PreviewSectionRefresh.Work.REBUILD, section.workSize())) break;
@@ -80,13 +84,14 @@ public final class PreviewRenderer {
                 : " · /maicraft preview confirm | cancel | layer <Y>")), false);
     }
 
+    // 先设定这一类图形的渲染方式；填充模型按远到近混合，轮廓另画，结束后恢复之前的颜色和渲染状态。
     private static void draw(List<PreviewMeshSection> visible, RenderType type, int pass,
                              Matrix4f view, Matrix4f projection, Vec3 camera) {
         type.setupRenderState();
         float[] color = RenderSystem.getShaderColor().clone();
         try {
             if (pass != 4) RenderSystem.setShaderColor(color[0], color[1], color[2], color[3] * .45f);
-            // Every blueprint model is a ghost, including normally solid terrain blocks.
+            // 石头等普通实心块在预览中也要半透明，统一把透明度乘以 0.45。
             if (pass != 4) {
                 for (int i = visible.size() - 1; i >= 0; i--) visible.get(i).draw(pass, view, projection, camera);
             } else for (PreviewMeshSection section : visible) section.draw(pass, view, projection, camera);
@@ -96,6 +101,7 @@ public final class PreviewRenderer {
         }
     }
 
+    // 重算当前所选高度的整体轮廓，把方块和部件按四格分区，并收集中心部件供连接示意使用。
     private static void reset(PreviewSession session, Minecraft minecraft) {
         clear(); cached = session; minY = session.minY(); maxY = session.maxY();
         resourceManager = minecraft.getBlockRenderer().getBlockModelShaper();
@@ -112,6 +118,7 @@ public final class PreviewRenderer {
         sections.addAll(grouped.values());
     }
 
+    // 用向下取整分区，负坐标也保持每四格为一组，例如 -1 属于起点为 -4 的分区。
     private static BlockPos sectionOrigin(BlockPos pos) {
         return new BlockPos(Math.floorDiv(pos.getX(), 4) * 4,
                 Math.floorDiv(pos.getY(), 4) * 4, Math.floorDiv(pos.getZ(), 4) * 4);
@@ -122,7 +129,7 @@ public final class PreviewRenderer {
         centres = Set.of(); outline = null;
     }
 
-    /** Called by client lifecycle hooks, including disconnect while no level can render. */
+    /** 断线等场合也可释放图形；若不在渲染线程，就排到渲染线程执行，避免跨线程释放显卡资源。 */
     public static void invalidate() {
         if (RenderSystem.isOnRenderThread()) clear(); else RenderSystem.recordRenderCall(PreviewRenderer::clear);
     }
