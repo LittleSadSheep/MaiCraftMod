@@ -147,13 +147,15 @@ public final class MachineMenu {
             entry.add("screen_offset", screen);
             JsonArray acceptable = new JsonArray();
             // These are actual carried candidate stacks, not inferred recipes or arbitrary slot roles.
-            java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+            java.util.Set<String> acceptedIds = new java.util.LinkedHashSet<>();
             for (int inventory = 0; inventory < 36 && acceptable.size() < 16; inventory++) {
                 ItemStack candidate = self.getInventory().getItem(inventory);
                 if (candidate.isEmpty()) continue;
                 String id = BuiltInRegistries.ITEM.getKey(candidate.getItem()).toString();
-                // 当前先按物品种类去重，再检查是否接受；前一叠不接受时，同种但组件不同的后一叠也不会再检查。
-                if (seen.add(id) && slot.mayPlace(candidate)) acceptable.add(id);
+                // 至少有一叠通过检查才合并该种类；前一叠的组件不合适，不能排除后一叠。
+                if (acceptedIds.contains(id) || !slot.mayPlace(candidate)) continue;
+                acceptedIds.add(id);
+                acceptable.add(id);
             }
             entry.add("accepts_carried_item_ids", acceptable);
             entries.add(entry);
