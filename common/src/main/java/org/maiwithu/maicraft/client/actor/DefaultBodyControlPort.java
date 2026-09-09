@@ -122,7 +122,10 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             targetYaw = null;
             targetPitch = null;
         }
-        writeStoppedInput();
+        // BotInput still describes the input consumed by the preceding physical player tick.
+        // Native secondary-use checks read it directly, so tasks must observe that posture until
+        // endTick applies this tick's renewed command (or STOPPED when no command was renewed).
+        // Clearing it here makes a requested crouch appear false before every placement attempt.
     }
 
     /**

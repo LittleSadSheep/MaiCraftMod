@@ -67,6 +67,8 @@ public final class ClientActorBoundary {
         updateWindowControl(body.effectiveAutomationRequested());
         if (player == null || minecraft.level == null || minecraft.gameMode == null ||
                 minecraft.getConnection() == null) {
+            // No context means no endTick to expire physical inputs; stop them at this boundary.
+            body.releaseAll();
             if (playerChanged) {
                 controlRevision = nextRevision(controlRevision, "control revision");
                 mutationClaimedTick = tickRevision;
