@@ -53,6 +53,7 @@ public final class BuildTool implements MaiCraftTool {
     }
 
     private record Args(List<OpSpec> ops, Boolean replace_existing, Boolean allow_partial,
+                        Boolean exact_states,
                         String material_policy, Boolean broaden_material_families,
                         List<String> protected_labels,
                         Map<String, Object> semantic_contract,
@@ -225,6 +226,10 @@ public final class BuildTool implements MaiCraftTool {
 
         Map<String, Object> rootProps = new LinkedHashMap<>();
         rootProps.put("ops", ops);
+        rootProps.put("exact_states", Map.of("type", "boolean", "description",
+                "Internal modeled blueprint: preserve exact block identity and explicitly authored properties."));
+        rootProps.put("project_id", Map.of("type", "string", "description", "Internal frozen build project reference."));
+        rootProps.put("project_targets", Map.of("type", "array", "description", "Internal persisted construction targets."));
         rootProps.put("replace_existing", Map.of(
                 "type", "boolean",
                 "description", "Optional, default true. Clear wrong non-protected blocks at requested cells."));
@@ -259,7 +264,8 @@ public final class BuildTool implements MaiCraftTool {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("type", "object");
         root.put("properties", rootProps);
-        root.put("required", List.of("ops"));
+        root.put("anyOf", List.of(Map.of("required", List.of("ops")),
+                Map.of("required", List.of("project_id", "project_targets"))));
         root.put("additionalProperties", false);
         return root;
     }
@@ -285,10 +291,12 @@ public final class BuildTool implements MaiCraftTool {
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion,
                              Consumer<String> reply) {
         Args parsed = GSON.fromJson(args, Args.class);
-        if (parsed.ops() == null || parsed.ops().isEmpty()) {
+        if (!args.has("project_targets") && (parsed.ops() == null || parsed.ops().isEmpty())) {
             throw new IllegalArgumentException("ops must contain at least one instruction");
         }
-        List<BuildTaskRecord.Target> targets = resolveTargets(parsed.ops());
+        List<BuildTaskRecord.Target> targets = args.has("project_targets")
+                ? org.maiwithu.maicraft.core.blueprint.BuildProjectTargets.decode(args.getAsJsonArray("project_targets"))
+                : resolveTargets(parsed.ops(), Boolean.TRUE.equals(parsed.exact_states()));
         if (targets.size() > BuildShapes.MAX_TOTAL_CELLS) {
             throw new IllegalArgumentException("this call resolves to " + targets.size()
                     + " cells, exceeding " + BuildShapes.MAX_TOTAL_CELLS + "; split it into multiple calls");
@@ -310,6 +318,13 @@ public final class BuildTool implements MaiCraftTool {
                 consume, allowPartial);
         plan.semanticFacts(parsed.semantic_contract());
         plan.traversabilityContract(parsed.traversability_contract());
+        plan.projectProtectionLabels(protectedLabels);
+        org.maiwithu.maicraft.core.blueprint.BuildProjectStore.available().ifPresent(store -> {
+            String dimension = companion.level().dimension().location().toString();
+            String id = args.has("project_id") ? args.get("project_id").getAsString()
+                    : store.save(dimension, args, plan.targets);
+            plan.project(id, frozen -> store.save(id, dimension, args, frozen.targets));
+        });
         if (consume && allowPartial) {
             org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord
                     .ensureRegistered();
@@ -336,18 +351,32 @@ public final class BuildTool implements MaiCraftTool {
 
     /** The actual deduplicated construction plan, shared by geometry checks and estimates. */
     public static List<BuildTaskRecord.Target> resolvedTargets(JsonArray ops) {
+        return resolvedTargets(ops, false);
+    }
+
+    public static List<BuildTaskRecord.Target> resolvedTargets(JsonArray ops, boolean exactStates) {
         if (ops == null || ops.size() == 0) {
             throw new IllegalArgumentException("ops must contain at least one instruction");
         }
         JsonObject wrapper = new JsonObject();
         wrapper.add("ops", ops.deepCopy());
         Args parsed = GSON.fromJson(wrapper, Args.class);
-        return List.copyOf(resolveTargets(parsed.ops()));
+        return List.copyOf(resolveTargets(parsed.ops(), exactStates));
     }
 
-    private static List<BuildTaskRecord.Target> resolveTargets(List<OpSpec> ops) {
+    public static List<BuildTaskRecord.Target> resolvedExactTargets(JsonArray ops) {
+        return resolvedTargets(ops, true);
+    }
+
+    private static List<BuildTaskRecord.Target> resolveTargets(List<OpSpec> ops, boolean exactStates) {
         List<BuildTaskRecord.Target> expanded = new ArrayList<>();
-        for (OpSpec op : ops) expanded.addAll(expandOp(op));
+        for (OpSpec op : ops) {
+            for (var target : expandOp(op)) expanded.add(exactStates
+                    ? new BuildTaskRecord.Target(target.desiredState(), target.item(), target.pos(), target.label(),
+                            target.facing(), target.axis(), target.topHalf(), false,
+                            op.properties() == null ? java.util.Set.of() : op.properties().keySet(), true)
+                    : target);
+        }
         // 单指令流:顺序即语义,后写覆盖先写,去重保留最后一笔
         Map<Long, BuildTaskRecord.Target> byPos = new LinkedHashMap<>();
         for (BuildTaskRecord.Target target : expanded) {

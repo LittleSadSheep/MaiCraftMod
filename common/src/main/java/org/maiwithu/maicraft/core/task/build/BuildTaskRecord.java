@@ -56,6 +56,18 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private boolean hasExecutionGuards;
     private boolean previewManaged;
     private BuildScaffoldLedger scaffoldLedger = new BuildScaffoldLedger();
+    private String projectId;
+    private List<String> projectProtectionLabels = List.of();
+    private java.util.function.Consumer<BuildTaskRecord> projectCheckpoint = plan -> {};
+
+    public String projectId() { return projectId; }
+    public List<String> projectProtectionLabels() { return projectProtectionLabels; }
+    public void projectProtectionLabels(List<String> labels) { projectProtectionLabels = List.copyOf(labels); }
+    public void project(String id, java.util.function.Consumer<BuildTaskRecord> checkpoint) {
+        projectId = id;
+        projectCheckpoint = Objects.requireNonNull(checkpoint);
+    }
+    public void persistProject() { projectCheckpoint.accept(this); }
 
     BuildScaffoldLedger scaffoldLedger() { return scaffoldLedger; }
     private List<BlockPos> materialSupplyProtection = List.of();
@@ -70,6 +82,9 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
     /** 分批施工时共享原来的预览决定、临时支撑账和场地检查，不能每一批都忘掉前一批的保护要求。 */
     public void copyExecutionContextTo(BuildTaskRecord destination) {
+        destination.projectId = projectId;
+        destination.projectProtectionLabels = projectProtectionLabels;
+        destination.projectCheckpoint = projectCheckpoint;
         destination.previewManaged = previewManaged;
         destination.scaffoldLedger = scaffoldLedger;
         destination.materialSupplyProtection = materialSupplyProtection;

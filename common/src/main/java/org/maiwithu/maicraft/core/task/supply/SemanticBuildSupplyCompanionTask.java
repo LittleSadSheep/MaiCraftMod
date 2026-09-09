@@ -212,6 +212,8 @@ final class SemanticBuildSupplyCompanionTask
             }
             activePlan = SemanticBuildMaterialBinding.bind(
                     r.plan, materialProposal, Map.copyOf(selectedVariants));
+            // Save the concrete palette shown in preview before any supply or construction runs.
+            activePlan.persistProject();
             refreshLedgers();
             prepared = true;
         } catch (IllegalArgumentException invalid) {
