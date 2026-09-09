@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.core.task.supply;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.SharedConstants;
@@ -17,7 +19,9 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
@@ -37,6 +41,7 @@ public final class BuildSupplyPreviewTest {
         exactPaletteKeepsWallAndTrim();
 
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
+        constructionReuseKeepsFinalStateObligations(memory);
         FlatLevel level = (FlatLevel) memory.allocateInstance(FlatLevel.class);
         LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
         field(Entity.class, "level").set(player, level);
@@ -94,10 +99,104 @@ public final class BuildSupplyPreviewTest {
                 "exact materials have independent supply requirements and no substitute variants");
     }
 
+    private static void constructionReuseKeepsFinalStateObligations(Unsafe memory) throws Exception {
+        FlatLevel level = (FlatLevel) memory.allocateInstance(FlatLevel.class);
+        LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
+        field(Entity.class, "level").set(player, level);
+        field(LocalPlayer.class, "clientLevel").set(player, level);
+        field(Player.class, "inventory").set(player, new Inventory(player));
+        BlockState desired = Blocks.OAK_DOOR.defaultBlockState();
+        Set<String> important = Set.of("facing", "half", "hinge", "open");
+        level.door(desired.setValue(DoorBlock.OPEN, !desired.getValue(DoorBlock.OPEN)));
+        var task = doorTask(player, desired, important);
+        task.onStart();
+        check(((Map<?, ?>) field(task.getClass(), "initialRemaining").get(task)).isEmpty(),
+                "opening an existing door must not add a replacement to the initial material ledger");
+        check(((Map<?, ?>) field(task.getClass(), "fullLedger").get(task)).get(Items.OAK_DOOR).equals(1),
+                "the full design still costs one door, without charging its generated upper half");
+        checkNoReplacement(task);
+        check(!(boolean) invoke(task, "allMatched") && (int) invoke(task, "remainingCellCount") == 2,
+                "a reusable door with important OPEN mismatch must still reach final state adjustment");
+
+        level.door(desired.setValue(DoorBlock.FACING,
+                desired.getValue(DoorBlock.FACING).getClockWise()));
+        checkNoReplacement(task);
+        check(!(boolean) invoke(task, "allMatched"),
+                "a required orientation mismatch needs finalization rather than replacement acquisition");
+        level.door(desired);
+        check((boolean) invoke(task, "allMatched") && (int) invoke(task, "remainingCellCount") == 0,
+                "all important properties must match before the supply parent considers the plan finished");
+
+        level.door(desired.setValue(DoorBlock.OPEN, !desired.getValue(DoorBlock.OPEN)));
+        var unimportantOpen = doorTask(player, desired, Set.of("facing", "half", "hinge"));
+        unimportantOpen.onStart();
+        checkNoReplacement(unimportantOpen);
+        check((boolean) invoke(unimportantOpen, "allMatched"),
+                "an explicitly unimportant OPEN property must not block final completion");
+
+        var legacy = doorTask(player, desired, null);
+        legacy.onStart();
+        checkReplacement(legacy, "legacy exact OPEN constraints retain their existing material behavior");
+        level.door(Blocks.IRON_DOOR.defaultBlockState());
+        checkReplacement(task, "a different block identity must still require the requested material");
+        level.door(Blocks.AIR.defaultBlockState());
+        checkReplacement(task, "an absent door must still require placement material");
+        level.door(desired);
+        level.unloaded = true;
+        checkReplacement(task, "unloaded targets cannot count as reusable inventory evidence");
+    }
+
+    private static SemanticBuildSupplyCompanionTask doorTask(LocalPlayer player, BlockState desired,
+                                                             Set<String> finalProperties) {
+        var lower = doorTarget(desired, BlockPos.ZERO, finalProperties);
+        var upper = doorTarget(desired.setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER),
+                BlockPos.ZERO.above(), finalProperties);
+        var plan = new BuildTaskRecord("door-final-properties", 1000, List.of(lower, upper), false);
+        var record = new SemanticBuildSupplyTaskRecord("door-materials", 1000, plan,
+                SemanticMaterialSupplyCoordinator.MaterialPolicy.ORDINARY, List.of(), false, List.of(), false);
+        return new SemanticBuildSupplyCompanionTask(player, record, (owner, frozen) -> Decision.WAITING);
+    }
+
+    private static BuildTaskRecord.Target doorTarget(BlockState desired, BlockPos pos,
+                                                     Set<String> finalProperties) {
+        return new BuildTaskRecord.Target(desired, Items.OAK_DOOR, pos, "door",
+                desired.getValue(DoorBlock.FACING), null, null, false, Set.of("facing", "half", "hinge", "open"),
+                true, finalProperties);
+    }
+
+    private static void checkNoReplacement(SemanticBuildSupplyCompanionTask task) throws Exception {
+        check(((Map<?, ?>) invoke(task, "ledger", true)).isEmpty(),
+                "reusable block state changes must not enter the remaining material ledger");
+        check(invoke(task, "nextNeed") == null,
+                "a state-only adjustment must reach construction without an acquisition child");
+    }
+
+    private static void checkReplacement(SemanticBuildSupplyCompanionTask task, String detail) throws Exception {
+        check(Integer.valueOf(1).equals(((Map<?, ?>) invoke(task, "ledger", true)).get(Items.OAK_DOOR))
+                && invoke(task, "nextNeed") != null, detail);
+    }
+
+    private static Object invoke(Object target, String name, Object... args) throws Exception {
+        var method = target.getClass().getDeclaredMethod(name,
+                args.length == 0 ? new Class<?>[0] : new Class<?>[]{boolean.class});
+        method.setAccessible(true);
+        return method.invoke(target, args);
+    }
+
     private static final class FlatLevel extends ClientLevel {
+        private Map<BlockPos, BlockState> blocks;
+        private boolean unloaded;
         private FlatLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
-        @Override public boolean isLoaded(BlockPos pos) { return true; }
-        @Override public BlockState getBlockState(BlockPos pos) { return Blocks.AIR.defaultBlockState(); }
+        void door(BlockState lower) {
+            blocks = Map.of(BlockPos.ZERO, lower, BlockPos.ZERO.above(),
+                    lower.hasProperty(DoorBlock.HALF)
+                            ? lower.setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER) : lower);
+        }
+        @Override public boolean isLoaded(BlockPos pos) { return !unloaded; }
+        @Override public BlockState getBlockState(BlockPos pos) {
+            return blocks == null ? Blocks.AIR.defaultBlockState()
+                    : blocks.getOrDefault(pos, Blocks.AIR.defaultBlockState());
+        }
     }
     private static Field field(Class<?> owner, String name) throws Exception {
         for (Class<?> type = owner; type != null; type = type.getSuperclass()) {

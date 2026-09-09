@@ -305,7 +305,7 @@ final class SemanticBuildSupplyCompanionTask
         int consumable = 0;
         Map<Item, Integer> remaining = ledger(true);
         for (BuildTaskRecord.Target target : ordered) {
-            if (matches(target)) continue;
+            if (constructionMatches(target)) continue;
             int cost = target.materialCount();
             if (cost <= 0) continue;
             int have = simulated.getOrDefault(target.item(), 0);
@@ -325,14 +325,19 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private Map<Item, Integer> ledger(boolean onlyOutstanding) {
-        // 完整账算全部目标，剩余账跳过当前已匹配的格子；清空和自动生成的另一半不重复算材料。
+        // 剩余材料账跳过施工时可复用的方块；重要属性仍由子任务收尾，不为调整状态另取替换材料。
         Map<Item, Integer> result = new LinkedHashMap<>();
         for (BuildTaskRecord.Target target : activePlan.targets) {
-            if (onlyOutstanding && matches(target)) continue;
+            if (onlyOutstanding && constructionMatches(target)) continue;
             int count = target.materialCount();
             if (count > 0) result.merge(target.item(), count, Integer::sum);
         }
         return result;
+    }
+
+    private boolean constructionMatches(BuildTaskRecord.Target target) {
+        return player.level().isLoaded(target.pos())
+                && target.constructionMatches(player.level().getBlockState(target.pos()));
     }
 
     private boolean matches(BuildTaskRecord.Target target) {
