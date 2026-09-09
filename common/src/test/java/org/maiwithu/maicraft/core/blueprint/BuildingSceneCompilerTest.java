@@ -7,7 +7,7 @@ import com.google.gson.JsonParser;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Geometry, material identity and Boolean scope must survive the mesh-to-block boundary. */
+/** 检查模型变成方块后，墙厚、开窗、独立玻璃、后写材质和两种坐标旋转都保持预期；也验证非法模型被拒绝。 */
 public final class BuildingSceneCompilerTest {
     public static void main(String[] args) {
         JsonObject scene = scene(); scene.addProperty("name", "Window wall"); String original = scene.toString();
@@ -19,6 +19,7 @@ public final class BuildingSceneCompilerTest {
         check(original.equals(scene.toString()), "compiler mutated the editable source model");
         check(compiled.equals(BuildingSceneCompiler.compile(scene)), "compilation must be deterministic");
 
+        // 往刚挖出的窗洞里加入独立玻璃，再交换对象顺序，确认开窗不会把别的对象一起擦掉。
         JsonObject glass = mesh("Glass", "glass", "[2.5,-0.5,2]", "[3,1,2]");
         scene.getAsJsonArray("objects").add(glass);
         Map<String, JsonObject> filled = cells(BuildingSceneCompiler.compile(scene));
@@ -34,6 +35,7 @@ public final class BuildingSceneCompilerTest {
         check(winner.get("block_id").getAsString().equals("minecraft:spruce_log"), "later solid must win overlaps without palette substitution");
         check(winner.getAsJsonObject("properties").get("axis").getAsString().equals("z"), "explicit material properties changed");
 
+        // 同一盒子分别按 Blender 和游戏的竖直轴旋转；只改变几何，木头的显式轴向仍按世界坐标解释。
         JsonObject rotated = mesh("Roof", "trim", "[3,2,1]", "[4,2,2]");
         rotated.add("rotation_euler", JsonParser.parseString("[0,0,1.5707963267948966]"));
         JsonArray objects = new JsonArray(); objects.add(rotated); scene.add("objects", objects);
@@ -50,6 +52,7 @@ public final class BuildingSceneCompilerTest {
         rotated.add("location", JsonParser.parseString("[0.5,-128.5,0.5]"));
         check(cells(BuildingSceneCompiler.compile(scene)).containsKey("[0,0,128]"), "Blender face inversion rejected a valid edge voxel");
 
+        // 依次检查未知坐标系、多余字段、不对齐网格、斜转、小数尺寸、极大数字、坏引用和超限场景。
         rejects(s -> s.addProperty("coordinate_system", "guess"));
         rejects(s -> s.getAsJsonArray("objects").get(0).getAsJsonObject().addProperty("scale", 2));
         rejects(s -> s.getAsJsonArray("objects").get(0).getAsJsonObject().add("location", JsonParser.parseString("[0,0,0]")));

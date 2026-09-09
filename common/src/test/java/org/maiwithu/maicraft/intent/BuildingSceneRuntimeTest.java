@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.core.blueprint.BuildingSceneExport;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 
-/** The real semantic entry accepts model geometry while preserving exact material/state requirements. */
+/** 检查模型目标能经过真实语义校验，保持世界锚点、指定材料、精确状态和导出内容；不会在游戏里实际施工。 */
 public final class BuildingSceneRuntimeTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -47,11 +47,13 @@ public final class BuildingSceneRuntimeTest {
                 {"blocks":[{"offset":[0,0,0],"block_id":"minecraft:snow","properties":{"layers":"7"}}]}
                 """).getAsJsonObject();
         var exact = BuildingSceneAdapter.buildArguments(explicit, new Goal.WorldPosition(0, 64, 0, "minecraft:overworld"), new JsonObject());
+        // 这里只检查最终七层雪与一层雪不能混同，没有验证从第一层逐次放到第七层的执行过程。
         var snow = BuildTool.resolvedTargets(exact.getAsJsonArray("ops"), true).getFirst();
         check(snow.exactProperties().contains("layers") && !snow.matchesExactProperties(Blocks.SNOW.defaultBlockState()), "authored layers are part of completion verification");
         var structure = BuildingSceneExport.structure(blueprint);
         check(structure.getList("blocks", net.minecraft.nbt.Tag.TAG_COMPOUND).size() == 6
                 && structure.getIntArray("maicraft_offset")[2] == -1, "NBT export retains all cells and origin translation");
+        // 用临时目录分别导出 NBT 和 JSON，再读回比较；另检查树叶的防腐烂默认值在两种导出中一致。
         var directory = java.nio.file.Files.createTempDirectory("maicraft-scene-export-");
         String id = java.util.UUID.randomUUID().toString();
         var file = BuildingSceneExport.write(directory, id, blueprint, "nbt");

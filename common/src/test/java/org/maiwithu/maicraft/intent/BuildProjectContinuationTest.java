@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Disk reconstruction keeps the reviewed site/palette after cancellation and altered world progress. */
+/** 保存并恢复固定施工单，检查位置、材质、状态、保护标签和取消后的续建编号不丢失；不实际执行施工。 */
 public final class BuildProjectContinuationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -50,6 +50,7 @@ public final class BuildProjectContinuationTest {
         check(actual.getFirst().pos().equals(new BlockPos(143, 70, -91)), "current-place movement relocated the frozen site");
         check(actual.getFirst().desiredState().getValue(BlockStateProperties.HORIZONTAL_FACING) == Direction.WEST,
                 "stair orientation was lost");
+        // 此处验证精确雪层数的最终比较，未走逐次叠加放置和中途备料的完整流程。
         check(actual.get(1).matches(Blocks.SNOW.defaultBlockState().setValue(BlockStateProperties.LAYERS, 4))
                         && !actual.get(1).matches(Blocks.SNOW.defaultBlockState()),
                 "authored non-directional state must remain exact");
@@ -69,7 +70,7 @@ public final class BuildProjectContinuationTest {
         normalizedState.get(0).getAsJsonObject().getAsJsonObject("properties").addProperty("waterlogged", "true");
         expectFailure(() -> BuildProjectTargets.decode(normalizedState));
 
-        // The supply coordinator may choose its concrete palette once, before review. Save that version under the same id.
+        // 供料在确认设计前可确定一次具体材料；共享执行上下文后，应把同一个工程编号更新成这份实际料单。
         JsonArray boundOps = JsonParser.parseString("""
                 [{"op":"set","block_id":"minecraft:birch_planks","x":143,"y":70,"z":-91}]
                 """).getAsJsonArray();
@@ -98,7 +99,7 @@ public final class BuildProjectContinuationTest {
         check(!snapshot.steps().get(1).parameters().has("material_policy")
                         && snapshot.steps().get(1).parameters().has("protected_labels"),
                 "continuation must keep protection while removing semantic replanning inputs");
-        // A completely new semantic task can use this id even though the former task remains cancelled.
+        // 旧任务已经取消，新任务仍可引用留下的工程编号；取消任务不会删除施工设计。
         check(new BuildProjectStore(new StateIdentity(world, directory)).load(
                 snapshot.steps().get(1).parameters().get("project_id").getAsString(), dimension).has("project_targets"),
                 "terminal task prevented explicit continuation of its retained building");

@@ -7,13 +7,14 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 
-/** Corrupt inputs must fail before allocation/expansion; valid sparse palettes and mod names survive. */
+/** 检查坏尺寸、材料下标、数据截断、路径越界和读取大小上限；有效稀疏编号与模组名称应保留。 */
 public final class BlueprintImportTest {
     public static void main(String[] args) {
         expectFailure(() -> BlueprintFormats.checkedVolume(0, 1, 1));
         expectFailure(() -> BlueprintFormats.checkedVolume(Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE));
         expectFailure(() -> BlueprintFormats.checkedVolume(Integer.MIN_VALUE, 1, 1));
 
+        // 材料编号即使很大也可重排成小下标；example:chair 只是名字以 air 结尾，不应被误删成空气。
         CompoundTag sparse = schem(1, Integer.MAX_VALUE, "example:chair",
                 new byte[]{-1, -1, -1, -1, 7});
         CompoundTag converted = BlueprintFormats.fromSchem(sparse);
@@ -21,6 +22,7 @@ public final class BlueprintImportTest {
                 || !converted.getList("palette", Tag.TAG_COMPOUND).getCompound(0).getString("Name").equals("example:chair")) {
             throw new AssertionError("Sparse palette ids or a mod block ending in air were discarded");
         }
+        // 这里只验证文件结构，没有把模组名字放进游戏注册表；它通过不能证明之后加载未知方块也会报错。
         BlueprintFiles.validate(converted);
 
         expectFailure(() -> BlueprintFormats.fromSchem(schem(1, 0, "minecraft:stone", new byte[]{-128})));
@@ -39,7 +41,7 @@ public final class BlueprintImportTest {
         regions.remove("two");
         regions.put("one", region(Integer.MIN_VALUE, 1, 1));
         expectFailure(() -> BlueprintFormats.fromLitematic(root));
-        regions.put("one", region(1, 1, 1)); // Missing BlockStates must not silently become air.
+        regions.put("one", region(1, 1, 1)); // 缺少打包方块数据应报错，不能补成一张空图。
         expectFailure(() -> BlueprintFormats.fromLitematic(root));
 
         CompoundTag backwards = region(-2, 1, 1);

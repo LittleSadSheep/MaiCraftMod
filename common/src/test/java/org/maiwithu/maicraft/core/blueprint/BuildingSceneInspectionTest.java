@@ -5,7 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-/** Inspection must expose the actual source objects and transformed bounds without losing cutters. */
+/** 用十二个对象检查十个一页的分页、开孔对象隐藏、坐标范围和原模型不被改写；查看信息不等于施工验收。 */
 public final class BuildingSceneInspectionTest {
     public static void main(String[] args) {
         JsonObject scene = JsonParser.parseString("""
@@ -26,6 +26,7 @@ public final class BuildingSceneInspectionTest {
         check(first.getAsJsonArray("objects").size() == 10 && first.get("has_more").getAsBoolean(), "first page must contain ten objects");
         check(last.getAsJsonArray("objects").size() == 2 && !last.get("has_more").getAsBoolean(), "last page lost objects");
         check(BuildingSceneInspection.sceneInfo(scene, Integer.MAX_VALUE).getAsJsonArray("objects").isEmpty(), "page multiplication overflowed");
+        // 被修改器引用的对象即使没写 cutter 角色也应只用于开孔，但查看单对象时仍要返回它的信息。
         JsonObject cutter = BuildingSceneInspection.objectInfo(scene, "Object11");
         check(!cutter.get("visible").getAsBoolean(), "referenced cutter must be hidden even without explicit cutter role");
         check(cutter.get("type").getAsString().equals("MESH") && cutter.get("primitive").getAsString().equals("cube"), "primitive alias did not normalize");

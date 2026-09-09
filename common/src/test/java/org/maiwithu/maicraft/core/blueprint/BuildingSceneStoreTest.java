@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.intent.Goal;
 
 /** Saved revisions keep object identity and the original site across edits and process reloads. */
 public final class BuildingSceneStoreTest {
+    // 在临时目录保存并重开模型，检查外部修改不改变已存版本、局部编辑保留锚点，并拒绝跨世界、跨维度和非法编辑。
     public static void main(String[] args) throws Exception {
         Path root = Files.createTempDirectory("building-scene-store-");
         String world = "a".repeat(64), dimension = "minecraft:overworld";
@@ -51,6 +52,7 @@ public final class BuildingSceneStoreTest {
                 "{\"remove_objects\":[\"wall\"],\"objects\":[{\"name\":\"wall\"}]}"})
             rejects(() -> BuildingSceneStore.validateEdits(json(invalid)));
         check(store.load(next.sceneId(), dimension).scene().equals(next.scene()), "failed edits preserve both revisions");
+        // 把测试文件故意加到上限之外，确认读取会拒绝；只影响这个测试创建的临时目录。
         Files.write(source, new byte[4 * 1024 * 1024 + 1]);
         rejects(() -> store.load(first.sceneId(), dimension));
         System.out.println("BuildingSceneStoreTest: immutable world-bound revisions passed");
