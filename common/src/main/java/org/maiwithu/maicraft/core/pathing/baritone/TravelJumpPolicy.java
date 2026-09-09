@@ -20,20 +20,9 @@ import net.minecraft.world.phys.Vec3;
 import java.util.List;
 
 /**
- * 赶路跑跳 —— MaiCraft {@code SprintPolicy} 在 Baritone 执行层的移植。
- *
- * <p>判据是"路线已经承诺了一段完整直跑道,并且能承受落地伤害":投影覆盖的每个路径
- * 原语都必须是同高同向平走,物理走廊的每一列也必须在可承受落点带(抬升一格/平/
- * 落一格)里有干燥实心支撑。于是终点前、拐弯前、落差前、液体或立柱前都会自然
- * 收步,不会为了看起来快而飞出选定路线。恰好处于两格高顶头走廊(树下、隧道)时
- * 投影自动缩短为顶头连跳,且只使用路线本来就经过的顶盖。空中不指望转向:身体沿
- * 出发方向飞,落点偏出路径时由 Baritone 的 splice 逻辑重新对齐。</p>
- *
- * <p>平走接上台的直跳由 {@link #ascendLaunchReady} 提供起跳时机:物理投影证明这一跳
- * 能落上平台,而不是走到面前卡住了再补跳。</p>
- *
- * <p>与原实现的差异:Baritone 的移动原语在空中也持续按住前进(splice 逻辑按真实脚位
- * 对齐路径),因此不移植 travel-jump 的空中相位与压舵状态。</p>
+ * 决定赶路时能不能顺势跑跳，以及靠近一格高平台时何时提前跳。
+ * 先按当前速度估计会飞多远，再检查已选路线够不够直、会不会撞头、途中有没有可承受的落点。
+ * 它只批准起跳，空中的按键和路线进度仍由现用导航执行。
  */
 public final class TravelJumpPolicy {
 
@@ -45,9 +34,7 @@ public final class TravelJumpPolicy {
     private TravelJumpPolicy() {}
 
     /**
-     * 这一 tick 是否应该在疾跑中起跳。调用点在 Baritone 已决定疾跑之后
-     * ({@code shouldSprintNextTick} 的 {@code requested} 分支),因此饥饿、疾跑许可
-     * 与前进动量都是调用方已验证的前置条件;这里只裁决"这一跳落不落得下去"。
+     * 调用方已经允许疾跑；这里再检查站稳、当前没有点击操作、前进速度和整段起落空间，全部通过才跳。
      */
     public static boolean shouldTravelJump(Baritone baritone, List<IMovement> movements,
                                            int pathPosition, java.util.function.Consumer<List<IMovement>> verifiedRunway) {
@@ -65,9 +52,7 @@ public final class TravelJumpPolicy {
         if (!isFlatRunwayMovement(current)) {
             return false;
         }
-        // 交互格全交给走廊与点击门裁决:待挖/待放/待挤目标只在身体真的停下来
-        // 操作(本 tick 正在点击)时阻止起跳;走廊扫描已验证飞跃的落点,跳过去
-        // 比停下来挖一格或搭一格更快。
+        // 这一刻正在挖掘或右键操作时不跳；将来路线上的交互格，继续由后面的通行与落点检查判断。
         if (baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_LEFT)
                 || baritone.getInputOverrideHandler().isInputForcedDown(Input.CLICK_RIGHT)) {
             return false;
@@ -78,8 +63,7 @@ public final class TravelJumpPolicy {
             return false;
         }
 
-        // 起跳只在前进动量已经建立后才有意义:物理判据而非计时器——新路线先在
-        // 普通疾跑下加速,第一个速度指向既定边缘的落地刻才变得 eligible。
+        // 先沿路线加速，有向前的速度后才考虑跑跳。
         Vec3 velocity = player.getDeltaMovement();
         double forwardSpeed = velocity.x * heading.x() + velocity.z * heading.z();
         if (forwardSpeed <= 0.0) {
@@ -90,8 +74,7 @@ public final class TravelJumpPolicy {
             return false;
         }
 
-        // 顶头走廊:短投影只在顶盖真覆盖整段短走廊时成立——中途没了顶盖就按
-        // 敞空投影(撞上中途顶盖只会提前落在已验证列上,反过来则会飞出走廊)。
+        // 只有低顶盖连续覆盖这一跳时，才按撞头后的短跳计算；中途顶盖消失就按完整跳距预留落点。
         BlockPos src = current.getSrc();
         BlockPos takeoff = ctx.playerFeet();
         boolean headHit = false;
@@ -111,8 +94,7 @@ public final class TravelJumpPolicy {
             return false;
         }
 
-        // 空中把身体保持在一格宽的走廊里:当前的横向偏移,加上原版空气阻力能耗散的
-        // 横向速度,都必须留在出发列的半格余量之内。
+        // 已有侧向偏移加上起跳后的侧向惯性，不能把身体推出这一格宽的通道。
         double relativeX = player.getX() - (src.getX() + 0.5D);
         double relativeZ = player.getZ() - (src.getZ() + 0.5D);
         double lateralOffset = Math.abs(-heading.z() * relativeX + heading.x() * relativeZ);
@@ -125,9 +107,7 @@ public final class TravelJumpPolicy {
             return false;
         }
 
-        // 跳跃可达走廊:从玩家当前格沿移动方向逐列验证——投影距离已从实时速度
-        // 出发,余量只需覆盖身体半宽与落点方差。任何一列在可承受落点带里没有
-        // 干燥安全支撑(深洞、流体、立柱),这一跳就可能摔进它——不跳,走过去再说。
+        // 按预计跳距加上身体宽度和余量检查前方路线；任何可能经过的列缺少安全落点就取消跑跳。
         double reach = projection.forwardDistance() + player.getBbWidth() * 0.5 + 0.25;
         int runwayMovements = (int) Math.ceil(reach / heading.stepLength());
         if (!routeCommitsStraightRunway(
@@ -146,9 +126,7 @@ public final class TravelJumpPolicy {
     }
 
     /**
-     * The travel jump may only consume cells that the selected path already owns as a straight,
-     * level runway. This is route-derived rather than a magic "long trip" distance: the physical
-     * jump projection itself decides how many committed movements are required.
+     * 这一跳覆盖的路线段必须首尾相接、方向相同且高度不变；前方就要转弯或到终点时不能提前跳过头。
      */
     private static boolean routeCommitsStraightRunway(
             List<IMovement> movements, int pathPosition, Vec3i direction, int columns) {
@@ -176,10 +154,7 @@ public final class TravelJumpPolicy {
     }
 
     /**
-     * 平走→上台直跳的起跳时机:从当前实时身位与速度投影,这一 tick 起跳能否不先
-     * 撞上台沿竖直面,并落上平台或其身后已验证的落格。窗口随距离实时开合——
-     * 起跳点在台前一格半左右,不是走到台沿才跳。返回 false 表示窗口未开(或已
-     * 错过);普通上升移动保持活跃,执行它原地的近距离跳。
+     * 估计现在起跳能否越过平台侧面，并落在平台或紧接着的平走段上；太早、太晚或飞过落点都不批准。
      */
     public static boolean ascendLaunchReady(Baritone baritone, MovementTraverse current,
                                             MovementAscend next, IMovement nextNext) {
@@ -209,8 +184,7 @@ public final class TravelJumpPolicy {
         double targetCenter = direction.getX() * (next.getDest().getX() + 0.5 - player.getX())
                 + direction.getZ() * (next.getDest().getZ() + 0.5 - player.getZ());
         double firstBodyOverlap = targetCenter - 0.5 - player.getBbWidth() * 0.5;
-        // 落点跑道:上台后接平走则验证到平走终点;接上台(台阶连跳)或其它移动时
-        // 只验证当前平台格——足够裁决这一跳能不能落上去。
+        // 平台后面紧接平走时把该终点也算作可落范围；其他后续动作只计算本次平台。
         BlockPos landingEnd = nextNext instanceof MovementTraverse landing
                 ? landing.getDest() : next.getDest();
         double lastValidFeet = direction.getX()
@@ -231,16 +205,14 @@ public final class TravelJumpPolicy {
             boolean descending = verticalSpeed <= 0.0;
 
             if (!enteredHighPlatform && horizontal >= firstBodyOverlap) {
-                // 组合移动可能在某一 tick 内落到顶面上;但若该 tick 竖直扫描的两端
-                // 都够不到一格高,身体撞的是侧面——动量窗口已经错过了。
+                // 身体已经碰到平台边缘，却还没升到一格高，撞到的就是侧面。
                 if (Math.max(height, nextHeight) < 1.0) {
                     return false;
                 }
                 enteredHighPlatform = true;
             }
             if (enteredHighPlatform && descending && height >= 1.0 && nextHeight <= 1.0) {
-                // 碰撞解算在本组合移动 tick 的 pre-horizontal 身位与顶面相遇;要求该
-                // 身位属于已验证的两格落条。
+                // 落到平台高度时，按本次水平位移前的位置检查是否还在允许的落地范围内。
                 return previousHorizontal < lastValidFeet;
             }
             if (horizontal >= lastValidFeet || nextHeight <= 0.0) {
@@ -255,9 +227,7 @@ public final class TravelJumpPolicy {
     }
 
     /**
-     * 这一列上是否存在可承受的落点。落点带是 [抬升一格, 平, 落一格]:坠落距离
-     * = 投影弧顶 - 落点高度,预计落地后生命值必须大于零。要求落点两格可穿行、
-     * 干燥、不是危险格(仙人掌/岩浆块/火/浆果)、支撑是实心整块。
+     * 分别检查高一格、同高度和低一格的落点；身体要放得下、地面要干燥结实，而且估计落地后还能活着。
      */
     private static boolean survivableColumn(IPlayerContext ctx, BlockPos column, double apexHeight,
                                             FallDamageBudget fallBudget) {
@@ -338,7 +308,9 @@ public final class TravelJumpPolicy {
         return true;
     }
 
-    /** Every possible diagonal corner and landing column stays inside the selected dry runway. */
+    /**
+     * 直行检查落点列；斜行还检查身体可能擦过的两个角，不能从危险角上斜穿过去。
+     */
     private static boolean safeFlightMovement(
             IPlayerContext ctx, IMovement movement, double apexHeight, boolean headHit, FallDamageBudget fallBudget) {
         if (!safeFlightColumn(ctx, movement.getDest(), apexHeight, headHit, fallBudget)) return false;
@@ -370,10 +342,7 @@ public final class TravelJumpPolicy {
     }
 
     /**
-     * 从当前路线对齐速度出发的保守原版跳跃投影。竖直飞行时间从玩家权威的
-     * 跳跃/重力属性积分;水平距离含疾跑跳冲量与按住前进的空中控制。实心顶盖
-     * 截断第一次向上碰撞,自然缩短跳步。同时记录弧顶高度,用于落点带的
-     * 坠落距离裁决。
+     * 用当前跳跃强度和重力逐刻估计高度、向前距离和侧向惯性。低顶盖会截断上升，超过四十刻仍不落地就放弃估算。
      */
     private static JumpProjection projectJump(
             LocalPlayer player, HorizontalHeading heading, boolean headHit) {
@@ -394,7 +363,7 @@ public final class TravelJumpPolicy {
         double drag = 1.0;
         int airborneTicks = 0;
         do {
-            // 局部物理飞行窗防止极小的模组重力把一个客户端 tick 变成无界数值循环。
+            // 重力特别小时也只算四十刻，避免一次导航更新在这里耗时过长。
             if (airborneTicks >= MAX_PROJECTED_AIRBORNE_TICKS) {
                 return null;
             }
@@ -417,7 +386,9 @@ public final class TravelJumpPolicy {
         return new JumpProjection(forwardDistance, airDragSum, apex);
     }
 
-    /** LivingEntity#getJumpPower 同源的权威跳跃强度组成。 */
+    /**
+     * 把跳跃属性、脚下方块的跳跃系数和跳跃提升效果合起来，得到起跳时向上的速度。
+     */
     private static double jumpVerticalSpeed(LocalPlayer player) {
         float bodyJumpFactor = player.level().getBlockState(player.blockPosition())
                 .getBlock().getJumpFactor();
@@ -431,9 +402,7 @@ public final class TravelJumpPolicy {
     }
 
     /**
-     * 当前速度加上原版的 0.2 疾跑跳冲量。物理旋转桥会在 jumpFromGround 内把
-     * 可见的平滑相机 yaw 临时替换成 Baritone 的路线朝向，所以投影也必须使用同一个
-     * 路线坐标系；读 player.getYRot() 会把镜头尚未转完的误差重新带回落点判断。
+     * 在当前速度上加沿路线方向的疾跑跳冲量；使用实际控制方向，避免尚未转完的显示镜头影响估计。
      */
     private static Vec3 sprintJumpLaunchVelocity(LocalPlayer player, Vec3i direction) {
         HorizontalHeading heading = HorizontalHeading.of(direction);

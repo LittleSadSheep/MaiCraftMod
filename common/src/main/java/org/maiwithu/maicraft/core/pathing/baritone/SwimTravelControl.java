@@ -2,7 +2,9 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 
 import org.maiwithu.maicraft.core.pathing.util.SwimAirBudget;
 
-/** Physical swim phases shared by the live route controller and its deterministic regressions. */
+/**
+ * 记住当前在潜水、正常游泳、上浮还是等气补满，并给出向上、向下、疾跑和抬头的意图；本类不读取地图。
+ */
 public final class SwimTravelControl {
     enum Phase { OFF, DIVING, CRUISING, SURFACING, REFILL }
 
@@ -21,8 +23,7 @@ public final class SwimTravelControl {
             return;
         }
         if (!inWater) {
-            // An upward stroke can briefly lift the whole bounding box out of water. That is
-            // still the same recovery episode, not a landing or permission to dive again.
+            // 游泳时短暂跃出水面不算上岸；还没补满气就继续等，不能立刻再潜下去。
             if (phase != Phase.OFF) phase = air < maxAir ? Phase.REFILL : Phase.OFF;
             return;
         }
@@ -35,8 +36,7 @@ public final class SwimTravelControl {
                 && (air <= ascentReserve || !deepRoute || approachingShore)) {
             phase = Phase.SURFACING;
         } else if (phase == Phase.DIVING && swimming) {
-            // Eye submersion precedes vanilla's swimming pose. Releasing the dive on that
-            // earlier observation used to raise upright eyes straight back out of the water.
+            // 眼睛入水还不够，原版真正切成游泳姿势后才结束主动下潜。
             phase = Phase.CRUISING;
         } else if (phase == Phase.CRUISING && !swimming) {
             phase = Phase.DIVING;
@@ -44,8 +44,7 @@ public final class SwimTravelControl {
         if (phase == Phase.OFF && deepRoute && !approachingShore && air > ascentReserve) {
             phase = swimming ? Phase.CRUISING : Phase.DIVING;
         }
-        // A deliberate underwater route may end at a depth-specific goal. The swim pose can
-        // lower a surface route, but must never lift that underwater route to a different Y.
+        // 路线本来要求在深水处到达时，不能为了贴近水面而把游泳目标抬高。
         targetY = Math.min(routeY + 0.1,
                 waterSurface - eyeHeight - (phase == Phase.DIVING ? 0.15 : 0.60));
     }
@@ -68,12 +67,16 @@ public final class SwimTravelControl {
     boolean recovering() { return phase == Phase.SURFACING || phase == Phase.REFILL; }
     boolean sprinting() { return phase == Phase.DIVING || phase == Phase.CRUISING; }
     Phase phase() { return phase; }
-    /** Structural path moves release depth tracking, but cannot erase unfinished air recovery. */
+    /**
+     * 路线换成台阶等非平游动作时停止跟踪深度；已经开始且尚未完成的换气继续保留。
+     */
     void releaseRoute(boolean inWater, boolean onGround, int air, int maxAir) {
         if ((!inWater && onGround) || air >= maxAir || !recovering()) phase = Phase.OFF;
     }
 
-    /** All route segments for one physical body share recovery; a respawn/world change does not. */
+    /**
+     * 同一玩家、同一世界的路线段共用换气进度；重生或换世界时重新开始，避免继承旧身体的状态。
+     */
     public static final class BodyState {
         private Object body;
         private Object world;

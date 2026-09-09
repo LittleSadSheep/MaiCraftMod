@@ -17,7 +17,9 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 import org.maiwithu.maicraft.core.pathing.util.SwimAirBudget;
 
-/** Actual swim controller transitions and Minecraft block/fluid geometry, without a game launch. */
+/**
+ * 检查潜水姿势、缺氧上浮、补满气后再走、换段保留换气和水面两层空间。测试没有覆盖更深处的含水障碍。
+ */
 public final class SubmergedWaterTravelPolicyTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();

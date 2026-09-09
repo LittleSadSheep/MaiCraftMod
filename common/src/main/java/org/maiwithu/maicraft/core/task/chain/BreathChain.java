@@ -158,6 +158,7 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         for (int i = 0; i < CEILING_PROBE; i++) {
             p = p.above();
             BlockState s = level.getBlockState(p);
+            // 当前含水方块也直接跳过，因此这里会漏掉含水半砖形成的实体顶盖。
             if (s.getFluidState().is(FluidTags.WATER)) continue;
             return !breathable(level, p, s);
         }
@@ -203,6 +204,7 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
                 BlockPos n = cell.relative(d);
                 if (Math.abs(n.getX() - start.getX()) > AIR_SEARCH_RADIUS
                         || Math.abs(n.getZ() - start.getZ()) > AIR_SEARCH_RADIUS) continue;
+                // 扩展邻格只认水，没有检查身体能否穿过；找到透气口不等于已经证明能游到那里。
                 if (!level.getFluidState(n).is(FluidTags.WATER)) continue;
                 if (seen.add(n.asLong())) {
                     queue.add(n);

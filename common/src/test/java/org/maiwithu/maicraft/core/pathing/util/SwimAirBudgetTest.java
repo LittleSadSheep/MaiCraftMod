@@ -2,7 +2,9 @@ package org.maiwithu.maicraft.core.pathing.util;
 
 import org.maiwithu.maicraft.core.task.survival.SurvivalDecisions;
 
-/** Air is reserved for the actual ascent rather than surfacing after a fixed three-second dip. */
+/**
+ * 检查深水要多留氧气、耗气加快要扩大预留量，以及换气必须等补满或真正上岸。使用数值样例，不运行真实游泳。
+ */
 public final class SwimAirBudgetTest {
     public static void main(String[] args) {
         int shallow = SwimAirBudget.requiredAirForAscent(1.0, 1.0);

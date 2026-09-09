@@ -16,7 +16,10 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.pathing.util.SwimAirBudget;
 
-/** Follows the selected water route in swimming pose, surfacing for air or the next shore. */
+/**
+ * 沿已选路线控制水下游泳，快缺氧或快到岸边时上浮；路线换段后仍接着完成这一口气的恢复。
+ * 这里读取现场地形并选方向，具体潜下去、游稳、浮上来和换气的阶段由 SwimTravelControl 保存。
+ */
 public final class SubmergedWaterTravelPolicy {
     private final IPlayerContext context;
     private final IPath path;
@@ -34,7 +37,9 @@ public final class SubmergedWaterTravelPolicy {
         this.airBudget = control.airBudget;
     }
 
-    /** Update before ordinary path membership checks, which otherwise reject the dive's Y offset. */
+    /**
+     * 先更新游泳状态，再检查玩家是否还在路线中；游泳时身体比路线节点低，不能因此误判已经走偏。
+     */
     public void update(int pathPosition) {
         LocalPlayer player = context.player();
         controlledMovement = null;
@@ -77,7 +82,9 @@ public final class SubmergedWaterTravelPolicy {
         return control.active() && controlledMovement == movement;
     }
 
-    /** Permit the intentional depth offset while the same horizontal route corridor is owned. */
+    /**
+     * 检查路线进度时暂用路线的高度；保留玩家真实横向位置，也不移动玩家身体。
+     */
     public BetterBlockPos routeFeet(BetterBlockPos physicalFeet) {
         return controlledMovement == null || !control.active() ? physicalFeet
                 : new BetterBlockPos(physicalFeet.getX(), routeY, physicalFeet.getZ());
@@ -90,7 +97,9 @@ public final class SubmergedWaterTravelPolicy {
                         && context.player().getAirSupply() >= context.player().getMaxAirSupply());
     }
 
-    /** At a shoreline endpoint, rise instead of swimming past the selected movement. */
+    /**
+     * 换气途中可以继续接近这一段的终点；到达后先停下等气补满，再让路线继续。
+     */
     public boolean movingForward() {
         return controlledMovement != null
                 && !(control.recovering() && atDestination(controlledMovement));
@@ -102,6 +111,7 @@ public final class SubmergedWaterTravelPolicy {
     }
 
     public boolean active() { return control.recovering() || (control.active() && controlledMovement != null); }
+    // 返回真会让尚未启动的换气自救暂不接管，因此上浮出口的判断直接影响自救能否启动。
     public boolean managesAir() { return active() && breathingEscapeKnown; }
     public boolean sprinting() { return control.sprinting(); }
     public int verticalIntent() { return control.verticalIntent(); }
@@ -145,6 +155,7 @@ public final class SubmergedWaterTravelPolicy {
         return findWaterSurface(context.world(), route);
     }
 
+    // 当前沿水一直找最上层，含水半砖也算水；这一步没有证明中间每一格都能让身体穿过。
     static BlockPos findWaterSurface(BlockGetter world, BlockPos route) {
         BlockPos cursor = route;
         if (!world.getFluidState(cursor).is(FluidTags.WATER)) cursor = cursor.below();
@@ -162,6 +173,7 @@ public final class SubmergedWaterTravelPolicy {
                 && !EmbeddedBaritonePolicy.forbidsBody(surface.below());
     }
 
+    // 这里只查水面附近两格能否游动、上方能否呼吸及脚下危险物；更深处到水面的碰撞不在检查范围内。
     static boolean safeSurfaceColumn(BlockGetter world, BlockPos surface) {
         BlockPos lower = surface.below();
         BlockPos above = surface.above();
