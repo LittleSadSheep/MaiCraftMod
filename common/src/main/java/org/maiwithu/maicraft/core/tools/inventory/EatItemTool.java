@@ -13,8 +13,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 吃/喝背包里的东西。<b>异步</b> —— 咀嚼要三十二刻,一口一口吃到饱可能更久,
- * 占着一轮对话不合理;完事发 task_finished。
+ * 内部进食工具：按物品 ID 创建一次进食任务，游戏之后逐刻完成拿取和使用。
+ * 这里只提交任务；是否真的吃掉，以及最终血量和饥饿值，由 EatCompanionTask 返回。
  */
 public final class EatItemTool implements MaiCraftTool {
 
@@ -47,6 +47,7 @@ public final class EatItemTool implements MaiCraftTool {
 
     @Override
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
+        // 参数转成进食任务单；被总任务调用时由总任务接住，直接调用时则替换当前任务。
         Args a = GSON.fromJson(args, Args.class);
         setTask(companion, impl.eatItem(a.item_id(), ctx(toolCallId, companion)), args, reply);
     }

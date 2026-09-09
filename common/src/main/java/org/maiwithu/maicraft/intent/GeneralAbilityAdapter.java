@@ -34,9 +34,9 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Compiles high-level, generally useful play intents into the existing body tools.
- * Runtime entity ids, click positions and inventory slots never cross the semantic
- * boundary: this adapter derives them from the currently loaded client world.
+ * 把战斗、跟随、吃东西、装备和交互等目标，转换成已经实现的具体工具调用。
+ * 例如调用者说“跟随张三”，这里从已加载的玩家中找到张三，再把他的游戏内编号交给跟随工具。
+ * 目标不明确或条件不够时，先给出问题，等调用者选择。
  */
 public final class GeneralAbilityAdapter {
 
@@ -64,7 +64,7 @@ public final class GeneralAbilityAdapter {
 
     private GeneralAbilityAdapter() {}
 
-    /** Registration surface for {@link AbilityAdapter}; no global state is installed here. */
+    /** 告诉上层这个类负责哪些能力；只是返回名单，不会在此刻启动任务。 */
     public static Set<String> abilities() {
         return ABILITIES;
     }
@@ -73,7 +73,7 @@ public final class GeneralAbilityAdapter {
         return ABILITIES.contains(ability);
     }
 
-    /** Package-local because {@link IntentAction} is deliberately an intent-runtime detail. */
+    /** 先拒绝直接指定鼠标点击、槽位等内部操作字段，再按能力名进入对应处理方法。 */
     static IntentAction adapt(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         JsonObject parameters = goal.parameters();
         for (String field : EXECUTION_FIELDS) {
@@ -101,6 +101,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction manageContainer(Goal goal) {
+        // 先分清要存入、取出还是让背包保留指定数量，再确定物品和容器，最后交给整理容器任务执行。
         JsonObject p = goal.parameters();
         String operation = lower(string(p, "operation"));
         if (operation == null || !Set.of("deposit", "withdraw", "balance").contains(operation)) {
@@ -136,6 +137,7 @@ public final class GeneralAbilityAdapter {
         }
         String tag = string(p, "tag");
         if (itemIds.isEmpty() == (tag == null)) {
+            // 物品 ID 和物品标签只能选一种；两种都没给或两种都给，都先询问。
             return decision(goal, "Provide exactly one item selector: item_id/item_ids, or tag.",
                     List.of(option("retry", "Describe the semantic item group once."),
                             option("cancel", "Cancel container management.")), null);
@@ -159,6 +161,7 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel container management.")), null);
         }
         if (count != null && targetCount != null) {
+            // “拿十个”和“拿到总共十个”不是同一件事，不能同时填写两种数量含义。
             return decision(goal, "count and target_count are different semantics; provide only one.",
                     List.of(option("retry", "Choose an amount to move or a final target count."),
                             option("cancel", "Cancel container management.")), null);
@@ -184,6 +187,7 @@ public final class GeneralAbilityAdapter {
                 || "area".equals(targetKind)) ? target.label() : null;
         boolean nearest = nearest(goal, p);
         if ("coordinates".equals(targetKind) || "prior_result".equals(targetKind)) {
+            // 当前这个入口只接受容器类型、记住的地点或就近选择，不接受前一步的位置结果。
             return decision(goal, "manage_container does not accept coordinates or prior menu details.",
                     List.of(option("retry", "Use block_id, a landmark, or nearest selection."),
                             option("cancel", "Cancel container management.")), null);
@@ -212,6 +216,7 @@ public final class GeneralAbilityAdapter {
         if (blockId != null) args.addProperty("block_id", blockId);
         if (landmark != null) args.addProperty("landmark_label", landmark);
         args.addProperty("selection", nearest ? "nearest" : "unique");
+        // 这里用前面综合判断出的 nearest；即使参数写 unique，目标中的 nearest 仍可能让它变成就近选择。
         args.addProperty("radius", integer(p, "radius",
                 org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord.DEFAULT_RADIUS,
                 1, org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord.MAX_RADIUS));
@@ -227,6 +232,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction findEntity(Goal goal) {
+        // 先把可接受的生物种类整理成去重名单；名字没注册就报告，不让底层按一个不存在的类型搜索。
         JsonObject p = goal.parameters();
         LinkedHashSet<String> requested = new LinkedHashSet<>();
         List<String> invalid = new ArrayList<>();
@@ -260,6 +266,7 @@ public final class GeneralAbilityAdapter {
         }
 
         String relation = lower(string(p, "relation"));
+        // 关系限定可以来自参数或目标描述，例如只找野生、无主或敌对生物；都没给时不限关系。
         if (relation == null && target != null) relation = lower(target.relation());
         if (relation == null) relation = "any";
         if (!Set.of("wild", "hostile", "unowned", "any").contains(relation)) {
@@ -288,6 +295,7 @@ public final class GeneralAbilityAdapter {
 
     private static void addEntityType(
             String raw, Set<String> requested, List<String> invalid) {
+        // 已注册的类型加入候选名单，不认识的名字集中记录，稍后一次告诉调用者。
         ResourceLocation id = ResourceLocation.tryParse(raw);
         if (id == null || !BuiltInRegistries.ENTITY_TYPE.containsKey(id)) {
             invalid.add(String.valueOf(raw));
@@ -297,6 +305,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction combat(Goal goal, LocalPlayer player) {
+        // 当前所有主动战斗入口都先要求 allow_harm；包括下面的 defend 分支。
         JsonObject p = goal.parameters();
         if (!bool(p, "allow_harm", false)) {
             return decision(goal,
@@ -309,6 +318,7 @@ public final class GeneralAbilityAdapter {
         String mode = lower(string(p, "mode"));
         EntitySelector selector = selector(goal, p);
         if (("defend".equals(mode) || "defence".equals(mode)) && selector.empty()) {
+            // 没点名敌人的防御交给 attack 自己找眼前威胁；点了名则继续按下面的目标选择规则处理。
             return new IntentAction.Tool("attack", "{}");
         }
         String selectorError = validateSelector(selector);
@@ -329,8 +339,10 @@ public final class GeneralAbilityAdapter {
             return ambiguousEntities(goal, player, "Several loaded entities match the combat target.", candidates);
         }
         List<Entity> selected = candidates.subList(0, Math.min(requested, candidates.size()));
+        // count 在战斗契约里是最多打几个，因此附近不足这个数时可以只选现有目标。
         List<Entity> risky = selected.stream().filter(GeneralAbilityAdapter::riskyHarmTarget).toList();
         if (!risky.isEmpty() && !bool(p, "confirm_risky_target", false)) {
+            // 玩家、宠物、有名字或非敌对生物要再确认一次；允许造成伤害还不等于确认要打这些对象。
             JsonObject facts = new JsonObject();
             facts.add("protected_or_non_hostile_candidates", entityFacts(player, risky));
             return decision(goal,
@@ -349,6 +361,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction follow(Goal goal, LocalPlayer player) {
+        // 开始前先找出唯一目标，或按明确的 nearest 选择最近一个；开始后由跟随任务持续追踪这个对象。
         JsonObject p = goal.parameters();
         EntitySelector selector = selector(goal, p);
         String error = validateSelector(selector);
@@ -374,6 +387,7 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction interact(
             Goal goal, LocalPlayer player, IntentRuntime runtime, boolean containerOnly) {
+        // “使用容器”在这里仅表示打开／使用；存取物品另走 manage_container，不在本方法里点击槽位。
         JsonObject p = goal.parameters();
         if (containerOnly && (p.has("transfer") || p.has("deposit") || p.has("withdraw"))) {
             return decision(goal,
@@ -392,11 +406,13 @@ public final class GeneralAbilityAdapter {
         EntitySelector selector = selector(goal, p);
         String blockId = blockId(goal, p);
         if (!selector.empty() && (blockId != null || exactBlockTarget(goal))) {
+            // 同时点名生物和方块时不能猜要用哪一个，先让调用者把目标说明白。
             return decision(goal, "The target names both an entity and a block. Which one should be used?",
                     List.of(option("retry", "Retry with exactly one semantic target kind."),
                             option("cancel", "Cancel interaction.")), null);
         }
         if (!selector.empty()) {
+            // 生物交互先找目标并检查指定物品；这个分支始终发起右键使用，不用于攻击。
             if (containerOnly) {
                 return decision(goal, "`use_container` currently opens loaded block containers, not entity inventories.",
                         List.of(option("replace_goal", "Use a block container target."),
@@ -430,6 +446,7 @@ public final class GeneralAbilityAdapter {
         }
         var hoe = !containerOnly && "till".equals(purpose) && itemId(p) == null
                 ? org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.tillingTool(player) : null;
+        // 要耕地但没指定工具时，Mod 自己找合适的锄；必要时先取到工具，再执行原交互。
         String selectedItem = hoe == null ? itemId(p) : hoe.itemId().toString();
         IntentAction interaction = interactBlock(goal, player, runtime, blockId, selectedItem, hoe != null && !hoe.carried());
         if (hoe == null) return interaction;
@@ -443,6 +460,7 @@ public final class GeneralAbilityAdapter {
     static IntentAction prepareUseTool(
             org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.UseTool tool,
             int carriedCount, boolean storage, IntentAction interaction) {
+        // 工具已带着，或交互本身还不能执行时，不另开取工具任务；否则把取工具插在交互前面。
         if (tool.carried() || !(interaction instanceof IntentAction.Tool || interaction instanceof IntentAction.Chain))
             return interaction;
         JsonObject args = new JsonObject();
@@ -452,6 +470,7 @@ public final class GeneralAbilityAdapter {
         sources.add("inventory"); sources.add("craft");
         if (storage) sources.add("storage");
         if (!tool.stockOnly()) { sources.add("nearby"); sources.add("mine"); }
+        // 允许来源由这里组装：背包、合成，已观察到库存时可取库存；非仅用库存的工具还可现场收集材料。
         args.add("allowed_sources", sources);
         List<IntentAction.Tool> actions = new ArrayList<>();
         actions.add(new IntentAction.Tool("acquire_items", args.toString()));
@@ -462,6 +481,7 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction interactBlock(
             Goal goal, LocalPlayer player, IntentRuntime runtime, String rawBlockId, String itemId, boolean prepareTool) {
+        // 指定坐标就只操作那一格；否则围绕玩家或指定地标寻找这种方块。
         if (exactBlockTarget(goal)) {
             return interactExactBlock(goal, player, rawBlockId, itemId, prepareTool);
         }
@@ -493,6 +513,7 @@ public final class GeneralAbilityAdapter {
         int chunkRadius = Math.max(1, (radius + 15) / 16);
         TargetIndex.Result query;
         TargetIndex.register(level, List.of(block));
+        // 查询可以分多刻完成，最多保留八个近处候选；没有查完时稍后再来，不当场说目标不存在。
         try {
             query = TargetIndex.query(level, center, List.of(block), 8, chunkRadius, 384);
         } finally {
@@ -515,6 +536,7 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel interaction.")), facts);
         }
         if (hits.size() > 1 && !nearest(goal, goal.parameters())) {
+            // 有多个匹配方块时，只有明确允许随便选最近一个，才继续；否则把候选概况交回去确认。
             JsonObject facts = new JsonObject();
             facts.addProperty("block_id", id.toString());
             facts.add("candidates", blockFacts(center, hits));
@@ -530,7 +552,7 @@ public final class GeneralAbilityAdapter {
         return goal.target() != null && "coordinates".equals(lower(goal.target().kind()));
     }
 
-    /** Coordinates identify one synchronized cell; a type is an assertion, never a search hint. */
+    /** 精确坐标只对应这一格；若还填了方块类型，就是要求这一格确实是该类型，不是让 Mod 去别处找。 */
     private static IntentAction interactExactBlock(
             Goal goal, LocalPlayer player, String rawBlockId, String itemId, boolean prepareTool) {
         Goal.WorldPosition position = goal.target().position();
@@ -576,6 +598,7 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction compileBlockInteraction(
             Goal goal, LocalPlayer player, BlockPos target, ResourceLocation id, String itemId, boolean prepareTool) {
+        // 先准备右键操作需要的目标和物品；如果现在已经够得着且看得见，就直接交互。
         ClientLevel level = player.clientLevel;
         JsonObject use = new JsonObject();
         use.addProperty("button", "right");
@@ -592,6 +615,7 @@ public final class GeneralAbilityAdapter {
             return new IntentAction.Tool("interact_at", use.toString());
         }
         BlockPos stand = interactionStand(level, player, target, player.blockPosition(), useItem);
+        // 否则找一个能站稳、能看见目标的位置。这里生成的 goto 尚未指定精确站位，会采用移动工具默认误差。
         if (stand == null) {
             JsonObject facts = new JsonObject();
             facts.addProperty("block_id", id.toString());
@@ -612,6 +636,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction consume(Goal goal, LocalPlayer player) {
+        // 当前先把饱食度满作为统一拒绝条件；此时还没读指定食物，也没看它是否能在满饱食度食用。
         JsonObject p = goal.parameters();
         if (player.getFoodData().getFoodLevel() >= 20) {
             return decision(goal, "Hunger is already full, so eating would not meet the requested outcome.",
@@ -623,6 +648,7 @@ public final class GeneralAbilityAdapter {
             requested = goal.target().label();
         }
         if (requested != null) {
+            // 点名食物时先确认背包里有；带效果的食物还要 allow_effects，之后交给实际进食任务。
             ResourceLocation id = ResourceLocation.tryParse(requested);
             if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) {
                 return invalidItem(goal, requested);
@@ -656,6 +682,7 @@ public final class GeneralAbilityAdapter {
                         .thenComparing(Comparator.comparingDouble(
                                 (FoodChoice choice) -> choice.food().saturation()).reversed()))
                 .toList();
+        // 没点名则只选无效果食物，优先补充量接近缺口的；补充量一样时选饱和度更高的。
         if (safe.isEmpty()) {
             JsonObject facts = new JsonObject();
             facts.add("available_food", foodFacts(choices));
@@ -670,6 +697,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction equip(Goal goal, LocalPlayer player) {
+        // 脱装备先明确脱哪个部位；穿装备则确认物品，或在该部位的候选装备只有一种时自动选择。
         JsonObject p = goal.parameters();
         String action = lower(string(p, "action"));
         if (action == null) action = "equip";
@@ -696,6 +724,7 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel equipment change.")), null);
         }
         if ("armor".equals(slot)) {
+            // armor 表示四个护甲位置一起处理，当前只支持用它批量脱下，不支持自动配齐整套。
             return decision(goal, "equipment_location=armor is only meaningful when unequipping all armor.",
                     List.of(option("retry", "Choose one equipment_location or omit it for automatic routing."),
                             option("cancel", "Cancel equipment change.")), null);
@@ -713,6 +742,7 @@ public final class GeneralAbilityAdapter {
             }
             EquipmentSlot equipmentSlot = equipmentSlot(slot);
             Map<String, ItemStack> matching = new LinkedHashMap<>();
+            // 这里按物品类型去重，没有把同类物品的附魔、耐久等差异当作不同候选。
             for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
                 ItemStack stack = player.getInventory().getItem(i);
                 if (!stack.isEmpty() && player.getEquipmentSlotForItem(stack) == equipmentSlot) {
@@ -746,6 +776,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction fish(Goal goal, LocalPlayer player) {
+        // 要求背包先有原版鱼竿，再交给钓鱼任务；缺竿时询问怎么补，不在这里自动合成。
         ResourceLocation rodId = ResourceLocation.tryParse("minecraft:fishing_rod");
         Item rod = BuiltInRegistries.ITEM.get(rodId);
         if (firstStack(player, rod) == null) {
@@ -762,6 +793,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction drop(Goal goal, LocalPlayer player) {
+        // 丢弃必须点名物品并给数量；数量超过当前物品栏总数时先询问，不默默改成“全部丢掉”。
         JsonObject p = goal.parameters();
         String itemId = itemId(p);
         if (itemId == null && goal.target() != null && "item".equals(goal.target().kind())) {
@@ -798,6 +830,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static EntitySelector selector(Goal goal, JsonObject p) {
+        // 把参数与目标里的描述整理成筛选条件：生物类型、玩家名、显示名或仅敌对；多个条件同时生效。
         String type = firstString(p, "entity_type_id", "entity_type");
         String playerName = string(p, "player_name");
         String entityName = string(p, "entity_name");
@@ -829,6 +862,7 @@ public final class GeneralAbilityAdapter {
 
     private static List<Entity> findEntities(
             LocalPlayer player, EntitySelector selector, int radius, boolean combat) {
+        // 只筛已经加载且活着的对象，并按距离排序；这里的“可见”没有做视线遮挡检查。
         AABB area = player.getBoundingBox().inflate(radius);
         return player.clientLevel.getEntities(player, area, entity -> {
                     if (entity == player || entity.isRemoved() || !entity.isAlive()) return false;
@@ -857,6 +891,7 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction ambiguousEntities(
             Goal goal, LocalPlayer player, String question, List<Entity> entities) {
+        // 最多显示八个候选的类型、名字等，要求补充选择条件，不把游戏内编号交给模型逐个点选。
         JsonObject facts = new JsonObject();
         facts.add("candidates", entityFacts(player, entities.stream().limit(8).toList()));
         return decision(goal, question,
@@ -909,6 +944,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static BlockPos semanticCenter(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 未点名地点或明确说最近时围绕玩家查；点名了地标却找不到时返回空，不回退到玩家脚下。
         Goal.SemanticTarget target = goal.target();
         if (target == null) return player.blockPosition();
         if ("current_place".equals(lower(target.kind()))
@@ -928,6 +964,7 @@ public final class GeneralAbilityAdapter {
 
     private static BlockPos interactionStand(
             ClientLevel level, LocalPlayer player, BlockPos target, BlockPos current, Item item) {
+        // 在目标周围一至三格、下两格到上一格找操作位置，保留能站稳且视线够到目标的位置，选离玩家最近的。
         List<BlockPos> candidates = new ArrayList<>();
         for (int radius = 1; radius <= 3; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -952,6 +989,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static boolean isStandable(ClientLevel level, BlockPos feet) {
+        // 当前规则要求脚和头所在格无碰撞、无液体，脚下整面能支撑；这比“玩家身体实际能站住”更保守。
         if (!level.isLoaded(feet) || !level.isLoaded(feet.above())
                 || !level.isLoaded(feet.below())) return false;
         if (!level.getFluidState(feet).isEmpty() || !level.getFluidState(feet.above()).isEmpty()) return false;
@@ -961,11 +999,7 @@ public final class GeneralAbilityAdapter {
         return level.getBlockState(support).isFaceSturdy(level, support, Direction.UP);
     }
 
-    /**
-     * Candidate stances and the current-position shortcut must prove the same thing the eventual
-     * first-person crosshair will need: a loaded, full-reach OUTLINE ray accepted by the shared
-     * target policy. Distance alone is not interaction reach through a wall.
-     */
+    /** 从眼睛到目标真的看得见、够得着才算可操作；桶与普通物品使用不同的视线规则。 */
     private static boolean hasLoadedInteractionLine(
             ClientLevel level, LocalPlayer player, Vec3 eye, BlockPos target, Item item) {
         if (FirstPersonInteractionTargeting.usesBucketRay(item)) {
@@ -988,6 +1022,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction requireInventoryItem(Goal goal, LocalPlayer player, String itemId) {
+        // 没指定物品就不附加持物条件；指定了则只检查类型和是否带着，不在这里获取缺少的物品。
         if (itemId == null) return null;
         ResourceLocation id = ResourceLocation.tryParse(itemId);
         if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return invalidItem(goal, itemId);
@@ -1010,6 +1045,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static ItemStack firstStack(LocalPlayer player, Item item) {
+        // 按物品栏顺序取第一叠相同类型物品；没有比较同类物品的不同附魔或自定义属性。
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
             if (!stack.isEmpty() && stack.is(item)) return stack;
@@ -1018,6 +1054,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static int countItem(LocalPlayer player, Item item) {
+        // 把物品栏里同类型的所有叠数相加，这里遍历范围也包括护甲和副手等可读位置。
         int count = 0;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
@@ -1027,6 +1064,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static List<FoodChoice> foodChoices(LocalPlayer player) {
+        // 按物品 ID 汇总食物数量；同 ID 多叠食物的属性若不同，这里最终保留后遇到那叠的属性。
         Map<String, FoodChoice> result = new LinkedHashMap<>();
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
@@ -1042,6 +1080,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static JsonArray foodFacts(List<FoodChoice> choices) {
+        // 把现有食物的数量、营养和是否有额外效果列出来，供调用者决定吃什么。
         JsonArray facts = new JsonArray();
         for (FoodChoice choice : choices) {
             JsonObject fact = new JsonObject();
@@ -1065,6 +1104,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static EquipmentSlot equipmentSlot(String slot) {
+        // 把公开的部位名称换成游戏的装备位置；未匹配的名称落到主手，合法性应由调用前的检查保证。
         return switch (slot) {
             case "offhand" -> EquipmentSlot.OFFHAND;
             case "head" -> EquipmentSlot.HEAD;
@@ -1101,6 +1141,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static boolean nearest(Goal goal, JsonObject p) {
+        // 参数 selection、目标种类或目标关系，只要任一写 nearest 就算允许就近选；没有单独处理 unique 覆盖。
         if ("nearest".equalsIgnoreCase(string(p, "selection"))) return true;
         Goal.SemanticTarget target = goal.target();
         return target != null && ("nearest".equalsIgnoreCase(target.kind())
@@ -1136,6 +1177,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static int integer(JsonObject object, String key, int fallback, int min, int max) {
+        // 读不出来就用默认值，超范围则改成边界值；因此这个方法不是严格拒绝不合法整数。
         int value = fallback;
         if (object != null && object.has(key) && object.get(key).isJsonPrimitive()) {
             try {
@@ -1148,6 +1190,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static Integer strictInteger(JsonObject object, String key, int min, int max) {
+        // 与上面不同，这里会拒绝越界值；但 getAsInt 仍会先把某些小数或大数转成 int，再检查范围。
         if (object == null || !object.has(key) || object.get(key).isJsonNull()) return null;
         if (!object.get(key).isJsonPrimitive()) {
             throw new IllegalArgumentException(key + " must be an integer");
@@ -1170,6 +1213,7 @@ public final class GeneralAbilityAdapter {
     }
 
     private static long squared(BlockPos a, BlockPos b) {
+        // 比较距离只需平方和，不用开方；先转成 long 再相减，避免普通世界坐标相减时溢出 int。
         long dx = (long) a.getX() - b.getX();
         long dy = (long) a.getY() - b.getY();
         long dz = (long) a.getZ() - b.getZ();

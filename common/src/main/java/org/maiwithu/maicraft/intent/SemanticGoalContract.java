@@ -5,7 +5,7 @@ import com.google.gson.JsonObject;
 
 import java.util.Set;
 
-/** Strict public semantic boundary: nothing unadvertised may be silently ignored. */
+/** 检查目标使用了已声明的能力、参数名和目标类型；大多数参数的具体值仍交给各能力自己检查。 */
 final class SemanticGoalContract {
 
     private static final String SEQUENCE = "maicraft:sequence";
@@ -17,6 +17,7 @@ final class SemanticGoalContract {
     }
 
     private static void validate(Goal goal, Set<String> knownAbilities, String path) {
+        // 不认识的能力或参数名立即报错，错误中带完整位置，方便调用者找到需要修改的字段。
         String ability = goal.ability();
         if (!knownAbilities.contains(ability)) {
             throw violation("unknown_ability", path + ".ability", ability,
@@ -31,6 +32,7 @@ final class SemanticGoalContract {
         validateTarget(goal, path, ability);
         validateConstraints(goal, path, ability);
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
+            // 建造功能名单在计划阶段就检查；不能先承诺有阳台等功能，施工时再悄悄忽略。
             var parameters = goal.parameters();
             if (parameters.has("features")) {
                 var features = parameters.get("features");
@@ -46,6 +48,7 @@ final class SemanticGoalContract {
             }
         }
         if ("maicraft:travel".equals(ability)) {
+            // 移动额外检查坐标与到达误差；这部分会读值，不只是检查参数名字。
             try {
                 TravelDestination.validatePrecision(goal.parameters());
                 TravelDestination.fromGoal(goal);
@@ -62,6 +65,7 @@ final class SemanticGoalContract {
         }
 
         if (SEQUENCE.equals(ability)) {
+            // sequence 只表示依次做子目标，不能另外指定一个总目的地；偏好和限制放到相关子目标上。
             if (goal.target() != null) {
                 throw violation("sequence_target_not_allowed", path + ".target", ability,
                         "maicraft:sequence accepts ordered children only; target is not allowed.");
@@ -84,6 +88,7 @@ final class SemanticGoalContract {
         }
 
         for (int i = 0; i < goal.children().size(); i++) {
+            // 组合目标的每个子目标也要经过同样检查，不能把不合法参数藏到子步骤里。
             validate(goal.children().get(i), knownAbilities, path + ".children[" + i + "]");
         }
     }
@@ -111,6 +116,7 @@ final class SemanticGoalContract {
 
     private static void validateProtectedLabels(
             JsonObject parameters, String path, String ability) {
+        // 要保护的地点必须是一组非空名字；这里只查格式，不在这里查地点是否已经记住。
         if (!parameters.has("protected_labels")) return;
         if (!parameters.get("protected_labels").isJsonArray()) {
             throw violation("invalid_protected_labels", path + ".protected_labels", ability,
@@ -128,6 +134,7 @@ final class SemanticGoalContract {
     }
 
     private static void validateConstraints(Goal goal, String path, String ability) {
+        // 当前只允许能力声明过、无需附加参数的硬性条件；没有真正支持的条件就拒绝，不假装会遵守。
         Set<String> allowed = SemanticAbilityCatalog.hardConstraintKinds(ability);
         for (int i = 0; i < goal.constraints().size(); i++) {
             Goal.Constraint constraint = goal.constraints().get(i);

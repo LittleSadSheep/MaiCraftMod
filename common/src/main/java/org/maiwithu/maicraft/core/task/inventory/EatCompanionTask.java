@@ -19,13 +19,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code eat} on the player body — a thin wrapper over the native held use. Hold the food and
- * run {@link Interaction#useInAir} on a {@code hold()} timing: that fires {@code gameMode.useItem},
- * and the body's own {@code aiStep} (ticked via {@code doTick}) drives the real eat to completion —
- * chewing animation/particles/sound, hunger + saturation + consume-effects on finish, modded foods,
- * and any mod events. No hand-rolled chew loop or fake direct heal: the companion is a LocalPlayer
- * with a live {@code FoodData}, so eating works exactly as it does for a real player (full hunger →
- * it simply won't eat, which we detect and report).
+ * 真正把食物拿在手里，按住使用键，让游戏完成吃东西的动画、扣物品和增加饥饿值等效果。
+ * 这里不直接改血量或饥饿值；结束后查看物品有没有减少，再判断是否吃成了。
+ * 当前只支持有 FOOD 属性的食物，不支持所有能喝的物品。
  */
 public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRecord> {
 
@@ -43,9 +39,9 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
 
     @Override
     protected List<Precondition> preconditions() {
+        // 先查当前模式是否按普通饥饿规则运行，再查有没有这种物品、这种物品默认是否有食物属性。
         return List.of(
-                // 无饥饿画像(创造)下:吃的动作会执行但食物不扣、饥饿不涨,
-                // 事后一切判定都失真——直接如实拒绝,别让模型收到"already full"的假诊断。
+                // 当前用“食物数量减少”确认成功；创造模式不会正常扣物品，所以在开始前直接拒绝。
                 () -> WorkProfile.of(player).hasHunger() ? null
                         : new Precondition.Failure(
                                 "creative mode has no hunger — eating is unnecessary; kept the "
@@ -53,7 +49,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
                 () -> PlayerInv.count(player.getInventory(), r.item) > 0 ? null
                         : new Precondition.Failure("no " + r.label + " in inventory to eat",
                                 FailureType.NO_MATERIAL),
-                // Native "is this consumable?" — covers food, potions, milk, and modded consumables alike.
+                // 检查的是这个物品新建一叠时的默认 FOOD 属性，不是背包里那一叠可能被修改过的属性。
                 () -> new ItemStack(r.item).get(DataComponents.FOOD) != null ? null
                         : new Precondition.Failure(r.label + " can't be eaten or drunk",
                                 FailureType.UNKNOWN));
@@ -61,17 +57,18 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
 
     @Override
     protected void onStart() {
+        // 先记住吃之前的物品数量、血量和饥饿值，最后才能说明发生了什么变化。
         beforeCount = PlayerInv.count(player.getInventory(), r.item);
         beforeHp = player.getHealth();
         beforeFood = player.getFoodData().getFoodLevel();
-        // Equip the food, then start a native held use. The use() call decides whether eating begins
-        // (e.g. full hunger on non-always-eat food won't start) — we read the outcome on completion.
+        // 找到要拿的食物位置；接下来能不能开始吃，由游戏本身处理，例如普通食物在吃饱时不会开吃。
         foodSlot = PlayerInv.findSlot(player.getInventory(), r.item);
     }
 
     @Override
     protected TaskState onTick() {
         if (eat == null) {
+            // 先等食物真的切换到手上，失败就停；成功后只创建一次持续使用动作，之后接着等待它。
             FirstPersonActionGate.Status selected = selection.select(player, foodSlot);
             if (selected == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;
             if (selected == FirstPersonActionGate.Status.FAILED) {
@@ -90,11 +87,11 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
         };
     }
 
-    /** The held use finished. If an item was actually consumed, report the hunger/HP it restored;
-     *  otherwise the body declined to eat (typically already full) — say so rather than claim success. */
+    /** 使用动作结束后，用同类型物品数量是否减少来判断有没有吃掉，增加的血量和饥饿值只是附加说明。 */
     private TaskState finish() {
         int now = PlayerInv.count(player.getInventory(), r.item);
         if (now >= beforeCount) {
+            // 没看到数量减少就报告失败；当前提示统一说“已经吃饱”，这里没有进一步证明失败原因。
             fail("didn't eat " + r.label + " — already full (hunger " + beforeFood + "/20). Kept it.",
                     FailureType.UNKNOWN);
             return TaskState.FAILED;
@@ -111,7 +108,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
         return v == Math.floor(v) ? String.valueOf((int) v) : String.format("%.1f", v);
     }
 
-    /** Release the held use; no nav / overlay to clear. */
+    /** 停止拿取等待和持续使用动作，避免任务结束后仍一直按住使用键。 */
     @Override
     protected void cleanup() {
         selection.reset();
@@ -122,6 +119,7 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
 
     @Override
     protected Map<String, Object> resultData() {
+        // 无论成功还是失败，附上此刻的血量和饥饿值，方便调用者看当前身体状态。
         Map<String, Object> data = new HashMap<>();
         data.put("item", r.label);
         data.put("hp", player.getHealth());
