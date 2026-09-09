@@ -11,7 +11,9 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
-/** Try existing terrain and completed construction before allowing a stance to need scaffolding. */
+/**
+ * 去施工站位时先尝试沿已有地形和已建方块走；失败后，只有原任务本来允许改地形，才对这一站位再试一次施工导航。
+ */
 final class BuildStanceNavigation {
     private final PlayerNav.ContextProvider construction;
     private final PlayerNav.ContextProvider existingFooting;
@@ -26,11 +28,14 @@ final class BuildStanceNavigation {
         return terrainRetries.contains(stance) ? construction : existingFooting;
     }
 
-    /** A failed preserve route gets one construction retry before the caller rejects this stance. */
+    /**
+     * 每个站位最多获得一次改地形重试；一个站位失败不会让其他站位直接跳过已有道路尝试。
+     */
     boolean retryWithTerrain(BlockPos stance) {
         return construction.permit().mayAlter() && terrainRetries.add(stance.immutable());
     }
 
+    // 换到下一项施工工作时清掉重试记录；刚建好的方块可能已经提供了新的路。
     void reset() { terrainRetries.clear(); }
 
     private record ExistingFooting(PlayerNav.ContextProvider construction) implements PlayerNav.ContextProvider {
@@ -44,7 +49,7 @@ final class BuildStanceNavigation {
             return construction.embeddedForbiddenBodyCells();
         }
 
-        // Keep the retained cost interfaces conservative too; delegating them would restore TERRAFORM.
+        // 旧成本接口也返回禁止改地形的上下文；当前主导航读的是上面的许可和保护格，旧接口仍留作兼容。
         @Override public CalculationContext forSearch(LocalPlayer player, LongSet sacred,
                 LongSet deniedPlace, LongSet forbiddenBodyCells) {
             return PlayerNav.ContextProvider.DEFAULT.forSearch(player,

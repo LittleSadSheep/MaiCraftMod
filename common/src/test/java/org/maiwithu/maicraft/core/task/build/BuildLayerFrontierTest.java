@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 
+// 检查同层边角先于填充、低层先于高层、吊灯等到天花板层、门上下半共用一次放置层级。
 public final class BuildLayerFrontierTest {
     public static void main(String[] args) {
         Map<Long, BuildTaskRecord.Target> floor = new LinkedHashMap<>();

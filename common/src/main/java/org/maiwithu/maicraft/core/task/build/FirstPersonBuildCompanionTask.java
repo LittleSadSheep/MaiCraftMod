@@ -399,7 +399,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         resetCell();
         promoteConstructionLayer();
         retainUsefulWorksite();
-        // Reuse reachable placements only within the unfinished structural layer.
+        // 留在当前尚未完成的施工层，把这一站位能顺手放到的格子做完，再继续队列。
         if (queueAt < queue.size() && !isTemporary(queue.get(queueAt))
                 && selectNearbyPlacement(worksite == null ? null : worksite.feet()))
             return TaskState.RUNNING;
@@ -599,6 +599,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && ownedAirScaffold(candidate.target(), player.level().getBlockState(candidate.target().pos())));
     }
 
+    // 在剩余队列里找最低的未完成层；临时支撑和本任务自己留在空气目标中的垫块不独立阻挡层推进。
     private int constructionLayer() {
         if (!layerKnown) {
             constructionLayer = Integer.MAX_VALUE;
@@ -1173,7 +1174,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return TaskState.RUNNING;
     }
 
-    /** Operating states are reconciled only after placement and scaffold/navigation cleanup. */
+    /**
+     * 普通结构与临时支撑处理完后，逐格验收明确要求的最终状态。当前只会自动修复可手开木门的开关状态。
+     * 其他状态不符时保留已有方块并报告无法调整；门修好后从头复查，避免走动又打开前面刚关上的门。
+     */
     private TaskState finalStateTick() {
         if (doorRepair != null) {
             TaskState status = doorRepair.tick();
@@ -1231,6 +1235,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return TaskState.SUCCESS;
     }
 
+    // 收尾调整仍要经过继承保护、当前导航保护和工程现场检查，不能因为是“收尾”就获得额外修改许可。
     private boolean stateAdjustmentAllowed(BlockPos pos) {
         return !inheritedProtectedMutationCells.contains(pos.asLong())
                 && !NavigationSafetyContext.protectsMutation(pos) && !NavigationSafetyContext.forbidsBody(pos)
@@ -1332,6 +1337,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return Map.copyOf(out);
     }
 
+    // 已有同种方块可以先复用；这一轮已经点过的数量型放置，则必须先补完当前数量再离开。
     private boolean currentPlacementComplete() {
         return constructionMatches(cell.target(), cell.generated()) && (useCount == 0
                 || BuildPlacementGeometry.placementComplete(cell.target(), player.level().getBlockState(cell.target().pos())));

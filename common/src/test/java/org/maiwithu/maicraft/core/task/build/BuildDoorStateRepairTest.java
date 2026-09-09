@@ -20,7 +20,9 @@ import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Open doors need neither replacement nor spare items; one native use must confirm both halves. */
+/**
+ * 检查木门两半的可修复条件、服务器确认、先施工后调整的顺序，以及多次放置不会提前结束；交互使用测试替身，未覆盖原版对副手的真实分发条件。
+ */
 public final class BuildDoorStateRepairTest {
     private static final BlockPos DOOR = new BlockPos(5, 1, 5);
     private static final BlockState CLOSED = Blocks.SPRUCE_DOOR.defaultBlockState();

@@ -286,11 +286,11 @@ final class BuildPlacementGeometry {
     }
 
     // 确认多次点击中的一次是否向目标靠近：状态必须有变化；已完成直接通过，双层半砖允许先放第一片。
-    // 其余整数属性必须不倒退、不超过目标，并至少一项增加。精确属性检查在前，因此明确要求精确数量时不能靠这里放宽。
+    // 数量属性必须不倒退、不超过目标，并至少一项增加。新最终属性规则允许中间数量；旧入口仍受前置精确比较限制。
     static boolean isProgress(BuildTaskRecord.Target target, BlockState before, BlockState after) {
         if (after.equals(before)) return false;
         if (placementComplete(target, after)) return true;
-        // 当前先要求明确列出的精确属性已经相等，再考虑中间进度；精确指定的数量属性也会受此限制。
+        // 只有旧入口继续先查全部精确属性；它仍可能把“最终四根蜡烛”误当成第一下就要四根。
         if (target.finalProperties() == null && !target.matchesExactProperties(after)) return false;
         BlockState desired = target.desiredState();
         if (after.getBlock() != desired.getBlock()) return false;
@@ -327,7 +327,9 @@ final class BuildPlacementGeometry {
         return Math.max(1, target.materialCount());
     }
 
-    /** A new multi-use placement must finish its required quantity before leaving the active cell. */
+    /**
+     * 连续放置正在进行时，雪层、蜡烛等数量必须达到目标才离开这一格；第一片半砖也不能提前结束双层半砖的放置。
+     */
     static boolean placementComplete(BuildTaskRecord.Target target, BlockState live) {
         if (target.finalProperties() == null) return target.matches(live);
         if (!target.acceptsPlacedState(live)) return false;

@@ -366,6 +366,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
         public Target {
             exactProperties = exactProperties == null ? java.util.Set.of() : java.util.Set.copyOf(exactProperties);
+            // 最终属性集合为空表示只要求方块种类；null 则保留旧入口的比较规则，两者含义不同。
             finalProperties = finalProperties == null ? null : java.util.Set.copyOf(finalProperties);
             desiredState = Objects.requireNonNull(desiredState, "desiredState");
             // 目标状态先经过 BuildStates 的统一整理，再检查显式属性是否合法；具体会整理哪些属性要看该类。
@@ -464,6 +465,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
             return materialCount() > 0;
         }
 
+        // 成品验收：新规则只逐项检查明确要求的最终属性；旧入口继续按精确属性和兼容设置判断。
         public boolean matches(BlockState state) {
             if (finalProperties != null) return matchesProperties(state, finalProperties);
             if (!matchesExactProperties(state)) return false;
@@ -476,6 +478,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
             return BuildValidity.valid(state, desiredState, false);
         }
 
+        // 新规则下，一次放置先满足朝向等摆放属性；门是否打开等最终状态留给施工结束后处理。
         public boolean acceptsPlacedState(BlockState state) {
             if (finalProperties != null) {
                 var placement = finalProperties.stream().filter(name -> BuildValidity.isPlacementProperty(
@@ -485,7 +488,9 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
             return matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true);
         }
 
-        /** Existing material/geometry positions are reusable; authored important states are verified at the end. */
+        /**
+         * 新规则下，现场已有同种方块就先复用，不因为状态不同额外备料或拆换；明确要求的属性仍要在收尾时验收。
+         */
         public boolean constructionMatches(BlockState state) {
             return finalProperties == null ? matches(state) : state != null && state.getBlock() == desiredState.getBlock();
         }

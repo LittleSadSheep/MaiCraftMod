@@ -9,14 +9,16 @@ import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-/** A structural layer is a hard frontier; corners and outlines are only ordering preferences within it. */
+/**
+ * 决定先盖哪一层，再决定这一层先放边角还是中间：本层未完成时先不去上层，层内的边角优先只是排序偏好。
+ */
 final class BuildLayerFrontier {
     private BuildLayerFrontier() {}
 
     static int layer(BuildTaskRecord.Target target) {
         var state = target.desiredState();
         int base = BuildPlacementGeometry.primaryOf(target).getY();
-        // Hanging fixtures are installed with their ceiling, not before that permanent support exists.
+        // 吊灯等挂在顶面的东西排到天花板所在层，等永久支撑形成后再装。
         boolean ceiling = state.hasProperty(BlockStateProperties.HANGING)
                 && state.getValue(BlockStateProperties.HANGING)
                 || state.hasProperty(BlockStateProperties.ATTACH_FACE)
@@ -40,11 +42,12 @@ final class BuildLayerFrontier {
         BlockPos pos = target.pos();
         int alongX = solid(targets, pos.west()) + solid(targets, pos.east());
         int alongZ = solid(targets, pos.north()) + solid(targets, pos.south());
-        // Orthogonal exposed sides distinguish a corner/end from the two opposite sides of a wall.
+        // 横向和纵向都没有两侧邻居时，视为边角或端点；只缺一侧的墙边随后，四周都有邻居的填充格更后。
         if (alongX < 2 && alongZ < 2) return 1;
         return alongX + alongZ < 4 ? 2 : 3;
     }
 
+    // 这里数的是计划里非空气的邻居，不是在读取现场，也不是按真实碰撞盒认定完整实体。
     private static int solid(Map<Long, BuildTaskRecord.Target> targets, BlockPos pos) {
         var target = targets.get(pos.asLong());
         return target != null && !BuildCellRules.isAirTarget(target) ? 1 : 0;

@@ -28,7 +28,10 @@ import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Restore a traversed door with a native empty-hand use, never a replacement or a relaxed final match. */
+/**
+ * 施工收尾时把已安装木门开到或关到作者要求的状态：走近、空手瞄准、右键一次，等服务器确认上下两半都正确。
+ * 只处理可手动开启且未受红石供电的完整门；材质、明确要求的朝向等其他差异不会在这里靠拆换解决。
+ */
 final class BuildDoorStateRepair {
     private final LocalPlayer player;
     private final BuildTaskRecord.Target target;
@@ -55,7 +58,9 @@ final class BuildDoorStateRepair {
         this.player = player; this.target = target; this.declared = declared; this.allowed = allowed; this.ray = ray;
     }
 
-    /** A native toggle must satisfy the declared requirements of both existing halves. */
+    /**
+     * 先确认只改变开关状态就能同时满足上下两半的要求，且两格都允许操作；没有办法靠这一次开关满足的情况交回父任务判断。
+     */
     static boolean canRepair(BuildTaskRecord.Target target, Map<Long, BuildTaskRecord.Target> declared,
                                     Predicate<BlockPos> loaded, Function<BlockPos, BlockState> states,
                                     Predicate<BlockPos> allowed) {
@@ -113,8 +118,10 @@ final class BuildDoorStateRepair {
         stopNav(); InputDriver.halt(player);
         // Avoid held axes, buckets and other item-specific effects on wooden or copper doors.
         if (!menu.worldReady(context)) return TaskState.RUNNING;
+        // 当前主手有物品时会优先用空副手；但原版木门的空手开关分支只处理主手，这个选择可能使收尾点击不生效。
         InteractionHand hand = player.getMainHandItem().isEmpty() ? InteractionHand.MAIN_HAND
                 : player.getOffhandItem().isEmpty() ? InteractionHand.OFF_HAND : null;
+        // 两手都不空时才寻找普通背包空格，并通过已有物品选择器腾出主手；已开始的切换必须先完成。
         if (handSelection.started() || hand == null) {
             if (emptySlot < 0) for (int i = 0; i < 36; i++)
                 if (player.getInventory().getItem(i).isEmpty()) { emptySlot = i; break; }
@@ -151,6 +158,7 @@ final class BuildDoorStateRepair {
                                        BlockState lower, BlockState upper) {
         return target.matches(lower) && upperMatches(target, declared, upper);
     }
+    // 下半没有明确要求开关时，可以采用已声明上半的要求；否则以下半要求为准，并仍检查两半是否能同时满足。
     private static boolean requestedOpen(BuildTaskRecord.Target target, Map<Long, BuildTaskRecord.Target> declared) {
         var upper = declared.get(target.pos().above().asLong());
         var required = target.finalProperties() == null ? target.exactProperties() : target.finalProperties();
@@ -170,6 +178,7 @@ final class BuildDoorStateRepair {
                 player.getEyePosition(), target.pos(), 4.5);
     }
 
+    // 客户端看到门变化还不能结束，外层还要等服务器确认这次右键；上下半只改变一半时继续等，变成无关状态则失败。
     static NativeConfirmation confirmation(BlockPos pos, BlockState before, BlockState expected) {
         return new NativeConfirmation() {
             public boolean requiresBlockAcknowledgement() { return true; }
@@ -196,6 +205,7 @@ final class BuildDoorStateRepair {
     boolean changed() { return changed; }
     boolean uncertain() { return uncertain; }
     void pause() { stopNav(); aim.reset(); InputDriver.halt(player); }
+    // 结束时松开输入、收回临时物品选择和菜单操作，并作废仍在等待的点击记录；不再额外点一次门。
     void stop() {
         pause(); handSelection.reset(); menu.cleanup(player);
         if (receipt != null && !receipt.terminal()) ClientRuntime.actor().activeContext()

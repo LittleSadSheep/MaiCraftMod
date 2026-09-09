@@ -371,6 +371,7 @@ public final class BuildTool implements MaiCraftTool {
     private static List<BuildTaskRecord.Target> resolveTargets(List<OpSpec> ops, boolean exactStates) {
         List<BuildTaskRecord.Target> expanded = new ArrayList<>();
         for (OpSpec op : ops) {
+            // 精确建造只把用户明确写出的属性列为最终要求；单独的朝向、轴向和上下半参数也一并记录。
             var authored = new java.util.LinkedHashSet<>(op.properties() == null ? java.util.Set.<String>of() : op.properties().keySet());
             if (op.facing() != null) authored.add("facing");
             if (op.axis() != null) authored.add("axis");

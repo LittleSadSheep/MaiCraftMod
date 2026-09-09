@@ -15,7 +15,7 @@ import net.minecraft.world.phys.Vec3;
  * 预检可以把较早的目标当作已完成；真正施工时一律读现场，避免把还没盖的屋顶当成已经挡住视线。
  */
 final class BuildPlacementStage implements BlockGetter {
-    // A small stability margin around actual outlines prevents aiming through zero-width shared edges.
+    // 给实际外形留一点瞄准余量，避免恰好从两堵墙共用的零宽缝穿过去。
     private static final double RAY_CLEARANCE = 1.0 / 64.0;
     private final BlockGetter world;
     private final Predicate<BlockPos> loaded;
@@ -69,14 +69,14 @@ final class BuildPlacementStage implements BlockGetter {
         return state(feet.below()).getFluidState().isEmpty();
     }
 
-    // Enumerate the short ray's bounding cells: point sampling skips both walls at a shared corner.
-    // Inflate the actual outline boxes, not the whole block, so slabs, stairs and panes retain real gaps.
+    // 枚举短视线经过的范围，再检查每块实际外形；沿线少量取样会漏掉墙角。
+    // 只给真实外形加少量余量，半砖、楼梯和玻璃板本来存在的间隙仍可参与判断。
     boolean rayClear(Vec3 from, Vec3 to, BlockPos clicked) {
         AABB bounds = new AABB(from, to).inflate(RAY_CLEARANCE);
         for (BlockPos cell : BlockPos.betweenClosed(BlockPos.containing(bounds.minX, bounds.minY, bounds.minZ),
                 BlockPos.containing(bounds.maxX, bounds.maxY, bounds.maxZ))) {
             if (cell.equals(clicked) || cell.equals(active.pos())) continue;
-            // Cull cells before reading shapes; all callers already cap the ray to interaction reach.
+            // 先排除与视线无交集的格子，再读取形状；调用者已把视线长度限制在交互距离内。
             if (!intersectsRay(new AABB(cell).inflate(RAY_CLEARANCE), from, to)) continue;
             for (AABB box : state(cell).getShape(this, cell).toAabbs())
                 if (intersectsRay(box.move(cell).inflate(RAY_CLEARANCE), from, to)) return false;

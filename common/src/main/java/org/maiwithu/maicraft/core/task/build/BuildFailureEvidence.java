@@ -11,7 +11,10 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
-/** Bounded model-level failure evidence survives semantic filtering without exposing route or input handles. */
+/**
+ * 把施工失败对应到固定图纸的第几格，并附上要求的状态和当前看到的状态，让外层报告保留能定位问题的信息。
+ * 最多保留多少条由调用者控制；这里一次只生成一条，没有加载的格子不会伪造现场状态。
+ */
 final class BuildFailureEvidence {
     private BuildFailureEvidence() {}
 
@@ -21,6 +24,7 @@ final class BuildFailureEvidence {
         result.put("code", code);
         int index = -1;
         for (int i = 0; i < targets.size(); i++) if (targets.get(i).pos().equals(at)) { index = i; break; }
+        // 编号从零开始；不是原图纸里的目标（例如临时垫块）用负一标记，不假装它有原图纸编号。
         result.put("target_index", index);
         result.put("target_index_basis", "zero_based_frozen_project_order");
         result.put("declared_target", index >= 0);

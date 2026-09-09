@@ -9,7 +9,9 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
-/** A missing walking route cannot reject a stance until its authorized construction fallback fails. */
+/**
+ * 检查先走已有道路、失败只对该站位放宽一次、保护格变化仍可见，并且帮助类不能授予原任务没有的改地形许可。
+ */
 public final class BuildStanceNavigationTest {
     public static void main(String[] args) {
         var protectedCells = new LongOpenHashSet();

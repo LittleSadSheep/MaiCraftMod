@@ -85,7 +85,7 @@ public final class BuildProjectTargets {
                 var names = new LinkedHashSet<String>(); row.getAsJsonArray("final_properties").forEach(value -> names.add(value.getAsString()));
                 finalProperties = names;
             } else if (row.get("strict_identity").getAsBoolean()) {
-                // Existing explicit projects keep declared requirements but defer their verification until the end.
+                // 旧工程没有分开保存最终属性时，把原来明确指定的属性迁移为最终要求；不把这些要求丢掉，也不在施工前强制替换。
                 finalProperties = java.util.Set.copyOf(exact);
             }
             result.add(new BuildTaskRecord.Target(target.desiredState(), BuiltInRegistries.ITEM.get(item),

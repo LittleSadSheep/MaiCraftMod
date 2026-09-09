@@ -335,6 +335,7 @@ final class SemanticBuildSupplyCompanionTask
         return result;
     }
 
+    // 备料按施工阶段是否可复用判断；新规则的同种方块先不购买替换材料，属性差异由子施工任务最后处理。
     private boolean constructionMatches(BuildTaskRecord.Target target) {
         return player.level().isLoaded(target.pos())
                 && target.constructionMatches(player.level().getBlockState(target.pos()));

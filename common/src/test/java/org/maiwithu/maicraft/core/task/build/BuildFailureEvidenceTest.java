@@ -11,6 +11,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.task.TaskResult;
 
+// 让施工诊断经过总任务和简短通知两层筛选，检查目标编号、现场门状态、已施工数量和剩余支撑不会丢失。
 public final class BuildFailureEvidenceTest {
     public static void main(String[] args) throws Exception {
         var target = new BuildTaskRecord.Target(Blocks.OAK_DOOR.defaultBlockState(), Items.OAK_DOOR,

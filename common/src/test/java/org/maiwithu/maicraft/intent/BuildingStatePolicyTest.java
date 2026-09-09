@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 
+// 从建模材料一路转换并保存工程，检查未声明门开关时不强加要求、已声明属性保留到最终验收，以及旧工程迁移不会丢要求。
 public final class BuildingStatePolicyTest {
     public static void main(String[] args) {
         JsonObject scene = JsonParser.parseString("""

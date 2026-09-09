@@ -45,6 +45,7 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
             return Verdict.PENDING;
         BlockState old = before.get(target.pos().asLong()), live = states.apply(target.pos());
         boolean unchanged = live.equals(old);
+        // 本次点击按放置阶段的要求确认，允许合法的逐次增量；门的最终开关状态随后另行调整。
         boolean complete = BuildPlacementGeometry.placementComplete(target, live)
                 || BuildPlacementGeometry.isProgress(target, old, live);
         boolean diverged = !complete && !unchanged;
