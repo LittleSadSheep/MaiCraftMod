@@ -11,37 +11,17 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 社区图纸格式 → 原版结构 NBT 形态(size + palette + blocks)的转换器。
- * 转完塞回 {@link BlueprintStore} 的既有管线,旋转/液体过滤/格数上限/
- * 工具层全部共用,加载器对格式来源无感。
- *
- * <ul>
- *   <li>{@code .litematic}:多区域,调色板即原版形状的
- *       {Name, Properties} 复合标签,方块索引是<b>跨 long 连续位流</b>
- *       (与区块存储"每 long 取整不跨界"不同),YZX 序;</li>
- *   <li>{@code .schem}(v2/v3):调色板是
- *       {@code "ns:block[k=v]" → id} 映射,方块数据为 LEB128 varint 字节流,
- *       YZX 序(x 最快)。</li>
- * </ul>
- *
- * <p>两种格式都对区域全体积编码,空气占绝对大头——转换时按<b>稀疏语义</b>
- * 丢弃空气格(导入图纸的空气 = 缺省不触碰,不是"清场"指令;不然一栋
- * 40×20×40 的房子光空气就把 32k 格上限吃穿)。实体/容器内容物/计划刻忽略。
+ * 把 .litematic 和 .schem 转成相同的尺寸、方块材料表、格子列表和实体列表，供蓝图加载器继续处理。
+ * 转换时跳过空气格，因此这两种格式的空白区域不自动表示清场；原版 NBT/SNBT 不经过这一步。
+ * 这里保留方块实体和普通实体的数据供后续筛选，真正允许哪些装饰由 BlueprintSafety 决定。
  */
 final class BlueprintFormats {
 
     private BlueprintFormats() {}
 
     /**
-     * 单个区域的<b>包围盒体积</b>上限(256³)。
-     *
-     * <p>这不是格数上限(那个在 {@code BlueprintStore.MAX_CELLS}),是遍历上限。区域尺寸
-     * 直接来自文件,而文件是玩家目录里可以任意编辑、也可能下载到一半就断的东西:一个声明
-     * 100000³ 的区域会让下面那个循环转上一万亿次——服务端不是崩,是<b>整个冻住</b>,而冻住
-     * 比崩更难查(没有崩溃报告,只有"服务器没反应了")。
-     *
-     * <p>256³ 对真实图纸绰绰有余:量过的日式小屋是 40×23×45,骏马马厩是 52×35×54,
-     * 都在这个数的百分之一以内。
+     * 限制最多枚举多少格，包括空气。Litematic 还会把所有区域的体积相加后应用同一上限。
+     * MAX_CELLS 则另管最终保存多少条非空气格或实体，不能用结果条数代替遍历工作量。
      */
     static final long MAX_REGION_VOLUME = 256L * 256L * 256L;
     static final int MAX_CELLS = 32768;
@@ -51,6 +31,7 @@ final class BlueprintFormats {
     // .litematic
     // ------------------------------------------------------------------
 
+    // 先找覆盖所有区域的矩形，再把各区域坐标平移到共同原点，材料表也按区域依次合并。
     static CompoundTag fromLitematic(CompoundTag root) {
         CompoundTag regions = root.getCompound("Regions");
         if (regions.isEmpty()) {
@@ -86,6 +67,7 @@ final class BlueprintFormats {
         ListTag palette = new ListTag();
         ListTag blocks = new ListTag();
         for (CompoundTag region : regionTags) {
+            // 每个区域的编号从自己的材料表开始；合并后加上此前材料总数，避免编号指向另一区域。
             int paletteBase = palette.size();
             ListTag regionPalette = region.getList("BlockStatePalette", Tag.TAG_COMPOUND);
             if (regionPalette.isEmpty() || palette.size() + regionPalette.size() > MAX_PALETTE) {
@@ -137,6 +119,7 @@ final class BlueprintFormats {
                 if (isAir[idx]) {
                     continue;   // 稀疏语义:空气不入格
                 }
+                // 文件中的顺序是先走 x，再换 z，最后换 y；这里把一维序号拆回三维坐标。
                 int x = (int) (i % abs[0]);
                 int z = (int) ((i / abs[0]) % abs[2]);
                 int y = (int) (i / ((long) abs[0] * abs[2]));
@@ -151,7 +134,9 @@ final class BlueprintFormats {
                 palette, blocks, entities);
     }
 
-    /** 区域最小角:负尺寸表示向负方向延伸(min = pos + size + 1)。 */
+    /**
+     * 把区域位置换成最小角。尺寸为负表示反向延伸，例如从 x=10 延伸 -3 格，覆盖 8、9、10，最小角是 8。
+     */
     private static int[] regionMin(CompoundTag region) {
         CompoundTag pos = region.getCompound("Position");
         CompoundTag size = region.getCompound("Size");
@@ -161,6 +146,7 @@ final class BlueprintFormats {
                 Math.toIntExact((long) pos.getInt("z") + Math.min(0L, (long) size.getInt("z") + 1))};
     }
 
+    // 正负号只表示延伸方向，实际枚举长度取绝对值；无法装进整数时明确报错。
     private static int[] regionAbsSize(CompoundTag region) {
         CompoundTag size = region.getCompound("Size");
         return new int[]{Math.toIntExact(Math.abs((long) size.getInt("x"))),
@@ -168,7 +154,10 @@ final class BlueprintFormats {
                 Math.toIntExact(Math.abs((long) size.getInt("z")))};
     }
 
-    /** {@code .litematic} 的跨 long 连续位流取值。 */
+    /**
+     * 从连续位串取出第 index 格的材料表编号，每个编号占 bits 位。
+     * 一个编号可能分在前后两个 long 中：分别取低段和高段再拼起来；上层已检查数据总长度。
+     */
     private static int unpack(long[] longs, int bits, long index) {
         long mask = (1L << bits) - 1;
         long startOffset = index * bits;
@@ -190,6 +179,7 @@ final class BlueprintFormats {
     // .schem(v2 根级 / v3 嵌套 Schematic.Blocks)
     // ------------------------------------------------------------------
 
+    // 同时读取 v2 的根字段和 v3 的嵌套字段；尺寸先按无符号短整数解释，再检查体积。
     static CompoundTag fromSchem(CompoundTag root) {
         if (root.contains("Schematic", Tag.TAG_COMPOUND)) {
             root = root.getCompound("Schematic");   // v3 外壳
@@ -256,6 +246,7 @@ final class BlueprintFormats {
         }
         ListTag palette = new ListTag();
         Map<Integer, Integer> remap = new HashMap<>();
+        // 原文件的编号可以不连续；按编号排序后改成内部连续下标，格子引用也随之换号。
         for (int id : byId.keySet().stream().sorted().toList()) {
             remap.put(id, palette.size());
             palette.add(byId.get(id));
@@ -268,7 +259,7 @@ final class BlueprintFormats {
         int cursor = 0;
         for (long i = 0; i < volume; i++) {
             if ((i & 4095) == 0) checkInterrupted();
-            // LEB128 varint
+            // 每个字节低七位装编号，高位表示后面还有字节；读取过长或超出正整数范围时拒绝文件。
             int id = 0;
             int shift = 0;
             while (true) {
@@ -297,8 +288,10 @@ final class BlueprintFormats {
         return assemble(width, height, length, palette, blocks, entities);
     }
 
-    /** {@code "ns:block[k=v,k2=v2]"} → 原版调色板复合标签 {Name, Properties}。
-     *  纯文本解析,不碰注册表——合法性由后续 NbtUtils.readBlockState 裁决。 */
+    /**
+     * 把 oak_stairs[facing=north,half=top] 拆成方块名字和属性文本。
+     * 这里不查注册表，也不严格拒绝缺右括号或没有等号的属性片段；原版后续读取也可能用默认值回退。
+     */
     private static CompoundTag parseStateString(String s) {
         CompoundTag out = new CompoundTag();
         int bracket = s.indexOf('[');
@@ -323,13 +316,14 @@ final class BlueprintFormats {
 
     private record CellPosition(int x, int y, int z) {}
 
-    /** Import coordinates need not fit Minecraft's packed-position bit widths. */
+    /** 用三个独立整数作查找键，避免图纸坐标超出游戏压缩坐标范围时，不同格子被挤成同一个编号。 */
     private static CellPosition key3(int x, int y, int z) { return new CellPosition(x, y, z); }
 
     private static CompoundTag cell(int x, int y, int z, int stateIndex) {
         return cell(x, y, z, stateIndex, null);
     }
 
+    // 一格保存相对坐标、材料表下标和可选原始数据；这个步骤还没有扣材料或放方块。
     private static CompoundTag cell(int x, int y, int z, int stateIndex, CompoundTag data) {
         CompoundTag cell = new CompoundTag();
         ListTag pos = new ListTag();
@@ -345,10 +339,8 @@ final class BlueprintFormats {
     }
 
     /**
-     * 一只实体 → 原版结构格式的条目({@code pos} 双精度相对坐标 + {@code nbt})。
-     *
-     * <p>只收展示框、盔甲架、画这类"摆设":它们是建筑的一部分。活物不收——图纸里
-     * 存着的牛马村民不是设计,照搬等于凭空造生物。
+     * 把实体位置和原数据包装成统一条目，同时算出它所在的整数格。
+     * 这里只拒绝非有限坐标，不按实体类型筛选；牛、村民等是否保留由后续 BlueprintSafety 检查。
      */
     private static CompoundTag entityCell(double x, double y, double z, CompoundTag nbt) {
         if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
@@ -373,6 +365,7 @@ final class BlueprintFormats {
         return assemble(sx, sy, sz, palette, blocks, new ListTag());
     }
 
+    // 把已经转换好的列表组装成统一结构；具体坐标合法性还会由 BlueprintFiles.validate 再检查。
     private static CompoundTag assemble(int sx, int sy, int sz, ListTag palette, ListTag blocks,
                                         ListTag entities) {
         CompoundTag out = new CompoundTag();
@@ -387,6 +380,7 @@ final class BlueprintFormats {
         return out;
     }
 
+    // 先用除法判断会不会超过体积上限，再做乘法，避免极大尺寸先乘溢出后逃过检查。
     static long checkedVolume(int x, int y, int z) {
         if (x <= 0 || y <= 0 || z <= 0 || x > MAX_REGION_VOLUME / y
                 || (long) x * y > MAX_REGION_VOLUME / z) {
@@ -395,10 +389,12 @@ final class BlueprintFormats {
         return (long) x * y * z;
     }
 
+    // 读取任务被取消时，在循环中的检查点抛出取消信号，让后台工作尽快结束。
     static void checkInterrupted() {
         if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
     }
 
+    // 在加入下一条之前检查容量，避免已经装入过量格子后才发现超限。
     private static void requireCapacity(ListTag entries) {
         if (entries.size() >= MAX_CELLS) {
             throw new IllegalArgumentException("blueprint exceeds the " + MAX_CELLS + " entry import memory budget");

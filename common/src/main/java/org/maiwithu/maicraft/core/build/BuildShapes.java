@@ -16,25 +16,24 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 参数化建造几何:形状算子(盒/周界墙/线/柱/球/撒点)与屋顶引擎。
- * 全是无状态纯函数,产出目标格集——`build` 工具是它的一个调用方,
- * 集成测试把它当几何库直接验。
+ * 把盒子、墙、线、圆柱、球、撒点和屋顶参数展开成需要施工的位置。这里只计算计划，不改游戏世界。
+ * 普通形状返回坐标；屋顶还要决定半砖放在上半、下半还是叠成整块，所以返回完整施工目标。
  */
 public final class BuildShapes {
 
     private BuildShapes() {}
 
     /**
-     * 一次调用展开后的总格数上限。
-     *
-     * <p>此前是 4096,而一栋正常房子 5000~8000 格——等于逼着整栋建筑拆成好几次
-     * 调用。生存模式的盘料只盘当前这一批,拆开就意味着墙已经砌好了才发现屋顶的
-     * 料不够,留下半成品空壳。<b>"整栋一次规划"和这个上限是绑死的</b>,要求前者
-     * 就必须给够后者。
+     * 一次普通建造允许的最终格数上限。shapeCells 在全部展开后检查；整次调用还由 BuildTool 再检查。
+     * 这个常量本身不会提前限制枚举次数，也不会自动限制本类所有生成方法。
      */
     public static final int MAX_TOTAL_CELLS = 16384;
 
-    /** 形状展开为格集(去重、上限封顶)。公开静态,测试直接验几何。 */
+    /**
+     * 把参数展开成不重复的坐标。box 的两个角都包含在内，hollow 只去掉六个面包住的内部。
+     * 圆柱与球按格子中心到中心点的距离选格；空心圆柱只有侧壁，空心球保留球壳。
+     * 计算完若为空或超过格数上限则报错。
+     */
     public static List<BlockPos> shapeCells(String shape, boolean hollow,
                                        int x1, int y1, int z1,
                                        Integer x2, Integer y2, Integer z2,
@@ -74,6 +73,7 @@ public final class BuildShapes {
                     }
                 }
             }
+            // 按最长方向的格数分段，在三个坐标上同步插值并取最近整数；相邻重复点会被集合去掉。
             case "line" -> {
                 int bx = req(x2, "x2"), by = req(y2, "y2"), bz = req(z2, "z2");
                 int steps = Math.max(1, Math.max(Math.abs(bx - x1),
@@ -132,8 +132,10 @@ public final class BuildShapes {
         return new ArrayList<>(out);
     }
 
-    /** 平面撒点:y1 平面、x1,z1..x2,z2 矩形内按密度取格。位置哈希决定取舍——
-     *  确定性(同参数同结果),测试与断点续建都friendly。 */
+    /**
+     * 在固定高度的矩形内按密度选点。选择只由 x/z 决定，改变高度不会改变平面花纹。
+     * 密度限制到 0..1，并按千分之一取整；若一个点都没有，仍补上矩形角上的一格，包括密度为零时。
+     */
     public static List<BlockPos> scatterCells(int x1, int y, int z1, int x2, int z2, double density) {
         int ax = Math.min(x1, x2), bx = Math.max(x1, x2);
         int az = Math.min(z1, z2), bz = Math.max(z1, z2);
@@ -154,29 +156,10 @@ public final class BuildShapes {
     }
 
     /**
-     * 屋顶:半砖三态砌出的连续坡面 + 垂脊 + 正脊 + 檐口。
-     *
-     * <p>做法是从四栋手工中式建筑(悬山、歇山、庑殿、攒尖)里逐格量出来的,不是推的。
-     * 三条量出来的事实决定了整个引擎:
-     *
-     * <ol>
-     *   <li><b>坡面主料是半砖,不是楼梯。</b>四栋里半砖比楼梯多 6~43 倍,而且
-     *       bottom/top/double 三态的占比四栋几乎一致(37/27/35)。砌法是同一个
-     *       高度上<b>下半砖当踏面、双层砖当立面</b>交替,顶面每格升半格,连一级
-     *       整块的台阶都没有。此前这里是"下半砖 + 上半砖",顶面轮廓一样,但上半砖
-     *       底下那半格是空的——从底下看是一排悬空的砖。</li>
-     *   <li><b>举架量的是每格的抬升,不是每层的收分。</b>量出来的顶面高度序列是
-     *       每格抬一个半砖(五举),接近脊时抬两个(十举),平均 1.2,即屋顶高
-     *       ≈ 0.6 × 半跨。所以这里<b>按每格到檐口的距离直接定高度</b>,不再逐层
-     *       收分——四条垂脊(到两边檐口等距的那条对角线)也就自然落出来了,而逐层
-     *       收分的写法必须另外拼角,拼一次错一次。</li>
-     *   <li><b>脊高出屋面,不齐平。</b>四栋的脊都是异色实心块压在瓦面之上:庑殿、
-     *       攒尖的四条垂脊是一格宽的正 45° 对角线,悬山两端是外探的博风板,正脊
-     *       再高出两格。此前脊是嵌进最后一层里的,所以四坡顶怎么调都不像中式。</li>
-     * </ol>
-     *
-     * <p>结构定死,换料换风格:石砖 + 铜是中式,深板岩 + 深色橡木是哥特,陶瓦是
-     * 地中海。所以每一个结构件都单独收一个 palette 参数。
+     * 在矩形上生成屋顶，较长的一边作为屋脊方向；overhang 最多向四边各伸出四格。
+     * 先按离屋檐的距离计算坡面高度，再放屋面、可选的底衬和实心填充，最后加山墙、屋脊和翘角。
+     * 空心屋顶是默认值。能找到同材质半砖时用半砖形成半格高度变化；找不到时使用传入方块。
+     * 各部位可以分别指定材料；同一坐标发生重叠时，下面各写入方法决定覆盖还是保留已有目标。
      */
     public static List<BuildTaskRecord.Target> roofCells(
             int x1, int y1, int z1, int x2, int z2,
@@ -244,6 +227,7 @@ public final class BuildShapes {
                 d = Math.min(d, h.length - 1);
                 int halves = h[d];
 
+                // d=0 表示屋檐边缘，有专用檐口材料时在这里换料。
                 boolean lip = d == 0;
                 skinCell(out, lip && eave != null ? eave : palette, x, z, y0, halves, lip);
                 if (soffit != null && !lip) {
@@ -268,6 +252,7 @@ public final class BuildShapes {
                 BuildPalette spine = ridge != null ? ridge : palette;
                 // 垂脊:四坡到两边檐口等距的那条正 45° 对角线。悬山没有垂脊,两端
                 // 改作博风板——同样是异色一条,只是走在山面的边缘。
+                // 到两边屋檐距离相同的对角线形成斜脊；双坡顶的两端另加边脊，最高处再加两格正脊。
                 boolean hipSpine = (hip || (xieshan && dEnd < brk)) && dSlope == dEnd && d < reach;
                 boolean barge = !hip && !shed && dEnd == 0;
                 if (hipSpine || barge) {
@@ -288,19 +273,8 @@ public final class BuildShapes {
     }
 
     /**
-     * 举架:从檐口往脊,每格屋面的顶面到多高(以<b>半砖</b>计)。
-     *
-     * <p>清式《工程做法》的举架把东亚屋面那条凹曲线量化成逐步加陡的举高比:檐口起于
-     * "五举"(0.5),脊步收到"十举"(1.0)。翻成方块就是<b>每格抬升几个半砖</b>:
-     * 五举抬一个,十举抬两个。
-     *
-     * <p>存档里量出来的顶面序列(悬山,半跨 13)是
-     * {@code 4,4,5,6,7,8,9,10,11,12,14,15,17}——前段每格抬一,近脊抬二,平均 1.2,
-     * 也就是屋顶高 ≈ 0.6 × 半跨。下面这条 {@code 1 + 0.6f²} 的抬升量累出来正是这个
-     * 数,而且中段会自然出现一二相间,和量到的一样。
-     *
-     * <p>第一格单独低一档:那是檐口的薄唇({@code skinCell} 的 thin 分支)。存档里
-     * 四栋都用上半砖收边,檐口因此是薄的、利的,不是一刀切齐的墩子。
+     * 计算从檐口往屋脊走时每个位置的高度，单位是半格。cur 至少每步增加 1，避免坡面突然降低。
+     * 直坡每步累计两个半格；曲坡的增量随距离增加，再四舍五入成可用半砖表达的高度。
      */
     private static int[] surfaceHalves(int reach, boolean concave) {
         int n = Math.max(1, reach) + 1;
@@ -317,11 +291,8 @@ public final class BuildShapes {
     }
 
     /**
-     * 屋面一格。顶面高度以半砖计:<b>偶数用双层砖</b>(占满整格,当立面),
-     * <b>奇数用下半砖</b>(占下半格,当踏面)。两者交替,顶面每格升半格,底下不留空。
-     *
-     * <p>{@code thin} 是檐口那一格,改用上半砖:顶面同高但只有半格厚,檐口收成一道
-     * 薄边。存档里四栋的檐口都是这么收的。
+     * 放这一列最上面的屋面。檐口用上半砖做薄边；其余按半格高度选择下半砖或双层半砖。
+     * 材料找不到对应半砖时，在同一坐标放原方块，坡面就只能按整格变化。
      */
     private static void skinCell(Map<Long, BuildTaskRecord.Target> out, BuildPalette pal,
                                  int x, int z, int y0, int halves, boolean thin) {
@@ -339,11 +310,8 @@ public final class BuildShapes {
     }
 
     /**
-     * 望板:瓦面底下的第二层皮,顶面恒比瓦面低一格,而且<b>实心一格厚</b>——半格处用
-     * "上半砖 + 下半砖"两块拼齐。
-     *
-     * <p>存档里四栋都有这一层(瓦面石砖、望板木)。没有它,从屋里往上看就是一排半砖
-     * 的背面和一格格的空档,屋顶是个壳;有了它,屋里屋外都是一道光滑斜面。
+     * 在屋面下面补可选底衬。用整层半砖或上下错开的两片半砖连接底面，减少从屋内看到的空隙。
+     * 高度不足以放底衬时直接跳过；找不到半砖时改放普通方块。
      */
     private static void soffitCell(Map<Long, BuildTaskRecord.Target> out, BuildPalette pal,
                                    int x, int z, int y0, int halves) {
@@ -367,11 +335,7 @@ public final class BuildShapes {
     }
 
     /**
-     * 脊:压在屋面之上的异色实心块,{@code n} 格高。
-     *
-     * <p>{@code y0 + halves / 2} 这一格正好骑在顶面上:顶面落在整格时(halves 偶)
-     * 它整格露在外面,落在半格时(halves 奇)它盖掉那块半砖、把顶面抬到整格。所以
-     * 坡面走到哪一档,脊都是明确高出来的一条,不会时隐时现。
+     * 从屋面顶上开始，往上加 n 格装饰脊。选到半砖材料时用双层半砖，使这一格是实心的。
      */
     private static void putProud(Map<Long, BuildTaskRecord.Target> out, BuildPalette pal,
                                  int x, int z, int y0, int halves, int n) {
@@ -389,6 +353,7 @@ public final class BuildShapes {
     }
 
     /** 不留阁楼时把屋面底下填实。 */
+    // 非空心屋顶把基准高度到屋面之间的每格填满；已经有屋面目标的位置不覆盖。
     private static void fillUnder(Map<Long, BuildTaskRecord.Target> out, BuildPalette pal,
                                   int x, int z, int y0, int halves) {
         for (int y = y0; y < y0 + (halves - 1) / 2; y++) {
@@ -397,11 +362,7 @@ public final class BuildShapes {
     }
 
     /**
-     * 檐角起翘(飞檐):四个檐角往上挑起来。
-     *
-     * <p>这是东亚屋顶最认得出的一笔——尖角一挑,整片屋面就"活"了。做法是在檐口那一层
-     * 的四角往上叠几格,并把紧挨着角的两格也抬一格,让翘起来的是一条弧,不是四根柱子。
-     * 用脊料,因为翘角本来就是垂脊的末端。
+     * 在四个檐角向上叠 lift 格；抬高两格以上时，再给角内相邻的两格各补一块作过渡。
      */
     private static void liftEaveCorners(Map<Long, BuildTaskRecord.Target> out, BuildPalette palette,
                                         int ax, int bx, int az, int bz, int y0, int lift) {
@@ -422,10 +383,8 @@ public final class BuildShapes {
     }
 
     /**
-     * 从给的料推它的半砖——屋面主料是半砖,而模型给过来的可能是整块、楼梯或木板。
-     *
-     * <p>{@code stone_bricks → stone_brick_slab} 这类要去掉复数才对得上,所以按几条
-     * 命名规律依次试,而不是硬拼一个后缀。推不出就退回整块砌。
+     * 尝试按注册名找到同材质半砖：木板、楼梯或墙替换后缀，其次尝试去掉复数 s，再加 _slab。
+     * 这是命名规则猜测，不查询配方；同一命名空间里确实注册为 SlabBlock 才采用，找不到返回 null。
      */
     private static Block slabFor(Block block) {
         if (block instanceof SlabBlock) {
@@ -456,6 +415,7 @@ public final class BuildShapes {
         return null;
     }
 
+    // 写入半砖种类和上下位置；双层半砖没有单独的“上半”提示，但状态本身仍要求 DOUBLE。
     private static void putSlabAt(Map<Long, BuildTaskRecord.Target> out, BlockPos pos,
                                   Block slab, SlabType type) {
         BlockState state = slab.defaultBlockState().setValue(SlabBlock.TYPE, type);
@@ -466,6 +426,7 @@ public final class BuildShapes {
                 BuiltInRegistries.BLOCK.getKey(slab).getPath(), null, null, topHalf));
     }
 
+    // 同一坐标已有目标时，由 overwrite 决定替换它还是保留原目标。
     private static void putSolidAt(Map<Long, BuildTaskRecord.Target> out, BuildPalette palette,
                                    BlockPos pos, boolean overwrite) {
         BuildPalette.Entry e = palette.pick(pos);

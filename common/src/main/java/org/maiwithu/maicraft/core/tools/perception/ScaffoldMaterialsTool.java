@@ -44,6 +44,7 @@ public final class ScaffoldMaterialsTool implements MaiCraftTool {
     }
 
     @Override
+    // add/delete 只增删指定项，set 替换整张清单，clear 清空；不填 action 只读取。清单决定哪些方块能被寻路消耗。
     public Map<String, Object> parameterSchema() {
         return Schema.object()
                 .optionalEnum("action", "add appends, delete removes, set replaces the whole list, "
@@ -56,6 +57,7 @@ public final class ScaffoldMaterialsTool implements MaiCraftTool {
     }
 
     @Override
+    // 这里只解析参数并转交 ScaffoldOps。实际修改、保存、通知玩家和整理返回清单都在那一层完成。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer self, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         reply.accept(impl.apply(
