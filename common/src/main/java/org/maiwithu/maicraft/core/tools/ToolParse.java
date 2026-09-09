@@ -15,9 +15,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 工具入口共享的参数解析件——此前 scan_blocks 与 mine 各抄一份方块 id
- * 解析、interact_at 与 interact_entity 各抄一份按键解析,在这里合一。
- * 物品 id 解析用引擎的 {@code ToolArgs.parseItem},不在此重复。
+ * 内部工具共用的参数转换：把方块名字／标签变成方块集合，把 left／right 变成鼠标键。
+ * 两类参数对错误的处理不同：方块列表略过无效项，鼠标键则直接报错。
  */
 public final class ToolParse {
 
@@ -34,6 +33,8 @@ public final class ToolParse {
      * <p>标签内容来自数据包,世界加载后才有,所以这里<b>每次调用现查</b>——{@code /reload}
      * 改了标签下一次就生效。
      */
+    // 既接受具体方块名，也接受 # 开头的方块标签并展开成员；重复成员合并，保留首次出现顺序。
+    // 空值、拼错的编号、不存在的方块和空气都静默略过，调用方若需要逐项报错不能只用返回集合判断。
     public static Set<Block> parseBlocks(List<String> ids) {
         Set<Block> out = new LinkedHashSet<>();
         if (ids == null) return out;
@@ -56,6 +57,7 @@ public final class ToolParse {
     }
 
     /** 左键=攻击、右键=使用;缺参或非法值直接报参数错。 */
+    // 只接受小写 left 或 right，缺省与其他文字都报错，不猜测“左键”等近义词。
     public static MouseButton parseButton(String button) {
         if (button == null) {
             throw new IllegalArgumentException("missing required argument: button");

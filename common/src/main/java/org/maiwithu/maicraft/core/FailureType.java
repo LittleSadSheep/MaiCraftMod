@@ -3,84 +3,50 @@ package org.maiwithu.maicraft.core;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * Structured "why did it fail" category, threaded up out of the pathing/placement
- * substrate ({@code PlayerNav}, {@code Interaction},
- * {@code BlockDigger}) so the reactive task layer can BRANCH on the cause instead
- * of string-matching a human-readable reason.
- *
- * <p>This is distinct from {@link TaskState}: {@code TaskState} is the task's
- * lifecycle (running / terminal); {@code FailureType} is the diagnosis attached to
- * a {@code FAILED}. A {@code failReason} String still rides alongside for the LLM's
- * benefit — the enum is for code, the string is for the model.
- *
- * <h2>Recovery boundary (why the taxonomy is shaped this way)</h2>
- * The governing rule of the reactive layer is that a recovery ladder recovers the
- * <em>execution of one bounded goal</em>; it never expands the goal's scope or
- * auto-acquires a prerequisite. The categories therefore split into two kinds:
- * <ul>
- *   <li><b>In-ladder</b> (a different way to reach the SAME bounded goal is worth
- *       trying): {@link #OCCLUDED}, {@link #BOXED_IN}, {@link #NO_PATH},
- *       {@link #OUT_OF_REACH}, {@link #HAZARD}.</li>
- *   <li><b>Kick-back-to-LLM</b> (the goal can't be met without a strategic
- *       decision the deterministic layer must not make): {@link #NO_MATERIAL},
- *       {@link #WRONG_TOOL}, {@link #TARGET_LOST}, {@link #MINED_OUT} — the model
- *       decides whether to acquire the missing thing, widen the search, or stop.</li>
- * </ul>
- * A rung declares which {@code FailureType}s it {@code handles}; anything it does
- * not handle falls straight through to a terminal give-up carrying this cause.
+ * 给失败原因一个固定名字，让上层按原因决定下一步，不必从报错文字里猜。
+ * TaskState 表示任务还在跑还是已结束；这里说明为何失败，例如缺材料、背包满或视线被挡。
+ * 枚举本身不会自动重试、补材料或请求决定；具体能力和任务各自选择如何处理。
  */
 public enum FailureType {
-    /** Out of blocks/items in inventory to place or use. Prerequisite — kick to LLM. */
+    /** 缺要放置或使用的材料，例如要搭桥却没有方块。 */
     NO_MATERIAL,
-    /** No free inventory slot to stow into (unequipped gear, picked-up loot). Kick to
-     *  LLM: dropping or depositing something first is a strategic call. */
+/** 背包没有足够空位或可叠加容量，不能再放入物品。 */
     NO_SPACE,
-    /** Nothing solid to place against at/around the target. In-ladder: try another support face. */
+    /** 目标附近找不到可以借来放置的支撑面。 */
     NO_SUPPORT,
-    /** A living/building-blocking entity occupies the target cell — vanilla refuses every
-     *  press until it moves. Kick to LLM: waiting, luring it away, or picking another cell
-     *  is a strategic call; no stance change or dig fixes it. */
+/** 目标格里有实体挡住放置，例如动物站在要砌墙的位置。 */
     ENTITY_BLOCKED,
-    /** No line of sight to the face/block — the view is boxed in by a wall/occluder. In-ladder. */
+    /** 视线被挡住，够得着的距离内也没有点到目标。 */
     OCCLUDED,
-    /** The BODY itself can't move out / no path survived the replan budget. In-ladder. */
+    /** 身体被困住，当前尝试找不到脱离位置的方法。 */
     BOXED_IN,
-    /** A* returned nothing to the target. In-ladder: try a looser goal (near/adjacent). */
+    /** 本次寻路没有找到到达目标的路线；不代表允许任意放宽原目标。 */
     NO_PATH,
-    /** No route WITHOUT altering terrain, but one exists if she may dig / bridge / pillar —
-     *  the reason lists exactly which blocks that route would break or place. In-ladder like
-     *  NO_PATH (a looser stance may still avoid it); the final verdict hands the list to the
-     *  LLM, which decides whether to re-send with consent. */
+/** 当前不允许改地形的条件挡住了路线；是否放宽要由上层按任务要求决定。 */
     TERRAIN_BLOCKED,
-    /** Never got within interaction reach of the target. In-ladder: reposition. */
+    /** 没走到手能碰到目标的距离。 */
     OUT_OF_REACH,
-    /** The search's goal membership IS satisfied at the feet, but the task's richer
-     *  arrival (reach / line of sight / on-ground) still isn't — the stance the graph
-     *  chose is a dud for the actual work. In-ladder: reposition, or blacklist the
-     *  composite member that produced it. */
+/** 寻路认为站位到了，但实际还不能干活，例如手够不到、视线被挡或尚未落地。 */
     STANCE_DUD,
-    /** Can't harvest/attack effectively with the current inventory. Prerequisite — kick to LLM. */
+    /** 工具不合要求，例如镐的等级不够，挖矿也不会掉材料。 */
     WRONG_TOOL,
-    /** The entity/block target is gone, dead, or moved out of the bounded search. Kick to LLM. */
+    /** 原先要操作的实体或方块已无法继续定位或使用。 */
     TARGET_LOST,
-    /** No more matching targets within the bounded scan radius. Kick to LLM (widen? stop?). */
+    /** 本次允许查询的范围内没有更多匹配来源。 */
     MINED_OUT,
-    /** A fluid/lava/void hazard blocks the safe execution. In-ladder: route around, else give up. */
+    /** 当前做法会遇到岩浆、虚空等已识别危险。 */
     HAZARD,
-    /** Pre-empted or cancelled (owner stop, death). Not a real failure — terminal housekeeping. */
+    /** 操作被停止或打断，例如玩家要求停止或身体失效。 */
     INTERRUPTED,
-    /** Ran out of deadline budget. */
+    /** 超出这项任务允许的执行时间。 */
     TIMED_OUT,
-    /** The record type had no registered runner. */
+    /** 当前没有支持这类任务或操作的实现。 */
     UNSUPPORTED,
     /**
-     * 任务自己抛了异常——<b>我们的 bug,不是世界的问题</b>。
-     *
-     * <p>单列一档而不是并进 {@link #UNKNOWN}:那一档的意思是"原因没归类",而这一档的
-     * 意思是"这里本不该发生"。两者对模型的含义完全不同——前者可以换个法子再试,后者
-     * 再试多少遍都一样,而且该被人看见。
+     * 执行代码出现了内部异常，需要保留诊断信息；不能伪装成普通缺材料或没路。
+     * 是否能重试要看异常与已发动作，不由这个标签保证。
      */
     INTERNAL,
-    /** Cause not classified. */
+    /** 没有归入以上类别；不是“什么也没有发生”的保证。 */
     UNKNOWN;
 }

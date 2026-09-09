@@ -5,30 +5,20 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * Small adapter giving the companion task layer the {@code SimpleContainer}-style
- * inventory operations it grew up on (count / remove-by-type / add-with-leftover)
- * over the player's native {@link Inventory}. The Mob used a 27-slot
- * SimpleContainer; the player body uses its full Inventory (hotbar + main +
- * armor + offhand), all reachable via {@link Inventory#getContainerSize()} /
- * {@link Inventory#getItem(int)}.
+ * 提供背包计数和查找方法。要区分“身上总共有多少”和“前 36 格能拿来操作的有多少”。
+ * 例如头盔从背包穿到头上，总数不变，但背包里的数量减少；不同目的应选对应的计数方法。
  */
 public final class PlayerInv {
 
     private PlayerInv() {}
 
     /**
-     * 建造能动用的格数:快捷栏 + 主背包,<b>不含盔甲栏与副手</b>。
-     *
-     * <p>建造那一族(报价、逐格闸门、实扣)必须共用这一个数,而不是各写各的循环。这条
-     * 口径分岔过两次,症状一模一样:一整叠木板放在副手,数 41 格的那一方说"料够了",
-     * 数 36 格的那一方每格都判缺料——玩家看着手里那叠木板,而我们两张嘴说两样话。
-     *
-     * <p>为什么是 36 而不是 41:盔甲是穿在身上的,副手是她另一只手里握着的东西(演出要
-     * 用),都不是"备料"。把它们算进可用材料,等于说她会拆自己的胸甲去砌墙。
+     * 建造当前能从中拿材料的 36 格：快捷栏加主背包，不含盔甲与副手。
+     * 预估材料与真正选取必须按同一范围数；否则副手有一叠木板时，前面说够用，后面却拿不到。
      */
     public static final int BUILDABLE_SLOTS = 36;
 
-    /** Total count of {@code item} across the whole inventory (armor + offhand included). */
+    /** 数玩家身上全部同种物品，包括盔甲与副手；不表示这些物品都能被当前动作选择器使用。 */
     public static int count(Inventory inv, Item item) {
         int n = 0;
         for (int i = 0; i < inv.getContainerSize(); i++) {
@@ -62,7 +52,7 @@ public final class PlayerInv {
         return n;
     }
 
-    /** First slot holding {@code item}, or -1. */
+    /** 返回第一个装着该物品的槽位，包括盔甲与副手；没找到返回 -1。调用方仍须核对能否操作该槽位。 */
     public static int findSlot(Inventory inv, Item item) {
         for (int i = 0; i < inv.getContainerSize(); i++) {
             ItemStack s = inv.getItem(i);
@@ -73,9 +63,8 @@ public final class PlayerInv {
 
 
     /**
-     * Add {@code stack} to the inventory; returns whatever didn't fit (empty if
-     * all fit). Mirrors {@code SimpleContainer.addItem}'s leftover contract over
-     * {@link Inventory#add(ItemStack)} (which mutates the stack down by what fit).
+     * 直接调用 Inventory.add，并返回原 stack 中没装下的部分；原对象数量会被修改。
+     * 这是本地背包数据操作，不是向服务器请求领取物品，也不能代替菜单或拾取确认。
      */
     public static ItemStack add(Inventory inv, ItemStack stack) {
         inv.add(stack);

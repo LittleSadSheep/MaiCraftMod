@@ -3,13 +3,9 @@ package org.maiwithu.maicraft.core;
 import net.minecraft.client.player.LocalPlayer;
 
 /**
- * 同伴此刻的工作能力画像——游戏模式(将来还可以叠药水/服主配置)到
- * 能力事实的唯一翻译点。铁律:算法不读模式,只读这里的能力位;
- * {@code isCreative()/instabuild} 只允许出现在本类与快照构造点,
- * 任务循环或 Movement 里出现即为坏味道。
- *
- * <p>零缓存:调用方在每个决策点现取({@link #of}),模式被外部切换时
- * 下一个决策自然用新画像,不存在幽灵状态。
+ * 给任务一组简化的工作规则：是否按免费材料、会掉落物、有饥饿、无普通伤害风险和瞬间挖掘来处理。
+ * 目前只看玩家 instabuild 开关，在预设的生存与创造两组值之间选择，不逐项核对实际能力或 Mod 特殊规则。
+ * 每次调用重新读取，没有跨刻缓存；服务器最后是否允许操作，仍由真实动作决定。
  */
 public record WorkProfile(
         boolean freeMaterials,   // 放置/使用不消耗物品
