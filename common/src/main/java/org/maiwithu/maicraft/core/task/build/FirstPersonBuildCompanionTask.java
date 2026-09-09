@@ -180,6 +180,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 先拒绝普通放块做不了的内容，例如直接写箱子数据、生成画或组合摆设，避免建到一半才暴露不支持。
         bounds();
         if (r.targets.isEmpty()) { r.completed(0); succeed(); return; }
+        // 蓝图读取能保存装饰数据，不等于当前施工能应用它；方块实体数据、摆设实体和特殊料单在这里整项拒绝。
         if (!r.blockEntityData.isEmpty()) addUnsupported("block_entity_data", null,
                 "generic first-person clicks cannot author block-entity NBT",
                 List.of("plain_blocks_only", "finish_contents_separately", "cancel"));
@@ -202,6 +203,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.CANCELLED;
         if (preflightDone) registerProvider();
         drainScaffolds();
+        // 一刻内可接着处理不需要等待的阶段；已发点击、正在改创造背包或本刻不能再操作时停下来。
         TaskState result = BuildTickPipeline.advance(() -> phase, this::stepPhase,
                 () -> phase != Phase.WAIT_USE && phase != Phase.CLEAR_CREATIVE
                         && ClientRuntime.requireContext(player).mutationAvailable());
@@ -359,6 +361,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failPreflight("site contains protected or unbreakable cells",
                     FailureType.NO_SUPPORT, "blocked_site_cells"); return TaskState.FAILED;
         }
+        // 预检按未完成目标的完整材料数核对背包，不扣除现场已有的半层等中间状态。
         if (r.consumeMaterials || !player.getAbilities().instabuild) required.forEach((item, count) -> {
             int have = inventory.mainInventoryCount(item); if (have < count) missing.put(item, count - have);
         });
@@ -372,6 +375,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         registerProvider(); phase = Phase.SELECT; return TaskState.RUNNING;
     }
 
+    // 允许部分施工时，只要还有一格能用现有物品完成，或有一格可清空，就可以先开工。
     private boolean anyAffordable() {
         for (CellPlan plan : plans) {
             if (matches(plan.target(), plan.generated())) continue;
@@ -564,6 +568,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         };
     }
 
+    // 一处站位连放的候选必须不用先清障、有材料、尚未完成且最新修改守卫允许；临时垫块另走自己的队列。
     private boolean readyForWorksite(CellPlan candidate) {
         return !isTemporary(candidate) && !BuildCellRules.isAirTarget(candidate.target())
                 && (!r.consumeMaterials || inventory.hasItems(candidate.target().item(), candidate.target().materialCount(), true))
@@ -572,6 +577,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && r.mutationGuardMatches(player, candidate.target().pos());
     }
 
+    // 先找当前伸手就够得着的待建格，最多验证十六格或约四毫秒；找到就移到队首，减少来回走路。
     private boolean selectNearbyPlacement(Vec3 approach) {
         int proofs = 0;
         long deadline = System.nanoTime() + 4_000_000;
@@ -591,6 +597,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return false;
     }
 
+    // 做完一格后尝试继续利用原站位。现场、材料或剩余任务变了就重新检查，没有可做的格子才放弃该站位。
     private void retainUsefulWorksite() {
         if (worksite == null) return;
         long deadline = System.nanoTime() + 4_000_000;
@@ -616,6 +623,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         worksite = null; worksiteSearched = false; worksiteProgress = null;
     }
 
+    // 把当前不用清障的目标交给多格站位搜索，逐刻累计检查；全部查完后才采用最佳站位。
     private TaskState worksiteTick() {
         if (worksiteSearch == null) {
             var pending = queue.subList(queueAt, queue.size()).stream().filter(this::readyForWorksite)
@@ -642,6 +650,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         phase = Phase.PLACE_NAV; return TaskState.RUNNING;
     }
 
+    // 只沿现有地面走向选中的站位。走途中若能放置，placeNavTick 会先接手；到达后仍没有机会则排除该站位重找。
     private TaskState walkToWorksite() {
         if (nav == null) {
             BlockPos destination = worksite.stance();
@@ -673,6 +682,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         int slot;
         // Finish any native swap before reconciling ownership against its post-swap inventory.
+        // 换槽已经开始就继续等待同一个槽位，不能在交易尚未确认时因为背包暂态又改选其他物品。
         if (selection.started()) slot = selection.requestedSlot();
         else if (player.getAbilities().instabuild) {
             var status = creativeMaterials.ensure(ClientRuntime.requireContext(player), cell.target().item(), creativeNeeds());
@@ -748,6 +758,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         phase = Phase.WAIT_USE; return TaskState.RUNNING;
     }
 
+    // 瞄准还在改善就继续等；视角已稳定且误差极小，或四十刻没有足够改善时，记录这次点击失败并换方案。
     private TaskState waitForAim(String reason, boolean settled) {
         aimWaitReason = reason;
         lastAimObservation = placementDiagnostics();
@@ -759,6 +770,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return TaskState.RUNNING;
     }
 
+    // 能保证放置前后通道都安全时继续短距离走动，否则停下，并按这次点击需要选择站立或蹲下。
     private void placementPostureAndMotion() {
         if (gesture == null || cell == null) { InputDriver.halt(player); return; }
         Map<BlockPos, BlockState> effects = new LinkedHashMap<>();
@@ -846,6 +858,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 FailureType.UNSUPPORTED, "placement_state_mismatch", true); return TaskState.FAILED;
     }
 
+    // 把这一格记入 placed 并续期。某些入口在别人刚好完成目标时也会调用这里，因此 placed 并不严格等于本任务确认点击数。
     private void finishPlaced() {
         if (isTemporary(cell) && useCount > 0)
             confirmedScaffold(cell.target().pos(), player.level().getBlockState(cell.target().pos()));
@@ -854,11 +867,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         finishCell();
     }
 
+    // 动作确认后通知外部观察守卫更新事实，再使附近的失败点击和搜索结果失效。
     private void confirmedBlockChange(BlockPos pos) {
         r.confirmedMutation(player, pos);
         placementEnvironmentChanged(pos);
     }
 
+    // 附近方块变了，旧的“这里放不了”可能已经不成立；清掉六格内对应记录，允许用新支撑重试。
     private void placementEnvironmentChanged(BlockPos pos) {
         placementAttempts.changedNear(pos);
         exhaustedPlacementStates.keySet().removeIf(key -> BlockPos.of(key).distSqr(pos) <= 36);
@@ -869,6 +884,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
     }
 
+    // 只回收以后不再需要的自有创造材料；每次改槽都等确认，清完再重新验收世界。
     private TaskState clearCreativeTick() {
         var status = creativeMaterials.releaseUnused(ClientRuntime.requireContext(player), creativeNeeds());
         if (status == CreativeBuildMaterialSupply.Status.FAILED) return creativeSupplyFailed();
@@ -882,6 +898,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return TaskState.FAILED;
     }
 
+    // 按剩余队列记录每种材料下一次使用有多远，并补上世界里又变坏的目标；没有后续用途才能清理。
     private java.util.function.ToIntFunction<Item> creativeNeeds() {
         return new java.util.function.ToIntFunction<>() {
             private Map<Item, Integer> next;
@@ -929,6 +946,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 FailureType.NO_PATH, "placement_stances_exhausted", false); return TaskState.FAILED;
     }
 
+    // 临时点击支撑最终会拆掉，因此原目标必须本来就能存活，不能靠临时垫块永久托住沙子或悬空装饰。
     private TaskState prepareTemporarySupports() {
         // Supports used only to obtain a click face must not be required for final survival.
         if (isTemporary(cell) || cell.target().block() instanceof net.minecraft.world.level.block.FallingBlock
@@ -937,6 +955,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 cell.target().pos(), pos -> scaffoldPermitted(pos, null));
         if (chain.isEmpty()) return null;
         Item material = null;
+        // 只从允许消耗的垫脚材料里选完整、不下落、无方块实体的方块；当前要求一种材料足够铺完整条链。
         for (Item candidate : org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials.of(player)) {
             if (!(candidate instanceof BlockItem blockItem)) continue;
             BlockState state = blockItem.getBlock().defaultBlockState();
@@ -1137,6 +1156,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 player.level().dimension().location().toString()));
     }
 
+    // 清理时使用普通导航去到可挖支撑的位置，施工专用的方块保护提供者已经注销；仍受外层导航保护约束。
     private TaskState scaffoldNavTick() {
         if (nav == null) {
             BlockPos at = scaffold.immutable();
@@ -1481,6 +1501,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             data.put("traversability_verification", traversabilityResult.evidence());
         }
 
+        // 再次读取现场，全部目标相符时给出场地中心；它表示已核对的建筑位置，不表示角色站在中心。
         if (!r.targets.isEmpty() && countMatching() == r.targets.size()
                 && siteMin != null && siteMax != null) {
             BlockPos center = new BlockPos(
@@ -1511,6 +1532,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return out;
     }
 
+    // 对仍未完成的原始施工目标重新汇总并扣背包库存；临时支撑和部分完成的数量没有在这里单独折算。
     private Map<Item, Integer> currentShortfall() {
         // 根据当前仍未完成的格子重新算材料，再减去实际背包数量，不直接沿用开工前的旧缺料表。
         Map<Item, Integer> need = new LinkedHashMap<>();
