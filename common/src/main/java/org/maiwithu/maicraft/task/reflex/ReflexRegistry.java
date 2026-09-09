@@ -6,42 +6,25 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The reflex roster (constitution §6): every autonomous mechanism registers here
- * once at init, and in return gets, for free,
- *
- * <ul>
- *   <li><b>self-description into the prompt</b> — {@link #overview()} joins the
- *       registered reflexes' one-liners into the "你的身体有这些本能:…你的显式动作
- *       永远优先" paragraph. The overview rides the
- *       {@code get_self_status} tool description — descriptions are
- *       re-read on every request build ({@code OpenAIProvider}), so the model
- *       sees the current roster each turn;</li>
- *   <li>—— 就这一件。<b>名册即全部</b>:登记了就是开着的,没有"每条本能的开关"。
- *       要做开关,先做主人能按的面板入口,再让这里长出开关——只有开关没有入口的话,
- *       每次启动读一个文件、写一个文件,里面的值永远全是 true。看着有、实际没有,
- *       比明说没做更难查。</li>
- * </ul>
- *
- * <p>静态(名册是每 JVM 一份,不分同伴),synchronized 因为服务端 tick 线程注册、
- * 客户端组装请求的线程读 {@link #overview()}。纯 JDK,所以名册与总览的语义
- * headless 可测。
+ * 保存自动行为的说明名册，供内部状态工具展示。
+ * 登记只影响这份文字，不会启动、关闭或调度行为；实际自救的执行名单在 BrainChains。
+ * 方法加锁以免登记与读取同时改动表，但这不涉及玩家动作的线程安排。
  */
 public final class ReflexRegistry {
 
-    /** Registration order preserved — the overview reads in the order instincts enlisted. */
+    /** 按登记顺序列说明，不按自救优先级排序。 */
     private static final Map<String, Reflex> REFLEXES = new LinkedHashMap<>();
 
     private ReflexRegistry() {}
 
-    /** Enlist one reflex. Idempotent by id — a duplicate registration is ignored. */
+    /** 同名时保留第一次登记的对象，后来的说明不会覆盖它。 */
     public static synchronized void register(Reflex reflex) {
         REFLEXES.putIfAbsent(reflex.id(), reflex);
     }
 
     /**
-     * The reflex overview for the model: every registered reflex's self-description
-     * joined into one paragraph, ending on the constitutional guarantee that
-     * explicit actions always win. Empty when nothing is registered.
+     * 把所有说明连成一段文字。没有登记任何项就返回空文字。
+     * 末尾仍带着旧的“显式动作永远优先”和自动装备说明；实际自救抢占要看 CompanionBrain。
      */
     public static synchronized String overview() {
         List<String> lines = new ArrayList<>();

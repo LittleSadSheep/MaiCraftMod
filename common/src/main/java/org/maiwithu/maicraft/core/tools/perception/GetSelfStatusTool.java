@@ -15,8 +15,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * A local-client query that replies from currently synchronized player and loaded-world facts.
- * No arguments means an empty schema.
+ * 读取自己的生命、饥饿、位置、装备和水下氧气，回复这一刻看到的状态。
+ * 这是内部查询工具。结果中的结构列表固定为空，背包只有占用格数，不能据此推断完整的物品明细。
  */
 public final class GetSelfStatusTool implements MaiCraftTool {
 
@@ -25,7 +25,7 @@ public final class GetSelfStatusTool implements MaiCraftTool {
         return "get_self_status";
     }
 
-    /** 常驻:每轮都可能要看自己的状态。 */
+    /** 标为常用的内部查询；这个标签不会自动把它变成公开 MCP 工具。 */
     @Override
     public Residency residency() {
         return Residency.RESIDENT;
@@ -33,10 +33,7 @@ public final class GetSelfStatusTool implements MaiCraftTool {
 
     @Override
     public String description() {
-        // The reflex overview rides THIS description (constitution §6): maicraft-api
-        // exposes no system-prompt injection channel to core, but every request
-        // re-reads tool descriptions, so the model sees the current roster each
-        // turn. Dynamic on purpose — switched-off reflexes drop out of the text.
+        // 查询说明后面附上自动自救名册；名册里有哪些文字与实际能否抢占身体是两回事。
         String base = "Read your body's condition in one call: name, game mode, HP / max HP, "
                 + "hunger / saturation, position, dimension, biome, the structures you are "
                 + "standing in, what you are wearing, and movement state. ALWAYS call this before "
@@ -54,6 +51,7 @@ public final class GetSelfStatusTool implements MaiCraftTool {
 
     @Override
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer self, Consumer<String> reply) {
+        // 直接读取此刻的本地玩家状态；不替玩家做动作，也不等待下一次服务器更新。
         JsonObject root = new JsonObject();
         root.addProperty("entity_id", self.getId());
         root.addProperty("name", self.getName().getString());
@@ -73,10 +71,11 @@ public final class GetSelfStatusTool implements MaiCraftTool {
         root.addProperty("biome", self.level().getBiome(self.blockPosition())
                 .unwrapKey().map(k -> k.location().toString()).orElse("unknown"));
 
-        // Structure starts are server-only facts. Never substitute a hidden locate query.
+        // 客户端没有完整的结构生成记录，所以空列表表示这里不知道，并不表示附近一定没有村庄等结构。
         root.add("structures", new JsonArray());
         root.addProperty("structures_note", "unknown from the local client; infer from visible loaded terrain");
 
+        // 按装备栏位列物品；空栏位省略，数量为一时也省略 count。
         JsonObject equipment = new JsonObject();
         for (EquipmentSlot slot : EquipmentSlot.values()) {
             ItemStack s = self.getItemBySlot(slot);
@@ -88,10 +87,8 @@ public final class GetSelfStatusTool implements MaiCraftTool {
         }
         root.add("equipment", equipment);
 
-        // 背包不在这里。它是「状态」不是「事件」——工具结果会沉进对话历史,而历史里的
-        // 状态永远不会过期:十轮之后她读到那份快照,上面写的还是十轮前的东西,而且和这一轮
-        // 挂在请求里的实时背包对不上。全量背包只有一个来源(runtime_state 的 <inventory>),
-        // 那一份永远是现在。要精确到槽位就调 inspect_gui。
+        // 这里只统计已占用的格数，不列背包明细。getContainerSize 还包括盔甲和副手，
+        // 所以下面的 backpack_slots 实际是整个 Inventory 的格数，并非仅背包的 36 格。
         var inv = self.getInventory();
         JsonObject slots = new JsonObject();
         int used = 0;
@@ -105,8 +102,7 @@ public final class GetSelfStatusTool implements MaiCraftTool {
         root.add("target", JsonNull.INSTANCE);
         root.addProperty("on_ground", self.onGround());
         root.addProperty("in_water", self.isInWater());
-        // Remaining breath — the one stat whose absence let a body drown while its
-        // mind calmly planned an 870-block trip (frozen-ocean death, 2026-07-15).
+        // 剩余氧气和最大氧气用游戏刻表示，便于判断在水下还能撑多久。
         root.addProperty("air", self.getAirSupply() + "/" + self.getMaxAirSupply() + " ticks");
         root.addProperty("in_lava", self.isInLava());
 

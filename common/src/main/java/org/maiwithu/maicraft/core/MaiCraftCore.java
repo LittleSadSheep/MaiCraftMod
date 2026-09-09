@@ -46,6 +46,7 @@ public final class MaiCraftCore {
 
     private MaiCraftCore() {}
 
+    // 启动时登记工具、任务执行器和三种紧急自救行为。标志一旦设为 true，本进程后续调用便不再登记。
     public static void init() {
         if (initialised) return;
         initialised = true;
@@ -63,10 +64,8 @@ public final class MaiCraftCore {
     private static void registerReflexes() {
         // 数字越小越先检查，固定顺序为落地救援、换气、自卫；这些数字不参与动态评分。
         //
-        // “卡住”不再是一条盲走反射。脱困可能需要沿水柱游、挖、垫或挖搭结合，
-        // 这些动作必须继承当前语义任务的 terrain permit、保护格和原生动作回执。
-        // 嵌入式路径执行器已经拥有这些信息；一个全局反射既拿不到授权，也会抢走
-        // 正在持续挖掘或完成跳跃的合法路线，因此不得再独立争夺身体。
+        // 卡住后的绕路、挖路或垫脚交给当前寻路任务处理：它知道这次允不允许改地形、哪些格不能碰。
+        // 这里不另加一条见到卡住就抢身体乱走的自救行为，以免打断本来正在完成的挖掘或跳跃。
         org.maiwithu.maicraft.task.BrainChains.register(10,
                 org.maiwithu.maicraft.core.task.chain.MLGChain::new);
         org.maiwithu.maicraft.task.BrainChains.register(20,

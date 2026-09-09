@@ -1,10 +1,7 @@
 package org.maiwithu.maicraft.task.reflex;
 
 /**
- * Roster entry for a PURE-POLICY instinct — a consulted function with no tick,
- * no priority and no body time (constitution §1: "被咨询的纯函数策略"), e.g. the
- * tool durability guard in {@code ToolSelect} or the {@code FoodPolicy} filter.
- * The policy's code stays a static utility; this record only files its paperwork
- * ({@link ReflexRegistry}) so the model sees it in the reflex overview.
+ * 给某条自动选择规则保存一个名字和一句说明。
+ * 这个记录本身不会执行规则，也不会申请身体控制；真正的判断仍由使用该规则的代码负责。
  */
 public record PolicyReflex(String id, String describe) implements Reflex {}

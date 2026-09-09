@@ -1,20 +1,7 @@
 /**
- * <strong>Public API.</strong> The raw tool contract the engine schedules. A
- * tool implements {@link MaiCraftTool} (name / description / schema / {@code invoke})
- * and is registered in the {@link ToolRegistry}; {@link ToolCall} is the handle
- * passed to {@link MaiCraftTool#invoke} — the tool does whatever it likes (on any
- * thread, sending its own packets, calling out to anything) and calls
- * {@link ToolCall#complete} when the result is ready. The engine is a scheduler,
- * not an executor.
- *
- * <p>Also public: {@link Schema} (the JSON-schema builder every tool's
- * {@code parameterSchema} uses) and {@link ToolArgs} (shared argument-parsing
- * helpers). The per-call {@code ToolContext} lives next door in
- * {@code agent.tool.api}; any server-side task execution ships in the tool pack
- * ({@code maicraft-core}) — not in the engine.
- *
- * <p>Internal members ({@link org.maiwithu.maicraft.api.Internal @Internal}):
- * {@link ToolInvocation} (the scheduler's per-call unit) and
- * {@link ClientToolContext} (the client-side context implementation).
+ * Mod 内部工具的基础接口和辅助数据。
+ * MaiCraftTool 提供名字、参数说明和执行方法；ToolRegistry 按名字找到工具；ToolCall 保存一次调用及结果回调。
+ * Schema 只编写参数格式说明，ToolArgs 提供部分参数读取方法。真正执行时仍须检查玩家、权限和当前世界。
+ * 这里登记的内部工具不等于 MCP 对外工具；公开入口由 mcp 包中的 PublicToolCatalog 定义。
  */
 package org.maiwithu.maicraft.agent.tool;

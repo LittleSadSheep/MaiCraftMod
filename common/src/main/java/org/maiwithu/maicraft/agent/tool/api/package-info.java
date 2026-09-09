@@ -1,12 +1,5 @@
 /**
- * <strong>Public API.</strong> {@link ToolContext} — the per-call context (the
- * tool-call id plus a deadline helper) a server-side tool uses when building a
- * task record.
- *
- * <p>The reflective {@code @MaiCraftAction} / {@code @Arg} authoring layer that
- * used to live here has been removed: a tool is just a
- * {@link org.maiwithu.maicraft.agent.tool.MaiCraftTool} (name, description, schema,
- * {@code invoke}). maicraft-core provides optional authoring sugar (a {@code Schema}
- * builder and a {@code TaskDispatch} helpers) for packs that want them.
+ * ToolContext 保存创建任务单时的调用编号和世界时间。
+ * 工具本身实现上一级的 MaiCraftTool；需要持续执行时，再创建任务单交给任务调度。
  */
 package org.maiwithu.maicraft.agent.tool.api;
