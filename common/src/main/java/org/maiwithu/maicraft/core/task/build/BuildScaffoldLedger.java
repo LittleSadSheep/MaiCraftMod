@@ -10,10 +10,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Confirmed temporary effects retained across material batches until the authored air is restored. */
+/**
+ * 记录本任务确认放下的临时垫脚块，换一批材料时继续保留，之后可据此清理。
+ * 记录的是坐标和完整方块状态；当前状态相同才视为仍属于本任务，无法识别别人换上了完全相同的方块。
+ */
 final class BuildScaffoldLedger {
     private final Map<BlockPos, BlockState> placed = new LinkedHashMap<>();
 
+    // 空气和含流体的状态不登记为可清理的临时支撑。
     void confirmed(BlockPos pos, BlockState state) {
         if (!state.isAir() && state.getFluidState().isEmpty()) placed.put(pos.immutable(), state);
     }
@@ -23,13 +27,16 @@ final class BuildScaffoldLedger {
     boolean owns(BlockPos pos, BlockState current) { return current.equals(placed.get(pos)); }
     Map<BlockPos, BlockState> snapshot() { return Map.copyOf(placed); }
 
-    /** Empty cells outside the finished solid plan can host removable supports; protection wins. */
+    /**
+     * 只有主人没有保护、最终计划为空或没有目标、现场没有流体，并且当前为空或仍是已登记支撑时，才允许临时借用。
+     */
     boolean permits(BuildTaskRecord.Target target, BlockState current, boolean protectedByOwner) {
         return !protectedByOwner && (target == null || target.desiredState().isAir())
                 && current.getFluidState().isEmpty()
                 && (current.isAir() || target != null && owns(target.pos(), current));
     }
 
+    // 先合并全部保护格。完成预检后，只对允许借用的计划空气格解除基础保护；继承的保护和额外保护仍然优先。
     LongSet navigationProtection(LongSet base, LongSet inherited, LongSet additional,
             LongSet airCells, Map<Long, BuildTaskRecord.Target> targets,
             BlockGetter world, Predicate<BlockPos> loaded, boolean preflightComplete) {

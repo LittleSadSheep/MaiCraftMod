@@ -7,7 +7,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.entity.InputDriver;
 
-/** Client-safe presentation: leased camera/sneak intent only; native placement supplies its own swing. */
+/**
+ * 旧施工表现辅助类，目前没有生产调用者。保留了朝工作区域看过去的计算，庆祝方法为空。
+ */
 final class BuildShowmanship {
     private final LocalPlayer player;
     private boolean crouching;
@@ -15,6 +17,7 @@ final class BuildShowmanship {
     BuildShowmanship(LocalPlayer player, BuildInventory ignored) { this.player = player; }
     boolean crouching() { return crouching; }
 
+    // 看向本批坐标中心的平均位置；低处工作时只记录 crouching 标志，这里没有发送蹲下按键。
     void performWork(List<BlockPos> touched, BlockState sample) {
         if (touched.isEmpty()) return;
         Vec3 centre = Vec3.ZERO;
@@ -25,7 +28,6 @@ final class BuildShowmanship {
     }
 
     void celebrate(BlockPos siteMin, BlockPos siteMax) {
-        // No server particle/sound broadcast is available to a LocalPlayer task. The confirmed
-        // native block placements are the presentation and remain fully mod-compatible.
+        // 未实现额外庆祝动作，调用它不会播放粒子或声音。
     }
 }

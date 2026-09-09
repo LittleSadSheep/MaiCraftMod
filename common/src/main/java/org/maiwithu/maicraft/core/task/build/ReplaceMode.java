@@ -3,15 +3,8 @@ package org.maiwithu.maicraft.core.task.build;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * 目标格上已经有东西时,让不让路。
- *
- * <p>四档,从最保守到最霸道。此前只有一个布尔量"替不替换",而那个布尔量把两件不同
- * 的事捆在了一起:<b>要不要顶掉挡路的</b>,和<b>要不要把该空的地方清空</b>。往一栋
- * 老房子上加东西时,人要的往往是"只往空地上补,已有的一律别碰"——那是这里的
- * {@link #DONT_REPLACE},用布尔量表达不出来。
- *
- * <p>"软"的判据用 {@link BlockState#canBeReplaced()}:草、花、水草、雪层、火——
- * 原版自己判断"能不能直接盖上去"用的就是它,所以不必另立一套近似判据。
+ * 决定目标格已有方块时，是否允许替换，以及是否处理蓝图中的空气。
+ * 草等可直接覆盖的方块由 canBeReplaced 判断；液体、保护区域和危险方块还要由调用者另外检查。
  */
 public enum ReplaceMode {
 
@@ -34,6 +27,7 @@ public enum ReplaceMode {
      * @param desired 图纸要它变成什么(空气 = 清空)
      */
     public boolean allows(BlockState current, BlockState desired) {
+        // null 也按清空处理；只有 REPLACE_EMPTY 允许清空，其余模式直接跳过空气目标。
         boolean clearing = desired == null || desired.isAir();
         if (clearing) {
             return this == REPLACE_EMPTY;   // 只有最高那档做清场
@@ -45,8 +39,7 @@ public enum ReplaceMode {
         if (soft) {
             return true;
         }
-        // 实心挡着:只有 REPLACE_SOLID 才允许,而且只允许实心压实心——
-        // 拿一根火把去顶掉一面墙不是任何人想要的
+        // 到这里当前方块已经不是可直接覆盖的；REPLACE_SOLID 还要求新目标占满整个方块碰撞空间。
         return this == REPLACE_SOLID && desired.isCollisionShapeFullBlock(
                 net.minecraft.world.level.EmptyBlockGetter.INSTANCE,
                 net.minecraft.core.BlockPos.ZERO);

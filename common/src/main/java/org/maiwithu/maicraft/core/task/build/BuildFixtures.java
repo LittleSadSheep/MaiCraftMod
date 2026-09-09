@@ -4,8 +4,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 
 /**
- * Client runtime fixture accounting. Remote clients cannot authoritatively spawn NBT entities or
- * schedule fluid ticks; unsupported fixtures are reported as skipped instead of being faked.
+ * 旧摆设统计的保留实现，目前没有生产代码创建它。spawnAll 不生成实体，只把请求计为跳过。
  */
 final class BuildFixtures {
     private final BuildTaskRecord record;
@@ -18,6 +17,7 @@ final class BuildFixtures {
     int skippedFixtures() { return skippedFixtures; }
     int skippedPayloads() { return skippedPayloads; }
 
+    // 把全部摆设计入跳过数量；带 Item 字段的再计一个跳过的随身物品。重复调用会继续累加。
     void spawnAll() {
         skippedFixtures += record.entities.size();
         for (BuildTaskRecord.EntitySpawn spawn : record.entities) {
@@ -28,11 +28,10 @@ final class BuildFixtures {
     }
 
     boolean alreadyThere(BuildTaskRecord.EntitySpawn spawn) {
-        return false; // no authoritative structure-entity metadata is exposed to the client
+        return false; // 未实现“摆设已经在那里”的识别，所以始终返回没有。
     }
 
     void nudgeSurroundingWater(BlockPos siteMin, BlockPos siteMax) {
-        // Fluid scheduling belongs to the server. Native neighbor updates from confirmed player
-        // placement are the only permitted effect in the LocalPlayer execution path.
+        // 此方法为空：客户端任务不主动安排服务端流体更新。
     }
 }

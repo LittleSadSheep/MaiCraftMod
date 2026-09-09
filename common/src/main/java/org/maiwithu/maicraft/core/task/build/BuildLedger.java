@@ -11,9 +11,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 材料账本:此刻还需要什么、背包还差什么、缺口怎么向玩家交代。
- * 开工前置、中途报缺与收工回执共用同一个统计口径,所以玩家听到的永远
- * 是同一个问题的答案——"从现在起还要凑什么"。
+ * 整理材料数量和缺料提示。当前施工器只调用本类的静态缺料摘要，下面的实例统计没有生产代码创建或调用。
+ * 因此不能用 remainingNeed 等旧统计方法来解释当前 FirstPersonBuildCompanionTask 的完整备料流程。
  */
 final class BuildLedger {
 
@@ -36,9 +35,8 @@ final class BuildLedger {
     }
 
     /**
-     * 此刻还需要的材料:按物品汇总所有<b>尚未达标且要花料</b>的格。
-     *
-     * <p>报的是<b>存量</b>不是"本遍缺了什么":后者是过程量,玩家拿它没法决定去采多少。
+     * 旧统计：汇总尚未完成、需要材料且没有被替换规则或不可建判断排除的格子。
+     * 带特殊料单的格子另由 remainingCellNeeds 统计；摆设实体本体的物品在这里加入。
      */
     Map<Item, Integer> remainingNeed() {
         Map<Item, Integer> need = new LinkedHashMap<>();
@@ -77,11 +75,7 @@ final class BuildLedger {
     }
 
     /**
-     * 还需要哪些<b>精确</b>料:旗帜的花纹、摆设身上带的东西。
-     *
-     * <p>和 {@link #remainingNeed} 分成两张单子,因为口径不同——那张按物品类型合并,
-     * 这张必须一叠一叠地看。两张单子上的格子互不重叠,所以合起来正好是
-     * "从现在起还要凑什么",不会重复索要。
+     * 旧统计：收集未完成格子的特殊料单，例如花盆加植物，再加尚未存在的摆设携带的物品。
      */
     List<BuildTaskRecord.CellNeed> remainingCellNeeds() {
         List<BuildTaskRecord.CellNeed> out = new ArrayList<>();
@@ -122,6 +116,7 @@ final class BuildLedger {
                 counts.set(at, counts.get(at) + 1);
             }
         }
+        // 每个匹配组分别扣一次当前背包数量；这里没有跨组预留同一物品，所以宽松组和精确组可能重复使用库存。
         List<BuildTaskRecord.CellNeed> missing = new ArrayList<>();
         for (int i = 0; i < kinds.size(); i++) {
             int have = inv.countMatching(kinds.get(i));
@@ -170,6 +165,7 @@ final class BuildLedger {
             return bulk.isEmpty() ? "nothing" : bulk;
         }
         // 两档分开说:按类型收的照常点名,按组件收的要讲清"要一模一样的那件"
+        // 提示按显示名字合并数量；两个同名但花纹不同的物品，在文字里可能合成同一行。
         Map<String, Integer> plain = new LinkedHashMap<>();
         Map<String, Integer> byName = new LinkedHashMap<>();
         for (BuildTaskRecord.CellNeed need : extra) {
