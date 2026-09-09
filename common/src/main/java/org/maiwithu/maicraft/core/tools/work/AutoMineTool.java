@@ -13,7 +13,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** World-action tool (raw MaiCraftTool): gather blocks by type and quantity. */
+/**
+ * 内部的“按方块种类采集材料”入口，例如同时寻找普通铁矿和深层铁矿。
+ * 工具只建立持续采集任务，找矿、寻路、挖掘、拾取都由 MineCompanionTask 逐刻完成。
+ */
 public final class AutoMineTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();
@@ -27,6 +30,7 @@ public final class AutoMineTool implements MaiCraftTool {
     }
 
     @Override
+    // 这是内部工具保留的用途文字；其中旧的 current_task／不必轮询说法不是当前公开 MCP 的使用约定。
     public String description() {
         return "Gather blocks by type and count. Give block id(s) and how many ITEMS you want — it finds "
                 + "the nearest matches, travels to each with full terrain-traversing navigation (digs to "
@@ -51,6 +55,8 @@ public final class AutoMineTool implements MaiCraftTool {
     }
 
     @Override
+    // 先把 JSON 转成参数，再由 BlockActionOps 建采矿任务单，最后交给本地任务调度。
+    // 参数说明中的 count 范围不会在这里自动校验，实际会由 autoMine 压到允许范围。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         setTask(companion, impl.autoMine(a.block_ids(), a.count(),

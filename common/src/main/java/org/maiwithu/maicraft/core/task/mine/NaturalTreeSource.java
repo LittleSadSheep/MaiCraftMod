@@ -14,7 +14,10 @@ import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Task-local evidence for intact natural trunks, retained while this task harvests them. */
+/**
+ * 在一次采矿任务内记住哪些原木看起来属于天然树，避免把房屋木梁当作供料来源。
+ * 判断依据是竖直树干、泥土根部、附近树叶和没有建筑附件；它只看当前形状，无法得知原木是谁放的。
+ */
 final class NaturalTreeSource {
     private final Set<BlockPos> verified = new HashSet<>();
     final Set<BlockPos> rejected = new HashSet<>();
@@ -23,8 +26,11 @@ final class NaturalTreeSource {
     boolean budgetDeferred;
     boolean unloadedEvidence;
 
+    // 每轮最多检查八个新树候选，避免树林很大时一刻扫描太多；之前的判断缓存仍保留。
     void beginQuery() { remaining = 8; budgetDeferred = false; unloadedEvidence = false; }
 
+    // 先查任务内缓存。已确认的树不因砍掉底部就立刻失去资格；但目前其他人改建后也不会重新检查。
+    // 缺区块的候选等对应区块加载再试，不会永久记成坏树。
     boolean accepts(BlockPos seed, BlockGetter world, Predicate<BlockPos> loaded) {
         if (verified.contains(seed)) return true;
         if (rejected.contains(seed)) return false;
@@ -52,6 +58,7 @@ final class NaturalTreeSource {
         return natural;
     }
 
+    // 寻找同种竖直原木的上下边界，最多 31 格；至少三格高、根部下方是泥土类方块才继续。
     private static boolean inspect(BlockPos seed, BlockGetter world, Predicate<BlockPos> loaded, Set<BlockPos> trunk) {
         if (!loaded.test(seed)) return false;
         BlockState first = world.getBlockState(seed);
@@ -71,6 +78,7 @@ final class NaturalTreeSource {
             if (n == 31) return false;
         }
         if (trunk.size() < 3 || !world.getBlockState(bottom.below()).is(BlockTags.DIRT)) return false;
+        // 检查树干旁有没有机器、牌子、梯子等建筑迹象；有这些附件就不把它当作可自动砍的天然树。
         for (BlockPos log : trunk) {
             for (Direction side : Direction.values()) {
                 BlockPos neighbor = log.relative(side);
@@ -86,6 +94,7 @@ final class NaturalTreeSource {
                         || !attached.getFluidState().isEmpty())) return false;
             }
         }
+        // 树干和周边都合格后，还必须通过树冠检查；孤零零的木柱不能只因插在泥土上就被砍。
         return MiningBatch.hasNaturalCrown(trunk, world, loaded);
     }
 

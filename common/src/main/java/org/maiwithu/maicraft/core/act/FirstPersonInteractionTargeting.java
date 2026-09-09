@@ -26,25 +26,30 @@ import java.util.Comparator;
 import java.util.Set;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
-/** Shared block-aim policy for semantic preflight and the eventual first-person interaction. */
+/**
+ * 在走过去之前先试算“站在那里能否点到”，相机转到位后再用同一套规则核对。
+ * 普通方块按可见表面判断；水桶沿原版取水／倒水的射线判断，不能把水后的机器误当作要点击的目标。
+ * 这里只检查几何和当前方块形态，不替原版证明权限、物品消耗或最后效果。
+ */
 public final class FirstPersonInteractionTargeting {
     private static final double EPSILON = 1.0e-6D;
     private static final double FACE_INSET = 1.0e-3D;
 
     private FirstPersonInteractionTargeting() {}
 
-    /** Buckets use their own native POV ray, then USE_ITEM; a backing machine is never clicked. */
+    /** 桶由原版 useItem 沿视线取水／倒水，不要改成点击水后面的机器。 */
     public static boolean usesBucketRay(Item item) {
         return item instanceof BucketItem;
     }
 
+    // 空桶射线会命中水源；装着东西的桶忽略流体，寻找能供倒水定位的方块表面。
     public static BlockHitResult bucketRay(
             Level level, Entity observer, Vec3 eye, Vec3 end, Item item) {
         return level.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE,
                 item == Items.BUCKET ? ClipContext.Fluid.SOURCE_ONLY : ClipContext.Fluid.NONE, observer));
     }
 
-    /** Validate the actual bucket hit and its placement face against the requested cell. */
+    /** 核对这次桶操作是否对准请求格；空桶要求那里真是可取的水源，满桶还要检查放置方向。 */
     public static boolean acceptsBucketHit(Level level, BlockPos target, Item item, BlockHitResult hit) {
         if (!level.isLoaded(target) || hit.getType() != HitResult.Type.BLOCK
                 || !level.isLoaded(hit.getBlockPos())) return false;
@@ -53,14 +58,16 @@ public final class FirstPersonInteractionTargeting {
             return hit.getBlockPos().equals(target) && state.getBlock() instanceof BucketPickup
                     && (!(state.getBlock() instanceof LiquidBlock) || state.getFluidState().isSource());
         }
+        // 请求格本身是实体方块时，当前规则只要求点击该格；空气或流体格则继续推算水要落在哪里。
         if (!state.isAir() && !(state.getBlock() instanceof LiquidBlock)) return hit.getBlockPos().equals(target);
+        // 当前只按方块是否实现含水接口判断，没检查双层台阶等实际不能含水的状态；见审计记录 A31。
         boolean waterlogs = (item == Items.WATER_BUCKET || item instanceof MobBucketItem)
                 && level.getBlockState(hit.getBlockPos()).getBlock() instanceof LiquidBlockContainer;
         BlockPos placement = waterlogs ? hit.getBlockPos() : hit.getBlockPos().relative(hit.getDirection());
         return placement.equals(target);
     }
 
-    /** Preflight for the same item ray the final converged camera must produce. */
+    /** 出手前先按桶的射线规则试算；相机真正转到位后仍要重新检查，避免水源已变或面点错。 */
     public static BlockHitResult visibleBucketHit(
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Item item) {
         if (!Double.isFinite(reach) || reach <= 0.0D
@@ -81,6 +88,8 @@ public final class FirstPersonInteractionTargeting {
      * outline shapes (doors, trapdoors and similar blocks) whose surface can lie just beyond the
      * centre along the approach direction.
      */
+    // 实心目标要找到真正可见的面；空气／流体目标先检查视线能否穿过那一格。
+    // 射线延伸到全部触及距离，避免薄门板的表面在整格中心后方时被漏掉。
     public static boolean hasLoadedReachLine(
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach) {
         if (!Double.isFinite(reach) || reach <= 0.0D
@@ -116,6 +125,7 @@ public final class FirstPersonInteractionTargeting {
      * The returned hit is proof that the target itself is the first block on that native-reach
      * line; callers still converge the real camera and perform a final native ray before use.</p>
      */
+    // 先取方块形状的边界，试中心和靠近六个面的点；命中必须属于指定格且在触及距离内。
     public static BlockHitResult visibleBlockHit(
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach) {
         if (!Double.isFinite(reach) || reach <= 0.0D
@@ -171,6 +181,8 @@ public final class FirstPersonInteractionTargeting {
      * Pick the nearest loaded, standable feet cell from which some face of {@code target} is
      * genuinely clickable. This is shared physical interaction geometry, not a workstation rule.
      */
+    // 只在目标水平三格、上下有限高度内找干燥站位；要有落脚支撑、身体两格空且能看到目标。
+    // 最后按与玩家的直线距离选择，不在这里证明有路能走到。
     public static BlockPos nearestVisibleStand(
             LocalPlayer player, BlockPos target, double reach, Set<Long> excluded) {
         if (target == null || !player.level().isLoaded(target)) return null;
@@ -200,6 +212,7 @@ public final class FirstPersonInteractionTargeting {
                 .orElse(null);
     }
 
+    // 这是较保守的站位筛选：不接受水中或身体格里有碰撞形状的位置，脚下还得能托住上表面。
     private static boolean standable(Level level, BlockPos feet) {
         if (!level.isLoaded(feet) || !level.isLoaded(feet.above())
                 || !level.isLoaded(feet.below())) return false;
@@ -229,6 +242,8 @@ public final class FirstPersonInteractionTargeting {
      * Air aims intentionally pass through. Non-bucket liquid use keeps the Fluid.NONE crosshair
      * policy; buckets instead require {@link #acceptsBucketHit} on their own item ray.
      */
+    // 空气坐标目前只被当作朝向提示，直接放行，前方即使有别的命中也不会在这里拒绝。
+    // 流体坐标比较先到目标格还是先碰阻挡物；普通方块则必须实际命中目标自身。
     public static boolean blockedByWorld(
             Level level, Vec3 eye, BlockPos target, Vec3 rayEnd, HitResult hit) {
         var targetState = level.getBlockState(target);

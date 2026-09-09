@@ -16,10 +16,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Block-action tool implementations — the business half of {@code AutoMineTool},
- * {@code InteractAtTool} and {@code InteractEntityTool}. Each method validates its
- * args and builds a {@link TaskRecord}; the {@link ToolContext} carries the call
- * id and deadline basis.
+ * 把内部采矿、点击方块和点击实体的参数转换成任务单。
+ * 这里只做参数转换、部分合法性检查和初始超时安排，不会真正按键；实际动作发生在对应任务里。
  */
 public final class BlockActionOps {
 
@@ -34,6 +32,8 @@ public final class BlockActionOps {
     // interact_entity: covers chasing a moving target.
     private static final long INTERACT_ENTITY_TIMEOUT_TICKS = 60 * 20;
 
+    // 把物品来源方块名读成目标集合，数量压到 1～256，并按数量给采矿任务一个初始期限。
+    // 这里创建的是通用采矿任务，没有填写期望产物；后面会通过背包变化猜本轮产物。
     public TaskRecord autoMine(List<String> block_ids, int count, ToolContext ctx) {
         Set<Block> targets = ToolParse.parseBlocks(block_ids);
         if (targets.isEmpty()) {
@@ -47,6 +47,7 @@ public final class BlockActionOps {
     }
 
     /** Short label for messages: the first target's path (e.g. "iron_ore"), "+N" if more. */
+    // 只为消息生成短标签：一种显示名字，多种显示首个名字加剩余种类数；不影响实际目标集合。
     private static String labelFor(Set<Block> targets) {
         Block first = targets.iterator().next();
         String path = BuiltInRegistries.BLOCK.getKey(first).getPath();
@@ -65,6 +66,7 @@ String expected_block_id,
         return interactAt(button, x, y, z, hold_ticks, item_id, expected_block_id, null, ctx);
     }
 
+    // 把鼠标键、可选坐标、按住时间和手持物品组合成任务单。坐标要么全给，要么全省略。
     public TaskRecord interactAt(String button, Integer x, Integer y, Integer z, Integer hold_ticks,
                                  String item_id, String expected_block_id, String required_block_id, ToolContext ctx) {
         MouseButton buttonVal = ToolParse.parseButton(button);
@@ -79,6 +81,8 @@ String expected_block_id,
             aim = new BlockPos(x, y, z);
         }
         Item item = item_id == null ? null : ToolArgs.parseItem(item_id);
+        // expected 是完成后该格应变成什么；required 是出手前该格必须仍是什么。
+        // 例如取水前要求水源还在，完成后再要求变成空气，前后条件各管一件事。
         Block expected = null;
         if (expected_block_id != null) {
             var id = net.minecraft.resources.ResourceLocation.tryParse(expected_block_id);
@@ -97,6 +101,7 @@ String expected_block_id,
                 buttonVal, aim, holdTicks, item, expected, required);
     }
 
+    // 实体交互只在这里保存实体编号和点击要求；能否找到它、走近和实际点到，交给执行任务判断。
     public TaskRecord interactEntity(
 String button,
 int entity_id,

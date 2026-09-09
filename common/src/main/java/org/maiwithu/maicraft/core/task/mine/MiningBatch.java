@@ -11,8 +11,12 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.LeavesBlock;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 
-/** A bounded subset of the existing target list, never a new terrain search or a loot receipt. */
+/**
+ * 把已经找到的相邻矿石或同一竖直树干分成一小批，决定先继续挖还是先捡地上材料。
+ * 它不负责寻路和确认拾取，也不会凭空把远处的新方块加进任务。
+ */
 record MiningBatch(Set<BlockPos> targets, boolean followTrunk) {
+    // 只从已经知道的同种材料里找相邻格，不额外扫描世界；原木批次只沿上下方向连接。
     static MiningBatch connected(BlockPos seed, Set<BlockPos> sameMaterial,
                                  boolean uprightLogs, boolean naturalLeaves) {
         Set<BlockPos> selected = new HashSet<>();
@@ -31,6 +35,7 @@ record MiningBatch(Set<BlockPos> targets, boolean followTrunk) {
         return new MiningBatch(Set.copyOf(selected), uprightLogs && naturalLeaves);
     }
 
+    // 背包已经够、加上地上物品就够、掉落物等了一分钟或有风险时，都应先捡。地上数量本身不算已获得。
     static boolean shouldCollect(int carried, int requested, int ownedLoose,
                                  long waitingTicks, boolean riskyDrop) {
         // Loose output is only a reason to stop producing more. It never increases the
@@ -39,6 +44,8 @@ record MiningBatch(Set<BlockPos> targets, boolean followTrunk) {
                 || waitingTicks >= 20L * 60L || riskyDrop;
     }
 
+    // 用树冠外观作判断：树顶附近至少两侧连着距原木一格的非持久树叶，再在小范围内数到八片叶子。
+    // 这是识别规则，不是读取游戏的“自然生成”来源标签。
     static boolean hasNaturalCrown(Set<BlockPos> trunk, BlockGetter world, Predicate<BlockPos> loaded) {
         if (trunk.isEmpty()) return false;
         BlockPos top = trunk.stream().max(Comparator.comparingInt(BlockPos::getY)).orElseThrow();
@@ -75,6 +82,7 @@ record MiningBatch(Set<BlockPos> targets, boolean followTrunk) {
         return state.getBlock() instanceof LeavesBlock && !state.getValue(LeavesBlock.PERSISTENT);
     }
 
+    // 往下最多检查四格；遇到危险或未加载就认为不能放心等它落地，找到有碰撞的支撑才算可落。
     static boolean safeDropLanding(BlockPos position, BlockGetter world, Predicate<BlockPos> loaded) {
         for (int depth = 0; depth < 4; depth++) {
             BlockPos below = position.below(depth);

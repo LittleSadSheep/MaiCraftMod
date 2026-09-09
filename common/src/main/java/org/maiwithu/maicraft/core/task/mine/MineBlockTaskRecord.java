@@ -10,34 +10,24 @@ import java.util.Set;
 import java.util.List;
 
 /**
- * Typed task descriptor for the intent-level {@code mine} tool: "gather
- * {@code count} of these block types, search/pathfind/dig it yourself". The
- * task owns the whole loop — scan the loaded area around the body for
- * targets, walk to them with the terrain-modifying pathfinder (bridging /
- * digging as needed), mine into the entity inventory, repeat until the count
- * is met or nothing reachable remains.
- *
- * <p>The LLM never sees coordinates: it only declares <em>what</em> and
- * <em>how many</em>. Drops/tool-tier follow from whatever the entity holds,
- * as in vanilla.
+ * 采矿任务单：要找哪些方块、要多少新材料，以及是否只许砍天然树、是否必须有高效工具。
+ * 任务单复制目标集合，防止调用方之后改列表影响正在执行的工作；具体寻找和采集由 MineCompanionTask 完成。
  */
 public final class MineBlockTaskRecord extends TaskRecord {
 
     public static final String TOOL_NAME = "mine";
 
-    /** Block types to gather (include variants, e.g. iron_ore + deepslate_iron_ore). */
+    /** 允许挖的方块种类，例如同时接受普通铁矿和深层铁矿。 */
     public final Set<Block> targets;
-    /** How many to gather before reporting success. */
+    /** 希望新获得的物品数量；没有掉落物的模式由执行器改数确认挖掉的块。 */
     public final int count;
     /** Human-readable target label for messages / debug overlay (e.g. "iron_ore"). */
     public final String label;
-    /** Exact acceptable inventory products when the semantic caller already knows them.
-     *  This lets terrain movements that mine a target contribute without exposing paths
-     *  or individual blocks to the LLM. Empty keeps the generic direct-mine behavior. */
+    /** 明确哪些物品才算目标产物，例如挖铁矿只数粗铁。空集合表示由执行器观察背包变化来猜产物。 */
     public final Set<Item> progressItems;
-    /** A prepared work batch must return for another tool instead of degrading to bare hands. */
+    /** 工具耗尽后要结束这批工作，不退回空手慢挖。 */
     public final boolean requireEfficientTool;
-    /** Automatic material supply must distinguish natural trees from structural log blocks. */
+    /** 只把通过天然树外观检查的原木当作材料，避免顺手拆木屋。 */
     public final boolean naturalLogsOnly;
 
     /** Live progress = matching ITEMS gathered since the task started (counted in the inventory,
@@ -79,6 +69,8 @@ public final class MineBlockTaskRecord extends TaskRecord {
         return hasEfficientTool(player.getInventory().items, targets);
     }
 
+    // 前 36 格中只要有一个仍有耐久、能加速且能采出任一目标材料的工具，就返回 true。
+    // 这不表示每一种目标都有合适工具，也不保证这一把工具能撑完整批。
     static boolean hasEfficientTool(List<ItemStack> inventory, Set<Block> targets) {
         for (int slot = 0; slot < Math.min(36, inventory.size()); slot++) {
             ItemStack tool = inventory.get(slot);
