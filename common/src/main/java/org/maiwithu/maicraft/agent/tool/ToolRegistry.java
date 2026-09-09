@@ -6,10 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Mod 内部工具的名称索引，通常在 MaiCraftCore 初始化时填入，由目标适配器和本地分发器查找。
- * 例如 goto 对应移动工具；MCP 对外的四个入口由 PublicToolCatalog 单独定义。
- *
- * <p>保留注册顺序，便于稳定列举。底层 Map 没有加锁，初始化后的访问应留在客户端线程。
+ * 根据内部工具名找到执行对象，例如 goto 找到移动工具。通常启动时登记，之后由目标适配和内部调用查找。
+ * 对外公开的四个 MCP 工具另由 PublicToolCatalog 定义；这里的列表和旧分类不会自动变成公开功能。
  */
 public final class ToolRegistry {
 
@@ -29,6 +27,7 @@ public final class ToolRegistry {
                     "工具名不合规(只允许 [a-zA-Z0-9_-],1~64 字符): '" + name
                             + "' — " + tool.getClass().getName());
         }
+        // 当前先写入再检查重名，所以抛出重名异常时旧映射已经被覆盖；这不是一次没有产生变化的拒绝。
         MaiCraftTool prior = TOOLS.put(name, tool);
         if (prior != null) {
             throw new IllegalStateException(
@@ -53,7 +52,7 @@ public final class ToolRegistry {
         MaiCraftTool exact = TOOLS.get(name);
         if (exact != null) return exact;
         String lower = name.toLowerCase();
-        if (lower.equals(name)) return null;  // already lowercase, no further fallback
+        if (lower.equals(name)) return null;  // 已经全小写，继续转换也找不到别的名称。
         return TOOLS.get(lower);
     }
 

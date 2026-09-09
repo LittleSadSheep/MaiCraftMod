@@ -5,12 +5,9 @@ import net.minecraft.client.player.LocalPlayer;
 import java.util.List;
 
 /**
- * 按固定顺序选出本 tick 想要使用身体的任务：生存反射 → 同步任务槽 → 当前任务槽 → 空闲姿态。
- * 每层检查 canRun，第一个可运行的任务获选；全部不可运行时返回 null。
- *
- * <p>这里只做选择，不暂停任务、不清理输入。CompanionBrain 还会检查当前动作能否安全交接，
- * 因此“选中了更高优先级任务”不一定意味着它本 tick 就能接管身体。
- * 当前 CompanionBrain 没有注册空闲姿态，idle 只是保留的选择入口。
+ * 每次更新先选能执行的紧急自救，再选临时任务、当前任务，最后才选闲置动作。每一组里按登记顺序选第一个。
+ * 例如走路时快淹死了，先把换气任务选出来；当前动作何时能安全停下，由 CompanionBrain 接着判断。
+ * 当前 CompanionBrain 没有登记闲置动作，这一层只是保留入口。
  */
 public final class TaskSelector {
 

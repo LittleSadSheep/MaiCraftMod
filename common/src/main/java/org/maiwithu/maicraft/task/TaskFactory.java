@@ -6,16 +6,14 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 把任务记录变成执行对象：{@link TaskRecord} 保存参数和状态，{@link Task} 负责逐 tick 干活。
- *
- * <p>按记录的具体类精确匹配，不会自动寻找父类的执行器。漏注册时返回 {@link UnsupportedTask}，
- * 由它报告失败，避免把客户端 tick 循环一起中断。
- *
- * <p>同一种记录再次注册会覆盖之前的工厂；这里登记的是创建方法，每次执行都会创建任务对象。
+ * 按任务单的具体类型创建对应执行器，例如挖掘任务单创建挖掘任务。每次都新建执行对象，不复用上一次的动作进度。
+ * 没有登记时创建一个会说明“不支持”的任务；创建方法本身抛出的异常仍交给调用者处理。
  */
 public final class TaskFactory {
 
-    /** Builds the {@link Task} that runs a record of the registered type. */
+    /**
+     * 登记用的创建方法：拿到玩家和任务单，返回这次要执行的任务。
+     */
     @FunctionalInterface
     public interface Runner<R extends TaskRecord> {
         Task create(LocalPlayer player, R record);
@@ -26,12 +24,16 @@ public final class TaskFactory {
 
     private TaskFactory() {}
 
-    /** Register the runner for a concrete record type. Tick-thread + init safe. */
+    /**
+     * 登记一种具体任务单的创建方法；再次登记同一种类型会替换先前的方法。
+     */
     public static <R extends TaskRecord> void register(Class<R> type, Runner<R> runner) {
         RUNNERS.put(type, runner);
     }
 
-    /** How many record types are currently registered. */
+    /**
+     * 返回已经登记了多少种任务单，不是当前正在运行多少个任务。
+     */
     public static int size() {
         return RUNNERS.size();
     }

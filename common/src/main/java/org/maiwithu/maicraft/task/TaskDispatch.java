@@ -8,7 +8,10 @@ import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-/** Direct entry points into the single local-player task slots. */
+/**
+ * 内部工具通过这里交出任务单。有父任务正在接收时，任务单直接交回父任务；否则放进玩家的临时任务槽或当前任务槽。
+ * 这里叫 runSync 也不是当场把工作全部做完，实际动作仍由后续游戏更新推进。
+ */
 public final class TaskDispatch {
 
     private static Capture activeCapture;
@@ -49,7 +52,9 @@ public final class TaskDispatch {
         CompanionTickDispatcher.submitSync(player, record);
     }
 
-    /** 有 capture 时交回任务单；否则替换当前槽。旧 ToolCall 已登记时，结束结果才会走对应回调。 */
+    /**
+     * 父任务正在接收时交回任务单；否则登记为异步并替换当前任务。args 和 reply 是保留参数，这里没有读取或直接答复它们。
+     */
     public static void setTask(LocalPlayer player, TaskRecord record, JsonObject args,
                                Consumer<String> reply) {
         requireClientThread();
