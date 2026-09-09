@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 /** Real task selection must respect supplied materials and resume retained worksite checks. */
 final class BuildWorksiteSelectionTest {
     static void run() throws Exception {
+        layerFrontier();
         try (var h = new InteractionWorldTestHarness()) {
             h.inventory.setItem(0, new ItemStack(Items.STONE, 64));
             var stone = stone(6, 1, 6);
@@ -87,6 +88,57 @@ final class BuildWorksiteSelectionTest {
 
     private static boolean ready(FirstPersonBuildCompanionTask task, BuildTaskRecord.Target target) throws Exception {
         Object cell = cell(target); return (boolean) invoke(task, "readyForWorksite", cell.getClass(), cell);
+    }
+
+    private static void layerFrontier() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var dimensions = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions");
+            dimensions.setAccessible(true);
+            dimensions.set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
+            h.position(new Vec3(4.5, 1, 8.5));
+            h.inventory.setItem(0, new ItemStack(Items.STONE, 64));
+            var low = stone(12, 1, 12);
+            var high = stone(5, 2, 8);
+            h.set(high.pos().below(), Blocks.STONE.defaultBlockState());
+            var targets = List.of(high, low);
+            var task = new FirstPersonBuildCompanionTask(h.player,
+                    new BuildTaskRecord("layers", 1000, targets, false));
+            install(task, targets);
+            var reachable = BuildPlacementGeometry.currentGesture(h.player, high, Map.of());
+            check(reachable != null, "the upper target is reachable, so distance alone would select it");
+            check(ready(task, low) && !ready(task, high), "a nearby upper cell cannot bypass unfinished foundation work");
+            check(!(boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null),
+                    "current-position placement must obey the structural layer frontier");
+            var site = new BuildWorksitePlanner.Worksite(h.player.blockPosition(), h.player.position(),
+                    List.of(new BuildWorksitePlanner.Placement(high, reachable)), 0);
+            field("worksite").set(task, site);
+            invoke(task, "retainUsefulWorksite");
+            check(field("worksite").get(task) == null, "an upper-layer worksite must not survive the frontier guard");
+            invoke(task, "promoteConstructionLayer");
+            check(((List<?>) field("queue").get(task)).getFirst().equals(cell(low)),
+                    "deferred or scrambled queues must return to the lowest unfinished layer");
+            invoke(task, "worksiteTick");
+            Object search = field("worksiteSearch").get(task);
+            if (search != null) {
+                var seeds = search.getClass().getDeclaredField("seeds"); seeds.setAccessible(true);
+                check(((List<?>) seeds.get(search)).equals(List.of(low)),
+                        "coverage search must never aggregate easy targets across three layers");
+            }
+            h.set(low.pos(), low.desiredState());
+            invoke(task, "resetCell");
+            check(ready(task, high), "confirmed foundation completion opens the next layer without reconstructing the task");
+            check((boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null),
+                    "the now-active upper cell still benefits from current-position placement");
+            var air = new BuildTaskRecord.Target(Blocks.AIR, Items.AIR, new BlockPos(6, 0, 6),
+                    "eventual support cleanup", null, null, null);
+            var supportedRecord = new BuildTaskRecord("owned-air", 1000, List.of(air, high), false);
+            h.set(air.pos(), Blocks.DIRT.defaultBlockState());
+            supportedRecord.scaffoldLedger().confirmed(air.pos(), Blocks.DIRT.defaultBlockState());
+            var supportedTask = new FirstPersonBuildCompanionTask(h.player, supportedRecord);
+            install(supportedTask, List.of(air, high));
+            check(ready(supportedTask, high),
+                    "owned air-cell scaffolds awaiting final cleanup must not lock the structural frontier");
+        }
     }
     private static Object cell(BuildTaskRecord.Target target) throws Exception {
         var type = Class.forName(FirstPersonBuildCompanionTask.class.getName() + "$CellPlan");

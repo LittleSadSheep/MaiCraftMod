@@ -125,7 +125,7 @@ final class BuildWorksitePlanner {
             for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) for (int z = -2; z <= 2; z++)
                 for (var target : buckets.getOrDefault(base.offset(x, y, z), List.of()))
                     if (target.pos().distToCenterSqr(feet.add(0, 1.62, 0)) <= 36) result.add(target);
-            result.sort(BuildOrder.BUILD_ORDER);
+            result.sort(BuildLayerFrontier.order(targets));
             return result;
         }
 

@@ -114,6 +114,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private boolean worksiteSearched;
     private final Set<BlockPos> rejectedWorksites = new HashSet<>();
     private final PlacementAttemptLedger placementAttempts = new PlacementAttemptLedger();
+    private final BuildStanceNavigation stanceNavigation = new BuildStanceNavigation(this);
+    private boolean layerKnown;
+    private int constructionLayer = Integer.MAX_VALUE;
     private final BuildAimProgress aimProgress = new BuildAimProgress();
     private String aimWaitReason = "not_aiming", aimHit = "not_checked";
     private Map<String, Object> lastPlacementRejection = Map.of();
@@ -372,6 +375,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (!missing.isEmpty()) note = "partial mode pauses when carried materials run out";
         preflightDone = true; queue = new ArrayList<>(plans); queueAt = 0;
+        queue.sort(java.util.Comparator.comparing(CellPlan::target, BuildLayerFrontier.order(targets)));
         registerProvider(); phase = Phase.SELECT; return TaskState.RUNNING;
     }
 
@@ -388,8 +392,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState selectTick() {
         // 找下一格不符合蓝图的位置，先清掉冲突方块，再选择放置手法；整轮做完进入成品复查。
         resetCell();
+        promoteConstructionLayer();
         retainUsefulWorksite();
-        // Finish reachable work from these feet before returning to the blueprint's global order.
+        // Reuse reachable placements only within the unfinished structural layer.
         if (queueAt < queue.size() && !isTemporary(queue.get(queueAt))
                 && selectNearbyPlacement(worksite == null ? null : worksite.feet()))
             return TaskState.RUNNING;
@@ -556,25 +561,67 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             gestureFromCurrent = false;
             BlockPos stance = gesture.stance();
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), 1.0,
-                    () -> PlayerNav.playerFeet(player).equals(stance), this);
+                    () -> PlayerNav.playerFeet(player).equals(stance), stanceNavigation.contextFor(stance));
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> { stopNav(); phase = Phase.SELECT_ITEM; yield TaskState.RUNNING; }
             case FAILED -> {
+                stopNav();
+                if (stanceNavigation.retryWithTerrain(gesture.stance())) {
+                    note = "existing-footing route exhausted; trying permitted construction access";
+                    yield TaskState.RUNNING;
+                }
                 placementAttempts.rejectStance(cell.target(), gesture.stance());
-                stopNav(); gestureAt++; yield TaskState.RUNNING;
+                gestureAt++; yield TaskState.RUNNING;
             }
         };
     }
 
     // 一处站位连放的候选必须不用先清障、有材料、尚未完成且最新修改守卫允许；临时垫块另走自己的队列。
     private boolean readyForWorksite(CellPlan candidate) {
-        return !isTemporary(candidate) && !BuildCellRules.isAirTarget(candidate.target())
+        return !isTemporary(candidate) && onConstructionLayer(candidate)
+                && !BuildCellRules.isAirTarget(candidate.target())
                 && (!r.consumeMaterials || inventory.hasItems(candidate.target().item(), candidate.target().materialCount(), true))
                 && player.level().isLoaded(candidate.target().pos())
                 && !matches(candidate.target(), candidate.generated()) && clearCells(candidate).isEmpty()
                 && r.mutationGuardMatches(player, candidate.target().pos());
+    }
+
+    private boolean layerPending(CellPlan candidate) {
+        return !matches(candidate.target(), candidate.generated())
+                && !(player.level().isLoaded(candidate.target().pos())
+                && ownedAirScaffold(candidate.target(), player.level().getBlockState(candidate.target().pos())));
+    }
+
+    private int constructionLayer() {
+        if (!layerKnown) {
+            constructionLayer = Integer.MAX_VALUE;
+            for (int i = queueAt; i < queue.size(); i++) {
+                CellPlan candidate = queue.get(i);
+                if (isTemporary(candidate)) continue;
+                int candidateLayer = BuildLayerFrontier.layer(candidate.target());
+                if (candidateLayer < constructionLayer && layerPending(candidate)) constructionLayer = candidateLayer;
+            }
+            layerKnown = true;
+        }
+        return constructionLayer;
+    }
+
+    private boolean onConstructionLayer(CellPlan candidate) {
+        return constructionLayer() == Integer.MAX_VALUE
+                || BuildLayerFrontier.layer(candidate.target()) == constructionLayer();
+    }
+
+    private void promoteConstructionLayer() {
+        if (queueAt >= queue.size() || isTemporary(queue.get(queueAt))) return;
+        for (int i = queueAt; i < queue.size(); i++) {
+            CellPlan candidate = queue.get(i);
+            if (!isTemporary(candidate) && onConstructionLayer(candidate) && layerPending(candidate)) {
+                java.util.Collections.swap(queue, queueAt, i);
+                return;
+            }
+        }
     }
 
     // 先找当前伸手就够得着的待建格，最多验证十六格或约四毫秒；找到就移到队首，减少来回走路。
@@ -932,12 +979,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.FAILED;
         }
 
-        List<CellPlan> pending = BuildTemporarySupportPlan.defer(queue, queueAt,
-                candidate -> !matches(candidate.target(), candidate.generated()));
-        if (pending.size() > 1) {
+        List<CellPlan> pending = BuildTemporarySupportPlan.defer(queue, queueAt, this::layerPending);
+        if (!isTemporary(cell) && pending.stream().anyMatch(candidate -> candidate != cell && onConstructionLayer(candidate))) {
+            pending.sort(java.util.Comparator.comparingInt(candidate -> BuildLayerFrontier.layer(candidate.target())));
             queue = pending;
             queueAt = 0;
-            note = "support-dependent cells were deferred until supports existed";
+            note = "trying other cells in the same structural layer before temporary supports";
             phase = Phase.SELECT; return TaskState.RUNNING;
         }
         TaskState recovery = prepareTemporarySupports();
@@ -1024,6 +1071,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         markComplete(cell); queueAt++; resetCell(); phase = Phase.SELECT;
     }
     private void resetCell() {
+        layerKnown = false;
+        stanceNavigation.reset();
         placementWalkTarget = null;
         gestureFromCurrent = false;
         worksiteSearch = null; worksiteSearched = worksite != null; rejectedWorksites.clear();
@@ -1408,9 +1457,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     @Override public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>(Map.of("task", name(), "phase", phase.name().toLowerCase(java.util.Locale.ROOT),
                 "planned_cells", r.targets.size(), "verified_cells", r.completed(),
+                "requested_blocks", r.targets.size(), "verified_blocks", r.completed(),
                 "placed_blocks", r.placed(), "cleared_blocks", r.broken(),
                 "temporary_supports_remaining", r.scaffoldLedger().snapshot().size()));
         if (phase == Phase.AIM) data.put("placement", placementDiagnostics());
+        if (layerKnown && constructionLayer != Integer.MAX_VALUE) data.put("construction_layer", constructionLayer);
         data.put("creative_materials", creativeMaterials.progress());
         if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
                 "stance_checks", gestureProgress.stanceChecks(), "face_checks", gestureProgress.probeCount(),
