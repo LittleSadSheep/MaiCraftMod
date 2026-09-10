@@ -19,7 +19,10 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorBridge.Cabin;
 import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorGeometry.Landing;
 
-/** Associations come from synchronized cabin floor lists and real local redstone connections. */
+/**
+ * 联合检查出发楼层、轿厢支撑、控制器、呼梯输入和目的楼层，组出可执行的乘梯计划。
+ * 当前先按距离只选一个入口和出口，随后才查厢内连通；这个顺序可能漏掉稍远但真正可用的门。
+ */
 final class ElevatorSurvey {
     record CallInput(BlockPos position, Vec3 stance, int inventorySlot, int channel,
                      BlockPos transmitter, BlockPos receiver, List<Map<String, Object>> frequencyItems) {
@@ -44,6 +47,7 @@ final class ElevatorSurvey {
     static Plan find(LocalPlayerContext ctx, BlockPos destination, LongSet forbidden, CreateElevatorBridge bridge, Cabin cabin, Map<String, Object> evidence) {
         return find(ctx,destination,forbidden,bridge,cabin,evidence,null);
     }
+    // 这里传入的 hasChunkAt 在原版客户端不能确认区块已加载；相应未知区域判断目前不能依赖它。
     static Plan find(LocalPlayerContext ctx, BlockPos destination, LongSet forbidden, CreateElevatorBridge bridge, Cabin cabin, Map<String, Object> evidence,Integer selectedFloor) {
         evidence.put("cabin_uuid", cabin.entity().getUUID().toString());
         Map<String, Integer> rejected = new java.util.LinkedHashMap<>();
@@ -75,6 +79,7 @@ final class ElevatorSurvey {
             for (double deck : decks) {
                 Vec3 targetReference=destination==null ? new Vec3(player.x,targetOrigin.y+deck,player.z) : Vec3.atBottomCenterOf(destination);
                 ElevatorArrivalView targetView = arrivals.computeIfAbsent(target.contactY(), y -> arrival(ctx, bridge, cabin, y, doorEvidence));
+                // 这里先只选离目标最近的出口；它在厢内走不通时，下面不会再遍历同层其他出口。
                 Landing exit = geometry.landings(targetView, ctx.level()::hasChunkAt, targetOrigin, step, forbidden, deck).stream()
                         .min(Comparator.comparingDouble(l -> l.outside().distanceToSqr(targetReference))).orElse(null);
                 if (exit == null) { reject(rejected, "target_landing_missing_or_obstructed"); continue; }
@@ -145,6 +150,7 @@ final class ElevatorSurvey {
         return view;
     }
 
+    // 把选定厢内站位投到起终点之间每半格高度，检查乘梯途中身体是否会进入禁止区域。
     static boolean rideAllowed(Vec3 local, Vec3 fromOrigin, Vec3 toOrigin, double width, double height, LongSet forbidden) {
         int steps = Math.max(1, (int) Math.ceil(Math.abs(toOrigin.y - fromOrigin.y) * 2));
         for (int i = 0; i <= steps; i++) if (ElevatorGeometry.forbidden(local.add(fromOrigin.lerp(toOrigin, (double) i / steps)), width, height, forbidden)) return false;
@@ -237,6 +243,7 @@ final class ElevatorSurvey {
     }
 
     /** A native button/receiver either weakly powers the contact or strongly powers its adjacent support. */
+    // 只解释直接相邻供电或通过按钮所附的导体供电；复杂红石线路不在这份关联判断中。
     static boolean feeds(BlockGetter world, BlockPos contact, BlockPos source, BlockState state, boolean button) {
         if (source.distManhattan(contact) == 1) return true;
         Direction facing;

@@ -17,7 +17,9 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.entity.InputDriver;
 
-/** Ordinary navigation outside, bounded support-aware walking inside the moving cabin. */
+/**
+ * 固定地面接近轿厢时用步行导航；厢内和门口则按轿厢局部支撑逐小步移动，切换前等旧导航安全让出控制。
+ */
 final class ElevatorMotion {
     enum Progress { MOVING, REACHED, BLOCKED }
     private EmbeddedBaritoneNavigator walking;
@@ -77,6 +79,7 @@ final class ElevatorMotion {
         return lastStepProgress;
     }
 
+    // 这里传入的 hasChunkAt 在原版客户端不能确认区块已加载；相应未知区域判断目前不能依赖它。
     private Progress stepChecked(LocalPlayerContext ctx, Cabin cabin, ElevatorGeometry geometry, Vec3 target, LongSet forbidden) {
         if (!releaseNavigation()) return Progress.MOVING;
         Vec3 position = ctx.player().position();

@@ -17,7 +17,9 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorBridge.WorldLink;
 
-/** User's actual button/support/link/contact layout, without loading Create or operating a game. */
+/**
+ * 用给定频率和按钮方块检查有序频率、染色差别、收发模式、距离许可和实际供电方向；不发送真实无线控制。
+ */
 public final class ElevatorCallLinksTest {
     private static final BlockPos BUTTON = new BlockPos(-74, 116, -12), SUPPORT = new BlockPos(-73, 116, -12);
     private static final BlockPos TRANSMITTER = new BlockPos(-73, 116, -13), RECEIVER = new BlockPos(-67, 115, -12);

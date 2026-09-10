@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskState;
 
+// 先靠近并读取指定电梯楼层；有目标楼层时交给乘梯会话，只有实际乘梯并离开轿厢成功后才记录已到达位置。
 final class ElevatorFloorTask extends AbstractCompanionTask<ElevatorFloorTaskRecord> {
     private final CreateElevatorBridge bridge=ElevatorInspection.bridge();
     private final ElevatorActions actions=new ElevatorActions();

@@ -25,6 +25,7 @@ public final class JetpackObstruction {
     private JetpackObstruction() {}
 
     // 沿线最多检查四百个样本，标明是实体身体真碰撞，还是仅碰到规划预留的安全余量。
+    // 这里的 hasChunkAt 在原版客户端恒为真，因此当前诊断不能靠这项条件识别未加载区域。
     public static Map<String, Object> inspect(LocalPlayerContext ctx, LongSet forbidden, Vec3 from, Vec3 to) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("type", "unknown"); result.put("from", point(from)); result.put("to", point(to));

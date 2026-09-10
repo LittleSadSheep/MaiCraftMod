@@ -8,7 +8,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 
-/** Reversible preparation of one real handheld controller, including cancellation mid-swap. */
+/**
+ * 把无线遥控器准备到快捷栏，操作结束后恢复原物品排列和选择；栏位被外部改变时不覆盖冲突内容。
+ */
 final class ElevatorRemoteStaging {
     private VisibleMenuSession menu = new VisibleMenuSession();
     private MenuReceipt exchange;

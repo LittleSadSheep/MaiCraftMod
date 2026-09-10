@@ -16,7 +16,9 @@ import org.maiwithu.maicraft.client.actor.MenuPort;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import sun.misc.Unsafe;
 
-/** Cancel after a sent inventory swap: await its receipt, reverse once, and close only our GUI. */
+/**
+ * 模拟遥控器换栏和关闭界面，检查未确认时不重复交换、外部新界面不被认领，结束时原排列被恢复。
+ */
 public final class ElevatorRemoteStagingTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

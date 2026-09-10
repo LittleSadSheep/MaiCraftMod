@@ -23,7 +23,10 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** Optional Create 6 client API. Snapshots contain live handles and must stay inside one tick. */
+/**
+ * 集中读取 Create 电梯轿厢、楼层、控制器和红石链路，并调用模组原有的滚动、确认和呼梯协议。
+ * 当前超过四千零九十六块的轿厢直接跳过，楼层等元信息也随之不可见。
+ */
 final class CreateElevatorBridge {
     private static final String ROOT = "com.simibubi.create.content.";
     private record MethodKey(Class<?> owner, String name, List<Class<?>> arguments) {}
@@ -117,6 +120,7 @@ final class CreateElevatorBridge {
     }
 
     record ArrivalDoors(String mode, Map<BlockPos, Direction> pairs) {}
+    // 按原生楼层门模式和轿厢滑门朝向找关联门；这里的 hasChunkAt 在原版客户端恒为真，不能证明楼层区块已加载。
     ArrivalDoors arrivalDoors(LocalPlayer player, Cabin cabin, int floor) {
         BlockPos contact = cabin.column().at(floor);
         if (!player.clientLevel.hasChunkAt(contact)) return new ArrivalDoors("unloaded", Map.of());
@@ -141,6 +145,7 @@ final class CreateElevatorBridge {
         return new ArrivalDoors(String.valueOf(mode), Map.copyOf(pairs));
     }
 
+    // 先按当前准星裁掉普通世界遮挡，再找目标轿厢命中；还有别的运动结构挡在前面时也不能点击后面的控制器。
     BlockHitResult hit(LocalPlayerContext ctx, Cabin cabin, BlockPos localPos) {
         if (ctx.player().isSpectator() || ctx.player().isHandsBusy()) return null;
         Vec3 from = ctx.player().getEyePosition();
@@ -294,6 +299,7 @@ final class CreateElevatorBridge {
         try { return ctor.newInstance(args); }
         catch (ReflectiveOperationException failure) { throw new IllegalStateException("Create construction " + name, failure); }
     }
+    // 用参数数量和运行时类型选择反射重载；当前对基本类型只区分数值或布尔，尚未精确区分各数值类型。
     private static boolean accepts(Class<?>[] types, Object[] args) {
         if (types.length != args.length) return false;
         for (int i = 0; i < types.length; i++) {

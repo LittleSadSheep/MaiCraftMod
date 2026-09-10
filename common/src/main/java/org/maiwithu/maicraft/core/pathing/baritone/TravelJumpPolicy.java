@@ -229,6 +229,7 @@ public final class TravelJumpPolicy {
     /**
      * 分别检查高一格、同高度和低一格的落点；身体要放得下、地面要干燥结实，而且估计落地后还能活着。
      */
+    // 下面的 hasChunkAt 在原版客户端恒为真；它不能单独保证落点列已经加载，仍要区分后续实际支撑检查。
     private static boolean survivableColumn(IPlayerContext ctx, BlockPos column, double apexHeight,
                                             FallDamageBudget fallBudget) {
         for (int landing = 1; landing >= -1; landing--) {

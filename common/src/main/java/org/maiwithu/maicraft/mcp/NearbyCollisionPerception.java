@@ -14,7 +14,10 @@ import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 
-/** Small on-demand geometry sample; no movement, chunk loading or route claims. */
+/**
+ * 观察身体周围两格的实际碰撞，优先展示已与身体相交或伸出所属格子的形状，最多列二十项。
+ * 当前现场入口用 hasChunkAt 作为加载依据，在原版客户端不能据此可靠统计未知格。
+ */
 final class NearbyCollisionPerception {
     static JsonObject observe(LocalPlayer player) {
         return observe(player.level(), player.level()::hasChunkAt, player.blockPosition(),

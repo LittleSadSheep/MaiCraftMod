@@ -26,7 +26,10 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 
-/** Loaded local standing surfaces, anchored to this body's floor instead of the roof heightmap. */
+/**
+ * 粗看周围不同高度的可站表面、门、攀爬物和危险方向；保留实际碰撞高度与可见性，不把候选当成已经有路。
+ * 当前现场入口使用的 hasChunkAt 在原版客户端恒为真，不能保证这里只读到已加载地形。
+ */
 public final class LocalFloorSense {
     private static final int RADIUS = 8, DEPTH = 16, RISE = 2, STRIDE = 2;
     private LocalFloorSense() {}
@@ -131,6 +134,7 @@ public final class LocalFloorSense {
         return result;
     }
 
+    // 按实际碰撞顶面确定站立高度，不把半砖和普通整块都当成同一高度。
     private static double supportTop(BlockState state, View view, BlockPos block, double x, double z, double width) {
         double top = Double.NEGATIVE_INFINITY;
         for (AABB shape : state.getCollisionShape(view, block).toAabbs()) {
@@ -191,6 +195,7 @@ public final class LocalFloorSense {
         }
     }
 
+    // 缓存本次读过的格子；传入判断说未知、越过建筑高度或预算用尽时，按挡住处理并标为部分观察。
     private static final class View implements BlockGetter {
         final BlockGetter world;
         final Predicate<BlockPos> loaded;

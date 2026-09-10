@@ -753,6 +753,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     }
 
     // 从已知候选里找相连的同种材料作为一小批。原木只沿竖直方向连起来，避免顺着横梁扩大工作范围。
+    // 树冠、掉落点及后面的天然树筛选均把 hasChunkAt 传作加载判断；它在原版客户端不能区分未知区块。
     private void beginBatch(BlockPos target) {
         if (batch != null && batch.targets().contains(target)) return;
         BlockState selected = player.level().getBlockState(target);

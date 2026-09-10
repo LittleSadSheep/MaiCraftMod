@@ -5,7 +5,9 @@ import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** A missing floor means observe/synchronize; a selected floor means one native elevator journey. */
+/**
+ * 保存电梯身份、可选目标楼层和是否先靠近；目标楼层为空表示只同步楼层清单，首次加载还登记对应任务。
+ */
 public final class ElevatorFloorTaskRecord extends TaskRecord implements InternalPositionReceipt {
     static { TaskFactory.register(ElevatorFloorTaskRecord.class,ElevatorFloorTask::new); }
     public final UUID elevatorId;

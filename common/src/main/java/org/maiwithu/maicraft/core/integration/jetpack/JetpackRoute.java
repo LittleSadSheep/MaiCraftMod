@@ -16,7 +16,8 @@ import baritone.pathing.movement.CollisionGeometry;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /**
- * 在已加载、干燥且身体能通过的空间里找一段最多六十四格的飞行路线；先试直接升高、平移、落下，再按六个方向分次搜索。
+ * 按干燥程度和身体空间找最多六十四格的飞行路线，先试升高、平移、落下，再按六方向搜索。
+ * 当前现场读取的加载检查使用 hasChunkAt；它在原版客户端恒为真，不能证明所查区域已有数据。
  */
 public final class JetpackRoute {
     public interface Space {
@@ -237,7 +238,7 @@ public final class JetpackRoute {
     public static Space observed(LocalPlayerContext ctx) {
         return observed(ctx, org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.forbiddenBodyCells());
     }
-    // 按实际身体尺寸加少量余量读取世界，并核对附近区块、世界边界、禁入格、实体和移动结构。
+    // 按实际身体尺寸加余量检查边界、禁入格和碰撞；这里的 hasChunksAt/hasChunkAt 不能在原版客户端确证区域已加载。
     public static Space observed(LocalPlayerContext ctx, it.unimi.dsi.fastutil.longs.LongSet forbidden) {
         var contraptions=org.maiwithu.maicraft.core.integration.create.ContraptionObstacles.capture(ctx.level(),ctx.player().position());
         return new Space() {

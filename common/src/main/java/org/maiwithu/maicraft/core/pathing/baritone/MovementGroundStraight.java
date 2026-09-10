@@ -47,6 +47,7 @@ public final class MovementGroundStraight extends Movement {
         return geometry.clear(start, end) && geometry.clear(start, start.add(drift)) ? originalCost : COST_INF;
     }
 
+    // 这里的客户端 hasChunkAt 不是可靠加载证据，未加载邻区可能被当成可读取区域交给通道检查。
     private GroundCorridor corridor() {
         return new GroundCorridor(ctx.world(), pos -> ctx.world().hasChunkAt(pos)
                 && ctx.world().getWorldBorder().isWithinBounds(pos), ctx.player().getBbWidth(), ctx.player().getBbHeight(),

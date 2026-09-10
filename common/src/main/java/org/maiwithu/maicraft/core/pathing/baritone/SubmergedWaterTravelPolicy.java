@@ -150,6 +150,7 @@ public final class SubmergedWaterTravelPolicy {
     }
 
     /** Accept both a water node and the air node above it, then locate its actual surface. */
+    // 本类两处 hasChunkAt 在原版客户端恒为真，不能凭它们证明游泳列已加载。
     private BlockPos findWaterSurface(BlockPos route) {
         if (!context.world().hasChunkAt(route)) return null;
         return findWaterSurface(context.world(), route);

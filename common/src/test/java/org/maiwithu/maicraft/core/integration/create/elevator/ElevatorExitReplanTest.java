@@ -20,7 +20,9 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
-/** Replays dock synchronization and changing native collision shapes through the actual cabin walker. */
+/**
+ * 检查脚位恢复、轿厢地板改变或门打开后会重新找厢内路径；多次尝试不能把仍关闭的门或缺地板变成通路。
+ */
 public final class ElevatorExitReplanTest {
     private static final Vec3 ORIGIN = new Vec3(4, 4, 4);
     private static final Vec3 START = new Vec3(.5, 1, .5), EXIT = new Vec3(2.5, 1, .5);

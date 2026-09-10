@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.create.elevator;
 import java.util.List;
 import java.util.UUID;
 
+// 检查楼层名称与相对选层使用真实已服务楼层，来源层未知时不能猜下一层，空列表应表示尚待同步。
 public final class ElevatorFloorsTest {
     public static void main(String[] args) {
         var floors=List.of(new ElevatorFloors.Floor("floor:10",10,"1","Lobby",true),

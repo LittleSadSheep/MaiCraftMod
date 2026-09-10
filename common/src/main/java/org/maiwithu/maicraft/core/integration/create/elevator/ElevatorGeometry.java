@@ -22,7 +22,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** Small cabin geometry, in Create's local coordinates; never a world/block mutation. */
+/**
+ * 按轿厢方块的实际碰撞找支撑面、厢内走路路径和进出连接。规划可暂按门打开后计算，执行仍核对真实门与地板。
+ * 当前世界通道检查主要看碰撞，未检查身体所在格的火焰等无碰撞危险物。
+ */
 final class ElevatorGeometry {
     private static final double EPS = 1.0E-5;
     final List<AABB> actual;
@@ -121,6 +124,7 @@ final class ElevatorGeometry {
     }
 
     /** Prefer the connected cabin interior while keeping both boarding and arrival paths valid. */
+    // 控制位置要同时能从入口走到、到目的层后能走向出口；在可行位置里偏好甲板中间。
     List<Vec3> interiorPath(Vec3 from, Vec3 entrance, Vec3 exit, Predicate<Vec3> usable,
                             Vec3 sourceOrigin, Vec3 targetOrigin, double deck, double step, LongSet forbidden) {
         if (forbidden(exit.add(targetOrigin), width, height, forbidden)) return List.of();
@@ -232,6 +236,7 @@ final class ElevatorGeometry {
         return best;
     }
 
+    // 为避免漏掉邻格伸入的形状，多查一圈碰撞来源；这里目前没有相应的火焰或液体接触检查。
     static boolean worldClear(BlockGetter world, Predicate<BlockPos> loaded, AABB body) {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int x = Mth.floor(body.minX) - 1; x <= Mth.floor(body.maxX) + 1; x++) {

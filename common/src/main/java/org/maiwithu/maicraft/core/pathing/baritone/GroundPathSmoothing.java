@@ -29,6 +29,7 @@ public final class GroundPathSmoothing extends PathBase {
         sanityCheck();
     }
 
+    // 现场把 hasChunkAt 传作加载判断；原版客户端恒为真，世界边界检查也不能替代真实区块加载检查。
     public static IPath apply(IBaritone baritone, IPath path) {
         var ctx = baritone.getPlayerContext(); var player = ctx.player();
         if (player == null || !player.onGround() || player.isInWater() || player.isPassenger()) return path;

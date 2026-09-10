@@ -13,7 +13,9 @@ import net.minecraft.world.level.block.ButtonBlock;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorBridge.WorldLink;
 
-/** One survey's loaded block-entity index. Never loads chunks or scans a cube around every receiver. */
+/**
+ * 找能呼叫指定楼层的红石发射端和按钮；频率、接收模式、原生传输范围及按钮供电关系都要匹配。
+ */
 final class ElevatorCallLinks {
     private static final int RADIUS = 32, BLOCK_ENTITY_BUDGET = 4096, LINK_BUDGET = 96, BUTTON_BUDGET = 128;
     private final LocalPlayerContext ctx;
@@ -37,6 +39,7 @@ final class ElevatorCallLinks {
         return List.copyOf(found);
     }
 
+    // 这里传入的 hasChunkAt 在原版客户端不能确认区块已加载；相应未知区域判断目前不能依赖它。
     List<BlockPos> buttons(WorldLink transmitter) {
         return buttons.computeIfAbsent(transmitter.position(), pos -> {
             List<BlockPos> found = new ArrayList<>();

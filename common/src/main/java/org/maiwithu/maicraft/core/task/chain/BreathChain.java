@@ -92,6 +92,7 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         return triggered;
     }
 
+    // 当前向上读水柱使用 hasChunkAt 作加载限制，但原版客户端不会在未知区块把它变成 false。
     private int requiredAirForSurface(LocalPlayer player) {
         Vec3 eyes = player.getEyePosition();
         BlockPos head = BlockPos.containing(eyes);

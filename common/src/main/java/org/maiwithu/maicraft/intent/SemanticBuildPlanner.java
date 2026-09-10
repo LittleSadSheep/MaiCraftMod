@@ -271,6 +271,7 @@ public final class SemanticBuildPlanner {
         if (semanticAnchor == null) return LoadedBuildProbe.invalid(
                 "semantic_target_unresolved",
                 "the semantic target is unresolved or in another dimension");
+        // 非空锚点在原版客户端会通过 hasChunkAt；这一步本身不能确认勘察区域已加载。
         if (surveyAnchor == null || !player.clientLevel.hasChunkAt(surveyAnchor)) {
             return LoadedBuildProbe.noSite(waterfront(purpose, features));
         }
@@ -1438,6 +1439,7 @@ public final class SemanticBuildPlanner {
                 || NavigationSafetyContext.forbidsBody(pos);
     }
 
+    // 当前调用的 hasChunkAt 在原版客户端恒为真，所以这个名字尚不能保证返回真实的加载状态。
     private static boolean loadedColumn(ClientLevel level, int x, int z, int aroundY) {
         int y = Math.max(level.getMinBuildHeight(), Math.min(level.getMaxBuildHeight() - 1, aroundY));
         return level.hasChunkAt(new BlockPos(x, y, z));

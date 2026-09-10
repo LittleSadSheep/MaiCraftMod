@@ -6,7 +6,9 @@ import java.util.Map;
 import java.util.UUID;
 import net.minecraft.client.player.LocalPlayer;
 
-/** Synchronized floor identities; names and contact heights never come from guessed landmarks. */
+/**
+ * 把当前观察到的楼层整理给用户选择，支持最高层、最低层、上一层、下一层和唯一名称；不把轿厢当前高度冒充玩家所在楼层。
+ */
 public final class ElevatorFloors {
     public record Floor(String id,int contactY,String shortName,String longName,boolean served) {}
     public record Elevator(UUID id,double distance,double approachDistance,Integer currentContactY,List<Floor> floors,boolean readyForDecision) {

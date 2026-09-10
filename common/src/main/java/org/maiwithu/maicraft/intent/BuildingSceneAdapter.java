@@ -101,6 +101,7 @@ final class BuildingSceneAdapter {
         if (op.equals("preview")) {
             Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
             targets.forEach(target -> {
+                // 这里的 hasChunkAt 在原版客户端不能证明模型位置已加载；高度检查仍独立生效。
                 if (!player.level().hasChunkAt(target.pos()) || player.level().isOutsideBuildHeight(target.pos()))
                     throw new IllegalArgumentException("Preview requires all model cells within loaded buildable terrain");
                 cells.put(target.pos(), target.desiredState());

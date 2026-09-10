@@ -8,11 +8,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** Bounded synchronized client evidence; this never opens a screen, scrolls or sends packets. */
+/**
+ * 整理电梯观察信息，并为通用导航粗筛可能的楼层；粗筛结果只供决定是否继续勘察，不证明已能上梯或下梯。
+ */
 final class ElevatorInspection {
     private static final CreateElevatorBridge BRIDGE = CreateElevatorBridge.optional();
     static CreateElevatorBridge bridge() { return BRIDGE; }
 
+    // 这里传入的 hasChunkAt 在原版客户端不能确认区块已加载；相应未知区域判断目前不能依赖它。
     static Map<String, Object> inspect(LocalPlayer player) {
         if (BRIDGE == null || player == null || player.clientLevel == null) return Map.of("integrationAvailable", false);
         try {

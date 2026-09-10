@@ -23,7 +23,10 @@ import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorSurvey.Pla
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import org.maiwithu.maicraft.entity.InputDriver;
 
-/** A complete native elevator leg; success means the body is on a fixed destination landing. */
+/**
+ * 执行一次乘梯：找到同时有入口、控制位置和出口的方案，呼梯、进厢、选层、随梯移动，再走到固定地面。
+ * 取消后先处理退出和遥控器归位；没有可靠出口时明确报告仍需处理，不能把还在轿厢里说成已下梯。
+ */
 public final class CreateElevatorTravel implements TransportSession {
     private enum Phase { DISCOVER, APPROACH_CALL, CALL, WAIT, APPROACH_BOARD, BOARD, WALK_CONTROL, SELECT, RIDE, WALK_EXIT, EXIT }
     private final BlockPos destination;
@@ -69,6 +72,7 @@ public final class CreateElevatorTravel implements TransportSession {
     public static Map<String, Object> inspect(LocalPlayer player) { return ElevatorInspection.inspect(player); }
     public static Map<String, Object> probe(LocalPlayerContext context, BlockPos destination) { return ElevatorInspection.probe(context, destination); }
 
+    // 这里传入的 hasChunkAt 在原版客户端不能确认区块已加载；相应未知区域判断目前不能依赖它。
     @Override public Result tick(LocalPlayerContext ctx) {
         if (terminal != null) return terminal;
         if (bridge == null) return terminal = Result.failed("create_elevator_unavailable", "Create elevator client API is unavailable", false, false);
@@ -139,6 +143,7 @@ public final class CreateElevatorTravel implements TransportSession {
         }
     }
 
+    // 每个阶段只推进当前动作；呼梯已生效或正在来这层时先等，不再重复按按钮。
     private Result advance(LocalPlayerContext ctx, Cabin cabin) {
         switch (phase) {
             case DISCOVER -> {
@@ -253,6 +258,7 @@ public final class CreateElevatorTravel implements TransportSession {
         return running();
     }
 
+    // 人在厢外时尝试回可靠地面；人在厢内时等轿厢停稳，再找当前位置真正开着的出口。
     private Result stopSafely(LocalPlayerContext ctx, Cabin cabin) {
         Vec3 recoveryGoal = departure != null ? departure : plan == null ? null : plan.exit().outside();
         if (!aboard && !safe && recoveryGoal != null) {
@@ -300,6 +306,7 @@ public final class CreateElevatorTravel implements TransportSession {
     }
     private Result running() { return new Result(State.RUNNING, phase(), pendingFailure == null ? "" : pendingFailure, effects, actions.uncertain); }
     private void setPhase(Phase next) { phase = next; motion.resetLocalPath(); lastProgress = now; }
+    // 只把方块位置和状态用于判断是否重建碰撞，楼层展示文字等附加数据不应让走路路线反复失效。
     static int geometryHash(Map<BlockPos, net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo> blocks) {
         int hash = blocks.size();
         for (var entry : blocks.entrySet()) hash += entry.getKey().hashCode() ^ System.identityHashCode(entry.getValue().state());

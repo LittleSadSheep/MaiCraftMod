@@ -20,7 +20,9 @@ import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import sun.misc.Unsafe;
 
-/** Production confirmation and terminal guards, using real receipt objects and immutable observations. */
+/**
+ * 检查轿厢高度对齐、单次协议确认、失败走路、取消后出口阻塞和错误楼层；用替身控制状态，没有实际乘坐电梯。
+ */
 public final class ElevatorSessionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

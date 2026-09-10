@@ -13,7 +13,9 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 
-/** Read-only arrival hypothesis for doors that Create's native moving-door behaviour will open. */
+/**
+ * 只为勘察暂时把已确认关联的楼层门视为打开，检查到站后可能的通道；真实世界不变，走出轿厢时仍检查当前门。
+ */
 final class ElevatorArrivalView implements BlockGetter {
     private final BlockGetter world;
     private final Map<BlockPos, BlockState> opened;

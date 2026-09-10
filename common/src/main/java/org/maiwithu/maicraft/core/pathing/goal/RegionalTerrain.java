@@ -35,7 +35,7 @@ public final class RegionalTerrain {
     }
     // 概览把取样扩大到一百二十八格、向下二百五十六格；远处采得更疏。
     public static RegionalTerrain overview(Vec3 origin) { return new RegionalTerrain(origin,128,256,OVERVIEW_OFFSETS); }
-    // 只读已加载世界；向下碰到表面后，再用实际身体尺寸和禁入区域检查能否站立。
+    // 向下碰到表面后再检查身体与禁入区域；当前 known 使用 hasChunkAt，在原版客户端不能识别未加载区块。
     public static View observed(net.minecraft.client.player.LocalPlayer player) {
         var level=player.clientLevel;
         return new View() {

@@ -430,6 +430,7 @@ public final class BuildSiteInvestigationCompanionTask
     }
 
     // 只围绕该列地表高度上方两格到下方八格找干燥落脚点，避开危险方块、农田、作物和方块实体。
+    // 列级预检的 hasChunkAt 在客户端不起真实加载检查作用；本方法后续仍用 isLoaded 检查脚下和头上，不能把两层混为一谈。
     private BlockPos safeDrySurfaceFeet(ClientLevel level, int x, int z) {
         int aroundY = Math.clamp(player.getBlockY(),
                 level.getMinBuildHeight() + 2, level.getMaxBuildHeight() - 3);
@@ -534,6 +535,7 @@ public final class BuildSiteInvestigationCompanionTask
     }
 
     // 四个方向各看 16 格和 32 格外的区块，越多未加载区块说明越接近目前观察边缘。
+    // 原版客户端 hasChunkAt 恒为真，因此当前这项“邻近未知区域”评分始终为零。
     private static int boundaryScore(ClientLevel level, BlockPos pos) {
         int score = 0;
         for (Direction direction : Direction.Plane.HORIZONTAL) {

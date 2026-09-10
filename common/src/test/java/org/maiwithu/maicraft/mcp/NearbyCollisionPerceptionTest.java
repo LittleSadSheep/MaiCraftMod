@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
+// 检查伸出格子的栅栏碰撞和未知格计数；未知状态是测试单独传入的，没有调用现场的 ClientLevel.hasChunkAt。
 public final class NearbyCollisionPerceptionTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

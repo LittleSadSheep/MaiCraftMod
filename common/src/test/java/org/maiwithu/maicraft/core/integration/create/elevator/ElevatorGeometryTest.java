@@ -19,7 +19,9 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemp
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 
-/** Actual vanilla shapes model moving support, a two-half doorway and a fixed landing. */
+/**
+ * 检查移动支撑、门口衔接、多层甲板、台阶、禁入区域和到站门预测；加载状态由测试传入，未验证真实客户端的加载接口。
+ */
 public final class ElevatorGeometryTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

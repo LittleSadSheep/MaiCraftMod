@@ -15,7 +15,9 @@ import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorBrid
 import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorSurvey.CallInput;
 import org.maiwithu.maicraft.entity.InputDriver;
 
-/** One actor-owned, bounded native gesture at a time. Selection alone is not arrival. */
+/**
+ * 串行提交电梯操作并等确认；呼梯前复核按钮或遥控器确实关联这层，遥控按下后还负责松开和恢复临时手持。
+ */
 final class ElevatorActions {
     private NativeActionReceipt receipt;
     private final ElevatorRemoteStaging preparation = new ElevatorRemoteStaging();
