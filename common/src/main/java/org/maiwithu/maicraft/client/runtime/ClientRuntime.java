@@ -9,7 +9,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.Constants;
-import org.maiwithu.maicraft.core.pathing.cache.PathCaches;
+import org.maiwithu.maicraft.core.pathing.util.NavProfiler;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.scan.BlockSearch;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
@@ -72,7 +72,7 @@ public final class ClientRuntime {
         // 即使玩家正在自己操作，也继续观察世界和更新预览，让 MCP 能看到当前发生了什么。
         tickStage = "observing";
         org.maiwithu.maicraft.core.inventory.StockEvidence.observe(minecraft.player);
-        PathCaches.clientTick(minecraft.player);
+        NavProfiler.clientTickPulse();
         PreviewController.tick(minecraft);
         org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade.tickObservation(minecraft.player);
         ACTOR.previewReview(PreviewController.waitingReview());
@@ -247,7 +247,6 @@ public final class ClientRuntime {
         org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.abandon();
         if (saveSemanticState) IntentRuntime.get().bodyUnavailable();
         CompanionTickDispatcher.bodyGone();
-        PathCaches.dropAll();
         BlockSearch.cancelAll();
         TargetIndex.dropAll();
         boolean preserveDeathRecovery = saveSemanticState
