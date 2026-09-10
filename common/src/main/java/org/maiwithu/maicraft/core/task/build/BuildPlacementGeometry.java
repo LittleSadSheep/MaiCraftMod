@@ -295,7 +295,7 @@ final class BuildPlacementGeometry {
         // 全部枚举结束后才允许取最终列表，避免调用者把尚未找完误认为没有方案。
         List<Gesture> results() {
             if (!complete) throw new IllegalStateException("placement enumeration is still pending");
-            return List.copyOf(found);
+            return found.stream().sorted(BuildPlacementPreference.gestures(player.position(), target)).toList();
         }
     }
 

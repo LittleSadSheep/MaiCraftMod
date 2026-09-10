@@ -48,8 +48,9 @@ final class BuildWorksiteSelectionTest {
             install(task, targets);
             var attempts = (PlacementAttemptLedger) field("placementAttempts").get(task);
             for (var target : targets.subList(0, targets.size() - 1)) attempts.rejectStance(target, h.player.blockPosition());
-            check(!(boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null),
-                    "the bounded current picker initially encounters only rejected targets");
+            check((boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null),
+                    "local ranking finds useful nearby work without being trapped by the old queue prefix");
+            install(task, targets);
             Vec3 feet = new Vec3(7.5, 1, 8.5);
             var gesture = BuildPlacementGeometry.liveGestureFrom(h.player, covered, Map.of(), feet);
             check(gesture != null, "retained target has a real future gesture");
@@ -127,8 +128,14 @@ final class BuildWorksiteSelectionTest {
             h.set(low.pos(), low.desiredState());
             invoke(task, "resetCell");
             check(ready(task, high), "confirmed foundation completion opens the next layer without reconstructing the task");
+            check(!(boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null),
+                    "an upper cell first checks whether permanent footing offers a better height");
+            for (int i = 0; i < 10_000; i++) {
+                invoke(task, "worksiteTick");
+                if (field("worksiteSearch").get(task) == null) break;
+            }
             check((boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null),
-                    "the now-active upper cell still benefits from current-position placement");
+                    "without higher useful footing, ordinary current-position placement remains available");
             var air = new BuildTaskRecord.Target(Blocks.AIR, Items.AIR, new BlockPos(6, 0, 6),
                     "eventual support cleanup", null, null, null);
             var supportedRecord = new BuildTaskRecord("owned-air", 1000, List.of(air, high), false);

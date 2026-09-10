@@ -2,40 +2,37 @@
 package org.maiwithu.maicraft.core.task.build;
 
 import it.unimi.dsi.fastutil.longs.LongSet;
-import java.util.HashSet;
-import java.util.Set;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /**
- * 去施工站位时先尝试沿已有地形和已建方块走；失败后，只有原任务本来允许改地形，才对这一站位再试一次施工导航。
+ * 对整组站位依次尝试保持高度、已有地形和施工导航；单个站位失败不能提前放宽为搭支撑。
  */
 final class BuildStanceNavigation {
     private final PlayerNav.ContextProvider construction;
-    private final PlayerNav.ContextProvider existingFooting;
-    private final Set<BlockPos> terrainRetries = new HashSet<>();
+    private int pass, floor = Integer.MIN_VALUE;
 
     BuildStanceNavigation(PlayerNav.ContextProvider construction) {
         this.construction = construction;
-        existingFooting = new ExistingFooting(construction);
     }
 
     PlayerNav.ContextProvider contextFor(BlockPos stance) {
-        return terrainRetries.contains(stance) ? construction : existingFooting;
+        return pass == 2 ? construction : walkingContext(pass == 0 ? floor : Integer.MIN_VALUE);
     }
 
-    /**
-     * 每个站位最多获得一次改地形重试；一个站位失败不会让其他站位直接跳过已有道路尝试。
-     */
-    boolean retryWithTerrain(BlockPos stance) {
-        return construction.permit().mayAlter() && terrainRetries.add(stance.immutable());
+    PlayerNav.ContextProvider walkingContext(int minimum) {
+        return new ExistingFooting(construction, Math.max(minimum, construction.minimumFeetY()));
     }
 
-    // 换到下一项施工工作时清掉重试记录；刚建好的方块可能已经提供了新的路。
-    void reset() { terrainRetries.clear(); }
+    boolean allows(BlockPos stance) { return pass != 0 || stance.getY() >= floor; }
+    boolean nextExistingPass() { if (pass != 0) return false; pass = 1; return true; }
+    boolean allowTerrain() { if (pass != 1 || !construction.permit().mayAlter()) return false; pass = 2; return true; }
+    String stage() { return pass == 0 ? "retain_height" : pass == 1 ? "existing_footing" : "construction_access"; }
+    void reset() { pass = 0; floor = Integer.MIN_VALUE; }
+    void startAt(BlockPos feet) { reset(); floor = feet.getY(); }
 
-    private record ExistingFooting(PlayerNav.ContextProvider construction) implements PlayerNav.ContextProvider {
+    private record ExistingFooting(PlayerNav.ContextProvider construction, int minimumFeetY) implements PlayerNav.ContextProvider {
         @Override public TerrainPermit permit() { return TerrainPermit.PRESERVE; }
 
         @Override public LongSet embeddedProtectedMutationCells() {

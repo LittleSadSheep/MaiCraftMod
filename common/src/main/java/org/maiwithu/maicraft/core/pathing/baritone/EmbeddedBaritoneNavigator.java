@@ -84,6 +84,8 @@ public final class EmbeddedBaritoneNavigator {
         return contextProvider.embeddedForbiddenBodyCells();
     }
 
+    int minimumFeetY() { return contextProvider.minimumFeetY(); }
+
     TerrainPermit permit() {
         return permit;
     }

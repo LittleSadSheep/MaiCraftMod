@@ -134,6 +134,9 @@ public final class PlayerNav {
         default LongSet embeddedForbiddenBodyCells() {
             return NavigationSafetyContext.forbiddenBodyCells();
         }
+
+        /** Optional task-local floor for a route that must retain an existing construction height. */
+        default int minimumFeetY() { return Integer.MIN_VALUE; }
     }
 
     /** Shared feet convention for navigation and interaction stances. */

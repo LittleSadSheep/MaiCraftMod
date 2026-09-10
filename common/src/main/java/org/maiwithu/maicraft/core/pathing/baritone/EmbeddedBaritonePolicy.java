@@ -22,9 +22,17 @@ public final class EmbeddedBaritonePolicy {
         return installSnapshot(capture(sacred, protectedMutations, forbiddenBodyCells));
     }
 
+    public static boolean install(LongSet sacred, LongSet protectedMutations, LongSet forbiddenBodyCells, int minimumFeetY) {
+        return installSnapshot(capture(sacred, protectedMutations, forbiddenBodyCells, minimumFeetY));
+    }
+
     /** Freeze a queued owner's policy without changing the body that is still executing. */
     public static Snapshot capture(
             LongSet sacred, LongSet protectedMutations, LongSet forbiddenBodyCells) {
+        return capture(sacred, protectedMutations, forbiddenBodyCells, Integer.MIN_VALUE);
+    }
+
+    public static Snapshot capture(LongSet sacred, LongSet protectedMutations, LongSet forbiddenBodyCells, int minimumFeetY) {
         LongOpenHashSet protectedCells = new LongOpenHashSet();
         if (sacred != null) protectedCells.addAll(sacred);
         if (protectedMutations != null) protectedCells.addAll(protectedMutations);
@@ -34,7 +42,7 @@ public final class EmbeddedBaritonePolicy {
         if (forbiddenBodyCells != null) forbidden.addAll(forbiddenBodyCells);
         return new Snapshot(
                 LongSets.unmodifiable(protectedCells),
-                LongSets.unmodifiable(forbidden));
+                LongSets.unmodifiable(forbidden), minimumFeetY);
     }
 
     /** Install a snapshot previously detached by {@link #capture}. */
@@ -62,7 +70,10 @@ public final class EmbeddedBaritonePolicy {
         current = Snapshot.EMPTY;
     }
 
-    public record Snapshot(LongSet protectedCells, LongSet forbiddenBodyCells) {
+    public record Snapshot(LongSet protectedCells, LongSet forbiddenBodyCells, int minimumFeetY) {
+        public Snapshot(LongSet protectedCells, LongSet forbiddenBodyCells) {
+            this(protectedCells, forbiddenBodyCells, Integer.MIN_VALUE);
+        }
         private static final Snapshot EMPTY = new Snapshot(
                 LongSets.emptySet(), LongSets.emptySet());
 
@@ -71,7 +82,7 @@ public final class EmbeddedBaritonePolicy {
         }
 
         public boolean forbidsBody(int x, int y, int z) {
-            return forbiddenBodyCells.contains(BlockPos.asLong(x, y, z));
+            return y < minimumFeetY || forbiddenBodyCells.contains(BlockPos.asLong(x, y, z));
         }
     }
 }

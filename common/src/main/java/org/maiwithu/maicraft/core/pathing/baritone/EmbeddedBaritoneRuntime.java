@@ -78,7 +78,7 @@ public final class EmbeddedBaritoneRuntime {
                              TerrainPermit permit, boolean sprintAllowed) {
             this(navigator, compiled, permit, sprintAllowed,
                     EmbeddedBaritonePolicy.capture(compiled.sacred(),
-                            navigator.protectedMutationCells(), navigator.forbiddenBodyCells()));
+                            navigator.protectedMutationCells(), navigator.forbiddenBodyCells(), navigator.minimumFeetY()));
         }
     }
 
@@ -160,7 +160,7 @@ public final class EmbeddedBaritoneRuntime {
         EmbeddedBaritonePolicy.install(
                 compiled.sacred(),
                 navigator.protectedMutationCells(),
-                navigator.forbiddenBodyCells());
+                navigator.forbiddenBodyCells(), navigator.minimumFeetY());
         PathingBehavior pathing = (PathingBehavior) baritone.getPathingBehavior();
         if (!pathing.isSafeToCancel()) {
             pendingPolicyOwner = navigator;
@@ -178,7 +178,7 @@ public final class EmbeddedBaritoneRuntime {
         boolean changed = EmbeddedBaritonePolicy.install(
                 compiled.sacred(),
                 navigator.protectedMutationCells(),
-                navigator.forbiddenBodyCells());
+                navigator.forbiddenBodyCells(), navigator.minimumFeetY());
         if (!changed || backend == null) return changed;
         PathingBehavior pathing = (PathingBehavior) backend.getPathingBehavior();
         if (!pathing.isSafeToCancel()) {

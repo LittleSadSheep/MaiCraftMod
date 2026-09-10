@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /**
- * 检查先走已有道路、失败只对该站位放宽一次、保护格变化仍可见，并且帮助类不能授予原任务没有的改地形许可。
+ * 整组站位先保高度，再试下降；之后才允许施工导航，且保持原任务的保护约束。
  */
 public final class BuildStanceNavigationTest {
     public static void main(String[] args) {
@@ -23,6 +23,7 @@ public final class BuildStanceNavigationTest {
         };
         var routes = new BuildStanceNavigation(construction);
         BlockPos first = new BlockPos(4, 2, 6), second = first.east();
+        routes.startAt(first);
         var existing = routes.contextFor(first);
         check(existing.permit() == TerrainPermit.PRESERVE, "first approach must forbid new scaffolds and digging");
         check(existing.embeddedProtectedMutationCells().equals(protectedCells), "completed structure remains protected");
@@ -32,16 +33,26 @@ public final class BuildStanceNavigationTest {
         check(existing.embeddedProtectedMutationCells().equals(protectedCells)
                         && existing.embeddedForbiddenBodyCells().equals(forbiddenCells),
                 "changes in task protection must remain visible to the navigation wrapper");
-        check(routes.retryWithTerrain(first), "a failed walking route must retry before rejecting the stance");
-        check(routes.contextFor(first) == construction, "fallback must retain original ownership and permissions");
-        check(!routes.retryWithTerrain(first), "a failed construction retry exhausts the stance without looping");
-        check(routes.contextFor(second).permit() == TerrainPermit.PRESERVE, "one failed stance cannot enable scaffolds everywhere");
-        check(routes.retryWithTerrain(second), "a second stance has its own bounded fallback");
-        routes.reset();
-        check(routes.contextFor(first).permit() == TerrainPermit.PRESERVE && routes.retryWithTerrain(first),
+        check(existing.minimumFeetY() == 2 && !routes.allows(first.below()), "first pass must retain construction height");
+        check(!routes.allowTerrain(), "one failed stance cannot grant a terrain retry before the whole existing-footing pass");
+        check(routes.contextFor(second).permit() == TerrainPermit.PRESERVE, "other stances still require existing footing");
+        check(routes.nextExistingPass() && routes.allows(first.below()), "only exhausted height-preserving candidates allow descent");
+        check(routes.contextFor(first).minimumFeetY() == Integer.MIN_VALUE
+                && routes.contextFor(first).permit() == TerrainPermit.PRESERVE, "descent still cannot place supports");
+        check(routes.allowTerrain() && routes.contextFor(first) == construction, "final fallback retains original permissions");
+        check(!routes.allowTerrain(), "construction pass cannot loop");
+        routes.startAt(second);
+        check(routes.contextFor(first).permit() == TerrainPermit.PRESERVE && !routes.allowTerrain(),
                 "new construction work must reconsider the newly completed footing");
-        check(!new BuildStanceNavigation(PlayerNav.ContextProvider.DEFAULT).retryWithTerrain(first),
+        var restricted = new BuildStanceNavigation(PlayerNav.ContextProvider.DEFAULT); restricted.nextExistingPass();
+        check(!restricted.allowTerrain(),
                 "the helper cannot grant construction permission its caller did not have");
+        var snapshot = org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy.capture(
+                null, protectedCells, forbiddenCells, 2);
+        check(snapshot.forbidsBody(100, 1, 100) && !snapshot.forbidsBody(100, 2, 100),
+                "route workers and execution share the same height floor");
+        check(!org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy.capture(null, null, null)
+                .forbidsBody(100, -60, 100), "other tasks retain unrestricted route heights by default");
         System.out.println("BuildStanceNavigationTest: passed");
     }
 
