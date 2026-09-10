@@ -16,20 +16,23 @@ import java.util.function.BiPredicate;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
-import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 
 /**
  * 寻找能从一个站位连续放多格的位置，减少每放一块就重新走路。这里只选站位和点击方案，不执行动作。
- * 候选必须能沿当前到目标的地面直线通道到达；需要绕障碍的路线留给后续其他导航处理。
+ * 候选必须沿已有落脚点可达，允许转弯和一级台阶；优先保持高度和从脚边向下施工。
  */
 final class BuildWorksitePlanner {
     private static final long SLICE_NANOS = 4_000_000;
 
     record Placement(BuildTaskRecord.Target target, BuildPlacementGeometry.Gesture gesture) {}
-    record Worksite(BlockPos stance, Vec3 feet, List<Placement> placements, double distanceSquared) {
-        Worksite { stance = stance.immutable(); placements = List.copyOf(placements); }
+    record Worksite(BlockPos stance, Vec3 feet, List<Placement> placements, double distanceSquared,
+                    double heightLoss, List<Vec3> route) {
+        Worksite { stance = stance.immutable(); placements = List.copyOf(placements); route = List.copyOf(route); }
+        Worksite(BlockPos stance, Vec3 feet, List<Placement> placements, double distanceSquared) {
+            this(stance, feet, placements, distanceSquared, 0, List.of(feet));
+        }
         int coverage() { return placements.size(); }
+        double overhead() { return placements.stream().mapToDouble(p -> Math.max(0, p.target().pos().getY() + 1 - feet.y)).average().orElse(0); }
     }
     /** A partial result may be used immediately, but an unfinished empty result is never no-path. */
     record Progress(boolean complete, Worksite best, int candidateChecks, int placementChecks) {}
@@ -47,6 +50,9 @@ final class BuildWorksitePlanner {
         private final CandidateRows candidates = new CandidateRows();
         private final Map<BlockPos, List<BuildTaskRecord.Target>> buckets = new HashMap<>();
         private final Vec3 origin;
+        private final BuildFootingSearch footing;
+        private boolean footingDone;
+        private BuildFootingSearch.Route scoringRoute;
         private int preparedAt, candidateChecks, placementChecks, nearbyAt;
         private boolean candidatesDone;
         private Worksite best;
@@ -67,12 +73,14 @@ final class BuildWorksitePlanner {
                             && BuildPlacementGeometry.primaryOf(t).equals(t.pos()))
                     .sorted(Comparator.comparingDouble((BuildTaskRecord.Target t) -> t.pos().distToCenterSqr(origin))
                             .thenComparing(BuildOrder.BUILD_ORDER)).toList();
+            footing = new BuildFootingSearch(player, seeds, forbidden);
         }
 
         // 每次按工作项数量和约四毫秒推进，保存候选与评分进度；返回已有最佳方案不代表所有候选都查完。
         Progress advance(int workBudget) {
             long deadline = System.nanoTime() + SLICE_NANOS;
             for (int work = 0; work < Math.max(0, workBudget) && System.nanoTime() < deadline; work++) {
+                if (!footingDone) { footingDone = footing.advance(); continue; }
                 if (scoringCell != null) {
                     if (nearbyAt < nearby.size()) {
                         var target = nearby.get(nearbyAt++); placementChecks++;
@@ -97,11 +105,9 @@ final class BuildWorksitePlanner {
                 if (cell == null) { candidatesDone = true; break; }
                 if (rejected.contains(cell) || !allowed.test(cell)) continue;
                 candidateChecks++;
-                // No plan overlay: the floor and the whole walking corridor must already exist.
-                var corridor = new GroundCorridor(player.level(), player.level()::isLoaded,
-                        player.getBbWidth(), player.getBbHeight(), forbidden, EmbeddedBaritoneRuntime.physicalObstacles());
-                Vec3 feet = corridor.stance(cell);
-                if (feet == null || !corridor.clear(origin, feet)) continue;
+                scoringRoute = footing.route(cell);
+                if (scoringRoute == null) continue;
+                Vec3 feet = scoringRoute.feet();
                 scoringCell = cell; scoringFeet = feet; nearbyAt = 0; placements.clear();
                 nearby = nearby(feet);
             }
@@ -131,7 +137,8 @@ final class BuildWorksitePlanner {
 
         private void finishCandidate() {
             if (!placements.isEmpty()) {
-                var worksite = new Worksite(scoringCell, scoringFeet, placements, origin.distanceToSqr(scoringFeet));
+                var worksite = new Worksite(scoringCell, scoringFeet, placements,
+                        scoringRoute.distance() * scoringRoute.distance(), Math.max(0, origin.y - scoringRoute.lowestY()), scoringRoute.points());
                 if (best == null || compare(worksite, best) < 0) best = worksite;
             }
             scoringCell = null; scoringFeet = null; nearby = List.of(); placements.clear();
@@ -183,8 +190,12 @@ final class BuildWorksitePlanner {
         }
     }
 
-    // 先选可施工格数多的位置，再选走动距离短的位置；仍相同时按施工顺序和坐标稳定排序。
+    // 不为多够到几格而丢掉已有高度；同类落脚点中再比较连续施工数量与实际路程。
     private static int compare(Worksite a, Worksite b) {
+        int height = Double.compare(a.heightLoss(), b.heightLoss());
+        if (height != 0) return height;
+        int overhead = Double.compare(a.overhead(), b.overhead());
+        if (overhead != 0) return overhead;
         int count = Integer.compare(b.coverage(), a.coverage());
         if (count != 0) return count;
         int distance = Double.compare(a.distanceSquared(), b.distanceSquared());

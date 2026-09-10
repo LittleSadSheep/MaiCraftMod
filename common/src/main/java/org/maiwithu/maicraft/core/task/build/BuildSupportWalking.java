@@ -17,21 +17,22 @@ final class BuildSupportWalking {
     private final LongSet forbidden;
     private final PhysicalObstacleSnapshot physical;
     private final double width, height;
-    private final GroundCorridor ground;
+    private final java.util.function.Predicate<BlockPos> loaded;
 
     BuildSupportWalking(BlockGetter world, java.util.function.Predicate<BlockPos> loaded,
                         double width, double height, LongSet forbidden, PhysicalObstacleSnapshot physical) {
         this.world = world; this.width = width; this.height = height;
         this.forbidden = forbidden; this.physical = physical;
-        ground = new GroundCorridor(world, loaded, width, height, forbidden, physical);
+        this.loaded = loaded;
     }
 
-    Vec3 stance(BlockPos cell) { return ground.stance(cell); }
+    private GroundCorridor ground() { return new GroundCorridor(world, loaded, width, height, forbidden, physical); }
+    Vec3 stance(BlockPos cell) { return ground().stance(cell); }
 
     boolean edge(Vec3 from, Vec3 to) {
         double rise = to.y - from.y;
         if (Math.abs(rise) > 1.0 + EPS || from.distanceToSqr(to) > 3) return false;
-        if (Math.abs(rise) < EPS) return ground.clear(from, to);
+        if (Math.abs(rise) < EPS) return ground().clear(from, to);
         Vec3 bend = rise > 0 ? new Vec3(from.x, to.y, from.z) : new Vec3(to.x, from.y, to.z);
         return sweep(from, bend) && sweep(bend, to);
     }
