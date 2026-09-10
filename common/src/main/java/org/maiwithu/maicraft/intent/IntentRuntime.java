@@ -27,6 +27,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.io.IOException;
+import java.time.Duration;
 
 /**
  * 保存客户端业务任务的计划、公开 ID、进度、决策和持久化状态，供 MCP 查询。
@@ -365,10 +366,14 @@ public final class IntentRuntime {
         captureCheckpoint(true);
     }
 
-    /** Submit a final immutable checkpoint; shutdown never waits for a slow or unavailable disk. */
+    /** 保存最后检查点，并给后台写盘最多两秒；已脱离身体的交接快照不被取消后的记录覆盖。 */
     public void shutdownPersistence() {
         captureCheckpoint(true);
         bodyAttached = false;
+        IntentStateStore.FlushResult result = stateStore.awaitPendingSaves(Duration.ofSeconds(2));
+        if (result != IntentStateStore.FlushResult.SAVED) {
+            Constants.LOG.warn("Could not confirm final MaiCraft checkpoints on disk before shutdown ({})", result);
+        }
     }
 
     public void requireCurrentBinding(IntentTaskRecord record) {

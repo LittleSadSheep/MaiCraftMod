@@ -9,12 +9,14 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import org.maiwithu.maicraft.core.Constants;
 
 /** 把任务进度写进磁盘文件：游戏线程先留一份文本，后台依次写入，避免每次保存都卡住游戏。 */
@@ -29,7 +31,7 @@ public final class IntentStateStore {
     private boolean workerRunning;
 
     public IntentStateStore() {
-        // 使用后台守护线程；游戏进程退出时不会为了这个线程保持运行，也没有在这里等待最后写完。
+        // 正常保存由守护线程处理；退出入口通过 awaitPendingSaves 有限等待最后写完。
         this(command -> {
             Thread worker = new Thread(command, "maicraft-state-writer");
             worker.setDaemon(true);
@@ -42,6 +44,7 @@ public final class IntentStateStore {
     }
 
     public enum Status { ABSENT, LOADED, CORRUPT }
+    public enum FlushResult { SAVED, FAILED, TIMED_OUT, INTERRUPTED }
 
     public record LoadResult(Status status, JsonObject root) {}
 
@@ -118,8 +121,35 @@ public final class IntentStateStore {
                     save.completion.completeExceptionally(rejected);
                 }
             }
+            latest.notifyAll();
         }
         return save.completion;
+    }
+
+    /**
+     * 等待各世界已接收的最新文本写完；合并替换时跟随新版本，共用同一个等待期限。
+     * 等待会释放邮箱锁，超时或中断不会取消写盘，也不关闭后续重连仍要使用的存储器。
+     */
+    public FlushResult awaitPendingSaves(Duration timeout) {
+        if (timeout.isNegative()) throw new IllegalArgumentException("negative checkpoint wait");
+        long budget = timeout.toNanos(), started = System.nanoTime();
+        synchronized (latest) {
+            while (true) {
+                boolean pending = false, failed = false;
+                for (PendingSave save : latest.values()) {
+                    pending |= !save.completion.isDone();
+                    failed |= save.completion.isCompletedExceptionally();
+                }
+                if (!pending) return failed ? FlushResult.FAILED : FlushResult.SAVED;
+                long remaining = budget - (System.nanoTime() - started);
+                if (remaining <= 0) return FlushResult.TIMED_OUT;
+                try { TimeUnit.NANOSECONDS.timedWait(latest, remaining); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return FlushResult.INTERRUPTED;
+                }
+            }
+        }
     }
 
     public boolean hasSnapshot(StateIdentity identity) {
@@ -158,6 +188,8 @@ public final class IntentStateStore {
                 save.completion.completeExceptionally(failure);
                 Constants.LOG.warn("Could not write MaiCraft semantic checkpoint ({})",
                         failure.getClass().getSimpleName());
+            } finally {
+                synchronized (latest) { latest.notifyAll(); }
             }
         }
     }

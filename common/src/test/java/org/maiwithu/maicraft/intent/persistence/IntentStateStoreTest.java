@@ -7,16 +7,20 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 
 /** Real file storage and the production mailbox, with worker dispatch held until assertions run. */
@@ -27,6 +31,9 @@ public final class IntentStateStoreTest {
         try {
             captureIsDetachedFromTasksAndJson(directory.resolve("capture"));
             repeatedSavesCoalesceAndRestoreLatest(directory.resolve("coalescing"));
+            shutdownWaitsForDetachedCheckpoint(directory.resolve("shutdown"));
+            shutdownCapturesAttachedCheckpoint(directory.resolve("attached-shutdown"));
+            boundedWaitPreservesPendingSave(directory.resolve("wait"));
             identityMailboxIsBounded(directory.resolve("identities"));
             failedDiskWriteCanRetry(directory.resolve("failure"));
             oversizeFilesAndSnapshotsAreRejected(directory.resolve("bounds"));
@@ -81,6 +88,89 @@ public final class IntentStateStoreTest {
                 "an earlier pending snapshot overwrote the newest checkpoint");
     }
 
+    private static void shutdownWaitsForDetachedCheckpoint(Path directory) throws Exception {
+        ArrayDeque<Runnable> workers = new ArrayDeque<>();
+        IntentStateStore store = new IntentStateStore(workers::add);
+        StateIdentity identity = identity(directory, 5), previousWorld = identity(directory, 6);
+        store.saveAsync(previousWorld, root(previousWorld, 7));
+        store.saveAsync(identity, root(identity, 1));
+        IntentRuntime runtime = runtime(store, identity, false);
+        // The body is already detached, so shutdown must wait for its captured handoff, not recapture cancelled records.
+        CountDownLatch entered = new CountDownLatch(1);
+        CompletableFuture<Void> shutdown = CompletableFuture.runAsync(() -> {
+            entered.countDown(); runtime.shutdownPersistence();
+        });
+        try {
+            check(entered.await(5, TimeUnit.SECONDS), "shutdown worker did not start");
+            try {
+                shutdown.get(50, TimeUnit.MILLISECONDS);
+                throw new AssertionError("shutdown returned before the final checkpoint reached disk");
+            } catch (TimeoutException expected) { }
+            store.saveAsync(identity, root(identity, 2));
+        } finally {
+            runWorker(workers);
+            shutdown.get(5, TimeUnit.SECONDS);
+        }
+        check(new IntentStateStore().load(identity).root().get("revision").getAsInt() == 2,
+                "shutdown must wait for the replacement receipt rather than the cancelled old generation");
+        check(new IntentStateStore().load(previousWorld).root().get("revision").getAsInt() == 7,
+                "shutdown must also finish the previous world's queued handoff");
+    }
+
+    private static void shutdownCapturesAttachedCheckpoint(Path directory) throws Exception {
+        ArrayDeque<Runnable> workers = new ArrayDeque<>();
+        CountDownLatch submitted = new CountDownLatch(1);
+        IntentStateStore store = new IntentStateStore(worker -> { workers.add(worker); submitted.countDown(); });
+        StateIdentity identity = identity(directory, 7);
+        IntentRuntime runtime = runtime(store, identity, true);
+        CompletableFuture<Void> shutdown = CompletableFuture.runAsync(runtime::shutdownPersistence);
+        try {
+            check(submitted.await(5, TimeUnit.SECONDS), "shutdown did not capture the attached world's final state");
+            check(!shutdown.isDone() && !Files.exists(directory), "queued final capture was treated as a disk receipt");
+        } finally {
+            runWorker(workers); shutdown.get(5, TimeUnit.SECONDS);
+        }
+        var loaded = new IntentStateStore().load(identity);
+        check(loaded.status() == IntentStateStore.Status.LOADED
+                        && IntentStateCodec.decode(loaded.root()).tasks().isEmpty(),
+                "the actual runtime shutdown must write its final encoded checkpoint before returning");
+    }
+
+    private static void boundedWaitPreservesPendingSave(Path directory) throws Exception {
+        ArrayDeque<Runnable> workers = new ArrayDeque<>();
+        IntentStateStore store = new IntentStateStore(workers::add);
+        check(store.awaitPendingSaves(Duration.ZERO) == IntentStateStore.FlushResult.SAVED, "an empty store needs no wait");
+        StateIdentity identity = identity(directory, 8);
+        var receipt = store.saveAsync(identity, root(identity, 1));
+        var timeout = CompletableFuture.supplyAsync(() -> store.awaitPendingSaves(Duration.ofMillis(10)));
+        check(timeout.get(1, TimeUnit.SECONDS) == IntentStateStore.FlushResult.TIMED_OUT,
+                "an unavailable writer must not block shutdown beyond the requested wait");
+        Thread.currentThread().interrupt();
+        try {
+            check(store.awaitPendingSaves(Duration.ofSeconds(1)) == IntentStateStore.FlushResult.INTERRUPTED
+                            && Thread.currentThread().isInterrupted(), "an interrupted wait must preserve the interrupt flag");
+        } finally { Thread.interrupted(); }
+        check(!receipt.isDone() && store.hasSnapshot(identity), "timeout and interruption must retain pending writes");
+        runWorker(workers);
+        check(store.awaitPendingSaves(Duration.ZERO) == IntentStateStore.FlushResult.SAVED
+                        && new IntentStateStore().load(identity).root().get("revision").getAsInt() == 1,
+                "the same pending write must still complete after an abandoned wait");
+        IntentStateStore rejected = new IntentStateStore(worker -> { throw new RejectedExecutionException("fixture"); });
+        rejected.saveAsync(identity, root(identity, 2));
+        check(rejected.awaitPendingSaves(Duration.ZERO) == IntentStateStore.FlushResult.FAILED,
+                "a rejected writer cannot be reported as persisted");
+    }
+
+    private static IntentRuntime runtime(IntentStateStore store, StateIdentity identity, boolean attached) throws Exception {
+        var constructor = IntentRuntime.class.getDeclaredConstructor(); constructor.setAccessible(true);
+        IntentRuntime runtime = constructor.newInstance();
+        for (var entry : Map.of("stateStore", (Object) store, "stateIdentity", identity, "bodyAttached", attached).entrySet()) {
+            var field = IntentRuntime.class.getDeclaredField(entry.getKey()); field.setAccessible(true);
+            field.set(runtime, entry.getValue());
+        }
+        return runtime;
+    }
+
     private static void identityMailboxIsBounded(Path directory) throws Exception {
         ArrayDeque<Runnable> workers = new ArrayDeque<>();
         IntentStateStore store = new IntentStateStore(workers::add);
@@ -117,6 +207,8 @@ public final class IntentStateStoreTest {
             throw new AssertionError("filesystem failure was reported as a persisted checkpoint");
         } catch (ExecutionException expected) { }
         check(store.hasFailedSave(identity), "runtime cannot detect and retry a failed disk write");
+        check(store.awaitPendingSaves(Duration.ZERO) == IntentStateStore.FlushResult.FAILED,
+                "shutdown must distinguish a failed disk write from a successful receipt");
         check(store.load(identity).root().get("revision").getAsInt() == 1,
                 "disk failure must not discard the in-process respawn checkpoint");
         Files.delete(directory);
