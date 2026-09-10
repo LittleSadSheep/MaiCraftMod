@@ -236,7 +236,6 @@ public final class JetpackFlightSession implements TransportSession {
         var space = space(ctx);
         Vec3 position = ctx.player().position();
         planningTarget=target;
-        planningTarget=target;
         if (!landingSelected()) {
             if (!JetpackRoute.flightClear(space,position,target,power)) { obstruction(ctx,space,target); return; }
             route=new JetpackRoute.Plan(java.util.List.of(position,target),route.emergencyLandings(),
@@ -306,7 +305,6 @@ public final class JetpackFlightSession implements TransportSession {
                 && space.clear(ctx.player().position(), ctx.player().position())) {
             repaired = true; holdPoint = ctx.player().position();
             planningTarget=target;
-            planningTarget=target;
             planningLanding=landingSelected();
             search = new JetpackRoute.Search(holdPoint, target, power,6000,planningLanding); phase = Phase.REPLAN;
             brake(ctx);
@@ -319,7 +317,6 @@ public final class JetpackFlightSession implements TransportSession {
         if (stopping && !discoveringExit || !power.controllable() || !JetpackNativeAdapter.uprightActive(nativeEvidence)
                 || !space.clear(ctx.player().position(), holdPoint)) { escape(ctx, space); return; }
         if (!steer(ctx, holdPoint, false)) { escape(ctx, space); return; }
-        if (movingTarget!=null && !movingTarget.ready()) return;
         if (movingTarget!=null && !movingTarget.ready()) return;
         if (movingTarget != null && planningTarget != null && (planningTarget.distanceTo(target) > 1 || planningLanding!=landingSelected())) {
             planningTarget = target; planningLanding=landingSelected();
