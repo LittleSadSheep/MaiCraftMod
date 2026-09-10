@@ -5,7 +5,9 @@ import java.util.Map;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** A live landing identity; implementations retain logical coordinates, never an actor context. */
+/**
+ * 提供会移动或仍在寻找中的飞行目标：更新位置、说明能否开始规划、是否已经接触并站稳，以及停止时是否另找落点。
+ */
 public interface MovingFlightTarget {
     boolean update(LocalPlayerContext context);
     Vec3 point();

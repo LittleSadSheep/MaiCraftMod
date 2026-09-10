@@ -15,7 +15,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import sun.misc.Unsafe;
 
-/** Exercises the production retarget, steering, touchdown, restore and cancellation branches. */
+/**
+ * 给移动平台设置位置、速度和接触状态，调用飞行会话的对应阶段，检查改目标、相对速度、站稳确认和模式恢复；不是整趟模组飞行。
+ */
 public final class MovingFlightSessionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -69,6 +71,7 @@ public final class MovingFlightSessionTest {
         check(phase(lost).equals("ACTIVE"),"losing the deck during mode restoration must rearm flight before trying to land again");
         System.out.println("MovingFlightSessionTest: passed");
     }
+    // 直接注入设备状态与阶段，绕过外部模组读取；用于隔离会话判断，不能证明真实开关协议已接通。
     private static JetpackFlightSession session(Target target) throws Exception {
         var session=new JetpackFlightSession(target,LongSets.emptySet());
         field(JetpackFlightSession.class,"power").set(session,new JetpackNativeAdapter.Snapshot(true,"fixture","pack",true,true,

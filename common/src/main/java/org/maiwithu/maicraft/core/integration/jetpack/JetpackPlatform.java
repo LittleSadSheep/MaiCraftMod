@@ -6,7 +6,9 @@ import java.util.List;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.transport.TransportTargets.Destination;
 
-/** Connected, goal-compatible supported cells form one landing area rather than repeated point flights. */
+/**
+ * 把同高度、水平相邻的可站位置分成平台组，每组选一个靠近中心的真实落点作代表，其他落点仍保留。
+ */
 public record JetpackPlatform(Destination anchor, List<Vec3> landings) {
     public JetpackPlatform { landings = List.copyOf(landings); }
 

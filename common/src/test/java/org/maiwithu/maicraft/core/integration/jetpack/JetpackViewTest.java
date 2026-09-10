@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 import java.util.List;
 import net.minecraft.world.phys.Vec3;
 
+// 检查转头前先稳住高度、镜头沿路线看前方，以及拐弯时不能因看得太远而阻止当前路段的按键。
 public final class JetpackViewTest {
     public static void main(String[] args) {
         var power = new JetpackNativeAdapter.Snapshot(true, "fixture", "create_jetpack:jetpack", true, true,

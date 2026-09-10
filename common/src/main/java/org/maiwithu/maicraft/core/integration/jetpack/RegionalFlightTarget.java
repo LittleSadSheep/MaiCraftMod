@@ -13,7 +13,10 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalGoal;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalTerrain;
 
-/** Keeps one flight owner while successive observations turn a direction into a real platform. */
+/**
+ * 在请求的范围和方向里边飞边找平台；没有可落平台时先挑一小段通畅空中位置，观察后继续。
+ * 停止时转为找可落地的位置，避免还在空中就放弃控制；失败过的落点会记住。
+ */
 public final class RegionalFlightTarget implements MovingFlightTarget {
     private final RegionalGoal goal;
     private RegionalTerrain terrain;

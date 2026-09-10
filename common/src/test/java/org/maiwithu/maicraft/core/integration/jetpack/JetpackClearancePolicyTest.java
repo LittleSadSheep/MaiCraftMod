@@ -5,7 +5,9 @@ import java.util.List;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-/** Real body volumes and arbitrary collision boxes exercise the soft clearance preference. */
+/**
+ * 在矩形障碍场景中检查宽敞路线应更优，但只有一格宽且身体能过的路仍可用；也限制每次评分的空间查询数量。
+ */
 public final class JetpackClearancePolicyTest {
     private static final JetpackNativeAdapter.Snapshot POWER = new JetpackNativeAdapter.Snapshot(
             true, "fixture", "create_jetpack:netherite_jetpack", true, true,

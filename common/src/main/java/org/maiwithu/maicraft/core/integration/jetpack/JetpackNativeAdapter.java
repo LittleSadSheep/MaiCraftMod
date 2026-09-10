@@ -12,9 +12,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** Optional Create Jetpack 5.1.2 / FlightLib 3.2.1 bridge, audited against the installed jars.
- * Never writes attachments, fuel, position or velocity. The two switches use ControlSender's
- * own packet + client prediction path; their receipts confirm observed client mode, not server ACK.
+/**
+ * 读取胸甲槽中 Create 喷气背包、FlightLib 开关、同步参数与优先气罐，并通过模组已有协议设置模式。
+ * 这里看到的是客户端状态；模式记录通过不代表另有服务器确认消息。
  */
 public final class JetpackNativeAdapter {
     private static final String FLIGHT = "com.possible_triangle.flightlib.";
@@ -27,6 +27,7 @@ public final class JetpackNativeAdapter {
         static Snapshot unavailable(String reason) {
             return new Snapshot(false, reason, "", false, false, 0, 0, 0, 0, 0, 0, 0);
         }
+        // 这里还限制了本控制器接受的速度、加速度和下降范围；设备能开启不等于本控制器愿意接管。
         public boolean controllable() {
             return known && fuelTicks > 0 && Double.isFinite(horizontal) && horizontal > 0
                     && horizontal <= 0.1 && Double.isFinite(vertical) && vertical > gravity && vertical <= 1
@@ -44,6 +45,7 @@ public final class JetpackNativeAdapter {
         if (!net.minecraft.client.Minecraft.getInstance().isSameThread()) throw new IllegalStateException("client-thread jetpack observation required");
         return observeCurrentPlayer(player);
     }
+    // 先确认支持的胸甲物品和模组选中的飞行来源一致，再读取开关、耗气和速度；读取失败就返回未知。
     private static Snapshot observeCurrentPlayer(net.minecraft.client.player.LocalPlayer player) {
         if (player == null) return Snapshot.unavailable("local player unavailable");
         ItemStack chest = player.getItemBySlot(EquipmentSlot.CHEST);
@@ -141,9 +143,8 @@ public final class JetpackNativeAdapter {
                 && Boolean.FALSE.equals(evidence.get("abilities_flying")) && Boolean.FALSE.equals(evidence.get("passenger"));
     }
 
-    /** Native isUsable uses float division; consumption uses floor integer division, minimum one.
-     * Only the priority tank is credited: a nearly empty first tank can prevent using later tanks.
-     * Reserve the last usable charge and the next unknown 20-tick billing boundary.
+    /**
+     * 只按优先气罐的余量估算可用时间，并扣掉最后一份可用气量和一次可能即将发生的计费；不把其他气罐直接合计进来。
      */
     static int usableTicks(int air, int base, int seconds) {
         if (air < 0 || base <= 0 || seconds <= 0) return 0;
@@ -153,6 +154,7 @@ public final class JetpackNativeAdapter {
         return (int) Math.min(Integer.MAX_VALUE, ticks);
     }
 
+    // 发送绝对的开关目标值，再等待客户端读取值一致；不把“发送成功”直接当成模式已经改变。
     public static NativeActionReceipt setMode(LocalPlayerContext ctx, boolean hover, boolean enabled) {
         String mode = hover ? "TOGGLE_HOVER" : "TOGGLE_ACTIVE";
         return ctx.actions().submitControlProtocol(ctx, "Create jetpack " + mode + "=" + enabled,

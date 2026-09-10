@@ -6,7 +6,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt.Status;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackFastDescent.Command;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackFastDescent.Observation;
 
-/** Exercises the production switch sequence and delayed native physics without controlling a player. */
+/**
+ * 给定高度、速度、延迟和模式记录，检查快速下降各阶段和取消后的恢复；无伤短落差直接传布尔结果，没有调用外层真实摔落预算。
+ */
 public final class JetpackFastDescentTest {
     private static final Vec3 LANDING = new Vec3(0.5, 103, 0.5);
     private static final JetpackNativeAdapter.Snapshot POWER = new JetpackNativeAdapter.Snapshot(
@@ -29,6 +31,7 @@ public final class JetpackFastDescentTest {
         System.out.println("JetpackFastDescentTest: passed");
     }
 
+    // 这里直接把 harmlessDrop 设为真，因此只验证收到这个结论后的流程，不验证这个结论是否算对。
     private static void harmlessShortDrop() {
         var descent=new JetpackFastDescent();
         var start=at(0,2,-.03,true,true,true,Command.NONE,null);
@@ -143,6 +146,7 @@ public final class JetpackFastDescentTest {
         check(shifted.advance(changed, false) == Command.ON, "a different platform height was silently adopted mid-drop");
     }
 
+    // 故意让重启结果长期不确定，确认控制器仍保留恢复责任并再次请求绝对的开启状态。
     private static void failedReceiptDoesNotReleaseDisabledPack() {
         var descent = started();
         descent.requestStop();

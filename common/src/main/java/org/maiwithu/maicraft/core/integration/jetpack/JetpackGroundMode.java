@@ -4,7 +4,9 @@ import java.util.Map;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 
-/** One native handoff from powered flight to ground/fall control; later flight enables the pack. */
+/**
+ * 步行或准备落地辅助前，必要时关闭仍启用的喷气背包，并等待模式记录确认；不在快速下落中随意关掉正在使用的背包。
+ */
 public final class JetpackGroundMode {
     enum Decision { READY, WAIT, DISABLE, FAILED }
     private NativeActionReceipt receipt;
@@ -28,6 +30,7 @@ public final class JetpackGroundMode {
     public void poll(LocalPlayerContext context) {
         if(receipt!=null && !receipt.terminal()) context.actions().poll(context,receipt);
     }
+    // 待确认时继续等；尝试后未确认或重新被开启就失败。还没尝试且无法识别背包时允许原步行流程继续。
     static Decision decide(JetpackNativeAdapter.Snapshot power,boolean grounded,double verticalSpeed,
                            boolean attempted,NativeActionReceipt.Status status) {
         if(status==NativeActionReceipt.Status.PENDING) return Decision.WAIT;

@@ -5,7 +5,9 @@ import java.util.List;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-/** Feasible three-dimensional searches must not flood-fill their equal-score volume. */
+/**
+ * 检查三维找路、直接路线、封闭空间、途中障碍变化和预算耗尽；明确区分“还没搜完”和“已确认这次搜索没有通道”。
+ */
 public final class JetpackSearchTest {
     private static final JetpackNativeAdapter.Snapshot POWER = new JetpackNativeAdapter.Snapshot(
             true, "fixture", "create_jetpack:netherite_jetpack", true, true,
@@ -37,6 +39,7 @@ public final class JetpackSearchTest {
         }
     }
 
+    // 同一处可达场景只缩小搜索额度，结果应说明预算用完，不能冒充已经证明没有路。
     private static void budgetIsNotNoCorridor() {
         var space = departureRoof();
         var limited = new JetpackRoute.Search(START, DECK, POWER, 4);

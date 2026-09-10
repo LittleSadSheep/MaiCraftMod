@@ -4,7 +4,9 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalGoal;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalTerrain;
 
-/** Observation replay: no floor at departure, local air legs, then actual supported touchdown. */
+/**
+ * 检查先飞到空中观察点再找真实平台、越过观察点后继续、地面消失后重新观察，以及停止上行请求时转找下方出口。
+ */
 public final class RegionalFlightTest {
     private static final JetpackNativeAdapter.Snapshot POWER=new JetpackNativeAdapter.Snapshot(
             true,"fixture","create_jetpack:netherite_jetpack",true,true,900,17000,.016,.32,.6,-.03,.08);

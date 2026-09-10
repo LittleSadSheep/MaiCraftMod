@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 
 import net.minecraft.world.phys.Vec3;
 
-/** Production incremental search, native fuel arithmetic, exit selection and key-only braking. */
+/**
+ * 检查气量预留、分次飞越障碍、水域上方的退出选择、刹车按键和平台对准；使用简化空间与固定设备参数。
+ */
 public final class JetpackFlightTest {
     private static final JetpackNativeAdapter.Snapshot POWER = new JetpackNativeAdapter.Snapshot(
             true, "fixture", "create_jetpack:netherite_jetpack", true, true, 900, 17000,

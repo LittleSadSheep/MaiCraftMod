@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 
-/** Quantized native key steering; measured velocity supplies braking, never a velocity write. */
+/**
+ * 根据目标距离和现有速度决定前后左右按键：靠近时减速，已经冲过头时反向刹车；需要更高位置时才请求上升。
+ */
 final class JetpackSteering {
     static BodyControlPort.Movement toward(Vec3 position, Vec3 velocity, Vec3 target, float yaw, boolean landing,
                                           JetpackNativeAdapter.Snapshot power) {

@@ -6,7 +6,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.transport.TransportTargets.Destination;
 
-/** Offline controller run against the native upright vertical update and a fixed raised platform. */
+/**
+ * 检查平台分组、起飞后升高再平移、靠近平台后落下，以及跳过路点时不能穿过低顶盖或下方地板；运动按测试公式逐刻推进。
+ */
 public final class JetpackCourseTest {
     private static final JetpackNativeAdapter.Snapshot POWER = new JetpackNativeAdapter.Snapshot(
             true, "fixture", "create_jetpack:netherite_jetpack", true, true, 900, 17000, 0.016, 0.32, 0.6, -0.03, 0.08);

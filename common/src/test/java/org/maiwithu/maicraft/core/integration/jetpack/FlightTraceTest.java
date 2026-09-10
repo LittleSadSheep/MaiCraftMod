@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 import java.util.ArrayList;
 import java.util.Map;
 
+// 检查飞行诊断合并相同样本、保留时间跨度和变化，最多展示最近八组，避免停留阶段反复输出相同信息。
 public final class FlightTraceTest {
     public static void main(String[] args) {
         var samples = new ArrayList<Map<String,Object>>();

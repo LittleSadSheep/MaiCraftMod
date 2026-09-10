@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 
 import net.minecraft.world.phys.Vec3;
 
-/** Prefer breathing room without making the optional margin a condition for a narrow passage. */
+/**
+ * 在确实可通过的空中路线之间，稍微偏好侧面和头顶更宽敞的空间；靠墙增加代价，实际碰撞才视为不能走。
+ */
 final class JetpackClearancePolicy {
     private static final double SIDE_MARGIN = 0.5, TOP_MARGIN = 0.35;
     private static final int[][] SIDES = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};

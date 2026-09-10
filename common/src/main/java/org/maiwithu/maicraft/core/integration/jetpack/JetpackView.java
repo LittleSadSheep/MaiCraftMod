@@ -5,7 +5,9 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 
-/** Look down the nearby course, then steer in the actual smoothly changing camera frame. */
+/**
+ * 选择镜头看向路线哪里，并把实际朝向交给飞行按键计算；镜头还没转向目标时先减少横向赶路。
+ */
 final class JetpackView {
     record Look(float yaw, float pitch) {}
     private JetpackView() {}
@@ -30,6 +32,7 @@ final class JetpackView {
         return new Look(yaw, Mth.clamp(pitch, -55, landing ? 75 : 45));
     }
 
+    // 前方观察点与当前路线偏离太大时，仍盯当前路点，避免镜头越过转角把控制方向带偏。
     static Vec3 focus(Vec3 position, Vec3 aim, Vec3 ahead) {
         Vec3 step = aim.subtract(position), glance = ahead.subtract(position);
         if (step.horizontalDistance() < 0.3) return ahead;

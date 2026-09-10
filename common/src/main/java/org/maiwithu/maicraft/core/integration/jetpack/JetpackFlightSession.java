@@ -13,7 +13,10 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 
-/** Controlled short flight with native mode receipts, loaded 3-D route and retained landing on cancel. */
+/**
+ * 执行一趟飞行：分次找路、开启背包和悬停、按路飞、处理移动目标或障碍、落地后恢复原开关。
+ * 开始操作前可以直接拒绝；已经飞起来就要继续找落点并收尾，不能把停止请求当成立刻松开所有控制。
+ */
 public final class JetpackFlightSession implements TransportSession {
     public record Probe(boolean available, String reason, int estimatedTicks) {}
     private enum Phase { PLAN, ACTIVE, HOVER, FLY, REPLAN, LAND, RESTORE, DONE }
@@ -77,6 +80,7 @@ public final class JetpackFlightSession implements TransportSession {
         fastDescent = new JetpackFastDescent(this.forbidden);
     }
     public static Probe probe(LocalPlayerContext ctx, Vec3 target) { return probe(ctx, target, LongSets.emptySet()); }
+    // 这是地面出发候选的快速筛选，只看设备、附近落点和最低预计耗气；完整路线由会话继续验证。
     public static Probe probe(LocalPlayerContext ctx, Vec3 target, LongSet forbidden) {
         var power = JetpackNativeAdapter.inspect(ctx);
         if (!power.controllable()) return new Probe(false, power.known() ? "fuel or native flight settings cannot support controlled flight" : power.reason(), 0);
@@ -138,6 +142,7 @@ public final class JetpackFlightSession implements TransportSession {
             receipt = null;
             if (!applied && phase == Phase.RESTORE) return finish(ctx, false);
         }
+        // 规划阶段可换候选落点，但总离地搜索预算共享，不能换一个候选就重新取得全部额度。
         if (phase == Phase.PLAN) {
             if (stopping) return finish(ctx, false);
             if (!power.controllable() || !grounded && (!power.active() || !power.hover()
@@ -225,6 +230,7 @@ public final class JetpackFlightSession implements TransportSession {
     private boolean landingSelected() { return movingTarget==null || movingTarget.landingSelected(); }
     private boolean followsTarget() { return (!stopping || discoveringExit) && !exiting; }
 
+    // 移动目标偏移后优先接一条新直线；无法直接接上时先悬停，再分次重新找路。
     private void retarget(LocalPlayerContext ctx) {
         if (route == null || route.points().getLast().distanceTo(target) < .5 && planningLanding==landingSelected()) return;
         var space = space(ctx);
@@ -307,6 +313,7 @@ public final class JetpackFlightSession implements TransportSession {
         } else escape(ctx, space);
     }
 
+    // 重规划时继续守住当前悬停点；设备、空间或停止条件不再允许时，改找提前落地出口。
     private void repair(LocalPlayerContext ctx) {
         var space = space(ctx);
         if (stopping && !discoveringExit || !power.controllable() || !JetpackNativeAdapter.uprightActive(nativeEvidence)
@@ -344,6 +351,7 @@ public final class JetpackFlightSession implements TransportSession {
         brake(ctx); // the next tick validates the exit segment before producing its motion
     }
 
+    // 先对准平台并消掉相对横向速度，再下降；移动平台还要确认真实接触和连续站稳。
     private void land(LocalPlayerContext ctx) {
         if (grounded) {
             if (movingTarget != null && !stopping && !exiting && failure.isEmpty()) {
@@ -465,6 +473,7 @@ public final class JetpackFlightSession implements TransportSession {
         ctx.body().requestLook(look.yaw(), look.pitch(), ctx.tickRevision());
     }
 
+    // 站稳后按需恢复本趟改过的开关；仍在空中时先回到飞行处理，不能在这里直接宣布结束。
     private Result restore(LocalPlayerContext ctx) {
         if (!grounded) { phase = Phase.ACTIVE; return running(); }
         if (!power.known()) { uncertain = true; failure = "jetpack_restore_unknown"; return finish(ctx, false); }
@@ -489,6 +498,7 @@ public final class JetpackFlightSession implements TransportSession {
         return terminal;
     }
     private Result running() { return new Result(State.RUNNING, phase(), detail, effects, uncertain); }
+    // 平时隔十刻记录一次，阶段变化或故障立即记录；保留有限的最近样本，避免诊断数据无限增长。
     private void recordTrace(LocalPlayerContext ctx, boolean force) {
         boolean transition = recordedPhase != phase;
         if (!force && !transition && traceTick != Long.MIN_VALUE && lastTick - traceTick < 10) return;

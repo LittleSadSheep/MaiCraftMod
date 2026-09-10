@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 import java.util.HashMap;
 import java.util.Map;
 
-/** The production guard requires active native evidence, not merely two client toggle values. */
+/**
+ * 逐项删改一份手写的飞行状态，检查缺来源、姿势或可用性证据时不能认作已接管；没有验证模组反射接口实际能否读取这些字段。
+ */
 public final class JetpackNativeEvidenceTest {
     public static void main(String[] args) {
         Map<String, Object> evidence = new HashMap<>(Map.of("scope", "client_only_no_server_ack", "known", true,

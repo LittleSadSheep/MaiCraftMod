@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.world.phys.Vec3;
 
-/** Select the cheapest currently clear exit: down, back along the route, or onward to its landing. */
+/**
+ * 需要提前结束飞行时，比较正下方降落、继续原路和沿原路退回三种已知出口，选择估计耗时最少且当前通畅的一条。
+ */
 final class JetpackEscape {
     static JetpackRoute.Plan choose(JetpackRoute.Space space, Vec3 position, JetpackRoute.Plan route,
                                    int next, JetpackNativeAdapter.Snapshot power) {

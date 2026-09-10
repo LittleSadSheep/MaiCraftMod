@@ -17,10 +17,14 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** On-demand explanation of a failed JetpackRoute body sweep, using only the loaded local scene. */
+/**
+ * 飞行通道检查失败后，补查当前场景里能解释的原因：边界、未知区域、液体、危险物、保护格、方块或实体碰撞。
+ * 这是诊断读取，不改变路线；无法在当前场景复现时明确报告未复现。
+ */
 public final class JetpackObstruction {
     private JetpackObstruction() {}
 
+    // 沿线最多检查四百个样本，标明是实体身体真碰撞，还是仅碰到规划预留的安全余量。
     public static Map<String, Object> inspect(LocalPlayerContext ctx, LongSet forbidden, Vec3 from, Vec3 to) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("type", "unknown"); result.put("from", point(from)); result.put("to", point(to));

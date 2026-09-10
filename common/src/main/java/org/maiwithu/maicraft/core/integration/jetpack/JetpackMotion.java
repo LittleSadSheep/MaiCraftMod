@@ -5,7 +5,9 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 
-/** Short dry-air prediction, restarted from measured motion each tick. Never changes entity physics. */
+/**
+ * 把前后左右、上升按键转换成短时间的位置估计，再检查保持原朝向或逐步转头时会不会碰撞。
+ */
 final class JetpackMotion {
     record Step(Vec3 position, Vec3 velocity) {}
     private JetpackMotion() {}
@@ -28,6 +30,7 @@ final class JetpackMotion {
         return clearTrajectory(space, position, velocity, aim, yaw, requestedYaw, power, 5);
     }
 
+    // 分别估计镜头不转和每刻最多转十二度两种情况，都通畅才接受；按键在每一步重新计算。
     private static boolean clearTrajectory(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
                                            float yaw, float requestedYaw, JetpackNativeAdapter.Snapshot power, int ticks) {
         // Cover both a stationary camera and its maximum next-tick turn (240 degrees/second).
@@ -46,6 +49,7 @@ final class JetpackMotion {
     }
 
     /** FlightLib 3.2.1 applies each native direction separately; vanilla alone normalizes diagonal input. */
+    // 合计背包横向推力与普通空中按键，再计算本次位置和受阻力影响的下一刻速度。
     static Step step(Vec3 position, Vec3 velocity, BodyControlPort.Movement command, float yaw,
                      JetpackNativeAdapter.Snapshot power) {
         double radians = yaw * (Math.PI / 180), sin = Math.sin(radians), cos = Math.cos(radians);

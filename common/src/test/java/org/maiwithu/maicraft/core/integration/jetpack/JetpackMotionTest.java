@@ -6,6 +6,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort.Movement;
 
+// 用身体碰撞盒和固定参数回放侧向漂移、窄门、低顶盖和移动中上升，确认预测会提前刹车且通道恢复后仍能前进。
 public final class JetpackMotionTest {
     private static final JetpackNativeAdapter.Snapshot POWER = new JetpackNativeAdapter.Snapshot(
             true, "installed dynamics", "create_jetpack:jetpack", true, true,

@@ -1,29 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.integration.jetpack;
 
-/** Airborne UPRIGHT hover model for CreateJetpack tag 5.1.2 / installed FlightLib 3.2.1.
- * JetpackLogic.uprightMovement runs before movement; ordinary MC air travel applies gravity
- * and 0.98 vertical drag afterwards. Raw tick-end velocity is therefore not next tick's displacement.
- * This assumes the native active context remains usable: fluids, elytra, levitation and supported
- * vanilla jumps need separate handling. It neither changes entity velocity nor emits a sneak input.
+/**
+ * 按读取到的推力、重力和阻力估计竖直速度与惯性上升高度，帮助决定是否继续上升；这里计算数值，不直接改变玩家速度。
  */
 public final class JetpackDynamics {
     private static final double AIR_DRAG = 0.98;
     private JetpackDynamics() {}
 
-    /** Vertical displacement after the next native UP/released-UP decision, before gravity. */
+    /**
+     * 估计这一刻实际向上或向下移动多少：上升受推力和最高速度限制，松开上升则至少保持悬停下降速度。
+     */
     public static double nextVertical(double rawVy, boolean up, JetpackNativeAdapter.Snapshot power) {
         requireModel(rawVy, power);
         return up ? Math.min(rawVy + power.acceleration(), power.vertical()) : Math.max(rawVy, power.hoverDescent());
     }
 
-    /** Tick-end velocity after ordinary airborne movement. */
+    /**
+     * 移动后再扣重力并乘阻力，得到下一刻开始时保留的速度；它与本刻实际位移不是同一个值。
+     */
     public static double rawAfterStep(double displacement, JetpackNativeAdapter.Snapshot power) {
         requireModel(displacement, power);
         return (displacement - power.gravity()) * AIR_DRAG;
     }
 
-    /** Remaining positive displacement if UP stays released; slow downward hover adds no rise. */
+    /**
+     * 松开推力后仍可能继续上升；最多逐刻算五百一十二次，剩下的上升用偏保守的阻力上界补足。
+     */
     public static double coastRise(double rawVy, JetpackNativeAdapter.Snapshot power) {
         requireModel(rawVy, power);
         double rise = 0;
@@ -41,7 +44,9 @@ public final class JetpackDynamics {
         return Math.max(0, step) + coastRise(rawAfterStep(step, power), power);
     }
 
-    /** Keep a minimum cruise height, allowing the unavoidable native UP-pulse/coasting band above it. */
+    /**
+     * 已有向上惯性够到目标高度就先不加推力；避免每次看到脚下略低就继续上冲。
+     */
     public static boolean shouldRise(double height, double rawVy, double minimumHeight, JetpackNativeAdapter.Snapshot power) {
         if (!Double.isFinite(height) || !Double.isFinite(minimumHeight)) throw new IllegalArgumentException("finite flight heights required");
         double releasedStep = nextVertical(rawVy, false, power);

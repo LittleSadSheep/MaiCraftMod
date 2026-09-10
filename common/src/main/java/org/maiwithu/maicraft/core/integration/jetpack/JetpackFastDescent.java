@@ -9,8 +9,9 @@ import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 
-/** Native shift descent, with off/drop/on acceleration when altitude permits. Never writes entity physics.
- * A mode receipt and upright context are client evidence, not a server fall-damage guarantee.
+/**
+ * 沿已对准的落点加快下降：短且无伤时暂时关背包，较高时提前重启悬停，最后用潜行下降。
+ * 地形改变或请求停止时转入恢复飞行模式，已经开始的恢复不能因超时就丢掉。
  */
 public final class JetpackFastDescent {
     enum Phase { IDLE, DISABLING, FALLING, SHORT_FALL, ENABLING, BRAKING, DONE }
@@ -75,6 +76,7 @@ public final class JetpackFastDescent {
             column &= exit != null && descentExit != null && exit.distanceToSqr(descentExit) < 0.0001;
         }
         var info = ctx.connection().getPlayerInfo(player.getUUID());
+        // 当前把已下落距离先加进参数，伤害预算又因最后的 true 再加一次；短落差可能因此被误判为有伤害。
         boolean harmless=landing!=null && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(player).damage(
                 player.fallDistance+Math.max(0,player.getY()-landing.y),
                 org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.ORDINARY,true)<=0;
@@ -112,6 +114,7 @@ public final class JetpackFastDescent {
     Command advance(Observation o, boolean allowStart) {
         return advance(o, allowStart, true);
     }
+    // 根据当前高度、惯性、模式确认和落点是否改变，决定关背包、开背包或继续下降；这里本身不发送协议。
     Command advance(Observation o, boolean allowStart, boolean touchdown) {
         if (finished()) return Command.NONE;
         var power = o.power();
@@ -208,6 +211,7 @@ public final class JetpackFastDescent {
     static boolean columnAvailable(JetpackRoute.Space space, Vec3 position, Vec3 landing) {
         return columnAvailable(space, position, landing, true);
     }
+    // 核对正下方通道和目标通道；只降到中间巡航高度时，也要求更下面还有一处已知落地出口。
     static boolean columnAvailable(JetpackRoute.Space space, Vec3 position, Vec3 landing, boolean touchdown) {
         if (landing == null || touchdown && !JetpackRoute.supportsLanding(space, landing)) return false;
         Vec3 directlyBelow = new Vec3(position.x, landing.y, position.z);

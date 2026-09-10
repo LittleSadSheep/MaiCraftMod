@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.integration.jetpack;
 
-/** Continuous simulation of the production model with only the native UP/release choices. */
+/**
+ * 用一组固定背包参数检查竖直位移、重力后的速度、一次推力的最高点，以及长期悬停和上升能否保持高度范围；不加载真实飞行模组。
+ */
 public final class JetpackDynamicsTest {
     private static final JetpackNativeAdapter.Snapshot POWER = new JetpackNativeAdapter.Snapshot(
             true, "CreateJetpack 5.1.2 / FlightLib 3.2.1", "create_jetpack:netherite_jetpack", true, true,
@@ -36,6 +38,7 @@ public final class JetpackDynamicsTest {
         System.out.println("JetpackDynamicsTest: passed");
     }
 
+    // 连续三千次使用同一组公式推进高度，检查不会持续下沉或越升越高；这是模型内的长期稳定性检查。
     private static void boundedCruise(double raw) {
         double height = 115, minimum = height;
         double envelope = JetpackDynamics.riseEnvelope(raw, true, POWER) - POWER.hoverDescent();

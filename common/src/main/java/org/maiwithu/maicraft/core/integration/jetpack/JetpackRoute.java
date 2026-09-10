@@ -15,7 +15,9 @@ import net.minecraft.world.phys.Vec3;
 import baritone.pathing.movement.CollisionGeometry;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** Bounded six-direction flight search through loaded, dry, collision-free body corridors. */
+/**
+ * 在已加载、干燥且身体能通过的空间里找一段最多六十四格的飞行路线；先试直接升高、平移、落下，再按六个方向分次搜索。
+ */
 public final class JetpackRoute {
     public interface Space {
         boolean clear(Vec3 from, Vec3 to);
@@ -71,6 +73,7 @@ public final class JetpackRoute {
         public String failureReason() { return failureReason; }
         /** Valid nodes whose neighbors were expanded; stale queue entries and templates cost no nodes. */
         public int expanded() { return expanded; }
+        // 搜索、初始化和最后的逐段复查都分次做；找到点列后还要确认整条线仍通畅，并计入预计耗气时间。
         public void advance(Space space, int nodeBudget, long timeBudgetNanos) {
             if (done) return;
             long began = System.nanoTime();
@@ -126,6 +129,7 @@ public final class JetpackRoute {
             }
         }
         private void fail(String reason) { failureReason = reason; done = true; }
+        // 先验证设备、距离、真实落点和离地空间；不要求立即触地的移动目标只规划眼前通畅的短线。
         private void initialize(Space space) {
             if (initialization == 0) {
                 if (!power.controllable()) { fail("uncontrollable"); return; }
@@ -183,6 +187,7 @@ public final class JetpackRoute {
         return null;
     }
 
+    // 既检查当前身体通道，也检查向上推一下可能达到的高度；额外高度来自当前悬停模型。
     static boolean flightClear(Space space, Vec3 from, Vec3 to, JetpackNativeAdapter.Snapshot power) {
         double hoverVelocity = JetpackDynamics.rawAfterStep(power.hoverDescent(), power);
         double reserve = JetpackDynamics.riseEnvelope(hoverVelocity, true, power);
@@ -195,6 +200,7 @@ public final class JetpackRoute {
     }
 
     /** Follow a clear forward corridor from the actual height; intermediate altitude is a guide. */
+    // 只有高度已满足且新的连接仍通畅时才跳过近路点；靠墙处保留原先选出的路线，避免把宽敞绕行压回窄缝。
     static int nextWaypoint(Space space, Plan route, Vec3 position, int current, JetpackNativeAdapter.Snapshot power) {
         int last = route.points().size() - 2;
         current = Math.min(current, last);
@@ -231,6 +237,7 @@ public final class JetpackRoute {
     public static Space observed(LocalPlayerContext ctx) {
         return observed(ctx, org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.forbiddenBodyCells());
     }
+    // 按实际身体尺寸加少量余量读取世界，并核对附近区块、世界边界、禁入格、实体和移动结构。
     public static Space observed(LocalPlayerContext ctx, it.unimi.dsi.fastutil.longs.LongSet forbidden) {
         var contraptions=org.maiwithu.maicraft.core.integration.create.ContraptionObstacles.capture(ctx.level(),ctx.player().position());
         return new Space() {

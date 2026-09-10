@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt.Status;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode.Decision;
 
+// 检查步行前关闭背包、快速下落时暂不切换、等待确认，以及用户后来重新开启时不继续争夺开关。
 public final class JetpackGroundModeTest {
     public static void main(String[] args) {
         var active=new JetpackNativeAdapter.Snapshot(true,"fixture","create_jetpack:netherite_jetpack",true,true,900,17000,.016,.32,.6,-.03,.08);
