@@ -5,10 +5,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 
 import java.lang.ref.WeakReference;
 import java.util.LinkedHashMap;
+import java.util.Objects;
 import java.util.UUID;
 
 /** 暂存玩家刚查看过的机器：保留名字、位置、方块状态和观察编号，后续操作先核对是否仍是那台机器。 */
@@ -18,6 +20,31 @@ public final class MachineSnapshots {
     private static final LinkedHashMap<String, Snapshot> SNAPSHOTS = new LinkedHashMap<>();
     private static WeakReference<Object> level = new WeakReference<>(null);
     private static UUID playerId;
+
+    /** 只检查请求引用的观察范围和摘要，不扫描世界，也不授予操作权限。 */
+    record Region(String dimension, BlockPos center, int radius, String structuralFingerprint) {
+        Region {
+            if (dimension == null || ResourceLocation.tryParse(dimension) == null)
+                throw new IllegalArgumentException("machine request requires a valid dimension");
+            center = Objects.requireNonNull(center, "center").immutable();
+            if (radius < 0 || radius > MachineSurvey.MAX_RADIUS)
+                throw new IllegalArgumentException("machine request radius must be between 0 and " + MachineSurvey.MAX_RADIUS);
+            if (structuralFingerprint == null || structuralFingerprint.isBlank())
+                throw new IllegalArgumentException("machine request requires a structure fingerprint");
+        }
+
+        BlockPos requirePosition(BlockPos position) {
+            BlockPos frozen = Objects.requireNonNull(position, "position").immutable();
+            if (!contains(frozen)) throw new IllegalArgumentException("the selected position is outside the surveyed machine region");
+            return frozen;
+        }
+
+        boolean contains(BlockPos position) {
+            return Math.abs((long) position.getX() - center.getX()) <= radius
+                    && Math.abs((long) position.getY() - center.getY()) <= radius
+                    && Math.abs((long) position.getZ() - center.getZ()) <= radius;
+        }
+    }
 
     public record Snapshot(String id, String label, String dimension, BlockPos center,
                            int radius, long gameTime, String fingerprint, String reportJson) {

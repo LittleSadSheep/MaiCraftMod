@@ -43,11 +43,9 @@ public final class MachineMenu {
             String structuralFingerprint, BlockPos machinePosition) {
         public OpenRequest {
             if (machinePosition == null) throw new IllegalArgumentException("machine position is required");
-            // 当前借用了拉杆控制请求的构造器来检查共同的位置、半径和摘要字段，这里不会控制拉杆。
-            var validated = new MachineControl.Request(dimension, center, radius,
-                    structuralFingerprint, false, machinePosition);
-            center = validated.center();
-            machinePosition = validated.controlPosition();
+            var region = new MachineSnapshots.Region(dimension, center, radius, structuralFingerprint);
+            center = region.center();
+            machinePosition = region.requirePosition(machinePosition);
         }
     }
 

@@ -2,9 +2,7 @@
 package org.maiwithu.maicraft.core.integration.machine;
 
 import java.util.List;
-import java.util.Objects;
 import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 
 /**
@@ -25,23 +23,9 @@ public final class MachineControl {
             boolean desiredPowered,
             BlockPos controlPosition) {
         public Request {
-            if (dimension == null || ResourceLocation.tryParse(dimension) == null) {
-                throw new IllegalArgumentException("machine control requires a valid dimension");
-            }
-            center = Objects.requireNonNull(center, "center").immutable();
-            if (radius < 0 || radius > MachineSurvey.MAX_RADIUS) {
-                throw new IllegalArgumentException("machine control radius must be between 0 and "
-                        + MachineSurvey.MAX_RADIUS);
-            }
-            if (structuralFingerprint == null || structuralFingerprint.isBlank()) {
-                throw new IllegalArgumentException("machine control requires a structure fingerprint");
-            }
-            if (controlPosition != null) {
-                controlPosition = controlPosition.immutable();
-                if (!contains(center, radius, controlPosition)) {
-                    throw new IllegalArgumentException("the control is outside the surveyed machine region");
-                }
-            }
+            var region = new MachineSnapshots.Region(dimension, center, radius, structuralFingerprint);
+            center = region.center();
+            if (controlPosition != null) controlPosition = region.requirePosition(controlPosition);
         }
     }
 
@@ -53,12 +37,6 @@ public final class MachineControl {
     public static MachineControlTaskRecord task(String callId, long deadlineGameTime, Request request) {
         install();
         return new MachineControlTaskRecord(callId, deadlineGameTime, request);
-    }
-
-    static boolean contains(BlockPos center, int radius, BlockPos position) {
-        return Math.abs((long) position.getX() - center.getX()) <= radius
-                && Math.abs((long) position.getY() - center.getY()) <= radius
-                && Math.abs((long) position.getZ() - center.getZ()) <= radius;
     }
 
     /** Selection never guesses which of several switches controls the intended output. */
