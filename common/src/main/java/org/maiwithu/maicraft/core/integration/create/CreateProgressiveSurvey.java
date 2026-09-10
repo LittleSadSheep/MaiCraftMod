@@ -18,9 +18,7 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
 /**
- * Progressive observation: discover both semantic endpoints from live evidence, walk the proposed
- * corridor from destination back to source, and approve it only after every cell and placement
- * stance was seen.
+ * 分阶段找两端、搜索可能路线、走近逐格核对放置条件，再回起点复查。遇到需要继续探索的端点边界时，把进度交回父任务等待继续选择。
  */
 final class CreateProgressiveSurvey {
     enum Status { RUNNING, READY, FAILED }
@@ -356,6 +354,7 @@ final class CreateProgressiveSurvey {
         markProgress();
     }
 
+    // 从目标端向起点复核，每格都要能保留现场、能点击支撑且有站位；一格不成立就排除它并重新找路线。
     private Status surveyCorridor(LocalPlayerContext context) {
         ClientLevel level = context.level();
         int budget = CELLS_PER_TICK;
@@ -436,6 +435,7 @@ final class CreateProgressiveSurvey {
         return pitch >= 48.0 && reachSq <= 4.35 * 4.35;
     }
 
+    // 回到施工起点后，再确认动力源和起点附近已调查的路线没变，才交出可执行计划。
     private Status returnSource(LocalPlayerContext context) {
         BlockPos returnTarget = surveyed.get(0).stand();
         if (context.player().blockPosition().distSqr(returnTarget) > 4.0) {
@@ -500,6 +500,7 @@ final class CreateProgressiveSurvey {
         return Status.FAILED;
     }
 
+    // 保存可恢复的调查阶段，只把本次调用交回父任务；继续授权后从同一进度接着查。
     private Status pauseForEndpointEvidence(String code, String detail) {
         travel.stop();
         failure = new Failure(code, detail, FailureType.TARGET_LOST,
@@ -535,6 +536,7 @@ final class CreateProgressiveSurvey {
     }
 
     /** Incremental loaded-frontier navigation used by survey and progressive construction. */
+    // 远处未加载时分段选当前可走到的观察点；走路失败记住该点，避免反复选同一个失败站位。
     static final class Travel {
         enum Status { RUNNING, ARRIVED, FAILED }
 

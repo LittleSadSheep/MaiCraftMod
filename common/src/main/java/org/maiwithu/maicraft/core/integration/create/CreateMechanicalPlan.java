@@ -13,7 +13,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Immutable survey and route result retained across ticks; it contains no player or level. */
+/**
+ * 保存经过调查的真实端点和每一格的放置位置、支撑面与站位；路线标识用于辨认这份计划，实际世界状态仍需另行复查。
+ */
 record CreateMechanicalPlan(
         KineticEndpoint source,
         KineticEndpoint destinationMachine,
@@ -55,6 +57,7 @@ record CreateMechanicalPlan(
     }
 
     CreateMechanicalPlan {
+        // 这句原值自赋值不改变记录内容，当前没有提供额外校验。
         source = source;
         receiver = receiver.immutable();
         cells = List.copyOf(cells);
@@ -64,6 +67,7 @@ record CreateMechanicalPlan(
         return destinationMachine == null ? receiver : destinationMachine.position();
     }
 
+    // 把已确认格数与路线顺序一起编码；这个标识不能证明那些方块现在仍是原状态。
     String prefixHash(int confirmedCells) {
         int safe = Math.max(0, Math.min(confirmedCells, cells.size()));
         StringBuilder value = new StringBuilder(routeHash).append('|').append(safe);

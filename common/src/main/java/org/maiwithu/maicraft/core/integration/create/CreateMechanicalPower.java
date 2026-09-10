@@ -12,11 +12,8 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /**
- * Optional, first-person integration for carrying rotational power through encased chain drives.
- *
- * <p>The public seam deliberately produces an ordinary {@link TaskRecord}.  Callers submit that
- * record to the one client task slot; this package never owns a scheduler.  Every world read and
- * every tick of the resulting task must happen on the Minecraft client thread.</p>
+ * 机械动力连接的入口：调用者给出两个语义位置，模块自己找真实接口、调查路线、补料并逐格安装。
+ * 目前自动方式也使用竖轴封装链传动，保留原有方块；同步 survey 只作前置判断，完整调查由任务继续。
  */
 public final class CreateMechanicalPower {
     public static final String CHAIN_DRIVE_ID = "create:encased_chain_drive";

@@ -8,7 +8,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 
-/** Optional Create 6 stockkeeper protocol; reads completed stock responses without ordering packages. */
+/**
+ * 读取 Create 库存请求菜单收到的完整库存摘要；第一次看到的可能是旧缓存，同一持有者换成新摘要后才记为新观察。制作预览不算现货。
+ */
 public final class CreateStockObservation {
     private static Object previousHolder, previousSummary;
     private CreateStockObservation() {}
@@ -33,6 +35,7 @@ public final class CreateStockObservation {
         }
     }
 
+    // 同一内容持有者收到新的摘要对象才算新完整响应；反复读取同一个对象不应使库存看起来刚更新过。
     static boolean receivedCompleteSummary(Object holder, Object summary) {
         // The first sight of an existing BE snapshot supplies no receipt time for this GUI session.
         boolean received = holder == previousHolder && summary != null && summary != previousSummary;

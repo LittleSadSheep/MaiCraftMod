@@ -7,7 +7,9 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Typed record captured by semantic intent execution and run by the single client scheduler. */
+/**
+ * 保存本次连接的端点、材料来源、是否允许伤害和需要保护的名称；续接凭据只表示已有调查或已确认施工进度。
+ */
 public final class CreateMechanicalPowerTaskRecord extends TaskRecord {
     public final CreateMechanicalPower.Request request;
     public final UUID continuationToken;

@@ -13,14 +13,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * Tick-sliced physical endpoint discovery around one semantic anchor.
- *
- * <p>The search has no model-authored or implementation-authored maximum radius. It observes
- * loaded chunk evidence in expanding rings and asks the first-person survey to load the next
- * missing ring chunk. A candidate becomes authoritative only after every chunk that could contain
- * a closer candidate has been observed. An empty world therefore does not turn an arbitrary
- * radius into a false "not found": it ends only at world-border exhaustion or when first-person
- * travel reports that the next required observation frontier is unreachable.</p>
+ * 从语义位置向外逐圈读真实动力接口，证明没有更近的合适证据后才交出候选；未知区块要求走近观察，不能直接当作没有机器。
  */
 final class CreateEndpointEvidenceSearch {
     enum Status { RUNNING, NEEDS_OBSERVATION, READY, EXHAUSTED }
@@ -155,6 +148,7 @@ final class CreateEndpointEvidenceSearch {
         return Status.RUNNING;
     }
 
+    // 完成最近证据判断后只暴露同一最近距离的合适端点，较远机器不会悄悄替换这个语义位置。
     Snapshot snapshot() {
         List<CreateMechanicalPlan.KineticEndpoint> observed = endpoints.values().stream()
                 .sorted(Comparator.comparingDouble(
@@ -308,6 +302,7 @@ final class CreateEndpointEvidenceSearch {
                                 Math.abs(level.getMaxBuildHeight() - 1 - center.getY()))));
     }
 
+    // 当前只接上下方向的竖轴接口，并要求旁边能留出新传动格；已有占用不会被清掉。
     private void scanKineticEvidence(ClientLevel level, LevelChunk chunk) {
         for (var entry : chunk.getBlockEntities().entrySet()) {
             BlockPos position = entry.getKey();
@@ -332,6 +327,7 @@ final class CreateEndpointEvidenceSearch {
         }
     }
 
+    // 已知候选必须比所有未观察区域可能提供的最近距离更近，才结束这次端点定位。
     private boolean evidenceProvenAgainst(double unseenLowerBound) {
         double bestDistanceSq = bestAdmissibleEvidenceDistanceSq();
         if (!Double.isFinite(bestDistanceSq)) return false;

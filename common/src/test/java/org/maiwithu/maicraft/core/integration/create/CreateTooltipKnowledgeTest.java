@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeDocument;
 
+// 检查提示中的显示标记、连续编号、操作名称、搜索文字和语言缓存更新；内容过长或配对说明缺失时应明确表示。
 public final class CreateTooltipKnowledgeTest {
     public static void main(String[] args) {
         String key = "block.create.shared_tooltip.tooltip";

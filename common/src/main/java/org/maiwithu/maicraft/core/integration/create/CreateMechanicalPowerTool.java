@@ -16,7 +16,9 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
-/** Hidden semantic-runtime bridge; concrete route cells remain inside the Mod. */
+/**
+ * 把语义层已经解析的位置和材料许可转换成机械接线任务；模型不需要自己列出每格路线，恢复时只携带内部续接凭据。
+ */
 public final class CreateMechanicalPowerTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
     /** Initial liveness lease; verified survey, supply, travel and placement progress renew it. */

@@ -7,7 +7,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** Small in-memory, one-use registry for definitely confirmed construction prefixes. */
+/**
+ * 短期保存部分已确认的接线进度与栏位准备信息，供同请求、身体和维度续接；最多三十二份，三十分钟过期，取用一次就移除。
+ */
 final class CreateMechanicalContinuations {
     private static final int MAX_RECEIPTS = 32;
     private static final long TTL_NANOS = Duration.ofMinutes(30).toNanos();

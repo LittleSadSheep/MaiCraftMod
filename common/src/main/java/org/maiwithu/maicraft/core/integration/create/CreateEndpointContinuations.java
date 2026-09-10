@@ -5,7 +5,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** One-use opaque receipts for a paused first-person endpoint evidence frontier. */
+/**
+ * 保存暂停的端点调查供确认后继续，取用一次就移除；取消时停止保留的调查。当前没有另设数量或过期上限，依赖父任务清理。
+ */
 final class CreateEndpointContinuations {
     private static final Map<UUID, Entry> ENTRIES = new LinkedHashMap<>();
 

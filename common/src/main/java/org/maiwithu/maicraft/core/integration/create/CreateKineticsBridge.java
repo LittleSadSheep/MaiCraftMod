@@ -8,7 +8,9 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Reflection-only optional dependency boundary. No Create class appears in a descriptor. */
+/**
+ * 只读 Create 的转速、网络存在与转轴朝向；能读取时另附过载状态。来源必须实际转动，不能仅按方块名称认定有动力。
+ */
 final class CreateKineticsBridge {
     private static final String KINETIC =
             "com.simibubi.create.content.kinetics.base.KineticBlockEntity";

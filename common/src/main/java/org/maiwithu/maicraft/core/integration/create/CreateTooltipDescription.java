@@ -7,7 +7,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
-/** Create's localized ItemDescription data, without keyboard state, font wrapping or a rendered GUI. */
+/**
+ * 把 Create 语言资源中的摘要、条件说明和操作提示整理成可搜索文字；去掉显示标记、限制总长度，并保留缺失说明与截断信息。
+ */
 public record CreateTooltipDescription(String translationKey, String summary, List<Detail> behaviours,
                                        List<Detail> controls, boolean truncated) {
     public record Detail(String condition, String explanation) {}

@@ -7,6 +7,7 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
+// 用摘要对象先后变化模拟旧缓存、分包未结束与完整新库存，检查重复读取不刷新时间，制作预览不会计入现货。
 public final class CreateStockObservationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();

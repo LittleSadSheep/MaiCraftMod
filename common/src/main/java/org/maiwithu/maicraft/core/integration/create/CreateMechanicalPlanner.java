@@ -24,12 +24,16 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Tick-sliced, preserve-existing mechanical route planning. */
+/**
+ * 同步入口先检查集成和保留现有方块的要求，实际线路由分次搜索产生。搜索记录链传动的连接方向，未观察区域只作待调查候选。
+ * 站位检查目前写死普通玩家尺寸与视距，并且会把玩家自身和仅禁改区域排除。
+ */
 final class CreateMechanicalPlanner {
     private static final Direction[] VERTICAL = {Direction.UP, Direction.DOWN};
 
     private CreateMechanicalPlanner() {}
 
+    // 当前所有合法新请求都会转去渐进调查，本方法自身不会返回一份成功路线。
     static CreateMechanicalPlan.Result plan(
             LocalPlayer player, CreateMechanicalPower.Request request) {
         Map<String, Object> facts = CreateMechanicalPlan.facts();
@@ -83,6 +87,7 @@ final class CreateMechanicalPlanner {
         BlockPos head = feet.above();
         BlockPos floor = feet.below();
         if (!level.isLoaded(feet) || !level.isLoaded(head) || !level.isLoaded(floor)) return false;
+        // 这里还把只禁止修改的脚位和头部格当作不能站立，扩大了原本独立的保护范围。
         if (NavigationSafetyContext.forbidsBody(feet)
                 || NavigationSafetyContext.protectsMutation(feet)
                 || NavigationSafetyContext.protectsMutation(head)) return false;
@@ -101,6 +106,7 @@ final class CreateMechanicalPlanner {
                 || protectedTerrain(level, floor)) return false;
         AABB body = new AABB(feet.getX() + 0.2, feet.getY(), feet.getZ() + 0.2,
                 feet.getX() + 0.8, feet.getY() + 1.8, feet.getZ() + 0.8);
+        // 这里没有排除操作者自己，也没有仅保留会阻挡身体的实体；玩家已经站在这里时反而会被拒绝。
         return level.getEntities(null, body).isEmpty();
     }
 
@@ -283,6 +289,7 @@ final class CreateMechanicalPlanner {
             return SearchStep.RUNNING;
         }
 
+        // 水平链条沿当前连接方向延伸；转到另一水平轴要经竖直连接，不能把普通寻路的任意拐弯当成可传动连接。
         private List<RouteState> neighbours(RouteState state) {
             List<RouteState> result = new ArrayList<>(6);
             Direction[] along = state.connectionAxis() == Direction.Axis.X
@@ -342,6 +349,7 @@ final class CreateMechanicalPlanner {
             return findStand(level, start, Set.of(support, start)) != null;
         }
 
+        // 未加载格先允许进入假设路线；真正施工前还要由渐进调查走近检查，不能把此返回值当作放置许可。
         private boolean cellAllowed(BlockPos position) {
             if (!bounds.contains(position)
                     || rejectedCells.contains(position.asLong())

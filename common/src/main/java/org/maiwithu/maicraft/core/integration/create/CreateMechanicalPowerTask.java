@@ -40,7 +40,10 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** One scheduler-owned, receipt-driven first-person construction attempt. */
+/**
+ * 完成接线全过程：调查、准备一批材料、复查、走到站位、瞄准放一格、确认消耗和状态，再验证目标开始转动并归位物品。
+ * 中途缺料可回补，已确认的前段保留；结果不确定时不会给出可直接续接的凭据。
+ */
 final class CreateMechanicalPowerTask
         extends AbstractCompanionTask<CreateMechanicalPowerTaskRecord> {
     private static final int PLACEMENT_CONFIRM_TICKS = 40;
@@ -110,6 +113,7 @@ final class CreateMechanicalPowerTask
     }
 
     @Override
+    // 先确认链传动物品存在；新任务开始渐进调查，续接任务则核对请求、身体、维度和已确认前段。
     protected void onStart() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         bodyEpoch = context.bodyEpoch();
@@ -252,6 +256,7 @@ final class CreateMechanicalPowerTask
         };
     }
 
+    // 续接前逐段走近读回已完成的方块，确认仍是竖轴链传动；不能只相信旧凭据上的完成格数。
     private TaskState auditProgressiveContinuation(LocalPlayerContext context) {
         if (resumeAuditIndex >= cursor) {
             constructionTravel.stop();
@@ -363,6 +368,7 @@ final class CreateMechanicalPowerTask
         return TaskState.RUNNING;
     }
 
+    // 按剩余线路和背包可容纳量确定一批数量；第一批材料未齐先补料，后续批次先归位再继续。
     private boolean initializeApprovedPlan(boolean duringTick) {
         startCursor = cursor;
         initialInventoryCount = inventoryCount(player, chainItem);
@@ -537,7 +543,9 @@ final class CreateMechanicalPowerTask
         return TaskState.RUNNING;
     }
 
-    /** Supply invalidates every pre-supply route fact; investigate again before any placement. */
+    /**
+     * 首次补料完成后重新调查整条路线，因为取材期间现场可能改变；不直接沿用旧的空格判断。
+     */
     private TaskState replanAfterSupply(LocalPlayerContext context) {
         continuingAfterRestock = false;
         if (progressiveSurvey != null) progressiveSurvey.stop();
@@ -573,6 +581,7 @@ final class CreateMechanicalPowerTask
         return TaskState.RUNNING;
     }
 
+    // 每次施工前核对这一批应剩多少材料，必要时重新加载附近路线，再准备手持并走到既定站位。
     private TaskState prepare(LocalPlayerContext context) {
         if (cursor >= plan.cells().size()) {
             phase = Phase.VERIFY;
@@ -665,6 +674,7 @@ final class CreateMechanicalPowerTask
         return TaskState.RUNNING;
     }
 
+    // 复查真实准星、足够陡的放置角度和原版预计轴向；同时确认现场仍空、手里物品没变后才提交一次放置。
     private TaskState alignAndPlace(LocalPlayerContext context) {
         CreateMechanicalPlan.RouteCell cell = plan.cells().get(cursor);
         if (!context.level().isLoaded(cell.position()) || !context.level().isLoaded(cell.support())) {
@@ -760,6 +770,7 @@ final class CreateMechanicalPowerTask
         return TaskState.RUNNING;
     }
 
+    // 最后看目标从原本无动力变成正在转动，并核对逐格消耗；远处已卸载的源头使用施工前记录，不等于两端此刻都实时可见。
     private TaskState verifyNetwork(LocalPlayerContext context) {
         InputDriver.halt(player);
         Validation route = validateWholeRoute(context.level());
@@ -812,6 +823,7 @@ final class CreateMechanicalPowerTask
         return TaskState.RUNNING;
     }
 
+    // 先完成或报告物品归位结果，再给出整趟成功／失败；恢复已经失败时不无休止重发同一交换。
     private TaskState restoreAndFinish(LocalPlayerContext context) {
         InputDriver.halt(player);
         if (restoreRetryBlocked) {
@@ -846,6 +858,7 @@ final class CreateMechanicalPowerTask
         return TaskState.FAILED;
     }
 
+    // 目标要变成预计状态且恰好少一件物品；当前还要求被点击的支撑完全不变，合法链条连接状态更新也会被当作偏离。
     private NativeConfirmation placementConfirmation(
             CreateMechanicalPlan.RouteCell cell,
             BlockState targetBefore,
@@ -877,6 +890,7 @@ final class CreateMechanicalPowerTask
         };
     }
 
+    // 渐进线路只复查身边已完成八格和前方六十四格，远处未加载的旧段保留此前证据；当前格仍在实际放置时再查。
     private Validation validateWholeRoute(ClientLevel level) {
         Validation endpoint = validateSourceAndDestination(level, cursor == startCursor);
         if (endpoint != null) return endpoint;
@@ -1027,6 +1041,7 @@ final class CreateMechanicalPowerTask
         }
     }
 
+    // 只有确实完成了部分线路、没有未确认操作且身体仍有效时，才发出可续接凭据。
     private void issueContinuationIfSafe() {
         if (continuationIssued || plan == null || cursor <= 0 || cursor >= plan.cells().size()
                 || nativeOutcomeUncertain || placementReceipt != null
@@ -1045,6 +1060,7 @@ final class CreateMechanicalPowerTask
     }
 
     @Override
+    // 对外保留实际进度、材料与失败原因，不把内部路线格和状态哈希全部当成模型需要填写的参数。
     protected Map<String, Object> resultData() {
         Map<String, Object> safe = new LinkedHashMap<>();
         copyResultField(data, safe,

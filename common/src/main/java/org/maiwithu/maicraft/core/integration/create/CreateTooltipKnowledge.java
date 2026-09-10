@@ -11,7 +11,9 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 
-/** Optional Create integration; only the custom translation-key resolver uses reflection. */
+/**
+ * 优先用 Create 自己的提示词条名读取说明，接口不可用时退回物品默认词条名；语言资源更换后重新读取，基础提示另作有限提取。
+ */
 public final class CreateTooltipKnowledge {
     private final CreateTooltipDescription.Cache descriptions = new CreateTooltipDescription.Cache();
     private boolean resolved;

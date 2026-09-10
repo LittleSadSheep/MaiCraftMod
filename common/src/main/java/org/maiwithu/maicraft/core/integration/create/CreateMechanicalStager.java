@@ -9,7 +9,10 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 
-/** Receipt-driven inventory-menu staging. It never writes an inventory or selected slot directly. */
+/**
+ * 把默认数据的链传动物品准备到快捷栏，记住临时挪开的物品，结束后再交换回来。
+ * 当前只有恢复续接凭据时核对旧栏位快照；普通归位直接按原栏号交换，可能碰到后来被更换的内容。
+ */
 final class CreateMechanicalStager {
     enum Status { RUNNING, READY, RESTORED, FAILED, UNCERTAIN }
 
@@ -102,6 +105,7 @@ final class CreateMechanicalStager {
         return Status.RUNNING;
     }
 
+    // 当前直接把临时交换的两格再交换一次；没有调用下方 validateSnapshot 检查原来被挪开的物品是否仍在。
     Status restore(LocalPlayerContext context) {
         Status pending = pollPending(context);
         if (pending == Status.FAILED || pending == Status.UNCERTAIN || pending == Status.RUNNING) {
@@ -142,6 +146,7 @@ final class CreateMechanicalStager {
                 activeSwapSource, activeSwapHotbar, expectedDisplacedAtSource);
     }
 
+    // 恢复续接凭据时检查原栏位和链条堆，防止沿用被改变的背包；普通 restore 目前没有共用这项检查。
     boolean validateSnapshot(LocalPlayer player, Item chainItem) {
         if (activeSwapSource < 0) return true;
         if (activeSwapSource >= player.getInventory().getContainerSize()
@@ -156,6 +161,7 @@ final class CreateMechanicalStager {
         return detail;
     }
 
+    // 先等上一次交换或选栏有结果，再关闭库存并完成后续选栏；失败时保留是否仍欠一次归位的信息。
     private Status pollPending(LocalPlayerContext context) {
         if (menuReceipt == null && closeAfterSwap) {
             menuReceipt = context.menus().close(context, CONFIRM_TICKS);
@@ -257,6 +263,7 @@ final class CreateMechanicalStager {
                 && stack.getComponentsPatch().isEmpty() ? stack.getCount() : 0;
     }
 
+    // 当前只愿临时挪动空格或无耐久、无额外组件的普通物品；这比一般库存交换能够处理的范围更窄。
     static boolean safeDisplaced(ItemStack stack) {
         return stack.isEmpty() || !stack.isDamageableItem()
                 && stack.getCount() >= 1 && stack.getCount() <= stack.getMaxStackSize()
