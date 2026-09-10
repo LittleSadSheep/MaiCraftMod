@@ -24,6 +24,7 @@ public final class PreviewVisibilityTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         incrementalExterior();
         lazyOutline();
+        preparedFrames();
         Map<BlockPos, BlockState> blocks = new LinkedHashMap<>();
         for (int x = 3; x < 6; x++) for (int y = 0; y < 3; y++) for (int z = 3; z < 6; z++)
             blocks.put(new BlockPos(x, y, z), Blocks.STONE.defaultBlockState());
@@ -128,6 +129,78 @@ public final class PreviewVisibilityTest {
         Counter counter = new Counter(); builder.result().emit(BlockPos.ZERO, BlockPos.ZERO, counter);
         check(builder.done() && steps > 10 && reads[0] == 1, "resuming must not repeat the source shape callback");
         check(Math.abs(counter.length - 16) < 1e-6, "fragmented two-cell shapes keep their exact joined perimeter");
+    }
+
+    private static void preparedFrames() throws Exception {
+        int[] reads = {0}; BlockState state = crossCellState(reads);
+        BlockPos low = new BlockPos(-1, 0, 0), high = new BlockPos(8, 4, 0), side = new BlockPos(-5, 0, 0);
+        Map<BlockPos, BlockState> cells = new LinkedHashMap<>(); cells.put(low, state); cells.put(high, state);
+        var parts = List.of(new PreviewPart(low, "ae2:glass_cable", "center"),
+                new PreviewPart(high, "ae2:glass_cable", "center"), new PreviewPart(side, "ae2:terminal", "east"));
+        var session = new PreviewSession("frames", "minecraft:overworld", "two layers", cells, parts);
+        var preparation = new PreviewRenderer.Preparation(session, new World());
+        preparation.advance(new PreviewFrameBudget(() -> 0, 0, 10_000, 64, 1));
+        check(reads[0] == 0, "an expired frame cannot start a source shape query");
+        notReady(preparation);
+        // The first shape consumes the time left in this frame; the second must wait for another frame.
+        preparation.advance(new PreviewFrameBudget(() -> reads[0] == 0 ? 0 : 100, 100, 10_000, 64, 1));
+        check(reads[0] == 1, "shape preparation yields when the shared frame deadline is reached");
+        notReady(preparation);
+        int frames = finish(preparation);
+        var ready = preparation.result();
+        check(frames > 10 && reads[0] == 2, "one-step frames resume every stage without rereading earlier source shapes");
+        check(ready.sections().stream().map(section -> section.origin).toList().equals(
+                List.of(new BlockPos(-4, 0, 0), new BlockPos(8, 4, 0), new BlockPos(-8, 0, 0))),
+                "incremental grouping preserves cell/part order and negative four-block section boundaries");
+        check(ready.sections().stream().mapToInt(section -> section.cells.size()).sum() == 2
+                && ready.sections().stream().mapToInt(section -> section.parts.size()).sum() == 3,
+                "all planned cells and multipart entries survive grouping");
+        check(ready.centres().equals(java.util.Set.of(low, high)), "only centre parts join the connection set");
+        Counter both = new Counter(); cells.keySet().forEach(pos -> ready.outline().emit(pos, BlockPos.ZERO, both));
+        check(Math.abs(both.length - 32) < 1e-6, "published geometry retains both separated cross-cell outlines");
+
+        var superseded = new PreviewRenderer.Preparation(session, new World());
+        superseded.advance(new PreviewFrameBudget(() -> 0, 100, 6, 64, 1));
+        int beforeSlice = reads[0]; session.layers(0, 0);
+        superseded.advance(new PreviewFrameBudget(() -> 0, 100, 10_000, 64, 1));
+        notReady(superseded);
+        check(reads[0] == beforeSlice, "changing layers stops the superseded preparation before another shape query");
+        notReady(preparation);
+        var sliced = new PreviewRenderer.Preparation(session, new World()); finish(sliced);
+        var slice = sliced.result(); Counter outline = new Counter();
+        cells.keySet().forEach(pos -> slice.outline().emit(pos, BlockPos.ZERO, outline));
+        check(reads[0] == beforeSlice + 1 && Math.abs(outline.length - 16) < 1e-6
+                        && slice.centres().equals(java.util.Set.of(low)),
+                "replacement preparation uses only the selected layer for outlines and centre connections");
+        check(session.decision() == PreviewSession.Decision.WAITING, "preparation never grants construction approval");
+        var cancelled = new PreviewRenderer.Preparation(session, new World());
+        cancelled.advance(new PreviewFrameBudget(() -> 0, 100, 6, 64, 1));
+        int beforeCancel = reads[0]; session.cancel();
+        cancelled.advance(new PreviewFrameBudget(() -> 0, 100, 10_000, 64, 1));
+        notReady(cancelled);
+        sliced.advance(new PreviewFrameBudget(() -> 0, 100, 10_000, 64, 1));
+        notReady(sliced);
+        check(reads[0] == beforeCancel && session.decision() == PreviewSession.Decision.CANCELLED,
+                "cancelled previews cannot resume or publish either partial or completed preparation");
+        var multipart = new PreviewRenderer.Preparation(new PreviewSession("parts", "minecraft:overworld",
+                "parts only", Map.of(), parts), new World());
+        finish(multipart);
+        Counter empty = new Counter(); multipart.result().outline().emit(low, BlockPos.ZERO, empty);
+        check(multipart.result().sections().size() == 3 && empty.vertices == 0,
+                "multipart-only previews finish even when there are no block shapes or outline edges");
+    }
+
+    private static int finish(PreviewRenderer.Preparation preparation) {
+        int frames = 0;
+        while (!preparation.done() && frames++ < 10_000)
+            preparation.advance(new PreviewFrameBudget(() -> 0, 100, 1, 64, 1));
+        check(preparation.done(), "preparation must finish when subsequent frames supply work");
+        return frames;
+    }
+    private static void notReady(PreviewRenderer.Preparation preparation) {
+        check(!preparation.done(), "unfinished or invalidated preparation is not ready");
+        try { preparation.result(); throw new AssertionError("unfinished or invalidated geometry was published"); }
+        catch (IllegalStateException expected) { }
     }
 
     private static BlockState crossCellState(int[] reads) throws Exception {

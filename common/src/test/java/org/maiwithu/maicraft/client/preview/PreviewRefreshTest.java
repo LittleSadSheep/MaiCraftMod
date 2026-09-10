@@ -57,6 +57,14 @@ public final class PreviewRefreshTest {
         budget = new PreviewFrameBudget(clock::get, 100, 64, 2);
         clock.set(100);
         check(!budget.claim(REBUILD, 1) && !budget.claim(RESORT, 1), "both queues respect the shared frame deadline");
+        clock.set(0);
+        budget = new PreviewFrameBudget(clock::get, 100, 1, 64, 1);
+        check(budget.claimPreparation() && !budget.claimPreparation(), "initial preparation has a finite step allowance");
+        check(budget.claim(REBUILD, 64) && budget.claim(RESORT, 1), "preparation steps do not consume mesh or sort work");
+        budget = new PreviewFrameBudget(clock::get, 100, 10, 64, 1);
+        clock.set(100);
+        check(!budget.claimPreparation() && !budget.claim(REBUILD, 1) && !budget.claim(RESORT, 1),
+                "preparation and section refresh all stop at the same deadline");
     }
 
     private static void retainedQuadSorting() {
