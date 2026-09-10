@@ -13,10 +13,8 @@ import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.structure.PhysicalStructureSearchTaskRecord;
 
 /**
- * Hidden semantic executor for physical structure discovery.
- *
- * <p>The public MCP surface never exposes this tool directly. Its caller supplies a structure
- * intent; routes, eye throws, frontier waypoints and evidence checks remain inside the Mod.</p>
+ * 把 structure_search 请求交给实际探索任务，默认需要走到线索再确认。
+ * 只接收目标和范围，不接收用户指定的逐段路线；开路和投眼分别读取显式许可。
  */
 public final class SemanticStructureSearchTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();

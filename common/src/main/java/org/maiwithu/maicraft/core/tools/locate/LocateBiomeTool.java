@@ -13,8 +13,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 向外提供 locate_biome 工具，把 JSON 交给 LocateOps 建立客户端抽样任务。
- * 工具描述目前写“最近”，但下游会在第一个匹配采样点结束。
+ * 登记旧的 locate_biome 内部工具，把 JSON 交给 LocateOps 建立客户端抽样任务。
+ * 内部描述目前写“最近”，但下游会在第一个匹配采样点结束；未发现现用语义适配器调用这个工具。
  */
 public final class LocateBiomeTool implements MaiCraftTool {
 

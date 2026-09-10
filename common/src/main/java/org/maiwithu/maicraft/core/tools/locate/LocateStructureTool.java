@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 向外提供 locate_structure 工具，转成旧结构定位任务。
+ * 登记旧的 locate_structure 内部工具，转成旧结构定位任务；现用语义搜索走 structure_search。
  * 目前下游始终报告无法取得权威结构位置；多加载地形再重试，也不会让这条入口返回找到。
  */
 public final class LocateStructureTool implements MaiCraftTool {

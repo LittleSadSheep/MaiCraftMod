@@ -10,7 +10,10 @@ import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** One bounded, first-person request to discover a structure from physical client facts. */
+/**
+ * 保存结构搜索的范围、是否必须走到线索，以及开路和投眼的许可。
+ * 父任务还可以排除已经查过的地点；这些内部地点不由公开工具要求用户逐个提供。
+ */
 public final class PhysicalStructureSearchTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "structure_search";
     public static final int MIN_DISTANCE = 64;

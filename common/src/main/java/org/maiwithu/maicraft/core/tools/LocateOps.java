@@ -6,7 +6,7 @@ import org.maiwithu.maicraft.core.task.locate.LocateBiomeTaskRecord;
 import org.maiwithu.maicraft.core.task.locate.LocateStructureTaskRecord;
 
 /**
- * 把两种定位工具的输入去掉首尾空格、检查长度，再建立带三十秒游戏时间上限的任务记录。
+ * 把两种旧定位工具的输入去掉首尾空格、检查长度，再建立带三十秒游戏时间上限的任务记录。
  * 这里只组装请求，不读取世界，也不负责判断找到的是不是最近目标。
  */
 public final class LocateOps {

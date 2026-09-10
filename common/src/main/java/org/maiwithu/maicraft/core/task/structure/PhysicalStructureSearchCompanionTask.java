@@ -36,11 +36,8 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * Discover a structure without seed, generator or server-locate authority.
- *
- * <p>Strongholds are followed by real, receipt-confirmed eye throws. Every other registered
- * structure shares one data-driven evidence matcher and one bounded frontier explorer. The model
- * never supplies (or receives) the internal travel legs.</p>
+ * 通过客户端已经加载的方块线索找结构，并按需要实际走过去复查。不会读取世界种子或调用服务器定位指令。
+ * 要塞还可以投出真实末影之眼、观察飞行方向、沿方向分段前进；其他结构按固定特征组合和向外扩展的路线寻找。
  */
 public final class PhysicalStructureSearchCompanionTask
         extends AbstractCompanionTask<PhysicalStructureSearchTaskRecord> {
@@ -141,8 +138,7 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     /**
-     * Internal typed evidence handoff for composing semantic tasks. The public result deliberately
-     * omits this coordinate so callers cannot turn a semantic search into coordinate micromanagement.
+     * 给父任务返回已确认线索的位置。它是观察到的方块位置，不是服务器提供的结构中心。
      */
     public BlockPos verifiedEvidenceAnchor() {
         return verifiedEvidence == null ? null : verifiedEvidence.position().immutable();
@@ -235,6 +231,7 @@ public final class PhysicalStructureSearchCompanionTask
         };
     }
 
+    // 先等本轮已加载方块查完；有剩余投眼方向就继续走，否则要塞进入投眼准备，其他结构换一个探索方向。
     private TaskState tickObserve(EvidenceScan scan) {
         if (!scan.complete()) {
             keepFiniteEvidenceScanAlive();
@@ -251,6 +248,7 @@ public final class PhysicalStructureSearchCompanionTask
         return beginFrontierTravel();
     }
 
+    // 投眼前要求有物品、允许使用稀有消耗品且当前站位符合这里的检查。选中后再次检查，再发出一次原版使用请求。
     private TaskState tickSelectAndThrow() {
         int slot = findEyeSlot();
         if (slot < 0) {
@@ -323,6 +321,8 @@ public final class PhysicalStructureSearchCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 先确认附近出现了此前没有的末影之眼，再核对背包总数减少，之后才跟踪轨迹。
+    // 当前把数量减少设为必需条件，所以创造模式即使投眼成功也会被拒绝继续。
     private TaskState tickEyeReceipt() {
         InputDriver.halt(player);
         var context = ClientRuntime.requireContext(player);
@@ -370,6 +370,7 @@ public final class PhysicalStructureSearchCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 观察眼飞出足够的横向距离后取方向；如果与上次方向相反，缩短下一段路，避免反复走过头。
     private TaskState tickEyeTracking() {
         InputDriver.halt(player);
         trackTicks++;
@@ -414,6 +415,7 @@ public final class PhysicalStructureSearchCompanionTask
         return beginDirectionTravel(direction);
     }
 
+    // 当前用“搜索半径减去离起点距离”限制本段长度，尚未按这次方向计算还能走多远；朝内走也会被这个值限制。
     private TaskState beginDirectionTravel(Vec3 direction) {
         double travelled = horizontalDistance(origin, player.blockPosition());
         double remaining = r.maxDistance - travelled;
@@ -431,6 +433,8 @@ public final class PhysicalStructureSearchCompanionTask
         return continueDirectionTravel();
     }
 
+    // 从眼指向的路线里选一段已经加载的地形，交给普通移动任务。
+    // 剩余不足十二格就清掉方向；上游却允许把步长缩到八格，两处下限目前不一致。
     private TaskState continueDirectionTravel() {
         if (pendingDirection == null
                 || pendingDirectionDistance < MIN_FRONTIER_LEG) {
@@ -480,6 +484,7 @@ public final class PhysicalStructureSearchCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 找到足够的方块线索后，按请求决定立即报告，或先靠近再查一次。线索匹配本身不代表一定有路能到。
     private TaskState beginEvidence(EvidenceMatch match) {
         activeEvidence = match;
         if (!r.reachStructure) {
@@ -492,6 +497,7 @@ public final class PhysicalStructureSearchCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 收取这一小段路的结果。靠近要塞线索失败就停止，不为已经找到的位置继续耗眼；普通探索走不通则换方向。
     private TaskState tickMove(boolean evidenceMove, boolean directionMove) {
         if (moveChild == null) {
             failIssue(
@@ -562,6 +568,7 @@ public final class PhysicalStructureSearchCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 到达后再要求附近出现同组线索；原候选不再成立时排除它，继续搜索。
     private TaskState tickEvidenceVerification(EvidenceScan scan) {
         if (!scan.complete()) {
             keepFiniteEvidenceScanAlive();
@@ -580,6 +587,8 @@ public final class PhysicalStructureSearchCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 让共享方块索引分批收集各组候选，只保留范围内仍存在的目标方块，再按离玩家的距离试配。
+    // 这里读的是已加载方块，没有逐个检查玩家是否能直接看见它。
     private EvidenceScan scanEvidence() {
         int chunkRadius = Math.max(
                 1, (Math.min(EVIDENCE_SCAN_RADIUS, r.maxDistance) + 15) / 16);
@@ -606,13 +615,13 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     /**
-     * Evidence indexing is a finite loaded-area search split into bounded per-tick batches.  Keep
-     * that batching from becoming a wall-clock task cap while preserving the scan's fixed radius.
+     * 方块索引仍在完成有限范围扫描时，把截止时间顺延一刻，避免将扫描本身计成没有进展。
      */
     private void keepFiniteEvidenceScanAlive() {
         r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
     }
 
+    // 拿每个候选当中心，数附近有多少符合各组要求的方块。每组最低数量和整团总数量都够才接受；同一块可以属于多个组。
     private EvidenceMatch matchEvidence(List<BlockPos> hits) {
         if (hits.isEmpty()) return null;
         double radiusSqr = (double) profile.profile().clusterRadius()
@@ -658,6 +667,7 @@ public final class PhysicalStructureSearchCompanionTask
                 && indexedBlocks.contains(player.clientLevel.getBlockState(position).getBlock());
     }
 
+    // 排除父任务指定的旧地点，以及本轮已经尝试失败的线索周围，避免总是回到同一片区域。
     private boolean evidenceRejected(BlockPos position) {
         if (r.evidenceExclusionRadius > 0) {
             long exclusionRadiusSqr = (long) r.evidenceExclusionRadius
@@ -682,6 +692,7 @@ public final class PhysicalStructureSearchCompanionTask
         return dx * dx + dz * dz;
     }
 
+    // 到线索时带上它的高度；探索方向时只指定横向位置，让移动任务选择可站高度，并沿用是否允许开路的要求。
     private void startMove(BlockPos target, boolean exact) {
         long now = player.level().getGameTime();
         String parentCall = r.getToolCallId() == null ? "structure-search" : r.getToolCallId();
@@ -696,6 +707,7 @@ public final class PhysicalStructureSearchCompanionTask
         moveChild = new MoveToCompanionTask(player, moveRecord);
     }
 
+    // 按向外绕圈的顺序选新方向，再截成当前地形已经加载的一小段。已经尝试过的横向落点不重复选。
     private BlockPos nextFrontier() {
         int finalRing = (int) Math.ceil(
                 (r.maxDistance + SCOPE_TOLERANCE) / (double) FRONTIER_GRID) + 1;
@@ -775,6 +787,8 @@ public final class PhysicalStructureSearchCompanionTask
         return count;
     }
 
+    // 这里要求脚和头所在整格无碰撞、脚下方块顶面承重，而且三格都没有液体。
+    // 它没有用玩家真实脚高检查支撑，所以正常站在下半砖上也会被拒绝。
     private boolean safeEyeThrowStance() {
         ClientLevel level = player.clientLevel;
         BlockPos feet = player.blockPosition();

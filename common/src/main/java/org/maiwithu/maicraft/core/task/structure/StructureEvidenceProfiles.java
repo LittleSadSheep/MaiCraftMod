@@ -15,12 +15,8 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 
 /**
- * Data-driven, loaded-client evidence for structures whose placement is not synchronized to a
- * remote client.
- *
- * <p>A profile is deliberately evidence, not a hidden assertion about a server structure start.
- * Every group must be present in one bounded cluster. Profiles can be extended without adding a
- * new task branch; an unregistered id is rejected rather than assigned invented coordinates.</p>
+ * 列出哪些方块组合可以作为某种结构的线索，例如传送门框架、紫珀建筑群或村庄钟与生活方块。
+ * 这些组合只能证明附近符合特征，不能区分天然结构和人为仿建；同一配置下的别名也不另查群系。
  */
 public final class StructureEvidenceProfiles {
     public record Group(String label, int minimum, List<String> blockIds) {
@@ -60,6 +56,7 @@ public final class StructureEvidenceProfiles {
 
     private StructureEvidenceProfiles() {}
 
+    // 把配置里的方块名字换成当前游戏实际存在的方块。只要某一必需组完全没有可识别的方块，整份配置就不可用。
     public static ResolvedProfile resolve(String structureId) {
         Profile profile = PROFILES.get(structureId);
         if (profile == null) return null;
@@ -98,6 +95,8 @@ public final class StructureEvidenceProfiles {
         return resolved;
     }
 
+    // 每项依次写：结构名、允许维度、聚集半径、整团最低数量、线索说明和每组最低数量。
+    // 这份表目前固定写在 Java 里；扩展配置要修改源码，没有运行时注册入口。
     private static Map<String, Profile> profiles() {
         Map<String, Profile> out = new LinkedHashMap<>();
 
