@@ -24,7 +24,7 @@ public final class ReflexRegistry {
 
     /**
      * 把所有说明连成一段文字。没有登记任何项就返回空文字。
-     * 末尾仍带着旧的“显式动作永远优先”和自动装备说明；实际自救抢占要看 CompanionBrain。
+     * 名册说明已登记的能力，不承诺每次都触发成功；自救是否接管由实际调度规则决定。
      */
     public static synchronized String overview() {
         List<String> lines = new ArrayList<>();
@@ -32,10 +32,9 @@ public final class ReflexRegistry {
             lines.add(r.describe());
         }
         if (lines.isEmpty()) return "";
-        return "你的身体有这些本能,会自动发生,不需要用工具去做:"
-                + String.join(";", lines)
-                + "。你的显式动作永远优先——用 equip_item 显式穿戴会钉住那个槽位,本能不再更换它;"
-                + "equip_item 的 item_id 传 \"auto\" 可解除钉,交还本能管理。";
+        return "已登记的自动自救能力："
+                + String.join("；", lines)
+                + "。这些行为会按触发条件和调度规则尝试执行；紧急自救可能暂时接管显式任务。";
     }
 
     /** Test hook: wipe the roster. */

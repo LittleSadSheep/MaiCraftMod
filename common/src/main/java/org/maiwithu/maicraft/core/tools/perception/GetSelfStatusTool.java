@@ -33,13 +33,13 @@ public final class GetSelfStatusTool implements MaiCraftTool {
 
     @Override
     public String description() {
-        // 查询说明后面附上自动自救名册；名册里有哪些文字与实际能否抢占身体是两回事。
+        // 只承诺本方法实际提供的观察字段；自动自救名册另说明触发与抢占的边界。
         String base = "Read your body's condition in one call: name, game mode, HP / max HP, "
-                + "hunger / saturation, position, dimension, biome, the structures you are "
-                + "standing in, what you are wearing, and movement state. ALWAYS call this before "
-                + "combat or planning decisions. It does NOT list your backpack — what you carry "
-                + "is already in front of you every turn; use inspect_gui when exact slots matter. "
-                + "No arguments.";
+                + "hunger / saturation, position, dimension, biome, equipped items, ground / water / "
+                + "lava state, and remaining air. Structure membership is unknown from this local query. "
+                + "Backpack occupancy covers the main inventory including the hotbar, excluding armor "
+                + "and offhand slots; item contents are not listed. Use inspect_gui when exact slots "
+                + "matter. No arguments.";
         String overview = org.maiwithu.maicraft.task.reflex.ReflexRegistry.overview();
         return overview.isEmpty() ? base : base + "\n\n" + overview;
     }
@@ -87,16 +87,15 @@ public final class GetSelfStatusTool implements MaiCraftTool {
         }
         root.add("equipment", equipment);
 
-        // 这里只统计已占用的格数，不列背包明细。getContainerSize 还包括盔甲和副手，
-        // 所以下面的 backpack_slots 实际是整个 Inventory 的格数，并非仅背包的 36 格。
+        // 只统计主物品栏（包含快捷栏，原版共 36 格）；盔甲和副手已在 equipment 中单列。
         var inv = self.getInventory();
         JsonObject slots = new JsonObject();
         int used = 0;
-        for (int i = 0; i < inv.getContainerSize(); i++) {
-            if (!inv.getItem(i).isEmpty()) used++;
+        for (ItemStack stack : inv.items) {
+            if (!stack.isEmpty()) used++;
         }
         slots.addProperty("used", used);
-        slots.addProperty("total", inv.getContainerSize());
+        slots.addProperty("total", inv.items.size());
         root.add("backpack_slots", slots);
 
         root.add("target", JsonNull.INSTANCE);
