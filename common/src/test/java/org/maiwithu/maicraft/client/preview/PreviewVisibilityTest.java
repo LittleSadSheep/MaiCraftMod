@@ -20,9 +20,10 @@ import net.minecraft.world.level.material.FluidState;
 
 /** Actual Minecraft occlusion/voxel geometry with a frozen blueprint and a changing real-world view. */
 public final class PreviewVisibilityTest {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         incrementalExterior();
+        lazyOutline();
         Map<BlockPos, BlockState> blocks = new LinkedHashMap<>();
         for (int x = 3; x < 6; x++) for (int y = 0; y < 3; y++) for (int z = 3; z < 6; z++)
             blocks.put(new BlockPos(x, y, z), Blocks.STONE.defaultBlockState());
@@ -110,6 +111,46 @@ public final class PreviewVisibilityTest {
         Counter counter = new Counter();
         session.cells().keySet().forEach(pos -> geometry.emit(pos, BlockPos.ZERO, counter));
         return counter;
+    }
+
+    private static void lazyOutline() throws Exception {
+        int[] reads = {0};
+        var session = new PreviewSession("lazy", "minecraft:overworld", "cross-cell shape",
+                Map.of(BlockPos.ZERO, crossCellState(reads)));
+        var builder = new PreviewOutlineGeometry.Builder(session, new PreviewWorldView(session, new World()));
+        check(reads[0] == 0 && !builder.done(), "constructing the outline job must not evaluate any block shape");
+        try { builder.result(); throw new AssertionError("an unfinished outline was exposed"); }
+        catch (IllegalStateException expected) { }
+        builder.step();
+        check(reads[0] == 1 && !builder.done(), "one source read must not complete clipping and connectivity too");
+        int steps = 1;
+        while (!builder.done() && steps++ < 1000) builder.step();
+        Counter counter = new Counter(); builder.result().emit(BlockPos.ZERO, BlockPos.ZERO, counter);
+        check(builder.done() && steps > 10 && reads[0] == 1, "resuming must not repeat the source shape callback");
+        check(Math.abs(counter.length - 16) < 1e-6, "fragmented two-cell shapes keep their exact joined perimeter");
+    }
+
+    private static BlockState crossCellState(int[] reads) throws Exception {
+        var registry = net.minecraft.core.registries.BuiltInRegistries.BLOCK;
+        var holders = net.minecraft.core.MappedRegistry.class.getDeclaredField("unregisteredIntrusiveHolders");
+        var frozen = net.minecraft.core.MappedRegistry.class.getDeclaredField("frozen");
+        holders.setAccessible(true); frozen.setAccessible(true);
+        Object priorHolders = holders.get(registry); boolean priorFrozen = frozen.getBoolean(registry);
+        // Give this unregistered fixture a private holder, then restore the global registry before testing.
+        try {
+            holders.set(registry, new java.util.IdentityHashMap<>()); frozen.setBoolean(registry, false);
+            return new net.minecraft.world.level.block.Block(
+                    net.minecraft.world.level.block.state.BlockBehaviour.Properties.of().dynamicShape()) {
+                @Override public net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state,
+                        net.minecraft.world.level.BlockGetter world, BlockPos pos,
+                        net.minecraft.world.phys.shapes.CollisionContext context) {
+                    reads[0]++;
+                    return net.minecraft.world.phys.shapes.Shapes.box(0, 0, 0, 2, 1, 1);
+                }
+            }.defaultBlockState();
+        } finally {
+            holders.set(registry, priorHolders); frozen.setBoolean(registry, priorFrozen);
+        }
     }
     private static final class Counter implements VertexConsumer {
         int vertices; float maxY = -Float.MAX_VALUE;

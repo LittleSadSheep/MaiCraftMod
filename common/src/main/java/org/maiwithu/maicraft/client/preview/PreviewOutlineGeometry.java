@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,60 +27,131 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  */
 final class PreviewOutlineGeometry {
     private static final double EPSILON = 1e-5;
-    private final Map<BlockPos, List<AABB>> boxes = new HashMap<>();
-    private final Map<BlockPos, List<Edge>> edges = new LinkedHashMap<>();
-    private final PreviewExteriorSpace exterior;
+    private final Map<BlockPos, List<AABB>> boxes;
+    private final Map<BlockPos, List<Edge>> edges;
+    private PreviewExteriorSpace exterior;
 
-    // 先取每格选择外形；查询失败或外形为空时用整方块代替，保证还有轮廓可看，但可能不像真实模型。
+    private PreviewOutlineGeometry() { boxes = new HashMap<>(); edges = new LinkedHashMap<>(); }
+
     PreviewOutlineGeometry(PreviewSession session, BlockGetter world) {
-        Map<BlockPos, VoxelShape> shapes = new LinkedHashMap<>();
-        Map<BlockPos, BlockPos> owners = new HashMap<>();
-        session.cells().forEach((pos, state) -> {
-            if (!session.includes(pos) || state.isAir()) return;
-            VoxelShape shape;
-            try { shape = state.getShape(world, pos); }
-            catch (RuntimeException unsupportedShape) { shape = Shapes.block(); }
-            if (shape.isEmpty()) shape = Shapes.block();
-            // 栅栏等外形会伸出本格，把伸出去的部分切到对应邻格，再判断空隙与外面是否连通。
-            for (AABB box : shape.toAabbs()) {
-                for (int x = (int)Math.floor(box.minX); x < Math.ceil(box.maxX); x++)
-                    for (int y = (int)Math.floor(box.minY); y < Math.ceil(box.maxY); y++)
-                        for (int z = (int)Math.floor(box.minZ); z < Math.ceil(box.maxZ); z++) {
-                            BlockPos cell = pos.offset(x, y, z);
-                            VoxelShape fragment = Shapes.box(Math.max(0, box.minX-x), Math.max(0, box.minY-y), Math.max(0, box.minZ-z),
-                                    Math.min(1, box.maxX-x), Math.min(1, box.maxY-y), Math.min(1, box.maxZ-z));
-                            shapes.merge(cell, fragment, Shapes::or); owners.putIfAbsent(cell, pos);
-                        }
-            }
-        });
-        shapes.forEach((pos, shape) -> boxes.put(pos, shape.toAabbs()));
-        exterior = new PreviewExteriorSpace(shapes);
-        // 每条候选边按相邻小碰撞盒的边界切段，逐段判断是否真是外轮廓，并去掉重复边。
-        Set<Edge> emitted = new HashSet<>();
-        shapes.forEach((pos, shape) -> shape.forAllEdges((a,b,c,d,e,f) -> {
-            double[] start = {a+pos.getX(), b+pos.getY(), c+pos.getZ()};
-            double[] end = {d+pos.getX(), e+pos.getY(), f+pos.getZ()};
-            int axis = Math.abs(a-d) > EPSILON ? 0 : Math.abs(b-e) > EPSILON ? 1 : 2;
-            if (end[axis] < start[axis]) { double[] swap = start; start = end; end = swap; }
-            TreeSet<Double> cuts = new TreeSet<>(); cuts.add(start[axis]); cuts.add(end[axis]);
-            for (BlockPos neighbor : quadrants(start, axis)) for (AABB box : boxes.getOrDefault(neighbor, List.of())) {
-                double offset = coordinate(neighbor, axis);
-                for (double cut : new double[]{box.min(Direction.Axis.values()[axis])+offset, box.max(Direction.Axis.values()[axis])+offset})
-                    if (cut > start[axis] && cut < end[axis]) cuts.add(cut);
-            }
-            Double previous = null;
-            for (double cut : cuts) {
-                if (previous != null && cut-previous > EPSILON) {
-                    double[] point = start.clone(); point[axis] = (previous+cut)/2;
-                    if (crease(point, axis)) {
-                        double[] from = start.clone(), to = start.clone(); from[axis] = previous; to[axis] = cut;
-                        Edge edge = new Edge(new Vec3(from[0], from[1], from[2]), new Vec3(to[0], to[1], to[2]));
-                        if (emitted.add(edge)) edges.computeIfAbsent(owners.get(pos), key -> new ArrayList<>()).add(edge);
+        Builder builder = new Builder(session, world);
+        while (!builder.done()) builder.step();
+        boxes = builder.geometry.boxes; edges = builder.geometry.edges; exterior = builder.geometry.exterior;
+    }
+
+    /** 创建时不取形状；每次推进一格、一个跨格片段、一步空隙连通或一条候选边。 */
+    static final class Builder {
+        private enum Stage { SHAPES, BOXES, EXTERIOR, EDGES, DONE }
+        private final PreviewOutlineGeometry geometry = new PreviewOutlineGeometry();
+        private final Iterator<Map.Entry<BlockPos, BlockState>> input;
+        private final BlockGetter world;
+        private final int minY, maxY;
+        private final Map<BlockPos, VoxelShape> shapes = new LinkedHashMap<>();
+        private final Map<BlockPos, BlockPos> owners = new HashMap<>();
+        private final Set<Edge> emitted = new HashSet<>();
+        private Iterator<AABB> sourceBoxes = java.util.Collections.emptyIterator();
+        private Iterator<Map.Entry<BlockPos, VoxelShape>> fragments;
+        private Iterator<CandidateEdge> candidates = java.util.Collections.emptyIterator();
+        private PreviewExteriorSpace.Builder exterior;
+        private BlockPos sourcePos, edgePos;
+        private AABB box;
+        private int x, y, z;
+        private Stage stage = Stage.SHAPES;
+
+        Builder(PreviewSession session, BlockGetter world) {
+            input = session.cells().entrySet().iterator(); this.world = world;
+            minY = session.minY(); maxY = session.maxY();
+        }
+        boolean done() { return stage == Stage.DONE; }
+        PreviewOutlineGeometry result() {
+            if (!done()) throw new IllegalStateException("preview outline is not ready");
+            return geometry;
+        }
+
+        void step() {
+            switch (stage) {
+                case SHAPES -> collectShape();
+                case BOXES -> {
+                    if (fragments.hasNext()) {
+                        var entry = fragments.next(); geometry.boxes.put(entry.getKey(), entry.getValue().toAabbs());
+                    } else { exterior = new PreviewExteriorSpace.Builder(shapes); stage = Stage.EXTERIOR; }
+                }
+                case EXTERIOR -> {
+                    if (!exterior.done()) exterior.step();
+                    else {
+                        geometry.exterior = exterior.result(); exterior = null;
+                        fragments = shapes.entrySet().iterator(); stage = Stage.EDGES;
                     }
                 }
-                previous = cut;
+                case EDGES -> {
+                    if (candidates.hasNext()) geometry.addEdge(edgePos, owners.get(edgePos), candidates.next(), emitted);
+                    else if (fragments.hasNext()) {
+                        var entry = fragments.next(); edgePos = entry.getKey();
+                        List<CandidateEdge> next = new ArrayList<>();
+                        entry.getValue().forAllEdges((a,b,c,d,e,f) -> next.add(new CandidateEdge(a,b,c,d,e,f)));
+                        candidates = next.iterator();
+                    } else stage = Stage.DONE;
+                }
+                case DONE -> { }
             }
-        }));
+        }
+
+        private void collectShape() {
+            if (box != null) {
+                // 伸出本格的外形也逐片段推进，不能把整个跨格体积放进一次无预算的循环。
+                BlockPos cell = sourcePos.offset(x, y, z);
+                VoxelShape fragment = Shapes.box(Math.max(0, box.minX-x), Math.max(0, box.minY-y), Math.max(0, box.minZ-z),
+                        Math.min(1, box.maxX-x), Math.min(1, box.maxY-y), Math.min(1, box.maxZ-z));
+                shapes.merge(cell, fragment, Shapes::or); owners.putIfAbsent(cell, sourcePos);
+                if (++z >= Math.ceil(box.maxZ)) {
+                    z = (int)Math.floor(box.minZ);
+                    if (++y >= Math.ceil(box.maxY)) {
+                        y = (int)Math.floor(box.minY);
+                        if (++x >= Math.ceil(box.maxX)) box = null;
+                    }
+                }
+            } else if (sourceBoxes.hasNext()) {
+                box = sourceBoxes.next();
+                x = (int)Math.floor(box.minX); y = (int)Math.floor(box.minY); z = (int)Math.floor(box.minZ);
+                if (x >= Math.ceil(box.maxX) || y >= Math.ceil(box.maxY) || z >= Math.ceil(box.maxZ)) box = null;
+            } else if (input.hasNext()) {
+                var entry = input.next(); sourcePos = entry.getKey(); BlockState state = entry.getValue();
+                if (sourcePos.getY() < minY || sourcePos.getY() > maxY || state.isAir()) return;
+                VoxelShape shape;
+                try { shape = state.getShape(world, sourcePos); }
+                catch (RuntimeException unsupportedShape) { shape = Shapes.block(); }
+                if (shape.isEmpty()) shape = Shapes.block();
+                sourceBoxes = shape.toAabbs().iterator();
+            } else { fragments = shapes.entrySet().iterator(); stage = Stage.BOXES; }
+        }
+    }
+
+    private record CandidateEdge(double a, double b, double c, double d, double e, double f) {}
+
+    // 保留原来的切段、外部连通和去重规则，只把调用边界缩小到一条候选边。
+    private void addEdge(BlockPos pos, BlockPos owner, CandidateEdge candidate, Set<Edge> emitted) {
+        double[] start = {candidate.a+pos.getX(), candidate.b+pos.getY(), candidate.c+pos.getZ()};
+        double[] end = {candidate.d+pos.getX(), candidate.e+pos.getY(), candidate.f+pos.getZ()};
+        int axis = Math.abs(candidate.a-candidate.d) > EPSILON ? 0 : Math.abs(candidate.b-candidate.e) > EPSILON ? 1 : 2;
+        if (end[axis] < start[axis]) { double[] swap = start; start = end; end = swap; }
+        TreeSet<Double> cuts = new TreeSet<>(); cuts.add(start[axis]); cuts.add(end[axis]);
+        for (BlockPos neighbor : quadrants(start, axis)) for (AABB box : boxes.getOrDefault(neighbor, List.of())) {
+            double offset = coordinate(neighbor, axis);
+            for (double cut : new double[]{box.min(Direction.Axis.values()[axis])+offset, box.max(Direction.Axis.values()[axis])+offset})
+                if (cut > start[axis] && cut < end[axis]) cuts.add(cut);
+        }
+        Double previous = null;
+        for (double cut : cuts) {
+            if (previous != null && cut-previous > EPSILON) {
+                double[] point = start.clone(); point[axis] = (previous+cut)/2;
+                if (crease(point, axis)) {
+                    double[] from = start.clone(), to = start.clone(); from[axis] = previous; to[axis] = cut;
+                    Edge edge = new Edge(new Vec3(from[0], from[1], from[2]), new Vec3(to[0], to[1], to[2]));
+                    if (emitted.add(edge)) edges.computeIfAbsent(owner, key -> new ArrayList<>()).add(edge);
+                }
+            }
+            previous = cut;
+        }
     }
 
     void emit(BlockPos pos, BlockPos origin, VertexConsumer lines) {
