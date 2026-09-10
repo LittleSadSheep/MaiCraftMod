@@ -14,7 +14,9 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 
-/** Planned and unexpected triggers both drive the production placement/contact/recovery state machine. */
+/**
+ * 把预先计划、意外下落和已在执行的下落交给同一救援流程，比较放置、确认与回收；还检查现成船优先级、干草减伤及不能转换到世界位置的射线。
+ */
 public final class SharedLandingExecutionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -31,6 +33,7 @@ public final class SharedLandingExecutionTest {
         System.out.println("SharedLandingExecutionTest: passed");
     }
 
+    // 同一场景依次保留水桶、只保留现成船、两者都没有，检查选择顺序且此时不发起物品操作。
     private static void existingBoatBeforeSupply() throws Exception {
         var f = new WaterLandingReplayTest.Fixture(false);
         f.position(2.5, -0.08, false); f.player.fallDistance = 5;
@@ -166,6 +169,7 @@ public final class SharedLandingExecutionTest {
         if (emergency) check(!reflex.canRun(f.player), "confirmed or failed terminal session yields the reflex owner");
     }
 
+    // 用原版干草落地方法确认它减少伤害但不免伤；成功记录必须保留实际生命损失。
     private static void hay() throws Exception {
         var f = new WaterLandingReplayTest.Fixture(false);
         var plan = new LandingAssistPlan(LandingAssistPlan.Kind.HAY, BlockPos.ZERO.above(), BlockPos.ZERO,

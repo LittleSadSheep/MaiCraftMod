@@ -23,7 +23,9 @@ import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan;
 
-/** Production permission wiring, native bucket geometry and confirmed clutch ownership. */
+/**
+ * 检查倒水许可、实际受影响的水格、含水楼梯和回收归属；末尾另查源码关键字是否仍走统一救援入口。
+ */
 public final class WaterBucketFallTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -78,6 +80,7 @@ public final class WaterBucketFallTest {
         check(PlayerNav.ContextProvider.WATER_ONLY.permit() == TerrainPermit.WATER_ONLY, "public navigation provider");
     }
 
+    // 这部分只搜索源码文字，能发现旧入口名字重新出现，不能单独证明真实调用顺序或救援结果。
     private static void singleStrategyBoundary() throws Exception {
         Path root = Path.of(System.getProperty("user.dir")).toAbsolutePath();
         while (root != null && !Files.isDirectory(root.resolve("common/src/main/java/baritone"))) root = root.getParent();

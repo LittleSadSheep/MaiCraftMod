@@ -18,7 +18,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionPort;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** Controller replay with native boat entities/rays and explicit server spawn/passenger observations. */
+/**
+ * 给定船出现和乘坐确认的时序，检查上船请求应早于触地位置报告，晚出现的船不能补算救援成功；事件顺序由替身记录。
+ */
 public final class BoatCatchReplayTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -30,6 +32,7 @@ public final class BoatCatchReplayTest {
     private static void run(boolean packetWindow) throws Exception {
         run(packetWindow,false);
     }
+    // 分别回放普通更新、位置报告前的短窗口、以及船来得太晚三种时序。
     private static void run(boolean packetWindow,boolean lateSpawn) throws Exception {
         var f=new WaterLandingReplayTest.Fixture(false);
         var item=packetWindow ? Items.SPRUCE_BOAT : Items.OAK_BOAT;

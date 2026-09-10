@@ -9,7 +9,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 
-/** Exercise the same block capability check used to dispatch actual native door interactions. */
+/**
+ * 检查开门应选主手、潜行时暂不点击，以及挖掘重试不能把已有进展清零；这里调用选择规则，没有真正点门。
+ */
 public final class NavigationActionPolicyTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();

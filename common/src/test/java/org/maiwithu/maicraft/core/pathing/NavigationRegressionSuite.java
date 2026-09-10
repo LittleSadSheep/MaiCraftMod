@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.pathing;
 
 /** Regressions of production algorithms; live movement and server confirmations need a game session. */
 // 导航相关回归的集合入口，逐个调用既有测试 main；不是扫描目录自动发现所有测试。
+// 按下面明确列出的顺序运行导航相关检查，任何断言失败就中断。新增测试文件不会自动加入；落地补料的菜单检查另由 GuiRegressionSuite 运行。
 public final class NavigationRegressionSuite {
     // 从输入预算到路径、落地、飞行和交通依次检查；异常直接向外传给 Gradle，让 check 失败。
     public static void main(String[] args) throws Exception {

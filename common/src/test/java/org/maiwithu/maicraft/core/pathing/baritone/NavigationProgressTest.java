@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.pathing.baritone;
 
+// 检查门边轻微来回抖动不算前进，真正位移或已确认的操作才更新进度；旧记录到期后不再续时。
 public final class NavigationProgressTest {
     public static void main(String[] args) {
         NavigationProgress progress = new NavigationProgress();

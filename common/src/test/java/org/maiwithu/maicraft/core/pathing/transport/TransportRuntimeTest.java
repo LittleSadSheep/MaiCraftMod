@@ -12,7 +12,9 @@ import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import sun.misc.Unsafe;
 
-/** Exercises the production owner lease with inert input and screens, never a real game/window. */
+/**
+ * 用简化交通会话检查谁能控制身体、每刻只推进一次、停止后的持续收尾、控制权丢失、菜单遮挡和受伤后的退出；不模拟真实电梯或飞行。
+ */
 public final class TransportRuntimeTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -131,6 +133,7 @@ public final class TransportRuntimeTest {
         check(!TransportRuntime.occupied() && f.callbacks == 1, "closing modal UI resumes controlled cleanup");
     }
 
+    // 让退出和诊断故意抛异常，检查错误不会留下占用状态或阻挡下一次交通任务。
     private static void throwingSessionCleanup(Unsafe memory) throws Exception {
         var f = new Fixture(memory); var owner = new Object(); var session = new Session();
         session.throwAbandon = true; session.throwDiagnostics = true;
@@ -154,6 +157,7 @@ public final class TransportRuntimeTest {
                 "healing must not mask absorption loss or permit another transport attempt after cleanup");
     }
 
+    // 这个替身在收到停止请求后再更新两次才结束，用来验证运行时不会过早松开交通控制。
     private static final class Session implements TransportSession {
         int ticks, stops, abandons, cleanupTicks;
         boolean complete, throwAbandon, throwDiagnostics;

@@ -17,7 +17,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 
-/** Reflex policy executes the real coordinator across native supply receipt boundaries. */
+/**
+ * 用可控的 AE2 会话检查补料：已携带物品优先、同刻不重复、到期先收尾、换身体后停用，以及有干草时仍可尝试取得水。
+ */
 public final class LandingMaterialSupplyTest {
     private static final ResourceLocation WATER = ResourceLocation.parse("minecraft:water_bucket");
     private static final ResourceLocation HAY = ResourceLocation.parse("minecraft:hay_block");

@@ -18,7 +18,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 
-/** Run actual fall-cost admission with empty inventory, conditional supplies and exact body geometry. */
+/**
+ * 检查寻路能否先选“待准备辅助物”的落差，以及没有辅助物时怎样拒绝受伤落地；不会把计划能补料当作背包已经有料。
+ */
 public final class AutomaticFallAdmissionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

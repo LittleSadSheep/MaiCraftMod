@@ -31,7 +31,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import sun.misc.Unsafe;
 
-/** Real session/receipt/voxel rays on inert fixtures; dry gravity is replayed between actor ticks. */
+/**
+ * 逐刻给出下落高度，让真实落地会话、确认记录和方块射线一起运行；倒水、背包变化和入水状态由测试控制。覆盖成功、缺证据、旧水、回收后支撑与延迟受伤。
+ */
 public final class WaterLandingReplayTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -65,6 +67,7 @@ public final class WaterLandingReplayTest {
                 "recovery restores the bucket and attributes exactly placement plus removal");
     }
 
+    // 依次扣掉方块变化、背包变化、实际入水三类证据；单凭没有掉血不能算救援成功。
     private static void missingEvidence() throws Exception {
         for (int missing = 0; missing < 3; missing++) {
             Fixture f = new Fixture(false);
@@ -91,6 +94,7 @@ public final class WaterLandingReplayTest {
                 "existing water never grants pickup ownership");
     }
 
+    // 入水后要先有可靠支撑才回收；舀掉水后再等站稳，旧的湿身状态不能替代新支撑。
     private static void postRemovalSupport() throws Exception {
         Fixture f = new Fixture(false);
         f.position(2, -1, false); f.player.setXRot(90);
@@ -175,6 +179,7 @@ public final class WaterLandingReplayTest {
         }
     }
 
+    // 多数落地测试共用这个内存场景；原生操作在这里被替换为可控状态变化，确认记录仍使用项目真实实现。
     static final class Fixture {
         final Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
         final TestPlayer player = (TestPlayer) memory.allocateInstance(TestPlayer.class);
@@ -232,6 +237,7 @@ public final class WaterLandingReplayTest {
             session = new LandingAssistSession(new LandingAssistPlan(LandingAssistPlan.Kind.WATER,
                     BlockPos.ZERO, BlockPos.ZERO, BlockPos.ZERO.below(), Direction.UP, existing));
         }
+        // 复查瞄准射线后按测试开关改变水和背包；可故意缺一项变化，验证上层不会误报成功。
         private NativeActionReceipt use(NativeConfirmation confirmation, int timeout) throws Exception {
             uses++;
             boolean pickup = player.getMainHandItem().is(Items.BUCKET);

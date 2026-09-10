@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.pathing.baritone;
 
+// 用连续角度请求检查镜头转速、同一刻重复请求和左右小幅抖动；不需要启动游戏画面。
 public final class NavigationCameraCourseTest {
     public static void main(String[] args) {
         var course = new NavigationCameraCourse();

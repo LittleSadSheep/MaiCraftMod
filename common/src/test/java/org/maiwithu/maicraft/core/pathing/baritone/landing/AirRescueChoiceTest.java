@@ -21,7 +21,9 @@ import org.maiwithu.maicraft.core.task.craft.CraftCompanionTask;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Reachable neighboring water, dry boat fallback and in-place boat preparation use production selectors. */
+/**
+ * 检查紧急落点改变、邻近水落点、现成船和原地补船的选择；用控制接口替身记录请求，不实际开启 AE2 或合成。
+ */
 public final class AirRescueChoiceTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

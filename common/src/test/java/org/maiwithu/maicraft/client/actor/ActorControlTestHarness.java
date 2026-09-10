@@ -10,7 +10,9 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.InventoryMenu;
 import sun.misc.Unsafe;
 
-/** A real actor context with inert player input; never constructs a window or connects to a world. */
+/**
+ * 构造只供控制测试使用的客户端、玩家和操作端口，并手动推进身体控制版本；没有正常启动游戏，未初始化的能力不能直接拿来推断实机行为。
+ */
 final class ActorControlTestHarness {
     final Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
     final Minecraft minecraft = allocate(Minecraft.class);

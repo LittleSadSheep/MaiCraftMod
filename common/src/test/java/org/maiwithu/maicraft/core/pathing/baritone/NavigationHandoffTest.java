@@ -22,7 +22,9 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import sun.misc.Unsafe;
 
-/** Real navigator lifecycle and Baritone input cleanup; no client window or world is created. */
+/**
+ * 检查导航暂让控制和停止时的收尾：动作还没到安全位置就继续驱动，到安全位置才清按键；测试直接设置安全状态。
+ */
 public final class NavigationHandoffTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
@@ -76,6 +78,7 @@ public final class NavigationHandoffTest {
         }
     }
 
+    // 拼出本测试会触及的导航和按键对象，并在结束时恢复全局状态；没有创建真实客户端窗口。
     private static final class Fixture implements AutoCloseable {
         private final Object previousMinecraft = field(Minecraft.class, "instance").get(null);
         private final Object previousActorClient = field(ClientRuntime.actor().getClass(), "minecraft")

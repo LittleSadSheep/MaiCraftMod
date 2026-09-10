@@ -31,7 +31,9 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
 
-/** Native outlines, fluid replacement/waterlogging and real body support on common landing surfaces. */
+/**
+ * 逐项检查草、半砖和楼梯上的落地辅助几何，包含实际含水与舀水方法；确认保护区也覆盖可能间接受影响的高草另一半。
+ */
 public final class LandingSurfaceRulesTest {
     private static final BlockPos FEET = new BlockPos(0,1,0);
     private static final LandingAssistPlan.InventorySnapshot WATER =
@@ -123,6 +125,7 @@ public final class LandingSurfaceRulesTest {
         }
     }
 
+    // 调用方块本身的装水和舀水实现，确认含水支撑恢复成原来的干燥状态，不把整块方块删掉。
     private static void nativeFillAndPickup(Scene scene, BlockPos position) {
         BlockState dry = scene.getBlockState(position);
         LevelAccessor level = (LevelAccessor)Proxy.newProxyInstance(LevelAccessor.class.getClassLoader(),

@@ -35,7 +35,9 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 
-/** Real runtime release, path cancellation and frame-final outputs around an airborne rescue. */
+/**
+ * 检查跳跃错过完整方块或半砖后如何交给救援；清掉旧路线按键、保留交通控制边界，站稳后重新编译原目标。
+ */
 public final class MissedLandingHandoffTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

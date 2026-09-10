@@ -22,7 +22,9 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 
-/** Actual emergency selection and native voxel-ray submission for the reported high-speed fall. */
+/**
+ * 回放给定高速下落，检查仍可抓住的放水机会；另覆盖半砖、草、水面选择、很高处的提早补料和异常射线范围。
+ */
 public final class EmergencyWaterSelectionTest {
     private static final double LIVE_DROP = 39.4838661356948;
     private static final double LIVE_SPEED = 2.603278959908224;

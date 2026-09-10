@@ -19,7 +19,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 
-/** Integration regression for actual shared-session lifecycle and native receipt retirement. */
+/**
+ * 把补料接入落地会话，检查站在出发处不会误判落地、落到别处仍等界面收尾，以及停止待确认水桶操作时先松开使用动作。
+ */
 public final class LandingSupplyCleanupTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

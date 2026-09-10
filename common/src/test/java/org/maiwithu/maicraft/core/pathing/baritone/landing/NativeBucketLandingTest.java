@@ -20,7 +20,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionPort;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** Execute actual BucketItem.use; the fixture supplies only the native world's storage and sound boundary. */
+/**
+ * 在内存世界里真正调用原版水桶 use，检查花草、半砖侧面和植物顶部命中后的水格与回收；玩家触地和湿身反馈仍由测试设置。
+ */
 public final class NativeBucketLandingTest {
     public static void main(String[] ignored) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

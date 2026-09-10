@@ -5,7 +5,9 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Uses the same frozen policy capture/install boundary as delayed navigation ownership handoff. */
+/**
+ * 检查下一趟路线排队时保护范围仍能保留下来，接管前不影响旧路线，接管后不继承无关旧限制。
+ */
 public final class NavigationPolicySnapshotTest {
     public static void main(String[] args) {
         BlockPos oldOwnerCell = new BlockPos(0, 64, 0);

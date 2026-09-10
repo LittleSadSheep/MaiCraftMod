@@ -11,7 +11,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 
-/** Real landing session and native receipt polling after flow/knockback misses the planned cell. */
+/**
+ * 检查角色落到计划之外后怎样收尾：必须持续站稳、入水或攀附，待确认的操作要处理完，原落点辅助物留在现场。
+ */
 public final class LandingAssistDisplacementTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

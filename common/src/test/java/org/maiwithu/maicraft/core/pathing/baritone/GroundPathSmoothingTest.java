@@ -29,6 +29,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 
+// 在简化地形上检查能否把折线路段改成直走；覆盖中途墙、缺地板、危险支撑、未知区域、移动结构和读取预算，不只比较起终点。
 public final class GroundPathSmoothingTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -66,6 +67,7 @@ public final class GroundPathSmoothingTest {
                     : new MovementDiagonal(baritone, cell, net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.SOUTH, 0);
             move.override(5); steps.add(move); cell = next;
         }
+        // 调用真实直线化入口后，检查起终点、时间预算和途中有效位置仍与原路线一致。
         IPath raw = path(steps), smooth = GroundPathSmoothing.smooth(baritone, raw, corridor, BlockPos.ZERO);
         check(smooth.length() == 2 && smooth.movements().getFirst() instanceof MovementGroundStraight,
                 "cardinal-then-diagonal route should become one actual movement");
@@ -108,6 +110,7 @@ public final class GroundPathSmoothingTest {
         check(!(offset.movements().getFirst() instanceof MovementGroundStraight),
                 "a legal offset start cannot be replaced by a clear cell center when its actual shortcut clips the adjacent wall");
         scene.blocks.clear();
+        // 耗尽地形读取额度时应保留原路线，而不是把没有完成检查当作无法到达。
         var limited = corridor(scene, PhysicalObstacleSnapshot.EMPTY); scene.reads = 0;
         for (int i = 0; i < 100 && !limited.exhausted(); i++) limited.clear(from, new Vec3(120.5, 0, .5));
         check(limited.exhausted() && scene.reads <= 16384, "all lowering probes share a finite native block-read budget");

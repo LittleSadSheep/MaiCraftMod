@@ -21,7 +21,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
 
-/** Shared execution with real voxel rays/receipts; the inert native boundary publishes world updates. */
+/**
+ * 检查水源在高草上方时，放水、接触水、落到地面和舀水都跟踪实际水源坐标；水流与植物变化由测试按顺序给出。
+ */
 public final class WaterSurfaceExecutionTest {
     public static void main(String[] ignored) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

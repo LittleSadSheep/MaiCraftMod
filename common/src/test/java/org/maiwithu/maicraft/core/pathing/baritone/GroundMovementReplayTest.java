@@ -18,7 +18,9 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 import sun.misc.Unsafe;
 
-/** Real movement-state entry points, including the 2026-09-08 superflat hop failure coordinates. */
+/**
+ * 把给定的位置样本交给真实移动更新：已批准的斜向跑跳可继续路线，普通长直行不应在格子边界停步或改变方向。位置由测试设置，不模拟完整移动物理。
+ */
 public final class GroundMovementReplayTest {
     public static void main(String[] args) throws Exception {
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);

@@ -22,7 +22,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 
-/** Grounded source drift cannot skip preparation; airborne PREPPING cannot delay self-rescue. */
+/**
+ * 检查站在边缘时先准备物品和瞄准，真正离地后改为紧急救援；空中的准备不能继续等待挖开起点。
+ */
 public final class FallDeparturePreparationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

@@ -42,7 +42,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import sun.misc.Unsafe;
 
-/** Vanilla mechanisms on inert fixtures plus loaded landing geometry and narrowly scoped ownership. */
+/**
+ * 检查不同落地用品的许可、依附位置、碰撞和回收规则，并直接调用部分原版蛛网、藤蔓和黏液块行为；最后验证准备被打断时先关好库存。
+ */
 public final class LandingAssistTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -126,6 +128,7 @@ public final class LandingAssistTest {
         }
     }
 
+    // 直接触发原版方块接触规则；这些结果用于核对辅助物原理，没有模拟一整段下落。
     private static void nativeMechanisms() throws Exception {
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
         DummyPlayer player = (DummyPlayer) memory.allocateInstance(DummyPlayer.class);
@@ -155,6 +158,7 @@ public final class LandingAssistTest {
     private static Field field(Class<?> type, String name) throws Exception {
         Field field = type.getDeclaredField(name); field.setAccessible(true); return field;
     }
+    // 故意保留未完成的选栏和库存操作，确认离地后先结清记录、关闭自己的界面，再报告准备失败。
     private static void interruptedPreparation() throws Exception {
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
         LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class); // onGround=false

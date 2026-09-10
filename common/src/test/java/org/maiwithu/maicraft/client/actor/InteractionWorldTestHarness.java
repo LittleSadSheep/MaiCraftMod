@@ -35,7 +35,9 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 
-/** Real block outlines, fluid rays, section index and actor port; no window, server or chunk loading. */
+/**
+ * 在一个已加载区块内提供可修改的方块、背包和原生操作计数，供交互测试复用；越界读取会报错，关闭时恢复之前的全局客户端与控制状态。
+ */
 public final class InteractionWorldTestHarness implements AutoCloseable {
     final ActorControlTestHarness h = new ActorControlTestHarness();
     public final LocalPlayer player = h.player;
@@ -83,6 +85,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
                 new AABB(at.x - .3, at.y, at.z - .3, at.x + .3, at.y + 1.8, at.z + .3));
     }
 
+    // 修改测试区块后也发送目标索引变更通知，让依赖索引的检查看到同一次变化。
     public void set(BlockPos pos, BlockState state) {
         BlockState before = level.getBlockState(pos);
         level.section.setBlockState(pos.getX(), pos.getY(), pos.getZ(), state);
@@ -99,6 +102,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
     public int itemUses() { return mode.items; }
     public int blockUses() { return mode.blocks; }
 
+    // 先释放测试按键和索引，再逐项还原原来的全局对象，避免影响后面测试。
     public void close() throws Exception {
         h.body.releaseAll(); TargetIndex.dropAll();
         for (var entry : saved.entrySet()) entry.getKey().set(actor, entry.getValue());

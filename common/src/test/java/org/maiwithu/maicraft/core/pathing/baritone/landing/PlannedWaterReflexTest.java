@@ -26,7 +26,9 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import sun.misc.Unsafe;
 
-/** Exercise the actual reflex scheduler guard with a current path/session, then release its owner. */
+/**
+ * 检查已有落地救援时自救不会再开一套放水流程；原会话完成或导航失去控制后，新的紧急自救仍可启动。
+ */
 public final class PlannedWaterReflexTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

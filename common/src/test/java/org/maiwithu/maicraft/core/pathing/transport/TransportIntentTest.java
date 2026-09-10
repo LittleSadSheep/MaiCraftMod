@@ -6,7 +6,9 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
-/** Goal changes cannot become stale transport arrivals or invented centroid floors. */
+/**
+ * 检查电梯提示使用实际候选楼层，逃离目标与不限高度目标不被中心点误导；途中改目标、加保护或交通已产生影响时要保留相应限制和失败原因。
+ */
 public final class TransportIntentTest {
     public static void main(String[] args) {
         BlockPos lower = new BlockPos(-81, 103, -4), upper = new BlockPos(-87, 116, -10);

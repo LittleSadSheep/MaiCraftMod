@@ -25,7 +25,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
-/** Pure world fixtures: no client instance, player, network, or actual game operations. */
+/**
+ * 从不同导航目标中枚举可站的交通落点，检查高度容差、完整身体碰撞、邻格伸入的形状、未知目标和分次搜索预算。
+ */
 public final class TransportTargetsTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
@@ -133,6 +135,7 @@ public final class TransportTargetsTest {
         check(probe(scene).destination() == null, "air is not a static landing floor");
     }
 
+    // 临时加入碰撞能伸到邻格的测试方块，防止只查脚下与头顶中心格而漏掉侧面障碍；随后恢复注册表状态。
     private static void protrudingShapes() throws Exception {
         var holders = MappedRegistry.class.getDeclaredField("unregisteredIntrusiveHolders");
         var frozen = MappedRegistry.class.getDeclaredField("frozen");

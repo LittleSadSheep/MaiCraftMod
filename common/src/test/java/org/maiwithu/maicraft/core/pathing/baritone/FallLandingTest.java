@@ -19,7 +19,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import sun.misc.Unsafe;
 
-/** Production context geometry and the shared fall/extended-fall landing boundary. */
+/**
+ * 检查实际支撑高度、已有摔落距离、半砖与未知地形怎样影响落地判断；再确认到达格子仍需要触地或入水。
+ */
 public final class FallLandingTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

@@ -22,7 +22,9 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** Native geometry oracle and receipt evidence without spawning, riding or damaging a real entity. */
+/**
+ * 检查落地上船的放置范围、上船距离、实体归属、下船空间和回收条件；部分几何直接与原版帮助方法对照。
+ */
 public final class BoatLandingAssistTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

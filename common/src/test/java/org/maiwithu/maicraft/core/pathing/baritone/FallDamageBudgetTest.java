@@ -15,7 +15,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import sun.misc.Unsafe;
 
-/** Native raw-damage oracle plus survival boundaries, expiring buffs and accumulated distance. */
+/**
+ * 检查摔落生命预算、药效期限、黄心和原版飞行免摔，并把基础伤害公式与原版方法对照；附魔保护值直接传入，没有覆盖真实装备上的混合附魔读取。
+ */
 public final class FallDamageBudgetTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -69,6 +71,7 @@ public final class FallDamageBudgetTest {
                 "prediction must retain the proven vanilla flight immunity rule");
     }
 
+    // 给原版伤害方法和预算输入相同属性与落差，逐项比较取整、支撑减伤和安全距离。
     private static void compareNativeFormula() throws Exception {
         var memoryField = Unsafe.class.getDeclaredField("theUnsafe"); memoryField.setAccessible(true);
         var nativeFall = (NativeFall) ((Unsafe) memoryField.get(null)).allocateInstance(NativeFall.class);
