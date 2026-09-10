@@ -22,6 +22,7 @@ import net.minecraft.world.level.material.FluidState;
 public final class PreviewVisibilityTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        incrementalExterior();
         Map<BlockPos, BlockState> blocks = new LinkedHashMap<>();
         for (int x = 3; x < 6; x++) for (int y = 0; y < 3; y++) for (int z = 3; z < 6; z++)
             blocks.put(new BlockPos(x, y, z), Blocks.STONE.defaultBlockState());
@@ -84,6 +85,24 @@ public final class PreviewVisibilityTest {
                 new BlockPos(1_000_000, 1_000_000, 1_000_000), Blocks.STONE.defaultBlockState());
         check(Math.abs(outline(new PreviewSession("sparse", "minecraft:overworld", "sparse", sparse)).length - 24) < 1e-6,
                 "disconnected sparse components do not require traversing their bounding volume");
+    }
+
+    private static void incrementalExterior() {
+        Map<BlockPos, net.minecraft.world.phys.shapes.VoxelShape> shell = new LinkedHashMap<>();
+        for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) for (int z = 0; z < 3; z++)
+            if (x != 1 || y != 1 || z != 1) shell.put(new BlockPos(x, y, z), net.minecraft.world.phys.shapes.Shapes.block());
+        for (boolean open : new boolean[]{false, true}) {
+            if (open) shell.remove(new BlockPos(1, 1, 0));
+            var builder = new PreviewExteriorSpace.Builder(shell);
+            check(!builder.done(), "creating an exterior job must not calculate its connectivity");
+            try { builder.result(); throw new AssertionError("partial connectivity was exposed"); }
+            catch (IllegalStateException expected) { }
+            int steps = 0;
+            while (!builder.done() && steps++ < 10_000) builder.step();
+            check(builder.done() && steps > shell.size(), "connectivity must advance through resumable stages");
+            check(builder.result().contains(1.5, 1.5, 1.5) == open, "opening one wall must connect the inner air to outside");
+            check(builder.result().contains(4, 1.5, 1.5), "unbounded space beside the shell remains outside");
+        }
     }
 
     private static Counter outline(PreviewSession session) {
