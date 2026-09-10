@@ -27,7 +27,9 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import sun.misc.Unsafe;
 
-/** Real session and voxel rays; only the asynchronous native close boundary is supplied by a port. */
+/**
+ * 检查原地供料的实际视线、距离、快捷栏优先级，以及关闭界面确认后才交还控制；这一组不覆盖普通供料的构造命中路径。
+ */
 public final class Ae2InPlaceSupplyTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

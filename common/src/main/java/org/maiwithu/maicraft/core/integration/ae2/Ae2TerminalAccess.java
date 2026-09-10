@@ -20,7 +20,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
 
-/** Observed terminal access, with bounded task-owned discovery and process-local successful access memory. */
+/**
+ * 发现可以访问的 AE2 终端：先识别背包无线终端，也可分次查附近固定终端；记住的一处固定终端只在同一玩家和世界中复用。
+ */
 final class Ae2TerminalAccess {
     static final List<ResourceLocation> WIRELESS_TERMINAL_IDS = List.of(
             ResourceLocation.fromNamespaceAndPath("ae2", "wireless_terminal"),
@@ -123,6 +125,7 @@ final class Ae2TerminalAccess {
         return new ExplicitObservation(radius, terminalCount, faceCount, selected);
     }
 
+    // 这里只列面板周围一到两格、按距离够得着的站位；没有在这里证明地板、视线和路线都可用。
     static List<FixedTarget> targetsFor(LocalPlayer player, BlockPos position, Direction side) {
         List<BlockPos> preferred = new ArrayList<>();
         if (side.getAxis().isHorizontal()) {
@@ -204,6 +207,7 @@ final class Ae2TerminalAccess {
     }
 
     /** Scan loaded block-entity maps by coordinate so block updates cannot invalidate an iterator. */
+    // 把周围三十三格见方的立方体分多次检查，最多保留三十二个最近终端面，不为此加载新区域。
     static final class Discovery {
         static final int RADIUS = 16;
         static final int CELLS_PER_TICK = 1024;

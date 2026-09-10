@@ -5,7 +5,9 @@ import java.util.Objects;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Scheduler record for one semantic AE2 supply request. */
+/**
+ * 保存这一趟供料的请求和截止时间；首次加载本类时还会登记如何创建对应执行任务。
+ */
 public final class Ae2SupplyTaskRecord extends TaskRecord {
     static {
         TaskFactory.register(Ae2SupplyTaskRecord.class, Ae2SupplyTask::new);

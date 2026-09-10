@@ -5,7 +5,9 @@ import java.util.List;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** Receipt for one native AE fluid-container action, including asynchronous repository updates. */
+/**
+ * 记录一次用网络空桶与水灌出一桶水的前后数量，要求背包、网络空桶和水量一起符合预期；不会把玩家原有空桶当作网络空桶消耗。
+ */
 record Ae2WaterBucketFill(int waterBuckets, int carriedEmptyBuckets,
                          long networkEmptyBuckets, long waterUnits, long unitsPerBucket) {
     static final ResourceLocation EMPTY_BUCKET = ResourceLocation.parse("minecraft:bucket");

@@ -11,7 +11,10 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
-/** Binds semantic acceptable-item groups to concrete AE samples before any effect begins. */
+/**
+ * 只计划、不点击：按请求选择网络里的具体物品，并预分配背包空间；后续执行必须继续符合这份选择和已确认数量。
+ * 单一品种组选一种物品，混合组可凑数量；现有可合并的背包堆先用，空格留给其余物品。
+ */
 final class Ae2SupplyPlanner {
     record Candidate(ResourceLocation itemId, ItemStack sample, long storedAmount,
                      boolean craftable, long stableSerial) {
@@ -86,6 +89,7 @@ final class Ae2SupplyPlanner {
     }
 
     /** Exact capacity simulator; empty slots become bound to a concrete component-exact sample. */
+    // 在一份背包副本上试放物品；只扣计划容量，不改真实背包，试选失败的候选可丢掉这份副本。
     private static final class Allocator {
         private final List<InventorySlot> slots;
 
@@ -167,8 +171,7 @@ final class Ae2SupplyPlanner {
     private Ae2SupplyPlanner() {}
 
     /**
-     * Bind a complete network-stock plan without considering player inventory capacity.
-     * Existing stock is preferred; a declared craftable entry may cover only the shortfall.
+     * 只准备网络库存时不占用背包格；先选现有库存，缺少部分在允许合成且网络提供样板时列为待制作。
      */
     static Result prepare(
             Ae2ResourceSupply.Request request,
@@ -282,6 +285,7 @@ final class Ae2SupplyPlanner {
                 directStored = saturatingAdd(directStored, storedLimits[i]);
             }
             long[] limits = storedLimits.clone();
+            // 当前只有现货总数不够时才放开合成；现货虽够但装不下时，不会再考虑能堆叠的可合成替代品。
             if (directStored < group.count()) {
                 for (int i = 0; i < candidates.size(); i++) {
                     limits[i] = supplyLimit(candidates.get(i), group.count(), request.allowCrafting());
@@ -365,6 +369,7 @@ final class Ae2SupplyPlanner {
                         && same(entry.sample(), allocation.sample())).toList();
     }
 
+    // 每次准备取下一批前，复查已确认增量、剩余网络库存和预留容量；一处不符就说明原计划已变。
     static String issue(
             Plan plan,
             LocalPlayer player,
@@ -406,6 +411,7 @@ final class Ae2SupplyPlanner {
         return byId < 0 || (byId == 0 && candidate.stableSerial() < best.stableSerial());
     }
 
+    // 当前只选没有额外组件变化、单叠上限在一到六十四之间的物品；带自定义数据的网络条目会在这里被排除。
     private static List<Candidate> candidates(
             Ae2ResourceSupply.Group group, List<Ae2ReflectionBridge.Entry> entries) {
         List<Candidate> result = new ArrayList<>();

@@ -21,7 +21,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuPort;
 import sun.misc.Unsafe;
 
-/** Exercise the real AE session entry/cleanup branches without an AE network or native window. */
+/**
+ * 检查聊天界面允许继续供料，暂停等无关界面会拦住新操作；恢复临时栏位仍要等真正的库存界面。
+ */
 public final class Ae2ScreenAccessTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();

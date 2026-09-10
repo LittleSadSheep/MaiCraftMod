@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.integration.ae2;
 
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
+// 分别给出两种流体单位，检查背包与网络先后同步时应继续等待，多拿一桶或多消耗水则不能确认成一次灌水。
 public final class Ae2WaterBucketFillTest {
     public static void main(String[] args) {
         for (long bucketUnits : new long[]{1000, 81000}) {

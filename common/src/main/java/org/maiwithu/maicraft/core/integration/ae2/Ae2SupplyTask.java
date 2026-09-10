@@ -9,7 +9,9 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Thin scheduler wrapper; all transactional state remains in {@link Ae2ResourceSupply.Session}. */
+/**
+ * 把供料会话接入任务调度，转达成功、失败与实际变化；阶段有推进或仍有已提交事务时延长等待时间。
+ */
 final class Ae2SupplyTask implements Task {
     private static final long PROGRESS_LEASE_TICKS = 3L * 60L * 20L;
     private final LocalPlayer player;

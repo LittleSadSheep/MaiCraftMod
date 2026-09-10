@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 
+// 检查附近固定终端分次发现、结果去重和数量上限，并确认导航目标仍包含较远的候选；没有验证每个站位到面板的真实遮挡。
 public final class Ae2FixedTerminalDiscoveryTest {
     public static void main(String[] args) {
         BlockPos near = new BlockPos(1, 0, 0), farther = new BlockPos(10, 0, 0);

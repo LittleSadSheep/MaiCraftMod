@@ -19,12 +19,8 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 
 /**
- * Internal semantic entry point for exact AE2 resource supply.
- *
- * <p>Callers name acceptable item groups and an approved count; they never name a terminal,
- * repository serial, menu slot, click, or route. The session binds all concrete choices before
- * its first inventory/network effect and confirms completion only from the player's net inventory
- * increase. AE2 remains an optional runtime dependency.</p>
+ * AE2 供料的共用入口：调用者说明可接受哪些物品、要多少和是否允许合成，具体找终端、选网络条目、拿取与收尾交给会话。
+ * SUPPLY 要求背包净增加指定数量；PREPARE 只准备网络库存。结果分别记录确认数量、已产生影响和是否还有不确定事务。
  */
 public final class Ae2ResourceSupply {
     /** Evidence produced only by an explicit bounded machine observation. */
@@ -65,8 +61,7 @@ public final class Ae2ResourceSupply {
     }
 
     /**
-     * One semantic acceptable-item group. The primary ID is always included in acceptable IDs.
-     * {@code count} is the exact approved net inventory increase, not a final inventory target.
+     * 一组可接受物品，主物品总在清单里。取物模式的 count 是背包要新增多少；准备模式把它解释为网络应有的数量。
      */
     public record Group(
             ResourceLocation itemId,
@@ -110,6 +105,7 @@ public final class Ae2ResourceSupply {
                 throw new IllegalArgumentException("an AE2 request needs between 1 and 128 groups");
             }
             groups = List.copyOf(groups);
+            // 不同组不能接受同一种物品，避免同一库存被两份要求重复算作够用。
             Map<ResourceLocation, ResourceLocation> owners = new LinkedHashMap<>();
             for (Group group : groups) {
                 for (ResourceLocation accepted : group.acceptableItemIds()) {
@@ -391,6 +387,7 @@ public final class Ae2ResourceSupply {
     }
 
     /** Available while falling: use wireless/currently reachable access; never start navigation. */
+    // 原地自救一次只补一件；只有落地船允许再走自动合成，不能把紧急补料变成任意合成任务。
     public static Session beginInPlace(LocalPlayer player, Request request) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(request, "request");

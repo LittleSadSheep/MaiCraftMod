@@ -20,11 +20,8 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 
 /**
- * Reflection-only access to the AE2 client menu protocol.
- *
- * <p>The common module deliberately has no AE2 linkage. Loading is all-or-nothing: if the
- * installed AE2 build does not expose the exact protocol used here, the integration reports
- * itself unavailable instead of discovering the mismatch after a transaction has started.</p>
+ * 集中调用 AE2 的终端、仓库列表、取物、装水和自动合成接口；不要求普通业务直接依赖 AE2 类。
+ * 当前初始化必须找全所有这些接口，任一项不兼容都会让整座桥接不可用。
  */
 final class Ae2ReflectionBridge {
     record FluidEntry(ResourceLocation fluidId, long serial, long storedAmount, long bucketUnits) {}
@@ -317,6 +314,7 @@ final class Ae2ReflectionBridge {
         if (!isStorageMenu(menu)) throw new Ae2ProtocolException("the active menu is not AE2 MEStorageMenu");
     }
 
+    // 操作前核对这个菜单就是玩家当前显示的菜单；后台残留的同类对象不能直接拿来提交点击。
     private static void requireVisibleMenu(Object menu) {
         Minecraft minecraft = Minecraft.getInstance();
         if (!(menu instanceof AbstractContainerMenu container) || minecraft.player == null
@@ -351,6 +349,7 @@ final class Ae2ReflectionBridge {
         }
     }
 
+    // 把需要的类、方法和枚举值一次找齐并保存；目前读取库存也依赖合成和灌水接口全部可用。
     private static Availability load() {
         try {
             Class<?> storageMenu = Class.forName("appeng.menu.me.common.MEStorageMenu");

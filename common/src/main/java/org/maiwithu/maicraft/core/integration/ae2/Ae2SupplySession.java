@@ -32,7 +32,10 @@ import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
-/** Complete first-person, cross-tick AE2 supply transaction. */
+/**
+ * 完成一趟 AE2 供料：准备终端和手持、打开可见菜单、检查库存、逐批取物或提交合成、确认结果，再关界面并归还临时栏位。
+ * 普通供料可能走到固定终端并返回出发处；落地自救用原地模式，时间不够时优先结束界面操作。
+ */
 final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private enum Phase {
         START,
@@ -289,6 +292,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     @Override
+    // 普通取消先停自己的导航并尝试关闭界面，随后立即给出结果；已产生影响或关闭尚未确认时标为不确定。
     public Ae2ResourceSupply.Outcome cancel(LocalPlayerContext context, String reason) {
         if (terminal != null) return terminal;
         validateContext(context);
@@ -319,6 +323,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     @Override
+    // 原地补料中止后最多再用二十刻处理松开使用和关闭自己的界面；保留未确认状态，不能因为已经拿到物品就忽略收尾。
     public Optional<Ae2ResourceSupply.Outcome> finishInPlace(LocalPlayerContext context, String reason) {
         if (!inPlace) return Ae2ResourceSupply.Session.super.finishInPlace(context, reason);
         if (terminal != null && stoppingInPlace) return Optional.of(terminal);
@@ -397,6 +402,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 "in_place_supply_stopped", reason, stopUncertain);
     }
 
+    // 鼠标拿着物品时先拒绝。可复用已打开的终端，否则先找无线终端，再尝试已记住或附近的固定终端。
     private void start(LocalPlayerContext context) {
         if (!player.containerMenu.getCarried().isEmpty()) {
             finishNow(Ae2ResourceSupply.Status.FAILED, "inventory_cursor_busy",
@@ -506,6 +512,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(Phase.STAGE);
     }
 
+    // 临时交换之前复查两个栏位仍是原内容，打开自己的库存后再发起交换，不能凭旧背包记录挪动物品。
     private void stage(LocalPlayerContext context) {
         inventoryGuiOwned = true;
         if (!context.menus().ensureVisible(context)) return;
@@ -556,6 +563,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(afterSelect);
     }
 
+    // 把所有候选站位作为同一个导航目标；原记忆位置走不通时再查一次附近终端，不只盯最近的一处。
     private void navigateFixed() {
         if (inPlace) throw new IllegalStateException("in-place AE supply cannot navigate");
         if (fixedCandidates.isEmpty()) {
@@ -669,6 +677,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
     }
 
+    // 原地模式检查真实射线命中；普通模式目前直接用计划中的位置和面构造命中，没有复查中间遮挡。
     private void openFixed(LocalPlayerContext context) {
         if (!worldAccessAvailable(context)) {
             beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "screen_open", "another GUI interrupted terminal opening");
@@ -748,6 +757,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(Phase.WAIT_REPOSITORY);
     }
 
+    // 等终端连上且客户端仓库列表可读，再绑定取物方案；符合条件时可改用网络空桶与水灌装。
     private void waitRepository() {
         Object menu = storageMenuOrFail();
         if (menu == null) return;
@@ -785,6 +795,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(Phase.PROCESS_ITEM);
     }
 
+    // 普通请求只给明确水桶组使用灌水后备；原地自救只要接受项里有水桶也允许，其他候选不会挡住它。
     private boolean canUseStoredWater() {
         if (Ae2WaterBucketFill.supports(request)) return true;
         return reflexRequest() && request.groups().getFirst().acceptableItemIds().contains(Ae2WaterBucketFill.WATER_BUCKET);
@@ -815,6 +826,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return item.equals(ResourceLocation.parse("minecraft:hay_block")) ? 2 : 1;
     }
 
+    // 一次只灌一桶，预先检查网络资源和原版将选择的空背包格；确认所有数量变化后才计入本次完成数。
     private void fillWaterBucket(LocalPlayerContext context) {
         var group = request.groups().getFirst();
         if (waterFillReceipts.size() == group.count()) {
@@ -870,6 +882,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(Phase.FILL_WATER_BUCKET);
     }
 
+    // 第一次资源影响发生前可以重新绑定候选；已经开始取物或合成后不悄悄替换原方案。
     private boolean installPlan(List<Ae2ReflectionBridge.Entry> entries) {
         if (effectsStarted) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "resource_plan_changed",
@@ -906,6 +919,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return true;
     }
 
+    // 逐组检查剩余数量，优先取当前计划的现货，缺少且允许时才打开合成数量界面。
     private void processItem(LocalPlayerContext context) {
         if (groupIndex >= request.groups().size()) {
             beginFinish(Ae2ResourceSupply.Status.SUCCEEDED,
@@ -1044,7 +1058,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 "the bound AE2 candidate can no longer complete its planned allocation");
     }
 
-    /** Prepare complete network stock, including confirmed auto-crafting, without extraction. */
+    /**
+     * 准备模式只核对网络现货或补合成，不提取到玩家；当前每项一旦确认，后续不再复查这项库存。
+     */
     private void processPreparedItem(
             LocalPlayerContext context, List<Ae2ReflectionBridge.Entry> entries) {
         Ae2SupplyPlanner.PlannedGroup plannedGroup = plan.groups().get(groupIndex);
@@ -1106,6 +1122,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
     }
 
+    // 先把网络条目、鼠标物品和计划绑定，再逐个拿到鼠标上；达到本批数量后才一次放进指定背包格。
     private void collectExact(LocalPlayerContext context) {
         ExactExtraction extraction = requireExtraction();
         if (extraction == null) return;
@@ -1188,6 +1205,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 "AE2 confirmed extraction without the expected exact cursor amount");
     }
 
+    // 放入前确认预留格没有变化；鼠标清空且背包恰好增加本批数量后，才确认这一批。
     private void placeExact(LocalPlayerContext context) {
         ExactExtraction extraction = requireExtraction();
         if (extraction == null) return;
@@ -1304,6 +1322,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(Phase.WAIT_CRAFT_PLAN);
     }
 
+    // 等 AE2 真正给出制作计划和可用 CPU，再提交作业；提交被拒绝与结果不确定要分别处理。
     private void waitCraftPlan(LocalPlayerContext context) {
         Object menu = player.containerMenu;
         if (!bridge.isCraftConfirmMenu(menu)) {
@@ -1390,6 +1409,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         finishUncertain("crafting_submit_unconfirmed", receipt.detail());
     }
 
+    // 已提交的合成可以等待较久，不因暂时没产物就重发；这段等待由调度器持续保留。
     private void waitCraftStock() {
         if (craftingItemId == null || craftingSample.isEmpty()) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "internal_state_invalid",
@@ -1440,6 +1460,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         // never resubmit merely because no output has appeared yet.
     }
 
+    // 记住原结果并进入收尾；当前已有待结束结果时直接返回，这也会挡住收尾中后来出现的可重试失败。
     private void beginFinish(
             Ae2ResourceSupply.Status status, String code, String message) {
         if (terminal != null || pendingTerminal != null) return;
@@ -1458,6 +1479,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
     }
 
+    // 失败时把尚在鼠标上的本批物品送回当前网络，确认鼠标清空后再关闭终端。
     private void cleanReturnCursor(LocalPlayerContext context) {
         if (!bridge.isStorageMenu(player.containerMenu)) {
             finishCleanupFailure("cursor_return_menu_missing");
@@ -1518,6 +1540,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(Phase.CLEAN_RESTORE);
     }
 
+    // 普通供料恢复临时交换的两个栏位；原地自救跳过交换恢复，以便尽快交还控制。
     private void cleanRestore(LocalPlayerContext context) {
         if (inPlace) { setPhase(Phase.CLEAN_SELECT); return; }
         InventorySwap swap = inventorySwap;
@@ -1559,6 +1582,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         setPhase(Phase.CLEAN_CLOSE);
     }
 
+    // 恢复原快捷栏选择；普通供料若离开过出发位置，再尝试走回附近后才给出最终结果。
     private void cleanSelect(LocalPlayerContext context) {
         if (player.getInventory().selected != originalSelected) {
             requestSelect(context, originalSelected, Phase.CLEAN_SELECT);
@@ -1676,6 +1700,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return false;
     }
 
+    // 确认成功才推进阶段；未应用时尝试进入失败收尾。不确定或偏离则直接结束为不确定。
     private boolean settleMenuReceipt(LocalPlayerContext context, String code) {
         MenuReceipt receipt = menuReceipt;
         if (receipt == null) {
@@ -1698,6 +1723,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return false;
     }
 
+    // 同一时刻只保留一份自己的原生协议记录；提交前还要确保相应菜单正在显示。
     private boolean submitProtocol(
             LocalPlayerContext context,
             String operation,
@@ -1744,6 +1770,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 && player.containerMenu == player.inventoryMenu;
     }
 
+    // 当前按可见菜单类型判断是否可收尾：AE2 仓库、合成界面，或自己打开的玩家库存。
     private boolean ownsOpenMenu(LocalPlayerContext context) {
         Object menu = player.containerMenu;
         return MenuVisibility.matches(context.minecraft(), player.containerMenu)
@@ -1834,6 +1861,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return count;
     }
 
+    // 从本轮基准背包数量计算净增加；单一品种组只算已经锁定的那种，混合组可合计其接受项。
     private int groupProgress(Ae2ResourceSupply.Group group) {
         if (group.selectionMode() == Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT) {
             ResourceLocation selected = lockedVariantByGroup.get(group.itemId());
@@ -1874,6 +1902,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return List.copyOf(result);
     }
 
+    // 取物模式最终再核对真实背包增量；准备模式当前只看此前每组已确认数量，不重读最终网络库存。
     private boolean finalAuditPasses() {
         if (waterBucketRoute) return player.containerMenu.getCarried().isEmpty()
                 && waterFillReceipts.size() == request.groups().getFirst().count()

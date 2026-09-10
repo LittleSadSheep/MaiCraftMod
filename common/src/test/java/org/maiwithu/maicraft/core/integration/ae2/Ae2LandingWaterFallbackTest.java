@@ -18,7 +18,9 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import sun.misc.Unsafe;
 
-/** Exercise reflected repository evidence and the production session's actual strategy selection. */
+/**
+ * 用可控网络列表检查紧急落地供料的顺序：现成水桶、网络灌水、其他免伤材料、干草；普通请求保留自己的选料规则。
+ */
 public final class Ae2LandingWaterFallbackTest {
     private static final ResourceLocation WEB = ResourceLocation.parse("minecraft:cobweb");
     private static final ResourceLocation WATER = ResourceLocation.parse("minecraft:water_bucket");
