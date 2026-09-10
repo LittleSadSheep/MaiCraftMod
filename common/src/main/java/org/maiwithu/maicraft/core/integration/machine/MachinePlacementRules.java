@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.integration.machine;
 
-import com.google.gson.JsonObject;
 import java.lang.reflect.Method;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
@@ -17,20 +16,11 @@ import org.maiwithu.maicraft.core.build.BuildStates;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 
 /**
- * 提供当前机器装配使用的状态解析与多格方块检查，并暂留旧格式的 validateWire。
- * 实际机器装配由 MachineConstructionPlan 和 MachineBuildTask 负责。
+ * 校验机器方块能否按现有安装规则表达：解析注册状态、保留明确属性，并核对多格效果。
+ * 蓝图格式由 MachineBlueprintDocument 校验，计划与现场勘察共同使用这里的安装规则。
  */
-public final class MachineBlueprint {
-    public static final int MAX_BLOCKS = MachineBlueprintSpec.MAX_BLOCKS;
-
-    private MachineBlueprint() {}
-
-    /**
-     * 旧蓝图格式检查：只收 blocks，并限制在旧观察半径内；它不是当前模型与机器布局的通用入口。
-     */
-    public static void validateWire(JsonObject blueprint) {
-        MachineBlueprintSpec.parse(blueprint, MachineSurvey.MAX_RADIUS);
-    }
+final class MachinePlacementRules {
+    private MachinePlacementRules() {}
 
     private static <T extends Comparable<T>> BlockState withProperty(BlockState state, Property<T> property, String value) {
         T parsed = property.getValue(value).orElseThrow(() -> new IllegalArgumentException(
@@ -100,7 +90,7 @@ public final class MachineBlueprint {
         if (!namespace.equals("mekanism") && !namespace.equals("mekanismgenerators")
                 && !namespace.equals("mekanismadditions")) return;
         try {
-            ClassLoader loader = MachineBlueprint.class.getClassLoader();
+            ClassLoader loader = MachinePlacementRules.class.getClassLoader();
             Class<?> attribute = Class.forName("mekanism.common.block.attribute.Attribute", false, loader);
             Class<?> bounding = Class.forName("mekanism.common.block.attribute.AttributeHasBounding", false, loader);
             Method has = attribute.getMethod("has", Block.class, Class.class);

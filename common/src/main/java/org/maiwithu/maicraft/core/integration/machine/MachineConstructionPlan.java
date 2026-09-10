@@ -65,7 +65,7 @@ public final class MachineConstructionPlan {
             public boolean blockExists(String id) { return exists(id, true); }
             public boolean itemExists(String id) { return exists(id, false); }
             public boolean supportsState(String id, Map<String, String> properties) {
-                try { MachineBlueprint.resolveState(id, properties); return true; }
+                try { MachinePlacementRules.resolveState(id, properties); return true; }
                 catch (IllegalArgumentException unavailable) { return false; }
             }
         };
@@ -126,12 +126,12 @@ public final class MachineConstructionPlan {
             Map<String, String> properties = new LinkedHashMap<>();
             if (cell.has("properties")) cell.getAsJsonObject("properties").entrySet()
                     .forEach(entry -> properties.put(entry.getKey(), entry.getValue().getAsString()));
-            BlockState state = MachineBlueprint.resolveState(id, properties);
+            BlockState state = MachinePlacementRules.resolveState(id, properties);
             Block block = state.getBlock();
             if (!state.isAir() && (!(block.asItem() instanceof BlockItem item) || item.getBlock() != block))
                 throw new IllegalArgumentException("machine block needs a native installation adapter: " + id);
             // 同一种方块只查一次连带结构规则；这里尚未读现场，因此已有同种机器也要先通过这项安装规则。
-            if (effectsChecked.add(block)) MachineBlueprint.requireModeledEffects(block);
+            if (effectsChecked.add(block)) MachinePlacementRules.requireModeledEffects(block);
             if (!occupied.add(position)) throw new IllegalArgumentException("overlapping machine targets");
             blocks.put(position, new BuildTaskRecord.Target(state, state.isAir() ? Items.AIR : block.asItem(),
                     position, id, null, null, null, false, properties.keySet(), true));
@@ -139,7 +139,7 @@ public final class MachineConstructionPlan {
         // Generated halves must be declared even for model-authored blueprints.
         Map<Long, BuildTaskRecord.Target> cells = new LinkedHashMap<>();
         blocks.values().forEach(target -> cells.put(target.pos().asLong(), target));
-        blocks.values().forEach(target -> MachineBlueprint.validateGeneratedCells(target, cells));
+        blocks.values().forEach(target -> MachinePlacementRules.validateGeneratedCells(target, cells));
         JsonObject report = layout.report().deepCopy();
         if (report.has("configurations") && !report.getAsJsonArray("configurations").isEmpty()) {
             if (!exists("mekanism:configurator", false))

@@ -53,7 +53,7 @@ final class MachineBuildSurvey {
                 if (!state.isAir() && plan.replaceExisting() && !state.hasBlockEntity()
                         && !state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
                         && !state.hasProperty(BlockStateProperties.BED_PART) && state.getDestroySpeed(world, at) >= 0) {
-                    MachineBlueprint.requireModeledEffects(state.getBlock()); clears.add(at);
+                    MachinePlacementRules.requireModeledEffects(state.getBlock()); clears.add(at);
                 } else return new Progress(false, null, "An AE2 part site is occupied or its native slot is incompatible.");
             }
             partIndex++;

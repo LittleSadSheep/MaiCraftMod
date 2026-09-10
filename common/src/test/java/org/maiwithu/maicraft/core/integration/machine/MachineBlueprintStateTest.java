@@ -21,14 +21,14 @@ public final class MachineBlueprintStateTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
-        check(MachineBlueprint.resolveState("minecraft:lever", Map.of("facing", "east"))
+        check(MachinePlacementRules.resolveState("minecraft:lever", Map.of("facing", "east"))
                 .getValue(BlockStateProperties.HORIZONTAL_FACING) == net.minecraft.core.Direction.EAST,
                 "registered property values must survive compilation");
         rejectState("minecraft:missing_machine", Map.of(), "unknown block");
         rejectState("minecraft:lever", Map.of("missing", "true"), "has no property");
         rejectState("minecraft:lever", Map.of("facing", "diagonal"), "invalid value");
         rejectState("minecraft:oak_slab", Map.of("waterlogged", "true"), "runtime state");
-        check(MachineBlueprint.resolveState("minecraft:oak_leaves", Map.of()).getValue(BlockStateProperties.PERSISTENT),
+        check(MachinePlacementRules.resolveState("minecraft:oak_leaves", Map.of()).getValue(BlockStateProperties.PERSISTENT),
                 "ordinary item-placement normalization may fill unspecified runtime defaults");
         // POWERED is deliberately absent from BuildValidity's authored-property whitelist,
         // exercising the same generic name lookup used for optional-mod custom properties.
@@ -55,7 +55,7 @@ public final class MachineBlueprintStateTest {
 
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
     private static void rejectState(String id, Map<String, String> properties, String messagePart) {
-        try { MachineBlueprint.resolveState(id, properties); throw new AssertionError("expected invalid registry state"); }
+        try { MachinePlacementRules.resolveState(id, properties); throw new AssertionError("expected invalid registry state"); }
         catch (IllegalArgumentException expected) { check(expected.getMessage().contains(messagePart), expected.getMessage()); }
     }
 }

@@ -7,7 +7,6 @@ import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachineControlTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReviewTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurveyModelTest;
-import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintSpecTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintStateTest;
 
 /** No game launch required; actual server receipts still require in-game acceptance tests. */
@@ -54,7 +53,6 @@ public final class MachineRegressionSuite {
         org.maiwithu.maicraft.core.integration.machine.assembly.MachineAssemblyTest.main(args);
         MachineControlTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.MachineMenuPolicyTest.main(args);
-        MachineBlueprintSpecTest.main(args);
         try { org.maiwithu.maicraft.core.integration.machine.MachineMenuObservationTest.main(args); }
         catch (Exception failure) { throw new AssertionError("menu observation regression", failure); }
         MachineBlueprintStateTest.main(args);
