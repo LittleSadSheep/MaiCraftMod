@@ -86,7 +86,7 @@ final class PreviewMeshSection implements AutoCloseable {
             BufferBuilder partMesh = new BufferBuilder(partMemory, VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
             PoseStack pose = new PoseStack();
             RandomSource random = RandomSource.create(0);
-            boolean[] modelUsable = {true, true, true};
+            ModelPass[] passes = {new ModelPass(), new ModelPass(), new ModelPass()};
             for (var cell : cells) {
                 BlockPos pos = cell.getKey();
                 if (!session.includes(pos)) continue;
@@ -100,25 +100,23 @@ final class PreviewMeshSection implements AutoCloseable {
                 if (!desired.isAir()) {
                     RenderType layer = ItemBlockRenderTypes.getChunkRenderType(desired);
                     int pass = layer == RenderType.translucent() ? 2 : layer == RenderType.solid() ? 0 : 1;
-                    if (desired.getRenderShape() == RenderShape.MODEL && modelUsable[pass]) {
+                    if (desired.getRenderShape() == RenderShape.MODEL && passes[pass].usable()) {
                         pose.pushPose();
                         pose.translate(x, y, z);
                         try {
-                            minecraft.getBlockRenderer().renderBatched(desired, pos, view, pose, model[pass], true, random);
-                        } catch (RuntimeException unsupportedModel) {
-                            // 模组模型可能只写了半个顶点就失败，整个分区的这一类模型缓存都不再使用，独立轮廓仍保留。
-                            // fallbackModels 只加这次失败和后续跳过的项，之前已画入但一同丢弃的模型没有补计。
-                            modelUsable[pass] = false; fallbackModels++;
+                            passes[pass].bake(() -> minecraft.getBlockRenderer()
+                                    .renderBatched(desired, pos, view, pose, model[pass], true, random));
                         }
                         finally { pose.popPose(); }
-                    } else fallbackModels++;
+                    } else passes[pass].skip();
                 }
                 if (desired.isAir()) PreviewOutlineGeometry.emit(actual, minecraft.level, pos, origin, line, 1, .2f, .25f);
             }
             for (PreviewPart part : parts) if (session.includes(part.position()))
                 PreviewPartGeometry.emit(part, origin, centres, partMesh, line);
             for (int pass = 0; pass < model.length; pass++) {
-                MeshData mesh = modelUsable[pass] ? model[pass].build() : null;
+                fallbackModels += passes[pass].fallback();
+                MeshData mesh = passes[pass].usable() ? model[pass].build() : null;
                 if (mesh == null) continue;
                 ByteBufferBuilder memory = pass == 0 ? solidMemory : pass == 1 ? cutoutMemory : translucentMemory;
                 sortStates[pass] = mesh.sortQuads(memory, sorting(origin, camera));
@@ -149,6 +147,26 @@ final class PreviewMeshSection implements AutoCloseable {
     static VertexSorting sorting(BlockPos origin, Vec3 camera) {
         return VertexSorting.byDistance((float) (camera.x - origin.getX()),
                 (float) (camera.y - origin.getY()), (float) (camera.z - origin.getZ()));
+    }
+
+    /** 一个模型写到一半失败会废弃整类缓冲区，先前成功写入的模型也必须计入回退数量。 */
+    static final class ModelPass {
+        private boolean usable = true;
+        private int rendered, fallback;
+
+        void bake(Runnable model) {
+            if (!usable) { skip(); return; }
+            try { model.run(); rendered++; }
+            catch (RuntimeException unsupportedModel) {
+                usable = false;
+                fallback += rendered + 1;
+                rendered = 0;
+            }
+        }
+
+        void skip() { fallback++; }
+        boolean usable() { return usable; }
+        int fallback() { return fallback; }
     }
 
     // 上传失败时关闭刚分配的显卡缓冲区再抛出，避免本次分配泄漏。

@@ -15,7 +15,7 @@ import static org.maiwithu.maicraft.client.preview.PreviewSectionRefresh.Work.*;
 /** Refresh decisions and Minecraft's retained-quad sorting run without an OpenGL context. */
 public final class PreviewRefreshTest {
     public static void main(String[] args) {
-        sectionRefresh(); independentBudgets(); retainedQuadSorting();
+        sectionRefresh(); independentBudgets(); retainedQuadSorting(); modelFallbacks();
         System.out.println("PreviewRefreshTest: passed");
     }
 
@@ -84,6 +84,28 @@ public final class PreviewRefreshTest {
                             && indices.byteBuffer().remaining() == 12 * Short.BYTES,
                     "moving around retained geometry produces only reordered indices using section-relative camera coordinates");
         }
+    }
+
+    private static void modelFallbacks() {
+        var failedPass = new PreviewMeshSection.ModelPass();
+        var otherPass = new PreviewMeshSection.ModelPass();
+        var baked = new AtomicInteger();
+        failedPass.bake(baked::incrementAndGet);
+        failedPass.bake(baked::incrementAndGet);
+        failedPass.skip();
+        check(failedPass.usable() && failedPass.fallback() == 1,
+                "unsupported render shapes count once without discarding successful models");
+        otherPass.bake(baked::incrementAndGet);
+        failedPass.bake(() -> { throw new IllegalStateException("model wrote incomplete vertices"); });
+        check(!failedPass.usable() && failedPass.fallback() == 4,
+                "discarding a pass must include its two earlier models, the failed model and the skipped shape");
+        failedPass.bake(() -> { throw new AssertionError("a failed pass must not bake later models"); });
+        check(failedPass.fallback() == 5 && baked.get() == 3,
+                "later fallback models are counted without invoking their renderer");
+        check(otherPass.usable() && otherPass.fallback() == 0, "other render passes keep their own successful models");
+        var rebuilt = new PreviewMeshSection.ModelPass();
+        rebuilt.bake(baked::incrementAndGet);
+        check(rebuilt.usable() && rebuilt.fallback() == 0, "a fresh rebuild starts without old fallback counts");
     }
 
     private static void check(boolean value, String detail) { if (!value) throw new AssertionError(detail); }
