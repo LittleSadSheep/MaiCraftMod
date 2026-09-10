@@ -2,19 +2,8 @@ package org.maiwithu.maicraft.core.task.survival;
 
 
 /**
- * 生存反射的<b>纯判据</b>——"现在该不该抢身体",从链里拆出来所以能无头单测
- * (不碰 Minecraft)。每个方法只吃从 {@code LocalPlayer} 上读到的原始值
- * (饱食度、血量、坠落距离、有没有威胁/有没有工具),返回一个布尔:<b>触发了没有</b>。
- *
- * <h2>为什么是布尔而不是优先级数值</h2>
- * 反射之间的先后<b>是固定的</b>(摔落永远比脱困急),不随世界状态变。让每个反射
- * 返回一个浮点"我多想要身体"再挑最大的,就是用连续量表达一个固定序——那些数值
- * 会变成必须小心维护却没人看得懂的魔法数。
- *
- * <p>先后现在写在注册号上({@code MaiCraftCore.registerReflexes},小的先,与原版
- * {@code addGoal(int priority, goal)} 同一惯例),这里只回答"触发没触发"。
- * 顺序是:摔落 &gt; 换气 &gt; 自卫 &gt; 进食 &gt; 脱困——正在坠落是最迫近的死法,
- * 而卡住只是烦人,绝不该压过打架或吃饭。
+ * 只回答某种自救现在是否需要介入，不操作玩家。调用方负责读取血量、空气和速度。
+ * 多种危险同时出现时谁先处理，由 MaiCraftCore 注册自救任务的顺序决定。
  */
 public final class SurvivalDecisions {
 
@@ -22,16 +11,8 @@ public final class SurvivalDecisions {
 
     // ---- fall thresholds ----
     /**
-     * 下落速度(格/刻)到这个量级就是"正在摔"。
-     *
-     * <p>判<b>速度</b>而不是累计落差:玩家的摔落结算在原版里是客户端权威的
-     * ({@code Entity.move} 里那一处被 {@code isLocalInstanceAuthoritative} 挡着,真正
-     * 结算的是收到移动包时的 {@code doCheckFallDamage}),而 {@code fallDistance} 也在
-     * 同一处累加。空壳玩家没有客户端,那个量永远是 0。速度是服务端物理自己算的,拿它当
-     * 判据既躲开了这件事,也更贴近这条反射真正关心的东西——她这一刻掉得有多快。
-     *
-     * <p>原版重力 0.08/刻、阻力 0.98,自由落体约九刻到 0.7 格/刻,那时已经掉了三格出头
-     * ——正好压在摔伤起点(落差 3 格)上。
+     * 竖直速度为负表示下落；低于这个数值时，这个简单判据把它视为快速坠落。
+     * 实际落地自救入口还会通过 EmergencyLanding 检查当前身体状态和可用方案。
      */
     public static final double MLG_FALL_SPEED = -0.7;
 
@@ -41,11 +22,7 @@ public final class SurvivalDecisions {
     }
 
     /**
-     * 摔落缓冲触发条件:人正在快速下落、并且手上有救命的东西(水桶或软方块)。
-     *
-     * @param grounded 脚落地了,或者人在水里/在爬梯藤——三者都不算"在摔"
-     * @param fallSpeed 竖直速度(格/刻),向下为负
-     * @param canSave  身上有水桶或软方块;没有的话抢了身体也救不了自己
+     * 这个简单判据要求：尚未落稳、存在救助办法，并且下落速度达到阈值。是否真有救助办法由调用方判断。
      */
     public static boolean mlgTriggered(boolean grounded, double fallSpeed, boolean canSave) {
         if (grounded) return false;
@@ -54,32 +31,20 @@ public final class SurvivalDecisions {
     }
 
     /**
-     * 水已经在减速她 —— 该收桶了。比 {@link #MLG_FALL_SPEED} 慢,所以"还在自由落体"
-     * 和"已经落进水里"分得开。
+     * 下落慢于这个速度时，可与仍在快速坠落的状态区分；数值本身不证明已经安全落地。
      */
     public static final double MLG_SETTLED_SPEED = -0.5;
 
-    /** Start ascent while enough air remains for its measured depth and reaction margin. */
+    /**
+     * 头还在水下，而且剩余空气已经不足以覆盖预计上浮用量时，开始换气自救。
+     */
     public static boolean breathTriggered(boolean headUnderWater, int airSupply, int ascentAir) {
         return headUnderWater && airSupply <= Math.max(1, ascentAir);
     }
 
     /**
-     * Whether an already-running breath rescue still owns the body.
-     *
-     * <p>This is deliberately a hysteresis decision, not another invocation of
-     * {@link #breathTriggered(boolean, int, int)}. Crossing the surface is only the
-     * beginning of recovery: vanilla restores air over several ticks.  Giving
-     * navigation the body at the first breathable tick lets a downward swim edge
-     * submerge the eyes again before that refill is complete, producing an endless
-     * surface/dive oscillation around the low-air threshold.
-     *
-     * <p>Landing out of water is also a safe terminal condition. Briefly cresting above the
-     * surface while airborne is still part of the same refill. Otherwise
-     * the rescue remains authoritative until the eyes are breathable and the
-     * server-synchronised air value reaches the player's current maximum.  Using
-     * {@code maxAirSupply} keeps the rule correct for bodies whose maximum is
-     * changed by another mod.
+     * 开始换气后，不在头刚露出水面时立即交还控制权，而是等空气补满，避免刚露头又被导航带回水下。
+     * 如果已经离水并站到地面上，可以直接结束；空气上限读取当前玩家的值，以适应其他 Mod。
      */
     public static boolean breathRecoveryRequired(boolean bodyInWater,
                                                  boolean headUnderWater,

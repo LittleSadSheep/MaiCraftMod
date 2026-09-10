@@ -13,8 +13,8 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * Client-safe structure locator. Vanilla does not synchronize authoritative structure starts or
- * seed placement metadata to a remote client, so this task refuses to invent a location.
+ * 旧的结构定位入口：检查输入名字后，固定返回客户端没有权威结构位置，当前不会真正扫描或找到结构。
+ * 按可见方块和生物寻找线索的工作在 PhysicalStructureSearchCompanionTask 中；这两条入口目前没有接起来。
  */
 public final class LocateStructureCompanionTask
         extends AbstractCompanionTask<LocateStructureTaskRecord> {

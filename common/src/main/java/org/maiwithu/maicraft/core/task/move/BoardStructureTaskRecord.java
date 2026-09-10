@@ -4,7 +4,9 @@ import java.util.UUID;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** One physical boarding outcome, deliberately not a static world-coordinate receipt. */
+/**
+ * 记录要登上的移动结构编号。结构会移动，所以成功表示在它的甲板站稳，不保存一个固定世界坐标冒充登船结果。
+ */
 public final class BoardStructureTaskRecord extends TaskRecord {
     static { TaskFactory.register(BoardStructureTaskRecord.class, BoardStructureTask::new); }
     public final UUID structureId;

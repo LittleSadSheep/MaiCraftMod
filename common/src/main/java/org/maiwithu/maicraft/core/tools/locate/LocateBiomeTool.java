@@ -12,7 +12,10 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Loaded-client query task for the nearest currently known biome sample. */
+/**
+ * 向外提供 locate_biome 工具，把 JSON 交给 LocateOps 建立客户端抽样任务。
+ * 工具描述目前写“最近”，但下游会在第一个匹配采样点结束。
+ */
 public final class LocateBiomeTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

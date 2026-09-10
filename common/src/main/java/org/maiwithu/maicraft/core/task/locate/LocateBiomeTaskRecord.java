@@ -3,16 +3,15 @@ package org.maiwithu.maicraft.core.task.locate;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * Typed task descriptor for {@code locate_biome}: "where is the nearest X?" —
- * X being a biome id ({@code minecraft:warped_forest}) or a biome tag
- * ({@code #minecraft:is_forest}). Resolution happens server-side in the goal,
- * where the registry lives.
+ * 保存查找群系的原始名字或标签，以及这次请求的截止时间。实际检查在客户端任务里进行。
  */
 public final class LocateBiomeTaskRecord extends TaskRecord {
 
     public static final String TOOL_NAME = "locate_biome";
 
-    /** Raw biome argument as the LLM gave it: an id, or a {@code #}-prefixed tag. */
+    /**
+     * 保留输入的资源名；以 # 开头表示标签，具体是否存在由执行任务检查。
+     */
     public final String biome;
 
     public LocateBiomeTaskRecord(String toolCallId, long deadlineGameTime, String biome) {

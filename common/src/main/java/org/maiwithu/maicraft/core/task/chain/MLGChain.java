@@ -11,7 +11,10 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
 
-/** Unexpected-fall trigger. Planned and reflex falls use the same native landing/recovery session. */
+/**
+ * 意外坠落时启动落地自救，并记录用了什么、是否受伤、辅助物有没有收回。
+ * 计划中的下落和意外下落共用同一套落地过程；已有导航接手时，这里不重复启动。
+ */
 public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.Reflex {
     private LandingAssistSession session;
     private boolean attentionActive;
@@ -28,7 +31,9 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
     @Override
     public TaskState tick(LocalPlayer companion) { return tick(ClientRuntime.requireContext(companion)); }
 
-    /** Resolve a continuation before the scheduler retires an irrecoverably missed jump. */
+    /**
+     * 原来的跳跃已经错过落点时，先找到还能继续的自救办法，再让调度器结束原来的跳跃。
+     */
     public boolean prepareMissedLandingTakeover(LocalPlayer player) {
         if (session == null) session = EmergencyLanding.find(ClientRuntime.requireContext(player));
         return session != null && !session.failed() && !session.complete();
@@ -57,6 +62,7 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
         return TaskState.RUNNING;
     }
 
+    // 把这一轮自救已经确认的事实汇总成通知。没确认放下或收回的东西，不记成成功操作。
     private void finishAttention(LocalPlayer player, String outcome) {
         if (!attentionActive) return;
         var facts = session == null ? java.util.Map.<String, Object>of() : session.diagnostics();

@@ -11,7 +11,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 
-/** Layered-building regression using real Minecraft collision shapes and ray casting. */
+/**
+ * 用原版碰撞形状构造楼层、墙、半砖和楼梯口，检查观察结果是否区分可见地面、楼下和未验证的路线。
+ * 未知区块由测试自己提供的判断模拟；没有覆盖现场 hasChunkAt 的语义，也没有覆盖邻格伸出的碰撞。
+ */
 public final class LocalFloorSenseTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

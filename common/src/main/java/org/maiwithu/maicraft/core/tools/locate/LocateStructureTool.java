@@ -12,7 +12,10 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Loaded-client query task for structure evidence. */
+/**
+ * 向外提供 locate_structure 工具，转成旧结构定位任务。
+ * 目前下游始终报告无法取得权威结构位置；多加载地形再重试，也不会让这条入口返回找到。
+ */
 public final class LocateStructureTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

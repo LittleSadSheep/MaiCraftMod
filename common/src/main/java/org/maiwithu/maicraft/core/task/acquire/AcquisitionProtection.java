@@ -13,7 +13,10 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 
-/** Explicit resource markers augment the parent's measured footprint without inventing an area. */
+/**
+ * 把取材料时明确指定的地标变成不能修改的格子，并记录找不到的地标名。
+ * 这里只保护地标坐标这一格；建筑的完整保护范围由外层任务另行提供。
+ */
 record AcquisitionProtection(LongSet markedCells, List<String> problems) {
     static AcquisitionProtection resolve(List<String> labels,
                                          Collection<IntentRuntime.Landmark> landmarks,
@@ -38,8 +41,7 @@ record AcquisitionProtection(LongSet markedCells, List<String> problems) {
 
     <T> T run(Supplier<T> operation) {
         if (!problems.isEmpty()) throw new IllegalStateException(String.join("; ", problems));
-        // IntentTask supplies measured protected_labels footprints in the outer scope. The same
-        // union is read by mining target pruning, BlockDigger and the terrain path calculation.
+        // 把这些格子并入外层已有的禁止修改范围，供挖掘和寻路共同读取；它们本身不禁止玩家经过。
         return NavigationSafetyContext.withProtectedArea(markedCells, LongSets.emptySet(), operation);
     }
 

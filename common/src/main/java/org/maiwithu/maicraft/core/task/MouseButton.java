@@ -1,4 +1,6 @@
 package org.maiwithu.maicraft.core.task;
 
-/** 交互任务的按键语义:left = 攻击/破坏,right = 使用/放置。 */
+/**
+ * 左键表示攻击或破坏；右键表示使用物品或放置方块。这里只记录要用哪种按键。
+ */
 public enum MouseButton { LEFT, RIGHT }

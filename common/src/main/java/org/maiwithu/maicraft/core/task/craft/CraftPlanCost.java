@@ -5,11 +5,8 @@ import java.util.Comparator;
 import java.util.Objects;
 
 /**
- * Stable, side-effect-free cost used to compare ordinary crafting routes.
- *
- * <p>A crafting surface is a prerequisite of the recipe, not an ingredient. Keeping the two
- * dimensions separate prevents a material-complete 3x3 recipe from losing to a superficially
- * smaller 2x2 conversion recipe whose ingredients still need recursive acquisition.</p>
+ * 给普通合成路线排先后：先看材料齐不齐、工作台能否使用，再比较缺料、浪费和材料用量。
+ * 材料已经齐全的工作台配方，可以排在还得继续找材料的背包配方前面。最后用配方名字固定同分顺序。
  */
 public record CraftPlanCost(
         int missingMaterials,
@@ -42,7 +39,9 @@ public record CraftPlanCost(
         stableId = Objects.requireNonNull(stableId, "stableId");
     }
 
-    /** True when the Mod can start this recipe without asking for another semantic decision. */
+    /**
+     * 材料已经齐全，并且工作面已就绪、能由内部准备或正在内部寻找时，可以直接交给执行任务。
+     */
     public boolean dispatchable() {
         return missingMaterials == 0
                 && (surface == Surface.READY || surface == Surface.PREPARABLE
@@ -50,8 +49,7 @@ public record CraftPlanCost(
     }
 
     /**
-     * Coarse route class. Material-complete routes always precede recursive material routes when
-     * their surface is ready or internally preparable.
+     * 先把路线分档：能做的排前面，还要补材料的排后面；工作面不可用或不支持的再往后排。
      */
     private int tier() {
         if (missingMaterials == 0 && surface == Surface.READY) return 0;

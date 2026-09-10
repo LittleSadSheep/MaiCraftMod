@@ -5,6 +5,8 @@ import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
+// 记录往哪个方向探索、最远看多大范围和允许的交通方式。
+// 真正到达后才由执行任务写入 verified，给父任务使用；电梯不接受这种没有指定楼层的区域目标。
 public final class RegionalTravelTaskRecord extends TaskRecord implements InternalPositionReceipt {
     static { TaskFactory.register(RegionalTravelTaskRecord.class,RegionalTravelTask::new); }
     public final String direction;

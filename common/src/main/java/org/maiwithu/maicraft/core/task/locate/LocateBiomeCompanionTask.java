@@ -17,7 +17,10 @@ import org.maiwithu.maicraft.core.task.IdSuggest;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Loaded-client-only biome locator. It never queries seed noise or generates/loads chunks. */
+/**
+ * 在玩家周围已经加载的地形中抽样查群系，每刻最多检查一百二十八个点。
+ * 当前从西北侧、最低高度开始依次扫描，遇到第一个匹配点就结束；这个点不保证最近。
+ */
 public final class LocateBiomeCompanionTask
         extends AbstractCompanionTask<LocateBiomeTaskRecord> {
     private static final int RADIUS = 256;
@@ -43,6 +46,7 @@ public final class LocateBiomeCompanionTask
         if (match == null) fail(inputFailure, FailureType.UNKNOWN);
     }
 
+    // 先确认名字或标签在客户端登记表里存在，再生成每个采样点的匹配规则。拼写相近的名字只用于报错提示。
     private Predicate<Holder<Biome>> resolve(String argument) {
         var registry = player.clientLevel.registryAccess().lookupOrThrow(Registries.BIOME);
         if (argument.startsWith("#")) {
@@ -91,6 +95,7 @@ public final class LocateBiomeCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 先往上跳三十二格；这一列看完后向南跳十六格，南北方向看完后再向东跳十六格。
     private void advance() {
         y += Y_STEP;
         if (y < player.clientLevel.getMaxBuildHeight()) return;

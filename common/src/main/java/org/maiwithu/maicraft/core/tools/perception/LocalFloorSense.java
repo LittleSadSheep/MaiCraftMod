@@ -99,7 +99,7 @@ public final class LocalFloorSense {
         List<Floor> ordered = new ArrayList<>(floors.values());
         ordered.sort(Comparator.comparingDouble(floor -> Math.abs(floor.y() - origin.y)));
         List<Floor> reported = new ArrayList<>(ordered.stream().limit(8).toList());
-        // Preserve the lower level even when intermediate stair treads fill the nearby samples.
+        // 楼梯的多个踏步高度可能占满前八个名额，所以额外保留最下层，让观察者仍能知道楼下存在。
         ordered.stream().min(Comparator.comparingDouble(Floor::y)).ifPresent(lowest -> {
             if (!reported.contains(lowest)) reported.add(lowest);
         });
@@ -145,6 +145,7 @@ public final class LocalFloorSense {
         return top;
     }
 
+    // 检查身体占用格里的危险和碰撞。当前没有检查邻格伸进身体的形状，因此这里通过仍可能漏掉阻挡。
     private static boolean clearBody(View view, double x, double y, double z, double width, double height) {
         AABB body = new AABB(x - width / 2, y + 1.0E-5, z - width / 2,
                 x + width / 2, y + height - 1.0E-5, z + width / 2);

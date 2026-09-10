@@ -1,10 +1,8 @@
 package org.maiwithu.maicraft.core.task;
 
 /**
- * 8-point compass label from a block delta (+X east, +Z south), shared by the
- * locate tools' result messages. A diagonal collapses to a cardinal when the
- * dominant axis is at least twice the other — "north-east" only when the
- * direction is meaningfully diagonal.
+ * 把目标相对玩家的位置写成东、西、东北等方向。
+ * 例如东向距离至少是北向的两倍时，只写东；两个方向接近时才写东北。
  */
 public final class CompassUtil {
 
