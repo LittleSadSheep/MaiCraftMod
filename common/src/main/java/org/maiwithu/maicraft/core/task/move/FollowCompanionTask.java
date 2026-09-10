@@ -12,32 +12,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 
 /**
- * 跟着走——第一个<b>常驻</b>任务。默认跟主人,点名了就跟那一只。
- *
- * <h2>它跟一次性任务差在哪</h2>
- * 只差一行:{@link #onTick} <b>永远不返终态</b>。同一个槽、同一套派发、同一个接口,
- * 「挖 64 块」干完腾位,而它一直占着,直到主人给她别的事做。
- *
- * <h2>跟到了就休眠,不是结束</h2>
- * 主人就在旁边时 {@link #canRun} 返 false:身体让给别人(她可以站着看你、可以被
- * 反射拿去吃东西),主人一走远它自己就醒过来。这跟原版 {@code Goal.canUse()} 是
- * 同一个道理——<b>休眠不是失败</b>,不发结果、不腾槽、不惊动模型。
- *
- * <h2>够不着就报出去</h2>
- * 跟着走默认不动世界(见 {@code TerrainPermit}),于是"没有路"多半不是暂时的:隔着断崖、
- * 在屋里、差几格高——退避多少次都一样。那就以失败收场,把原因连同要动的方块清单交给
- * 模型,它决定带 {@code may_alter_terrain} 重发、换个办法、或者告诉主人。一个明确的失败
- * 原因不能攥在手里站着空算。主人飞在半空时跟的是他脚下的地面({@link #anchor}),
- * 一般够得着;真够不着也照样报。
- *
- * <h2>目标没了,主人和别人不一样</h2>
- * <b>主人下线是暂时的</b>——他会回来,所以休眠等着,这也是常驻该有的样子。而点名跟的
- * 那只羊死了、或者走出加载范围被卸载了,再等也不会回来:那时收尾报给模型,让它决定下
- * 一步。一套逻辑通吃的话,要么她对着一只死羊站到天荒地老,要么主人一下线任务就没了。
- *
- * <p><b>{@code nav.tick()} 的返回值一个都不能丢</b>:{@link PlayerNav} 的 FAILED 是
- * <b>终局闩</b>(一经裁定即稳定持续),不接住就是她永久定在原地而 {@code task_status}
- * 照说"执行中"——主人完全看不出她卡住了。这里接住的方式就是把它变成任务的结果。
+ * 持续跟随已经选定的实体，靠近后暂时不占控制权，目标再离远一些才重新起步。目标丢失或路走不通会失败。
+ * 空中目标的导航位置取脚下地面，但开始和停止判断仍用到实体本体的距离；这两套要求目前并不一致。
+ * 旧的空目标分支只会等待，现用工具必须指定实体，不会自动找到所谓默认主人。
  */
 public final class FollowCompanionTask extends AbstractCompanionTask<FollowTaskRecord> {
 
@@ -118,10 +95,7 @@ public final class FollowCompanionTask extends AbstractCompanionTask<FollowTaskR
     }
 
     /**
-     * 跟着谁。没点名就是主人;点名了就按 id 现查——每次都查,因为它随时可能死掉或者
-     * 走出加载范围,而那两件事对我们是同一个答案:不在了。
-     *
-     * <p>不同维度天然落进 null:客户端只保留当前维度已加载的实体。
+     * 每次用运行编号找到目标，再用 UUID 确认还是原来那一只；编号被重用时不会改跟其他实体。
      */
     private Entity target(LocalPlayer companion) {
         if (r.entityId == null) {
@@ -142,14 +116,7 @@ public final class FollowCompanionTask extends AbstractCompanionTask<FollowTaskR
     }
 
     /**
-     * 目标悬空(飞行/跳跃/坐船/本来就会飞)时跟到它<b>脚下的地面</b>。
-     *
-     * <p>{@link NavGoal#nearGround} 只认 ±1 格高差,直接追主人所在的那一格,人在半空就
-     * 永远够不着——这正是「飞起来她就不跟了」的来源。往下找到第一块能站的地面,
-     * 「就近跟随」在他头顶下方成立。
-     *
-     * <p>找不到(悬在虚空/海面上)就返回扫到的最低点:那一格同样够不着,于是照实报,
-     * 而不是假装找到了。
+     * 目标在空中时，向下找最多六十四格，把导航引向它脚下的地面；遇到不能穿过的格子也停止下探。
      */
     private BlockPos anchor(Entity target) {
         BlockPos at = target.blockPosition();

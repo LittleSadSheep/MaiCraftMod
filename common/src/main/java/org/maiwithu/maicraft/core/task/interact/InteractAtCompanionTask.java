@@ -24,34 +24,34 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code interact_at} on the player body — the point-aimed native interaction (BLOCK + AIR).
- * Walk within reach of the aim (if one is given), look at it, fire ONE native crosshair
- * raytrace ({@link Interaction#nativeRaytrace}) and press the requested mouse button on
- * whatever it resolves to ({@link Interaction#forHit}): break / activate the block hit, or —
- * on a clear-air aim — use the held item in that direction (throw / eat / draw). The mouse
- * model is the two record fields {@code button} (left/right) × {@code holdTicks} (tap/hold).
+ * 在当前位置对准方块、液体或前方按键。先选物品、等镜头真正对准，再按实际射线命中的目标执行。
+ * 它当前不会自己走过去；超出工作距离就失败，让上层先移动。若规定了目标原来的方块和操作后的方块，会在对应阶段检查。
  */
 public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTaskRecord> {
 
     private static final double REACH = 4.5;
     private static final double REACH_SQR = REACH * REACH;
     private static final double WALK_SPEED = 1.0;
-    /** Reposition-rung stance radius: any feet cell this close to the aim (< {@link #REACH},
-     *  so an accepted stance is still within interact reach). Never wider than the goal. */
+    /**
+     * 当前这次点击或持续按住的执行过程。
+     */
 
     private Interaction interaction;
     private final org.maiwithu.maicraft.core.task.FirstPersonActionGate selection =
             new org.maiwithu.maicraft.core.task.FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private boolean itemSelected;
-    /** Stable visible point selected from the target outline; avoids centre-only false occlusion. */
+    /**
+     * 在目标可见轮廓上挑出的瞄准点，避免只瞄方块中心而被部分遮挡。
+     */
     private Vec3 aimPoint;
     /** 按键前的世界快照,收尾时对账出"真发生了什么"(见 {@link PressReceipt})。 */
     private PressReceipt receipt;
     private java.util.List<String> changes = List.of();
-    // ---- bounded recovery state (fields, so a Suspendable mid-rung suspend/resume
-    //      picks straight back up: the counter and the rebuilt nav both survive) ----
-    /** The FIRST nav failure's reason, preserved so the final give-up keeps the original wording. */
+    // 下面保存持续按住的结束时间和结果文字；这个类当前没有重新寻路的过程。
+    /**
+     * 固定时长的按住动作在这个游戏刻松开；-1 表示没有固定结束刻。
+     */
     private long holdUntil = -1;       // game tick to release a fixed-duration hold (holdTicks > 0)
     private String successMsg = "done";
     // A right-click that activated a real block (a station's GUI): captured so the
@@ -213,6 +213,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         };
     }
 
+    // 如果调用方要求操作后出现某种方块，再检查一次；未提供这项要求时，这里直接接受执行结束。
     private TaskState verifiedOutcome() {
         if (r.expectedBlock != null && (r.aim == null || !player.level().getBlockState(r.aim).is(r.expectedBlock))) {
             fail("interaction completed without producing the required block "
@@ -222,7 +223,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         return TaskState.SUCCESS;
     }
 
-    /** In-ladder nav causes the reposition rung handles; anything else kicks straight back to the LLM. */
+    /**
+     * 旧的换站位失败分类，目前本类没有调用它；实体交互类中另有仍在使用的版本。
+     */
     private static boolean repositionable(FailureType type) {
         return type == FailureType.NO_PATH || type == FailureType.TERRAIN_BLOCKED
                 || type == FailureType.BOXED_IN
@@ -234,6 +237,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 ? Interaction.Button.ATTACK : Interaction.Button.USE;
     }
 
+    // 先要求身体站稳、在水中或坐在载具上。水桶按实际射线和玩家触及范围检查，普通点击仍按固定距离比较方块中心。
     private boolean withinReach() {
         var item = r.item == null ? player.getMainHandItem().getItem() : r.item;
         if (button() == Interaction.Button.USE && FirstPersonInteractionTargeting.usesBucketRay(item)) {
@@ -253,9 +257,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     }
 
     /**
-     * 收尾对账:回执只报事实,不判成败。"按键被消费"不等于"发生了什么"——
-     * 船可以吃掉点击却因站位碰撞一无所成,此前这里会报一句裸的成功,模型
-     * 就当船已经放下了。什么都没变时明说,她自己决定挪个位置再试还是放弃。
+     * 比较按键前后观察到的变化，并写进结果。没有变化时明确说明，但这份差异本身不决定动作成功与否。
      */
     private String settle() {
         changes = receipt == null ? List.of() : receipt.diff(player);

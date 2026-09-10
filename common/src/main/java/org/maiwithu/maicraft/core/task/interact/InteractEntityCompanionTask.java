@@ -22,30 +22,32 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code interact_entity} on the player body: the entity-aimed native interaction.
- * It auto-paths and follows the live entity, then aims at it and presses the
- * requested mouse button only when the native raytrace reaches that entity.
- * A wall in between blocks it, and the task repositions instead of acting on
- * whatever the ray returns. LEFT+hold repeats the native attack until the hold
- * ends, the target dies, or the task times out.
+ * 先靠近选定实体，跟随它的位置，等真实准星命中它后再执行左键或右键。
+ * 第一次靠近失败时允许在目标附近换一次站位；物品选择、持续按住和收尾结果也由这次任务保留。
  */
 public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEntityTaskRecord> {
 
     private static final double REACH = 3.0;            // vanilla entity interaction range
     private static final double REACH_SQR = REACH * REACH;
     private static final double WALK_SPEED = 1.0;
-    /** Reposition-rung stance radius: any feet cell this close to the entity's cell
-     *  (< {@link #REACH}, so an accepted stance is still within interact reach). */
+    /**
+     * 第一次路线走不通时，第二次允许站在目标附近这个范围内，但实际操作仍要求距离和视线通过。
+     */
     private static final double REPOSITION_RADIUS = 2.5;
-    /** The reposition rung runs at most once. */
+    /**
+     * 最多额外尝试一次站位；耗尽后把原失败原因一起返回。
+     */
     private static final int MAX_REPOSITIONS = 1;
 
     private Entity entity;
-    // ---- bounded recovery state (fields, so a Suspendable mid-rung suspend/resume
-    //      picks straight back up: the counter and the rebuilt nav both survive) ----
-    /** Executions of the reposition rung so far (capped at {@link #MAX_REPOSITIONS}). */
+    // 保存换站位次数和第一次失败的原因，暂停恢复时继续同一次尝试。
+    /**
+     * 已经额外换过几次站位。
+     */
     private int repositionAttempts;
-    /** The FIRST nav failure's reason, preserved so the final give-up keeps the original wording. */
+    /**
+     * 保留第一次失败原因，最终结果同时说明后续尝试为何失败。
+     */
     private String firstNavFailReason;
     private Interaction interaction;
     private final org.maiwithu.maicraft.core.task.FirstPersonActionGate selection =
@@ -180,19 +182,8 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     }
 
     /**
-     * Bounded recovery — ONE reposition rung, as an inline attempt counter (a single
-     * rung doesn't warrant {@code RecoveryLadder}'s child-task plumbing). On an
-     * in-ladder nav cause ({@code NO_PATH} / {@code BOXED_IN} / {@code OUT_OF_REACH})
-     * retry the SAME bounded goal once with a looser stance goal — {@link NavGoal#near}
-     * within {@link #REPOSITION_RADIUS} (&lt; {@link #REACH}) of the entity's LIVE cell,
-     * so "can't stand exactly next to it" becomes "stand anywhere within interact reach".
-     * The goal supplier re-reads the entity each tick, so a target that merely MOVED
-     * while we repositioned is tracked (the nav replans), not failed; a genuinely gone
-     * entity never reaches this seam — {@link #reached()} routes it to {@link #act()},
-     * which reports {@code TARGET_LOST} immediately (no ladder). Never widens the
-     * search, never acquires anything. Exhausted (or a cause no rung handles), give up
-     * preserving the original "can't reach {name}: {reason}" wording plus a note of
-     * what was tried, carrying the nav's failType.
+     * 只有无路、够不着或站位不合适等失败才尝试换一次站位；仍跟踪同一实体，不另找目标。
+     * 再次失败时保留第一次原因，并附上这次尝试的结果。
      */
     @Override
     protected TaskState handleNavFailure(FailureType type, String reason) {
@@ -215,7 +206,9 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         return TaskState.FAILED;
     }
 
-    /** In-ladder nav causes the reposition rung handles; anything else kicks straight back to the LLM. */
+    /**
+     * 这些失败可能通过换一个站位解决；其他失败直接结束。
+     */
     private static boolean repositionable(FailureType type) {
         return type == FailureType.NO_PATH || type == FailureType.TERRAIN_BLOCKED
                 || type == FailureType.BOXED_IN
@@ -227,13 +220,15 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
                 ? Interaction.Button.ATTACK : Interaction.Button.USE;
     }
 
+    // 当前按双方位置之间的三格距离粗筛，没有读取玩家属性修改后的实体触及范围。
     private boolean withinReach() {
         return bodySettled() && entity != null
                 && player.distanceToSqr(entity.position()) <= REACH_SQR;
     }
 
-    /** In arm's reach AND no block between our eyes and the entity (vanilla hasLineOfSight) —
-     *  the nav arrival gate, so the body walks around a wall instead of freezing in front of it. */
+    /**
+     * 要求身体状态允许操作、距离够近，而且眼睛到目标没有方块遮挡；真正点击前还要让准星命中该实体。
+     */
     private boolean inReachAndLos() {
         return withinReach() && player.hasLineOfSight(entity);
     }

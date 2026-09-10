@@ -8,21 +8,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 
 /**
- * Typed descriptor for {@code interact_at} — the point-aimed half of the native
- * crosshair interaction (the BLOCK and AIR columns of vanilla's
- * {@code startAttack}/{@code startUseItem}; the ENTITY column is {@code interact_entity}).
- *
- * <p>Aim at a world point and press a mouse button; the native raytrace resolves whatever
- * is actually under the aim:
- * <ul>
- *   <li>{@link Button#LEFT} (attack): break the block hit (held until gone); air = nothing.</li>
- *   <li>{@link Button#RIGHT} (use): activate the block hit (lever / door / modded machine), or
- *       — when the aim is clear air — use the held item in that direction (throw an ender
- *       pearl, eat, draw a bow).</li>
- * </ul>
- * {@code aim} null = use the body's CURRENT facing (in-air use with no target, e.g. eating).
- * {@code holdTicks}: 0 = a single press; &gt;0 = hold that many ticks (modded crank / bow draw);
- * -1 = hold until the action self-completes or the task times out.
+ * 保存原地点击的方向、按键、物品和按住时间。没有坐标时沿当前朝向操作。
+ * expectedBlock 要求操作后出现某种方块；requiredBlock 要求操作前目标仍是指定方块，两者用途不同。
  */
 public final class InteractAtTaskRecord extends TaskRecord {
 
@@ -33,7 +20,9 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public final int holdTicks;
     public final Item item;        // null → use whatever is already in hand; else equip this first
     public final Block expectedBlock;
-    /** Optional identity assertion immediately before native use, distinct from its world outcome. */
+    /**
+     * 执行原版使用前再确认目标身份；它不是操作后的结果要求。
+     */
     public final Block requiredBlock;
 
     public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,

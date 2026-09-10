@@ -12,7 +12,9 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** World-action tool (raw MaiCraftTool): press a mouse button on a moving entity. */
+/**
+ * 接收内部 interact_entity 请求，交给 BlockActionOps 建立对实体的点击任务；靠近、对准和实际操作由执行任务完成。
+ */
 public final class InteractEntityTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

@@ -14,12 +14,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 跟着走——纯<b>常驻</b>工具:它没有"干完"这回事,只有被新任务换掉。
- *
- * <p>所以它没有 count、没有期限。派下去之后她就一直跟着,直到收到别的任务
- * ({@code mine} / {@code fish} / ……都会顶掉它)。
- *
- * <p>目标必须是客户端当前已加载的显式实体 id；村民、狼、别的玩家都可以。
+ * 接收内部跟随请求，立即核对目标已加载，并把它的 UUID 一起存入请求，供以后恢复时检查身份。
  */
 public final class FollowTool implements MaiCraftTool {
 

@@ -12,7 +12,9 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** World-action tool (raw MaiCraftTool): aim at a world point and press a mouse button. */
+/**
+ * 接收内部 interact_at 请求，交给 BlockActionOps 检查参数并建立原地点击任务；坐标、物品和结果要求原样传下去。
+ */
 public final class InteractAtTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();
