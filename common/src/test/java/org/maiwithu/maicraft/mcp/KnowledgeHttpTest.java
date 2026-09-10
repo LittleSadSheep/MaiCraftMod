@@ -36,14 +36,17 @@ public final class KnowledgeHttpTest {
             JsonObject list = send("resources/list", new JsonObject()).getAsJsonObject("result");
             String scene = null;
             boolean attention = false;
+            boolean chatflow = false;
             for (var element : list.getAsJsonArray("resources")) {
                 var row = element.getAsJsonObject();
                 check(!row.has("text"), "resources/list must not preload tutorial bodies");
                 String uri = row.get("uri").getAsString();
                 attention |= uri.equals("maicraft://attention");
+                chatflow |= uri.equals("maicraft://chatflow");
                 if (uri.startsWith(PonderKnowledgeSource.SCENE)) scene = uri;
             }
-            check(attention && scene != null && PonderFixture.compiled == 0, "keep attention and discover foreign Ponder scenes");
+            check(attention && chatflow && scene != null && PonderFixture.compiled == 0,
+                    "keep attention and chatflow, and discover foreign Ponder scenes");
             var templates = send("resources/templates/list", new JsonObject()).getAsJsonObject("result");
             var templateMimes = new java.util.HashMap<String, String>();
             templates.getAsJsonArray("resourceTemplates").forEach(element -> {
@@ -70,6 +73,8 @@ public final class KnowledgeHttpTest {
             check(send("resources/list", json("{\"cursor\":\"broken\"}")).getAsJsonObject("error").get("code").getAsInt() == -32602, "invalid cursor code");
             check(send("resources/subscribe", uri("maicraft://attention")).has("result"), "existing subscriptions preserved");
             check(send("resources/read", uri("maicraft://attention")).getAsJsonObject("result").has("contents"), "attention reads preserved");
+            check(send("resources/subscribe", uri("maicraft://chatflow")).has("result"), "chatflow subscription accepted");
+            check(send("resources/read", uri("maicraft://chatflow")).getAsJsonObject("result").has("contents"), "chatflow reads preserved");
             var invalid = send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"situation\",\"resource_uri\":\"maicraft://knowledge/index\"}}"));
             check(invalid.getAsJsonObject("result").get("isError").getAsBoolean(), "knowledge fields cannot be silently ignored by other views");
         }
@@ -100,5 +105,7 @@ public final class KnowledgeHttpTest {
         public CompletionStage<JsonElement> task(JsonObject args) { throw new AssertionError("No tasks"); }
         public CompletionStage<JsonElement> readAttention() { return CompletableFuture.completedFuture(new JsonObject()); }
         public AutoCloseable subscribeAttention(Consumer<JsonElement> listener) { return () -> {}; }
+        public CompletionStage<JsonElement> readChat() { return CompletableFuture.completedFuture(new JsonObject()); }
+        public AutoCloseable subscribeChat(Consumer<JsonElement> listener) { return () -> {}; }
     }
 }

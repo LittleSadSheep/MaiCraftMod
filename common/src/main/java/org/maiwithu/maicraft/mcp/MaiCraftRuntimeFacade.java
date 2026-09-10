@@ -160,6 +160,12 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return onClient(() -> attentionOnClient(args));
     }
 
+    @Override
+    public CompletionStage<JsonElement> readChat() {
+        // 快照读最近五十条聊天；聊天缓冲不依赖身体，没进世界也能读已收到的消息。
+        return onClient(() -> intents.chat(0, 50, null));
+    }
+
     @Override public CompletionStage<JsonElement> knowledge(JsonObject arguments) {
         return onClient(() -> knowledge.request(arguments));
     }
@@ -167,6 +173,11 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     @Override
     public AutoCloseable subscribeAttention(Consumer<JsonElement> listener) {
         return intents.subscribeAttention(listener);
+    }
+
+    @Override
+    public AutoCloseable subscribeChat(Consumer<JsonElement> listener) {
+        return intents.subscribeChat(listener);
     }
 
     private JsonElement perceiveOnClient(JsonObject arguments) {

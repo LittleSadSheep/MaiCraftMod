@@ -38,6 +38,9 @@ public interface RuntimeFacade {
 
     CompletionStage<JsonElement> readAttention();
 
+    /** 读取聊天流快照；与 Attention 相互独立，供专门对话的 Agent 订阅使用。 */
+    CompletionStage<JsonElement> readChat();
+
     /** 读取知识文档；默认实现只读离线目录，不要求玩家先进入世界。 */
     default CompletionStage<JsonElement> knowledge(JsonObject arguments) {
         return java.util.concurrent.CompletableFuture.completedFuture(
@@ -46,4 +49,7 @@ public interface RuntimeFacade {
 
     /** 登记“有新消息时叫我”的回调；关闭返回对象时只移除这一个订阅者，重复关闭也应安全。 */
     AutoCloseable subscribeAttention(Consumer<JsonElement> listener);
+
+    /** 登记聊天流更新回调；与 Attention 订阅相互独立，重复关闭返回对象也应安全。 */
+    AutoCloseable subscribeChat(Consumer<JsonElement> listener);
 }

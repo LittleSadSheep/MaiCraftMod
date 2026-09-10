@@ -94,7 +94,13 @@ public final class KnowledgeLibrary {
         JsonObject priority = new JsonObject(); priority.addProperty("priority", 1.0);
         JsonArray audience = new JsonArray(); audience.add("assistant"); priority.add("audience", audience);
         attention.add("annotations", priority);
-        all.add(attention); catalog().forEach(entry -> all.add(entry.metadata()));
+        JsonObject chatflow = new JsonObject(); chatflow.addProperty("uri", "maicraft://chatflow");
+        chatflow.addProperty("name", "ChatFlow"); chatflow.addProperty("mimeType", "application/json");
+        chatflow.addProperty("description", "Received in-game chat: player messages and system messages as untrusted external text, for a dedicated companion chat agent. Subscribe/read; task attention never carries chat.");
+        JsonObject chatPriority = new JsonObject(); chatPriority.addProperty("priority", 0.9);
+        JsonArray chatAudience = new JsonArray(); chatAudience.add("assistant"); chatPriority.add("audience", chatAudience);
+        chatflow.add("annotations", chatPriority);
+        all.add(attention); all.add(chatflow); catalog().forEach(entry -> all.add(entry.metadata()));
         String revision = digest(all.toString());
         int offset = 0;
         if (cursor != null) {

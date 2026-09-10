@@ -29,7 +29,9 @@ public final class AttentionHttpTest {
             var init = client.send(post(uri, null, 1, "initialize", new JsonObject()), HttpResponse.BodyHandlers.ofString());
             String session = init.headers().firstValue("MCP-Session-Id").orElseThrow();
             String instructions = json(init.body()).getAsJsonObject("result").get("instructions").getAsString();
-            check(instructions.contains("Attention is the primary") && instructions.contains("next_attention"), "host discovery prioritizes attention");
+            check(instructions.contains("Attention is the primary") && instructions.contains("next_attention")
+                            && instructions.contains("maicraft://chatflow"),
+                    "host discovery prioritizes attention and mentions chatflow");
             JsonObject resource = json("{\"uri\":\"maicraft://attention\"}");
             client.send(post(uri, session, 2, "resources/subscribe", resource), HttpResponse.BodyHandlers.ofString());
             // No publication is needed to catch up when the initial SSE stream opens.
@@ -41,6 +43,26 @@ public final class AttentionHttpTest {
             String body = json(read.body()).getAsJsonObject("result").getAsJsonArray("contents")
                     .get(0).getAsJsonObject().get("text").getAsString();
             check(json(body).get("wake_reason").getAsString().equals("task_terminal"), "reconnect signal leads to current state");
+            // ChatFlow 是独立可订阅资源：快照独立，两条门铃在同一条 SSE 流上互不挤占、按地址合并。
+            JsonObject chatResource = json("{\"uri\":\"maicraft://chatflow\"}");
+            client.send(post(uri, session, 4, "resources/subscribe", chatResource), HttpResponse.BodyHandlers.ofString());
+            var chatRead = client.send(post(uri, session, 5, "resources/read", chatResource), HttpResponse.BodyHandlers.ofString());
+            String chatBody = json(chatRead.body()).getAsJsonObject("result").getAsJsonArray("contents")
+                    .get(0).getAsJsonObject().get("text").getAsString();
+            check(json(chatBody).get("stream").getAsString().equals("chat"), "chatflow resource reads the chat snapshot");
+            var live = client.send(base(uri, session).header("Accept", "text/event-stream").GET().build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+            var lineExecutor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+            try (var input = live.body()) {
+                var reader = new BufferedReader(new InputStreamReader(input));
+                var catchUp = readUris(reader, lineExecutor, 2);
+                check(catchUp.contains("maicraft://attention") && catchUp.contains("maicraft://chatflow"),
+                        "reconnect catch-up delivers both subscribed resources");
+                runtime.publish(); runtime.publish(); runtime.publishChat(); runtime.publishChat();
+                var liveUris = readUris(reader, lineExecutor, 2);
+                check(liveUris.contains("maicraft://attention") && liveUris.contains("maicraft://chatflow"),
+                        "doorbells coalesce per uri into one signal each");
+            } finally { lineExecutor.shutdownNow(); }
             runtime.reason = "idle";
             JsonObject call = json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"attention\",\"wait_ms\":60000}}");
             var waiting = client.sendAsync(post(uri, session, 10, "tools/call", call), HttpResponse.BodyHandlers.ofString());
@@ -62,7 +84,8 @@ public final class AttentionHttpTest {
             waitingAgain.get(3, TimeUnit.SECONDS);
             check(active.isCancelled() && runtime.listeners.size() == 1, "session deletion releases outstanding waits");
         }
-        check(runtime.listeners.isEmpty(), "service shutdown detaches the last listener");
+        check(runtime.listeners.isEmpty() && runtime.chatListeners.isEmpty(),
+                "service shutdown detaches the last listener of each feed");
         System.out.println("AttentionHttpTest: passed");
     }
 
@@ -85,6 +108,23 @@ public final class AttentionHttpTest {
         } finally { executor.shutdownNow(); }
     }
 
+    private static java.util.List<String> readUris(BufferedReader reader,
+            java.util.concurrent.ExecutorService executor, int count) throws Exception {
+        var uris = new java.util.ArrayList<String>();
+        for (int i = 0; i < count; i++) {
+            var submitted = executor.submit(() -> {
+                String line;
+                while ((line = reader.readLine()) != null) if (line.startsWith("data: ")) return line.substring(6);
+                throw new AssertionError("stream ended without notification");
+            });
+            JsonObject signal = json(submitted.get(3, TimeUnit.SECONDS));
+            check(signal.get("method").getAsString().equals("notifications/resources/updated"),
+                    "standard resource update notification");
+            uris.add(signal.getAsJsonObject("params").get("uri").getAsString());
+        }
+        return uris;
+    }
+
     private static HttpRequest.Builder base(URI uri, String session) {
         var request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5));
         if (session != null) request.header("MCP-Session-Id", session).header("MCP-Protocol-Version", "2025-11-25");
@@ -101,13 +141,18 @@ public final class AttentionHttpTest {
 
     private static final class FakeRuntime implements RuntimeFacade {
         final CopyOnWriteArrayList<Consumer<JsonElement>> listeners = new CopyOnWriteArrayList<>();
+        final CopyOnWriteArrayList<Consumer<JsonElement>> chatListeners = new CopyOnWriteArrayList<>();
         final LinkedBlockingQueue<AttentionWait> waits = new LinkedBlockingQueue<>();
         volatile String reason = "idle";
 
         private JsonObject snapshot() {
             JsonObject result = new JsonObject(); result.addProperty("wake_reason", reason); return result;
         }
+        private JsonObject chatSnapshot() {
+            JsonObject result = new JsonObject(); result.addProperty("stream", "chat"); return result;
+        }
         void publish() { listeners.forEach(listener -> listener.accept(snapshot())); }
+        void publishChat() { chatListeners.forEach(listener -> listener.accept(chatSnapshot())); }
         public CompletionStage<JsonElement> perceive(JsonObject args) {
             AttentionWait wait = AttentionWait.start(this::snapshot, this::subscribeAttention, Runnable::run,
                     args.get("wait_ms").getAsInt());
@@ -116,6 +161,10 @@ public final class AttentionHttpTest {
         public CompletionStage<JsonElement> readAttention() { return CompletableFuture.completedFuture(snapshot()); }
         public AutoCloseable subscribeAttention(Consumer<JsonElement> listener) {
             listeners.add(listener); return () -> listeners.remove(listener);
+        }
+        public CompletionStage<JsonElement> readChat() { return CompletableFuture.completedFuture(chatSnapshot()); }
+        public AutoCloseable subscribeChat(Consumer<JsonElement> listener) {
+            chatListeners.add(listener); return () -> chatListeners.remove(listener);
         }
         public CompletionStage<JsonElement> plan(JsonObject args) { throw new AssertionError("no planning"); }
         public CompletionStage<JsonElement> execute(JsonObject args) { throw new AssertionError("no execution"); }

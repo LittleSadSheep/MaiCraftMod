@@ -35,9 +35,10 @@ public final class KnowledgeLibraryTest {
             if (!page.has("nextCursor")) break;
             list.add("cursor", page.get("nextCursor")); page = library.request(list);
         }
-        check(uris.size() == source.entries().size() + 4 && source.reads == 0
-                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT)),
-                "attention, builtins and all extension resources discovered without bodies");
+        check(uris.size() == source.entries().size() + 5 && source.reads == 0
+                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT,
+                        "maicraft://attention", "maicraft://chatflow")),
+                "attention, chatflow, builtins and all extension resources discovered without bodies");
         check(library.read(KnowledgeLibrary.BLUEPRINT).text().contains("schema_version"), "shared blueprint format available on demand");
         JsonObject search = request("search"); search.addProperty("query", "demo:machine"); search.addProperty("limit", 2);
         JsonObject hits = library.request(search);

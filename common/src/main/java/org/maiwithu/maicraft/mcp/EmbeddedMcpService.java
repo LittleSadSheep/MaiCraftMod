@@ -34,14 +34,15 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /**
  * 游戏进程里的 MCP 网络服务：接收请求、检查连接和格式，再把实际工作交给 RuntimeFacade。
@@ -49,6 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class EmbeddedMcpService implements AutoCloseable {
     public static final URI ATTENTION_URI = URI.create("maicraft://attention");
+    public static final URI CHATFLOW_URI = URI.create("maicraft://chatflow");
 
     private static final Gson GSON = new Gson();
     private static final String ENDPOINT = "/mcp";
@@ -72,6 +74,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private ExecutorService executor;
     private ScheduledExecutorService maintenance;
     private AutoCloseable attentionSubscription;
+    private AutoCloseable chatSubscription;
     private Thread shutdownHook;
 
     public EmbeddedMcpService(McpConfig config, RuntimeFacade runtime) {
@@ -92,12 +95,14 @@ public final class EmbeddedMcpService implements AutoCloseable {
         );
         HttpServer newServer = null;
         AutoCloseable newSubscription = null;
+        AutoCloseable newChatSubscription = null;
         try {
             // 先在局部变量里准备各部分；任何一步失败都关闭已创建的资源，全部成功后才记为服务已启动。
             newServer = HttpServer.create(new InetSocketAddress(config.host(), config.port()), 0);
             newServer.createContext(ENDPOINT, this::handle);
             newServer.setExecutor(newExecutor);
             newSubscription = runtime.subscribeAttention(ignored -> publishAttentionUpdate());
+            newChatSubscription = runtime.subscribeChat(ignored -> publishChatUpdate());
             newServer.start();
             newMaintenance.scheduleWithFixedDelay(
                     this::reapSessionsSafely,
@@ -109,9 +114,11 @@ public final class EmbeddedMcpService implements AutoCloseable {
             maintenance = newMaintenance;
             server = newServer;
             attentionSubscription = newSubscription;
+            chatSubscription = newChatSubscription;
             installShutdownHook();
         } catch (IOException | RuntimeException exception) {
             closeQuietly(newSubscription);
+            closeQuietly(newChatSubscription);
             if (newServer != null) newServer.stop(0);
             newExecutor.shutdownNow();
             newMaintenance.shutdownNow();
@@ -142,6 +149,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
         AutoCloseable subscription = attentionSubscription;
         attentionSubscription = null;
         closeQuietly(subscription);
+        AutoCloseable chat = chatSubscription;
+        chatSubscription = null;
+        closeQuietly(chat);
 
         ScheduledExecutorService currentMaintenance = maintenance;
         maintenance = null;
@@ -318,7 +328,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 "Timeout only ends a wait; continue quietly while running. Handle decisions, pauses and " +
                 "runtime/task unavailability rather than waiting forever. Inspect resync_required and current " +
                 "task state after lost history or a stream reset. Hosts may subscribe to maicraft://attention " +
-                "and read it on updates; notifications themselves do not run the model. " +
+                "(task monitor) and maicraft://chatflow (received game chat for a dedicated companion agent) " +
+                "and read them on updates; notifications themselves do not run the model. " +
                 "For block behavior and Ponder tutorials, start with maicraft://knowledge/index. " +
                 "Discover metadata using resources/list or perceive(view=knowledge, focus=item ID/name), " +
                 "then read one returned URI using resources/read or perceive(view=knowledge, resource_uri=...). " +
@@ -446,19 +457,25 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private JsonObject readResource(JsonObject params) {
-        // Attention 资源读任务消息；其他地址交给知识库。这里只读资源，不启动目标执行。
+        // Attention 和 ChatFlow 资源读各自的快照；其他地址交给知识库。这里只读资源，不启动目标执行。
         only(params, "uri", "_meta");
         optionalMeta(params);
         String uri = requiredString(params, "uri");
-        if (!ATTENTION_URI.toString().equals(uri)) {
-            JsonObject request = new JsonObject(); request.addProperty("action", "read"); request.addProperty("uri", uri);
-            return knowledgeRequest(request);
+        if (ATTENTION_URI.toString().equals(uri)) {
+            return jsonResource(ATTENTION_URI, runtime.readAttention());
         }
-        CompletionStage<JsonElement> stage = runtime.readAttention();
+        if (CHATFLOW_URI.toString().equals(uri)) {
+            return jsonResource(CHATFLOW_URI, runtime.readChat());
+        }
+        JsonObject request = new JsonObject(); request.addProperty("action", "read"); request.addProperty("uri", uri);
+        return knowledgeRequest(request);
+    }
+
+    private JsonObject jsonResource(URI uri, CompletionStage<JsonElement> stage) {
         try {
             JsonElement snapshot = await(stage, config.requestTimeout());
             JsonObject content = new JsonObject();
-            content.addProperty("uri", ATTENTION_URI.toString());
+            content.addProperty("uri", uri.toString());
             content.addProperty("mimeType", "application/json");
             content.addProperty("text", GSON.toJson(nonNull(snapshot)));
             JsonArray contents = new JsonArray();
@@ -472,7 +489,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         } catch (InterruptedException exception) {
             cancelRuntimeCall(stage);
             Thread.currentThread().interrupt();
-            throw new RpcException(-32001, "The MCP transport stopped while reading attention");
+            throw new RpcException(-32001, "The MCP transport stopped while reading " + uri);
         } catch (Exception exception) {
             throw new RpcException(-32603, message(unwrap(exception)));
         }
@@ -481,9 +498,10 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private JsonObject subscribeResource(Session session, JsonObject params) {
         only(params, "uri", "_meta");
         optionalMeta(params);
-        requireAttentionUri(params);
-        session.attentionSubscribed.set(true);
-        session.enqueue(attentionNotification());
+        URI uri = requireSubscribableUri(params);
+        if (ATTENTION_URI.equals(uri)) session.attentionSubscribed.set(true);
+        else session.chatSubscribed.set(true);
+        session.enqueue(uri.toString(), resourceNotification(uri));
         return new JsonObject();
     }
 
@@ -523,8 +541,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private JsonObject unsubscribeResource(Session session, JsonObject params) {
         only(params, "uri", "_meta");
         optionalMeta(params);
-        requireAttentionUri(params);
-        session.attentionSubscribed.set(false);
+        URI uri = requireSubscribableUri(params);
+        if (ATTENTION_URI.equals(uri)) session.attentionSubscribed.set(false);
+        else session.chatSubscribed.set(false);
         return new JsonObject();
     }
 
@@ -550,7 +569,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
         SseConnection connection = new SseConnection(exchange, session::touch);
         session.attach(connection);
         // Catch up after subscribing before GET, or after events occurred while SSE was disconnected.
-        if (session.attentionSubscribed.get()) connection.enqueue(attentionNotification());
+        if (session.attentionSubscribed.get()) {
+            connection.enqueue(ATTENTION_URI.toString(), resourceNotification(ATTENTION_URI));
+        }
+        if (session.chatSubscribed.get()) {
+            connection.enqueue(CHATFLOW_URI.toString(), resourceNotification(CHATFLOW_URI));
+        }
         try {
             connection.writeLoop();
         } catch (InterruptedException exception) {
@@ -572,17 +596,25 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void publishAttentionUpdate() {
+        publishResourceUpdate(ATTENTION_URI, session -> session.attentionSubscribed.get());
+    }
+
+    private void publishChatUpdate() {
+        publishResourceUpdate(CHATFLOW_URI, session -> session.chatSubscribed.get());
+    }
+
+    private void publishResourceUpdate(URI uri, Predicate<Session> subscribed) {
         // 游戏线程只把通知放进队列，不能在这里向慢网络连接写数据，否则会拖住游戏更新。
-        JsonObject notification = attentionNotification();
+        JsonObject notification = resourceNotification(uri);
         sessions.values().forEach(session -> {
             // Never perform socket work on the Minecraft publication thread.
-            if (session.attentionSubscribed.get()) session.enqueue(notification);
+            if (subscribed.test(session)) session.enqueue(uri.toString(), notification);
         });
     }
 
-    private static JsonObject attentionNotification() {
+    private static JsonObject resourceNotification(URI uri) {
         JsonObject params = new JsonObject();
-        params.addProperty("uri", ATTENTION_URI.toString());
+        params.addProperty("uri", uri.toString());
         JsonObject notification = new JsonObject();
         notification.addProperty("jsonrpc", "2.0");
         notification.addProperty("method", "notifications/resources/updated");
@@ -912,12 +944,13 @@ public final class EmbeddedMcpService implements AutoCloseable {
         });
     }
 
-    private static void requireAttentionUri(JsonObject params) {
-        if (!ATTENTION_URI.toString().equals(requiredString(params, "uri"))) {
-            if (requiredString(params, "uri").startsWith("maicraft://knowledge/"))
-                throw new RpcException(-32602, "Knowledge is read on demand; resource update subscriptions are supported for maicraft://attention only");
-            throw new RpcException(-32002, "Resource not found");
-        }
+    private static URI requireSubscribableUri(JsonObject params) {
+        String uri = requiredString(params, "uri");
+        if (ATTENTION_URI.toString().equals(uri)) return ATTENTION_URI;
+        if (CHATFLOW_URI.toString().equals(uri)) return CHATFLOW_URI;
+        if (uri.startsWith("maicraft://knowledge/"))
+            throw new RpcException(-32602, "Knowledge is read on demand; resource update subscriptions are supported for maicraft://attention and maicraft://chatflow only");
+        throw new RpcException(-32002, "Resource not found");
     }
 
     private static JsonObject success(JsonElement id, JsonElement result) {
@@ -1006,6 +1039,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         private final String id;
         private final String version;
         private final AtomicBoolean attentionSubscribed = new AtomicBoolean();
+        private final AtomicBoolean chatSubscribed = new AtomicBoolean();
         private final AtomicBoolean initialized = new AtomicBoolean();
         private final AtomicBoolean closed = new AtomicBoolean();
         private final AtomicReference<SseConnection> connection = new AtomicReference<>();
@@ -1049,9 +1083,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
             connection.compareAndSet(candidate, null);
         }
 
-        private boolean enqueue(JsonObject message) {
+        private boolean enqueue(String uri, JsonObject message) {
             SseConnection current = connection.get();
-            return current != null && current.enqueue(message);
+            return current != null && current.enqueue(uri, message);
         }
 
         private void close() {
@@ -1065,11 +1099,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static final class SseConnection implements AutoCloseable {
-        // 只留一个待发“有更新”通知就够了；客户端收到后会读取最新状态，不需要缓存每条提醒。
+        // 每个资源地址最多留一条待发“有更新”通知；客户端收到后会读取最新快照，不需要缓存每条提醒。
         private final HttpExchange exchange;
         private final OutputStream output;
         private final Runnable activity;
-        private final ArrayBlockingQueue<Outbound> outbound = new ArrayBlockingQueue<>(1);
+        private final Semaphore wakeups = new Semaphore(0);
+        private final ConcurrentMap<String, JsonObject> pending = new ConcurrentHashMap<>();
         private final AtomicBoolean done = new AtomicBoolean();
 
         private SseConnection(HttpExchange exchange, Runnable activity) throws IOException {
@@ -1078,14 +1113,15 @@ public final class EmbeddedMcpService implements AutoCloseable {
             this.activity = activity;
         }
 
-        private boolean enqueue(JsonObject message) {
+        private boolean enqueue(String uri, JsonObject message) {
             if (done.get()) return false;
-            Outbound update = new Outbound(message.deepCopy(), false);
-            if (outbound.offer(update)) return true;
 
-            // Resource-updated messages are level-triggered: one pending signal
-            // already tells the client to read the latest attention snapshot.
+            // Resource-updated messages are level-triggered: one pending signal per
+            // uri already tells the client to read the latest snapshot.  Coalescing
+            // by uri keeps an attention signal from displacing a chatflow signal.
             // Never wait for a slow reader and never perform socket work here.
+            pending.put(uri, message.deepCopy());
+            wakeups.release();
             return !done.get();
         }
 
@@ -1094,19 +1130,26 @@ public final class EmbeddedMcpService implements AutoCloseable {
             try {
                 writeComment("connected");
                 while (!done.get()) {
-                    Outbound next = outbound.poll(SSE_HEARTBEAT_SECONDS, TimeUnit.SECONDS);
-                    if (next == null) {
+                    if (!wakeups.tryAcquire(SSE_HEARTBEAT_SECONDS, TimeUnit.SECONDS)) {
                         writeComment("heartbeat");
-                    } else if (next.terminal()) {
-                        return;
-                    } else {
-                        writeMessage(next.message());
+                        continue;
                     }
+                    if (done.get()) return;
+                    JsonObject message;
+                    while ((message = pollPending()) != null) writeMessage(message);
                 }
             } catch (IOException ignored) {
                 // A disconnected or non-reading client is isolated to this GET
                 // handler.  Its session is detached in handleGet's finally block.
             }
+        }
+
+        private JsonObject pollPending() {
+            for (String uri : pending.keySet()) {
+                JsonObject message = pending.remove(uri);
+                if (message != null) return message;
+            }
+            return null;
         }
 
         private void writeMessage(JsonObject message) throws IOException {
@@ -1128,16 +1171,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
         @Override
         public void close() {
             if (!done.compareAndSet(false, true)) return;
-            outbound.clear();
-            outbound.offer(Outbound.CLOSE);
+            pending.clear();
+            wakeups.release();
             // No monitor is acquired and no writer completion is awaited.  This
             // makes session replacement, expiry, and stop() bounded even when a
             // client has stopped reading its SSE stream.
             exchange.close();
-        }
-
-        private record Outbound(JsonObject message, boolean terminal) {
-            private static final Outbound CLOSE = new Outbound(null, true);
         }
     }
 

@@ -44,7 +44,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 以上是服务器在 MCP `tools/list` 中注册的名称；客户端可以附加服务器前缀来区分不同连接。旧版使用的 `maicraft_` 工具名前缀已移除，升级后请让客户端重新获取工具列表，并更新固定工具名配置。
 
-执行后按返回的 `next_attention` 等待，读取响应中的 `task` 和 `wake_reason`，再按新的 `next_attention` 续等。Attention 直接引用任务记录，即使历史事件已被挤出缓存，也能返回仍保留的任务决策和最终结果；无需轮询 `task(get)` 或包装同步执行工具。原生资源订阅可使用 `maicraft://attention`，模型唤醒行为由宿主决定。
+执行后按返回的 `next_attention` 等待，读取响应中的 `task` 和 `wake_reason`，再按新的 `next_attention` 续等。Attention 直接引用任务记录，即使历史事件已被挤出缓存，也能返回仍保留的任务决策和最终结果；无需轮询 `task(get)` 或包装同步执行工具。原生资源订阅可使用 `maicraft://attention`（任务监控）和 `maicraft://chatflow`（收到的游戏内聊天，供专门对话的 Agent 使用），模型唤醒行为由宿主决定。
 
 四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
 
