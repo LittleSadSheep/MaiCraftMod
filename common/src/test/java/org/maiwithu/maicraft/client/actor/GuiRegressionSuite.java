@@ -39,6 +39,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildWorksitePlannerTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildStanceNavigationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildLayerFrontierTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildRegionsTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildFootingTest.main(args);
         org.maiwithu.maicraft.core.task.build.CreativeBuildInventoryTest.main(args);
         org.maiwithu.maicraft.core.task.build.CreativeBuildRetentionTest.main(args);
         CreativeBuildSupplyMenuTest.main(args);
