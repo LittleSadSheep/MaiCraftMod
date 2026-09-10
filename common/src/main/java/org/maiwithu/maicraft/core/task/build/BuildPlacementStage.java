@@ -22,13 +22,23 @@ final class BuildPlacementStage implements BlockGetter {
     private final Map<Long, BuildTaskRecord.Target> targets;
     private final BuildTaskRecord.Target active;
     private final boolean preflight;
+    private final boolean projectedSupport;
 
     BuildPlacementStage(BlockGetter world, Predicate<BlockPos> loaded,
                         Map<Long, BuildTaskRecord.Target> targets, BuildTaskRecord.Target active,
                         boolean preflight) {
-        this.world = world; this.loaded = loaded; this.targets = targets;
-        this.active = active; this.preflight = preflight;
+        this(world, loaded, targets, active, preflight, false);
     }
+
+    BuildPlacementStage(BlockGetter world, Predicate<BlockPos> loaded,
+                        Map<Long, BuildTaskRecord.Target> targets, BuildTaskRecord.Target active,
+                        boolean preflight, boolean projectedSupport) {
+        this.world = world; this.loaded = loaded; this.targets = targets;
+        this.active = active; this.preflight = preflight; this.projectedSupport = projectedSupport;
+    }
+
+    boolean projectedSupport() { return projectedSupport; }
+    boolean proposedAt(BlockPos pos) { return world instanceof BuildSupportWorld projection && projection.proposes(pos); }
 
     BlockState state(BlockPos pos) {
         // 没加载的格子当作屏障，不能据此推断那里有空位。

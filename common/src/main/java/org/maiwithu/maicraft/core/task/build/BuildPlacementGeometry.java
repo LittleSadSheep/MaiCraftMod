@@ -196,6 +196,28 @@ final class BuildPlacementGeometry {
         return true;
     }
 
+    /** A hypothetical support view can prove access, but never replaces the live placement/acknowledgement gate. */
+    static Gesture projectedGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
+                                         net.minecraft.world.level.BlockGetter projected,
+                                         Predicate<BlockPos> loaded, Vec3 feet) {
+        if (!(target.item() instanceof BlockItem) || !loaded.test(target.pos())) return null;
+        var stage = new BuildPlacementStage(projected, loaded, Map.of(), target, false, true);
+        if (!bodyClearFrom(player, target, stage, feet)) return null;
+        AABB body = player.getBoundingBox().move(feet.subtract(player.position())).deflate(1.0e-5);
+        for (GeneratedCell effect : generatedBy(target))
+            for (AABB shape : effect.expected().getCollisionShape(stage, effect.pos()).toAabbs())
+                if (shape.move(effect.pos()).intersects(body)) return null;
+        var out = new ArrayList<Gesture>(1);
+        for (Direction toward : SUPPORT_ORDER) {
+            BlockPos clicked = target.pos().relative(toward);
+            if (!stage.support(clicked, toward.getOpposite())) continue;
+            gesturesAt(player, target, stage, clicked, toward.getOpposite(), feet,
+                    false, true, true, ignored -> true, out);
+            if (!out.isEmpty()) return out.getFirst();
+        }
+        return null;
+    }
+
     private static List<Gesture> plan(LocalPlayer player, BuildTaskRecord.Target target,
                                       Map<Long, BuildTaskRecord.Target> targets, boolean firstOnly,
                                       Predicate<BlockPos> stanceAllowed) {
@@ -382,7 +404,36 @@ final class BuildPlacementGeometry {
         BlockHitResult hit = probe.shape().clip(eye, point, probe.clicked());
         if (hit == null || hit.isInside() || hit.getDirection() != probe.face()
                 || hit.getLocation().distanceToSqr(point) > 1.0e-6) return null;
+        if (stage.projectedSupport()) {
+            if (!stage.state(target.pos()).isAir() || !probe.clicked().relative(probe.face()).equals(target.pos())) return null;
+            NativePlacement predicted = predictPlacement(player, new ItemStack(target.item()), gesture.syntheticHit(),
+                    yaw, pitch, gesture.sneak(), target.pos(), stage.proposedAt(probe.clicked()));
+            return predicted != null && predicted.state() != null && (target.acceptsPlacedState(predicted.state())
+                    || isProgress(target, stage.state(target.pos()), predicted.state()))
+                    && projectedPlacementClear(player, target, stage, feet, predicted.state()) ? gesture : null;
+        }
         return (live ? provesLiveGesture(player, target, gesture) : provesGesture(player, target, gesture)) ? gesture : null;
+    }
+
+    private static boolean projectedPlacementClear(LocalPlayer player, BuildTaskRecord.Target target,
+                                                    BuildPlacementStage stage, Vec3 feet, BlockState predicted) {
+        double half = player.getBbWidth() / 2;
+        double height = Math.max(player.getBbHeight(), player.getDimensions(Pose.STANDING).height());
+        AABB body = new AABB(feet.x - half, feet.y, feet.z - half,
+                feet.x + half, feet.y + height, feet.z + half).deflate(1.0e-5);
+        for (AABB box : predicted.getCollisionShape(stage, target.pos()).toAabbs())
+            if (box.move(target.pos()).intersects(body)) return false;
+        var actual = generatedBy(new BuildTaskRecord.Target(predicted, target.item(), target.pos(),
+                target.label(), null, null, null));
+        var expected = generatedBy(target);
+        if (actual.size() != expected.size()) return false;
+        for (int i = 0; i < actual.size(); i++) {
+            var effect = actual.get(i);
+            if (!effect.pos().equals(expected.get(i).pos())) return false;
+            for (AABB box : effect.expected().getCollisionShape(stage, effect.pos()).toAabbs())
+                if (box.move(effect.pos()).intersects(body)) return false;
+        }
+        return true;
     }
 
     // 现场方案必须能预测出落在目标格的状态，并达到目标或形成允许的中间进度。
@@ -532,6 +583,12 @@ final class BuildPlacementGeometry {
     // 落点仍交给原版 BlockPlaceContext 决定；若物品会放到别的格子，不能强行把它解释成目标格。
     private static NativePlacement predictPlacement(LocalPlayer player, ItemStack stack, BlockHitResult hit,
                                                      float yaw, float pitch, boolean sneak, BlockPos target) {
+        return predictPlacement(player, stack, hit, yaw, pitch, sneak, target, false);
+    }
+
+    private static NativePlacement predictPlacement(LocalPlayer player, ItemStack stack, BlockHitResult hit,
+                                                     float yaw, float pitch, boolean sneak, BlockPos target,
+                                                     boolean projectedSupport) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
         Vec3 look = direction(yaw, pitch);
         Direction[] nearest = Direction.values();
@@ -542,6 +599,13 @@ final class BuildPlacementGeometry {
         try {
             BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(
                     player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
+                // Only the hypothetical full support's destination differs; execution still uses the real context.
+                @Override public BlockPos getClickedPos() {
+                    return projectedSupport ? hit.getBlockPos().relative(hit.getDirection()) : super.getClickedPos();
+                }
+                @Override public boolean replacingClickedOnBlock() {
+                    return !projectedSupport && super.replacingClickedOnBlock();
+                }
                 @Override public boolean isSecondaryUseActive() { return sneak; }
                 @Override public Direction getHorizontalDirection() {
                     return Direction.fromYRot(yaw);
