@@ -58,7 +58,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private static final int USE_TIMEOUT = 40;
 
     private enum Phase { PREFLIGHT, SELECT, CLEAR_NAV, CLEAR, PLACE_NAV, WORKSITE, SELECT_ITEM,
-        AIM, WAIT_USE, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, FINAL_STATE, ROUTE_VERIFY }
+        AIM, WAIT_USE, SUPPORT_VERIFY, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, FINAL_STATE, ROUTE_VERIFY }
     private record CellPlan(BuildTaskRecord.Target target,
                             List<BuildPlacementGeometry.GeneratedCell> generated) {
         CellPlan { generated = List.copyOf(generated); }
@@ -84,6 +84,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final List<CellPlan> plans = new ArrayList<>();
     private final Map<Long, BuildTaskRecord.Target> temporaryTargets = new LinkedHashMap<>();
     private final Map<Long, CellPlan> plansByPrimary = new LinkedHashMap<>();
+    private CellPlan supportedCell;
+    private List<BlockPos> supportChain = List.of();
+    private BlockState supportMaterial;
+    private BuildSupportAccess supportAccess;
+    private BuildPlacementGeometry.Gesture supportWitness;
+    private boolean supportProposal, supportStepApproved;
+    private Map<String, Object> supportAccessEvidence = Map.of();
     private final Map<Item, Integer> required = new LinkedHashMap<>();
     private final Map<Item, Integer> missing = new LinkedHashMap<>();
     private final List<Map<String, Object>> unsupported = new ArrayList<>();
@@ -228,6 +235,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             case PLACE_NAV -> placeNavTick(); case SELECT_ITEM -> selectItemTick();
             case WORKSITE -> worksiteTick();
             case AIM -> aimTick(); case WAIT_USE -> waitUseTick();
+            case SUPPORT_VERIFY -> supportVerifyTick();
             case CLEAR_CREATIVE -> clearCreativeTick(); case VERIFY -> verifyTick();
             case SCAFFOLD_SELECT -> scaffoldSelectTick(); case SCAFFOLD_NAV -> scaffoldNavTick();
             case SCAFFOLD_BREAK -> scaffoldBreakTick();
@@ -397,15 +405,16 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState selectTick() {
         // 找下一格不符合蓝图的位置，先清掉冲突方块，再选择放置手法；整轮做完进入成品复查。
         resetCell();
-        promoteConstructionLayer();
-        retainUsefulWorksite();
+        if (supportedCell == null) { promoteConstructionLayer(); retainUsefulWorksite(); }
         // 留在当前尚未完成的施工层，把这一站位能顺手放到的格子做完，再继续队列。
-        if (queueAt < queue.size() && !isTemporary(queue.get(queueAt))
+        if (supportedCell == null && queueAt < queue.size() && !isTemporary(queue.get(queueAt))
                 && selectNearbyPlacement(worksite == null ? null : worksite.feet()))
             return TaskState.RUNNING;
         while (queueAt < queue.size()) {
             cell = queue.get(queueAt);
-            if (constructionMatches(cell.target(), cell.generated())) { markComplete(cell); queueAt++; continue; }
+            if (constructionMatches(cell.target(), cell.generated())) {
+                markComplete(cell); if (cell == supportedCell) releaseSupportPlan(); queueAt++; continue;
+            }
             if (isTemporary(cell) && (!player.level().isLoaded(cell.target().pos())
                     || !scaffoldPermitted(cell.target().pos(), null))) {
                 failAt(cell.target().pos(), "temporary support cell changed or gained protection",
@@ -534,7 +543,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (useCount > 0) { worksite = null; worksiteSearch = null; worksiteSearched = true; }
         Vec3 approaching = worksite != null ? worksite.feet()
                 : nav != null && gesture != null ? Vec3.atBottomCenterOf(gesture.stance()) : null;
-        if (useCount == 0 && !isTemporary(cell) && selectNearbyPlacement(approaching)) return TaskState.RUNNING;
+        if (supportedCell == null && useCount == 0 && !isTemporary(cell) && selectNearbyPlacement(approaching)) return TaskState.RUNNING;
         BuildPlacementGeometry.Gesture nearby = BuildPlacementGeometry.currentGesture(player, cell.target(), targets,
                 candidate -> placementAttempts.allows(cell.target(), candidate));
         if (nearby != null) {
@@ -544,11 +553,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         // 一种放法不通就试下一种；站位必须精确到指定格，不能像长途旅行那样“附近就算到了”。
         if (currentPlacementComplete()) { finishPlaced(); return TaskState.RUNNING; }
-        if (useCount == 0 && !worksiteSearched && !isTemporary(cell)) {
+        if (supportedCell == null && useCount == 0 && !worksiteSearched && !isTemporary(cell)) {
             stopNav(); phase = Phase.WORKSITE; return TaskState.RUNNING;
         }
         if (worksite != null) return walkToWorksite();
         if (nav == null) {
+            if (cell == supportedCell && supportWitness != null && liveGestures.isEmpty())
+                liveGestures = List.of(supportWitness);
             if (liveGestures.isEmpty()) {
                 if (gestureSearch == null) {
                     gestureSearch = new BuildPlacementGeometry.PlanSearch(player, cell.target(), targets);
@@ -573,7 +584,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             case ARRIVED -> { stopNav(); phase = Phase.SELECT_ITEM; yield TaskState.RUNNING; }
             case FAILED -> {
                 stopNav();
-                if (stanceNavigation.retryWithTerrain(gesture.stance())) {
+                if (supportedCell == null && stanceNavigation.retryWithTerrain(gesture.stance())) {
                     note = "existing-footing route exhausted; trying permitted construction access";
                     yield TaskState.RUNNING;
                 }
@@ -764,6 +775,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState aimTick() {
         // 先真正转头到位，复查视线会点到哪，再预测会放成什么状态，并检查是否把自己或生物卡进方块。
         if (currentPlacementComplete()) { finishPlaced(); return TaskState.RUNNING; }
+        if (isTemporary(cell) && supportedCell != null && !supportStepApproved) {
+            List<BlockPos> remaining = queue.subList(queueAt, queue.size()).stream().filter(this::isTemporary)
+                    .map(plan -> plan.target().pos()).toList();
+            beginSupportVerification(remaining, false); return TaskState.RUNNING;
+        }
         if (!player.getMainHandItem().is(cell.target().item())) {
             selection.reset(); phase = Phase.SELECT_ITEM; return TaskState.RUNNING;
         }
@@ -805,6 +821,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     "build_target_changed", false); return TaskState.FAILED;
         }
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
+        if (isTemporary(cell) && supportedCell != null && (supportAccess == null || !supportAccess.current())) {
+            supportStepApproved = false;
+            phase = Phase.AIM; return TaskState.RUNNING;
+        }
         aimWaitReason = "placement_submitted";
         useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
                 confirmation(cell, frozen, placedPrimary), USE_TIMEOUT);
@@ -1002,7 +1022,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     // 临时点击支撑最终会拆掉，因此原目标必须本来就能存活，不能靠临时垫块永久托住沙子或悬空装饰。
     private TaskState prepareTemporarySupports() {
         // Supports used only to obtain a click face must not be required for final survival.
-        if (isTemporary(cell) || cell.target().block() instanceof net.minecraft.world.level.block.FallingBlock
+        if (supportedCell != null || isTemporary(cell) || cell.target().block() instanceof net.minecraft.world.level.block.FallingBlock
                 || !cell.target().desiredState().canSurvive(player.level(), cell.target().pos())) return null;
         List<BlockPos> chain = BuildTemporarySupportPlan.find(player.level(), player.level()::isLoaded,
                 cell.target().pos(), pos -> scaffoldPermitted(pos, null));
@@ -1023,17 +1043,49 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.NO_MATERIAL, "temporary_support_materials_missing", false);
             return TaskState.FAILED;
         }
+        supportedCell = cell; supportChain = chain;
+        supportMaterial = ((BlockItem) material).getBlock().defaultBlockState();
+        beginSupportVerification(chain, true);
+        return TaskState.RUNNING;
+    }
+
+    private void beginSupportVerification(List<BlockPos> remaining, boolean proposal) {
+        stopNav(); InputDriver.halt(player); supportProposal = proposal;
+        supportAccess = new BuildSupportAccess(player, supportedCell.target(), remaining, supportMaterial,
+                pos -> scaffoldPermitted(pos, null), unionForbidden(NavigationSafetyContext.forbiddenBodyCells()),
+                org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles());
+        phase = Phase.SUPPORT_VERIFY;
+    }
+
+    private TaskState supportVerifyTick() {
+        InputDriver.halt(player);
+        boolean done = supportAccess.advance(16); supportAccessEvidence = supportAccess.evidence();
+        if (!done) return TaskState.RUNNING;
+        if (!supportAccess.accepted() || !supportAccess.current()) {
+            if (supportAccess.accepted()) {
+                var changed = new LinkedHashMap<>(supportAccessEvidence);
+                changed.put("verified", false); changed.put("reason", "support_access_observation_changed");
+                supportAccessEvidence = Map.copyOf(changed);
+            }
+            failAt(supportedCell.target().pos(), "temporary supports have no verified post-placement access: "
+                            + supportAccessEvidence.get("reason") + "; no additional support was submitted",
+                    FailureType.NO_PATH, "temporary_support_access_unproven", false);
+            return TaskState.FAILED;
+        }
+        supportWitness = supportAccess.witness();
+        if (!supportProposal) { supportStepApproved = true; phase = Phase.AIM; return TaskState.RUNNING; }
         List<CellPlan> prepared = new ArrayList<>();
-        for (BlockPos pos : chain) {
-            var target = new BuildTaskRecord.Target(((BlockItem) material).getBlock(), material,
+        for (BlockPos pos : supportChain) {
+            var target = new BuildTaskRecord.Target(supportMaterial, supportMaterial.getBlock().asItem(),
                     pos, "temporary click support", null, null, null).asItemPlace();
             temporaryTargets.put(pos.asLong(), target);
             prepared.add(new CellPlan(target, List.of()));
         }
-        prepared.add(cell);
+        prepared.add(supportedCell);
         for (int i = queueAt + 1; i < queue.size(); i++) prepared.add(queue.get(i));
         queue = prepared; queueAt = 0; phase = Phase.SELECT;
-        note = "placing " + chain.size() + " removable supports before the deferred cell";
+        worksite = null; worksiteSearch = null; worksiteProgress = null;
+        note = "placing " + supportChain.size() + " supports with verified final access";
         return TaskState.RUNNING;
     }
 
@@ -1073,10 +1125,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private void finishCell() {
+        if (cell == supportedCell) releaseSupportPlan();
         exhaustedPlacementStates.remove(cell.target().pos().asLong());
         markComplete(cell); queueAt++; resetCell(); phase = Phase.SELECT;
     }
+    private void releaseSupportPlan() {
+        supportedCell = null; supportWitness = null; supportChain = List.of(); supportAccessEvidence = Map.of();
+    }
     private void resetCell() {
+        supportStepApproved = false; supportAccess = null;
         layerKnown = false;
         stanceNavigation.reset();
         placementWalkTarget = null;
@@ -1561,6 +1618,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 "placed_blocks", r.placed(), "cleared_blocks", r.broken(),
                 "temporary_supports_remaining", r.scaffoldLedger().snapshot().size()));
         if (phase == Phase.AIM) data.put("placement", placementDiagnostics());
+        if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
         if (layerKnown && constructionLayer != Integer.MAX_VALUE) data.put("construction_layer", constructionLayer);
         data.put("creative_materials", creativeMaterials.progress());
         if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
@@ -1621,6 +1679,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("placed", r.placed());
         data.put("cleared", r.broken());
         data.put("stopped_phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
         data.put("temporary_supports_remaining", r.scaffoldLedger().snapshot().size());
         var diagnostics = new ArrayList<>(targetDiagnostics);
         if (failurePos != null) {
