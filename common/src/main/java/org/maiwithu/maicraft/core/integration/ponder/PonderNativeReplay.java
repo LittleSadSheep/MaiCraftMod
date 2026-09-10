@@ -17,7 +17,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 
-/** Uses the installed storyboard program and scheduler, with a separate schematic world and local localization. */
+/**
+ * 为结构提取建立独立的演示世界，放入教程自带结构，再推进真实 Ponder 日程并读取状态；需要客户端世界已经存在。
+ */
 final class PonderNativeReplay implements PonderReplaySession.Driver {
     private final Object scene;
     private final PonderSnapshotReader reader;

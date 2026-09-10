@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.mcp.knowledge.PonderKnowledgeSource;
 
+// 用给定演示状态检查平移投影、旋转拒绝、章节切分、拆除前保留和旧资源失效；不运行实际 Ponder 动画世界。
 public final class PonderReplayTest {
     private static final PonderAccess.Entry ENTRY = new PonderAccess.Entry("fixture", "addon:machine", "addon:usage", List.of(), null);
     public static void main(String[] args) throws Exception {

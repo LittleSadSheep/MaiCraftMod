@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.core.integration.ponder;
 import java.util.List;
 import java.util.Map;
 
-/** Original tutorial evidence, without treating narration or demonstration coordinates as a solver. */
+/**
+ * 保存提取出的教程文字与提示，按四十条一页展示；累计等待只是演示节奏，不是机器生产速度。
+ */
 public record PonderTranscript(String sceneId, String title, List<Step> steps,
                                Map<String, Integer> unexpanded, List<String> warnings) {
     public record Step(int ordinal, int afterDelayTicks, String kind, String text, String focus) {}

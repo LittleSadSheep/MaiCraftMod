@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import org.maiwithu.maicraft.mcp.knowledge.PonderKnowledgeSource;
 
+// 检查目录不会提前编译全部故事板、重复注册有不同资源标识，以及单篇提取、缺失接口、部分坏条目和分页行为。
 public final class PonderKnowledgeTest {
     public static void main(String[] args) throws Exception {
         var access = PonderFixture.access(); PonderFixture.compiled = 0;

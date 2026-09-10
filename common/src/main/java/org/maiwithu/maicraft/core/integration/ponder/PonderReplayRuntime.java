@@ -7,7 +7,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.server.packs.resources.ReloadableResourceManager;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 
-/** Client-tick capture queue; no scene is played until its replay resource is explicitly requested. */
+/**
+ * 管理最多八个教程回放，分客户端更新推进；世界、语言、资源或注册故事板变化时清掉旧结果，缓存不足先淘汰已结束的回放。
+ */
 public final class PonderReplayRuntime {
     private record Job(Object entry, PonderReplaySession session) {}
     private static final Map<String, Job> JOBS = new LinkedHashMap<>(16, .75f, true);
@@ -29,6 +31,7 @@ public final class PonderReplayRuntime {
     }
 
     /** Call once per client tick. A native callback is indivisible; the budget is checked between simulation ticks. */
+    // 四毫秒预算在每个演示刻之间检查；单个回调和完整快照仍可能超过剩余时间，它不是强制中断时限。
     public static synchronized void tick() {
         if (JOBS.values().stream().noneMatch(job -> job.session().status().equals("running"))) return;
         refreshEnvironment(); long deadline = System.nanoTime() + 4_000_000;
@@ -38,6 +41,7 @@ public final class PonderReplayRuntime {
         }
     }
 
+    // 读取结果前和回放途中都检查环境；资源管理器即使还是同一对象，注册的重载通知也会清掉旧快照。
     public static synchronized void refreshEnvironment() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null) return;

@@ -18,7 +18,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.Vec3;
 
-/** Observes a private PonderLevel and its presentation sections without rendering or changing the client world. */
+/**
+ * 读取演示世界中的方块、显示区域、变换和实体，并限制数量与附加数据大小；这些是教程演示信息，不是玩家世界运行结果。
+ */
 final class PonderSnapshotReader {
     private static final int MAX_BLOCKS = 8192;
     private final Object scene;

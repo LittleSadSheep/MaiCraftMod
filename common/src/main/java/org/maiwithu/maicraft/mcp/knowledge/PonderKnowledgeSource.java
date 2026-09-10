@@ -13,7 +13,9 @@ import org.maiwithu.maicraft.core.integration.ponder.PonderAccess;
 import org.maiwithu.maicraft.core.integration.ponder.PonderBlueprintStore;
 import org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime;
 
-/** Registry-driven progressive disclosure: index -> component -> one storyboard's original text. */
+/**
+ * 把教程目录、单篇旁白、分章回放和结构 JSON 提供为知识资源；点到具体故事板才编译文字，读回放资源才启动结构提取。
+ */
 public final class PonderKnowledgeSource implements KnowledgeLibrary.Source {
     public static final String INDEX = "maicraft://knowledge/ponder/index";
     public static final String COMPONENT = "maicraft://knowledge/ponder/component/";
@@ -87,6 +89,7 @@ public final class PonderKnowledgeSource implements KnowledgeLibrary.Source {
             if (entry == null) return null;
             if (replay) return new KnowledgeDocument(uri, "ponder.replay." + key, "Ponder 章节结构",
                     "On-demand chapter end snapshots with narration", access.replay(entry).markdown(base, offset));
+            // 当前每次读取旁白页都会重新编译该故事板；分页没有缓存上次已编译的全文。
             var transcript = access.compile(entry);
             return new KnowledgeDocument(uri, "ponder.scene." + key, transcript.title(), "Original Ponder narration and control hints",
                     transcript.markdown(entry, base, offset) + "\n[按需提取章节结构](" + REPLAY + key

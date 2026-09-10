@@ -7,7 +7,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Works with any plugin registered in the installed Ponder registry, without per-mod scene lists. */
+/**
+ * 从已安装 Ponder 的注册表发现故事板，通过反射编译指定教程的旁白；旁白使用独立的本地词条收集器，不把作者默认文字写入全局词条。
+ */
 public final class ReflectivePonderAccess implements PonderAccess {
     private static final String BASE = "net.createmod.ponder.";
     public record Api(Class<?> index, Class<?> sceneAccess, Class<?> story, Class<?> localization, Class<?> registry, Class<?> level) {}
@@ -29,6 +31,7 @@ public final class ReflectivePonderAccess implements PonderAccess {
                 Class.forName(BASE + "api.level.PonderLevel", true, loader));
     }
 
+    // 只列注册条目，单个坏条目会被跳过并标为部分结果，不因此丢掉其他可读教程。
     @Override public Snapshot snapshot() {
         try {
             Api api = resolver.get();
@@ -57,6 +60,7 @@ public final class ReflectivePonderAccess implements PonderAccess {
         }
     }
 
+    // 这里只编译文字日程，传入空演示世界参数；正式结构回放另走 replay。
     @Override public PonderTranscript compile(Entry entry) {
         try {
             Api api = resolver.get(); Class<?> localizationType = api.localization();

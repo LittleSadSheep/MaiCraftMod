@@ -11,7 +11,9 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 
-/** Reads Ponder's presentation data only; never invokes scheduled world callbacks. */
+/**
+ * 从编译后的教程日程提取等待、旁白和按键提示；不认识的指令只记名称和数量，不猜成某种机器功能。
+ */
 public final class PonderInstructionReader {
     private PonderInstructionReader() {}
 

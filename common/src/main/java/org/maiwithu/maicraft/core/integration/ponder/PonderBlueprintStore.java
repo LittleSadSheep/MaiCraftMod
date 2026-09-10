@@ -6,7 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
-/** Bounded immutable tutorial artifacts. Import only resolves previously returned, current resource URIs. */
+/**
+ * 在内存中按内容保存教程结构，最多十六兆字节；读取返回副本，转交建造前还要检查投影完整并且确实有方块。
+ */
 public final class PonderBlueprintStore {
     public static final String PREFIX = "maicraft://knowledge/ponder/structure/";
     private static final int MAX_BYTES = 16 * 1024 * 1024;
@@ -37,6 +39,7 @@ public final class PonderBlueprintStore {
     }
 
     /** Does not replay implicitly or interpret observed NBT as requested configuration. */
+    // 展示时可以读不完整结构供判断，但实际导入必须是完整投影、非空且仍在当前环境缓存中的结果。
     public static JsonObject resolve(String uri) {
         hooks.refresh().run();
         JsonObject result = read(uri);

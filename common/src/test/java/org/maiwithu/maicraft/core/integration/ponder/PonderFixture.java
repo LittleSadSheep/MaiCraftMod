@@ -9,7 +9,9 @@ import java.util.Map;
 import java.util.function.Supplier;
 import net.minecraft.world.phys.Vec3;
 
-/** A foreign plugin API fixture; deliberately no hardcoded Create component or running world. */
+/**
+ * 提供测试用故事板、词条和指令对象；故意让播放或世界修改报错，用来检查只读旁白过程不会调用它们。
+ */
 public final class PonderFixture {
     public static int compiled;
     public static boolean brokenEntry;

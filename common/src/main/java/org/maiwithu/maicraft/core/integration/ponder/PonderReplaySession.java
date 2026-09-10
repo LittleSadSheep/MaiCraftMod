@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
 
-/** Advances the native scheduler incrementally and retains chapter ends plus destructive predecessors only. */
+/**
+ * 推进一份教程，按作者关键帧或旁白分章，保留章节结束以及结构拆除前的状态；失败时说明不完整，不把已经提取的片段冒充整篇教程。
+ */
 public final class PonderReplaySession {
     public interface Driver {
         void tick() throws ReflectiveOperationException;
@@ -57,6 +59,7 @@ public final class PonderReplaySession {
         }
     }
 
+    // 相邻相同结构复用资源，不因仅仅移动位置就逐刻保留；整份回放最多记录九十六次保留事件。
     private void retain(PonderStructureSnapshot snapshot, int time, String reason) {
         var blueprint = snapshot.blueprint(entry, transcript.sceneId());
         String uri = PonderBlueprintStore.put(entry.key(), blueprint);
@@ -66,6 +69,7 @@ public final class PonderReplaySession {
                 blueprint.getAsJsonObject("evidence").get("projection_complete").getAsBoolean()));
     }
 
+    // 按演示起止时间把旁白放入对应章节，同时保存这章已保留的结构链接。
     private void finishChapter(int end) {
         List<PonderTranscript.Step> steps = transcript.steps().stream()
                 .filter(step -> step.afterDelayTicks() >= chapterStart && step.afterDelayTicks() < end).toList();

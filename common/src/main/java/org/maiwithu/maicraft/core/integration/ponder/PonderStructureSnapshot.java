@@ -9,7 +9,9 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
-/** Captured source coordinates are evidence; only unambiguous integral translations become build offsets. */
+/**
+ * 保存一刻演示状态，并把可见、无旋转、整格平移且完全显现的区域转换成方块蓝图；不能处理的变换仍保存在说明数据中。
+ */
 public record PonderStructureSnapshot(List<Block> blocks, List<Section> sections, JsonArray entities) {
     public record Block(BlockPos position, String id, Map<String, String> properties, String observedNbt) {
         public Block { position = position.immutable(); properties = Map.copyOf(properties); }
@@ -60,6 +62,7 @@ public record PonderStructureSnapshot(List<Block> blocks, List<Section> sections
             if (section.fadeVector() != null) row.add("fade_vector", vector(section.fadeVector()));
             sectionData.add(row);
             if (!section.visible()) continue;
+            // 当前尚未先检查这片区域是否真有方块；空区域的旋转或淡入淡出也会让整份蓝图被标为不完整。
             if (!section.projectable()) {
                 complete = false; warnings.add("Section " + section.id() + " is rotated, fading or off-grid; source geometry retained in evidence only"); continue;
             }
@@ -76,6 +79,7 @@ public record PonderStructureSnapshot(List<Block> blocks, List<Section> sections
         evidence.addProperty("component", entry.component()); evidence.addProperty("schematic", entry.schematic());
         evidence.addProperty("projection_complete", complete); evidence.add("source_blocks", raw); evidence.add("sections", sectionData);
         evidence.add("observed_entities", entities.deepCopy()); evidence.add("warnings", warnings);
+        // 转速、物品和实体附加数据只作观察记录，不自动变成施工配置或生产成功的证明。
         evidence.addProperty("interpretation", "Demonstration evidence. Raw NBT and entities are observations, not desired build configuration. Speed, inventory, output and attachment behavior require separate use/modification steps. Camera transforms are excluded.");
         result.add("evidence", evidence); return result;
     }
