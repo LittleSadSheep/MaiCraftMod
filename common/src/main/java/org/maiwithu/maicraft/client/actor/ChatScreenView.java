@@ -7,11 +7,14 @@ import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
 import org.lwjgl.glfw.GLFW;
 
-/** The real vanilla chat UI. Native submission retains loader chat hooks and command dispatch. */
+/**
+ * 把聊天过程接到原版输入框。只关闭自己打开的界面，不动玩家后来打开的界面。
+ */
 final class ChatScreenView implements ChatSession.View {
     private Minecraft minecraft;
     private TypingScreen screen;
 
+    // 无界面时可以开始；只有失焦自动出现、且不显示暂停菜单的后台暂停界面也可以让开。其他界面保留。
     static boolean mayOpen(Screen current, boolean windowActive) {
         // pauseGame(true) creates this invisible singleplayer pause on loss of window focus.
         return current == null || !windowActive && current instanceof PauseScreen pause && !pause.showsPauseMenu();
@@ -37,6 +40,7 @@ final class ChatScreenView implements ChatSession.View {
         String draft() { return input.getValue(); }
         void write(String value) { input.setValue(value); input.moveCursorToEnd(false); }
 
+        // 人开始按键、打字或点击时，把当前草稿交给普通聊天界面，之后由人决定是否发送。
         private ChatScreen handoff() {
             ChatScreen manual = new ChatScreen(draft());
             minecraft.setScreen(manual);

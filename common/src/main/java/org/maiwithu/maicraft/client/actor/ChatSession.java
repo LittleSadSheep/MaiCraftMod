@@ -7,7 +7,10 @@ import org.maiwithu.maicraft.client.chat.ChatTyping;
 import java.util.Locale;
 import java.util.Map;
 
-/** One owned chat draft, paced on leased client ticks and submitted at most once. */
+/**
+ * 管理一次完整的聊天输入：确认仍由程序控制玩家，打开自己的输入框，逐字写入，再提交一次。
+ * 人关掉、修改或接管输入框时取消自动提交；提交时抛错则记录结果未知，不能自动重发。
+ */
 public final class ChatSession {
     public enum Status { TYPING, SUBMITTED, CANCELLED, FAILED, UNCERTAIN }
     interface View {
@@ -30,6 +33,8 @@ public final class ChatSession {
     public ChatSession(ChatMessage message) { this(message, new ChatScreenView()); }
     ChatSession(ChatMessage message, View view) { typing = new ChatTyping(message); this.view = view; }
 
+    // 每刻先核对玩家、世界和输入框是否仍属于这次任务，再使用本刻的一次操作机会。
+    // SUBMITTED 只表示原版客户端已经接收提交，不表示服务器收到或命令执行成功。
     public Status tick(LocalPlayerContext context, long now) {
         if (status != Status.TYPING) return status;
         if (!(context instanceof DefaultLocalPlayerContext current))
@@ -69,7 +74,10 @@ public final class ChatSession {
         return status;
     }
 
-    /** A scheduler pause releases only our screen; resume opens the retained draft with a new dwell. */
+    /**
+     * 临时让出控制权时保留已打出的进度，关掉自己的输入框；恢复后继续同一份草稿。
+     * 如果人已经接管输入框，就取消这次自动输入，不重新接管。
+     */
     public void suspend() {
         if (status == Status.TYPING && opened && !view.active()) {
             cancel("The player took over the chat draft before the task paused.");
@@ -79,6 +87,7 @@ public final class ChatSession {
         opened = false;
     }
 
+    // 只把尚在输入的任务改为取消；已经提交或结果未知的状态必须保留，免得上层以为可以重发。
     public Status cancel(String reason) {
         if (status == Status.TYPING) { status = Status.CANCELLED; detail = reason; }
         view.close();

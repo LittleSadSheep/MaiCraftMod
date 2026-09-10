@@ -4,7 +4,10 @@ package org.maiwithu.maicraft.client.chat;
 import java.util.List;
 import java.util.regex.Pattern;
 
-/** Bounded, tick-driven typing: never split a grapheme or burst after a slow background frame. */
+/**
+ * 只计算现在应该显示多少文字，不操作输入框。中文、组合表情和附加音符按完整可见字符逐个显示。
+ * 每次最多增加一个字符；最后一字显示后再停留四分之一秒，才允许提交。
+ */
 public final class ChatTyping {
     private static final Pattern CHARACTER = Pattern.compile("\\X");
     private static final long SUBMIT_DELAY = 250_000_000L;
@@ -23,7 +26,9 @@ public final class ChatTyping {
         nextAt = now + (typed == ends.size() ? SUBMIT_DELAY : interval());
     }
 
-    /** Returns the new full draft, or null when this tick should leave the input unchanged. */
+    /**
+     * 时间到了才增加一个完整字符。即使上一帧卡了很久，也不会一下补出所有漏掉的字符。
+     */
     public String advance(long now) {
         if (submissionAttempted || typed == ends.size() || now - nextAt < 0) return null;
         typed++;
@@ -35,7 +40,9 @@ public final class ChatTyping {
         return !submissionAttempted && typed == ends.size() && now - nextAt >= 0;
     }
 
-    /** Claim before entering the native handler; an exception must never permit another send. */
+    /**
+     * 先记下已经尝试提交，再交给实际输入框发送；后续恢复或重复调用都不能再发一次。
+     */
     public void claimSubmission(long now) {
         if (!readyToSubmit(now)) throw new IllegalStateException("chat submission is not ready or was already attempted");
         submissionAttempted = true;

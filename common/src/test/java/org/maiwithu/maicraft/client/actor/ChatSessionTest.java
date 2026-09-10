@@ -7,6 +7,8 @@ import net.minecraft.client.gui.screens.ChatScreen;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.*;
 
+// 用假的输入框检查占用操作机会、暂停恢复、人的接管和提交结果未知时不重发。
+// 这里的发送只增加测试计数，不向游戏服务器发消息。
 public final class ChatSessionTest {
     public static void main(String[] args) throws Exception {
         net.minecraft.SharedConstants.tryDetectVersion();

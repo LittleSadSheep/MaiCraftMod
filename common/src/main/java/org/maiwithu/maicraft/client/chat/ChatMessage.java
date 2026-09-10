@@ -4,7 +4,10 @@ package org.maiwithu.maicraft.client.chat;
 import com.google.gson.JsonObject;
 import org.apache.commons.lang3.StringUtils;
 
-/** One native chat submission, validated before opening a screen or truncating any text. */
+/**
+ * 保存一条要输入的聊天或命令。只接受一行，按原版输入习惯合并空白，并限制长度与打字间隔。
+ * 长度按 Java 的字符存储单位计数；组合表情在后面的打字阶段才按一个可见字符处理。
+ */
 public record ChatMessage(String text, int intervalMillis) {
     public static final int MAX_LENGTH = 256;
     public static final int DEFAULT_INTERVAL = 100;

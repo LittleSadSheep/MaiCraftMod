@@ -9,7 +9,10 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.Map;
 
-/** Drives a visible chat draft inside the same scheduler and body lease as other semantic tasks. */
+/**
+ * 把一次聊天接入任务调度。输入时松开移动按键；暂时被自救打断就保留进度，其他结束原因则取消。
+ * 只有确认已交给原版客户端才返回成功，服务器收信与命令结果由会话说明另行标注。
+ */
 public final class ChatTask implements Task {
     private final LocalPlayer player;
     private final ChatSession session;

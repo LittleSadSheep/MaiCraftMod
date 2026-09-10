@@ -5,7 +5,9 @@ import org.maiwithu.maicraft.client.chat.ChatMessage;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Typing has bounded content and wall-clock pacing; a paused task must not expire on world time. */
+/**
+ * 保存要输入的内容，不设置世界游戏刻截止时间。打字用真实经过时间控制，暂停任务时保留进度。
+ */
 public final class ChatTaskRecord extends TaskRecord {
     static { TaskFactory.register(ChatTaskRecord.class, ChatTask::new); }
     final ChatMessage message;

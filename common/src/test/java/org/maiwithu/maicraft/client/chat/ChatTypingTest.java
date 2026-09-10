@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.chat;
 
 import com.google.gson.JsonParser;
 
+// 检查消息格式、组合字符的显示、暂停恢复和只提交一次。只推进打字计算，不打开聊天或发送消息。
 public final class ChatTypingTest {
     public static void main(String[] args) {
         check(parse("{\"text\":\"  /home   base  \"}").text().equals("/home base"), "native normalization");
