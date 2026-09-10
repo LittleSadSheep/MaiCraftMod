@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.UUID;
 import net.minecraft.world.phys.AABB;
 
+// 检查很多微小结构不会挤掉大船信息，但准星所指、当前登船目标和挡住身体的小结构仍保留；展示不修改原列表。
 public final class StructurePresentationTest {
     public static void main(String[] args) {
         var many = new ArrayList<SableStructureBridge.Structure>();

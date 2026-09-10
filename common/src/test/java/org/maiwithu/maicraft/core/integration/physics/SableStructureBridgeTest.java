@@ -17,7 +17,9 @@ import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import sun.misc.Unsafe;
 
-/** Uses the real reflective bridge with public native-shaped fixtures and no game or Sable runtime. */
+/**
+ * 用具有相同方法名的替身对象检查接口缺失、部分字段失败、结构身份、观察上限和已加载区块；不证明某个实际 Sable 安装版本的接口兼容。
+ */
 public final class SableStructureBridgeTest {
     private static final BlockPos STORAGE = new BlockPos(20_000_000, 64, -20_000_000);
 

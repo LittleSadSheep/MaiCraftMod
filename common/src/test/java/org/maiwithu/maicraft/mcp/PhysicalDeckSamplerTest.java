@@ -14,6 +14,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
 import org.maiwithu.maicraft.core.integration.physics.StructurePose;
 
+// 检查甲板报告保留正确坐标、头顶空间、未知读取、倾斜面和预算限制，防止候选报告冒充已站稳或已规划好的路线。
 public final class PhysicalDeckSamplerTest {
     public static void main(String[] args) {
         World world = new World();

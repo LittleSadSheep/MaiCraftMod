@@ -22,7 +22,10 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniondc;
 import org.joml.Vector3dc;
 
-/** Optional read-only Sable boundary. Frames must be opened and consumed on the client thread. */
+/**
+ * 通过可选的 Sable 接口读取结构身份、位置变换、已加载区块和玩家接触关系；缺接口、读取失败和确实没有结构分别报告。
+ * 结构存放方块的坐标与玩家所处的世界坐标不同，必须通过位置变换对应起来。
+ */
 public final class SableStructureBridge {
     private static final String CONTAINER = "dev.ryanhcode.sable.api.sublevel.SubLevelContainer";
     private static final Map<MethodKey, Method> METHODS = new ConcurrentHashMap<>();
@@ -111,6 +114,7 @@ public final class SableStructureBridge {
         return openBound(source, eye, preferredStorageHit, false);
     }
 
+    // 最多查一百二十八个结构摘要、展开十六个详细对象；准星命中优先，遗漏和字段失败保留在结果中。
     static Frame openBound(NativeContainerSource source, Vec3 eye, BlockPos preferredStorageHit, boolean presentation) {
         try {
             if (eye != null && (!Double.isFinite(eye.x) || !Double.isFinite(eye.y) || !Double.isFinite(eye.z))) {
@@ -195,6 +199,7 @@ public final class SableStructureBridge {
         public int metadataProbes() { return metadataProbes; }
         public boolean truncated() { return truncated; }
 
+        // 用原生对象身份核对命中属于这一份观察；同 UUID 的新对象也不能冒充旧观察中的结构。
         public HitResolution resolveHit(BlockPos plotStorageHit) {
             if (container == null) return new HitResolution("unknown", null, error);
             if (plotStorageHit == null) return new HitResolution("unknown", null, "hit position is missing");
@@ -235,6 +240,7 @@ public final class SableStructureBridge {
             return ready == null ? "unknown" : !ready ? "loading" : errors.isEmpty() ? "ready" : "partial";
         }
 
+        // 只从已经拿到的区块读方块；没有区块时返回未加载或未知，不能为了读取而主动加载。
         public BlockRead readBlock(BlockPos storagePosition) {
             if (storagePosition == null) return new BlockRead("unknown", null, "storage position is missing");
             try {
@@ -273,6 +279,7 @@ public final class SableStructureBridge {
                 chunks == null ? List.of() : chunks, errors);
     }
 
+    // 每个结构最多拿二百五十六个区块引用，超出部分明确标成截断，已拿到的仍可单独读取。
     private static List<LevelChunk> chunks(Object plot, Map<String, String> errors) throws ReflectiveOperationException {
         List<LevelChunk> chunks = new ArrayList<>();
         Iterator<?> holders = ((Iterable<?>) required(call(plot, "getLoadedChunks"))).iterator();

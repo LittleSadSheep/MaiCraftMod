@@ -12,7 +12,9 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Uses the normal transport lease, so cancellation continues a controlled airborne exit. */
+/**
+ * 完成登上指定移动结构的任务：已站稳就直接确认，否则找可起飞位置并交给喷气背包会话，结束时保留其实际成功或失败信息。
+ */
 public final class BoardStructureTask extends AbstractCompanionTask<BoardStructureTaskRecord> {
     private final ShipLandingTarget target;
     private JetpackFlightSession flight;
@@ -57,6 +59,7 @@ public final class BoardStructureTask extends AbstractCompanionTask<BoardStructu
         TransportRuntime.drive(this,context);
         return TaskState.RUNNING;
     }
+    // 起飞上方被挡时，仅在同高度周围两格找一个更近的干燥站位；当前任务最多作一次这样的移位。
     private net.minecraft.core.BlockPos departureStance(org.maiwithu.maicraft.client.actor.LocalPlayerContext context,
             org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute.Space space) {
         var origin = player.blockPosition();

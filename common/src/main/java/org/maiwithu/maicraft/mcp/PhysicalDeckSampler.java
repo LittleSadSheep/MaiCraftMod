@@ -12,7 +12,9 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.integration.physics.StructurePose;
 import org.maiwithu.maicraft.core.integration.physics.StructureDeckGeometry;
 
-/** JSON projection of the same native deck geometry used by boarding. */
+/**
+ * 把共用甲板几何检查的结果整理成最多十二条观察信息，分别标出结构局部、存储区和世界位置；明确这些候选尚未证明路线或实际站稳。
+ */
 final class PhysicalDeckSampler {
     static JsonObject sample(BlockGetter world, Predicate<BlockPos> loaded, StructurePose pose,
                              AABB bounds, BlockPos origin, Vec3 focus, double width, double height) {

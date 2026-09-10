@@ -7,7 +7,9 @@ import org.joml.Quaterniondc;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
 
-/** Immutable copied pose. Storage coordinates include the native plotyard offset. */
+/**
+ * 复制结构的位置、转动、缩放和旋转中心，在结构的存储坐标与实际世界坐标之间转换；不持有会被模组继续修改的向量。
+ */
 public record StructurePose(Vec3 position, double orientationX, double orientationY,
         double orientationZ, double orientationW, Vec3 pivot, Vec3 scale) {
     public StructurePose {
@@ -34,6 +36,7 @@ public record StructurePose(Vec3 position, double orientationX, double orientati
                 orientation.z(), orientation.w(), copy(pivot), copy(scale));
     }
 
+    // 先减去结构旋转中心，再缩放、旋转并移到世界位置，不能直接把很远的存储区坐标当作世界地点。
     public Vec3 toWorld(Vec3 storage) {
         requireFinite(storage);
         Vector3d relative = new Vector3d(storage.x - pivot.x, storage.y - pivot.y,
@@ -41,6 +44,7 @@ public record StructurePose(Vec3 position, double orientationX, double orientati
         return copy(rotation().transform(relative).add(position.x, position.y, position.z));
     }
 
+    // 按相反顺序撤销平移、旋转和缩放，恢复结构内部的存储位置。
     public Vec3 toStorage(Vec3 world) {
         requireFinite(world);
         Vector3d relative = rotation().transformInverse(new Vector3d(
@@ -50,7 +54,9 @@ public record StructurePose(Vec3 position, double orientationX, double orientati
         return copy(relative);
     }
 
-    /** Unit surface normal transformed by inverse transpose, including nonuniform scale. */
+    /**
+     * 表面朝向要按缩放的倒数修正后再旋转、归一化；非等比缩放时不能直接照搬位置的转换方式。
+     */
     public Vec3 normalToWorld(Vec3 normal) {
         requireFinite(normal);
         Vector3d transformed = rotation().transform(new Vector3d(

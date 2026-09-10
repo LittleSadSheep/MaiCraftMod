@@ -11,7 +11,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute;
 import org.maiwithu.maicraft.core.integration.jetpack.MovingFlightTarget;
 
-/** Follows one retained local deck face on one UUID, including rotation about the native pivot. */
+/**
+ * 跟踪指定结构上的一个甲板位置，结构平移转动时更新世界落点；到达要由原生接触关系和连续八刻稳定站立共同确认。
+ */
 public final class ShipLandingTarget implements MovingFlightTarget {
     private final UUID id;
     private StructureDeckGeometry.Surface site;
@@ -68,6 +70,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
     static StructureDeckGeometry.Surface choose(List<StructureDeckGeometry.Surface> sites, Vec3 center, Vec3 player) {
         return rank(sites,center,p -> p.distanceTo(player)).stream().findFirst().orElse(null);
     }
+    // 把估计路程、甲板边缘暴露程度和靠近结构中心的偏好合成排序，不只选离玩家最近的边缘。
     static List<StructureDeckGeometry.Surface> rank(List<StructureDeckGeometry.Surface> sites, Vec3 center,
             java.util.function.ToDoubleFunction<Vec3> travelCost) {
         return sites.stream().sorted(Comparator.comparingDouble(site -> {
@@ -78,6 +81,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
             return travelCost.applyAsDouble(site.feet()) + exposed * 24 + .001 * site.storage().distanceToSqr(center);
         })).toList();
     }
+    // 最多留三个明显不同的落点，优先保留另一高度的甲板，避免三个机会都花在相邻格。
     static List<StructureDeckGeometry.Surface> alternatives(List<StructureDeckGeometry.Surface> ranked) {
         var result = new java.util.ArrayList<StructureDeckGeometry.Surface>();
         if (ranked.isEmpty()) return List.of();
@@ -108,6 +112,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
     @Override public boolean contact() { return contact; }
     @Override public boolean touchdown() { return available && support.ticks >= 8; }
 
+    // 同一刻重复观察不增加计数，漏观察一刻或脚下明显滑动就重新累计稳定时间。
     static final class SupportDwell {
         int ticks; long last = Long.MIN_VALUE; Vec3 previous;
         void observe(long tick, boolean contact, Vec3 localFeet) {

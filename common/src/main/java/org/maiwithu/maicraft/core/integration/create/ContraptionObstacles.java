@@ -15,7 +15,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 
-/** Create's current native voxel shapes, copied to immutable world boxes before worker path search. */
+/**
+ * 读取 Create 运动结构的各个方块碰撞，并转换到世界位置，避免把整座有门洞的结构当成实心盒子。读取失败或超预算时退回整体范围。
+ */
 public final class ContraptionObstacles {
     private static final Api API=Api.load();
     private static WeakReference<ClientLevel> cachedLevel=new WeakReference<>(null);
@@ -23,6 +25,7 @@ public final class ContraptionObstacles {
     private static long cachedTick=Long.MIN_VALUE;
     private static PhysicalObstacleSnapshot cached=PhysicalObstacleSnapshot.EMPTY;
     private ContraptionObstacles() {}
+    // 同世界、同一游戏刻且关注位置移动不足一格时复用结果；下一刻重新看结构与门的位置。
     public static PhysicalObstacleSnapshot capture(ClientLevel level,Vec3 focus) {
         if(API==null) return PhysicalObstacleSnapshot.EMPTY;
         if(cachedLevel.get()==level && cachedTick==level.getGameTime() && cachedOrigin.distanceToSqr(focus)<1) return cached;

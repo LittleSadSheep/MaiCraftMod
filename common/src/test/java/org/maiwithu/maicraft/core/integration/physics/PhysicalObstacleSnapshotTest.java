@@ -20,7 +20,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import sun.misc.Unsafe;
 
-/** Replays the live Sable crafter obstruction through the production swept-body route check. */
+/**
+ * 用给定结构位置和方块检查碰撞转换、门洞保留、贴边后退、实时更新与后台快照隔离，以及读取不足时的保守障碍。
+ */
 public final class PhysicalObstacleSnapshotTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

@@ -15,6 +15,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
 
+// 检查甲板内部候选、位置变换、失去支撑、多层替代落点和稳定接触计数；原生接触数据由测试替身提供。
 public final class ShipBoardingGeometryTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

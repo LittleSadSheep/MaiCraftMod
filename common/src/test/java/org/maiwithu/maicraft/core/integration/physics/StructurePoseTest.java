@@ -5,6 +5,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 
+// 用明确坐标检查旋转、非等比缩放、正反转换和表面朝向，并拒绝零缩放、无效旋转或数值溢出。
 public final class StructurePoseTest {
     public static void main(String[] args) {
         Vector3d position = new Vector3d(10, 30, -4);

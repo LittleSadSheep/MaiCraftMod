@@ -6,6 +6,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 
+// 用碰撞盒模拟开门、关门、升降和旋转，检查门洞与快照隔离；没有调用真实 Create 结构读取接口。
 public final class ContraptionObstaclesTest {
     public static void main(String[] args) {
         var walls=new ArrayList<>(List.of(new AABB(2,0,-2,2.25,3,0),new AABB(2,0,1,2.25,3,3),new AABB(1,-1,-2,4,0,3)));

@@ -4,7 +4,9 @@ import java.util.List;
 import java.util.UUID;
 import net.minecraft.world.phys.AABB;
 
-/** Presentation relevance only. Small assemblies remain present in native collision observation. */
+/**
+ * 选择观察报告里详细展示哪些结构，优先准星所指、当前目标和碰到身体的对象；其余微小结构折叠计数，不从碰撞数据里删除。
+ */
 public final class StructurePresentation {
     private StructurePresentation() {}
     public static boolean small(AABB bounds) {

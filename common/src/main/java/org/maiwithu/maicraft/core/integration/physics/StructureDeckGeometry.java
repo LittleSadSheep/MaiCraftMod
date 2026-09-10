@@ -16,7 +16,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** On-demand native voxel support samples. These are observations, never a flight/landing verdict. */
+/**
+ * 读取结构局部的真实碰撞面，找直立身体可能站得下的位置，并把候选转换到世界坐标。最多读八千一百九十二格、保留六十四个表面，不把候选当作已登船。
+ */
 public final class StructureDeckGeometry {
     private static final int RADIUS = 8, READ_BUDGET = 8192, SURFACE_BUDGET = 64;
     public record Surface(BlockState state, BlockPos block, AABB box, Vec3 storage, Vec3 world, Vec3 normal, Vec3 feet) {
@@ -29,6 +31,7 @@ public final class StructureDeckGeometry {
     }
     private StructureDeckGeometry() {}
 
+    // 从关注位置向外扩八格，竖直方向先看近处再看更高或更低层；这样高塔顶部不会先耗尽下层甲板的观察预算。
     public static Sample sample(BlockGetter world, Predicate<BlockPos> loaded, StructurePose pose,
                              AABB storageBounds, BlockPos origin, Vec3 focus, double width, double height) {
         if (pose == null || storageBounds == null || origin == null)
@@ -98,6 +101,7 @@ public final class StructureDeckGeometry {
                 ? new Surface(state,block,box,surface,world,normal,feet) : null;
     }
 
+    // 多读一圈邻格是为了检查伸过来的碰撞；当前液体和危险物也按这整圈直接拒绝，范围超过了身体实际接触处。
     private static boolean clearBody(GuardedView view, AABB body) {
         if (!Double.isFinite(body.minX + body.minY + body.minZ + body.maxX + body.maxY + body.maxZ)
                 || Math.min(body.minX, Math.min(body.minY, body.minZ)) < Integer.MIN_VALUE + 2D
@@ -124,6 +128,7 @@ public final class StructureDeckGeometry {
                 || state.is(Blocks.FIRE) || state.is(Blocks.SOUL_FIRE) || state.is(Blocks.LAVA);
     }
 
+    // 结构范围外当作此结构没有方块；范围内未加载或读取失败则计入未知，并限制总读取量。
     private static final class GuardedView implements BlockGetter {
         final BlockGetter world; final Predicate<BlockPos> loaded; final AABB bounds;
         final Map<BlockPos, BlockState> known = new HashMap<>();

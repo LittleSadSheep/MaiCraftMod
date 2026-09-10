@@ -9,7 +9,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** Client-thread voxel capture; workers receive only immutable world-space obstacle boxes. */
+/**
+ * 把移动结构的实际方块碰撞转换到世界位置，供当前导航或后台搜索读取。能读清细节时保留门洞；读不全某个结构时用它的整体范围作保守障碍。
+ */
 public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int conservativeStructures, String state) {
     public static final PhysicalObstacleSnapshot EMPTY = new PhysicalObstacleSnapshot(List.of(), 0, 0, "not_installed");
     private static final int READ_BUDGET = 4096, BOX_BUDGET = 4096;
@@ -29,6 +31,7 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
         return capture(level, frame.structures(), focus, frame.state());
     }
 
+    // 只展开玩家附近十六格内的部分；某结构的细节不完整时丢掉它已读出的零散盒子，改用整体范围。
     static PhysicalObstacleSnapshot capture(net.minecraft.world.level.BlockGetter world,
             List<SableStructureBridge.Structure> structures, Vec3 focus, String state) {
         var boxes = new ArrayList<AABB>();
@@ -77,7 +80,9 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
                 conservative > 0 ? "partial" : state);
     }
 
-    /** Native voxel boxes transformed individually retain openings in an assembled structure. */
+    /**
+     * 转换盒子的八个角，再取包住这些点的世界或存储坐标盒；旋转后可能比真实斜盒更宽，是保守范围。
+     */
     public static AABB transformBox(StructurePose pose, AABB box, boolean toWorld) {
         double minX = Double.POSITIVE_INFINITY, minY = minX, minZ = minX;
         double maxX = Double.NEGATIVE_INFINITY, maxY = maxX, maxZ = maxX;
@@ -103,6 +108,7 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
         return true;
     }
 
+    // 身体已经与障碍重叠时，允许朝最近边界向外挪；否则会连脱离接触的第一步也拒绝。
     private static boolean escapesNearestFace(AABB box, Vec3 from, Vec3 to) {
         double[] distances = {from.x - box.minX, box.maxX - from.x, from.y - box.minY,
                 box.maxY - from.y, from.z - box.minZ, box.maxZ - from.z};
