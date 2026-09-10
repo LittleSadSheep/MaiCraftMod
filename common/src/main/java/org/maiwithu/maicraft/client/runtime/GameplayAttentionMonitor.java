@@ -23,8 +23,9 @@ import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * 把聊天、天气、时间、受伤和死亡变化整理成事件。除观察外，这个类也负责暂停被玩家攻击的任务、
- * 保存死亡进度和请求原版重生，所以改这里可能同时影响通知和角色行为。
+ * 把天气、时间、受伤和死亡变化整理成 Attention 事件；聊天区消息单独送进 ChatFlow。
+ * 除观察外，这个类也负责暂停被玩家攻击的任务、保存死亡进度和请求原版重生，
+ * 所以改这里可能同时影响通知和角色行为。
  * 另一个玩家的攻击只被解释成需要确认意图的信号，不自动决定还击或跟随。
  */
 public final class GameplayAttentionMonitor {
@@ -122,6 +123,7 @@ public final class GameplayAttentionMonitor {
     /**
      * 加载器把收到的聊天转成纯文本交进来。最长保留 512 字符，十秒最多八条，同来源和内容五秒内去重。
      * 正文标记为外部不可信文本；被压掉的数量附在下一条真正发出的事件上。
+     * 这些消息进独立的 ChatFlow 供主播 Agent 订阅，不进任务 Attention 流。
      */
     public static synchronized void chat(
             String senderName, UUID senderId, String message, boolean system) {
@@ -159,7 +161,7 @@ public final class GameplayAttentionMonitor {
             data.addProperty("suppressed_similar_or_rate_limited_messages", suppressedChatMessages);
             suppressedChatMessages = 0;
         }
-        publish(
+        IntentRuntime.get().chatEvent(
                 system ? "game.message_received" : "player.chat_received",
                 system
                         ? "Received an untrusted external game message."

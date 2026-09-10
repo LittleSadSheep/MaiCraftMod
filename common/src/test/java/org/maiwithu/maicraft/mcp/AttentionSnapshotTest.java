@@ -43,7 +43,7 @@ public final class AttentionSnapshotTest {
             TaskResult receipt = new TaskResult(state == TaskState.SUCCESS, "final receipt", state == TaskState.TIMEOUT,
                     state == TaskState.CANCELLED, Map.of("preview_id", "retained-result", "verified", true));
             invoke(finished, "terminal", new Class<?>[]{TaskState.class, TaskResult.class, long.class}, state, receipt, 12L);
-            for (int i = 0; i < 300; i++) runtime.gameEvent("game.message_received", "noise", null);
+            for (int i = 0; i < 300; i++) runtime.gameEvent("world.weather_changed", "noise", null);
             result = AttentionSnapshot.read(runtime, before, true);
             check(result.get("history_lost").getAsBoolean() && result.get("wake_reason").getAsString().equals("task_terminal"),
                     "evicted event does not hide authoritative terminal state " + state);

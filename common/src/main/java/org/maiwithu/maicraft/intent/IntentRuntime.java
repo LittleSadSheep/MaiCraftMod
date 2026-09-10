@@ -107,6 +107,7 @@ public final class IntentRuntime {
     private final LinkedHashMap<String, UUID> requestKeys = new LinkedHashMap<>();
     private final LinkedHashMap<String, Landmark> landmarks = new LinkedHashMap<>();
     private final AttentionFeed attention = new AttentionFeed();
+    private final ChatFlow chatFlow = new ChatFlow();
     private final IntentStateStore stateStore = new IntentStateStore();
     private StateIdentity stateIdentity;
     private boolean bodyAttached;
@@ -499,6 +500,8 @@ public final class IntentRuntime {
         requestKeys.clear();
         landmarks.clear();
         attention.clear();
+        // 换了世界或连接，聊天区消息也属于上一轮，随任务语义一起作废。
+        chatFlow.clear();
         dirty = false;
     }
 
@@ -674,6 +677,22 @@ public final class IntentRuntime {
 
     public AutoCloseable subscribeAttention(Consumer<JsonElement> listener) {
         return attention.subscribe(listener);
+    }
+
+    /** Route one received chat-area message into the dedicated chat flow; task attention stays chat-free. */
+    public void chatEvent(String type, String message, JsonObject data) {
+        if (type == null || type.isBlank()) {
+            throw new IllegalArgumentException("chat event type is required");
+        }
+        chatFlow.publish(type, message, data == null ? new JsonObject() : data);
+    }
+
+    public JsonObject chat(long afterCursor, int limit, String streamId) {
+        return chatFlow.read(afterCursor, limit, streamId);
+    }
+
+    public AutoCloseable subscribeChat(Consumer<JsonElement> listener) {
+        return chatFlow.subscribe(listener);
     }
 
     /** Publish a concise game-side fact that may require the LLM's attention. */

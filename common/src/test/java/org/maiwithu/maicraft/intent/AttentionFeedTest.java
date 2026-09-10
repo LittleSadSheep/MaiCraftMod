@@ -23,12 +23,12 @@ public final class AttentionFeedTest {
         } while (page.get("has_more").getAsBoolean());
         check(received == 25 && cursor == 25, "drain every page including the last five completions");
         feed.publish("world.time_phase_changed", null, "night", null);
-        feed.publish("game.message_received", null, "engine on", null);
+        feed.publish("world.weather_changed", null, "rain", null);
         feed.publish("completed", UUID.randomUUID(), "other task", null);
         check(feed.read(cursor, 10, stream, task).getAsJsonArray("events").isEmpty(), "task wait suppresses unrelated noise");
         feed.publish("agent.damaged", null, "damage", null);
-        feed.publish("player.chat_received", null, "stop?", null);
-        check(feed.read(cursor, 10, stream, task).getAsJsonArray("events").size() == 2, "safety and player messages remain visible");
+        feed.publish("agent.reflex", null, "reflex", null);
+        check(feed.read(cursor, 10, stream, task).getAsJsonArray("events").size() == 2, "safety and body events remain visible");
         check(feed.read(cursor, 10, stream, null).getAsJsonArray("events").size() == 5, "global readers retain all events");
         AtomicInteger signals = new AtomicInteger();
         var bad = feed.subscribe(ignored -> { throw new IllegalStateException("disconnected reader"); });
@@ -36,7 +36,7 @@ public final class AttentionFeedTest {
         feed.publish("decision", task, "choose", null);
         check(signals.get() == 1 && feed.checkpoint().get("cursor").getAsLong() > 0, "subscriber isolation");
         good.close(); good.close(); bad.close();
-        for (int i = 0; i < 300; i++) feed.publish("game.message_received", null, "noise", null);
+        for (int i = 0; i < 300; i++) feed.publish("world.weather_changed", null, "noise", null);
         page = feed.read(1, 20, stream, task);
         check(page.get("history_lost").getAsBoolean() && page.get("resync_required").getAsBoolean(), "overflow cannot look like a reliable empty feed");
         check(signals.get() == 1, "unsubscribe is idempotent");
