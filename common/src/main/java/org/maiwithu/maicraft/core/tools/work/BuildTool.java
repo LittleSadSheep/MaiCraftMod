@@ -39,11 +39,8 @@ public final class BuildTool implements MaiCraftTool {
     private static final double TIMEOUT_SLACK = 1.6;
 
     /**
-     * 施工时限:赴工地的行程 + 施工预计时长再留一截余量。
-     *
-     * <p>预计时长必须问施工层要,不能在这里另估一套。此前这里按"每格固定几刻"
-     * 拍了个数,而生存最慢档实际是每格十刻——差二十倍,五百格的房子会在盖到一半
-     * 时被判超时。两处各拍各的迟早再犯,所以公式只有一处真源。
+     * 用 BuildOrder 的格数估值，加赴工地预算和余量，计算本次任务的期限。
+     * 这份估值不决定实际放置节奏；实际执行还要逐步完成瞄准、交互和服务器确认。
      */
     public static long timeoutTicksFor(int cellCount, boolean consumeMaterials) {
         long build = org.maiwithu.maicraft.core.task.build.BuildOrder

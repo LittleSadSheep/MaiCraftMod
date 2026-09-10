@@ -9,18 +9,18 @@ import java.util.Comparator;
 
 /**
  * 提供建筑目标的排序规则。当前施工和供料仍使用这个比较器。
- * 下面的旧速率与时长公式当前没有生产调用者，不能用它们承诺实际完工时间。
+ * 时长公式供 BuildTool 估算任务期限，不控制施工器每刻放置几格，也不保证实际完工时间。
  */
 public final class BuildOrder {
 
     private BuildOrder() {}
 
     /**
-     * 旧节奏公式的参数，单位是每刻格数和游戏刻数。公式只按格数估计，不包含走路、瞄准、挖掘和等待服务器。
+     * 期限估算的参数，单位是每刻格数和游戏刻数。公式只按格数估计，不包含走路、瞄准、挖掘和等待服务器。
      */
-    static final double SURVIVAL_MIN_RATE = 2.0 / 20.0;    // 每秒 2 格,慢的那一头
+    static final double SURVIVAL_MIN_RATE = 2.0 / 20.0;    // 估算的生存模式最低速率
     static final double SURVIVAL_TARGET_TICKS = 12 * 60 * 20;   // 仅作为速率公式的十二分钟目标
-    static final double FREE_MAX_RATE = 100.0 / 20.0;      // 创造快,但不瞬移
+    static final double FREE_MAX_RATE = 100.0 / 20.0;      // 估算的创造模式最高速率
     static final double FREE_TARGET_TICKS = 25 * 20;       // 仅作为速率公式的二十五秒目标
 
     /**
@@ -73,8 +73,8 @@ public final class BuildOrder {
     }
 
     /**
-     * 旧速率公式：生存模式至少每秒两格，按十二分钟目标可进一步加速；创造模式按二十五秒目标计算，最多每秒一百格。
-     * 返回计划速率，不代表角色真的能在这一时间内完成相应操作。
+     * 期限估算使用的速率：生存至少每秒两格、按十二分钟目标提高估值；创造按二十五秒目标估计、上限每秒一百格。
+     * 该数值只用于下面的 estimatedTicks，不是实际执行速率。
      */
     public static double paceFor(int cellCount, boolean consumeMaterials) {
         int cells = Math.max(1, cellCount);
@@ -84,7 +84,7 @@ public final class BuildOrder {
     }
 
     /**
-     * 用同一旧速率公式计算格数除以速率，并向上取整。它只是该公式的估计值，目前没有生产调用者。
+     * 用格数除以估算速率并向上取整，交给 BuildTool.timeoutTicksFor 加上行程预算和余量。
      */
     public static long estimatedTicks(int cellCount, boolean consumeMaterials) {
         return (long) Math.ceil(Math.max(1, cellCount) / paceFor(cellCount, consumeMaterials));
