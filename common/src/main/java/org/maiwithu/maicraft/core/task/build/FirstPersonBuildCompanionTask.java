@@ -9,12 +9,10 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.build.BuildValidity;
-import org.maiwithu.maicraft.core.pathing.bridge.ContextFactory;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
-import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
@@ -1572,22 +1570,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     @Override public boolean acceptsPlacement(BlockPos pos, BlockState state) {
         BuildTaskRecord.Target target = targets.get(pos.asLong());
         return target != null && target.acceptsPlacedState(state);
-    }
-    @Override public CalculationContext forSearch(LocalPlayer p, LongSet sacred, LongSet denied,
-                                                  LongSet forbidden) {
-        return ContextFactory.forSearch(p, union(sacred), union(denied),
-                unionForbidden(forbidden), permit(),
-                (body, view, loaded, safe, s, d, f, terrain) -> new BuildCalculationContext(
-                        body, view, loaded, safe, s, d, f, terrain, targets,
-                        inventory.availableStates(true), r.replaceExisting));
-    }
-    @Override public CalculationContext forExecution(LocalPlayer p, LongSet sacred, LongSet denied,
-                                                     LongSet forbidden) {
-        return ContextFactory.forExecution(p, union(sacred), union(denied),
-                unionForbidden(forbidden), permit(),
-                (body, view, loaded, safe, s, d, f, terrain) -> new BuildCalculationContext(
-                        body, view, loaded, safe, s, d, f, terrain, targets,
-                        inventory.availableStates(true), r.replaceExisting));
     }
     @Override public TerrainPermit permit() { return TerrainPermit.TERRAFORM; }
     @Override public LongSet embeddedProtectedMutationCells() {

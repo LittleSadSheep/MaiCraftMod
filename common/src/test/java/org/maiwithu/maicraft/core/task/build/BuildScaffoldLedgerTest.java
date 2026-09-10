@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.core.task.build;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
-import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,9 +17,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
-import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
-import sun.misc.Unsafe;
 
 /** Hollow 18-cube support exceptions are bounded by authored air, real receipts and inherited protection. */
 public final class BuildScaffoldLedgerTest {
@@ -53,13 +50,10 @@ public final class BuildScaffoldLedgerTest {
                 targets, world, pos -> true, true).contains(scaffold.asLong()), "goal sacred cells cannot be subtracted");
         check(ledger.navigationProtection(base, LongSets.emptySet(), LongSets.emptySet(), air,
                 targets, world, pos -> !pos.equals(scaffold), true).contains(scaffold.asLong()), "unknown cells remain protected");
-        double openCost = cost(targets, allowed, scaffold);
-        double protectedCost = cost(targets, protectedCells, scaffold);
-        check(openCost < org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF
-                && protectedCost == org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF,
-                "real BuildCalculationContext offers a finite air-scaffold route but rejects protected placement");
         var policy = EmbeddedBaritonePolicy.capture(LongSets.emptySet(), allowed, LongSets.emptySet());
         check(!policy.protects(9, 70, 9) && policy.protects(0, 70, 9), "embedded backend receives the same bounded permission");
+        var protectedPolicy = EmbeddedBaritonePolicy.capture(LongSets.emptySet(), protectedCells, LongSets.emptySet());
+        check(protectedPolicy.protects(9, 70, 9), "the active backend retains inherited protection inside authored air");
         world.cells.put(scaffold, Blocks.DIRT.defaultBlockState());
         check(!ledger.permits(targets.get(scaffold.asLong()), world.getBlockState(scaffold), false),
                 "an unowned real obstruction cannot become a scaffold exception");
@@ -101,21 +95,6 @@ public final class BuildScaffoldLedgerTest {
         BuildPlacementRegistry.unregister(null, replacement);
     }
 
-    private static double cost(Map<Long, BuildTaskRecord.Target> targets, LongSet sacred, BlockPos pos) throws Exception {
-        Field singleton = Unsafe.class.getDeclaredField("theUnsafe"); singleton.setAccessible(true);
-        Unsafe memory = (Unsafe) singleton.get(null);
-        var context = (BuildCalculationContext) memory.allocateInstance(BuildCalculationContext.class);
-        assign(context, BuildCalculationContext.class, "activeTargets", targets);
-        assign(context, CalculationContext.class, "sacred", sacred);
-        assign(context, CalculationContext.class, "deniedPlace", LongSets.emptySet());
-        assign(context, CalculationContext.class, "hasThrowaway", true);
-        assign(context, CalculationContext.class, "placeBlockCost", 1.0);
-        assign(context, CalculationContext.class, "worldBorder", new CalculationContext.BorderSnapshot(-100, 100, -100, 100));
-        return context.costOfPlacingAt(pos.getX(), pos.getY(), pos.getZ(), Blocks.AIR.defaultBlockState());
-    }
-    private static void assign(Object object, Class<?> owner, String name, Object value) throws Exception {
-        Field field = owner.getDeclaredField(name); field.setAccessible(true); field.set(object, value);
-    }
     private static final class Owner implements BuildPlacementRegistry.Provider {
         final BuildScaffoldLedger ledger = new BuildScaffoldLedger();
         @Override public BlockState desiredState(BlockPos pos) { return null; }

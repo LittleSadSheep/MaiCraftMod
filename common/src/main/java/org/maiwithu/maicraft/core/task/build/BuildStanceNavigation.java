@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.build;
 
-import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.HashSet;
 import java.util.Set;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
-import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /**
@@ -49,25 +46,5 @@ final class BuildStanceNavigation {
             return construction.embeddedForbiddenBodyCells();
         }
 
-        // 旧成本接口也返回禁止改地形的上下文；当前主导航读的是上面的许可和保护格，旧接口仍留作兼容。
-        @Override public CalculationContext forSearch(LocalPlayer player, LongSet sacred,
-                LongSet deniedPlace, LongSet forbiddenBodyCells) {
-            return PlayerNav.ContextProvider.DEFAULT.forSearch(player,
-                    union(sacred, embeddedProtectedMutationCells()), deniedPlace,
-                    union(forbiddenBodyCells, embeddedForbiddenBodyCells()));
-        }
-
-        @Override public CalculationContext forExecution(LocalPlayer player, LongSet sacred,
-                LongSet deniedPlace, LongSet forbiddenBodyCells) {
-            return PlayerNav.ContextProvider.DEFAULT.forExecution(player,
-                    union(sacred, embeddedProtectedMutationCells()), deniedPlace,
-                    union(forbiddenBodyCells, embeddedForbiddenBodyCells()));
-        }
-
-        private static LongSet union(LongSet first, LongSet second) {
-            var result = new LongOpenHashSet(first);
-            result.addAll(second);
-            return result;
-        }
     }
 }

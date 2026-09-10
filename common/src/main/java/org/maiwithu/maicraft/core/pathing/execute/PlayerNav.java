@@ -9,10 +9,8 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.transport.TransportNavigator;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
-import org.maiwithu.maicraft.core.pathing.bridge.ContextFactory;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
-import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /** 给走路、挖矿、施工等任务用的统一导航入口，实际交给 TransportNavigator 协调步行与交通，再由 Baritone 走路线。 */
@@ -103,7 +101,7 @@ public final class PlayerNav {
     public PlayerNav walkingOnly() { return withTransportMode(TransportMode.GROUND); }
 
     public interface ContextProvider {
-        // 当前 Baritone 使用 permit 和下面两个 embedded 方法；forSearch／forExecution 是保留的旧成本接口。
+        // 当前导航只从这里读取地形许可和额外保护格，不创建另一套寻路成本上下文。
         /** 缺省:只走不改。接近类动作全部用它,忘了指定也只会更保守。 */
         ContextProvider DEFAULT = of(TerrainPermit.PRESERVE);
         ContextProvider WATER_ONLY = of(TerrainPermit.WATER_ONLY);
@@ -114,31 +112,13 @@ public final class PlayerNav {
         static ContextProvider of(TerrainPermit permit) {
             return new ContextProvider() {
                 @Override
-                public CalculationContext forSearch(LocalPlayer player, LongSet sacred,
-                                                    LongSet deniedPlace, LongSet forbiddenBodyCells) {
-                    return ContextFactory.forSearch(player, sacred, deniedPlace,
-                            forbiddenBodyCells, permit, CalculationContext::new);
-                }
-
-                @Override
-                public CalculationContext forExecution(LocalPlayer player, LongSet sacred,
-                                                       LongSet deniedPlace, LongSet forbiddenBodyCells) {
-                    return ContextFactory.forExecution(player, sacred, deniedPlace,
-                            forbiddenBodyCells, permit, CalculationContext::new);
-                }
-
-                @Override
                 public TerrainPermit permit() {
                     return permit;
                 }
             };
         }
 
-        CalculationContext forSearch(LocalPlayer player, LongSet sacred, LongSet deniedPlace,
-                                     LongSet forbiddenBodyCells);
-        CalculationContext forExecution(LocalPlayer player, LongSet sacred, LongSet deniedPlace,
-                                        LongSet forbiddenBodyCells);
-        /** 本提供者建出的上下文所带的地形许可(执行器据此决定顺手的放置能不能做)。 */
+        /** 当前导航据此判断是否允许挖掘或放置。 */
         TerrainPermit permit();
 
         /**

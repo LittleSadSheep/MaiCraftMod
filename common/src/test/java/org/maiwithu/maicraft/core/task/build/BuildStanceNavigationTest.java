@@ -3,10 +3,8 @@ package org.maiwithu.maicraft.core.task.build;
 
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
-import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /**
@@ -22,10 +20,6 @@ public final class BuildStanceNavigationTest {
             @Override public TerrainPermit permit() { return TerrainPermit.TERRAFORM; }
             @Override public LongSet embeddedProtectedMutationCells() { return protectedCells; }
             @Override public LongSet embeddedForbiddenBodyCells() { return forbiddenCells; }
-            @Override public CalculationContext forSearch(LocalPlayer player, LongSet sacred,
-                    LongSet denied, LongSet forbidden) { throw new AssertionError("unexpected search"); }
-            @Override public CalculationContext forExecution(LocalPlayer player, LongSet sacred,
-                    LongSet denied, LongSet forbidden) { throw new AssertionError("unexpected execution"); }
         };
         var routes = new BuildStanceNavigation(construction);
         BlockPos first = new BlockPos(4, 2, 6), second = first.east();
