@@ -383,7 +383,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         });
         if (!missing.isEmpty() && !(r.allowPartial && anyAffordable())) {
             failureCode = "missing_materials";
-            fail("construction did not start; missing " + BuildLedger.summarizeShortfall(missing),
+            fail("construction did not start; missing " + BuildMaterialSummary.summarizeShortfall(missing),
                     FailureType.NO_MATERIAL); return TaskState.FAILED;
         }
         if (!missing.isEmpty()) note = "partial mode pauses when carried materials run out";

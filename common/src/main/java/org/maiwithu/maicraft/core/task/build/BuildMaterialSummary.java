@@ -6,9 +6,9 @@ import java.util.List;
 import java.util.Map;
 
 /** 把已算好的材料缺口写成简短提示；不统计施工进度，也不决定如何备料。 */
-final class BuildLedger {
+final class BuildMaterialSummary {
     private static final int MISSING_ITEMS_LISTED = 8;
-    private BuildLedger() {}
+    private BuildMaterialSummary() {}
 
     /**
      * 缺料清单:按缺口从大到小点名前几种,其余只报种类数与总件数。
