@@ -79,6 +79,7 @@ public final class ClientRuntime {
         ACTOR.previewReview(PreviewController.waitingReview());
         Optional<LocalPlayerContext> opened = ACTOR.beginTick();
         if (opened.isEmpty()) {
+            org.maiwithu.maicraft.client.server.ServerSessionRuntime.observe(minecraft, null);
             tickStage = "no_body";
             if (bodyPresent) {
                 bodyGone();
@@ -94,6 +95,7 @@ public final class ClientRuntime {
             BlockSearch.tick(context.level());
             TargetIndex.clientTick(context.level());
             GameplayAttentionMonitor.tick(context.player());
+            org.maiwithu.maicraft.client.server.ServerSessionRuntime.observe(minecraft, context);
             IntentRuntime intents = IntentRuntime.get();
             // 任务状态与玩家/世界实例绑定；换维度、重生等情况下先处理交接，再尝试推进任务。
             intents.beforeBodyTick(minecraft);
@@ -145,6 +147,7 @@ public final class ClientRuntime {
             }
             tickStage = "running_tasks";
             CompanionTickDispatcher.tick(context.player());
+            org.maiwithu.maicraft.client.server.ServerSessionRuntime.dispatch(context);
             // A semantic action may have consumed this tick's one native-mutation slot. Do not
             // let the embedded path executor append a break/place gesture after it.
             pathingMayDrive = context.mutationAvailable() && !PreviewController.waitingReview();
@@ -208,6 +211,7 @@ public final class ClientRuntime {
 
         Minecraft minecraft = Minecraft.getInstance();
         Runnable cleanup = () -> {
+            org.maiwithu.maicraft.client.server.ServerSessionRuntime.shutdown();
             ACTOR.shutdown();
             PreviewController.shutdown();
             IntentRuntime.get().shutdownPersistence();
