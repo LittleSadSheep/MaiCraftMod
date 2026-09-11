@@ -145,6 +145,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final LinkedHashSet<Long> verifyFailed = new LinkedHashSet<>();
     private final List<ObservedCell> verifyFailureStates = new ArrayList<>();
     private List<BlockPos> scaffoldQueue = List.of();
+    private BuildScaffoldCleanup scaffoldCleanup;
     private BlockPos scaffold, siteMin, siteMax, failurePos;
     private String failureCode, note = "all native actions re-verified";
 
@@ -1294,6 +1295,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (player.level().getBlockState(scaffold).isAir()) {
                 r.scaffoldLedger().cleared(scaffold); scaffoldAt++; continue;
             }
+            scaffoldCleanup = new BuildScaffoldCleanup(player, scaffold, forbiddenBodyCells);
             phase = Phase.SCAFFOLD_NAV; return TaskState.RUNNING;
         }
         finalStateAt = 0; phase = Phase.FINAL_STATE;
@@ -1400,37 +1402,60 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 player.level().dimension().location().toString()));
     }
 
-    // 清理时使用普通导航去到可挖支撑的位置，施工专用的方块保护提供者已经注销；仍受外层导航保护约束。
+    // 只走已有地面，找到实际可见且不依赖待拆支撑的站位；导航到达并不替代真实射线验收。
     private TaskState scaffoldNavTick() {
+        if (nav == null && (!player.level().isLoaded(scaffold) || player.level().getBlockState(scaffold).isAir())) {
+            stopNav(); phase = Phase.SCAFFOLD_BREAK; return TaskState.RUNNING;
+        }
         if (nav == null) {
-            BlockPos at = scaffold.immutable();
-            nav = PlayerNav.toGoal(player, () -> NavGoal.mineStance(at), 1.0,
-                    () -> inReach(at), PlayerNav.ContextProvider.DEFAULT);
+            if (scaffoldCleanup.ready()) { phase = Phase.SCAFFOLD_BREAK; return TaskState.RUNNING; }
+            var candidate = scaffoldCleanup.next();
+            if (candidate == null) {
+                if (!scaffoldCleanup.exhausted()) return TaskState.RUNNING;
+                failAt(scaffold, "no remaining visible cleanup stance on independently supported existing footing",
+                        FailureType.OCCLUDED, "scaffold_cleanup_stances_exhausted", false);
+                return TaskState.FAILED;
+            }
+            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(candidate.cell()), 1.0,
+                    scaffoldCleanup::ready, stanceNavigation.walkingContext(Integer.MIN_VALUE)).walkingOnly();
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
-            case ARRIVED -> { stopNav(); phase = Phase.SCAFFOLD_BREAK; yield TaskState.RUNNING; }
+            case ARRIVED -> {
+                stopNav();
+                if (scaffoldCleanup.ready()) phase = Phase.SCAFFOLD_BREAK;
+                else scaffoldCleanup.rejectCurrent();
+                yield TaskState.RUNNING;
+            }
             case FAILED -> {
-                FailureType type = nav.failType(); String reason = nav.failReason(); stopNav();
-                failAt(scaffold, "could not reach temporary scaffold: " + reason,
-                        type, "scaffold_cleanup_path_failed", false); yield TaskState.FAILED;
+                note = "cleanup stance unreachable: " + nav.failReason(); stopNav();
+                yield TaskState.RUNNING;
             }
         };
     }
 
     private TaskState scaffoldBreakTick() {
         // 只拆自己曾确认放下、现在仍是原状态的临时支撑；被别人换过或新加保护的就停，不误拆新东西。
+        if (!player.level().isLoaded(scaffold)) {
+            failAt(scaffold, "temporary scaffold unloaded before cleanup", FailureType.TARGET_LOST,
+                    "scaffold_unloaded", false); return TaskState.FAILED;
+        }
         BlockState live = player.level().getBlockState(scaffold);
         if (live.isAir()) {
             r.scaffoldLedger().cleared(scaffold);
             scaffoldAt++; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
         }
         if (inheritedProtectedMutationCells.contains(scaffold.asLong())
+                || forbiddenBodyCells.contains(scaffold.asLong())
                 || NavigationSafetyContext.protectsMutation(scaffold) || NavigationSafetyContext.forbidsBody(scaffold)
-                || r.scaffoldLedger().contains(scaffold) && !r.scaffoldLedger().owns(scaffold, live)) {
+                || !r.scaffoldLedger().owns(scaffold, live) || !r.mutationGuardMatches(player, scaffold)) {
             failAt(scaffold, "temporary scaffold changed or gained protection before cleanup",
                     FailureType.TARGET_LOST, "scaffold_cleanup_guard_changed", true);
             return TaskState.FAILED;
+        }
+        if (!scaffoldCleanup.ready()) {
+            digger.cancel(); scaffoldCleanup.rejectCurrent(); phase = Phase.SCAFFOLD_NAV;
+            return TaskState.RUNNING;
         }
         return switch (digger.digTargetStep(scaffold)) {
             case PROGRESSING -> TaskState.RUNNING;
@@ -1444,8 +1469,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         "scaffold_cleanup_wrong_block", true); yield TaskState.FAILED;
             }
             case NO_SHOT -> {
-                failAt(scaffold, "scaffold remains but has no safe first-person ray",
-                        FailureType.OCCLUDED, "scaffold_cleanup_occluded", false); yield TaskState.FAILED;
+                digger.cancel(); scaffoldCleanup.rejectCurrent(); phase = Phase.SCAFFOLD_NAV;
+                yield TaskState.RUNNING;
             }
         };
     }
@@ -1683,6 +1708,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("construction_access", stanceNavigation.stage());
         data.put("construction_navigation", navigationDiagnostics());
         data.put("creative_materials", creativeMaterials.progress());
+        if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
         if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
                 "stance_checks", gestureProgress.stanceChecks(), "face_checks", gestureProgress.probeCount(),
                 "candidates", gestureProgress.gestureCount()));

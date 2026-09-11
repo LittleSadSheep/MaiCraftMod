@@ -47,6 +47,8 @@ public final class GuiRegressionSuite {
         CreativeBuildSupplyMenuTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldLedgerTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterialsTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupGuardTest.main(args);
         org.maiwithu.maicraft.core.task.build.MachineSealingTest.main(args);
         CompanionCancellationTest.main(args);
         SleepSafetyTest.main(args);
