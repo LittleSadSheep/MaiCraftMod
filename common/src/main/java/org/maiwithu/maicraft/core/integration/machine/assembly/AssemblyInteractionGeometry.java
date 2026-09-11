@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 /**
  * 为 AE2 部件安装和 Mekanism 配置寻找已有站位，并预先检查潜行时能不能点到目标。
  */
-final class AssemblyInteractionGeometry {
+public final class AssemblyInteractionGeometry {
     private AssemblyInteractionGeometry() {}
 
     static BlockHitResult hit(LocalPlayer player, Vec3 eye, Vec3 aim) {
@@ -30,6 +30,11 @@ final class AssemblyInteractionGeometry {
 
     // 只在目标周围水平三格、向下两格至向上一格内找，按离玩家最近的有效位置选择；已失败的位置跳过。
     static BlockPos nearestStand(LocalPlayer player, BlockPos target, Set<Long> excluded, Function<Vec3, Vec3> aimFrom) {
+        return nearestStand(player, target, excluded, aimFrom, Pose.CROUCHING);
+    }
+
+    public static BlockPos nearestStand(LocalPlayer player, BlockPos target, Set<Long> excluded,
+                                        Function<Vec3, Vec3> aimFrom, Pose pose) {
         BlockPos best = null;
         double distance = Double.POSITIVE_INFINITY;
         for (int dx = -3; dx <= 3; dx++) for (int dz = -3; dz <= 3; dz++) for (int dy = -2; dy <= 1; dy++) {
@@ -37,7 +42,7 @@ final class AssemblyInteractionGeometry {
             if (excluded.contains(feet.asLong()) || !standable(player, feet)) continue;
             double candidateDistance = Vec3.atBottomCenterOf(feet).distanceToSqr(player.position());
             if (candidateDistance >= distance) continue;
-            Vec3 eye = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(Pose.CROUCHING), 0);
+            Vec3 eye = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(pose), 0);
             if (aimFrom.apply(eye) != null) { best = feet; distance = candidateDistance; }
         }
         return best;
