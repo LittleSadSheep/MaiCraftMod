@@ -84,6 +84,25 @@ public final class GroundMovementReplayTest {
         }
         field(LocalPlayer.class, "position").set(player, end);
         check(straight.updateState(running()).getStatus() == MovementStatus.SUCCESS, "arrival ends the long movement");
+        field(LocalPlayer.class, "onGround").setBoolean(player, false);
+        field(LocalPlayer.class, "position").set(player, start.add(2, 1.2, 1));
+        check(straight.updateState(running()).getStatus() == MovementStatus.UNREACHABLE,
+                "an unplanned airborne body cannot claim a straight travel hop");
+        jump.launch(0, 0, java.util.List.of(straight)); jump.observe(false, 1.2);
+        var airborne = straight.updateState(running());
+        check(airborne.getStatus() == MovementStatus.RUNNING && airborne.getInputStates().get(Input.MOVE_FORWARD)
+                && airborne.getInputStates().get(Input.SPRINT) && !straight.safeToCancel(),
+                "a verified straight hop keeps forward control and cannot hand off midair");
+        check(!Boolean.TRUE.equals(airborne.getInputStates().get(Input.JUMP)),
+                "release jump while airborne so the native repeat delay clears before the next landing");
+        field(LocalPlayer.class, "position").set(player, end.add(0, .01, 0));
+        check(straight.updateState(running()).getStatus() == MovementStatus.RUNNING,
+                "being above the endpoint does not complete a hop before physical touchdown");
+        jump.observe(true, 0);
+        field(LocalPlayer.class, "onGround").setBoolean(player, true);
+        field(LocalPlayer.class, "position").set(player, end);
+        check(straight.safeToCancel() && straight.updateState(running()).getStatus() == MovementStatus.SUCCESS,
+                "touchdown releases the temporary hop and completes the ordinary route");
         System.out.println("GroundMovementReplayTest: passed");
     }
 

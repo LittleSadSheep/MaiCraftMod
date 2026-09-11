@@ -218,7 +218,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             System.out.println("Recalculating break and place took " + (end - start) + "ms");
         }*/
         if (pauseAtUnloadedNext(movement)) return true;
-        boolean canCancel = movement.safeToCancel();
+        boolean canCancel = movement.safeToCancel() && !groundJump.controls(movement);
         if (costEstimateIndex == null || costEstimateIndex != pathPosition) {
             costEstimateIndex = pathPosition;
             // do this only once, when the movement starts, and deliberately get the cost as cached when this path was calculated, not the cost as it is right now
@@ -270,7 +270,7 @@ public class PathExecutor implements IPathExecutor, Helper {
             ticksOnCurrent++;
             if (cancelIfTimedOut(movement)) return true;
         }
-        return canCancel; // movement is in progress, but if it reports cancellable, PathingBehavior is good to cut onto the next path
+        return canCancel && !groundJump.controls(movement); // A hop launched this tick also retains the body through landing.
     }
 
     private boolean pauseAtUnloadedNext(Movement movement) {
@@ -749,6 +749,8 @@ public class PathExecutor implements IPathExecutor, Helper {
     public BetterBlockPos groundJumpFeet(IMovement movement, BetterBlockPos physicalFeet) {
         return groundJump.feet(movement, physicalFeet);
     }
+
+    public boolean controlsGroundJump(IMovement movement) { return groundJump.controls(movement); }
 
     /** Whether the selected current movement owns the temporary physical swim-depth offset. */
     public boolean controlsSubmergedWaterMovement(IMovement movement) {

@@ -2,8 +2,6 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 
 import baritone.api.pathing.movement.IMovement;
 import baritone.api.utils.BetterBlockPos;
-import baritone.pathing.movement.movements.MovementDiagonal;
-import baritone.pathing.movement.movements.MovementTraverse;
 
 /**
  * 一次已核对的平地跑跳期间，暂时让指定的走路步骤仍按起跳地面高度判断进度，避免刚离地就误认为偏离路线。
@@ -27,11 +25,15 @@ public final class GroundJumpContinuation {
         if (grounded && airborne || y < takeoffY - 0.1 || ++ticks > (airborne ? 40 : 3)) floor = null;
     }
 
-    // 只对当时核对过、起终点都在同一地面层的直走／斜走步骤生效；其他动作仍使用实际脚的位置。
+    public boolean controls(IMovement movement) {
+        return floor != null && movement != null && verified.contains(movement)
+                && TravelRunway.accepts(movement)
+                && movement.getSrc().getY() == floor && movement.getDest().getY() == floor;
+    }
+
+    // Only the movements whose whole flight corridor was checked inherit this temporary floor.
     public BetterBlockPos feet(IMovement movement, BetterBlockPos actual) {
-        if (floor == null || movement == null || !verified.contains(movement)
-                || !(movement instanceof MovementTraverse || movement instanceof MovementDiagonal)
-                || movement.getSrc().getY() != floor || movement.getDest().getY() != floor) return actual;
+        if (!controls(movement)) return actual;
         return new BetterBlockPos(actual.x, floor, actual.z);
     }
 }

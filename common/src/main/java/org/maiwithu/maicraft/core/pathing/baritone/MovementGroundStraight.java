@@ -37,6 +37,10 @@ public final class MovementGroundStraight extends Movement {
         if (executor == null || executor.getPosition() >= executor.getPath().movements().size()
                 || executor.getPath().movements().get(executor.getPosition()) != this) return originalCost;
         Vec3 start = ctx.player().position(), delta = target.subtract(start);
+        if (ownsHop()) {
+            start = new Vec3(start.x, from.y, start.z);
+            delta = target.subtract(start);
+        }
         double distance = delta.length();
         // Installation checked the full line. Execution refreshes a braking-distance window,
         // including the current momentum, instead of rescanning a distant route every tick.
@@ -47,9 +51,8 @@ public final class MovementGroundStraight extends Movement {
         return geometry.clear(start, end) && geometry.clear(start, start.add(drift)) ? originalCost : COST_INF;
     }
 
-    // 这里的客户端 hasChunkAt 不是可靠加载证据，未加载邻区可能被当成可读取区域交给通道检查。
     private GroundCorridor corridor() {
-        return new GroundCorridor(ctx.world(), pos -> ctx.world().hasChunkAt(pos)
+        return new GroundCorridor(ctx.world(), pos -> ctx.world().isLoaded(pos)
                 && ctx.world().getWorldBorder().isWithinBounds(pos), ctx.player().getBbWidth(), ctx.player().getBbHeight(),
                 EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells(), EmbeddedBaritoneRuntime.physicalObstacles());
     }
@@ -73,19 +76,26 @@ public final class MovementGroundStraight extends Movement {
 
     @Override public MovementState updateState(MovementState state) {
         super.updateState(state);
-        if (!ctx.player().onGround() || ctx.player().isInWater() || ctx.player().isPassenger()) {
+        boolean hopping = ownsHop();
+        if ((!ctx.player().onGround() && !hopping) || ctx.player().isInWater() || ctx.player().isPassenger()) {
             return state.setStatus(MovementStatus.UNREACHABLE);
         }
         Vec3 delta = target.subtract(ctx.player().position());
-        if (delta.horizontalDistanceSqr() < 0.0625 && Math.abs(delta.y) < 0.05) {
+        if (ctx.player().onGround() && delta.horizontalDistanceSqr() < 0.0625 && Math.abs(delta.y) < 0.05) {
             return state.setStatus(MovementStatus.SUCCESS);
         }
         float yaw = (float) (Mth.atan2(delta.z, delta.x) * Mth.RAD_TO_DEG) - 90;
         return state.setTarget(new MovementState.MovementTarget(new Rotation(yaw, 8), false))
-                .setInput(Input.MOVE_FORWARD, true).setInput(Input.SPRINT, delta.horizontalDistanceSqr() > 4);
+                .setInput(Input.MOVE_FORWARD, true).setInput(Input.SPRINT, hopping || delta.horizontalDistanceSqr() > 4);
     }
 
     @Override protected boolean prepared(MovementState state) { return true; }
+    @Override protected boolean safeToCancel(MovementState state) { return !ownsHop(); }
+
+    private boolean ownsHop() {
+        var executor = baritone.getPathingBehavior().getCurrent();
+        return executor instanceof baritone.pathing.path.PathExecutor path && path.controlsGroundJump(this);
+    }
 
     public Vec3 target() { return target; }
     Vec3 origin() { return from; }
