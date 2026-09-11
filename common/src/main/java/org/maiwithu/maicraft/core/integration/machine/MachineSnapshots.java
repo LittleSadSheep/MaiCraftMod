@@ -106,6 +106,22 @@ public final class MachineSnapshots {
         return snapshot;
     }
 
+    /** Attach native observation pages without extending structural freshness or changing its fingerprint. */
+    public static Snapshot enrich(LocalPlayer player, Snapshot anchor, JsonObject serverEvidence) {
+        bind(player);
+        Snapshot current = SNAPSHOTS.get(anchor.id());
+        if (current == null || current.gameTime() != anchor.gameTime()
+                || !current.fingerprint().equals(anchor.fingerprint())
+                || !current.dimension().equals(player.level().dimension().location().toString()))
+            throw new IllegalArgumentException("machine_snapshot_missing: observation anchor was consumed or replaced");
+        JsonObject report = current.report();
+        report.add("server_evidence", Objects.requireNonNull(serverEvidence).deepCopy());
+        Snapshot enriched = new Snapshot(current.id(), current.label(), current.dimension(), current.center(),
+                current.radius(), current.gameTime(), current.fingerprint(), report.toString());
+        SNAPSHOTS.put(enriched.id(), enriched);
+        return enriched;
+    }
+
     /** 要用于操作时，再检查编号、时效、结构是否看完整，以及当前方块是否与观察时一致。 */
     public static Snapshot requireFresh(LocalPlayer player, String id) {
         bind(player);
