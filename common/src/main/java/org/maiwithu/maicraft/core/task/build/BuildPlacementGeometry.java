@@ -597,34 +597,36 @@ final class BuildPlacementGeometry {
                         + direction.getStepY() * look.y
                         + direction.getStepZ() * look.z)));
         try {
-            BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(
-                    player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
-                // Only the hypothetical full support's destination differs; execution still uses the real context.
-                @Override public BlockPos getClickedPos() {
-                    return projectedSupport ? hit.getBlockPos().relative(hit.getDirection()) : super.getClickedPos();
-                }
-                @Override public boolean replacingClickedOnBlock() {
-                    return !projectedSupport && super.replacingClickedOnBlock();
-                }
-                @Override public boolean isSecondaryUseActive() { return sneak; }
-                @Override public Direction getHorizontalDirection() {
-                    return Direction.fromYRot(yaw);
-                }
-                @Override public float getRotation() { return yaw; }
-                @Override public Direction getNearestLookingDirection() {
-                    return Direction.getNearest(look.x, look.y, look.z);
-                }
-                @Override public Direction getNearestLookingVerticalDirection() {
-                    return look.y >= 0.0 ? Direction.UP : Direction.DOWN;
-                }
-                @Override public Direction[] getNearestLookingDirections() {
-                    return nearest.clone();
-                }
-            };
-            // 例如点同类半砖可能补成点击格的双层砖，而不是放到邻格；必须连落点也匹配本次目标。
-            BlockPos destination = context.getClickedPos();
-            return new NativePlacement(destination, destination.equals(target)
-                    ? blockItem.getBlock().getStateForPlacement(context) : null);
+            return PlacementSneakProjection.withCandidate(player, sneak, () -> {
+                BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(
+                        player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
+                    // Only the hypothetical full support's destination differs; execution still uses the real context.
+                    @Override public BlockPos getClickedPos() {
+                        return projectedSupport ? hit.getBlockPos().relative(hit.getDirection()) : super.getClickedPos();
+                    }
+                    @Override public boolean replacingClickedOnBlock() {
+                        return !projectedSupport && super.replacingClickedOnBlock();
+                    }
+                    @Override public boolean isSecondaryUseActive() { return sneak; }
+                    @Override public Direction getHorizontalDirection() {
+                        return Direction.fromYRot(yaw);
+                    }
+                    @Override public float getRotation() { return yaw; }
+                    @Override public Direction getNearestLookingDirection() {
+                        return Direction.getNearest(look.x, look.y, look.z);
+                    }
+                    @Override public Direction getNearestLookingVerticalDirection() {
+                        return look.y >= 0.0 ? Direction.UP : Direction.DOWN;
+                    }
+                    @Override public Direction[] getNearestLookingDirections() {
+                        return nearest.clone();
+                    }
+                };
+                // 例如点同类半砖可能补成点击格的双层砖，而不是放到邻格；必须连落点也匹配本次目标。
+                BlockPos destination = context.getClickedPos();
+                return new NativePlacement(destination, destination.equals(target)
+                        ? blockItem.getBlock().getStateForPlacement(context) : null);
+            });
         } catch (RuntimeException ignored) {
             return null;
         }

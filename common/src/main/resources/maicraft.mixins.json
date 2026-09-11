@@ -17,6 +17,7 @@
     "GameRendererCameraMixin",
     "NavigationPathRenderMixin",
     "BuildPreviewRenderMixin",
+    "PlacementSneakProjectionMixin",
     "MouseHandlerControlMixin",
     "ContainerStockSyncMixin",
     "ScreenVisibilityMixin",
