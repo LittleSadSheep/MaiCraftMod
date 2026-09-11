@@ -20,7 +20,8 @@ neoForge {
 // Mixin 等依赖供编译和注解处理使用，游戏运行时由加载器提供；测试可另有专门的运行依赖。
 dependencies {
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
-    compileOnly group: 'org.ow2.asm', name: 'asm', version: '9.7'
+    compileOnly group: 'org.ow2.asm', name: 'asm', version: '9.7.1'
+    compileOnly group: 'org.ow2.asm', name: 'asm-tree', version: '9.7.1'
     // Vendored Baritone sources retain their upstream nullability annotations.
     compileOnly group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
     // fabric and neoforge both bundle mixinextras, so it is safe to use it in common
@@ -154,3 +155,18 @@ tasks.register('combatRegression', JavaExec) {
 }
 
 tasks.named('check') { dependsOn tasks.named('combatRegression') }
+
+tasks.register('optionalServerRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks optional server negotiation, native resources and production evidence.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+    mainClass = 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite'
+    maxHeapSize = '768m'
+    timeout = java.time.Duration.ofSeconds(90)
+    def regressionDirectory = layout.buildDirectory.dir('optional-server-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
+}
+tasks.named('check') { dependsOn tasks.named('optionalServerRegression') }
