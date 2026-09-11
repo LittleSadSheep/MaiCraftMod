@@ -22,7 +22,7 @@ public final class BoardStructureTask extends AbstractCompanionTask<BoardStructu
     private MoveToCompanionTask departure;
     private boolean repositioned;
     public BoardStructureTask(LocalPlayer player, BoardStructureTaskRecord record) {
-        super(player,record); target = new ShipLandingTarget(record.structureId);
+        super(player,record); target = new ShipLandingTarget(record.structureId,record.interactionFocus);
     }
     @Override protected TaskState onTick() {
         var context = ClientRuntime.requireContext(player);

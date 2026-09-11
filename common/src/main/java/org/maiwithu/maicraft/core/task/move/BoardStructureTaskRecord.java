@@ -10,9 +10,14 @@ import org.maiwithu.maicraft.task.TaskRecord;
 public final class BoardStructureTaskRecord extends TaskRecord {
     static { TaskFactory.register(BoardStructureTaskRecord.class, BoardStructureTask::new); }
     public final UUID structureId;
+    public final net.minecraft.world.phys.Vec3 interactionFocus;
     public BoardStructureTaskRecord(String callId, long deadline, UUID structureId) {
+        this(callId,deadline,structureId,null);
+    }
+    public BoardStructureTaskRecord(String callId,long deadline,UUID structureId,net.minecraft.world.phys.Vec3 interactionFocus) {
         super("board_structure",callId,deadline);
         this.structureId = java.util.Objects.requireNonNull(structureId);
+        this.interactionFocus=interactionFocus;
     }
-    @Override public String describe() { return "飞上目标飞艇并在甲板站稳"; }
+    @Override public String describe() { return "登上目标物理结构并在支撑面站稳"; }
 }

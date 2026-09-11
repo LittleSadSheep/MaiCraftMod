@@ -35,11 +35,12 @@ public final class SemanticAbilityCatalog {
                             field("text", "string", "Required single line, 1-256 UTF-16 characters. A leading / submits a command; otherwise sends public player chat. Uses vanilla whitespace normalization. No control characters or section-sign formatting; Chinese and complete Unicode graphemes are supported."),
                             field("typing_interval_ms", "integer", "Time between displayed characters, 50-1000 ms, default 100. A slow client may take longer; it never bursts to catch up. The completed draft remains visible for 250 ms before automatic submission.")));
             case MachineAbilityAdapter.INSPECT -> contract(
-                    "Mark and inspect an existing machine, including Create, AE2, Mekanism and mixed assemblies. Returns bounded relative structure, state, candidate connections, evidence limits and an expiring snapshot_id for LLM analysis. Complete means the requested volume was observed, not that an entire network was discovered.",
+                    "Inspect a machine or an observed physical structure. Includes native control components, ordered wireless frequencies, directed redstone ports, kinetic connections and control-to-actuator paths. A seat or physical body alone does not establish a vehicle. World surveys retain relative layout and snapshot_id; structure_id surveys use moving native block coordinates and do not create a fixed-place snapshot. Unknown circuits and force/stability analysis remain explicit.",
                     targets("current_place", "coordinates", "landmark", "area", "prior_result"),
                     fields(
                             field("label", "string", "Short durable machine label; required unless the target already supplies one. Stored as a landmark; observing grants no mutation authority."),
-                            field("radius", "integer", "Survey cube radius 0-8, default 4; larger machines need multiple labeled surveys. Unloaded or truncated evidence cannot authorize operations.")));
+                            field("radius", "integer", "World survey cube radius 0-8, default 4. Unloaded or truncated evidence remains unknown."),
+                            field("structure_id", "string", "Observed physical-structure UUID. Inspects its native blocks and control circuits; omit target and radius. Does not assume the structure can be driven.")));
             case MachineAbilityAdapter.DESIGN -> contract(
                     "Review a machine layout against installed block/item IDs without construction. Supply exactly one of design, blueprint or blueprint_uri. A semantic design lets MaiCraft arrange components; a blueprint declares the model's exact structure, using the same JSON as exported Ponder chapters. Reports materials and unresolved requirements. expected_output in a semantic design queries synchronized recipes; successful review does not prove construction or production.",
                     targets("landmark", "area"),
@@ -61,9 +62,10 @@ public final class SemanticAbilityCatalog {
                             field("protected_labels", "array<string>", "Remembered areas that construction and material acquisition must preserve.")));
             case MachineAbilityAdapter.OPERATE -> contract(
                     "Use existing machines through native evidence: open_menu on a surveyed block, perceive(machine_menu), then deposit/withdraw an exact observed entry. Transfers bind a fresh menu receipt, validate native slot rules and verify inventory/cursor effects. set_control observes one exact vanilla lever state. ae2_supply uses an accessible AE2 terminal, including already configured mixed-mod patterns. Success identifies the observed effect; it never invents production or the meaning of undocumented menu controls.",
-                    targets("landmark", "area", "nearest"),
+                    targets("landmark", "area", "nearest", "coordinates", "prior_result"),
                     fields(
-                            field("operation", "string", "open_menu, close_menu, deposit, withdraw, set_control or ae2_supply; operation-specific fields are enforced. close_menu omits target and closes only the current menu opened by this workflow, with an empty cursor."),
+                            field("operation", "string", "drive_vehicle, open_menu, close_menu, deposit, withdraw, set_control or ae2_supply. drive_vehicle inspects the selected physical structure, boards an accessible driver seat, learns small native control responses, drives to target and confirms stopped arrival. Unsupported/ambiguous circuits return evidence without guessing keys. close_menu omits target."),
+                            field("structure_id", "string", "drive_vehicle only: observed physical-structure UUID. target is the destination. Existing control bindings are preserved; no force/stability model is assumed."),
                             field("allow_use", "boolean", "Required true only when the player's instructions authorize this use of the machine/network; never infer ownership from a label."),
                             field("snapshot_id", "string", "set_control/open_menu: fresh inspect_machine receipt for the exact target label; consumed by operation."),
                             field("component_index", "integer", "open_menu only: index of the desired block in snapshot.relative_blocks; omit to use the marked center. Must come from that exact observation."),

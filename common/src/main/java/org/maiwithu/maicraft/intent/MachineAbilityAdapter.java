@@ -66,10 +66,13 @@ final class MachineAbilityAdapter {
         JsonObject p = goal.parameters();
         switch (goal.ability()) {
             case INSPECT -> {
-                only(p, "label", "radius");
+                only(p, "label", "radius", "structure_id");
                 optionalString(p, "label", 160);
                 integer(p, "radius", 4, 0, 8);
-                if (goal.target() == null) throw bad("inspect_machine requires an explicit semantic target");
+                if (p.has("structure_id")) {
+                    UUID.fromString(requiredString(p,"structure_id",36));
+                    if (goal.target()!=null || p.has("radius")) throw bad("structure_id inspects that whole observed physical structure; omit target and radius");
+                } else if (goal.target() == null) throw bad("inspect_machine requires a semantic target or observed structure_id");
             }
             case DESIGN -> {
                 // 通用设计可以没有场地；如果指定某处机器，就要求带上那处机器的观察编号。
@@ -83,6 +86,13 @@ final class MachineAbilityAdapter {
             case OPERATE -> {
                 String operation = requiredString(p, "operation", 64);
                 switch (operation) {
+                    case "drive_vehicle" -> {
+                        only(p,"operation","structure_id","allow_use");
+                        UUID.fromString(requiredString(p,"structure_id",36));
+                        bool(p,"allow_use",false);
+                        if(goal.target()==null || !Set.of("coordinates","landmark","area","prior_result").contains(goal.target().kind()))
+                            throw bad("drive_vehicle requires an explicit destination target and an observed structure_id");
+                    }
                     case "close_menu" -> {
                         // 关的是本流程现在打开的菜单，不能借这个操作顺便点名另一台机器。
                         only(p, "operation", "allow_use");
@@ -128,7 +138,7 @@ final class MachineAbilityAdapter {
                             throw bad("ae2_supply requires target={kind:nearest}: it uses a natively accessible terminal, not a selected surveyed network");
                         }
                     }
-                    default -> throw bad("unsupported_machine_operation: choose set_control, open_menu, close_menu, deposit, withdraw or ae2_supply");
+                    default -> throw bad("unsupported_machine_operation: choose drive_vehicle, set_control, open_menu, close_menu, deposit, withdraw or ae2_supply");
                 }
             }
             case MODIFY -> {
@@ -162,6 +172,12 @@ final class MachineAbilityAdapter {
     }
 
     private static IntentAction inspect(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        if (goal.parameters().has("structure_id")) {
+            var inspection=org.maiwithu.maicraft.core.integration.machine.control.MachineControlInspection.structure(player,
+                    UUID.fromString(goal.parameters().get("structure_id").getAsString()));
+            return new IntentAction.Report(TaskResult.ok("Physical structure control paths inspected; see verified connections, unresolved inputs and vehicle classification.",
+                    Map.of("machine",inspection.report())),null);
+        }
         // 在指定位置读机器周围的方块并给观察结果一个编号，同时记住机器的地点名；命名不等于允许修改。
         Goal.WorldPosition position = resolve(goal.target(), player, runtime);
         JsonObject p = goal.parameters();
@@ -214,6 +230,12 @@ final class MachineAbilityAdapter {
         long deadline = player.level().getGameTime() + 3 * 60 * 20;
         String callId = "machine-" + UUID.randomUUID();
         String operation = requiredString(p, "operation", 64);
+        if ("drive_vehicle".equals(operation)) {
+            var destination=resolve(goal.target(),player,runtime);
+            return new IntentAction.Native(new org.maiwithu.maicraft.core.integration.machine.control.VehicleDriveTaskRecord(
+                    callId,player.level().getGameTime()+15*60*20,UUID.fromString(requiredString(p,"structure_id",36)),
+                    new net.minecraft.world.phys.Vec3(destination.x(),destination.y(),destination.z())));
+        }
         if ("close_menu".equals(operation)) return new IntentAction.Native(MachineMenu.closeTask(callId, deadline));
         if (Set.of("deposit", "withdraw").contains(operation)) {
             String item = requiredString(p, "item_id", 256);

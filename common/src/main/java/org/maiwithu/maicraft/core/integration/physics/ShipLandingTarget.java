@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.core.integration.jetpack.MovingFlightTarget;
  */
 public final class ShipLandingTarget implements MovingFlightTarget {
     private final UUID id;
+    private final Vec3 interactionFocus;
     private StructureDeckGeometry.Surface site;
     private List<StructureDeckGeometry.Surface> candidates = List.of();
     private int candidateIndex;
@@ -25,7 +26,10 @@ public final class ShipLandingTarget implements MovingFlightTarget {
     private long lastTick = Long.MIN_VALUE;
     private String detail = "locating an observed physical structure";
 
-    public ShipLandingTarget(UUID id) { this.id = java.util.Objects.requireNonNull(id); }
+    public ShipLandingTarget(UUID id) { this(id,null); }
+    public ShipLandingTarget(UUID id,Vec3 interactionFocus) {
+        this.id=java.util.Objects.requireNonNull(id); this.interactionFocus=interactionFocus;
+    }
 
     @Override public boolean update(LocalPlayerContext context) {
         if (lastTick == context.tickRevision()) return available;
@@ -40,9 +44,11 @@ public final class ShipLandingTarget implements MovingFlightTarget {
         try {
             if (site == null) {
                 var geometry = StructureDeckGeometry.sample(context.level(), ship::isLoaded, ship.pose(),
-                        ship.storageBounds(), ship.plotCenter(), ship.pose().toStorage(context.player().position()), width, height);
+                        ship.storageBounds(), ship.plotCenter(), interactionFocus==null ? ship.pose().toStorage(context.player().position()):interactionFocus, width, height);
                 var world = JetpackRoute.observed(context, LongSets.emptySet());
-                var clear = geometry.surfaces().stream().filter(s -> world.clear(s.feet(), s.feet())).toList();
+                var clear = geometry.surfaces().stream().filter(s -> world.clear(s.feet(), s.feet()))
+                        .filter(s -> interactionFocus==null || s.feet().add(0,context.player().getEyeHeight(),0)
+                                .distanceTo(ship.pose().toWorld(interactionFocus))<context.player().blockInteractionRange()-1).toList();
                 var power = org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeAdapter.inspect(context);
                 candidates = alternatives(rank(clear, ship.storageBounds().getCenter(), p -> power.controllable()
                         ? JetpackRoute.edgeTicks(context.player().position(),p,power) : p.distanceTo(context.player().position())));

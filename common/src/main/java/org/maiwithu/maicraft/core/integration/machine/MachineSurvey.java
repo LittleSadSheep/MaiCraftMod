@@ -165,6 +165,8 @@ public final class MachineSurvey {
                 "Re-survey before executing a plan and verify its effect afterward.",
                 "A matching structural fingerprint does not validate settings, inventory, ownership or action safety.")) rules.add(rule);
         report.add("analysis_rules", rules);
+        report.add("control_analysis", org.maiwithu.maicraft.core.integration.machine.control.MachineControlInspection
+                .world(self, center, capture.radius).report());
         return report;
     }
 
