@@ -1,0 +1,11 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "org.maiwithu.maicraft.server.machine.mixin",
+  "plugin": "org.maiwithu.maicraft.network.OptionalServerMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": ["CreatePressProductionMixin", "MekTransportDeliveryMixin", "MekSorterSourceMixin", "MekItemExtractionMixin",
+    "MekMonitorProductionMixin", "MekCachedProductionMixin", "MekOutputProductionMixin", "MekInputProductionMixin",
+    "CreateMillstoneProductionMixin", "CreateCrushingProductionMixin", "Ae2CraftingLifecycleMixin"],
+  "injectors": {"defaultRequire": 0}
+}
