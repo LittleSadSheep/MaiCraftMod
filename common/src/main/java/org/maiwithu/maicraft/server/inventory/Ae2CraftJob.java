@@ -22,6 +22,8 @@ final class Ae2CraftJob {
     final Future<?> calculation;
     Object plan;
     Object link;
+    Object cpuLogic;
+    String completionProvenance = "not_observed";
     boolean submissionStarted;
     String status = "planning";
     String error;

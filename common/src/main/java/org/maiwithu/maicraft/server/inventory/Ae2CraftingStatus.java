@@ -16,8 +16,22 @@ final class Ae2CraftingStatus {
     static void refresh(Ae2CraftJob job) {
         if (job.status.equals("cancelled")) return;
         if (job.link != null) {
-            if (NativeApi.truth(NativeApi.call(job.link, Ae2Crafting.LINK, "isCanceled"))) job.status = "cancelled";
-            else if (NativeApi.truth(NativeApi.call(job.link, Ae2Crafting.LINK, "isDone"))) job.status = "completed";
+            Ae2NativeCraftingCompletion.State lifecycle = Ae2NativeCraftingCompletion.state(job.link);
+            if (lifecycle == Ae2NativeCraftingCompletion.State.COMPLETED) {
+                job.status = "completed"; job.error = null; job.completionProvenance = "native_CraftingLink.markDone";
+            } else if (lifecycle == Ae2NativeCraftingCompletion.State.CANCELLED) {
+                job.status = "cancelled"; job.error = null; job.completionProvenance = "native_CraftingLink.cancel";
+            } else if (NativeApi.truth(NativeApi.call(job.link, Ae2Crafting.LINK, "isCanceled"))) {
+                job.status = "cancelled"; job.error = null; job.completionProvenance = "native_link_cancelled";
+            } else if (NativeApi.truth(NativeApi.call(job.link, Ae2Crafting.LINK, "isDone"))) {
+                job.status = "completed"; job.error = null; job.completionProvenance = "native_link_done";
+            } else if (job.cpuLogic != null) {
+                Object current = NativeApi.call(job.cpuLogic, "appeng.crafting.execution.CraftingCpuLogic", "getLastLink");
+                Object expected = NativeApi.call(job.link, Ae2Crafting.LINK, "getCraftingID");
+                if (current == null || !expected.equals(NativeApi.call(current, Ae2Crafting.LINK, "getCraftingID"))) {
+                    job.status = "uncertain"; job.error = "native_finish_not_observed";
+                }
+            }
             return;
         }
         if (job.submissionStarted || job.plan != null || !job.calculation.isDone()) return;
@@ -42,6 +56,7 @@ final class Ae2CraftingStatus {
         result.addProperty("dimension", job.dimension);
         result.addProperty("tick", player.serverLevel().getGameTime());
         result.addProperty("submission_started", job.submissionStarted);
+        result.addProperty("completion_provenance", job.completionProvenance);
         result.addProperty("error", job.error);
         result.addProperty("output_destination", "native_ae2_network_inventory");
         result.addProperty("player_delivery_verified", false);

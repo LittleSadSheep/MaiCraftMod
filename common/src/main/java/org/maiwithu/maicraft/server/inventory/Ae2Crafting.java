@@ -65,6 +65,7 @@ public final class Ae2Crafting {
         Ae2CraftingStatus.refresh(job);
         if (job.submissionStarted) return Ae2CraftingStatus.describe(player, job);
         if (!job.status.equals("ready")) throw ServerAccess.denied("plan_not_ready", "Crafting plan is not executable: " + job.status);
+        Ae2SubmissionTracking tracking = Ae2SubmissionTracking.before(access, job.plan);
         // Pin before calling AE2: any exception after this point can never trigger a second native submission.
         job.submissionStarted = true;
         job.status = "uncertain";
@@ -72,8 +73,9 @@ public final class Ae2Crafting {
                 job.plan, null, null, true, access.actionSource());
         String api = "appeng.api.networking.crafting.ICraftingSubmitResult";
         if (NativeApi.truth(NativeApi.call(submission, api, "successful"))) {
-            job.link = NativeApi.call(submission, api, "link");
-            job.status = job.link == null ? "uncertain" : "running";
+            job.link = tracking.completedSubmission(NativeApi.call(submission, api, "link"));
+            job.cpuLogic = tracking.logicFor(job.link);
+            job.status = Ae2NativeCraftingCompletion.watch(job.link) ? "running" : "uncertain";
         } else {
             job.status = "rejected";
             job.error = String.valueOf(NativeApi.call(submission, api, "errorCode"));
@@ -84,6 +86,8 @@ public final class Ae2Crafting {
     public static JsonObject cancel(ServerPlayer player, JsonObject body) {
         Ae2CraftJob job = owned(player, body);
         sameTerminal(player, job);
+        Ae2CraftingStatus.refresh(job);
+        if (job.status.equals("completed") || job.status.equals("cancelled")) return Ae2CraftingStatus.describe(player, job);
         if (job.link != null) {
             NativeApi.call(job.link, LINK, "cancel");
             job.status = NativeApi.truth(NativeApi.call(job.link, LINK, "isCanceled")) ? "cancelled" : "uncertain";
@@ -121,11 +125,16 @@ public final class Ae2Crafting {
             boolean old = now - job.createdNanos > java.util.concurrent.TimeUnit.HOURS.toNanos(1);
             if (!old) return false;
             if (!job.submissionStarted) { job.calculation.cancel(true); return true; }
-            return job.status.equals("completed") || job.status.equals("cancelled") || job.status.equals("rejected");
+            boolean remove = job.status.equals("completed") || job.status.equals("cancelled") || job.status.equals("rejected");
+            if (remove) Ae2NativeCraftingCompletion.forget(job.link);
+            return remove;
         });
         if (JOBS.size() >= 128) {
             var iterator = JOBS.values().iterator();
-            while (iterator.hasNext() && JOBS.size() >= 128) if (finished(iterator.next())) iterator.remove();
+            while (iterator.hasNext() && JOBS.size() >= 128) {
+                Ae2CraftJob job = iterator.next();
+                if (finished(job)) { Ae2NativeCraftingCompletion.forget(job.link); iterator.remove(); }
+            }
         }
     }
 
