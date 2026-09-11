@@ -39,7 +39,7 @@ public final class ControlComponents {
         if (is(be,CREATE+"contraptions.bearing.MechanicalBearingBlockEntity")) return JOINT;
         if (is(be,CREATE+"kinetics.base.KineticBlockEntity")) return TRANSMISSION;
         if (block instanceof net.minecraft.world.level.block.RedStoneWireBlock) return WIRE;
-        if (block instanceof net.minecraft.world.level.block.DiodeBlock) return RELAY;
+        if (block instanceof net.minecraft.world.level.block.DiodeBlock || block instanceof net.minecraft.world.level.block.RedstoneTorchBlock) return RELAY;
         return OTHER;
     }
     public static List<Link> read(Level level, Cell cell, ControlCircuit circuit) {

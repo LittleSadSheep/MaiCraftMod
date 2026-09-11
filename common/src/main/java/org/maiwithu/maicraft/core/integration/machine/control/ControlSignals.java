@@ -36,6 +36,8 @@ public final class ControlSignals {
         if(kind==THROTTLE || block instanceof ButtonBlock || block instanceof LeverBlock)
             return !strong || toward==attachment(state);
         if(block instanceof DiodeBlock) return toward==facing(state).getOpposite();
+        if(block instanceof RedstoneTorchBlock) return strong ? toward==Direction.UP
+                : toward!=(block instanceof RedstoneWallTorchBlock ? facing(state).getOpposite() : Direction.DOWN);
         if(block instanceof RedStoneWireBlock) {
             if(toward==Direction.DOWN) return true;
             if(toward==Direction.UP) return false;
@@ -52,6 +54,8 @@ public final class ControlSignals {
     static String input(Cell target,Direction side) {
         var kind=kind(target); var block=target.state().getBlock();
         if(kind==TRANSMITTER || kind==WIRE) return "signal";
+        if(block instanceof RedstoneTorchBlock) return side==(block instanceof RedstoneWallTorchBlock
+                ? facing(target.state()).getOpposite():Direction.DOWN) ? "invert_signal":null;
         if(kind==RELAY) return side==facing(target.state()) ? "diode_input" : null;
         if(kind==WHEEL) {
             Direction facing=facing(target.state());
