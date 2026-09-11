@@ -40,22 +40,25 @@ public final class SemanticAbilityCatalog {
                     fields(
                             field("label", "string", "Short durable machine label; required unless the target already supplies one. Stored as a landmark; observing grants no mutation authority."),
                             field("radius", "integer", "World survey cube radius 0-8, default 4. Unloaded or truncated evidence remains unknown."),
+                            field("component_offset", "integer", "Continue optional server component observations from the previous server_evidence.next_component_index, 0-768. Each inspection retains its own snapshot identity/tick; pages are not one atomic world snapshot. Omit with structure_id."),
+                            field("resource_offset", "integer", "Continue the starting component's resources from server_evidence.next_resource_offset, 0-4096, together with its next_component_index. Later components start at zero. Omit with structure_id."),
                             field("structure_id", "string", "Observed physical-structure UUID. Inspects its native blocks and control circuits; omit target and radius. Does not assume the structure can be driven.")));
             case MachineAbilityAdapter.DESIGN -> contract(
                     "Review a machine layout against installed block/item IDs without construction. Supply exactly one of design, blueprint or blueprint_uri. A semantic design lets MaiCraft arrange components; a blueprint declares the model's exact structure, using the same JSON as exported Ponder chapters. Reports materials and unresolved requirements. expected_output in a semantic design queries synchronized recipes; successful review does not prove construction or production.",
                     targets("landmark", "area"),
                     fields(field("design", "object",
                             "Shape: {components:[{name,block_id,count,role,module?,module_tier?,module_options?}],connections:[{from,to,medium,purpose}],expected_output?:item_id,style?:string,constraints?:{max_width?,max_depth?,max_height?,terrain_fit?,maintenance_access?,preserve_existing?,throughput?}}. Planning budgets: 1024 component groups, 4096 connections, 32768 physical targets. Modules: create:press_station, create:press_basin_station, create:mixer_station, ae2:storage_cluster, ae2:crafting_cluster, mekanism:induction_matrix. Matrix options: width/height/depth/cell_count/provider_count, tier basic/advanced/elite/ultimate. AE options: storage_tier and storage_cells. Media include kinetic, items, fluids, energy, chemicals and ae_network; unsupported interfaces produce specific compiler issues."),
-                            blueprintField(), blueprintUriField(),
+                            blueprintField(), blueprintUriField(), productionField(),
                             field("snapshot_id", "string", "Optional fresh site/machine observation that grounds site-specific analysis; requires the exact surveyed target label. Blueprint offsets are relative to this anchor.")));
             case MachineAbilityAdapter.BUILD -> contract(
-                    "Construct a machine at an observed anchor. Supply exactly one of design, blueprint or blueprint_uri. MaiCraft compares the declared structure with the world, supplies materials, chooses placement order and executes native interactions. Success verifies declared structure and supported configuration; use operate_machine separately to run the machine and collect operating evidence. Dev mode displays the frozen blueprint and waits for local preview confirmation. Unsupported structures or configurations report concrete issues before construction.",
+                    "Construct a machine at an observed anchor. Supply exactly one of design, blueprint or blueprint_uri. MaiCraft supplies materials, chooses placement order and executes native interactions. Without production, success verifies declared structure and supported configuration. With production and allow_use=true, continue through real input supply, native configuration and a finite observed production-and-delivery run; server assistance is required. Dev mode waits for local preview confirmation before construction. Unsupported structures or configurations report concrete issues.",
                     targets("landmark", "area"),
                     fields(
                             field("snapshot_id", "string", "Fresh complete inspect_machine receipt identifying the build anchor. The complete construction footprint is subsequently inspected by the native task and is not limited to the anchor survey radius."),
                             field("design", "object", "Alternative to blueprint/blueprint_uri: same semantic graph as design_machine, with components, connections and optional expected_output, style and constraints."),
-                            blueprintField(), blueprintUriField(),
+                            blueprintField(), blueprintUriField(), productionField(),
                             field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site."),
+                            field("allow_use", "boolean", "Required true with production: authorizes operating the declared machine after construction. Omit when production is absent."),
                             field("material_policy", "string", "ordinary, storage_available (including an existing AE2 network), or inventory_only; exact machine items are never substituted."),
                             field("replace_existing", "boolean", "Allow removing ordinary obstructing blocks in the compiled footprint; block entities stay protected unless replace_block_entities is also true. Default false."),
                             field("replace_block_entities", "boolean", "Also allow replacing existing block entities at declared targets; requires replace_existing=true and authorization for those changes. Default false."),
@@ -64,10 +67,13 @@ public final class SemanticAbilityCatalog {
                     "Use existing machines through native evidence: open_menu on a surveyed block, perceive(machine_menu), then deposit/withdraw an exact observed entry. Transfers bind a fresh menu receipt, validate native slot rules and verify inventory/cursor effects. set_control observes one exact vanilla lever state. ae2_supply uses an accessible AE2 terminal, including already configured mixed-mod patterns. Success identifies the observed effect; it never invents production or the meaning of undocumented menu controls.",
                     targets("landmark", "area", "nearest", "coordinates", "prior_result"),
                     fields(
-                            field("operation", "string", "drive_vehicle, open_menu, close_menu, deposit, withdraw, set_control or ae2_supply. drive_vehicle inspects the selected physical structure, boards an accessible driver seat, learns small native control responses, drives to target and confirms stopped arrival. Unsupported/ambiguous circuits return evidence without guessing keys. close_menu omits target."),
+                            field("operation", "string", "run_production, drive_vehicle, open_menu, close_menu, deposit, withdraw, set_control or ae2_supply. run_production requires a fresh machine snapshot, production manifest and allow_use; success requires actual native output and delivery over the observation window. drive_vehicle boards and drives the observed structure to target. Unsupported/ambiguous circuits return evidence. close_menu omits target."),
+                            productionField(),
+                            field("protected_labels", "array<string>", "run_production only: remembered areas that navigation and material acquisition must preserve."),
+                            field("material_policy", "string", "run_production only: configuration-tool acquisition, inventory_only by default; storage_available or ordinary must be explicitly chosen. Input supply follows each production source's policy."),
                             field("structure_id", "string", "drive_vehicle only: observed physical-structure UUID. target is the destination. Existing control bindings are preserved; no force/stability model is assumed."),
                             field("allow_use", "boolean", "Required true only when the player's instructions authorize this use of the machine/network; never infer ownership from a label."),
-                            field("snapshot_id", "string", "set_control/open_menu: fresh inspect_machine receipt for the exact target label; consumed by operation."),
+                            field("snapshot_id", "string", "run_production/set_control/open_menu: fresh inspect_machine receipt for the exact target label; consumed by operation."),
                             field("component_index", "integer", "open_menu only: index of the desired block in snapshot.relative_blocks; omit to use the marked center. Must come from that exact observation."),
                             field("menu_receipt_id", "string", "deposit/withdraw only: receipt from perceive(view=machine_menu) after open_menu. Omit target; the receipt already binds the exact native menu. Inspect again after each transaction."),
                             field("entry_index", "integer", "deposit/withdraw only: exact observed native menu entry. MaiCraft chooses player inventory entries, validates slot rules and never quick-moves or swaps arbitrary contents."),
@@ -385,6 +391,21 @@ public final class SemanticAbilityCatalog {
                 "execution_boundary",
                 "Use only fields declared by this ability. Build accepts LLM-authored scenes and explicit block blueprints; machine blueprints also accept exported tutorial structures. MaiCraft owns native routes, gestures, transactions, retries and verification. Never supply click scripts. Construction verifies structure; operation requires separate evidence.");
         return result;
+    }
+
+    private static JsonObject productionField() {
+        return field("production", "object", "Optional production manifest: {schema_version:1,"
+                + "nodes:[{id,kind:'source|process|transport|sink',offset:[x,y,z],recipe_id?,batches?,material_policy?}],"
+                + "ports:[{id,node,offset:[x,y,z],face,medium,direction:'input|output'}],"
+                + "links:[{id,from:port_id,to:port_id,medium,resource,amount,path?:[[x,y,z]],configurations?:[id]}],"
+                + "configurations:[{id,node,operation,stage:'configure|start',arguments:{}}],"
+                + "target:{node,medium,resource},observation:{window_ticks,minimum_output,minimum_events,max_idle_ticks}}. "
+                + "Offsets share the frozen blueprint/build anchor. Process nodes require an installed recipe and batches; "
+                + "source policy is inventory_only, storage_available or ordinary. Media: items, fluids, chemicals, energy, kinetic. "
+                + "Amounts are finite window budgets, kinetic amount is minimum rpm. Native resource identities returned by adapters retain components. "
+                + "At least two native production events, the declared time span and actual output delivery are required. "
+                + "Design reports unresolved evidence; building with production and operate_machine/run_production execute this complete chain. "
+                + "Without optional server support, use ordinary construction separately; production verification is never silently weakened.");
     }
 
     private static JsonObject blueprintField() {

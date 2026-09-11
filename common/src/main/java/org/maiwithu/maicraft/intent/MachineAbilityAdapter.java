@@ -66,18 +66,21 @@ final class MachineAbilityAdapter {
         JsonObject p = goal.parameters();
         switch (goal.ability()) {
             case INSPECT -> {
-                only(p, "label", "radius", "structure_id");
+                only(p, "label", "radius", "structure_id", "component_offset", "resource_offset");
                 optionalString(p, "label", 160);
                 integer(p, "radius", 4, 0, 8);
+                integer(p, "component_offset", 0, 0, 768);
+                integer(p, "resource_offset", 0, 0, 4096);
                 if (p.has("structure_id")) {
                     UUID.fromString(requiredString(p,"structure_id",36));
-                    if (goal.target()!=null || p.has("radius")) throw bad("structure_id inspects that whole observed physical structure; omit target and radius");
+                    if (goal.target()!=null || p.has("radius") || p.has("component_offset") || p.has("resource_offset")) throw bad("structure_id inspects that whole observed physical structure; omit target, radius and paging offsets");
                 } else if (goal.target() == null) throw bad("inspect_machine requires a semantic target or observed structure_id");
             }
             case DESIGN -> {
                 // 通用设计可以没有场地；如果指定某处机器，就要求带上那处机器的观察编号。
-                only(p, "design", "blueprint", "blueprint_uri", "snapshot_id");
+                only(p, "design", "blueprint", "blueprint_uri", "snapshot_id", "production");
                 validateLayoutSource(p, true);
+                if (p.has("production")) MachineProductionIntent.validate(p);
                 if (p.has("snapshot_id")) {
                     requiredString(p, "snapshot_id", 36);
                     requireMachineTarget(goal);
@@ -86,6 +89,14 @@ final class MachineAbilityAdapter {
             case OPERATE -> {
                 String operation = requiredString(p, "operation", 64);
                 switch (operation) {
+                    case "run_production" -> {
+                        only(p, "operation", "snapshot_id", "production", "allow_use", "protected_labels", "material_policy");
+                        requiredString(p, "snapshot_id", 36);
+                        bool(p, "allow_use", false);
+                        MachineProductionIntent.validate(p);
+                        if (p.has("material_policy")) SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(requiredString(p, "material_policy", 64));
+                        requireMachineTarget(goal);
+                    }
                     case "drive_vehicle" -> {
                         only(p,"operation","structure_id","allow_use");
                         UUID.fromString(requiredString(p,"structure_id",36));
@@ -138,7 +149,7 @@ final class MachineAbilityAdapter {
                             throw bad("ae2_supply requires target={kind:nearest}: it uses a natively accessible terminal, not a selected surveyed network");
                         }
                     }
-                    default -> throw bad("unsupported_machine_operation: choose drive_vehicle, set_control, open_menu, close_menu, deposit, withdraw or ae2_supply");
+                    default -> throw bad("unsupported_machine_operation: choose run_production, drive_vehicle, set_control, open_menu, close_menu, deposit, withdraw or ae2_supply");
                 }
             }
             case MODIFY -> {
@@ -160,9 +171,11 @@ final class MachineAbilityAdapter {
                 requireMachineTarget(goal);
             }
             case BUILD -> {
-                only(p, "snapshot_id", "design", "blueprint", "blueprint_uri", "allow_modify", "material_policy", "replace_existing", "replace_block_entities", "protected_labels");
+                only(p, "snapshot_id", "design", "blueprint", "blueprint_uri", "allow_modify", "material_policy", "replace_existing", "replace_block_entities", "protected_labels", "production", "allow_use");
                 requiredString(p, "snapshot_id", 36);
                 validateLayoutSource(p, true);
+                if (p.has("production")) { MachineProductionIntent.validate(p); bool(p, "allow_use", false); }
+                else if (p.has("allow_use")) throw bad("allow_use on build_machine requires an explicit production goal");
                 bool(p, "allow_modify", false);
                 validateConstructionOptions(p);
                 requireMachineTarget(goal);
@@ -189,8 +202,9 @@ final class MachineAbilityAdapter {
         if (!player.level().isLoaded(center)) throw bad("machine_anchor_unloaded: travel closer before inspecting; unloaded terrain is not empty space");
         MachineSnapshots.Snapshot snapshot = MachineSnapshots.inspect(player, label, center, radius);
         runtime.remember(label, position);
-        return new IntentAction.Report(TaskResult.ok("Machine structure observed; inferred connections and unknown state require analysis.",
-                Map.of("machine", snapshot.report())), position);
+        return new IntentAction.Native(new org.maiwithu.maicraft.client.server.ServerMachineObservationTaskRecord(
+                "machine-inspection-" + UUID.randomUUID(), player.level().getGameTime() + 1_200, snapshot,
+                integer(p, "component_offset", 0, 0, 768), integer(p, "resource_offset", 0, 0, 4096)));
     }
 
     private static IntentAction design(Goal goal, LocalPlayer player, IntentRuntime runtime) {
@@ -218,6 +232,7 @@ final class MachineAbilityAdapter {
             report.add("observed_context", context);
         }
         report.add("layout_compiler", layout.report());
+        if (p.has("production")) report.add("production", MachineProductionIntent.review(p.getAsJsonObject("production")));
         // 返回成功只是完成了检查，调用者还要看报告中哪些条件未满足，不能据此说机器已建好。
         return new IntentAction.Report(TaskResult.ok("Machine design review completed; inspect validation and unresolved obligations before proposing work.",
                 Map.of("design_review", report)), null);
@@ -230,6 +245,20 @@ final class MachineAbilityAdapter {
         long deadline = player.level().getGameTime() + 3 * 60 * 20;
         String callId = "machine-" + UUID.randomUUID();
         String operation = requiredString(p, "operation", 64);
+        if ("run_production".equals(operation)) {
+            MachineProductionIntent.requireRuntime(p.getAsJsonObject("production"));
+            MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
+            var plan = new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(
+                    snapshot.center(), snapshot.dimension(), p.getAsJsonObject("production"));
+            var protections = new java.util.LinkedHashSet<>(goal.inheritedProtectionLabels());
+            if (p.has("protected_labels")) p.getAsJsonArray("protected_labels").forEach(value -> protections.add(value.getAsString()));
+            var task = new org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord(
+                    callId, player.level().getGameTime() + 45L * 60 * 20, plan, null, List.copyOf(protections),
+                    p.has("material_policy") ? SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(p.get("material_policy").getAsString())
+                            : SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY);
+            MachineSnapshots.consume(snapshot);
+            return new IntentAction.Native(task);
+        }
         if ("drive_vehicle".equals(operation)) {
             var destination=resolve(goal.target(),player,runtime);
             return new IntentAction.Native(new org.maiwithu.maicraft.core.integration.machine.control.VehicleDriveTaskRecord(
@@ -310,6 +339,10 @@ final class MachineAbilityAdapter {
         // 布局算完后再核对场地观察是否仍有效；图形方案、允许替换哪些方块和供料策略一起交给施工任务。
         JsonObject p = goal.parameters();
         if (!bool(p, "allow_modify", false)) throw bad("machine_build_not_authorized: the player's instructions must authorize building this machine");
+        if (p.has("production")) {
+            if (!bool(p, "allow_use", false)) throw bad("machine_production_not_authorized: allow_use is required to run the declared production chain");
+            MachineProductionIntent.requireRuntime(p.getAsJsonObject("production"));
+        }
         var layout = compileLayout(p, player);
         if (layout == null) return IntentAction.Pending.INSTANCE;
         MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
@@ -330,9 +363,14 @@ final class MachineAbilityAdapter {
             var task = new MachineBuildTaskRecord("machine-" + UUID.randomUUID(), deadline, plan,
                     snapshot.dimension(), SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(
                             optionalString(p, "material_policy", 64)), protectedLabels);
+            org.maiwithu.maicraft.task.TaskRecord execution = task;
+            if (p.has("production")) execution = new org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord(
+                    task.getToolCallId(), deadline,
+                    new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(anchor,
+                            snapshot.dimension(), p.getAsJsonObject("production")), task, protectedLabels);
             MachineSnapshots.consume(snapshot);
             // 一份观察只用于发起一次修改，即使后面的施工失败，也要重新观察才可另开一份修改任务。
-            return new IntentAction.Native(task);
+            return new IntentAction.Native(execution);
         }
         JsonObject context = new JsonObject();
         context.addProperty("ability", goal.ability());

@@ -38,6 +38,16 @@ public final class BlueprintGoalData {
             // 先证明是合法蓝图，再从普通脚本字段检查中排除它，不能靠起名 blueprint 绕过验证。
             parameters.remove("blueprint");
         }
+        boolean productionDeclared = MachineAbilityAdapter.DESIGN.equals(goal.ability())
+                || MachineAbilityAdapter.BUILD.equals(goal.ability())
+                || MachineAbilityAdapter.OPERATE.equals(goal.ability()) && operation != null
+                    && operation.isJsonPrimitive() && operation.getAsJsonPrimitive().isString()
+                    && "run_production".equals(operation.getAsString());
+        if (productionDeclared && parameters.has("production")) {
+            // Anchored ports and paths are typed design data. Their strict parser still rejects slot/click scripts.
+            MachineProductionIntent.validate(parameters);
+            parameters.remove("production");
+        }
         for (int i = 0; i < goal.children().size(); i++)
             stripValidatedBlueprints(goal.children().get(i), view.getAsJsonArray("children").get(i).getAsJsonObject());
     }
