@@ -31,10 +31,12 @@ public final class ServerProductionEvents {
     /** Amounts already describe this actual native operation; operations is metadata, never a multiplier. */
     public static void recordProduction(ServerLevel level, BlockPos producer, String recipeId, JsonArray inputs,
                                         JsonArray outputs, long operations, String nativeCall) {
-        if (!level.getServer().isSameThread() || producer == null || outputs.isEmpty() || operations <= 0) return;
+        if (!level.getServer().isSameThread() || producer == null || operations <= 0) return;
+        if (!hasPositiveResource(outputs) && !hasPositiveResource(inputs)) return;
         JsonObject event = new JsonObject();
         event.addProperty("producer", key(producer));
         event.addProperty("kind", "recipe_output");
+        event.addProperty("completed", true);
         JsonObject position = new JsonObject();
         position.addProperty("x", producer.getX());
         position.addProperty("y", producer.getY());
@@ -54,6 +56,20 @@ public final class ServerProductionEvents {
             event.add("input_amount", inputs.get(0).getAsJsonObject().get("amount").deepCopy());
         }
         journal(level).append(event);
+    }
+
+    private static boolean hasPositiveResource(JsonArray resources) {
+        for (var raw : resources) {
+            if (!raw.isJsonObject()) continue;
+            JsonObject value = raw.getAsJsonObject();
+            if (!value.has("identity") || !value.get("identity").isJsonObject()
+                    || !value.has("resource_id") || !value.has("amount")) continue;
+            try {
+                if (value.get("amount").getAsBigDecimal().longValueExact() > 0
+                        && ResourceIdentity.key(value.getAsJsonObject("identity")).equals(value.get("resource_id").getAsString())) return true;
+            } catch (RuntimeException invalid) { /* Unverifiable resource descriptors cannot prove native completion. */ }
+        }
+        return false;
     }
 
     private static JsonObject item(ServerLevel level, ItemStack stack) {
