@@ -48,6 +48,8 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         if (!player.level().dimension().location().toString().equals(r.plan.dimension()))
             return failure("production_world_changed", "Production cannot continue in a different dimension");
         try {
+            // The construction child owns its target permissions; planned machine cells are not yet protected assets.
+            if (phase == Phase.CHECK || phase == Phase.BUILD) return advance();
             return org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.withProtectedArea(
                     r.plan.positions(), java.util.List.of(), this::advance);
         } catch (IllegalArgumentException | IllegalStateException unavailable) {
