@@ -48,6 +48,29 @@ public final class GroundCorridor {
     public boolean exhausted() { return remainingReads <= 0; }
     private void charge() { if (remainingReads-- <= 0) throw new IllegalStateException("corridor observation budget"); }
 
+    /** Every column touched by the body must have the same full ceiling before shortening a hop. */
+    public boolean hasContinuousCeiling(Vec3 from, Vec3 to, double clearance) {
+        if (exhausted() || from == null || to == null || !Double.isFinite(from.lengthSqr() + to.lengthSqr())
+                || !Double.isFinite(width + clearance) || width <= 0 || width > 2 || clearance <= 0
+                || Math.abs(from.y - to.y) > EPS || from.distanceToSqr(to) > MAX_LENGTH * MAX_LENGTH) return false;
+        int y = Mth.floor(from.y + clearance);
+        if (Math.abs(from.y + clearance - y) > EPS) return false;
+        var view = new LoadedView(world, loaded, this::charge);
+        double half = width / 2;
+        try {
+            for (int x = Mth.floor(Math.min(from.x, to.x) - half); x <= Mth.floor(Math.max(from.x, to.x) + half); x++) {
+                for (int z = Mth.floor(Math.min(from.z, to.z) - half); z <= Mth.floor(Math.max(from.z, to.z) + half); z++) {
+                    if (interval(from, to, x - half + EPS, x + 1 + half - EPS,
+                            z - half + EPS, z + 1 + half - EPS) == null) continue;
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = view.getBlockState(pos);
+                    if (!state.getFluidState().isEmpty() || !state.isCollisionShapeFullBlock(view, pos)) return false;
+                }
+            }
+            return true;
+        } catch (RuntimeException | LinkageError unavailable) { return false; }
+    }
+
     public boolean clear(Vec3 from, Vec3 to) {
         if (exhausted() || from == null || to == null || !Double.isFinite(from.lengthSqr() + to.lengthSqr())
                 || !Double.isFinite(width + height) || width <= 0 || width > 2 || height <= 0 || height > 4

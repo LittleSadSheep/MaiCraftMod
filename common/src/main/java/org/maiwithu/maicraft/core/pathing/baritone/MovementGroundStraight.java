@@ -88,4 +88,5 @@ public final class MovementGroundStraight extends Movement {
     @Override protected boolean prepared(MovementState state) { return true; }
 
     public Vec3 target() { return target; }
+    Vec3 origin() { return from; }
 }

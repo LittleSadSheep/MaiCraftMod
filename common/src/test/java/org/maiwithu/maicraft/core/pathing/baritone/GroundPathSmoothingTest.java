@@ -133,7 +133,7 @@ public final class GroundPathSmoothingTest {
         };
     }
     private static void check(boolean test, String detail) { if (!test) throw new AssertionError(detail); }
-    private static final class Scene implements BlockGetter {
+    static final class Scene implements BlockGetter {
         final Map<BlockPos, BlockState> blocks = new HashMap<>();
         int reads;
         public BlockState getBlockState(BlockPos pos) { reads++; return blocks.getOrDefault(pos, (pos.getY() == -1 ? Blocks.STONE : Blocks.AIR).defaultBlockState()); }

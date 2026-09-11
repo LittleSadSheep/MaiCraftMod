@@ -14,3 +14,8 @@ MaiCraft owns semantic intent, task scheduling, first-person control authority,
 failure receipts, and cancellation. The embedded code does not register its chat
 command surface. The optional native elytra pathfinder is not included in the
 initial backend slice.
+
+Selected movement fixes are compared with upstream `1.21.1` commit `11ea66cd`
+(Baritone 1.11.3). This includes its second-corner magma check for diagonal
+movement. Sprint-ascend decisions follow upstream; continuous ground travel
+hops and low-ceiling acceleration are MaiCraft extensions.
