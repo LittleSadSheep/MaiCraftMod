@@ -12,7 +12,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.effect.MobEffects;
-import net.minecraft.world.entity.ai.attributes.Attributes;
+import org.maiwithu.maicraft.core.pathing.baritone.TravelJumpPhysics.JumpProjection;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
@@ -25,8 +25,6 @@ import java.util.List;
  */
 public final class TravelJumpPolicy {
 
-    /** 超出这个物理飞行窗仍不落地的属性组合不交给普通赶路跳。 */
-    private static final int MAX_PROJECTED_AIRBORNE_TICKS = 40;
     /** 原版普通地面的摩擦系数;更滑的支撑上起跳,速度投影不可信。 */
     private static final float NORMAL_GROUND_FRICTION = 0.6F;
 
@@ -273,59 +271,8 @@ public final class TravelJumpPolicy {
      */
     private static JumpProjection projectJump(
             LocalPlayer player, HorizontalHeading heading, boolean headHit) {
-        double gravity = player.getAttributeValue(Attributes.GRAVITY);
-        double verticalSpeed = jumpVerticalSpeed(player);
-        if (gravity <= 0.0 || verticalSpeed <= 0.0) {
-            return null;
-        }
-        double height = 0.0;
-        double apex = 0.0;
-        double headroom = Math.max(0.0, 2.0 - player.getBbHeight());
-        Vec3 launchVelocity = sprintJumpLaunchVelocity(player, heading);
-        double forwardSpeed = Math.max(0.0,
-                launchVelocity.x * heading.x()
-                        + launchVelocity.z * heading.z());
-        double forwardDistance = 0.0;
-        double airDragSum = 0.0;
-        double drag = 1.0;
-        int airborneTicks = 0;
-        do {
-            // 重力特别小时也只算四十刻，避免一次导航更新在这里耗时过长。
-            if (airborneTicks >= MAX_PROJECTED_AIRBORNE_TICKS) {
-                return null;
-            }
-            forwardDistance += forwardSpeed;
-            airDragSum += drag;
-            forwardSpeed = (forwardSpeed + 0.02) * 0.91;
-            drag *= 0.91;
-
-            double nextHeight = height + verticalSpeed;
-            if (headHit && nextHeight > headroom) {
-                height = headroom;
-                verticalSpeed = 0.0;
-            } else {
-                height = nextHeight;
-                apex = Math.max(apex, height);
-                verticalSpeed = (verticalSpeed - gravity) * 0.98;
-            }
-            airborneTicks++;
-        } while (height > 0.0);
-        return new JumpProjection(forwardDistance, airDragSum, apex);
-    }
-
-    /**
-     * 把跳跃属性、脚下方块的跳跃系数和跳跃提升效果合起来，得到起跳时向上的速度。
-     */
-    private static double jumpVerticalSpeed(LocalPlayer player) {
-        float bodyJumpFactor = player.level().getBlockState(player.blockPosition())
-                .getBlock().getJumpFactor();
-        float supportJumpFactor = player.level()
-                .getBlockState(player.getBlockPosBelowThatAffectsMyMovement())
-                .getBlock().getJumpFactor();
-        double blockJumpFactor = bodyJumpFactor == 1.0F
-                ? supportJumpFactor : bodyJumpFactor;
-        return player.getAttributeValue(Attributes.JUMP_STRENGTH)
-                * blockJumpFactor + player.getJumpBoostPower();
+        return TravelJumpPhysics.project(TravelJumpPhysics.capture(player,
+                new Vec3(heading.x(), 0, heading.z())), headHit);
     }
 
     /**
@@ -348,5 +295,4 @@ public final class TravelJumpPolicy {
         }
     }
 
-    private record JumpProjection(double forwardDistance, double airDragSum, double apexHeight) {}
 }
