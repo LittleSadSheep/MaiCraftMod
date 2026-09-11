@@ -17,7 +17,7 @@ import static org.maiwithu.maicraft.core.integration.machine.control.ControlComp
 public final class MachineControlInspection {
     private static final int MAX_CELLS=32768, MAX_COMPONENTS=2048;
     public record Observation(UUID structureId, Map<BlockPos,Cell> cells, ControlCircuit circuit,
-                              SableStructureBridge.Structure structure, boolean complete) {
+                              SableStructureBridge.Structure structure, boolean complete,double interactionRange) {
         public Observation { cells=Map.copyOf(cells); }
         public Vec3 world(BlockPos pos) { return structure==null ? Vec3.atCenterOf(pos) : structure.pose().toWorld(Vec3.atCenterOf(pos)); }
         public Cell cell(String id) {
@@ -30,8 +30,21 @@ public final class MachineControlInspection {
             out.addProperty("scope",structureId==null ? "surveyed_world_volume" : "selected_physical_structure");
             if(structureId!=null) out.addProperty("structure_id",structureId.toString());
             out.addProperty("complete",complete && circuit.analyze().complete());
-            out.add("components",gson.toJsonTree(circuit.nodes().stream().filter(n->n.kind()!=ControlCircuit.Kind.OTHER).toList()));
+            var referenced=new java.util.HashSet<String>();
+            circuit.edges().forEach(edge->{ referenced.add(edge.from()); referenced.add(edge.to()); });
+            out.add("components",gson.toJsonTree(circuit.nodes().stream()
+                    .filter(n->n.kind()!=ControlCircuit.Kind.OTHER || referenced.contains(n.id())).toList()));
             out.add("connections",gson.toJsonTree(circuit.edges())); out.add("analysis",gson.toJsonTree(circuit.analyze()));
+            var plan=VehicleControlPlan.compile(circuit); out.add("control_plan",gson.toJsonTree(plan));
+            var stations=new ArrayList<Map<String,Object>>();
+            for(var node:circuit.nodes()) if(node.kind()==ControlCircuit.Kind.SEAT) {
+                Cell seat=cell(node.id());
+                var reachable=plan.inputs().stream().filter(i->seat.pos().distSqr(cell(i.id()).pos())<Math.pow(interactionRange-.5,2)).map(VehicleControlPlan.Input::id).toList();
+                stations.add(Map.of("seat",node.id(),"occupied",node.facts().getOrDefault("occupied",true),
+                        "controls_nearby",reachable,"all_controls_nearby",!plan.inputs().isEmpty()&&reachable.size()==plan.inputs().size(),
+                        "verification","native seating and post-seat reach/visibility still required"));
+            }
+            out.add("driver_station_candidates",gson.toJsonTree(stations));
             out.addProperty("vehicle_classification",!complete ? "unknown_incomplete_observation"
                     : !circuit.analyze().locomotionObserved() ? "no_locomotion_mechanism_observed"
                     : circuit.analyze().controllableCandidate() ? "control_connected_candidate" : "no_proven_control_path");
@@ -68,9 +81,16 @@ public final class MachineControlInspection {
             Cell cell=new Cell(pos,state,entity); cells.put(pos,cell);
         }
         if(!complete) circuit.unknown("unloaded, missing or omitted cells; absence does not prove no wiring");
-        for(Cell cell:cells.values()) links.addAll(read(player.level(),cell,circuit));
-        var observation=new Observation(structure==null ? null:structure.id(),cells,circuit,structure,complete);
+        for(Cell cell:cells.values()) {
+            if(circuit.size()>4096) {
+                circuit.unknown("control-node observation budget exhausted");
+                return new Observation(structure==null ? null:structure.id(),cells,circuit,structure,false,player.blockInteractionRange());
+            }
+            links.addAll(read(player.level(),cell,circuit));
+        }
+        var observation=new Observation(structure==null ? null:structure.id(),cells,circuit,structure,complete,player.blockInteractionRange());
         ControlConnections.connect(player.level(),cells,links,observation::world,circuit);
+        ExternalRadioEvidence.inspect(player,observation,links);
         return observation;
     }
 }

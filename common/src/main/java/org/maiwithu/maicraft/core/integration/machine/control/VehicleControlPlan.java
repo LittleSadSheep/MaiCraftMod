@@ -29,12 +29,17 @@ public record VehicleControlPlan(List<Input> inputs, List<String> limitations) {
         var analysis=circuit.analyze(); List<Input> inputs=new ArrayList<>(); List<String> issues=new ArrayList<>();
         if(!analysis.complete()) issues.addAll(analysis.unknowns());
         if(!analysis.controllableCandidate()) issues.add("no control path to a locomotion-equipped structure");
+        if(analysis.routes().stream().map(r->circuit.node(r.actuator())).filter(n->n.kind()==WHEEL)
+                .anyMatch(n->Boolean.FALSE.equals(n.facts().get("wheel_item_present"))))
+            issues.add("a wheel mount has no installed wheel item");
         for(var node:circuit.nodes()) {
             if(!node.control()) continue;
             var routes=analysis.routes().stream().filter(r->r.control().equals(node.id())).toList();
             if(routes.isEmpty()) continue;
             boolean disconnected=false,ordinary=false,propulsion=false;
             for(var route:routes) {
+                if(route.path().stream().anyMatch(e->e.medium().equals("wireless") && e.behavior().contains("attenuated")))
+                    issues.add(node.id()+": position-dependent wireless gain requires a dynamic control model");
                 boolean brake=route.path().stream().anyMatch(e->e.behavior().endsWith("/wheel_brake"));
                 boolean neutralHigh=brake || route.path().stream().anyMatch(e->e.behavior().endsWith("/analog_disconnect_at_15")
                         || e.behavior().endsWith("/clutch_disconnect_when_powered"));
@@ -45,7 +50,7 @@ public record VehicleControlPlan(List<Input> inputs, List<String> limitations) {
                     issues.add(node.id()+": no established power-disconnect state");
                 if(route.path().stream().anyMatch(e->e.behavior().endsWith("/reverse_when_powered")))
                     issues.add(node.id()+": reversing a running source does not establish neutral");
-                disconnected|=neutralHigh; ordinary|=!neutralHigh; propulsion|=drive;
+                disconnected|=neutralHigh; ordinary|=!neutralHigh; propulsion|=drive||brake;
             }
             if(disconnected && ordinary) { issues.add(node.id()+": conflicting neutral states across affected actuators"); continue; }
             double maximum=node.kind()==KEY ? 1 : node.kind()==THROTTLE ? 15
@@ -58,6 +63,7 @@ public record VehicleControlPlan(List<Input> inputs, List<String> limitations) {
                     routes.stream().map(ControlCircuit.Route::actuator).distinct().toList(),propulsion));
         }
         if(inputs.isEmpty()) issues.add("no usable controls");
+        else if(inputs.stream().noneMatch(Input::propulsion)) issues.add("no controllable propulsion or braking path");
         return new VehicleControlPlan(inputs,issues);
     }
     public boolean usable() { return limitations.isEmpty() && !inputs.isEmpty(); }

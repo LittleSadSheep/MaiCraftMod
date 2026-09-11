@@ -39,7 +39,14 @@ public record DriverStation(BlockPos seat,List<BlockPos> controls) {
         var state=structure.readBlock(pos).blockState();
         if(state==null) return null;
         var shape=state.getShape(player.level(),pos);
+        if(ControlReflection.is(player.level().getBlockEntity(pos),SIM+"steering_wheel.SteeringWheelBlockEntity")) {
+            String name=Boolean.parseBoolean(property(state,"on_floor"))?"STEERING_WHEEL_FLOOR":"STEERING_WHEEL_CEILING";
+            Object shaper=ControlReflection.field(ControlReflection.type("dev.simulated_team.simulated.index.SimBlockShapes"),name);
+            shape=(net.minecraft.world.phys.shapes.VoxelShape)ControlReflection.call(shaper,"get",ControlSignals.facing(state));
+        }
         Vec3 local=shape.isEmpty() ? Vec3.atCenterOf(pos) : shape.bounds().getCenter().add(Vec3.atLowerCornerOf(pos));
+        if(!shape.isEmpty()) local=shape.toAabbs().stream().map(box->box.getCenter().add(Vec3.atLowerCornerOf(pos)))
+                .min(Comparator.comparingDouble(p->structure.pose().toWorld(p).distanceToSqr(player.getEyePosition()))).orElse(local);
         return structure.pose().toWorld(local);
     }
     public static BlockHitResult hit(LocalPlayer player,SableStructureBridge.Structure structure,BlockPos pos) {
