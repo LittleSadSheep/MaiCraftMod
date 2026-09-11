@@ -19,7 +19,7 @@ record TravelRunway(Vec3 start, Vec3 heading, List<IMovement> movements) {
     static TravelRunway capture(List<IMovement> path, int position, Vec3 feet) {
         if (position < 0 || position >= path.size() || !accepts(path.get(position))) return null;
         IMovement first = path.get(position);
-        Vec3 origin = first instanceof MovementGroundStraight straight ? straight.origin()
+        Vec3 origin = first instanceof MovementGroundStraight ? feet
                 : Vec3.atBottomCenterOf(first.getSrc());
         Vec3 direction = end(first).subtract(origin).multiply(1, 0, 1).normalize();
         if (direction.lengthSqr() < .99 || !Double.isFinite(feet.lengthSqr())) return null;

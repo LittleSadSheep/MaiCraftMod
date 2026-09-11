@@ -98,5 +98,4 @@ public final class MovementGroundStraight extends Movement {
     }
 
     public Vec3 target() { return target; }
-    Vec3 origin() { return from; }
 }
