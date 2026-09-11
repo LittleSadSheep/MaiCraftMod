@@ -41,6 +41,7 @@ public final class BuildPlacementRegistry {
         /** Called only after the owning embedded navigator obtains a confirmed placement receipt. */
         default void confirmedScaffold(BlockPos placeAt, BlockState state) {}
         default void confirmedScaffoldRemoval(BlockPos placeAt) {}
+        default java.util.Map<Item, Integer> scaffoldReservations() { return java.util.Map.of(); }
     }
 
     /** One first-person client body exists in a process; never retain that LocalPlayer here. */
@@ -48,6 +49,21 @@ public final class BuildPlacementRegistry {
     private static final java.util.Set<BlockPos> SCAFFOLD = new java.util.LinkedHashSet<>();
 
     private BuildPlacementRegistry() {}
+
+    public static boolean hasScaffoldMaterialPolicy() { return activeProvider != null; }
+
+    public static org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials.Choice scaffoldChoice(LocalPlayer player) {
+        if (activeProvider == null || player == null) return null;
+        return org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials.inventoryChoice(
+                player.getInventory().items, ScaffoldMaterials.of(player), activeProvider.scaffoldReservations());
+    }
+
+    /** Recheck actual inventory and permanent requirements immediately before a navigation placement. */
+    public static boolean scaffoldUseAllowed(LocalPlayer player, ItemStack held) {
+        if (activeProvider == null) return true;
+        var choice = scaffoldChoice(player);
+        return choice != null && !held.isEmpty() && held.is(choice.item());
+    }
 
     /**
      * 旧移动流程准备尝试垫块时先记位置，并没有确认方块真的放下；当前只有旧 MovementPlacement 调用它。

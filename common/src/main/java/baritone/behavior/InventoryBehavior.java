@@ -136,6 +136,8 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     public boolean hasGenericThrowaway() {
+        if (org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.hasScaffoldMaterialPolicy())
+            return org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldChoice(ctx.player()) != null;
         for (Item item : Baritone.settings().acceptableThrowawayItems.value) {
             if (throwaway(false, stack -> item.equals(stack.getItem()))) {
                 return true;
@@ -145,6 +147,8 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     public boolean selectThrowawayForLocation(boolean select, int x, int y, int z) {
+        if (org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.hasScaffoldMaterialPolicy())
+            return EmbeddedBaritoneRuntime.selectBuildScaffold(ctx.player(), select);
         BlockState maybe = baritone.getBuilderProcess().placeAt(x, y, z, baritone.bsi.get0(x, y, z));
         if (maybe != null && throwaway(select, stack -> stack.getItem() instanceof BlockItem && maybe.equals(((BlockItem) stack.getItem()).getBlock().getStateForPlacement(new BlockPlaceContext(new UseOnContext(ctx.world(), ctx.player(), InteractionHand.MAIN_HAND, stack, new BlockHitResult(new Vec3(ctx.player().position().x, ctx.player().position().y, ctx.player().position().z), Direction.UP, ctx.playerFeet(), false)) {}))))) {
             return true; // gotem

@@ -50,6 +50,7 @@ final class EmbeddedBaritoneActionBridge {
     private int rightClickCooldown;
     private boolean stopBreakingRequested;
     private final BreakProgress breakProgress = new BreakProgress();
+    boolean pending() { return receipt != null; }
 
     void tick(
             LocalPlayerContext context,
@@ -287,6 +288,7 @@ final class EmbeddedBaritoneActionBridge {
                 || !BaritoneAPI.getSettings().allowPlace.value) {
             return;
         }
+        if (!org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldUseAllowed(context.player(), held)) return;
         BlockPos actual = placementCell(clicked, clickedState, hit);
         boolean protectedSupport = EmbeddedBaritonePolicy.protects(clicked);
         if (EmbeddedBaritonePolicy.protects(actual) || protectedSupport

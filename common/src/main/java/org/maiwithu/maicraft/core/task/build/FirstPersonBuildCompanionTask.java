@@ -1102,19 +1102,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         List<BlockPos> chain = BuildTemporarySupportPlan.find(player.level(), player.level()::isLoaded,
                 cell.target().pos(), pos -> scaffoldPermitted(pos, null));
         if (chain.isEmpty()) return null;
-        Item material = null;
-        // 只从允许消耗的垫脚材料里选完整、不下落、无方块实体的方块；当前要求一种材料足够铺完整条链。
-        for (Item candidate : org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials.of(player)) {
-            if (!(candidate instanceof BlockItem blockItem)) continue;
-            BlockState state = blockItem.getBlock().defaultBlockState();
-            if (state.hasBlockEntity() || blockItem.getBlock() instanceof net.minecraft.world.level.block.FallingBlock
-                    || !state.isCollisionShapeFullBlock(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, BlockPos.ZERO)) continue;
-            if (player.getAbilities().instabuild && !r.consumeMaterials
-                    || inventory.mainInventoryCount(candidate) >= chain.size()) { material = candidate; break; }
-        }
+        Item material = BuildTemporarySupportMaterials.choose(
+                org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials.of(player), scaffoldReservations(),
+                inventory::mainInventoryCount, chain.size(), player.getAbilities().instabuild && !r.consumeMaterials);
         if (material == null) {
             failAt(cell.target().pos(), "placement needs " + chain.size()
-                            + " full temporary support blocks from scaffold_materials in inventory",
+                            + " spare full temporary support blocks after reserving every remaining permanent build target",
                     FailureType.NO_MATERIAL, "temporary_support_materials_missing", false);
             return TaskState.FAILED;
         }
@@ -1648,6 +1641,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     @Override public boolean acceptsPlacement(BlockPos pos, BlockState state) {
         BuildTaskRecord.Target target = targets.get(pos.asLong());
         return target != null && target.acceptsPlacedState(state);
+    }
+    @Override public Map<Item, Integer> scaffoldReservations() {
+        if (player.getAbilities().instabuild && !r.consumeMaterials) return Map.of();
+        // SemanticBuildSupply passes the complete frozen source.targets to every carried-material batch.
+        return BuildTemporarySupportMaterials.remaining(r.targets,
+                target -> constructionMatches(target, BuildPlacementGeometry.generatedBy(target)));
     }
     @Override public TerrainPermit permit() { return TerrainPermit.TERRAFORM; }
     @Override public LongSet embeddedProtectedMutationCells() {

@@ -39,6 +39,7 @@ public final class EmbeddedBaritoneRuntime {
     private static long lastSwimDriveTick = Long.MIN_VALUE;
     private static final EmbeddedBaritoneActionBridge ACTIONS =
             new EmbeddedBaritoneActionBridge();
+    private static final EmbeddedBuildScaffoldSelection BUILD_SCAFFOLDS = new EmbeddedBuildScaffoldSelection();
     private static IBaritone backend;
     private static EmbeddedBaritoneNavigator owner;
     private static ClientLevel world;
@@ -246,6 +247,7 @@ public final class EmbeddedBaritoneRuntime {
         boolean drive = current.requiresOrphanContinuation()
                 || (schedulerAllowsBodyWork && requested);
         if (!drive) {
+            BUILD_SCAFFOLDS.cancel(current);
             lastSwimDriveTick = Long.MIN_VALUE;
             baritone.getInputOverrideHandler().clearAllKeys();
             ((LookBehavior) baritone.getLookBehavior()).clearTarget();
@@ -267,6 +269,11 @@ public final class EmbeddedBaritoneRuntime {
         }
 
         try {
+            if (prepareBuildScaffold(context, current)) {
+                baritone.getInputOverrideHandler().clearAllKeys();
+                InputDriver.halt(context.player());
+                return;
+            }
             refreshPhysicalObstacles(context.player());
             lastSwimDriveTick = context.level().getGameTime();
             tickingContext = context;
@@ -290,6 +297,7 @@ public final class EmbeddedBaritoneRuntime {
 
     static void suspend(EmbeddedBaritoneNavigator navigator) {
         if (owner != navigator || backend == null) return;
+        BUILD_SCAFFOLDS.cancel(navigator);
         lastSwimDriveTick = Long.MIN_VALUE;
         backend.getInputOverrideHandler().clearAllKeys();
         ((LookBehavior) backend.getLookBehavior()).clearTarget();
@@ -352,6 +360,7 @@ public final class EmbeddedBaritoneRuntime {
     static void release(EmbeddedBaritoneNavigator navigator) {
         requireClientThread();
         if (owner != navigator) return;
+        BUILD_SCAFFOLDS.cancel(navigator);
         if (backend != null) {
             backend.getPathingBehavior().forceCancel();
             backend.getInputOverrideHandler().clearAllKeys();
@@ -384,6 +393,7 @@ public final class EmbeddedBaritoneRuntime {
                     new WorldEvent(null, EventState.POST));
         }
         ACTIONS.bodyGone();
+        BUILD_SCAFFOLDS.reset();
         owner = null;
         world = null;
         pendingPolicyOwner = null;
@@ -406,6 +416,7 @@ public final class EmbeddedBaritoneRuntime {
             ((PathingBehavior) backend.getPathingBehavior()).discardPendingPathEvents();
         }
         ACTIONS.bodyGone();
+        BUILD_SCAFFOLDS.reset();
         owner = null; pendingPolicyOwner = null; pendingPolicyGoal = null;
         EmbeddedBaritonePolicy.clear();
         CAMERA_COURSE.reset();
@@ -477,6 +488,7 @@ public final class EmbeddedBaritoneRuntime {
 
     /** Called by the adapted upstream input behavior while the actor lease is open. */
     public static void applyActionState(InputOverrideHandler input) {
+        if (BUILD_SCAFFOLDS.pending()) return;
         LocalPlayerContext context = tickingContext;
         EmbeddedBaritoneNavigator current = owner;
         if (context == null || current == null) return;
@@ -491,6 +503,28 @@ public final class EmbeddedBaritoneRuntime {
                 && ACTIONS.ensureHotbarSelected(context, current, player, slot);
     }
 
+    /** Building keeps its permanent materials reserved even if the only spare scaffold is off the hotbar. */
+    public static boolean selectBuildScaffold(LocalPlayer player, boolean select) {
+        var choice = org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldChoice(player);
+        if (choice == null) return false;
+        if (!select) return true;
+        if (tickingContext == null || owner == null || ACTIONS.pending()) return false;
+        if (choice.inventorySlot() < 9 && !BUILD_SCAFFOLDS.pending())
+            return ACTIONS.ensureHotbarSelected(tickingContext, owner, player, choice.inventorySlot());
+        if (!player.onGround() && !BUILD_SCAFFOLDS.pending()) return false;
+        return BUILD_SCAFFOLDS.select(tickingContext, owner, player);
+    }
+
+    private static boolean prepareBuildScaffold(LocalPlayerContext context, EmbeddedBaritoneNavigator current) {
+        if (BUILD_SCAFFOLDS.pending()) return !BUILD_SCAFFOLDS.advance(context, current);
+        if (current.permit() != TerrainPermit.TERRAFORM || !context.player().onGround() || ACTIONS.pending()
+                || !org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.hasScaffoldMaterialPolicy()) return false;
+        var choice = org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldChoice(context.player());
+        if (choice == null || choice.inventorySlot() < 9) return false;
+        // Prepare while grounded, before Baritone can launch a placement-dependent jump.
+        return !BUILD_SCAFFOLDS.select(context, current, context.player());
+    }
+
     /** Compatibility hook for upstream cancellation sites; no game-mode call occurs here. */
     public static void requestStopBreaking() {
         ACTIONS.requestStopBreaking();
@@ -502,6 +536,7 @@ public final class EmbeddedBaritoneRuntime {
         if (backend == null || owner == null) return;
         var player = backend.getPlayerContext().player();
         if (player == null) return;
+        if (BUILD_SCAFFOLDS.pending()) { InputDriver.halt(player); return; }
         var currentExecutor = backend.getPathingBehavior().getCurrent();
         PathExecutor executor = currentExecutor instanceof PathExecutor pathExecutor
                 ? pathExecutor : null;
