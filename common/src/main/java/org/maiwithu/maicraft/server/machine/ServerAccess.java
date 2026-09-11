@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -130,11 +131,20 @@ public final class ServerAccess {
     }
 
     private static void checkInteractionEvent(ServerPlayer player, BlockPos pos, BlockHitResult hit) {
+        // Use an actually empty hand when one exists; never replace, move or impersonate held stacks.
+        InteractionHand hand = player.getMainHandItem().isEmpty() ? InteractionHand.MAIN_HAND
+                : player.getOffhandItem().isEmpty() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         String hooks = "net.neoforged.neoforge.common.CommonHooks";
         if (NativeApi.present(hooks)) {
-            Object event = NativeApi.call(null, hooks, "onRightClickBlock", player, InteractionHand.MAIN_HAND, pos, hit);
-            if (NativeApi.truth(NativeApi.call(event, null, "isCanceled"))
-                    || "FALSE".equals(String.valueOf(NativeApi.call(event, null, "getUseBlock")))
+            Object event = NativeApi.call(null, hooks, "onRightClickBlock", player, hand, pos, hit);
+            boolean cancelled = NativeApi.truth(NativeApi.call(event, null, "isCanceled"));
+            if (cancelled) {
+                InteractionResult outcome = (InteractionResult) NativeApi.call(event, null, "getCancellationResult");
+                if (outcome == null || outcome.consumesAction()) {
+                    throw new IllegalStateException("Native interaction already handled the action; effects must be reconciled");
+                }
+            }
+            if (cancelled || "FALSE".equals(String.valueOf(NativeApi.call(event, null, "getUseBlock")))
                     || "DENY".equals(String.valueOf(NativeApi.call(event, null, "getUseBlock")))) {
                 throw denied("permission_denied", "A server interaction event denied access");
             }
@@ -142,9 +152,12 @@ public final class ServerAccess {
             Object event = NativeApi.constant("net.fabricmc.fabric.api.event.player.UseBlockCallback", "EVENT");
             Object callback = NativeApi.call(event, "net.fabricmc.fabric.api.event.Event", "invoker");
             Object result = NativeApi.call(callback, "net.fabricmc.fabric.api.event.player.UseBlockCallback", "interact",
-                    player, player.serverLevel(), InteractionHand.MAIN_HAND, hit);
+                    player, player.serverLevel(), hand, hit);
             if (!"PASS".equals(String.valueOf(result))) {
-                throw denied("interaction_handled", "Another handler claimed the block interaction");
+                if (result instanceof InteractionResult outcome && outcome.consumesAction()) {
+                    throw new IllegalStateException("Native interaction already handled the action; effects must be reconciled");
+                }
+                throw denied("permission_denied", "Another handler rejected the block interaction");
             }
         }
     }
