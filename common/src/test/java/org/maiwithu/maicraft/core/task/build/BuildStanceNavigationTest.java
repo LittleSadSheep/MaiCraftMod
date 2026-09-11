@@ -35,13 +35,28 @@ public final class BuildStanceNavigationTest {
                 "changes in task protection must remain visible to the navigation wrapper");
         check(existing.minimumFeetY() == 2 && !routes.allows(first.below()), "first pass must retain construction height");
         check(!routes.allowTerrain(), "one failed stance cannot grant a terrain retry before the whole existing-footing pass");
+        routes.attempted(); routes.failed(first, "no existing route");
+        check(!routes.allows(first) && routes.allows(second), "only the failed stance is skipped within the current pass");
         check(routes.contextFor(second).permit() == TerrainPermit.PRESERVE, "other stances still require existing footing");
         check(routes.nextExistingPass() && routes.allows(first.below()), "only exhausted height-preserving candidates allow descent");
         check(routes.contextFor(first).minimumFeetY() == Integer.MIN_VALUE
                 && routes.contextFor(first).permit() == TerrainPermit.PRESERVE, "descent still cannot place supports");
+        check(routes.allows(first), "a new pass retries stances that failed under the preceding height floor");
+        routes.attempted(); routes.failed(first, "descent did not help");
         check(routes.allowTerrain() && routes.contextFor(first) == construction, "final fallback retains original permissions");
+        check(routes.allows(first), "construction access does not inherit an existing-footing failure");
         check(!routes.allowTerrain(), "construction pass cannot loop");
         routes.startAt(second);
+        routes.forTarget(new BlockPos(8, 2, 8), second); routes.attempted(); routes.failed(first, "blocked");
+        routes.forTarget(new BlockPos(8, 2, 9), second);
+        check(routes.allows(first), "another construction target starts with fresh route evidence");
+        routes.attempted(); routes.failed(first, "blocked before a support changed");
+        routes.environmentChanged();
+        check(routes.allows(first), "confirmed world changes invalidate failed navigation stances");
+        routes.failed(first, "late failure from the old route");
+        check(routes.allows(first), "a stale route result cannot reject a stance after the world changed");
+        routes.attempted(); routes.failed(first, "new route also failed");
+        check(!routes.allows(first), "a fresh failure remains bounded after invalidation");
         check(routes.contextFor(first).permit() == TerrainPermit.PRESERVE && !routes.allowTerrain(),
                 "new construction work must reconsider the newly completed footing");
         var restricted = new BuildStanceNavigation(PlayerNav.ContextProvider.DEFAULT); restricted.nextExistingPass();

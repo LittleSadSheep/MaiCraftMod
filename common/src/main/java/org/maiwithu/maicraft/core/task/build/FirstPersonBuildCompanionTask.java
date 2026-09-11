@@ -542,6 +542,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState placeNavTick() {
+        stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
         if (seekRaisedFooting()) {
             footingSearchAfter = lastPlacedTarget; worksiteSearched = false;
             phase = Phase.WORKSITE; return TaskState.RUNNING;
@@ -579,7 +580,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             while (gestureAt < liveGestures.size()
                     && (!stanceNavigation.allows(liveGestures.get(gestureAt).stance())
                     || !supportExists(liveGestures.get(gestureAt))
-                    || !placementAttempts.allows(cell.target(), liveGestures.get(gestureAt)))) gestureAt++;
+                    || !placementAttempts.allows(cell.target(), liveGestures.get(gestureAt)))) {
+                stanceNavigation.skipped(liveGestures.get(gestureAt).stance()); gestureAt++;
+            }
             if (gestureAt >= liveGestures.size()) {
                 if (stanceNavigation.nextExistingPass()) { gestureAt = 0; return TaskState.RUNNING; }
                 return deferOrFail();
@@ -587,6 +590,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             gesture = liveGestures.get(gestureAt);
             gestureFromCurrent = false;
             BlockPos stance = gesture.stance();
+            stanceNavigation.attempted();
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), 1.0,
                     () -> PlayerNav.playerFeet(player).equals(stance), stanceNavigation.contextFor(stance));
         }
@@ -594,6 +598,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> { stopNav(); phase = Phase.SELECT_ITEM; yield TaskState.RUNNING; }
             case FAILED -> {
+                stanceNavigation.failed(gesture.stance(), nav.failReason());
                 stopNav();
                 gestureAt++; yield TaskState.RUNNING;
             }
@@ -677,6 +682,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     g -> placementAttempts.allows(candidate.target(), g));
             if (available == null) continue;
             java.util.Collections.swap(queue, queueAt, i); cell = candidate;
+            stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
             placementWalkTarget = approach; stopNav();
             liveGestures = List.of(); gestureSearch = null; gestureProgress = null;
             gestureAt = 0; useCount = 0; selection.reset(); aimConvergence.reset();
@@ -757,6 +763,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 java.util.Collections.swap(queue, queueAt, i); cell = queue.get(queueAt); break;
             }
             gesture = worksite.placements().getFirst().gesture(); liveGestures = List.of(); gestureAt = 0;
+            stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
         }
         // No direct corridor does not mean no route: ordinary navigation still tries around obstacles.
         phase = Phase.PLACE_NAV; return TaskState.RUNNING;
@@ -1009,6 +1016,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         placementAttempts.changedNear(pos);
         exhaustedPlacementStates.keySet().removeIf(key -> BlockPos.of(key).distSqr(pos) <= 36);
         if (cell != null && cell.target().pos().distSqr(pos) <= 36) {
+            stanceNavigation.environmentChanged();
             gestureSearch = null; gestureProgress = null;
             liveGestures = List.of(); gestureAt = 0;
             // Keep any active walk bound to its current gesture; re-enumerate after it settles.
@@ -1674,6 +1682,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (layerKnown && constructionLayer != Integer.MAX_VALUE) data.put("construction_layer", constructionLayer);
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
         data.put("construction_access", stanceNavigation.stage());
+        data.put("construction_navigation", navigationDiagnostics());
         data.put("creative_materials", creativeMaterials.progress());
         if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
                 "stance_checks", gestureProgress.stanceChecks(), "face_checks", gestureProgress.probeCount(),
@@ -1708,6 +1717,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 "rejected_gestures", placementAttempts.rejectedCount(cell.target()));
     }
 
+    private Map<String, Object> navigationDiagnostics() {
+        var data = new LinkedHashMap<>(stanceNavigation.evidence());
+        if (cell != null) for (int i = 0; i < r.targets.size(); i++)
+            if (r.targets.get(i).pos().equals(cell.target().pos())) { data.put("target_index", i); break; }
+        return Map.copyOf(data);
+    }
+
     @Override public void stop(LocalPlayer companion, StopReason why) {
         // 暂停时先停当前挖掘、撤掉导航的施工协助并松键；任务进度仍保留，恢复后可以重新登记协助。
         if (digger.current() != null) digger.cancel();
@@ -1735,6 +1751,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("stopped_phase", phase.name().toLowerCase(java.util.Locale.ROOT));
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
         data.put("construction_access", stanceNavigation.stage());
+        data.put("construction_navigation", navigationDiagnostics());
         if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
         data.put("temporary_supports_remaining", r.scaffoldLedger().snapshot().size());
         var diagnostics = new ArrayList<>(targetDiagnostics);

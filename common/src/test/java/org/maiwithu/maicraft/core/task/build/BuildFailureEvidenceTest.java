@@ -19,7 +19,8 @@ public final class BuildFailureEvidenceTest {
         var evidence = BuildFailureEvidence.describe("replacement_policy", target.pos(), List.of(target),
                 ignored -> true, ignored -> target.desiredState().setValue(BlockStateProperties.OPEN, true));
         var raw = TaskResult.fail("Cannot continue", Map.of("build_diagnostics", List.of(evidence), "placed", 5,
-                "completed", 410, "temporary_supports_remaining", 3, "blocked_cells", List.of(Map.of("x", 307))));
+                "completed", 410, "temporary_supports_remaining", 3, "blocked_cells", List.of(Map.of("x", 307)),
+                "construction_navigation", Map.of("route_attempts", 3, "failed_stances", 2, "target_index", 17)));
         var sanitizer = Class.forName("org.maiwithu.maicraft.intent.IntentTask").getDeclaredMethod("semanticResult", TaskResult.class);
         sanitizer.setAccessible(true);
         var clean = JsonParser.parseString(((TaskResult) sanitizer.invoke(null, raw)).toJson()).getAsJsonObject();
@@ -31,6 +32,9 @@ public final class BuildFailureEvidenceTest {
         check(data.get("placed").getAsInt() == 5 && data.get("completed").getAsInt() == 410
                 && data.get("temporary_supports_remaining").getAsInt() == 3, "attention cannot hide partial effects or scaffolds");
         check(!data.has("blocked_cells") && !row.has("position"), "raw routes and coordinates remain outside this model-level receipt");
+        check(data.getAsJsonObject("construction_navigation").get("target_index").getAsInt() == 17
+                && data.getAsJsonObject("construction_navigation").get("failed_stances").getAsInt() == 2,
+                "active navigation evidence survives compact attention separately from historical target failures");
         System.out.println("BuildFailureEvidenceTest: actionable model diagnostics survive semantic and attention filtering");
     }
     private static void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }

@@ -103,9 +103,13 @@ public final class BuildTaskSearchBudgetTest {
                     () -> org.maiwithu.maicraft.core.pathing.calc.NavGoal.exact(boundGesture.stance()),
                     1, () -> false, task);
             field("gesture").set(task, boundGesture); field("nav").set(task, boundNavigation);
+            var routes = (BuildStanceNavigation) field("stanceNavigation").get(task);
+            routes.attempted(); routes.failed(boundGesture.stance(), "no route before support");
+            check(!routes.allows(boundGesture.stance()), "the fixture starts with a rejected navigation stance");
             var lateSupport = positiveTarget.pos().below().east();
             h.set(lateSupport, Blocks.DIRT.defaultBlockState());
             task.confirmedScaffold(lateSupport, Blocks.DIRT.defaultBlockState());
+            check(routes.allows(boundGesture.stance()), "confirmed support clears route failures without rebinding active navigation");
             checkCleared(task, "late nearby support invalidates completed positive candidates too");
             check(field("gesture").get(task) == boundGesture && field("nav").get(task) == boundNavigation,
                     "invalidating candidates must not retarget or restart the walk already bound to a gesture");
