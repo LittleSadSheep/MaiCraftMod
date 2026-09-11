@@ -48,6 +48,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         NAVIGATE_FIXED,
         FACE_FIXED,
         OPEN_FIXED,
+        SERVER_SUPPLY,
         OPEN_WIRELESS,
         WAIT_OPEN,
         WAIT_REPOSITORY,
@@ -178,6 +179,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private boolean waterBucketRoute;
     private Ae2WaterBucketFill pendingWaterFill;
     private final List<Map<String, Object>> waterFillReceipts = new ArrayList<>();
+    private Ae2ServerSupply serverSupply;
+    private boolean serverRouteConsidered;
+    private boolean effectsBeforeServer;
+    private Phase serverFallbackPhase;
 
     Ae2SupplySession(
             LocalPlayer player, Ae2ResourceSupply.Request request, Ae2ReflectionBridge bridge) {
@@ -225,6 +230,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 case NAVIGATE_FIXED -> navigateFixed();
                 case FACE_FIXED -> faceFixed(context);
                 case OPEN_FIXED -> openFixed(context);
+                case SERVER_SUPPLY -> tickServerSupply(context);
                 case OPEN_WIRELESS -> openWireless(context);
                 case WAIT_OPEN -> waitOpen(context);
                 case WAIT_REPOSITORY -> waitRepository();
@@ -275,6 +281,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     @Override
     public boolean livenessActive() {
+        if (serverSupply != null && serverSupply.runningRequest()) return true;
         if (stoppingInPlace && terminal == null) return true;
         if (craftingJobEffectPending
                 || nativeReceipt != null && !nativeReceipt.terminal()
@@ -296,6 +303,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     public Ae2ResourceSupply.Outcome cancel(LocalPlayerContext context, String reason) {
         if (terminal != null) return terminal;
         validateContext(context);
+        if (serverSupply != null) {
+            effectsStarted |= serverSupply.effectsStarted();
+            serverSupply.cancel();
+        }
         stopNavigation();
         context.body().releaseAll();
         boolean uncertain = effectsStarted
@@ -404,6 +415,11 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     // 鼠标拿着物品时先拒绝。可复用已打开的终端，否则先找无线终端，再尝试已记住或附近的固定终端。
     private void start(LocalPlayerContext context) {
+        if (!org.maiwithu.maicraft.client.server.ServerAssistClient.nativeFallbackAllowed("inventory.ae2_supply")) {
+            finishNow(Ae2ResourceSupply.Status.FAILED, "server_supply_blocked",
+                    "known server denial or an unresolved mutation prevents native supply fallback", false);
+            return;
+        }
         if (!player.containerMenu.getCarried().isEmpty()) {
             finishNow(Ae2ResourceSupply.Status.FAILED, "inventory_cursor_busy",
                     "clear the inventory cursor before exact AE2 extraction", false);
@@ -418,6 +434,11 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             finishNow(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "screen_open",
                     "close the current screen before opening an AE2 terminal", false);
             return;
+        }
+
+        if (!inPlace && !serverRouteConsidered && Ae2ServerSupply.available()) {
+            var reachable = inPlaceTargets();
+            if (!reachable.isEmpty() && tryServerSupply(reachable.getFirst(), Phase.START)) return;
         }
 
         wireless = Ae2TerminalAccess.findWireless(player);
@@ -690,6 +711,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     "fixed_terminal_changed", "the fixed AE2 terminal changed before opening");
             return;
         }
+        if (tryServerSupply(target, Phase.OPEN_FIXED)) return;
         if (!player.getMainHandItem().isEmpty()) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "safe_hand_unavailable",
                     "the selected hand is no longer empty for fixed-terminal interaction");
@@ -722,6 +744,45 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 NativeConfirmation.menuChanged(beforeContainer),
                 TERMINAL_OPEN_TICKS);
         setPhase(Phase.WAIT_OPEN);
+    }
+
+    private boolean tryServerSupply(Ae2TerminalAccess.FixedTarget target, Phase fallback) {
+        if (inPlace || serverRouteConsidered || request.operation() != Ae2ResourceSupply.Operation.SUPPLY
+                || !Ae2ServerSupply.available()) return false;
+        serverRouteConsidered = true;
+        effectsBeforeServer = effectsStarted;
+        serverFallbackPhase = fallback;
+        baseline = inventoryCounts();
+        serverSupply = new Ae2ServerSupply(player, request, target, reservedInventorySlots(), this::groupProgress);
+        terminalAccess = "server_fixed_terminal";
+        setPhase(Phase.SERVER_SUPPLY);
+        return true;
+    }
+
+    private void tickServerSupply(LocalPlayerContext context) {
+        var progress = serverSupply.tick(context);
+        effectsStarted = effectsBeforeServer || serverSupply.effectsStarted();
+        craftingRequests = serverSupply.craftPlans();
+        craftingJobsSubmitted = serverSupply.craftStarts();
+        if (serverSupply.plan() != null && plan != serverSupply.plan()) {
+            plan = serverSupply.plan();
+            lockedVariantByGroup.clear();
+            for (var group : plan.groups()) {
+                if (group.group().selectionMode() == Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT)
+                    lockedVariantByGroup.put(group.group().itemId(), group.allocations().getFirst().itemId());
+            }
+        }
+        switch (progress.state()) {
+            case RUNNING -> { }
+            case FALLBACK -> {
+                serverSupply = null;
+                plan = null;
+                setPhase(serverFallbackPhase);
+            }
+            case SUCCEEDED -> beginFinish(Ae2ResourceSupply.Status.SUCCEEDED, progress.code(), progress.message());
+            case FAILED -> beginFinish(Ae2ResourceSupply.Status.FAILED, progress.code(), progress.message());
+            case UNCERTAIN -> finishUncertain(progress.code(), progress.message());
+        }
     }
 
     private void openWireless(LocalPlayerContext context) {

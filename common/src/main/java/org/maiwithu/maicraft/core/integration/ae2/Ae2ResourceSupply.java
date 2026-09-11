@@ -285,6 +285,9 @@ public final class Ae2ResourceSupply {
         return Ae2ReflectionBridge.availability().detail();
     }
 
+    /** Physical-terminal enhancement is optional; wireless and visible-menu supply keep their native path. */
+    public static boolean serverAssistanceSupported() { return Ae2ServerSupply.available(); }
+
     /** Current synchronized repository only; craftable patterns never contribute to stored counts. */
     public static Optional<StockEvidence.Snapshot> observeOpenStock(
             Object menu, long observedGameTick) {
