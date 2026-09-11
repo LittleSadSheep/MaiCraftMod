@@ -28,6 +28,7 @@ public final class MachineRegressionSuite {
         try { org.maiwithu.maicraft.core.scan.TargetIndexInvalidationTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
         MachineSurveyModelTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.control.VehicleRegressionSuite.main(args);
         MachineDesignReviewTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayoutTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutModulesTest.main(args);
