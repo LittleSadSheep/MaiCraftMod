@@ -68,6 +68,7 @@ public final class ClientRuntime {
         // 总流程：观察世界 → 取得本 tick 的身体上下文 → 检查控制权 → 调度任务 → 推进导航 → 归还上下文。
         // 中途因预览或人工接管而返回时，仍需通过 finally 收尾，不能遗留上一轮的按键或原生动作。
         requireClientThread(minecraft);
+        org.maiwithu.maicraft.core.combat.CombatThreats.observe(minecraft.player);
         org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime.tick();
         // 即使玩家正在自己操作，也继续观察世界和更新预览，让 MCP 能看到当前发生了什么。
         tickStage = "observing";
@@ -242,6 +243,7 @@ public final class ClientRuntime {
     }
 
     private static void bodyGone(boolean saveSemanticState) {
+        org.maiwithu.maicraft.core.combat.CombatThreats.clear();
         // 先记住“刚才做到哪了”，再停止旧玩家的任务；反过来会只记下“任务已取消”，下次就接不上了。
         EmbeddedBaritoneRuntime.bodyGone();
         org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.abandon();

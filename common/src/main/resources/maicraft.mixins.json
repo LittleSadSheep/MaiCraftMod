@@ -8,6 +8,7 @@
     "MenuDataSlotsAccessor"
   ],
   "client": [
+    "ClientDamageEventMixin",
     "ClientLevelBlockChangeMixin",
     "BlockUseAcknowledgementMixin",
     "BoatCatchPacketMixin",

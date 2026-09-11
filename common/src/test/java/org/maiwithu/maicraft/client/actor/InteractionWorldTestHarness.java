@@ -51,6 +51,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
 
     public InteractionWorldTestHarness() throws Exception {
         TargetIndex.dropAll();
+        level.entities = new LinkedHashMap<>();
         level.section = new LevelChunkSection(new PalettedContainer<>(Block.BLOCK_STATE_REGISTRY,
                 Blocks.AIR.defaultBlockState(), PalettedContainer.Strategy.SECTION_STATES), null);
         level.chunks = h.allocate(LoadedChunks.class);
@@ -110,6 +111,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
     }
 
     public static final class TestLevel extends ClientLevel implements BlockUseAcknowledgement {
+        public Map<Integer, Entity> entities;
         public int blockSequence, acknowledgedSequence;
         @Override public int maicraft$currentBlockSequence() { return blockSequence; }
         @Override public int maicraft$acknowledgedBlockSequence() { return acknowledgedSequence; }
@@ -130,9 +132,16 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         @Override public int getHeight() { return 16; }
         @Override public int getMinBuildHeight() { return 0; }
         @Override public long getGameTime() { return time; }
-        @Override public List<Entity> getEntities(Entity entity, AABB bounds, Predicate<? super Entity> filter) { return List.of(); }
+        @Override public Entity getEntity(int id) { return entities.get(id); }
+        @Override public Iterable<Entity> entitiesForRendering() { return List.copyOf(entities.values()); }
+        @Override public List<Entity> getEntities(Entity entity, AABB bounds, Predicate<? super Entity> filter) {
+            return entities.values().stream().filter(e -> e != entity && e.getBoundingBox().intersects(bounds) && filter.test(e)).toList();
+        }
         @Override public <T extends Entity> List<T> getEntities(
-                EntityTypeTest<Entity, T> type, AABB bounds, Predicate<? super T> filter) { return List.of(); }
+                EntityTypeTest<Entity, T> type, AABB bounds, Predicate<? super T> filter) {
+            return entities.values().stream().map(type::tryCast).filter(java.util.Objects::nonNull)
+                    .filter(e -> e.getBoundingBox().intersects(bounds) && filter.test(e)).toList();
+        }
     }
 
     private static final class LoadedChunks extends ClientChunkCache {
