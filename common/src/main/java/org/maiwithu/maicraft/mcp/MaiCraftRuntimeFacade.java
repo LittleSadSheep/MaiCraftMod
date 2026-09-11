@@ -428,19 +428,24 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return summary;
     }
     private JsonObject abilities(String focus) {
-        // 当前 available=true 只表示这个能力名已注册，不检查是否装了对应模组、带了材料或具备实际执行条件。
+        // 注册、已实现的后端和当前目标的执行条件分开报告；未知前置条件不能写成可执行。
+        JsonObject serverAssistance = org.maiwithu.maicraft.client.server.ServerAssistClient.capabilityReport();
         JsonArray abilities = new JsonArray();
         for (String ability : IntentRuntime.KNOWN_ABILITIES.stream().sorted().toList()) {
             if (focus != null && !focus.equals(ability)) continue;
             JsonObject item = new JsonObject();
             item.addProperty("ability", ability);
-            item.addProperty("available", true);
+            SemanticAbilityAvailability.describe(item, ability,
+                    BuiltInRegistries.BLOCK.containsKey(net.minecraft.resources.ResourceLocation.parse("create:shaft")),
+                    Minecraft.getInstance().player != null && Minecraft.getInstance().player.isAlive());
+            SemanticAbilityAvailability.production(item, ability, serverAssistance);
             item.addProperty("mode", abilityMode(ability));
             item.add("contract", SemanticAbilityCatalog.describe(ability));
             abilities.add(item);
         }
         JsonObject result = new JsonObject();
         result.add("semantic_abilities", abilities);
+        result.add("server_assistance", serverAssistance);
         result.addProperty(
                 "boundary",
                 "Use fields declared by each ability. Machine design/build accept a semantic design, an explicit blueprint with block offsets and states, or an exported Ponder blueprint_uri. modify_machine applies blueprint changes; operate_machine performs native use and checks its effects separately. MaiCraft owns routes, gestures, retries and confirmation; never submit click scripts.");
