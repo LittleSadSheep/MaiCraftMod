@@ -18,6 +18,9 @@ public final class VehicleFeedbackPilotTest {
         var pending=new VehicleFeedbackPilot(plan,new Vec3(0,0,10));
         for(int tick=0;tick<60;tick++) pending.observe(tick,new VehicleFeedbackPilot.Sample(Vec3.ZERO,0),false);
         check(pending.phase()==VehicleFeedbackPilot.Phase.BASELINE,"unconfirmed inputs cannot advance calibration");
+        var spinning=new VehicleFeedbackPilot(plan,new Vec3(0,0,1));
+        for(int tick=0;tick<500&&!spinning.terminal();tick++) spinning.observe(tick,new VehicleFeedbackPilot.Sample(Vec3.ZERO,tick*.05),true);
+        check(spinning.terminal()&&!spinning.succeeded(),"a rotating hull is not a stopped arrival");
         System.out.println("VehicleFeedbackPilotTest: passed");
     }
     private static void run(VehicleControlPlan plan,Vec3 target,boolean cancel) {

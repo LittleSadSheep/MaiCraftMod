@@ -23,6 +23,7 @@ public final class VehicleDriveTask extends AbstractCompanionTask<VehicleDriveTa
     @Override protected TaskState onTick() {
         var ctx=ClientRuntime.requireContext(player);
         if(observation==null) {
+            try {
             observation=MachineControlInspection.structure(player,r.structureId);
             plan=VehicleControlPlan.compile(observation.circuit());
             if(!observation.complete() || !plan.usable()) {
@@ -32,6 +33,9 @@ public final class VehicleDriveTask extends AbstractCompanionTask<VehicleDriveTa
             if(!station.seated(player) && observation.world(station.seat()).distanceTo(player.getEyePosition())>player.blockInteractionRange()-1)
                 boarding=new BoardStructureTask(player,new BoardStructureTaskRecord(r.getToolCallId(),r.getDeadlineGameTime(),r.structureId,
                         net.minecraft.world.phys.Vec3.atCenterOf(station.seat())));
+            } catch(IllegalArgumentException unavailable) {
+                fail(unavailable.getMessage(),FailureType.NO_PATH); return TaskState.FAILED;
+            }
         }
         if(boarding!=null) {
             TaskState state=runChild(boarding); if(state==null) return TaskState.RUNNING;
@@ -50,6 +54,10 @@ public final class VehicleDriveTask extends AbstractCompanionTask<VehicleDriveTa
     @Override protected void cleanup() {
         if(boarding!=null) { boarding.result(TaskState.CANCELLED); boarding=null; }
         TransportRuntime.cancel(this); super.cleanup();
+    }
+    @Override public void stop(LocalPlayer player,org.maiwithu.maicraft.task.Task.StopReason why) {
+        if(boarding!=null) boarding.stop(player,why);
+        TransportRuntime.cancel(this); super.stop(player,why);
     }
     @Override protected Map<String,Object> resultData() {
         var result=new java.util.LinkedHashMap<String,Object>();

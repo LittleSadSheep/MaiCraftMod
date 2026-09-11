@@ -20,11 +20,14 @@ public final class NativeVehicleControls {
     private final VehicleControlPlan plan;
     private final Map<String,Double> applied=new LinkedHashMap<>();
     private final Map<BlockPos,Boolean> typewriters=new LinkedHashMap<>();
+    private final java.util.Set<String> submitted=new java.util.LinkedHashSet<>();
     private NativeActionReceipt receipt;
     private ServerBlockEntityReceipts.Watch watch;
     private LocalPlayerContext last;
     private String pendingId;
     private double pendingValue;
+    private String desiredKey;
+    private long desiredSince;
     private boolean changed,uncertain;
     public NativeVehicleControls(MachineControlInspection.Observation observation,VehicleControlPlan plan) {
         this.observation=observation; this.plan=plan;
@@ -39,7 +42,12 @@ public final class NativeVehicleControls {
                 throw new IllegalStateException("control block changed or unloaded");
             Object be=ctx.level().getBlockEntity(pos);
             if(be==null) throw new IllegalStateException("control state unavailable");
+            if(input.kind()==KEY && typewriters.containsKey(pos) && !Boolean.TRUE.equals(call(be,"checkUser",ctx.player().getUUID())))
+                throw new IllegalStateException("native typewriter user changed");
             if(applied.containsKey(input.id()) && Math.abs(applied.get(input.id())-value)<1e-5) continue;
+            String key=input.id()+"="+value;
+            if(!key.equals(desiredKey)) { desiredKey=key; desiredSince=ctx.tickRevision(); }
+            if(ctx.tickRevision()-desiredSince>100) throw new IllegalStateException("control cannot be reached and confirmed from this seat");
             if(input.kind()==KEY && !Boolean.TRUE.equals(call(be,"checkUser",ctx.player().getUUID()))) {
                 if(!ctx.player().getMainHandItem().isEmpty() || is(ctx.player().getOffhandItem().getItem(),
                         ControlComponents.CREATE+"redstone.link.controller.LinkedControllerItem"))
@@ -60,8 +68,8 @@ public final class NativeVehicleControls {
             NativeConfirmation confirmation;
             Runnable submit;
             if(input.kind()==KEY) {
-                int key=((Number)observation.circuit().node(input.id()).facts().get("key")).intValue();
-                submit=()->send(ctx,construct(PACKETS+"linked_typewriter.TypewriterKeyInteractionPacket",pos,key,0,target>0?1:0));
+                int keyCode=((Number)observation.circuit().node(input.id()).facts().get("key")).intValue();
+                submit=()->send(ctx,construct(PACKETS+"linked_typewriter.TypewriterKeyInteractionPacket",pos,keyCode,0,target>0?1:0));
                 // This protocol has no per-key server acknowledgement. Only dispatch settles here.
                 confirmation=c->c.tickRevision()>tick ? NativeConfirmation.Verdict.APPLIED:NativeConfirmation.Verdict.PENDING;
             } else {
@@ -82,6 +90,7 @@ public final class NativeVehicleControls {
                 }
             }
             pendingId=input.id(); pendingValue=value; changed=true;
+            submitted.add(input.id());
             receipt=ctx.actions().submitControlProtocol(ctx,"vehicle native "+input.kind().name().toLowerCase(),submit,confirmation,40);
             return false;
         }
@@ -118,7 +127,7 @@ public final class NativeVehicleControls {
                 || last.player().connection==null) { applied.clear(); return; }
         for(var input:plan.inputs()) {
             var value=applied.get(input.id());
-            if(value==null && !input.id().equals(pendingId)) continue;
+            if(value==null && !submitted.contains(input.id())) continue;
             BlockPos pos=observation.cell(input.id()).pos();
             try {
                 if(input.kind()==KEY) {
@@ -130,6 +139,16 @@ public final class NativeVehicleControls {
                 }
             } catch(RuntimeException failure) { uncertain=true; }
         }
+        for(BlockPos pos:typewriters.keySet()) {
+            Object be=last.level().getBlockEntity(pos);
+            try {
+                if(be!=null && Boolean.TRUE.equals(call(be,"checkUser",last.player().getUUID()))) {
+                    send(last,construct(PACKETS+"linked_typewriter.TypewriterDisconnectUser",pos));
+                    call(be,"disconnectUser");
+                }
+            } catch(RuntimeException failure) { uncertain=true; }
+        }
+        typewriters.clear(); submitted.clear();
         applied.clear();
     }
     private static void send(LocalPlayerContext ctx,Object packet) {

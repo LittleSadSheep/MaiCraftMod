@@ -5,6 +5,9 @@ public final class VehicleRegressionSuite {
         ControlCircuitTest.main(args);
         ControlReflectionTest.main(args);
         ControlSignalsTest.main(args);
+        WirelessControlRulesTest.main(args);
+        VehicleCircuitGuardTest.main(args);
+        ControlInspectionReportTest.main(args);
         VehicleControlPlanTest.main(args);
         VehicleFeedbackPilotTest.main(args);
         org.maiwithu.maicraft.intent.VehicleMachineContractTest.main(args);

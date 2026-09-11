@@ -25,6 +25,7 @@ public final class VehicleFeedbackPilot {
     private String failure="";
     private Response propulsion;
     private double speed;
+    private double angularSpeed;
     private double bestDistance=Double.POSITIVE_INFINITY;
     private long lastProgress=-1;
     public VehicleFeedbackPilot(VehicleControlPlan plan,Vec3 destination) {
@@ -57,13 +58,14 @@ public final class VehicleFeedbackPilot {
         if(previousTick==tick || terminal()) return;
         if(origin==null) origin=sample;
         speed=previous==null ? 0:sample.position().distanceTo(previous.position())/Math.max(1,tick-previousTick);
+        angularSpeed=previous==null ? 0:Math.abs(wrap(sample.yaw()-previous.yaw()))/Math.max(1,tick-previousTick);
         previous=sample; previousTick=tick;
         if(speed>.25) { stop("vehicle exceeded the measured driving speed limit"); }
         if(phase!=Phase.DRIVE && phase!=Phase.BRAKE && sample.position().distanceTo(origin.position())>12)
             stop("calibration displacement limit reached");
         if(!inputsApplied) { phaseTick=-1; stable=0; return; }
         if(phaseTick<0) { phaseTick=tick; start=sample; }
-        stable=speed<.015 ? stable+1:0;
+        stable=speed<.015 && angularSpeed<.003 ? stable+1:0;
         switch(phase) {
             case BASELINE -> {
                 if(stable>=8) transition(Phase.PROBE);
@@ -120,6 +122,7 @@ public final class VehicleFeedbackPilot {
     public String failure() { return failure; }
     public double speed() { return speed; }
     public Map<String,Object> diagnostics() { return Map.of("phase",phase.name().toLowerCase(),"observed_speed_blocks_per_tick",speed,
+            "observed_angular_speed_radians_per_tick",angularSpeed,
             "responses",List.copyOf(responses),"input_confirmation","native dispatch/analog update; actual movement independently observed",
             "force_analysis","not implemented by this controller","detail",failure); }
 }
