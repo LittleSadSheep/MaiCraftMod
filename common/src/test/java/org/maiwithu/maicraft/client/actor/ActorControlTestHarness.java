@@ -83,5 +83,6 @@ final class ActorControlTestHarness {
         @Override public void setSprinting(boolean value) { sprinting = value; }
         @Override public boolean isSprinting() { return sprinting; }
         @Override public boolean isSleeping() { return sleeping; }
+        @Override public void swing(net.minecraft.world.InteractionHand hand) { /* no network in this fixture */ }
     }
 }

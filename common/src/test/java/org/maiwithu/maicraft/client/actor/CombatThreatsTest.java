@@ -29,6 +29,7 @@ public final class CombatThreatsTest {
         rejectsUnrelatedDamage();
         expiresWithoutRenewingOnReads();
         forgetsRetiredEntitiesAndBodies();
+        MobDefenseDamageTest.main(args);
         System.out.println("CombatThreatsTest: client damage attribution and lifetime passed");
     }
 
@@ -132,6 +133,11 @@ public final class CombatThreatsTest {
             define.setAccessible(true); define.invoke(h.player, builder);
             ActorControlTestHarness.field(Entity.class, "entityData").set(h.player, builder.build());
             h.player.setId(1); h.player.setHealth(20);
+            var sources = h.h.allocate(net.minecraft.world.damagesource.DamageSources.class);
+            ActorControlTestHarness.field(sources.getClass(), "generic").set(sources, new DamageSource(DAMAGE));
+            ActorControlTestHarness.field(h.level.getClass(), "damageSources").set(h.level, sources);
+            ActorControlTestHarness.field(Player.class, "attackStrengthTicker").setInt(h.player, 100);
+            ActorControlTestHarness.field(Entity.class, "random").set(h.player, net.minecraft.util.RandomSource.create(1));
             ActorControlTestHarness.field(Entity.class, "dimensions").set(h.player, EntityType.PLAYER.getDimensions());
             CombatThreats.clear();
         }
@@ -141,6 +147,7 @@ public final class CombatThreatsTest {
             ActorControlTestHarness.field(Entity.class, "level").set(mob, h.level);
             ActorControlTestHarness.field(Entity.class, "dimensions").set(mob, EntityType.ZOMBIE.getDimensions());
             ActorControlTestHarness.field(Entity.class, "position").set(mob, new Vec3(x, 1, 3.5));
+            mob.setDeltaMovement(Vec3.ZERO);
             ActorControlTestHarness.field(Entity.class, "blockPosition").set(mob, new BlockPos((int) x, 1, 3));
             ActorControlTestHarness.field(Entity.class, "bb").set(mob, new AABB(x - .3, 1, 3.2, x + .3, 2.8, 3.8));
             h.level.entities.put(id, mob);
@@ -159,8 +166,9 @@ public final class CombatThreatsTest {
 
     static final class TestHostile extends Zombie {
         boolean dead;
+        float damage;
         private TestHostile() { super(EntityType.ZOMBIE, null); }
-        @Override public float getHealth() { return dead ? 0 : 20; }
+        @Override public float getHealth() { return dead ? 0 : 20 - damage; }
     }
 
     static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }

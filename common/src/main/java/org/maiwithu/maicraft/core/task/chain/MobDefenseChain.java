@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.chain;
 
 import org.maiwithu.maicraft.core.combat.Menace;
+import org.maiwithu.maicraft.core.combat.CombatThreats;
 import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.survival.SurvivalDecisions;
@@ -14,14 +15,13 @@ import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.reflex.Reflex;
 
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 附近出现正在伤害玩家的近距离敌人时，暂时接管当前工作并用普通战斗任务自卫。
+ * 收到敌对生物造成的伤害，或观察到近处明确的攻击目标时，暂时接管当前工作自卫。
  * 危险短暂消失后保留一小段观察时间，避免刚拉开一点距离就把工作还回去，再马上被同一只怪打断。
  * 它没有另一套攻击动作，实际打斗、撤退和拾取都交给 AttackCompanionTask。
  */
@@ -135,7 +135,7 @@ public final class MobDefenseChain implements Task, Reflex {
         attentionStartHealth = companion.getHealth();
         attentionActive = true;
         GameplayAttentionMonitor.reflexStarted(
-                id(), "nearby hostile entities pose immediate danger", "emergency self-defense",
+                id(), "hostile damage or an immediate nearby threat was observed", "emergency self-defense",
                 "weapons, ammunition, food, shields, or durability may be consumed",
                 "combat can cause damage or death");
         AttackTaskRecord record = new AttackTaskRecord(
@@ -206,7 +206,7 @@ public final class MobDefenseChain implements Task, Reflex {
 
     @Override
     public String describe() {
-        return "身边有危险就自动开打,打法与她自己派的 attack 完全一致";
+        return "受到敌对生物伤害或发现近处明确威胁时自动自卫，战斗或撤退后恢复工作";
     }
 
     // ---- 什么算危险 ----
@@ -220,13 +220,12 @@ public final class MobDefenseChain implements Task, Reflex {
      * <p>模型自己派的 {@code attack} 已经认领的目标同样不算:那场仗有人管了。但她扛不住时
      * 一律接管——那一档只有本能看得见。
      */
-    // 先取 Enemy 类别生物，再要求它是最近伤害来源或正在追打玩家，最后检查是否已经太近。
-    // 第一层会排除愤怒的狼等非 Enemy 攻击者，哪怕它已是最近伤害来源（A38）。
+    // 真实伤害不受近战距离限制：骷髅在远处射中玩家也应触发。
+    // 若其他模组提供了实际 AI 目标，仍保留原来的近处危险预判；不靠它识别已发生的伤害。
     private List<Mob> dangersNear(LocalPlayer companion) {
-        LivingEntity attacker = companion.getLastHurtByMob();
-        List<Mob> near = new ArrayList<>();
+        List<Mob> near = new ArrayList<>(CombatThreats.attackers(companion));
         for (Mob m : Menace.hostilesAround(companion, SCAN_RADIUS)) {
-            if (m != attacker && m.getTarget() != companion) {
+            if (near.contains(m) || m.getTarget() != companion) {
                 continue;
             }
 

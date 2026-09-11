@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.combat.AttackPlan;
 import org.maiwithu.maicraft.core.combat.Battlefield;
+import org.maiwithu.maicraft.core.combat.CombatThreats;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.Haven;
 import org.maiwithu.maicraft.core.combat.Menace;
@@ -245,13 +246,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * <p>点名模式下"被授权"是模型给的那份清单;无差别模式下是"这一刻在追我的"——会分裂的怪
      * 裂出来的新 id 因此自动进场,而点名的清单一裂开就作废了。
      */
-    // 先找附近 Enemy 类别生物，另外补进明确指定的目标。
+    // 先找附近敌对生物，补进伤害包确认的远程攻击者和明确指定的目标。
     // “正在攻击我”与“允许作为主目标”分别记录，严格授权模式还会限制顺手反击的对象。
     private Battlefield surveyField() {
-        hostiles = Menace.hostilesAround(player, FIELD_RADIUS);
+        hostiles = CombatThreats.around(player, FIELD_RADIUS);
         List<Battlefield.Foe> foes = new ArrayList<>();
         for (var mob : hostiles) {
-            boolean engaging = mob.getTarget() == player || mob == player.getLastHurtByMob();
+            boolean engaging = CombatThreats.recentlyAttackedBy(player, mob) || mob.getTarget() == player;
             boolean authorized = r.indiscriminate ? engaging : r.entityIds.contains(mob.getId());
             if (r.terminal(mob.getId())) {
                 // 打完了、丢了、或者走不到又射不到的:<b>整只移出局面</b>。留着当"还有东西在
@@ -484,11 +485,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * @param field 这一刻的局面,复用 onTick 已经扫好的那份
      */
     // 先把上一次近战点击结算，再在够得着的实体中选本次攻击者。
-    // strictAuthorized 才会排除未获准的对象；默认模式允许对附近威胁顺手反击。
+    // 自卫只打实际攻击者；显式战斗的严格授权模式也排除未获准对象。
     private void tickWeapon(Battlefield field) {
         if (meleeAction != null) {
             Entity planned = liveEntity(meleeVictimId);
-            if (r.strictAuthorized && (planned == null
+            boolean expiredDefense = r.indiscriminate && (!(planned instanceof Mob mob)
+                    || !CombatThreats.recentlyAttackedBy(player, mob) && mob.getTarget() != player);
+            if (expiredDefense || r.strictAuthorized && (planned == null
                     || !r.entityIds.contains(planned.getId())
                     || !strictMeleeClear(planned))) {
                 meleeAction.stop();
@@ -519,7 +522,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         Entity victim = null;
         double best = Double.MAX_VALUE;
         for (var f : field.foes()) {
-            if (r.strictAuthorized && !f.authorized()) {
+            if ((r.strictAuthorized || r.indiscriminate) && !f.authorized()) {
                 continue;
             }
             // <b>名单只决定去打谁,不决定砍不砍眼前的。</b>"够得着就打"本来就是攻击层的
@@ -849,9 +852,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      *
      * <p>三十二格是<b>跑的目标</b>,不是状态的出口:跑到了就没什么可跑的,判据自会改口。
      */
-    // 周围已没有敌对类别生物就结束撤退；否则尝试找远处落点，并定期按敌人新位置重新寻路。
+    // 近处危险和近期远程伤害都消失后才结束撤退；持续来袭的箭不能被近战扫描范围漏掉。
     private TaskState tickFlee() {
-        var around = Menace.hostilesAround(player, Menace.FLEE_DISTANCE);
+        var around = CombatThreats.around(player, Menace.FLEE_DISTANCE);
         if (around.isEmpty()) {
             clearHaven();
             InputDriver.halt(player);
@@ -865,7 +868,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return TaskState.FAILED;
         }
         if (haven == null || player.blockPosition().closerThan(haven, HAVEN_ARRIVED)) {
-            haven = Haven.awayFrom(player, Menace.hostilesAround(player, FLEE_SCAN_RADIUS));
+            haven = Haven.awayFrom(player, CombatThreats.around(player, FLEE_SCAN_RADIUS));
             stopNav();
             Constants.LOG.info("[maicraft-attack] 逃向 {} —— {} 格内 {} 只",
                     haven, (int) Menace.FLEE_DISTANCE, around.size());
@@ -914,7 +917,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     private java.util.List<org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities.Threat>
             roadHazards() {
-        return Menace.field(player, Menace.hostilesAround(player, FLEE_SCAN_RADIUS)).stream()
+        return Menace.field(player, CombatThreats.around(player, FLEE_SCAN_RADIUS)).stream()
                 .map(t -> t.withClearance(0.0))
                 .toList();
     }
