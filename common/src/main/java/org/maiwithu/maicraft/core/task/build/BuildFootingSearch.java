@@ -76,7 +76,9 @@ final class BuildFootingSearch {
                 && pos.getY() >= minY && pos.getY() <= maxY;
     }
     Route route(BlockPos cell) {
-        Node node = reached.get(cell); if (node == null) return null;
+        // An admitted edge already proves its destination reachable. The expansion budget
+        // only limits where we look next; it must not erase verified lower fallback routes.
+        Node node = best.get(cell); if (node == null) return null;
         var points = new ArrayList<Vec3>();
         for (Node step = node; step != null; step = step.previous()) points.add(step.feet());
         java.util.Collections.reverse(points);

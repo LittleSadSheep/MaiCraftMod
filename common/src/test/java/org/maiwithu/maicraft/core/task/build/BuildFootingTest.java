@@ -15,9 +15,12 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
 public final class BuildFootingTest {
     public static void main(String[] args) throws Exception {
+        net.minecraft.SharedConstants.tryDetectVersion();
+        net.minecraft.server.Bootstrap.bootStrap();
         turnsAlongExistingWall();
         climbsPermanentStepBeforeOverheadPlacement();
         keepsAdjacentWallWorkAheadOfDistantCorners();
+        budgetRetainsAlreadyProvenLowerFooting();
         System.out.println("BuildFootingTest: wall turns, permanent steps and local continuity passed");
     }
 
@@ -69,6 +72,37 @@ public final class BuildFootingTest {
         var targets = Map.of(adjacent.pos().asLong(), adjacent, corner.pos().asLong(), corner);
         var order = BuildPlacementPreference.targets(new Vec3(4.5, 3, 4.5), previous, targets);
         check(order.compare(adjacent, corner) < 0, "continue the adjacent wall before another distant corner");
+    }
+
+    private static void budgetRetainsAlreadyProvenLowerFooting() throws Exception {
+        try (var h = world()) {
+            h.position(new Vec3(3.5, 2, 4.5));
+            BlockPos lower = new BlockPos(4, 1, 4);
+            var view = new net.minecraft.world.level.BlockGetter() {
+                public net.minecraft.world.level.block.state.BlockState getBlockState(BlockPos pos) {
+                    return (pos.getY() == 0 || pos.getY() == 1 && !pos.equals(lower)
+                            ? Blocks.STONE : Blocks.AIR).defaultBlockState();
+                }
+                public net.minecraft.world.level.material.FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
+                public net.minecraft.world.level.block.entity.BlockEntity getBlockEntity(BlockPos pos) { return null; }
+                public int getHeight() { return 16; }
+                public int getMinBuildHeight() { return 0; }
+            };
+            var walking = new BuildSupportWalking(view, pos -> true, .6, 1.8, LongSets.emptySet(),
+                    org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY);
+            check(walking.edge(h.player.position(), Vec3.atBottomCenterOf(lower)),
+                    "the adjacent one-block descent has an actually clear, supported route");
+            var search = new BuildFootingSearch(h.player, List.of(stone(4, 1, 4)), LongSets.emptySet());
+            var walkingField = BuildFootingSearch.class.getDeclaredField("walking"); walkingField.setAccessible(true);
+            walkingField.set(search, walking);
+            boolean complete = false;
+            for (int n = 0; n < 20_000 && !(complete = search.advance()); n++) { }
+            check(complete, "the footing graph must respect its finite expansion budget");
+            var route = search.route(lower);
+            check(route != null && route.points().size() == 2 && route.lowestY() == 1,
+                    "preferring the wide upper floor must not discard an already proven adjacent descent");
+            check(h.blockUses() == 0, "probing a lower fallback cannot construct a route");
+        }
     }
 
     private static BuildWorksitePlanner.Progress finish(BuildWorksitePlanner.Search search) {
