@@ -216,7 +216,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
             return verified("Native operation is available; the requested action must still return its own verified result");
         return unknown("No supported backend has been confirmed for " + configuration.operation());
     }
-    @Override public boolean dynamicCondition(String condition) { return Set.of("create:nonzero_rotation","create:not_overstressed",
+    @Override public boolean dynamicCondition(String condition) { return Set.of("create:nonzero_rotation","create:not_overstressed","create:millstone_output_space",
             "mekanism:can_function","mekanism:energy_available","mekanism:output_space").contains(condition); }
     @Override public Check condition(Node node, String condition) {
         JsonObject result = recipes.get(node.id());

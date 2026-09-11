@@ -40,6 +40,7 @@ public final class ProductionEvidenceWindow {
     private BigDecimal runOutput = BigDecimal.ZERO, totalOutput = BigDecimal.ZERO;
     private BigDecimal observedGrowth = BigDecimal.ZERO;
     private String invalidation;
+    private Map<String, Object> verifiedRun;
 
     public ProductionEvidenceWindow(String scope, Set<String> producers, Requirement requirement) {
         if (scope == null || scope.isBlank() || producers == null || producers.isEmpty()
@@ -69,6 +70,8 @@ public final class ProductionEvidenceWindow {
         if (firstRunTick < 0) firstRunTick = event.gameTick();
         lastRunTick = event.gameTick(); runEvents++; totalEvents++;
         runOutput = runOutput.add(event.amount()); totalOutput = totalOutput.add(event.amount());
+        if (verifiedRun == null && qualifies()) verifiedRun = Map.of("from_tick", firstRunTick,
+                "through_tick", lastRunTick, "output", runOutput, "events", runEvents);
         return true;
     }
 
@@ -82,17 +85,24 @@ public final class ProductionEvidenceWindow {
         if (lastRunTick < 0) return Status.AWAITING_EVIDENCE;
         if (serverTick < latestEventTick) return Status.INVALIDATED;
         if (serverTick - lastRunTick > requirement.maxIdleTicks()) return Status.STALLED;
-        if (runEvents >= requirement.minimumEvents()
-                && lastRunTick - firstRunTick >= requirement.windowTicks()
-                && runOutput.compareTo(requirement.minimumOutput()) >= 0) return Status.VERIFIED;
+        if (qualifies()) return Status.VERIFIED;
         return Status.OBSERVING;
+    }
+
+    /** A finite observed run remains evidence after a bounded batch finishes; current idleness is reported separately. */
+    public boolean hasVerifiedRun() { return invalidation == null && verifiedRun != null; }
+
+    private boolean qualifies() {
+        return runEvents >= requirement.minimumEvents() && lastRunTick - firstRunTick >= requirement.windowTicks()
+                && runOutput.compareTo(requirement.minimumOutput()) >= 0;
     }
 
     public Map<String, Object> report(long serverTick) {
         Map<String, Object> result = new LinkedHashMap<>();
         Status status = status(serverTick);
         result.put("status", status.name().toLowerCase(java.util.Locale.ROOT));
-        result.put("machine_production_verified", status == Status.VERIFIED);
+        result.put("machine_production_verified", hasVerifiedRun());
+        if (verifiedRun != null) result.put("verified_run", verifiedRun);
         result.put("evidence_source", "native_recipe_output_events");
         result.put("scope", scope); result.put("resource_key", requirement.resourceKey());
         result.put("observed_server_tick", serverTick); result.put("last_event_sequence", lastSequence);

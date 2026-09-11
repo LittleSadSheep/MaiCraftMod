@@ -18,6 +18,8 @@ public final class ProductionEvidenceWindowTest {
         check(window.status(110) == Status.VERIFIED, "native outputs across the required window");
         var frozen = window.report(110);
         check(window.status(231) == Status.STALLED, "old output cannot prove current operation");
+        check(window.hasVerifiedRun(), "delayed observation must retain the completed finite run");
+        check(Boolean.TRUE.equals(window.report(231).get("machine_production_verified")), "historical proof and current status are separate");
         window.accept(event("world-A", 4, 240, Provenance.NATIVE_RECIPE_OUTPUT));
         check(window.status(240) == Status.OBSERVING, "restart must prove another continuous run");
         check(window.report(240).get("native_output_total").equals(BigDecimal.valueOf(3)), "retain real partial progress");
