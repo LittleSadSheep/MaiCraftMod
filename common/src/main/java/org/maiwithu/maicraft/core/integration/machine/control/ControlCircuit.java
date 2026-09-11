@@ -23,12 +23,12 @@ public final class ControlCircuit {
         public Route { path = List.copyOf(path); }
     }
     public record Analysis(List<Route> routes, Set<String> unconnectedControls, List<String> unknowns,
-                           boolean locomotionObserved, boolean complete) {
+                           boolean locomotionObserved, boolean locomotionControlled, boolean complete) {
         public Analysis {
             routes = List.copyOf(routes); unconnectedControls = Set.copyOf(unconnectedControls);
             unknowns = List.copyOf(unknowns);
         }
-        public boolean controllableCandidate() { return locomotionObserved && !routes.isEmpty(); }
+        public boolean controllableCandidate() { return locomotionControlled; }
     }
 
     private final Map<String, Node> nodes = new LinkedHashMap<>();
@@ -47,6 +47,7 @@ public final class ControlCircuit {
     public List<Node> nodes() { return List.copyOf(nodes.values()); }
     public List<Edge> edges() { return List.copyOf(edges); }
     public Node node(String id) { return nodes.get(id); }
+    public int size() { return nodes.size(); }
 
     public Analysis analyze() {
         List<Route> routes = new ArrayList<>();
@@ -78,6 +79,8 @@ public final class ControlCircuit {
             if (!connected) unconnected.add(control.id());
         }
         return new Analysis(routes, unconnected, missing,
-                nodes.values().stream().anyMatch(Node::locomotion), missing.isEmpty());
+                nodes.values().stream().anyMatch(Node::locomotion),
+                routes.stream().map(r->nodes.get(r.actuator())).anyMatch(n->n.locomotion()
+                        && !Boolean.FALSE.equals(n.facts().get("wheel_item_present"))), missing.isEmpty());
     }
 }

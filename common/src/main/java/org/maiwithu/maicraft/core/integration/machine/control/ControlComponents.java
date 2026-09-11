@@ -46,14 +46,19 @@ public final class ControlComponents {
         var kind=kind(cell); var facts=new LinkedHashMap<String,Object>();
         facts.put("block_id",cell.blockId()); facts.put("storage_position",List.of(cell.pos().getX(),cell.pos().getY(),cell.pos().getZ()));
         var properties=new LinkedHashMap<String,String>();
-        cell.state().getValues().forEach((p,v)->properties.put(p.getName(),v.toString())); facts.put("properties",properties);
+        cell.state().getValues().forEach((p,v)->properties.put(p.getName(),serialized(p,v))); facts.put("properties",properties);
         List<Link> links=new ArrayList<>();
         try {
             Object be=cell.entity();
-            if (kind==KEY) {
+            if(kind==SEAT) {
+                facts.put("occupied",level.getEntities((net.minecraft.world.entity.Entity)null,new net.minecraft.world.phys.AABB(cell.pos()),
+                        e->is(e,CREATE+"contraptions.actors.seat.SeatEntity")&&!e.getPassengers().isEmpty()).size()>0);
+            } else if (kind==KEY) {
                 facts.put("in_use",call(be,"isInUse"));
                 Object entries=call(be,"getTypewriterEntries");
-                for (Object key : (List<?>)call(entries,"getEntries")) {
+                List<?> keys=(List<?>)call(entries,"getEntries");
+                if(keys.size()>256) circuit.unknown(cell.id()+": typewriter binding observation truncated");
+                for (Object key : keys.subList(0,Math.min(256,keys.size()))) {
                     int code=((Number)call(key,"getGLFWKeyCode")).intValue();
                     Object frequency=call(key,"getNetworkKey");
                     var keyFacts=new LinkedHashMap<>(facts); keyFacts.put("key",code); keyFacts.put("frequency",frequency(frequency));
@@ -68,6 +73,7 @@ public final class ControlComponents {
                 if (behavior==null) throw new IllegalStateException("link behavior not synchronized");
                 Object frequency=call(behavior,"getNetworkKey");
                 facts.put("frequency",frequency(frequency)); facts.put("listening",call(behavior,"isListening"));
+                if(Boolean.TRUE.equals(facts.get("listening"))!=(kind==RECEIVER)) circuit.unknown(cell.id()+": receiver mode and native link behavior disagree");
                 links.add(new Link(cell.id(),behavior,frequency,kind==RECEIVER));
                 if(kind==RECEIVER) facts.put("received_signal",call(be,"getReceivedSignal"));
                 if(is(be,SIM+"redstone.modulating_receiver.ModulatingLinkedReceiverBlockEntity")) {
@@ -89,6 +95,15 @@ public final class ControlComponents {
             if(is(be,SIM+"analog_transmission.AnalogTransmissionBlockEntity")) {
                 facts.put("signal_rule","0=direct; 1..14=variable_ratio; 15=disconnected");
                 facts.put("neutral_signal",15);
+                Object extra=call(be,"getExtraKinetics");
+                Object shaftSource=field(be,"source"), cogSource=field(extra,"source");
+                boolean shaftInput=shaftSource instanceof BlockPos pos && !pos.equals(cell.pos());
+                boolean cogInput=cogSource instanceof BlockPos pos && !pos.equals(cell.pos());
+                if(shaftInput!=cogInput) facts.put("controlled_output",cell.id()+(shaftInput?"/cog":""));
+                else circuit.unknown(cell.id()+": analog transmission input/output power direction unavailable or multiply powered");
+                var cogFacts=new LinkedHashMap<>(facts); cogFacts.put("port","internal_cogwheel");
+                cogFacts.put("rpm",call(extra,"getSpeed"));
+                circuit.add(new ControlCircuit.Node(cell.id()+"/cog",TRANSMISSION,cogFacts));
             }
             if(kind==WHEEL) {
                 facts.put("wheel_item_present",!((ItemStack)call(be,"getHeldItem")).isEmpty());
@@ -103,7 +118,11 @@ public final class ControlComponents {
     }
     public static String property(BlockState state,String name) {
         return state.getValues().entrySet().stream().filter(e->e.getKey().getName().equals(name))
-                .map(e->e.getValue().toString()).findFirst().orElse("");
+                .map(e->serialized(e.getKey(),e.getValue())).findFirst().orElse("");
+    }
+    @SuppressWarnings({"rawtypes","unchecked"})
+    private static String serialized(net.minecraft.world.level.block.state.properties.Property property,Comparable value) {
+        return property.getName(value);
     }
     private static List<Map<String,Object>> frequency(Object pair) {
         List<Map<String,Object>> result=new ArrayList<>();

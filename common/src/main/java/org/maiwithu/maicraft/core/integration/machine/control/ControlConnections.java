@@ -22,49 +22,19 @@ public final class ControlConnections {
                 BlockPos from=(BlockPos)call(source.nativeLink(),"getLocation"), to=(BlockPos)call(target.nativeLink(),"getLocation");
                 Cell receiver=cells.get(to);
                 double range=((Number)call(field(field(call(type("com.simibubi.create.infrastructure.config.AllConfigs"),"server"),"logistics"),"linkRange"),"get")).doubleValue();
-                Vec3 delta=world.apply(from).subtract(world.apply(to));
-                String behavior="ordered_frequency_within_native_range";
-                boolean matched=delta.length()<range;
-                if(is(receiver.entity(),SIM+"redstone.AbstractLinkedReceiverBlockEntity")) {
-                    // These receivers transform strength by distance/direction, not simply on/off.
-                    circuit.connect(new ControlCircuit.Edge(source.node(),target.node(),"wireless","position_dependent_receiver",false));
-                    continue;
+                var transfer=WirelessControlRules.plain(true,world.apply(from),world.apply(to),range,15);
+                if(is(receiver.entity(),SIM+"redstone.modulating_receiver.ModulatingLinkedReceiverBlockEntity")) {
+                    transfer=WirelessControlRules.modulating(true,world.apply(from),world.apply(to),
+                            ((Number)field(receiver.entity(),"minRange")).intValue(),((Number)field(receiver.entity(),"maxRange")).intValue(),15);
+                } else if(is(receiver.entity(),SIM+"redstone.directional_receiver.DirectionalLinkedReceiverBlockEntity")) {
+                    Direction facing=ControlSignals.facing(receiver.state());
+                    Vec3 normal=world.apply(to.relative(facing)).subtract(world.apply(to));
+                    transfer=WirelessControlRules.directional(true,world.apply(from),world.apply(to),normal,range,15);
                 }
-                if(matched) circuit.connect(new ControlCircuit.Edge(source.node(),target.node(),"wireless",behavior,true));
+                if(transfer.inRange() && transfer.strength()>0) circuit.connect(new ControlCircuit.Edge(source.node(),target.node(),"wireless",
+                        transfer.behavior()+"/strength_at_full_input="+transfer.strength(),true));
             } catch(RuntimeException | LinkageError failure) { circuit.unknown("radio evidence unavailable: "+source.node()+" -> "+target.node()); }
         }
-        for(Cell source:cells.values()) {
-            if(!is(source.entity(),CREATE+"kinetics.base.KineticBlockEntity")) continue;
-            try {
-                java.util.ArrayList<BlockPos> candidates=new java.util.ArrayList<>();
-                for(Direction side:Direction.values()) candidates.add(source.pos().relative(side));
-                @SuppressWarnings("unchecked") List<BlockPos> expanded=(List<BlockPos>)call(source.entity(),"addPropagationLocations",source.state().getBlock(),source.state(),candidates);
-                for(BlockPos pos:expanded) {
-                    Cell target=cells.get(pos);
-                    if(target==null) {
-                        if(!level.isLoaded(pos)) circuit.unknown("unloaded kinetic endpoint from "+source.id());
-                        continue;
-                    }
-                    if(!is(target.entity(),CREATE+"kinetics.base.KineticBlockEntity")) continue;
-                    boolean connected=kineticConnected(level,source,target);
-                    if(connected) circuit.connect(new ControlCircuit.Edge(source.id(),target.id(),"kinetic","native_rotation_port_with_component_gating",true));
-                }
-            } catch(RuntimeException | LinkageError failure) { circuit.unknown("kinetic ports unavailable: "+source.id()); }
-        }
-    }
-    private static boolean kineticConnected(Level level,Cell from,Cell to) {
-        BlockPos delta=to.pos().subtract(from.pos());
-        if(delta.distManhattan(BlockPos.ZERO)==1) {
-            Direction side=Direction.fromDelta(delta.getX(),delta.getY(),delta.getZ());
-            if(Boolean.TRUE.equals(call(from.state().getBlock(),"hasShaftTowards",level,from.pos(),from.state(),side))
-                    && Boolean.TRUE.equals(call(to.state().getBlock(),"hasShaftTowards",level,to.pos(),to.state(),side.getOpposite()))) return true;
-        }
-        for(Object a:kinetics(from)) for(Object b:kinetics(to))
-            if(Boolean.TRUE.equals(call(type(CREATE+"kinetics.RotationPropagator"),"isConnected",a,b))) return true;
-        return false;
-    }
-    private static List<Object> kinetics(Cell cell) {
-        return is(cell.entity(),SIM+"analog_transmission.AnalogTransmissionBlockEntity")
-                ? List.of(cell.entity(),call(cell.entity(),"getExtraKinetics")) : List.of(cell.entity());
+        ControlKineticPorts.connect(level,cells,circuit);
     }
 }

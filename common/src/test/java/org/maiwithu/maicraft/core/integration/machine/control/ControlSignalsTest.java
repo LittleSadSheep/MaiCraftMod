@@ -17,6 +17,8 @@ public final class ControlSignalsTest {
                 .setValue(BlockStateProperties.HORIZONTAL_FACING,Direction.EAST),null);
         check(ControlSignals.outputs(lever,Direction.WEST,true),"wall control powers its actual support");
         check(!ControlSignals.outputs(lever,Direction.EAST,true),"opposite side is not strong power");
+        var floorLever=new Cell(BlockPos.ZERO,lever.state().setValue(BlockStateProperties.ATTACH_FACE,AttachFace.FLOOR),null);
+        check(ControlSignals.outputs(floorLever,Direction.DOWN,true),"serialized FLOOR attachment powers below");
         var glass=new Cell(BlockPos.ZERO,Blocks.GLASS.defaultBlockState(),null);
         check(!ControlSignals.outputs(glass,Direction.WEST,false),"proximity to a block is not an output port");
         var repeater=new Cell(BlockPos.ZERO,Blocks.REPEATER.defaultBlockState()
@@ -27,6 +29,7 @@ public final class ControlSignalsTest {
                 "side locking input cannot be treated as the main signal path");
         var dust=new Cell(BlockPos.ZERO,Blocks.REDSTONE_WIRE.defaultBlockState(),null);
         check(ControlSignals.outputs(dust,Direction.DOWN,true) && !ControlSignals.outputs(dust,Direction.UP,false),"dust powers its support below");
+        check(!ControlSignals.outputs(dust,Direction.NORTH,false),"an absent dust connection does not become an output");
         System.out.println("ControlSignalsTest: passed");
     }
     private static void check(boolean value,String reason) { if(!value) throw new AssertionError(reason); }

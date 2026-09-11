@@ -24,6 +24,8 @@ public final class ControlCircuitTest {
         add(workshop,"wheel_control",STEERING_WHEEL); add(workshop,"bearing",JOINT);
         edge(workshop,"wheel_control","bearing","kinetic","native",true);
         check(!workshop.analyze().controllableCandidate(),"a workshop bearing is not a vehicle");
+        add(workshop,"unconnected_wheel",WHEEL);
+        check(!workshop.analyze().controllableCandidate(),"an unrelated wheel cannot turn a controlled workshop bearing into a vehicle");
         try { edge(workshop,"missing","bearing","kinetic","native",true); throw new AssertionError("dangling reference"); }
         catch(IllegalArgumentException expected) { }
         System.out.println("ControlCircuitTest: passed");

@@ -48,7 +48,13 @@ public final class ControlSignals {
     private static void edge(ControlCircuit graph,Cell source,Cell target,Direction toward,String path) {
         String behavior=input(target,toward.getOpposite());
         if(behavior==null) return;
-        graph.connect(new ControlCircuit.Edge(source.id(),target.id(),"redstone",path+"/"+behavior,true));
+        String targetId=target.id();
+        if(behavior.equals("analog_disconnect_at_15")) {
+            Object output=graph.node(target.id()).facts().get("controlled_output");
+            if(!(output instanceof String id)) { graph.connect(new ControlCircuit.Edge(source.id(),targetId,"redstone","unknown_analog_power_direction",false)); return; }
+            targetId=id;
+        }
+        graph.connect(new ControlCircuit.Edge(source.id(),targetId,"redstone",path+"/"+behavior,true));
     }
     /** Side is the face of the consumer towards the signal source. */
     static String input(Cell target,Direction side) {
