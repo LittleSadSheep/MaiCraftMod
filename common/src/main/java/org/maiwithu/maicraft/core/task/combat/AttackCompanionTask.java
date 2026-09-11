@@ -114,6 +114,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private static final int FLEE_REPLAN_TICKS = 20;
 
     private Phase phase = Phase.COMBAT;
+    private boolean defendingDuringLoot;
     private Entity target;
     private Vec3 lastTargetPosition;
     /** Last synchronized position per authorized target, used to bind a loot sweep to its kill. */
@@ -182,11 +183,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     @Override
-    // 先处理死亡和拾取阶段，再观察战场、选择目标，依次推进举盾、攻击和走位。
-    // 进入拾取阶段后这里直接返回 tickLoot，不再经过本刻的危险评估；见 A37。
+    // 每刻先观察战场；自卫途中有攻击者时暂停拾取，持续记录掉落，安全后再恢复收集。
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
-        if (phase == Phase.LOOT) return tickLoot();
 
         Battlefield field = surveyField();
         for (var f : field.foes()) {
@@ -195,11 +194,20 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
         }
         settleFinishedTargets();
-        // A confirmed death changes ownership of the body from combat to loot collection.
-        // Do not continue through DONE in this same tick: that used to report success before the
-        // freshly-created item entities had even been observed, leaving every drop behind.
         if (phase == Phase.LOOT) {
-            return tickLoot();
+            boolean threatened = r.indiscriminate && field.foes().stream().anyMatch(Battlefield.Foe::engaging);
+            if (threatened != defendingDuringLoot) {
+                stopNav();
+                abortShot();
+                target = null;
+                lastMove = null;
+                if (!threatened) tickWeapon(field); // 结束未发出的过期反击，或结算已有动作。
+            }
+            defendingDuringLoot = threatened;
+            if (!threatened) return tickLoot();
+            // 暂停的是追逐物品；死亡与掉落观察仍继续，不能在恢复时丢失归属证据。
+            loot.discover();
+            loot.prune();
         }
         AttackPlan.Move move = AttackPlan.decide(field, lastMove);
         lastMove = move;
@@ -214,7 +222,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (target != null) {
             lastTargetPosition = target.position();
             lastTargetPositions.put(target.getId(), lastTargetPosition);
-            loot.rememberPreexisting();
+            if (phase != Phase.LOOT) loot.rememberPreexisting();
         }
         // 攻击与移动<b>正交</b>:每刻先问一次"冷却好了吗、够得着谁吗",够得着就打 ——
         // 不管这一刻在靠近、在拉开、还是站着。攻击不影响寻路,最多让她回个头。

@@ -23,6 +23,7 @@ public final class MobDefenseDamageTest {
         lowHealthKeepsRetreatingFromDistantFire();
         retaliatesThroughNativeAttack();
         cancelsAnExpiredPendingStrike();
+        defendsDuringLootWithoutDiscardingDeaths();
         System.out.println("MobDefenseDamageTest: damage triggers defense, native retaliation and retreat");
     }
 
@@ -105,6 +106,33 @@ public final class MobDefenseDamageTest {
             f.h.level.time += 200; f.h.nextTick(); weapon(task);
             check(field(task, "meleeAction") == null && f.h.mode.attacks == 0,
                     "an unsubmitted strike must not outlive its defense evidence");
+            task.result(TaskState.CANCELLED);
+        }
+    }
+
+    private static void defendsDuringLootWithoutDiscardingDeaths() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var corpse = f.mob(11, 3); corpse.dead = true;
+            var task = fight(f);
+            var record = (AttackTaskRecord) field(task, "r"); record.defeated(corpse.getId());
+            Method beginLoot = AttackCompanionTask.class.getDeclaredMethod("beginLoot", int.class, Vec3.class);
+            beginLoot.setAccessible(true); beginLoot.invoke(task, corpse.getId(), corpse.position());
+            var attacker = f.mob(12, 2); f.hit(attacker, attacker);
+            check(task.tick(f.h.player) == TaskState.RUNNING && ((Integer) field(task, "meleeVictimId")) == attacker.getId(),
+                    "waiting for a previous kill's drops must not swallow a new attack");
+            Vec3 aim = attacker.getBoundingBox().getCenter().subtract(f.h.player.getEyePosition());
+            f.h.player.setYRot((float) Math.toDegrees(Math.atan2(-aim.x, aim.z)));
+            f.h.player.setXRot((float) -Math.toDegrees(Math.atan2(aim.y, aim.horizontalDistance())));
+            f.h.nextTick(); task.tick(f.h.player);
+            check(f.h.mode.attacks == 1, "self-defense must still reach the native attack while loot is pending");
+            attacker.damage = 1;
+            f.h.nextTick(); task.tick(f.h.player); f.h.nextTick(); task.tick(f.h.player);
+            attacker.dead = true;
+            f.h.nextTick(); task.tick(f.h.player);
+            var loot = field(task, "loot");
+            check(((List<?>) field(loot, "deaths")).size() == 2 && record.defeated().size() == 2,
+                    "resuming loot retains both the previous corpse and the newly defeated attacker");
+            check(field(task, "meleeAction") == null, "no stale melee action remains when pickup resumes");
             task.result(TaskState.CANCELLED);
         }
     }
