@@ -16,16 +16,19 @@ config = "${mod_id}.mixins.json"
 
 [[mixins]]
 config = "maicraft-baritone.mixins.json"
-# 依赖的 type=required 表示必需；side=CLIENT 限定依赖适用端，真正入口的客户端限制还在 Java 的 @Mod 注解中。
+
+[[mixins]]
+config = "maicraft.server-machine.mixins.json"
+# 通用入口在两端加载；客户端运行时仍由独立 dist=CLIENT 的入口限定。
 [[dependencies.${mod_id}]] #optional
 modId = "neoforge" #mandatory
 type="required" #mandatory (Can be one of "required", "optional", "incompatible" or "discouraged")
 versionRange = "[${neoforge_version},)" #mandatory
 ordering = "NONE" # The order that this dependency should load in relation to your mod, required to be either 'BEFORE' or 'AFTER' if the dependency is not mandatory
-side = "CLIENT"
+side = "BOTH"
 [[dependencies.${mod_id}]]
 modId = "minecraft"
 type="required" #mandatory (Can be one of "required", "optional", "incompatible" or "discouraged")
 versionRange = "${minecraft_version_range}"
 ordering = "NONE"
-side = "CLIENT"
+side = "BOTH"

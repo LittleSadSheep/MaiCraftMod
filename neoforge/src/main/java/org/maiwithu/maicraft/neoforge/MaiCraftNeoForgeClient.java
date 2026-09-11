@@ -40,6 +40,7 @@ public final class MaiCraftNeoForgeClient {
     private void onClientSetup(FMLClientSetupEvent event) {
         // 初始化安排到客户端工作队列，先完成注册，再开放 MCP 接单。
         event.enqueueWork(() -> {
+            NeoForgeOptionalServerClient.install();
             MaiCraftCore.init();
             ClientRuntime.start(MaiCraftRuntimeFacade.instance());
         });

@@ -23,6 +23,7 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
     @Override
     // 先登记公共工具和任务，再把启动、每刻更新、退出接到 Fabric 事件上；真正的玩法逻辑仍在公共模块。
     public void onInitializeClient() {
+        FabricOptionalServerClient.install();
         // 先建立工具和任务执行器的对应关系，客户端启动后再开放 MCP 接单。
         MaiCraftCore.init();
         ClientLifecycleEvents.CLIENT_STARTED.register(client ->
