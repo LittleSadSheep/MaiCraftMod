@@ -6,7 +6,6 @@ import baritone.api.pathing.movement.IMovement;
 import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
-import baritone.pathing.movement.movements.MovementAscend;
 import baritone.pathing.movement.movements.MovementDiagonal;
 import baritone.pathing.movement.movements.MovementTraverse;
 import net.minecraft.client.player.LocalPlayer;
@@ -20,7 +19,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.List;
 
 /**
- * 决定赶路时能不能顺势跑跳，以及靠近一格高平台时何时提前跳。
+ * 决定连续地面上何时为赶路加速起跳；跨缺口与上台仍使用 Baritone 的原有移动判断。
  * 先按当前速度估计会飞多远，再检查已选路线够不够直、会不会撞头、途中有没有可承受的落点。
  * 它只批准起跳，空中的按键和路线进度仍由现用导航执行。
  */
@@ -151,79 +150,6 @@ public final class TravelJumpPolicy {
         return (movement instanceof MovementTraverse || movement instanceof MovementDiagonal)
                 && movement.getSrc().getY() == movement.getDest().getY()
                 && HorizontalHeading.of(movement.getDirection()) != null;
-    }
-
-    /**
-     * 估计现在起跳能否越过平台侧面，并落在平台或紧接着的平走段上；太早、太晚或飞过落点都不批准。
-     */
-    public static boolean ascendLaunchReady(Baritone baritone, MovementTraverse current,
-                                            MovementAscend next, IMovement nextNext) {
-        IPlayerContext ctx = baritone.getPlayerContext();
-        LocalPlayer player = ctx.player();
-        if (player == null
-                || !player.onGround() || player.isInWater() || player.isPassenger()
-                || player.hasEffect(MobEffects.LEVITATION)
-                || player.hasEffect(MobEffects.SLOW_FALLING)) {
-            return false;
-        }
-        Vec3i direction = current.getDirection();
-        Vec3 liveVelocity = player.getDeltaMovement();
-        if (liveVelocity.x * direction.getX() + liveVelocity.z * direction.getZ() <= 0.0) {
-            return false;
-        }
-
-        double gravity = player.getAttributeValue(Attributes.GRAVITY);
-        double verticalSpeed = jumpVerticalSpeed(player);
-        Vec3 launchVelocity = sprintJumpLaunchVelocity(player, direction);
-        double horizontalSpeed = launchVelocity.x * direction.getX()
-                + launchVelocity.z * direction.getZ();
-        if (gravity <= 0.0 || verticalSpeed <= 0.0 || horizontalSpeed <= 0.0) {
-            return false;
-        }
-
-        double targetCenter = direction.getX() * (next.getDest().getX() + 0.5 - player.getX())
-                + direction.getZ() * (next.getDest().getZ() + 0.5 - player.getZ());
-        double firstBodyOverlap = targetCenter - 0.5 - player.getBbWidth() * 0.5;
-        // 平台后面紧接平走时把该终点也算作可落范围；其他后续动作只计算本次平台。
-        BlockPos landingEnd = nextNext instanceof MovementTraverse landing
-                ? landing.getDest() : next.getDest();
-        double lastValidFeet = direction.getX()
-                * (landingEnd.getX() + 0.5 - player.getX())
-                + direction.getZ() * (landingEnd.getZ() + 0.5 - player.getZ())
-                + 0.5;
-        if (firstBodyOverlap <= 0.0 || lastValidFeet <= firstBodyOverlap) {
-            return false;
-        }
-
-        double height = 0.0;
-        double horizontal = 0.0;
-        boolean enteredHighPlatform = false;
-        for (int tick = 0; tick < MAX_PROJECTED_AIRBORNE_TICKS; tick++) {
-            double previousHorizontal = horizontal;
-            horizontal += horizontalSpeed;
-            double nextHeight = height + verticalSpeed;
-            boolean descending = verticalSpeed <= 0.0;
-
-            if (!enteredHighPlatform && horizontal >= firstBodyOverlap) {
-                // 身体已经碰到平台边缘，却还没升到一格高，撞到的就是侧面。
-                if (Math.max(height, nextHeight) < 1.0) {
-                    return false;
-                }
-                enteredHighPlatform = true;
-            }
-            if (enteredHighPlatform && descending && height >= 1.0 && nextHeight <= 1.0) {
-                // 落到平台高度时，按本次水平位移前的位置检查是否还在允许的落地范围内。
-                return previousHorizontal < lastValidFeet;
-            }
-            if (horizontal >= lastValidFeet || nextHeight <= 0.0) {
-                return false;
-            }
-
-            height = nextHeight;
-            verticalSpeed = (verticalSpeed - gravity) * 0.98;
-            horizontalSpeed = (horizontalSpeed + 0.02) * 0.91;
-        }
-        return false;
     }
 
     /**
@@ -405,12 +331,6 @@ public final class TravelJumpPolicy {
     /**
      * 在当前速度上加沿路线方向的疾跑跳冲量；使用实际控制方向，避免尚未转完的显示镜头影响估计。
      */
-    private static Vec3 sprintJumpLaunchVelocity(LocalPlayer player, Vec3i direction) {
-        HorizontalHeading heading = HorizontalHeading.of(direction);
-        if (heading == null) return player.getDeltaMovement();
-        return sprintJumpLaunchVelocity(player, heading);
-    }
-
     private static Vec3 sprintJumpLaunchVelocity(
             LocalPlayer player, HorizontalHeading heading) {
         Vec3 velocity = player.getDeltaMovement();

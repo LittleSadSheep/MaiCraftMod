@@ -416,17 +416,14 @@ public class PathExecutor implements IPathExecutor, Helper {
             IMovement next = path.movements().get(pathPosition + 1);
             if (next instanceof MovementAscend && sprintableAscend(ctx, (MovementTraverse) current, (MovementAscend) next, path.movements().get(pathPosition + 2))) {
                 if (skipNow(ctx, current)) {
-                    // 起跳时机门:投影证明这一跳能落上平台而不是先撞台沿,才跳过平走直跳
-                    // 上台;窗口没开就留给普通上升移动做它的近距离跳。
-                    if (TravelJumpPolicy.ascendLaunchReady(behavior.baritone, (MovementTraverse) current, (MovementAscend) next, path.movements().get(pathPosition + 2))) {
-                        logDebug("Skipping traverse to straight ascend");
-                        pathPosition++;
-                        onChangeInPathPosition();
-                        advanceAgain = true;
-                        jumpAfterAdvance = true;
-                        return true;
-                    }
-                    logDebug("Ascend launch window not open; ordinary ascend jump will handle it");
+                    // Keep upstream's sprint-ascend decision; the bounded tick loop performs
+                    // its handoff before applying the launch input, without recursive ticks.
+                    logDebug("Skipping traverse to straight ascend");
+                    pathPosition++;
+                    onChangeInPathPosition();
+                    advanceAgain = true;
+                    jumpAfterAdvance = true;
+                    return true;
                 } else {
                     logDebug("Too far to the side to safely sprint ascend");
                 }
