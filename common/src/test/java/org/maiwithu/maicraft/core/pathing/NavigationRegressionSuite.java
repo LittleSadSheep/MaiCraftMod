@@ -29,6 +29,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.task.move.MoveToContractTest.main(args);
         org.maiwithu.maicraft.core.task.move.MoveToTransportCompletionTest.main(args);
         baritone.pathing.calc.PathSearchRegressionTest.main(args);
+        baritone.pathing.calc.HeightPolicyTest.main(args);
         baritone.pathing.path.PathTickBudgetTest.main(args);
         baritone.pathing.movement.DoorPassageTest.main(args);
         baritone.pathing.movement.CollisionGeometryTest.main(args);

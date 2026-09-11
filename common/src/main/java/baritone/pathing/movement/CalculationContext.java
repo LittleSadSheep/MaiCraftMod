@@ -348,8 +348,9 @@ public class CalculationContext {
         return maicraftPolicy.forbidsBody(x, y, z);
     }
 
-    /** Avoid constructing movement objects in the hot A* loop when no body policy is active. */
+    /** Height-only policies also need the movement-lattice check even without explicit body cells. */
     public boolean hasForbiddenBodyCells() {
-        return !maicraftPolicy.forbiddenBodyCells().isEmpty();
+        return maicraftPolicy.minimumFeetY() != Integer.MIN_VALUE
+                || !maicraftPolicy.forbiddenBodyCells().isEmpty();
     }
 }
