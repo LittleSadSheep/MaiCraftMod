@@ -92,6 +92,8 @@ public final class ServerAccess {
         }
         if (interactive) {
             if (!player.mayBuild()) throw denied("permission_denied", "Player cannot modify machines");
+            // A real menu opening already traversed the native use event; menu operations keep its exact target and access checks.
+            if (ServerMenuAccess.permits(player, pos)) return entity;
             if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
                 throw denied("menu_busy", "Close the active menu before a server transaction");
             }

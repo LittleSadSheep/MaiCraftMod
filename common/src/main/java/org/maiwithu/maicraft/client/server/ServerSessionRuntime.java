@@ -72,7 +72,7 @@ public final class ServerSessionRuntime {
             router.register(new ClientOperation("inventory.transfer", 1, true, null));
             router.register(new ClientOperation("inventory.ae2_supply", 1, true, null));
             for (String operation : new String[]{"machine.recipe", "machine.connections", "machine.configuration",
-                    "machine.production_events", "inventory.quote", "inventory.ae2_network", "inventory.ae2_craft_status"})
+                    "machine.production_events", "machine.watch", "inventory.quote", "inventory.ae2_network", "inventory.ae2_craft_status"})
                 router.register(new ClientOperation(operation, 1, false, null));
             for (String operation : new String[]{"inventory.ae2_craft_plan", "inventory.ae2_craft_start", "inventory.ae2_craft_cancel"})
                 router.register(new ClientOperation(operation, 1, true, null));
@@ -131,6 +131,13 @@ public final class ServerSessionRuntime {
                 && ServerRequestOwners.ordinaryWinner(winner), receipt -> owners.selected(receipt.id(), owner));
     }
 
+    /** Passive job status never acquires the body or admits a native mutation. */
+    public static void dispatchBackgroundReads() {
+        requireThread();
+        if (installed) router.dispatch(false, receipt -> false,
+                receipt -> receipt.operation.id().equals("machine.watch"));
+    }
+
     static String selectedOwner() {
         var current = CompanionTickDispatcher.current();
         String winner = CompanionTickDispatcher.controllingTask();
@@ -159,9 +166,14 @@ public final class ServerSessionRuntime {
         var context = ClientRuntime.actor().activeContext().orElse(null);
         if (context == null || !context.permitsNativeActions() || !context.mutationAvailable()) return false;
         try {
-            var nativeReceipt = context.actions().submitControlProtocol(context,
-                    "server " + receipt.snapshot().operationId(), send,
-                    NativeConfirmation.pending(), 1);
+            boolean menu = receipt.arguments.has("container_id");
+            if (menu && (context.player().containerMenu == context.player().inventoryMenu
+                    || context.player().containerMenu.containerId != receipt.arguments.get("container_id").getAsInt()))
+                throw new IllegalStateException("The request's actual menu changed");
+            var nativeReceipt = menu ? context.actions().submitProtocol(context,
+                    "server " + receipt.operation.id(), send, NativeConfirmation.pending(), 1)
+                    : context.actions().submitControlProtocol(context,
+                    "server " + receipt.operation.id(), send, NativeConfirmation.pending(), 1);
             // The actor enforces this tick's native boundary. The router/journal own the remote
             // receipt, so a delayed reply must not lock next tick's emergency native input slot.
             context.actions().retireOneShotForTaskBoundary(context, nativeReceipt,

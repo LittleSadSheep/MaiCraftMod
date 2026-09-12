@@ -20,6 +20,11 @@ public final class InventoryTransfer {
         int playerSlot = ServerAccess.integer(body, "player_slot", 0, 35);
         int slot = ServerAccess.integer(body, "slot", 0, 4095);
         int requested = ServerAccess.integer(body, "amount", 1, 64);
+        if (body.has("container_id")) {
+            int container = ServerAccess.integer(body, "container_id", 1, Integer.MAX_VALUE);
+            if (player.containerMenu == player.inventoryMenu || player.containerMenu.containerId != container
+                    || !player.containerMenu.stillValid(player)) throw ServerAccess.denied("menu_changed", "The opened machine menu is no longer valid");
+        }
         ServerAccess.check(player, pos, true);
         NativeItemPort port = NativeItemPort.find(player.serverLevel(), pos, side);
         if (port == null) throw ServerAccess.denied("unsupported", "No native item port on this side");
@@ -34,6 +39,7 @@ public final class InventoryTransfer {
                 : withdraw(player, playerSlot, port, slot, requested);
         player.getInventory().setChanged();
         player.inventoryMenu.broadcastChanges();
+        if (player.containerMenu != player.inventoryMenu) player.containerMenu.broadcastChanges();
         JsonObject result = new JsonObject();
         result.addProperty("status", moved == 0 ? "no_change" : moved < requested ? "partial" : "applied");
         result.addProperty("requested", requested);

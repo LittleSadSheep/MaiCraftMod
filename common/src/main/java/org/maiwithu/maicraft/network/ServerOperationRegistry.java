@@ -36,6 +36,9 @@ public final class ServerOperationRegistry {
     public static synchronized void setPolicy(BiPredicate<ServerPlayer, String> next) {
         policy = Objects.requireNonNull(next);
     }
+    public static synchronized boolean allowed(ServerPlayer player, String operation) {
+        return OPERATIONS.containsKey(operation) && policy.test(player,operation);
+    }
 
     static synchronized List<ServerFeature> features(ServerPlayer player) {
         return OPERATIONS.values().stream().map(operation -> {
@@ -56,6 +59,7 @@ public final class ServerOperationRegistry {
             if (!policy.test(player, operationId))
                 throw ServerOperationException.notApplied("authorization_denied", "Operation disabled by server policy");
         }
-        return Objects.requireNonNull(operation.handler().apply(player, body), "Handler returned no result");
+        return org.maiwithu.maicraft.server.machine.ServerMenuAccess.execute(player, body,
+                () -> Objects.requireNonNull(operation.handler().apply(player, body), "Handler returned no result"));
     }
 }

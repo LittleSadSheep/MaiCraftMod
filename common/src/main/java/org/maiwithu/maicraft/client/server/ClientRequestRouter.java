@@ -183,12 +183,17 @@ public final class ClientRequestRouter {
     }
 
     public void dispatch(boolean allowMutations, Predicate<ClientRequestReceipt> selectedOwner) {
+        dispatch(allowMutations, selectedOwner, receipt -> true);
+    }
+
+    void dispatch(boolean allowMutations, Predicate<ClientRequestReceipt> selectedOwner, Predicate<ClientRequestReceipt> included) {
         requireThread.run();
         if (dispatchedTick != tick) { dispatchedTick = tick; dispatchedThisTick = 0; }
         int budget = session.capabilities.limit("maxRequestsPerTick", 8, 8) - dispatchedThisTick;
         for (ClientRequestReceipt receipt : List.copyOf(ledger.requests.values())) {
             if (budget <= 0) break;
             if (receipt.status != Status.QUEUED || receipt.retired) continue;
+            if (!included.test(receipt)) continue;
             if (receipt.binding != session.binding) { ledger.retire(receipt, "stale world binding"); continue; }
             if (receipt.operation.mutating() && (!allowMutations || !selectedOwner.test(receipt))) continue;
             var choice = choose(receipt.operation, receipt.arguments, receipt.fallbackAfterRejection);
