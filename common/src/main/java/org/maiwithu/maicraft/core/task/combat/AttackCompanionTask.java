@@ -116,6 +116,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     private Phase phase = Phase.COMBAT;
     private boolean defendingDuringLoot;
+    private boolean defensiveInterruption;
     private Entity target;
     private Vec3 lastTargetPosition;
     /** Last synchronized position per authorized target, used to bind a loot sweep to its kill. */
@@ -198,7 +199,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         settleFinishedTargets();
         if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         if (phase == Phase.LOOT) {
-            boolean threatened = r.indiscriminate && field.foes().stream().anyMatch(Battlefield.Foe::engaging);
+            boolean threatened = field.foes().stream().anyMatch(Battlefield.Foe::engaging);
             if (threatened != defendingDuringLoot) {
                 stopNav();
                 abortShot();
@@ -207,6 +208,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 if (!threatened) tickWeapon(field); // 结束未发出的过期反击，或结算已有动作。
             }
             defendingDuringLoot = threatened;
+            if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
             if (!threatened) return tickLoot();
             // 暂停的是追逐物品；死亡与掉落观察仍继续，不能在恢复时丢失归属证据。
             loot.discover();
@@ -261,11 +263,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 先找附近敌对生物，补进伤害包确认的远程攻击者和明确指定的目标。
     // “正在攻击我”与“允许作为主目标”分别记录，严格授权模式还会限制顺手反击的对象。
     private Battlefield surveyField() {
+        defensiveInterruption = !r.indiscriminate && CombatThreats.attackers(player).stream()
+                .anyMatch(mob -> !r.entityIds.contains(mob.getId()));
         hostiles = CombatThreats.around(player, FIELD_RADIUS);
         List<Battlefield.Foe> foes = new ArrayList<>();
         for (var mob : hostiles) {
             boolean engaging = CombatThreats.recentlyAttackedBy(player, mob) || mob.getTarget() == player;
-            boolean authorized = r.indiscriminate ? engaging : r.entityIds.contains(mob.getId());
+            boolean authorized = authorizedTarget(mob.getId(), engaging);
             if (r.terminal(mob.getId())) {
                 // 打完了、丢了、或者走不到又射不到的:<b>整只移出局面</b>。留着当"还有东西在
                 // 追我"的话,判据会永远喊走位 —— 一只在悬崖对面射她的骷髅就能把任务钉死。
@@ -291,7 +295,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 if (e != null) {
                     foes.add(new Battlefield.Foe(id, player.distanceTo(e),
                             Menace.explodes(e), Menace.armed(e),
-                            false, reachable(id), true));
+                            false, reachable(id), !defensiveInterruption));
                 }
             }
         }
@@ -311,6 +315,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         return false;
     }
 
+    // 新袭击优先于原目标，处理完后自动回到原名单。严格名单受到额外袭击时只避让，不扩大伤害许可。
+    private boolean authorizedTarget(int id, boolean engaging) {
+        if (defensiveInterruption) return !r.strictAuthorized && engaging && !r.entityIds.contains(id);
+        return r.indiscriminate ? engaging : r.entityIds.contains(id);
+    }
+
     private boolean reachable(int id) {
         return !noPath.contains(id);
     }
@@ -323,7 +333,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     /** 把已经有结果的目标记进账本(死了 / 不见了)。 */
     // 活物必须有死亡证据；末影水晶沿用严格任务的“已出手且原位置仍加载”的移除凭证。
     private void settleFinishedTargets() {
-        for (int id : r.indiscriminate ? List.copyOf(touchedIds) : r.entityIds) {
+        var observedIds = new java.util.LinkedHashSet<>(r.entityIds);
+        observedIds.addAll(touchedIds);
+        for (int id : observedIds) {
             if (r.terminal(id)) {
                 continue;
             }
@@ -511,9 +523,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private void tickWeapon(Battlefield field) {
         if (meleeAction != null) {
             Entity planned = liveEntity(meleeVictimId);
-            boolean expiredDefense = r.indiscriminate && (!(planned instanceof Mob mob)
-                    || !CombatThreats.recentlyAttackedBy(player, mob) && mob.getTarget() != player);
-            if (expiredDefense || r.strictAuthorized && (planned == null
+            Battlefield.Foe plannedFoe = field.byId(meleeVictimId);
+            if (plannedFoe == null || !plannedFoe.authorized() || r.strictAuthorized && (planned == null
                     || !r.entityIds.contains(planned.getId())
                     || !strictMeleeClear(planned))) {
                 meleeAction.stop();
@@ -544,7 +555,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         Entity victim = null;
         double best = Double.MAX_VALUE;
         for (var f : field.foes()) {
-            if ((r.strictAuthorized || r.indiscriminate) && !f.authorized()) {
+            if (!f.authorized()) {
                 continue;
             }
             // <b>名单只决定去打谁,不决定砍不砍眼前的。</b>"够得着就打"本来就是攻击层的

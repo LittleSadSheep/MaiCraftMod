@@ -23,7 +23,9 @@ public final class MobDefenseDamageTest {
         lowHealthKeepsRetreatingFromDistantFire();
         retaliatesThroughNativeAttack();
         cancelsAnExpiredPendingStrike();
-        defendsDuringLootWithoutDiscardingDeaths();
+        defendsDuringLootWithoutDiscardingDeaths(false);
+        defendsDuringLootWithoutDiscardingDeaths(true);
+        explicitGoalResumesAfterAmbush();
         System.out.println("MobDefenseDamageTest: damage triggers defense, native retaliation and retreat");
     }
 
@@ -110,10 +112,11 @@ public final class MobDefenseDamageTest {
         }
     }
 
-    private static void defendsDuringLootWithoutDiscardingDeaths() throws Exception {
+    private static void defendsDuringLootWithoutDiscardingDeaths(boolean explicit) throws Exception {
         try (var f = new CombatThreatsTest.Fixture()) {
             var corpse = f.mob(11, 3); corpse.dead = true;
-            var task = fight(f);
+            var task = explicit ? new AttackCompanionTask(f.h.player,
+                    new AttackTaskRecord("explicit-loot", 1000, List.of(11), false)) : fight(f);
             var record = (AttackTaskRecord) field(task, "r"); record.defeated(corpse.getId());
             Method beginLoot = AttackCompanionTask.class.getDeclaredMethod("beginLoot", int.class, Vec3.class);
             beginLoot.setAccessible(true); beginLoot.invoke(task, corpse.getId(), corpse.position());
@@ -141,6 +144,32 @@ public final class MobDefenseDamageTest {
         var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("self-defense", 1000, List.of(), true));
         task.start(f.h.player);
         return task;
+    }
+
+    private static void explicitGoalResumesAfterAmbush() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var original = f.mob(11, 2); var attacker = f.mob(12, 50);
+            var record = new AttackTaskRecord("interrupted-goal", 1000, List.of(11), false);
+            var task = new AttackCompanionTask(f.h.player, record);
+            weapon(task);
+            check(((Integer) field(task, "meleeVictimId")) == 11, "the original task first selects its requested target");
+            f.hit(null, attacker); weapon(task);
+            check(field(task, "meleeAction") == null && f.h.mode.attacks == 0,
+                    "a new attacker cancels the not-yet-submitted original strike");
+            var ambushed = survey(task);
+            check(ambushed.byId(12).authorized() && !ambushed.byId(11).authorized(),
+                    "an explicit task prioritizes the attacker without forgetting the original goal");
+            var strict = new AttackCompanionTask(f.h.player,
+                    new AttackTaskRecord("strict-goal", 1000, List.of(11), false, true));
+            var restricted = survey(strict);
+            check(restricted.foes().stream().noneMatch(Battlefield.Foe::authorized)
+                    && AttackPlan.decide(restricted, null).foeId() == AttackPlan.NO_FOE,
+                    "strict authorization evades an unlisted attacker instead of attacking outside the list");
+            org.maiwithu.maicraft.core.combat.CombatThreats.clear();
+            check(survey(task).byId(original.getId()).authorized() && record.entityIds.equals(List.of(11)),
+                    "the original goal becomes attackable again after the ambush is over");
+            task.result(TaskState.CANCELLED);
+        }
     }
     static Battlefield survey(AttackCompanionTask task) throws Exception { return (Battlefield) invoke(task, "surveyField"); }
     private static void weapon(AttackCompanionTask task) throws Exception {
