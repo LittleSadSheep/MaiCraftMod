@@ -117,6 +117,10 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             case SUPPLY -> {
                 if (supply.tick()) {
                     if (started) phase = Phase.OBSERVE;
+                    else if (!hasStartActions()) {
+                        // An already running installation needs observation/refill after its first tranche, not admission for an absent action.
+                        started = true; watchdog.noteInput(player.level().getGameTime()); phase = Phase.OBSERVE;
+                    }
                     else { preparation.refresh(); phase = Phase.ADMIT_START; }
                 }
             }
@@ -130,7 +134,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             case START -> {
                 if (configure("start")) {
                     started = true; watchdog.noteInput(player.level().getGameTime());
-                    if (r.plan.manifest().configurations().stream().anyMatch(action -> action.stage().equals("start"))) {
+                    if (hasStartActions()) {
                         preparation.refresh(); phase = Phase.REFRESH;
                     } else {
                         // ADMIT_START just read the installation, and this stage performed no native operation.
@@ -175,6 +179,10 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             case DONE -> { return TaskState.SUCCESS; }
         }
         return TaskState.RUNNING;
+    }
+
+    private boolean hasStartActions() {
+        return r.plan.manifest().configurations().stream().anyMatch(action -> action.stage().equals("start"));
     }
 
     private boolean configure(String stage) {
@@ -334,7 +342,21 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         result.put("construction_active", construction != null);
         if (construction != null) result.put("construction_task", construction.name());
         result.put("navigation_active", nav != null); result.put("preparation_complete", preparation.compilation() != null);
-        result.put("preparation", preparation.progress());
+        if (phase == Phase.PREPARE || phase == Phase.ADMIT_START || phase == Phase.REFRESH || phase == Phase.FINAL_VERIFY)
+            result.put("preparation", preparation.progress());
+        if (supply != null) {
+            var supplied = supply.report();
+            result.put("confirmed_injected", supplied.get("confirmed_injected"));
+            result.put("remaining_to_inject", supplied.get("remaining_to_inject"));
+        }
+        if (output != null) {
+            var observed = output.report();
+            result.put("processing_events", output.processingProgress());
+            result.put("production_window", observed.get("production"));
+            if (observed.containsKey("sink_net_growth")) result.put("sink_net_growth", observed.get("sink_net_growth"));
+            if (observed.get("flow") instanceof Map<?, ?> flow)
+                result.put("native_delivered", flow.get("produced_and_delivered"));
+        }
         result.put("server_request_pending", requests.pending());
         Map<String, Object> report = requests.report(); var request = new LinkedHashMap<String, Object>();
         for (String key : java.util.List.of("request_id", "operation", "backend", "status", "effect", "code", "server_tick", "outcome_uncertain"))
