@@ -72,6 +72,7 @@ public final class ClientRuntime {
         org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime.tick();
         // 即使玩家正在自己操作，也继续观察世界和更新预览，让 MCP 能看到当前发生了什么。
         tickStage = "observing";
+        org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.tick(minecraft);
         org.maiwithu.maicraft.core.inventory.StockEvidence.observe(minecraft.player);
         NavProfiler.clientTickPulse();
         PreviewController.tick(minecraft);
@@ -96,6 +97,8 @@ public final class ClientRuntime {
             TargetIndex.clientTick(context.level());
             GameplayAttentionMonitor.tick(context.player());
             org.maiwithu.maicraft.client.server.ServerSessionRuntime.observe(minecraft, context);
+            org.maiwithu.maicraft.client.server.ClientMachineWatches.tick(minecraft);
+            org.maiwithu.maicraft.client.server.ServerSessionRuntime.dispatchBackgroundReads();
             IntentRuntime intents = IntentRuntime.get();
             // 任务状态与玩家/世界实例绑定；换维度、重生等情况下先处理交接，再尝试推进任务。
             intents.beforeBodyTick(minecraft);
@@ -211,6 +214,7 @@ public final class ClientRuntime {
 
         Minecraft minecraft = Minecraft.getInstance();
         Runnable cleanup = () -> {
+            org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.shutdown();
             org.maiwithu.maicraft.client.server.ServerSessionRuntime.shutdown();
             ACTOR.shutdown();
             PreviewController.shutdown();

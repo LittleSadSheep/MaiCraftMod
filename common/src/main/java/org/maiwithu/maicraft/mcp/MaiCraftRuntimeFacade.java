@@ -233,7 +233,11 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 yield result;
             }
             case "landmarks" -> landmarks(player);
-            case "machines" -> org.maiwithu.maicraft.core.integration.machine.MachineSnapshots.summaries(player);
+            case "machines" -> {
+                var report = org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.view(player, nullableString(arguments,"focus"));
+                report.add("production_watches",org.maiwithu.maicraft.client.server.ClientMachineWatches.view(player));
+                yield report;
+            }
             case "machine_menu" -> org.maiwithu.maicraft.core.integration.machine.MachineMenu.inspect(player);
             default -> throw new IllegalArgumentException("unknown perceive view: " + view);
         };

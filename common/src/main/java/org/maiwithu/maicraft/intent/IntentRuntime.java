@@ -240,7 +240,12 @@ public final class IntentRuntime {
     }
 
     public Landmark landmark(String label) {
-        return label == null ? null : landmarks.get(normalizeLabel(label));
+        if (label == null) return null;
+        Landmark remembered = landmarks.get(normalizeLabel(label));
+        if (remembered != null) return remembered;
+        var minecraft = net.minecraft.client.Minecraft.getInstance();
+        var location = minecraft == null ? null : org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.resolveLabel(minecraft.player,label);
+        return location == null ? null : new Landmark(label,location,LandmarkAreaRole.ORDINARY);
     }
 
     public List<Landmark> landmarks() {
