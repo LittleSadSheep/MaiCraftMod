@@ -50,10 +50,13 @@ public final class BuildPrecisionAimTest {
             }
             var attempts = (PlacementAttemptLedger) field("placementAttempts").get(task);
             check(attempts.rejectedCount(target) == 0 && h.blockUses() == 0, "no blacklist or incorrect native click while converging");
-            h.nextTick(); h.player.setYRot(gesture.yaw()); h.player.setXRot(gesture.pitch());
-            aim.invoke(task);
+            for (int tick = 0; tick < 3; tick++) {
+                h.nextTick(); h.player.setYRot(gesture.yaw()); h.player.setXRot(gesture.pitch());
+                aim.invoke(task);
+                if (tick < 2) check(h.blockUses() == 0, "a newly correct ray still needs settled physical ticks");
+            }
             check(field("phase").get(task).toString().equals("WAIT_USE") && h.blockUses() == 1,
-                    "the same feet may place immediately once the real ray reaches the correct half: phase="
+                    "the same feet may place once the real ray remains on the correct half: phase="
                             + field("phase").get(task) + ", reason=" + field("aimWaitReason").get(task)
                             + ", error=" + field("aimError").get(task) + ", uses=" + h.blockUses());
 

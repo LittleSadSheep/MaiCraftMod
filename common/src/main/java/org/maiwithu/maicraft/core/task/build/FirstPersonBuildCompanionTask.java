@@ -142,6 +142,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private BuildTraversabilityVerifier.Verification traversabilityScan;
     private FirstPersonActionGate selection = new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
+    private final BuildPlacementSettling placementSettling = new BuildPlacementSettling();
     private final LinkedHashSet<Long> verifyFailed = new LinkedHashSet<>();
     private final List<ObservedCell> verifyFailureStates = new ArrayList<>();
     private List<BlockPos> scaffoldQueue = List.of();
@@ -870,6 +871,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && !BuildPlacementGeometry.isProgress(cell.target(), before, predicted))) {
             return waitForAim("native_placement_state_mismatch", aimConvergence.ready(player, gesture.point().subtract(eye)));
         }
+        // A valid ray/state can occur while crossing a facing boundary during a camera turn.
+        // Keep the actual view settled before clicking so ordinary player ticks can synchronize it.
+        if (!placementSettling.ready(player, gesture, cell.target().pos(), hit, predicted))
+            return waitForAim("waiting_for_view_settle", false);
         BlockState placedPrimary = predicted == null ? cell.target().desiredState() : predicted;
         if (placementBlockedByPlayer(placedPrimary)) return rejectPlayerOccupiedGesture();
         if (placementBlockedByEntity(placedPrimary)) {
