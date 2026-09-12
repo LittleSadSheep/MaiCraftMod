@@ -7,6 +7,7 @@ public final class PortalRegressionSuite {
         NetherPortalFrameTest.main(args);
         EndPortalFrameTest.main(args);
         PortalActivationTest.main(args);
+        PortalPreparationSiteTest.main(args);
         System.out.println("PortalRegressionSuite: passed");
     }
 }
