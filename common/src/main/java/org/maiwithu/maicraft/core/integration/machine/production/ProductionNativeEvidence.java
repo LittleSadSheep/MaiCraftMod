@@ -12,6 +12,11 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionManif
 /** Owner-thread native-response accumulator. Protocol/session/authorization checks remain the runtime router's responsibility. */
 public final class ProductionNativeEvidence implements ProductionEvidence {
     private static final long MAX_AGE = 1200;
+    public enum ObservationKind { NODE, PORT, RECIPE, CONFIGURATION, LINK }
+    public enum FreshnessStatus { FRESH, EXPIRED, INVALIDATED, MISSING, INVALID }
+    /** Freshness describes bound observations; a fresh negative native fact still fails its domain checks. */
+    public record ObservationFreshness(ObservationKind kind, String id, FreshnessStatus status, Long tick, long ageTicks) {}
+    private record ObservationKey(ObservationKind kind, String id) {}
     private final ProductionManifest manifest;
     private final ProductionGraph graph;
     private final ProductionSupplyEvidence supply;
@@ -21,6 +26,8 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     private final Map<String,JsonObject> links = new LinkedHashMap<>(), configurations = new LinkedHashMap<>();
     private final Map<String,JsonObject> configurationReads = new LinkedHashMap<>();
     private final Map<String,String> recipeIds = new LinkedHashMap<>();
+    private final Set<ObservationKey> attempted = new java.util.HashSet<>();
+    private final Map<String,Long> invalidatedLinkTicks = new LinkedHashMap<>();
     private Set<String> operations = Set.of();
     private String dimension;
     private Point anchor;
@@ -33,15 +40,17 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
             nodes.clear(); ports.clear(); recipes.clear(); links.clear(); configurations.clear(); configurationReads.clear(); supply.clear(); now = 0; changedAt = 0;
             bindings.clear(); bindingsDirty = true;
             recipeIds.clear();
+            attempted.clear(); invalidatedLinkTicks.clear();
         }
         this.dimension = dimension; this.anchor = anchor;
     }
     public void supportedOperations(Set<String> available) { operations = Set.copyOf(available); }
     public void advance(long serverTick) { if (serverTick < 0) throw new IllegalArgumentException("Negative server tick"); if (serverTick > now) bindingsDirty = true; now = Math.max(now, serverTick); }
-    public void observeNode(String nodeId, JsonObject observation) { putObservation(nodes, nodeId, observation, graph.nodes.get(nodeId).offset()); }
-    public void observePort(String portId, JsonObject observation) { putObservation(ports, portId, observation, graph.ports.get(portId).offset()); }
+    public void observeNode(String nodeId, JsonObject observation) { attempted.add(new ObservationKey(ObservationKind.NODE,nodeId)); putObservation(nodes, nodeId, observation, graph.nodes.get(nodeId).offset()); }
+    public void observePort(String portId, JsonObject observation) { attempted.add(new ObservationKey(ObservationKind.PORT,portId)); putObservation(ports, portId, observation, graph.ports.get(portId).offset()); }
     public void observeRecipe(String nodeId, JsonObject result) {
         Node node = graph.nodes.get(nodeId); if (node == null || !node.kind().equals("process")) throw new IllegalArgumentException("Unknown process node");
+        attempted.add(new ObservationKey(ObservationKind.RECIPE,nodeId));
         recipes.remove(nodeId); bindingsDirty = true;
         String actual = text(result,"recipe_id"), requested = text(result,"requested_recipe_id"), pinned = recipeIds.get(nodeId);
         boolean matches = node.recipeId().equals(actual) || node.recipeId().equals(requested) || pinned != null && pinned.equals(actual);
@@ -49,6 +58,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     }
     public void observeLink(String linkId, JsonObject result) {
         Link link = linkById(linkId); links.remove(linkId);
+        attempted.add(new ObservationKey(ObservationKind.LINK,linkId)); invalidatedLinkTicks.remove(linkId);
         if (sameWorld(result) && number(result,"tick") != null && "maicraft.connection_inspection.v1".equals(text(result,"schema"))) {
             links.put(link.id(),result.deepCopy()); advance(number(result,"tick"));
         }
@@ -56,6 +66,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     public void configured(String configurationId, JsonObject result) {
         Configuration configuration = manifest.configurations().stream().filter(c -> c.id().equals(configurationId)).findFirst().orElseThrow();
         configurations.remove(configurationId);
+        attempted.add(new ObservationKey(ObservationKind.CONFIGURATION,configurationId));
         configurationReads.remove(configurationId);
         bindingsDirty = true;
         if (!bound(result, graph.nodes.get(configuration.node()).offset())) return;
@@ -63,12 +74,14 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
         if (configurationResult(configuration, result, false).status() == Status.VERIFIED) {
             changedAt = Math.max(changedAt,number(result,"tick"));
             // Direction/filter changes invalidate earlier path proofs, even if their geometry remains unchanged.
+            links.forEach((id, value) -> { Long tick = number(value,"tick"); if (tick != null) invalidatedLinkTicks.put(id,tick); });
             links.clear();
         }
     }
     /** Current configuration readback is evidence only: it neither replays the action nor invalidates other observations. */
     public void observeConfiguration(String id, JsonObject result) {
         Configuration configuration = manifest.configurations().stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
+        attempted.add(new ObservationKey(ObservationKind.CONFIGURATION,id));
         configurationReads.put(id,new JsonObject());
         if (bound(result,graph.nodes.get(configuration.node()).offset()) && "machine.configuration".equals(text(result,"operation"))) {
             configurationReads.put(id,result.deepCopy()); advance(number(result,"tick"));
@@ -78,6 +91,58 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
         Configuration c = manifest.configurations().stream().filter(value -> value.id().equals(id)).findFirst().orElseThrow();
         JsonObject result = configurations.get(id);
         return sameWorld(result) && configurationResult(c,result,false).status() == Status.VERIFIED;
+    }
+    /** Bounded by the manifest's existing node/port/link budgets; never replaces historical supply or recipe bindings. */
+    public List<ObservationFreshness> freshness(long serverTick) {
+        advance(serverTick);
+        var result = new java.util.ArrayList<ObservationFreshness>();
+        for (Node node : manifest.nodes()) {
+            result.add(freshness(ObservationKind.NODE,node.id(),nodes.get(node.id()),false));
+            if (node.kind().equals("process")) result.add(freshness(ObservationKind.RECIPE,node.id(),recipes.get(node.id()),false));
+        }
+        for (Port port : manifest.ports()) result.add(freshness(ObservationKind.PORT,port.id(),ports.get(port.id()),false));
+        for (Configuration configuration : manifest.configurations()) {
+            String id = configuration.id(); boolean read = configurationReads.containsKey(id);
+            result.add(freshness(ObservationKind.CONFIGURATION,id,read ? configurationReads.get(id) : configurations.get(id),!read));
+        }
+        for (Link link : manifest.links()) result.add(freshness(ObservationKind.LINK,link.id(),links.get(link.id()),false));
+        return List.copyOf(result);
+    }
+    private ObservationFreshness freshness(ObservationKind kind, String id, JsonObject value, boolean receipt) {
+        Long tick = number(value,"tick"); FreshnessStatus status;
+        if (kind == ObservationKind.LINK && value == null && invalidatedLinkTicks.containsKey(id)) {
+            tick = invalidatedLinkTicks.get(id); status = FreshnessStatus.INVALIDATED;
+        } else if (value == null) status = attempted.contains(new ObservationKey(kind,id)) ? FreshnessStatus.INVALID : FreshnessStatus.MISSING;
+        else if (!sameWorld(value) || tick == null || tick < 0 || tick > now) status = FreshnessStatus.INVALID;
+        else if (!receipt && tick < changedAt) status = FreshnessStatus.INVALIDATED;
+        else status = now - tick > MAX_AGE ? FreshnessStatus.EXPIRED : FreshnessStatus.FRESH;
+        return new ObservationFreshness(kind,id,status,tick,tick == null || tick > now ? -1 : now-tick);
+    }
+
+    /** Current installation proof after an independently verified finite run; empty fuel/input and idle speed are allowed. */
+    public Check finalVerification() {
+        for (Node node : manifest.nodes()) {
+            Check geometry = geometry(node);
+            if (geometry.status() != Status.VERIFIED) return unknown("Final geometry " + node.id() + ": " + geometry.detail());
+            if (!node.kind().equals("process")) continue;
+            JsonObject observed = recipes.get(node.id());
+            if (bindRecipe(node).check().status() != Status.VERIFIED
+                    || !Boolean.TRUE.equals(bool(observed,"compatible")) || !"verified".equals(text(observed,"compatibility")))
+                return unknown("Final recipe binding or native machine compatibility is unverified: " + node.id());
+            try {
+                Recipe decoded = ProductionNativeRecipes.decode(observed);
+                if (!decoded.complete()) return unknown("Final recipe definition is incomplete: " + node.id());
+            } catch (RuntimeException invalid) { return unknown("Final recipe definition is invalid: " + node.id()); }
+        }
+        for (Configuration configuration : manifest.configurations()) {
+            Check current = configuration(configuration);
+            if (current.status() != Status.VERIFIED) return unknown("Final configuration " + configuration.id() + ": " + current.detail());
+        }
+        for (Link link : manifest.links()) {
+            Check current = topology(link,graph.ports.get(link.from()),graph.ports.get(link.to()));
+            if (current.status() != Status.VERIFIED) return unknown("Final topology " + link.id() + ": " + current.detail());
+        }
+        return verified("Current native installation and settings remain verified; future production capacity is not required");
     }
     /** Only a router-confirmed deposit into the declared ingress may call this; withdrawal/quotes are not injection evidence. */
     public void confirmedSupply(String linkId, String requestId, JsonObject result) {

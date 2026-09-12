@@ -89,6 +89,7 @@ public final class ProductionNativeEvidenceTest {
         aliasesAndSharedStock();
         semanticPatternConfiguration();
         configurationReadbackAfterLongSupply();
+        ProductionEvidenceFreshnessTest.main(args);
         System.out.println("ProductionNativeEvidenceTest: passed");
     }
     private static void aliasesAndSharedStock() {
