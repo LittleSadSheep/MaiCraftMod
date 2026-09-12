@@ -34,6 +34,14 @@ public final class MachineProductionContractTest {
         JsonObject run = new JsonObject(); run.addProperty("operation", "run_production");
         run.addProperty("snapshot_id", "receipt"); run.addProperty("allow_use", true); run.add("production", manifest());
         accepts(MachineAbilityAdapter.OPERATE, run);
+        JsonObject watch = run.deepCopy(); watch.addProperty("operation","watch_production");
+        accepts(MachineAbilityAdapter.OPERATE,watch);
+        Goal watched = goal(MachineAbilityAdapter.OPERATE,watch);
+        if (!runtime.compile(watched,100).goal().parameters().get("production").equals(watch.get("production")))
+            throw new AssertionError("Passive watch compilation must preserve the validated coordinate-bearing manifest");
+        JsonObject unsafeWatch = watch.deepCopy();
+        unsafeWatch.getAsJsonObject("production").getAsJsonArray("nodes").get(0).getAsJsonObject().addProperty("slot",1);
+        rejects(MachineAbilityAdapter.OPERATE,unsafeWatch);
         runtime.compile(new Goal("maicraft:sequence", "review and build production", null, "{}", "{}",
                 java.util.List.of(), java.util.List.of(reviewed, goal(MachineAbilityAdapter.BUILD, build))), 100);
         JsonObject missing = run.deepCopy(); missing.remove("production"); rejects(MachineAbilityAdapter.OPERATE, missing);

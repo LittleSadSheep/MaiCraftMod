@@ -42,7 +42,7 @@ public final class BlueprintGoalData {
                 || MachineAbilityAdapter.BUILD.equals(goal.ability())
                 || MachineAbilityAdapter.OPERATE.equals(goal.ability()) && operation != null
                     && operation.isJsonPrimitive() && operation.getAsJsonPrimitive().isString()
-                    && "run_production".equals(operation.getAsString());
+                    && java.util.Set.of("run_production","watch_production").contains(operation.getAsString());
         if (productionDeclared && parameters.has("production")) {
             // Anchored ports and paths are typed design data. Their strict parser still rejects slot/click scripts.
             MachineProductionIntent.validate(parameters);
