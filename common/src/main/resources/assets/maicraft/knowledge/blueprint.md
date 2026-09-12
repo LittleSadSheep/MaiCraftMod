@@ -109,6 +109,22 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 ## 分阶段验收
 
-构建和修改验收声明的方块、状态及原生部件。显式蓝图完成后报告 `construction_complete` 与 `machine_geometry_verified`，同时保留 `configuration_complete: false`、`configuration_status: "separate_use_phase"`、`machine_production_verified: false`。
+不带生产清单的构建和修改验收声明的方块、状态及原生部件。显式蓝图完成后报告 `construction_complete` 与 `machine_geometry_verified`，同时保留 `configuration_complete: false`、`configuration_status: "separate_use_phase"`、`machine_production_verified: false`。
 
 `operate_machine` 负责现有的菜单、存取物品和控制操作。启动成功与持续产出需要相应观察证据，不能由构建完成推出。缺少某种使用操作时先读取 abilities，按具体缺口反馈，避免假定任意 NBT 或点击动作都可执行。
+
+## 可选服务端生产清单
+
+客户端必装，服务端可选。先查看 `perceive(view="abilities")` 中的 `server_assistance` 与具体操作支持情况。没有服务端增强时，普通构建继续使用客户端模式；生产证明不会自动降级为只看方块或库存。
+
+- `build_machine` 可额外提供 `production` 和 `allow_use: true`，在同一任务中执行建造、配置、供料和观察。
+- 已建机器使用 `operate_machine`、`operation: "run_production"`、`production`、`snapshot_id` 与 `allow_use: true`。
+- `production.schema_version` 为 `1`；`nodes` 描述 `source/process/transport/sink`，工序声明原生 `recipe_id` 和 `batches`；`ports` 指定节点、相对位置、侧面、介质及输入/输出方向；`links` 声明资源、有限预算和完整路径。
+- `configurations` 仅使用能力契约中的语义配置，阶段为 `configure` 或 `start`。不接受槽位脚本、原始点击或任意 NBT 写入；所需工具和空白样板仍要从真实材料取得。
+- `target` 指定目标接收节点与资源；`observation` 包含 `window_ticks`、`minimum_output`、`minimum_events` 和 `max_idle_ticks`。时间窗口是首尾实际产出事件之间的最小跨度，等待本身不会增加产量或事件数。
+
+所有位置共用冻结的蓝图锚点。源的 `material_policy` 可为 `inventory_only`、`storage_available` 或 `ordinary`；库存预存量只计一次，后续真实注入不得超过声明预算。后续批次由对应工序的原生完成事件放行，概率性零产出可以证明工序已完成，但不增加目标产量。
+
+运行时重新读取当前配置，按真实资源身份保留组件，区分连接、运行条件与实际流量。重复回执、任务开始前已在途的物品及无归因库存增长不能充当本次生产证明。结果中的 `production_observation` 说明已覆盖的加工与目标资源交付范围；这不是所有上游介质的流量证明。
+
+只有工序、时间窗口及真实目标交付均满足要求后，生产任务才报告 `machine_production_verified: true`。其中嵌套的 `construction` 仍只是施工阶段证据。有限原料耗尽后停机不会抹去已经验证的窗口，也不代表系统具备无限供料能力。
