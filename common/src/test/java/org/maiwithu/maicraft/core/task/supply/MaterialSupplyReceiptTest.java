@@ -18,7 +18,8 @@ public final class MaterialSupplyReceiptTest {
                 List.of(ResourceLocation.parse("minecraft:iron_ingot")), 4, "production input"));
         set(coordinator, "materialPolicy", SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE);
         var nativeReceipt = Map.of("request_id", "settled-native-request", "operation", "inventory.ae2_supply",
-                "transferred", 1, "backend", "server");
+                "amount", 1, "backend", "server", "confirmed", true, "resource_id", "items:iron#exact",
+                "server_tick", 10, "player_slot", 7);
         var source = Map.of("terminal_access", "server_fixed_terminal", "server_supply_receipts", List.of(nativeReceipt),
                 "server_supply_receipt_count", 1, "server_supply_transferred", 1,
                 "server_supply_receipts_truncated", false, "unrelated_payload", "must not propagate");
@@ -33,13 +34,33 @@ public final class MaterialSupplyReceiptTest {
         check(Boolean.FALSE.equals(failed.get("goal_satisfied")) && preserved.size() == 1,
                 "partial confirmed source effects survive failure without inventing goal success or inventory extraction");
         var first = (Map<?, ?>) preserved.getFirst();
-        check(first.get("server_supply_receipts").equals(List.of(nativeReceipt))
-                        && first.get("server_supply_transferred").equals(1) && !first.containsKey("unrelated_payload"),
-                "the exact native receipt survives parent aggregation without copying unrelated child data");
+        check(first.get("server_supply_transferred").equals(1) && !first.containsKey("unrelated_payload")
+                        && !first.containsKey("server_supply_receipts"),
+                "the parent exposes completed transfer facts rather than internal slot receipts");
+        publicEvidenceSurvives(failed);
         var ordinary = (Map<?, ?>) method.invoke(coordinator,
                 TaskResult.ok("carried", Map.of()), TaskState.SUCCESS, 4, true);
         check(!ordinary.containsKey("storage_attempts"), "carried materials cannot fabricate an AE server receipt");
         System.out.println("MaterialSupplyReceiptTest: passed");
+    }
+
+    private static void publicEvidenceSurvives(Map<?, ?> receipt) throws Exception {
+        var sanitize = Class.forName("org.maiwithu.maicraft.intent.IntentTask").getDeclaredMethod("sanitizeMap", Map.class);
+        sanitize.setAccessible(true);
+        var gson = new com.google.gson.Gson();
+        var value = gson.toJsonTree(sanitize.invoke(null, receipt));
+        var attention = Class.forName("org.maiwithu.maicraft.intent.IntentRuntime")
+                .getDeclaredMethod("sanitizeAttentionValue", com.google.gson.JsonElement.class);
+        attention.setAccessible(true); value = (com.google.gson.JsonElement) attention.invoke(null, value);
+        var persist = Class.forName("org.maiwithu.maicraft.intent.persistence.IntentStateCodec")
+                .getDeclaredMethod("safeElement", com.google.gson.JsonElement.class, int.class);
+        persist.setAccessible(true); value = (com.google.gson.JsonElement) persist.invoke(null, value, 0);
+        var transfer = value.getAsJsonObject().getAsJsonArray("storage_attempts").get(0).getAsJsonObject()
+                .getAsJsonArray("server_supply_transfers").get(0).getAsJsonObject();
+        check(transfer.get("request_id").getAsString().equals("settled-native-request")
+                        && transfer.get("amount").getAsInt() == 1 && transfer.get("confirmed").getAsBoolean()
+                        && !transfer.has("player_slot"),
+                "public task, attention and persisted results must retain auditable material facts without slot actions");
     }
 
     private static void set(Object instance, String name, Object value) throws Exception {

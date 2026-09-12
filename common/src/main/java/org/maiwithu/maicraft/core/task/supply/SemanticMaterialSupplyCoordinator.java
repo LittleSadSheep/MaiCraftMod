@@ -328,10 +328,27 @@ public final class SemanticMaterialSupplyCoordinator {
                     if (value instanceof Map<?, ?> attempt && "storage".equals(attempt.get("source"))
                             && attempt.get("child_data") instanceof Map<?, ?> evidence) {
                         Map<String, Object> entry = new LinkedHashMap<>();
-                        for (String key : List.of("terminal_access", "server_supply_receipts",
+                        for (String key : List.of("terminal_access",
                                 "server_supply_receipt_count", "server_supply_transferred",
                                 "server_supply_receipts_truncated")) {
                             if (evidence.containsKey(key)) entry.put(key, evidence.get(key));
+                        }
+                        // Publish completed material transfers, not the internal action/slot receipts.
+                        if (evidence.get("server_supply_receipts") instanceof List<?> raw) {
+                            List<Map<String, Object>> transfers = new ArrayList<>();
+                            for (Object item : raw) {
+                                if (transfers.size() == 64) break;
+                                if (!(item instanceof Map<?, ?> row) || !Boolean.TRUE.equals(row.get("confirmed"))
+                                        || !"server".equals(row.get("backend"))
+                                        || !"inventory.ae2_supply".equals(row.get("operation"))) continue;
+                                Map<String, Object> transfer = new LinkedHashMap<>();
+                                for (String key : List.of("request_id", "operation", "backend", "confirmed",
+                                        "resource_id", "amount", "server_tick")) {
+                                    if (row.containsKey(key)) transfer.put(key, row.get(key));
+                                }
+                                transfers.add(Map.copyOf(transfer));
+                            }
+                            entry.put("server_supply_transfers", List.copyOf(transfers));
                         }
                         if (!entry.isEmpty()) storage.add(Map.copyOf(entry));
                     }
