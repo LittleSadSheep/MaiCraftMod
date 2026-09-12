@@ -25,6 +25,7 @@ record PortalPreparationSite(NetherPortalFrame nether, EndPortalFrame end) {
         var cells = new ArrayList<>(frames()); cells.addAll(interior()); return List.copyOf(cells);
     }
     List<BlockPos> forbiddenBody() {
+        if (nether != null) return interior();
         var cells = new ArrayList<BlockPos>();
         for (var pos : interior()) { cells.add(pos.below()); cells.add(pos); cells.add(pos.above()); }
         return List.copyOf(cells);

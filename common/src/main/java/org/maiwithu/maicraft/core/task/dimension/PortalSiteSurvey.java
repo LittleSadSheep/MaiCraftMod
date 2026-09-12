@@ -22,6 +22,7 @@ final class PortalSiteSurvey implements AutoCloseable {
     private PortalPreparationSite repair;
     private int newSiteCursor;
     private boolean complete;
+    private boolean closed;
 
     PortalSiteSurvey(ClientLevel world, BlockPos origin, int radius, boolean end) {
         this.world = world; this.origin = origin.immutable(); this.radius = radius; this.end = end;
@@ -81,5 +82,7 @@ final class PortalSiteSurvey implements AutoCloseable {
         }
     }
     boolean complete() { return complete; }
-    @Override public void close() { TargetIndex.unregister(world, targets); }
+    @Override public void close() {
+        if (!closed) { closed = true; TargetIndex.unregister(world, targets); }
+    }
 }
