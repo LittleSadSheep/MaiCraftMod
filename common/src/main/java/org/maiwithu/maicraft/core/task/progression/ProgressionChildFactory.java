@@ -73,7 +73,10 @@ public final class ProgressionChildFactory {
     public DimensionTravelTaskRecord travel(String destinationDimension) {
         return new DimensionTravelTaskRecord(
                 callId("dimension"), parent.getDeadlineGameTime(), destinationDimension,
-                parent.portalSearchRadius, parent.mayAlterTerrain);
+                parent.portalSearchRadius, parent.mayAlterTerrain,
+                new org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy(parent.preparePortal,
+                        parent.allowRareConsumables, parent.allowCombat, parent.maxSearchDistance,
+                        parent.materialPolicy, parent.allowedSources, parent.protectedLabels));
     }
 
     public DragonFightTaskRecord dragonFight() {

@@ -172,7 +172,7 @@ public final class ReachMilestoneCompanionTask
                 // evidence. Rebuild from live inventory and finish that dimension-local need
                 // before returning, otherwise handoff reconstruction would bounce forever.
                 TaskState localSupply = ensureRequirements(
-                        facts, ProgressionRequirementProfile.strongholdNavigation(),
+                        facts, navigationRequirements(),
                         Phase.PREPARE_NAVIGATION);
                 if (localSupply != null) return localSupply;
             }
@@ -192,7 +192,7 @@ public final class ReachMilestoneCompanionTask
                     Phase.LOCATE_STRONGHOLD);
         }
         TaskState prerequisite = ensureRequirements(
-                facts, ProgressionRequirementProfile.strongholdNavigation(),
+                facts, navigationRequirements(),
                 Phase.PREPARE_NAVIGATION);
         if (prerequisite != null) return prerequisite;
         if (!r.allowRareConsumables) {
@@ -217,7 +217,7 @@ public final class ReachMilestoneCompanionTask
 
         if (ProgressionFacts.NETHER.equals(facts.dimension())) {
             TaskState localNavigationSupply = ensureRequirements(
-                    facts, ProgressionRequirementProfile.strongholdNavigation(),
+                    facts, navigationRequirements(),
                     Phase.PREPARE_NAVIGATION);
             if (localNavigationSupply != null) return localNavigationSupply;
         }
@@ -243,10 +243,10 @@ public final class ReachMilestoneCompanionTask
         if (!facts.strongholdApproachVerified()) {
             return planStronghold(facts);
         }
-        if (!facts.activeEndPortalNearby()) {
-            return block("end_portal_activation_unavailable", FailureType.UNSUPPORTED,
-                    "The stronghold is reached, but no already-active End portal is observed. Portal activation is not implemented or authorized.",
-                    List.of("activate the End portal outside this task",
+        if (!facts.activeEndPortalNearby() && !r.preparePortal) {
+            return block("portal_preparation_permission_required", FailureType.UNSUPPORTED,
+                    "The stronghold is reached, but no active End portal is observed and prepare_portal is disabled.",
+                    List.of("retry with prepare_portal=true and allow_rare_consumables=true",
                             "resume after an active portal is visibly loaded"));
         }
         return start(children.travel(ProgressionFacts.END), Purpose.DIMENSION_TRAVEL,
@@ -301,7 +301,8 @@ public final class ReachMilestoneCompanionTask
             TaskResult result,
             ProgressionFacts facts) {
         String childIssue = issue(result);
-        if (purpose == Purpose.ACQUIRE && "requires_dimension".equals(childIssue)) {
+        if ((purpose == Purpose.ACQUIRE || purpose == Purpose.DIMENSION_TRAVEL
+                || purpose == Purpose.SUPPLY_DIMENSION_TRAVEL) && "requires_dimension".equals(childIssue)) {
             String destination = chooseRequiredDimension(result, facts.dimension());
             if (destination == null) {
                 return block("progression_supply_requires_dimension", FailureType.NO_MATERIAL,
@@ -313,28 +314,28 @@ public final class ReachMilestoneCompanionTask
                         "A progression prerequisite is unavailable in the current End body; this task will not invent or activate an exit route.",
                         List.of("leave through an already-active exit portal, then resume"));
             }
-            if (ProgressionFacts.END.equals(destination) && !facts.activeEndPortalNearby()) {
-                return block("end_portal_activation_unavailable", FailureType.UNSUPPORTED,
-                        "A prerequisite points to the End, but no already-active End portal is observed. This task cannot activate one.",
-                        List.of("activate a real End portal outside this task", "resume afterward"));
+            if (ProgressionFacts.END.equals(destination) && !facts.activeEndPortalNearby() && !r.preparePortal) {
+                return block("portal_preparation_permission_required", FailureType.UNSUPPORTED,
+                        "A prerequisite points to the End, but no active portal is observed and prepare_portal is disabled.",
+                        List.of("retry with prepare_portal=true and allow_rare_consumables=true"));
             }
             return start(children.travel(destination), Purpose.SUPPLY_DIMENSION_TRAVEL,
                     requirement, facts, Phase.TRAVEL_DIMENSION);
         }
         if ((purpose == Purpose.DIMENSION_TRAVEL
                 || purpose == Purpose.SUPPLY_DIMENSION_TRAVEL)
-                && "portal_not_observed".equals(childIssue)) {
+                && "portal_not_observed".equals(childIssue) && !r.preparePortal) {
             String destination = record instanceof org.maiwithu.maicraft.core.task.dimension.DimensionTravelTaskRecord travel
                     ? travel.destinationDimension : "";
             if (ProgressionFacts.END.equals(destination)
                     || ProgressionFacts.END.equals(facts.dimension())) {
                 return block("end_portal_activation_unavailable", FailureType.UNSUPPORTED,
-                        "No already-active End portal is observed; this task cannot build, repair or activate one.",
-                        List.of("activate a real End portal outside this task", "resume afterward"));
+                        "No active End portal is observed. Entry activation needs prepare_portal and rare-consumable permission; exit portals require the dragon encounter.",
+                        List.of("enable entry preparation or complete the encounter that creates the exit"));
             }
             return block("portal_lifecycle_unavailable", FailureType.UNSUPPORTED,
-                    "No already-active portal for the required dimension transition is observed. Portal construction, repair and activation are outside this task.",
-                    List.of("prepare an active portal outside this task", "resume afterward"));
+                    "No active Nether portal is observed and prepare_portal is disabled.",
+                    List.of("retry with prepare_portal=true and may_alter_terrain=true"));
         }
         if ("rare_consumable_permission_required".equals(childIssue)) {
             return block(childIssue, FailureType.NO_MATERIAL,
@@ -370,6 +371,15 @@ public final class ReachMilestoneCompanionTask
         activeStartFingerprint = facts.fingerprint();
         phase = nextPhase;
         return TaskState.RUNNING;
+    }
+
+    private List<ProgressionRequirementProfile.Requirement> navigationRequirements() {
+        if (!r.preparePortal || r.milestone == ReachMilestoneTaskRecord.Milestone.STRONGHOLD)
+            return ProgressionRequirementProfile.strongholdNavigation();
+        // Retain the navigation reserve plus up to twelve insertions before leaving a supply dimension.
+        var navigation = ProgressionRequirementProfile.strongholdNavigation().getFirst();
+        return List.of(new ProgressionRequirementProfile.Requirement("portal_eye_reserve", navigation.alternatives(),
+                16, null, navigation.hostileHuntAllowed(), navigation.sourceHint()));
     }
 
     private void clearActive() {

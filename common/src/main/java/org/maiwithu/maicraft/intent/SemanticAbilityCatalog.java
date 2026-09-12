@@ -226,11 +226,18 @@ public final class SemanticAbilityCatalog {
                             field("may_alter_terrain", "boolean", "Hard consent to dig, bridge or pillar; default false."),
                             field("protected_labels", "array<string>", "Remembered areas whose previously measured footprint this movement must preserve.")));
             case "maicraft:travel_dimension" -> contract(
-                    "Reach another dimension through a real portal. MaiCraft discovers the loaded portal, walks into it, survives the LocalPlayer replacement and verifies the destination.",
+                    "Reach another dimension through a real portal. With prepare_portal, MaiCraft can prepare a Nether or End entry portal before walking through and verifying the new dimension.",
                     targets("current_place", "landmark", "area", "prior_result"),
                     fields(
                             field("destination_dimension", "resource_id", "Required destination dimension, such as minecraft:the_nether or minecraft:the_end."),
                             field("max_search_radius", "integer", "Bounded loaded-world portal evidence radius; default 128."),
+                            field("prepare_portal", "boolean", "If no active portal is observed, obtain materials and prepare one; default false. Nether construction/repair also needs may_alter_terrain; End eyes need allow_rare_consumables."),
+                            field("allow_rare_consumables", "boolean", "Permit stronghold eye throws and End frame eye insertion; default false."),
+                            field("allow_combat", "boolean", "Permit hostile hunting for portal supplies; default false."),
+                            field("max_search_distance", "integer", "Physical stronghold search limit during preparation; default and maximum 4096."),
+                            field("allowed_sources", "array<string>", "Permitted material sources for portal preparation."),
+                            field("material_policy", "string", "Ordinary, storage_available or inventory_only material supply."),
+                            field("protected_labels", "array<string>", "Remembered places and inherited areas to preserve throughout preparation."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false.")));
             case "maicraft:find_structure" -> contract(
                     "Discover and optionally reach a structure through physical first-person evidence. Strongholds use real ender-eye throws; other registered structures use bounded loaded-world evidence profiles.",
@@ -242,16 +249,17 @@ public final class SemanticAbilityCatalog {
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false."),
                             field("allow_rare_consumables", "boolean", "Explicitly permits real ender-eye throws when structure_id is minecraft:stronghold; default false.")));
             case "maicraft:reach_milestone" -> contract(
-                    "Reach one survival milestone through a recoverable, live-fact-driven internal progression state machine. MaiCraft derives prerequisites and concrete work; it never builds, repairs or activates portals.",
+                    "Reach one survival milestone through live-fact-driven progression. MaiCraft derives prerequisites and can prepare missing active portals when prepare_portal is enabled.",
                     targets("current_place", "area", "prior_result"),
                     fields(
                             field("milestone", "string", "Nether, stronghold, defeat_dragon or elytra."),
                             field("max_search_distance", "integer", "Bounded physical structure and End search distance; maximum 4096."),
                             field("max_portal_search_radius", "integer", "Bounded loaded active-portal evidence radius; default 128."),
+                            field("prepare_portal", "boolean", "Enable Nether frame construction/repair and End frame activation when needed; default false."),
                             field("minimum_health", "number", "Health floor for a separately permitted boss encounter; default 10."),
                             field("allow_combat", "boolean", "Separate consent for hostile combat; never inferred from terrain permission."),
                             field("allow_rare_consumables", "boolean", "Separate consent for typed rare resource use such as eyes or gateway pearls."),
-                            field("may_alter_terrain", "boolean", "Ordinary route/mining permission only; never permission to create, repair or activate a portal."),
+                            field("may_alter_terrain", "boolean", "Permit route/mining changes and Nether construction when prepare_portal is also enabled."),
                             field("allowed_sources", "array<string>", "Permitted semantic prerequisite sources; MaiCraft chooses no slots, routes or concrete targets here."),
                             field("material_policy", "string", "Ordinary, storage_available or inventory_only prerequisite supply."),
                             field("protected_labels", "array<string>", "Remembered areas, entities or possessions all child work must preserve.")));

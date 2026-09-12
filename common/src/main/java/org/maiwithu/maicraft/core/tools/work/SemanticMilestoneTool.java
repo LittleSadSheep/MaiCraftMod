@@ -27,6 +27,7 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
             Boolean allow_combat,
             Boolean allow_rare_consumables,
             Boolean may_alter_terrain,
+            Boolean prepare_portal,
             List<String> allowed_sources,
             String material_policy,
             List<String> protected_labels) {}
@@ -41,7 +42,8 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
         return "Reach one survival progression milestone by reconciling live inventory, equipment, "
                 + "dimension, structure and encounter facts. MaiCraft privately derives and executes "
                 + "typed prerequisites. It never accepts coordinates, routes, entity IDs, slots, "
-                + "recipes or item checklists, and it never builds, repairs or activates portals.";
+                + "recipes or item checklists. prepare_portal enables observed Nether frame construction/repair "
+                + "and End frame activation while preserving separate terrain and rare-consumable permissions.";
     }
 
     @Override
@@ -58,12 +60,13 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
                         ReachMilestoneTaskRecord.MIN_PORTAL_RADIUS,
                         ReachMilestoneTaskRecord.MAX_PORTAL_RADIUS)
                 .optionalBool("allow_combat", "Permit hostile combat required by the milestone.")
+                .optionalBool("prepare_portal", "Prepare missing active portals; construction and eyes retain their separate permissions.")
                 .optionalBool(
                         "allow_rare_consumables",
                         "Permit typed rare progression consumption such as eyes or gateway pearls.")
                 .optionalBool(
                         "may_alter_terrain",
-                        "Permit ordinary route/mining terrain changes; this is never portal-lifecycle permission.")
+                        "Permit route/mining changes and Nether construction when prepare_portal is also enabled.")
                 .optionalInteger(
                         "minimum_health", "Minimum health for a permitted boss encounter.", 1, 1024)
                 .optionalStringArray(
@@ -106,7 +109,7 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
                 Boolean.TRUE.equals(parsed.allow_combat()),
                 Boolean.TRUE.equals(parsed.allow_rare_consumables()),
                 Boolean.TRUE.equals(parsed.may_alter_terrain()),
-                sources, policy, parsed.protected_labels());
+                sources, policy, parsed.protected_labels(), Boolean.TRUE.equals(parsed.prepare_portal()));
         setTask(player, record, input, reply);
     }
 }

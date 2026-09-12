@@ -66,6 +66,10 @@ public final class DimensionTravelCompanionTask
     private boolean cleaned;
     private long handoffPreparedAtNanos;
     private String lastPortalFailure;
+    private PortalPreparationTask preparationTask;
+    private PortalPreparationTaskRecord preparationRecord;
+    private boolean preparationAttempted;
+    private Map<String, Object> preparationData = Map.of();
     /** Grows only when the current nearest window has been exhausted. */
     private int portalCandidateWindow = INITIAL_PORTAL_CANDIDATES;
 
@@ -98,6 +102,7 @@ public final class DimensionTravelCompanionTask
 
     @Override
     protected TaskState onTick() {
+        if (preparationTask != null) return tickPreparation();
         if (r.destinationDimension.equals(dimension())) {
             arrived = true;
             return TaskState.SUCCESS;
@@ -143,6 +148,13 @@ public final class DimensionTravelCompanionTask
                 portalCandidateWindow *= 2;
                 return TaskState.RUNNING;
             }
+            if (attempted.isEmpty() && r.preparation.enabled() && !preparationAttempted) {
+                preparationAttempted = true;
+                preparationRecord = new PortalPreparationTaskRecord(r.getToolCallId() + "-prepare",
+                        r.getDeadlineGameTime(), r.destinationDimension, r.searchRadius, r.mayAlterTerrain, r.preparation);
+                preparationTask = new PortalPreparationTask(player, preparationRecord);
+                return TaskState.RUNNING;
+            }
             failIssue(
                     attempted.isEmpty() ? "portal_not_observed" : "portal_unreachable",
                     attempted.isEmpty()
@@ -173,6 +185,24 @@ public final class DimensionTravelCompanionTask
         moveChild = new MoveToCompanionTask(player, moveRecord);
         phase = Phase.MOVE;
         armHandoffIfNear();
+        return TaskState.RUNNING;
+    }
+
+    private TaskState tickPreparation() {
+        TaskState terminal;
+        if (player.level().getGameTime() >= preparationRecord.getDeadlineGameTime()) {
+            preparationTask.stop(player, Task.StopReason.REPLACED); terminal = TaskState.TIMEOUT;
+        } else terminal = runChild(preparationTask);
+        r.extendDeadlineTo(preparationRecord.getDeadlineGameTime());
+        if (terminal == null) return TaskState.RUNNING;
+        TaskResult result = preparationTask.result(terminal);
+        preparationData = result.data() == null ? Map.of() : Map.copyOf(result.data());
+        preparationTask = null; preparationRecord = null;
+        if (terminal != TaskState.SUCCESS || !result.success()) {
+            failIssue(preparationData.getOrDefault("issue_code", "portal_preparation_failed").toString(), result.message());
+            return TaskState.FAILED;
+        }
+        phase = Phase.FIND;
         return TaskState.RUNNING;
     }
 
@@ -302,6 +332,7 @@ public final class DimensionTravelCompanionTask
     @Override
     public void stop(LocalPlayer companion, Task.StopReason why) {
         try {
+            if (preparationTask != null) preparationTask.stop(companion, why);
             super.stop(companion, why);
         } finally {
             if (why == Task.StopReason.PREEMPTED) {
@@ -317,6 +348,13 @@ public final class DimensionTravelCompanionTask
     protected void cleanup() {
         if (cleaned) return;
         boolean complete = true;
+        if (preparationTask != null) {
+            try {
+                preparationTask.stop(player, Task.StopReason.REPLACED);
+                preparationTask.result(TaskState.CANCELLED);
+                preparationTask = null; preparationRecord = null;
+            } catch (RuntimeException ignored) { complete = false; }
+        }
         try {
             revokeHandoff();
         } catch (RuntimeException ignored) {
@@ -416,6 +454,7 @@ public final class DimensionTravelCompanionTask
     @Override
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
+        data.putAll(preparationData);
         data.put("destination_dimension", r.destinationDimension);
         data.put("final_dimension", dimension());
         if (portalBlockId != null) data.put("portal_block", portalBlockId);
@@ -424,7 +463,7 @@ public final class DimensionTravelCompanionTask
         if (issueCode != null) {
             data.put("issue_code", issueCode);
             data.put("requires_decision", true);
-            data.put("recovery_options", recoveryOptions());
+            data.putIfAbsent("recovery_options", recoveryOptions());
         }
         return data;
     }

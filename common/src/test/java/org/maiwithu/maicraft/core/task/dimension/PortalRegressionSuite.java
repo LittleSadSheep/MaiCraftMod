@@ -11,6 +11,8 @@ public final class PortalRegressionSuite {
         PortalPolicyTest.main(args);
         PortalSurveyTest.main(args);
         PortalPreparationTaskTest.main(args);
+        org.maiwithu.maicraft.intent.PortalPreparationContractTest.main(args);
+        DimensionPreparationFallbackTest.main(args);
         System.out.println("PortalRegressionSuite: passed");
     }
 }

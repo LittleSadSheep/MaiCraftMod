@@ -11,6 +11,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.dimension.DimensionTravelTaskRecord;
+import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy;
 
 /** Hidden executor for semantic dimension travel; portal cells remain a Mod concern. */
 public final class SemanticDimensionTravelTool implements MaiCraftTool {
@@ -31,7 +32,8 @@ public final class SemanticDimensionTravelTool implements MaiCraftTool {
         return "Reach a semantic destination dimension through a portal observed by the client. "
                 + "The Mod finds the portal block, walks into it, authorises one same-connection "
                 + "LocalPlayer handoff and verifies the new dimension. It never asks the model for "
-                + "portal coordinates and never treats a disconnect as a successful crossing.";
+                + "portal coordinates and never treats a disconnect as a successful crossing. With prepare_portal, "
+                + "it can obtain materials, build or repair a Nether frame, or fill a real End frame, then verify activation.";
     }
 
     @Override
@@ -46,6 +48,13 @@ public final class SemanticDimensionTravelTool implements MaiCraftTool {
                 .optionalBool(
                         "may_alter_terrain",
                         "Explicit permission for the route to dig, bridge or pillar; default false.")
+                .optionalBool("prepare_portal", "Prepare an absent active portal; Nether construction also needs terrain permission.")
+                .optionalBool("allow_rare_consumables", "Permit stronghold eye throws and End frame eye insertion.")
+                .optionalBool("allow_combat", "Permit hostile hunting for portal materials.")
+                .optionalInteger("max_search_distance", "Physical stronghold search limit when preparation is enabled.", 128, 4096)
+                .optionalStringArray("allowed_sources", "Permitted material acquisition sources.")
+                .optionalEnum("material_policy", "Material supply policy.", "ordinary", "storage_available", "inventory_only")
+                .optionalStringArray("protected_labels", "Remembered places that preparation must preserve.")
                 .build();
     }
 
@@ -63,7 +72,7 @@ public final class SemanticDimensionTravelTool implements MaiCraftTool {
                 player.level().getGameTime() + INITIAL_LIVENESS_LEASE_TICKS,
                 parsed.destination_dimension(),
                 radius,
-                alter);
+                alter, PortalPreparationPolicy.parse(args));
         setTask(player, record, args, reply);
     }
 }

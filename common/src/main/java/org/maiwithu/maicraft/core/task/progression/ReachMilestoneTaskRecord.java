@@ -52,6 +52,7 @@ public final class ReachMilestoneTaskRecord extends TaskRecord {
     public final boolean allowCombat;
     public final boolean allowRareConsumables;
     public final boolean mayAlterTerrain;
+    public final boolean preparePortal;
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy;
     public final List<String> protectedLabels;
@@ -69,6 +70,16 @@ public final class ReachMilestoneTaskRecord extends TaskRecord {
             List<SemanticAcquireTaskRecord.Source> allowedSources,
             SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy,
             List<String> protectedLabels) {
+        this(toolCallId, deadlineGameTime, milestone, maxSearchDistance, portalSearchRadius, minimumHealth,
+                allowCombat, allowRareConsumables, mayAlterTerrain, allowedSources, materialPolicy, protectedLabels, false);
+    }
+
+    public ReachMilestoneTaskRecord(String toolCallId, long deadlineGameTime, Milestone milestone,
+            int maxSearchDistance, int portalSearchRadius, float minimumHealth, boolean allowCombat,
+            boolean allowRareConsumables, boolean mayAlterTerrain,
+            List<SemanticAcquireTaskRecord.Source> allowedSources,
+            SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy, List<String> protectedLabels,
+            boolean preparePortal) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.milestone = java.util.Objects.requireNonNull(milestone, "milestone");
         this.maxSearchDistance = Math.clamp(
@@ -83,6 +94,7 @@ public final class ReachMilestoneTaskRecord extends TaskRecord {
         this.allowCombat = allowCombat;
         this.allowRareConsumables = allowRareConsumables;
         this.mayAlterTerrain = mayAlterTerrain;
+        this.preparePortal = preparePortal;
         this.allowedSources = allowedSources == null
                 ? List.of() : List.copyOf(new LinkedHashSet<>(allowedSources));
         this.materialPolicy = materialPolicy == null

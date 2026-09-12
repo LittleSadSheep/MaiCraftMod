@@ -446,6 +446,10 @@ final class AbilityAdapter {
                 || bool(goal.preferences(), "may_alter_terrain", false)) {
             args.addProperty("may_alter_terrain", true);
         }
+        for (String key : List.of("prepare_portal", "allow_rare_consumables", "allow_combat",
+                "max_search_distance", "allowed_sources", "material_policy", "protected_labels")) {
+            if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
+        }
         return new IntentAction.Tool("dimension_travel", args.toString());
     }
 
@@ -532,7 +536,7 @@ final class AbilityAdapter {
         }
         for (String key : List.of(
                 "minimum_health", "allow_combat", "allow_rare_consumables",
-                "allowed_sources", "material_policy", "protected_labels")) {
+                "allowed_sources", "material_policy", "protected_labels", "prepare_portal")) {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
         return new IntentAction.Tool("reach_milestone", args.toString());
