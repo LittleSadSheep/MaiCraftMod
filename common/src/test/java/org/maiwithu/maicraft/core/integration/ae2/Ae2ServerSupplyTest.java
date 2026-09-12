@@ -34,6 +34,7 @@ public final class Ae2ServerSupplyTest {
         confirmedProvenanceIsBounded();
         inventoryArrivalSettlesSubmittedReceipt();
         settlementDoesNotStartAnotherGroupOrNativeCraft();
+        Ae2ServerMenuPresentationTest.main(args);
         System.out.println("Ae2ServerSupplyTest: passed");
     }
 
@@ -118,23 +119,7 @@ public final class Ae2ServerSupplyTest {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void serverFallbackRestoresAccess() throws Exception {
-        var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
-        var session = (Ae2SupplySession) memory.allocateInstance(Ae2SupplySession.class);
-        var server = serverSupply();
-        field(Ae2ServerSupply.class, "terminal").set(server,
-                new Ae2ServerSupply.Progress(Ae2ServerSupply.State.FALLBACK, "unsupported_operation", "untouched"));
-        field(Ae2SupplySession.class, "serverSupply").set(session, server);
-        field(Ae2SupplySession.class, "terminalAccess").set(session, "server_fixed_terminal");
-        field(Ae2SupplySession.class, "accessBeforeServer").set(session, "fixed_terminal");
-        var fallback = field(Ae2SupplySession.class, "serverFallbackPhase");
-        fallback.set(session, Enum.valueOf((Class) fallback.getType(), "OPEN_FIXED"));
-        var tick = Ae2SupplySession.class.getDeclaredMethod("tickServerSupply",
-                org.maiwithu.maicraft.client.actor.LocalPlayerContext.class);
-        tick.setAccessible(true); tick.invoke(session, new Object[]{null});
-        check(session.phase().equals("open_fixed")
-                        && field(Ae2SupplySession.class, "serverSupply").get(session) == null
-                        && field(Ae2SupplySession.class, "terminalAccess").get(session).equals("fixed_terminal"),
-                "actual no-effect fallback resumes native terminal access without claiming the server route");
+        Ae2ServerMenuPresentationTest.serverFallbackRestoresAccess();
     }
 
     private static void confirmedProvenanceIsBounded() throws Exception {

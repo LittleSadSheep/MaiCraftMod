@@ -148,8 +148,10 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         LevelChunk chunk;
         private LoadedChunks() { super(null, 0); }
         @Override public LevelChunk getChunk(int x, int z, ChunkStatus status, boolean load) {
+            // Vanilla getBlockEntity asks for an already resident chunk with load=true; this creates no new chunk.
+            if (x == 0 && z == 0) return chunk;
             if (load) throw new AssertionError("interaction attempted to load a chunk");
-            return x == 0 && z == 0 ? chunk : null;
+            return null;
         }
     }
 
