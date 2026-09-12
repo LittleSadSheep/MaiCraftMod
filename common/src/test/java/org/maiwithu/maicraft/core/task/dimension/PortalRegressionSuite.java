@@ -8,6 +8,7 @@ public final class PortalRegressionSuite {
         EndPortalFrameTest.main(args);
         PortalActivationTest.main(args);
         PortalPreparationSiteTest.main(args);
+        PortalPolicyTest.main(args);
         System.out.println("PortalRegressionSuite: passed");
     }
 }
