@@ -101,20 +101,20 @@ public final class ProductionSessionRolloverTest {
         }
     }
 
-    private static final class Fixture implements ProductionRequestSlot.Backend {
+    static final class Fixture implements ProductionRequestSlot.Backend {
         final ArrayDeque<JsonObject> replies = new ArrayDeque<>();
         final Set<String> requests = new HashSet<>();
         final ServerProtocolDispatcher server = new ServerProtocolDispatcher();
         final ClientRequestRouter router;
         final ProductionRequestSlot slot;
         boolean available = true, advertiseRead = true;
-        long tick;
+        long tick, serverOffset;
         int reads, writes, hellos;
 
         Fixture() {
             ServerProtocolDispatcher.Peer peer = new ServerProtocolDispatcher.Peer() {
                 public String dimension() { return "minecraft:overworld"; }
-                public long tick() { return tick; }
+                public long tick() { return tick + serverOffset; }
                 public boolean mayMutate() { return true; }
                 public List<ServerFeature> features() {
                     var write = new ServerFeature(WRITE, 1, true, true, new JsonObject());
@@ -155,6 +155,7 @@ public final class ProductionSessionRolloverTest {
         }
         public boolean supported(String operation) { return router.supported(operation); }
         public boolean renegotiating(String operation) { return router.renegotiating(operation); }
+        public boolean takeExpiredReadForRefresh(UUID id) { return router.takeExpiredReadForRefresh(id); }
         public ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating) { return router.submit(operation, arguments, mutating); }
         public void query(UUID id) { router.query(id); }
         public void cancel(UUID id) { router.cancel(id); }

@@ -23,6 +23,7 @@ final class ServerSessionConnection {
     long helloDeadline;
     long controlRetryTick;
     int controlAttempts;
+    long observedTick, lastScopeActivityTick;
 
     ServerSessionConnection(BooleanSupplier available, Predicate<JsonObject> sender) {
         this.available = available;
@@ -31,6 +32,7 @@ final class ServerSessionConnection {
 
     void bind(long connection, long binding, String dimension, long authority, boolean allowed,
               long tick, Collection<ClientOperation> operations) {
+        observedTick = lastScopeActivityTick = tick;
         if (this.connection == connection) close();
         this.connection = connection;
         this.binding = binding;
@@ -59,6 +61,7 @@ final class ServerSessionConnection {
     }
 
     void tick(long tick, Collection<ClientOperation> operations) {
+        observedTick = tick;
         if (connection < 0) return;
         if (!available.getAsBoolean()) {
             if (capabilities.state == ServerCapabilityState.State.READY) {
@@ -148,7 +151,14 @@ final class ServerSessionConnection {
 
     boolean send(JsonObject envelope) {
         if (!available.getAsBoolean()) return false;
-        return sender.test(envelope.deepCopy());
+        boolean sent = sender.test(envelope.deepCopy());
+        if (sent && matchesScope(envelope)) lastScopeActivityTick = observedTick;
+        return sent;
+    }
+
+    boolean idleRenewalDue(long tick) {
+        return capabilities.state == ServerCapabilityState.State.READY
+                && tick - lastScopeActivityTick >= Math.max(1, capabilities.limit("retentionTicks", 6000, 72000) - 100);
     }
 
     boolean canQuery(ServerCapabilityState.Scope scope) {

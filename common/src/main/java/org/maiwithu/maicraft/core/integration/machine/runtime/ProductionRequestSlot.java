@@ -12,6 +12,7 @@ final class ProductionRequestSlot {
     interface Backend {
         boolean supported(String operation);
         boolean renegotiating(String operation);
+        boolean takeExpiredReadForRefresh(java.util.UUID id);
         ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating);
         void query(java.util.UUID id);
         void cancel(java.util.UUID id);
@@ -21,12 +22,14 @@ final class ProductionRequestSlot {
     private JsonObject arguments;
     private String operation;
     private boolean mutating;
+    private boolean readRefreshed;
     private Map<String, Object> last = Map.of();
 
     ProductionRequestSlot() {
         this(new Backend() {
             public boolean supported(String operation) { return ServerAssistClient.supported(operation); }
             public boolean renegotiating(String operation) { return ServerAssistClient.renegotiating(operation); }
+            public boolean takeExpiredReadForRefresh(java.util.UUID id) { return ServerAssistClient.takeExpiredReadForRefresh(id); }
             public ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating) {
                 return ServerAssistClient.submit(operation, arguments, mutating);
             }
@@ -38,6 +41,8 @@ final class ProductionRequestSlot {
 
     JsonObject call(String operation, JsonObject arguments, boolean mutating) {
         if (receipt == null) {
+            if (readRefreshed && (!this.operation.equals(operation) || !this.arguments.equals(arguments) || this.mutating != mutating))
+                throw new IllegalStateException("A production read changed while renewing its expired scope");
             if (!backend.supported(operation)) {
                 if (backend.renegotiating(operation)) return null;
                 throw new IllegalArgumentException("production_capability_unavailable: " + operation);
@@ -57,12 +62,16 @@ final class ProductionRequestSlot {
             throw new IllegalStateException("production_effect_uncertain: inspect request " + state.requestId()
                     + " before any retry; " + state.message());
         }
+        if (!readRefreshed && !state.mutating() && state.code().equals("session_expired") && backend.takeExpiredReadForRefresh(state.requestId())) {
+            readRefreshed = true; receipt = null;
+            return null;
+        }
         if (state.status() != ClientRequestReceipt.Status.SUCCEEDED) {
             throw new IllegalArgumentException("production_request_" + state.code() + ": " + state.message());
         }
         JsonObject result = state.result();
         result.addProperty("maicraft_request_id", state.requestId().toString());
-        receipt = null; this.arguments = null; this.operation = null;
+        receipt = null; this.arguments = null; this.operation = null; readRefreshed = false;
         return result;
     }
 
@@ -74,6 +83,7 @@ final class ProductionRequestSlot {
             capture(receipt.snapshot());
             receipt = null;
         }
+        this.arguments = null; this.operation = null; readRefreshed = false;
     }
 
     Map<String, Object> report() {

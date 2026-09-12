@@ -47,6 +47,7 @@ public final class ClientRequestReceipt {
     boolean retired;
     boolean submitted;
     boolean fallbackAfterRejection;
+    boolean readRefreshEligible;
     String code = "queued";
     String message = "waiting for a client tick";
     JsonObject result = new JsonObject();

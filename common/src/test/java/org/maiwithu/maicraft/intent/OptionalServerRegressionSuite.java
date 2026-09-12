@@ -8,6 +8,7 @@ public final class OptionalServerRegressionSuite {
         org.maiwithu.maicraft.network.OptionalServerPayloadTest.main(args);
         org.maiwithu.maicraft.client.server.ServerAssistanceRegressionSuite.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionSessionRolloverTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.runtime.ProductionSessionIdleExpiryTest.main(args);
         org.maiwithu.maicraft.client.server.MachineSnapshotEnrichmentTest.main(args);
         org.maiwithu.maicraft.client.server.ServerActorMutationGateTest.main(args);
         org.maiwithu.maicraft.mcp.SemanticAbilityAvailabilityTest.main(args);

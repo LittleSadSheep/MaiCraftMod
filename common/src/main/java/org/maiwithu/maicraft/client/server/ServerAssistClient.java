@@ -11,6 +11,7 @@ public final class ServerAssistClient {
 
     public static boolean supported(String operation) { return ServerSessionRuntime.router().supported(operation); }
     public static boolean renegotiating(String operation) { return ServerSessionRuntime.router().renegotiating(operation); }
+    public static boolean takeExpiredReadForRefresh(UUID requestId) { return ServerSessionRuntime.router().takeExpiredReadForRefresh(requestId); }
     public static boolean serverSupported(String operation) {
         return ServerSessionRuntime.installed() && ServerSessionRuntime.router().serverSupported(operation);
     }
