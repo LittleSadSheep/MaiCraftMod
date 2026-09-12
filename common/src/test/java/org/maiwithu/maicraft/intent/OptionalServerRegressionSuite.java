@@ -38,6 +38,7 @@ public final class OptionalServerRegressionSuite {
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionTransitBaselineTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionProgressWatchdogTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionIdleObservationTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.runtime.ProductionStartupTransitionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionFlowBudgetTest.main(args);
         org.maiwithu.maicraft.core.task.build.PlacementSneakProjectionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionConstructionProtectionTest.main(args);

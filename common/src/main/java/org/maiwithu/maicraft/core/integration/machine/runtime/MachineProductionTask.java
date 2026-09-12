@@ -8,6 +8,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.integration.machine.production.ProductionStageReadiness;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
@@ -105,7 +106,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             case PREPARE -> {
                 if (preparation.tick()) {
                     if (!preparation.compilation().canEnter("supply"))
-                        return failure("production_design_blocked", preparation.compilation().report().toString());
+                        return failure("production_design_blocked", ProductionStageReadiness.failureSummary(preparation.compilation().report(), "supply"));
                     r.plan.bindResolved(preparation.compilation().report());
                     supply = new ProductionInputSupply(player, r, r.plan, this, r.protectedLabels);
                     output = new ProductionOutputMonitor(r.plan, this);
@@ -122,19 +123,25 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             case ADMIT_START -> {
                 if (preparation.tick()) {
                     if (!preparation.compilation().canEnter("start"))
-                        return failure("production_start_not_ready", preparation.compilation().report().toString());
+                        return failure("production_start_not_ready", ProductionStageReadiness.failureSummary(preparation.compilation().report(), "start"));
                     phase = Phase.START;
                 }
             }
             case START -> {
                 if (configure("start")) {
-                    started = true; watchdog.noteInput(player.level().getGameTime()); preparation.refresh(); phase = Phase.REFRESH;
+                    started = true; watchdog.noteInput(player.level().getGameTime());
+                    if (r.plan.manifest().configurations().stream().anyMatch(action -> action.stage().equals("start"))) {
+                        preparation.refresh(); phase = Phase.REFRESH;
+                    } else {
+                        // ADMIT_START just read the installation, and this stage performed no native operation.
+                        phase = Phase.OBSERVE;
+                    }
                 }
             }
             case REFRESH -> {
                 if (preparation.tick()) {
                     if (!preparation.compilation().valid())
-                        return failure("production_running_design_changed", preparation.compilation().report().toString());
+                        return failure("production_running_design_changed", ProductionStageReadiness.failureSummary(preparation.compilation().report(), "observe"));
                     // Reading completed native events remains useful after a finite batch becomes idle.
                     phase = Phase.OBSERVE;
                 }
