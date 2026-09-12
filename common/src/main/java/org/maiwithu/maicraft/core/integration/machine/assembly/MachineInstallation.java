@@ -78,7 +78,7 @@ public final class MachineInstallation {
             Class<?> api = Class.forName("appeng.api.parts.IPartItem");
             if (!api.isInstance(item)) throw unsupported("item does not implement AE2 IPartItem");
             Class<?> part = (Class<?>) api.getMethod("getPartClass").invoke(item);
-            boolean cable = Class.forName("appeng.api.parts.ICablePart").isAssignableFrom(part);
+            boolean cable = Class.forName("appeng.api.implementations.parts.ICablePart").isAssignableFrom(part);
             if (cable != (side == null)) throw unsupported("cables occupy center; other AE2 parts require a face");
             return new PartSpec(item, part, side);
         } catch (ReflectiveOperationException | LinkageError failure) {
