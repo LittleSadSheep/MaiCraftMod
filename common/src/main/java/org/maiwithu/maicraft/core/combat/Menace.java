@@ -92,12 +92,14 @@ public final class Menace {
      * <p>看两件事:天生敌对({@link #hostile}),或者<b>这一刻正针对着她</b> ——
      * 后者接住被激怒的铁傀儡、狼、僵尸猪灵,它们不是 {@code Enemy} 但打起人来一样疼。
      */
-    // 敌对类别和爆炸物先算威胁；其他生物只有明确以自己为攻击目标才算。
+    // 敌对类别和爆炸物先算威胁；中立生物可由实际受伤证据或明确的 AI 目标进入威胁集合。
     public static boolean threatens(Entity foe, Entity self) {
         if (hostile(foe) || explodes(foe)) {
             return true;
         }
-        return foe instanceof Mob mob && mob.getTarget() == self;
+        return foe instanceof Mob mob && (mob.getTarget() == self
+                || self instanceof net.minecraft.client.player.LocalPlayer player
+                && CombatThreats.recentlyAttackedBy(player, mob));
     }
 
     /** 引信正在涨——它已经在倒计时,不是"可能会炸"。 */

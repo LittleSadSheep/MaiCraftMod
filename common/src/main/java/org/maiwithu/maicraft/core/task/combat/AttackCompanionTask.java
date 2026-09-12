@@ -558,9 +558,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             if (!f.authorized()) {
                 continue;
             }
-            // <b>名单只决定去打谁,不决定砍不砍眼前的。</b>"够得着就打"本来就是攻击层的
-            // 定义,掺进"这只在不在名单里"就又把两层耦上了 —— 而且点名模式下路上被贴脸
-            // 也不还手,得挨完一路才到目标。
+            // 只在当前获准的目标中挑近处可打者；额外袭击由战场观察切换到自卫优先级。
             if (f.armed() || f.distance() >= best) {
                 continue;   // 引信在走的不碰:打它等于自己引爆
             }
@@ -574,7 +572,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (victim == null) {
             return;
         }
-        // 武器选择没完成就等；失败时仅清掉选择器，下次重新扫描。同一副手候选因此会重复失败（A34）。
+        // 武器选择没完成就等；候选已经限定在执行器支持的背包与快捷栏内。
         if (loadout.hasMelee()) {
             FirstPersonActionGate.Status selected = meleeSelection.select(player, loadout.melee().slot());
             if (selected != FirstPersonActionGate.Status.READY) {

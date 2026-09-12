@@ -17,6 +17,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
+import org.maiwithu.maicraft.core.combat.CombatThreats;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
@@ -46,7 +47,6 @@ public final class GameplayAttentionMonitor {
     private static String previousTimePhase;
     private static String previousWeather;
     private static float previousEffectiveHealth = Float.NaN;
-    private static int previousHurtByMobTimestamp;
     private static int suppressedChatMessages;
     private static LifeState lifeState = LifeState.ALIVE;
     private static DeathSnapshot lastDeath;
@@ -63,15 +63,13 @@ public final class GameplayAttentionMonitor {
         String weather = weather(level);
         // 把普通血量和吸收黄心相加观察。黄心到期也会使这个数下降，因此单靠它变小不能证明受到了伤害。
         float effectiveHealth = player.getHealth() + player.getAbsorptionAmount();
-        // 当前用 lastHurtByMob 的时间识别新攻击者；原版客户端的伤害包并不更新这组服务端 AI 字段。
-        int hurtByMobTimestamp = player.getLastHurtByMobTimestamp();
         boolean dead = player.isDeadOrDying() || player.getHealth() <= 0.0F;
 
         if (dead) {
             if (lifeState == LifeState.ALIVE || lifeState == LifeState.RESPAWN_OBSERVED) {
                 deathDetected(player);
             }
-            remember(level, dimension, phase, weather, effectiveHealth, hurtByMobTimestamp);
+            remember(level, dimension, phase, weather, effectiveHealth);
             return;
         }
 
@@ -81,12 +79,15 @@ public final class GameplayAttentionMonitor {
             // CompanionTickDispatcher observes and retires the dead body.
             IntentRuntime.get().prepareRespawnHandoff();
             lifeState = LifeState.RESPAWN_OBSERVED;
-            remember(level, dimension, phase, weather, effectiveHealth, hurtByMobTimestamp);
+            remember(level, dimension, phase, weather, effectiveHealth);
             return;
         }
 
+        boolean receivedDamage = observeDamagePackets(player,
+                previousLevel == level && Float.isFinite(previousEffectiveHealth) ? previousEffectiveHealth : effectiveHealth,
+                effectiveHealth);
         if (previousLevel == null) {
-            remember(level, dimension, phase, weather, effectiveHealth, hurtByMobTimestamp);
+            remember(level, dimension, phase, weather, effectiveHealth);
             return;
         }
 
@@ -96,7 +97,7 @@ public final class GameplayAttentionMonitor {
             data.addProperty("to_dimension", dimension);
             data.add("position", position(player));
             publish("agent.dimension_changed", "Entered dimension " + dimension, data);
-            remember(level, dimension, phase, weather, effectiveHealth, hurtByMobTimestamp);
+            remember(level, dimension, phase, weather, effectiveHealth);
             return;
         }
 
@@ -112,12 +113,11 @@ public final class GameplayAttentionMonitor {
             data.addProperty("weather", weather);
             publish("world.weather_changed", "Weather changed to " + weather, data);
         }
-        if (effectiveHealth + HEALTH_EPSILON < previousEffectiveHealth) {
-            damaged(player, previousEffectiveHealth, effectiveHealth,
-                    hurtByMobTimestamp != previousHurtByMobTimestamp);
+        if (!receivedDamage && effectiveHealth + HEALTH_EPSILON < previousEffectiveHealth) {
+            damaged(player, previousEffectiveHealth, effectiveHealth, null);
         }
 
-        remember(level, dimension, phase, weather, effectiveHealth, hurtByMobTimestamp);
+        remember(level, dimension, phase, weather, effectiveHealth);
     }
 
     /**
@@ -180,7 +180,6 @@ public final class GameplayAttentionMonitor {
         previousTimePhase = null;
         previousWeather = null;
         previousEffectiveHealth = Float.NaN;
-        previousHurtByMobTimestamp = 0;
         recentChatEvents.clear();
         recentChatFingerprints.clear();
         activeReflexes.clear();
@@ -513,10 +512,16 @@ public final class GameplayAttentionMonitor {
     }
 
     // 只有判断为新攻击且读到攻击者是玩家时才暂停语义任务；否则仍发受伤通知，但没有这一玩家交互分支。
+    /** 在调度身体之前消费收到的伤害；玩家袭击不依赖血量包先后顺序，也不读取服务端 AI 字段。 */
+    public static boolean observeDamagePackets(LocalPlayer player, float before, float after) {
+        var notices = CombatThreats.consumeDamage(player);
+        for (var notice : notices) damaged(player, before, after, notice.attacker());
+        return !notices.isEmpty();
+    }
+
     private static void damaged(
-            LocalPlayer player, float before, float after, boolean freshMobAttack) {
-        LivingEntity attacker = freshMobAttack ? player.getLastHurtByMob() : null;
-        Player attackingPlayer = attacker instanceof Player value ? value : null;
+            LocalPlayer player, float before, float after, LivingEntity attacker) {
+        Player attackingPlayer = attacker instanceof Player value && value != player ? value : null;
 
         JsonObject cause = new JsonObject();
         if (attacker != null) {
@@ -562,13 +567,12 @@ public final class GameplayAttentionMonitor {
     }
 
     private static void remember(ClientLevel level, String dimension, String phase,
-                                 String weather, float health, int hurtByMobTimestamp) {
+                                 String weather, float health) {
         previousLevel = level;
         previousDimension = dimension;
         previousTimePhase = phase;
         previousWeather = weather;
         previousEffectiveHealth = health;
-        previousHurtByMobTimestamp = hurtByMobTimestamp;
     }
 
     private static void publish(String type, String message, JsonObject data) {

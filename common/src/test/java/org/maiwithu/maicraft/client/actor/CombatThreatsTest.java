@@ -32,6 +32,7 @@ public final class CombatThreatsTest {
         MobDefenseDamageTest.main(args);
         CombatOutcomeTest.main(args);
         RangedShotTest.main(args);
+        DamageAttentionTest.main(args);
         System.out.println("CombatThreatsTest: client damage attribution and lifetime passed");
     }
 
@@ -67,10 +68,9 @@ public final class CombatThreatsTest {
             CombatThreats.damaged(f.h.player, new ClientboundDamageEventPacket(zombie, new DamageSource(DAMAGE, zombie)));
             f.hit(null, null);
             f.hit(f.h.player, f.h.player);
-            var wolf = f.h.h.allocate(net.minecraft.world.entity.animal.Wolf.class); wolf.setId(14);
-            f.h.level.entities.put(14, wolf); f.hit(wolf, wolf);
+            var unloaded = f.mob(14, 2); f.h.level.entities.remove(14); f.hit(unloaded, unloaded);
             check(CombatThreats.attackers(f.h.player).isEmpty(),
-                    "bystander damage, environmental damage, players and non-hostile mobs cannot authorize retaliation");
+                    "bystander damage, environmental damage, players and unloaded attackers cannot authorize retaliation");
             check(!CombatThreats.recentlyAttackedBy(f.h.player, zombie),
                     "proximity alone never creates damage evidence");
         }
@@ -144,10 +144,13 @@ public final class CombatThreatsTest {
             CombatThreats.clear();
         }
         TestHostile mob(int id, double x) throws Exception {
-            var mob = h.h.allocate(TestHostile.class); mob.setId(id);
-            ActorControlTestHarness.field(Entity.class, "type").set(mob, EntityType.ZOMBIE);
+            return mob(TestHostile.class, EntityType.ZOMBIE, id, x);
+        }
+        <T extends net.minecraft.world.entity.Mob> T mob(Class<T> kind, EntityType<?> type, int id, double x) throws Exception {
+            var mob = h.h.allocate(kind); mob.setId(id);
+            ActorControlTestHarness.field(Entity.class, "type").set(mob, type);
             ActorControlTestHarness.field(Entity.class, "level").set(mob, h.level);
-            ActorControlTestHarness.field(Entity.class, "dimensions").set(mob, EntityType.ZOMBIE.getDimensions());
+            ActorControlTestHarness.field(Entity.class, "dimensions").set(mob, type.getDimensions());
             ActorControlTestHarness.field(Entity.class, "position").set(mob, new Vec3(x, 1, 3.5));
             mob.setDeltaMovement(Vec3.ZERO);
             ActorControlTestHarness.field(Entity.class, "blockPosition").set(mob, new BlockPos((int) x, 1, 3));

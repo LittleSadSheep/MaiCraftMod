@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 收到敌对生物造成的伤害，或观察到近处明确的攻击目标时，暂时接管当前工作自卫。
+ * 收到生物造成的伤害，或观察到近处明确的攻击目标时，暂时接管当前工作自卫。
  * 危险短暂消失后保留一小段观察时间，避免刚拉开一点距离就把工作还回去，再马上被同一只怪打断。
  * 它没有另一套攻击动作，实际打斗、撤退和拾取都交给 AttackCompanionTask。
  */
@@ -206,7 +206,7 @@ public final class MobDefenseChain implements Task, Reflex {
 
     @Override
     public String describe() {
-        return "受到敌对生物伤害或发现近处明确威胁时自动自卫，战斗或撤退后恢复工作";
+        return "受到生物伤害或发现近处明确威胁时自动自卫，战斗或撤退后恢复工作";
     }
 
     // ---- 什么算危险 ----
