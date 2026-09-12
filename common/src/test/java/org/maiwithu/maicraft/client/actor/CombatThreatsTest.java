@@ -33,6 +33,7 @@ public final class CombatThreatsTest {
         CombatOutcomeTest.main(args);
         RangedShotTest.main(args);
         DamageAttentionTest.main(args);
+        CombatHandOwnershipTest.main(args);
         System.out.println("CombatThreatsTest: client damage attribution and lifetime passed");
     }
 

@@ -219,6 +219,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         logMove(move, field);
 
         Entity chosen = move.foeId() == AttackPlan.NO_FOE ? null : liveEntity(move.foeId());
+        bowFighting = move.action() == AttackPlan.Action.BOW;
+        if (!bowFighting && shot != null) abortShot();
         if (chosen != target) {
             stopNav();
             abortShot();
@@ -232,7 +234,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         // 攻击与移动<b>正交</b>:每刻先问一次"冷却好了吗、够得着谁吗",够得着就打 ——
         // 不管这一刻在靠近、在拉开、还是站着。攻击不影响寻路,最多让她回个头。
-        tickShield();
+        tickShield(field);
         tickWeapon(field);
         if (move.action() != AttackPlan.Action.DISENGAGE && haven != null) {
             haven = null;   // 不再逃跑了:落点作废,下次要跑再重新挑
@@ -240,11 +242,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         return switch (move.action()) {
             case SKIRMISH -> {
-                bowFighting = false;
                 yield closeIn();
             }
             case BOW -> {
-                bowFighting = true;
                 yield bowFight();
             }
             case DISENGAGE -> tickFlee();
@@ -446,27 +446,10 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // ==================== 近战 ====================
 
-    /**
-     * 盾。与攻击、寻路并列的<b>第三层</b>,同样每刻问一次,同样不管别人在干嘛。
-     *
-     * <pre>
-     * 弓战斗中                       → 不碰(拉弓和举盾抢同一个 useItem,原版硬约束)
-     * 有谁进了它的危险半径 且 盾能举 → 举
-     * 否则                           → 放
-     * </pre>
-     *
-     * <p>不看攻击冷却:原版举着盾照样能挥刀,两件事不冲突;也不拦攻击层 —— 那样两层就又
-     * 耦上了。举着会减速,代价认了:能挡住的那一下比早退半格值。盾被斧子破了会进冷却,
-     * 那时她就正常跑。
-     *
-     * <p>同行没有可抄的(AltoClef 完全没有用盾逻辑,Meteor 管的是怎么破<b>对手</b>的盾),
-     * 这套判据与 PR #13 的 {@code ShieldCombatPolicy} 同源,只是去掉了"冷却好了放盾"
-     * 那一步 —— 既然能边举边砍,那一步是多余的。
-     */
-    // 近处有危险且副手拿着可用盾时尝试举盾；开始使用后这里直接等，不按 ShieldPlan 的攻击时机松盾。
-    // 危险离开时调用 stop 松盾；这份持续使用记录可能已被近战操作覆盖，见 A35。
-    private void tickShield() {
-        if (bowFighting) {
+    /** 举盾占用持续使用记录；近战出手或拉弓前先松盾，不能让下一次动作覆盖它。 */
+    private void tickShield(Battlefield field) {
+        if (bowFighting || meleeAction != null || meleeWindow(field)) {
+            lowerShield();
             return;
         }
         boolean raised = shieldRaised();
@@ -478,8 +461,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
         }
         if (!threatened) {
-            if (shieldAction != null) shieldAction.stop();
-            shieldAction = null;
+            lowerShield();
             return;
         }
         if (raised || player.isUsingItem()) {
@@ -495,6 +477,23 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                     player, InteractionHand.OFF_HAND, Interaction.Timing.hold());
         }
         if (shieldAction.tick() == Interaction.Status.FAILED) shieldAction = null;
+    }
+
+    private void lowerShield() {
+        if (shieldAction != null) shieldAction.stop();
+        shieldAction = null;
+    }
+
+    private boolean meleeWindow(Battlefield field) {
+        for (var foe : field.foes()) {
+            if (!foe.authorized() || foe.armed()) continue;
+            Entity entity = liveEntity(foe.id());
+            if (entity != null && foe.distance() <= Swing.reachTo(
+                    player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE), entity.getBbWidth())
+                    && Swing.mayStrike(false, entity instanceof LivingEntity living && living.hurtTime > 0,
+                    player.getAttackStrengthScale(0.0F))) return true;
+        }
+        return false;
     }
 
     private boolean shieldRaised() {
@@ -521,6 +520,14 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 先把上一次近战点击结算，再在够得着的实体中选本次攻击者。
     // 自卫只打实际攻击者；显式战斗的严格授权模式也排除未获准对象。
     private void tickWeapon(Battlefield field) {
+        if (bowFighting) {
+            if (meleeAction != null) meleeAction.stop();
+            meleeAction = null;
+            meleeVictimId = -1;
+            meleeSelection.reset();
+            return;
+        }
+        if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return;
         if (meleeAction != null) {
             Entity planned = liveEntity(meleeVictimId);
             Battlefield.Foe plannedFoe = field.byId(meleeVictimId);
@@ -542,12 +549,10 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
             return;
         }
-        if (player.isUsingItem() && !shieldRaised()) {
+        if (player.isUsingItem()) {
             return;   // 正在拉弓或吃东西,别打断
         }
-        // <b>举着盾照样挥刀</b> —— 原版这两件事不冲突。这条守卫本意是拦"正在拉弓",
-        // 却写成了"手上用着任何东西";副手多了一面盾之后,它把攻击层整个锁死:
-        // 实测她站在带里(距离 2.0~2.9、带 [2.02, 3.30])一刀不挥,看着像只躲不打。
+        // 盾由 tickShield 在可出手时先松开，不能在持续使用未结束时换武器或覆盖动作记录。
         // 武器是<b>可选的</b>:拳头一点伤害,鸡四血、羊八血、牛十血,照样打得动。
         // 这里曾经"没有近战武器就直接返回" —— 那是按"打怪"写的前提(赤手对上会还手的
         // 东西不是出路),模型让她打一只鸡时那个前提不成立,她会走到跟前站着不动。
@@ -786,6 +791,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 先检查距离和弹道，再把弓弩拿到主手，最后推进拉弓／装填／发射。
     // 离得太远或没有弹道时继续等待走位，不凭估计盲射。
     private TaskState shootAt(Loadout loadout) {
+        if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         Loadout.Pick weapon = loadout.ranged();
         if (weapon == null) {
             return closeIn();   // 弓没了:回去走位,别放弃这只
