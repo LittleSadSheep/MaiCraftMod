@@ -100,9 +100,7 @@ final class MachineAbilityAdapter {
                     case "watch_production" -> {
                         only(p,"operation","snapshot_id","production","allow_use","minimum_process_events","idle_ticks","max_duration_ticks");
                         requiredString(p,"snapshot_id",36); MachineProductionIntent.validate(p); bool(p,"allow_use",false);
-                        integer(p,"minimum_process_events",1,1,100);
-                        int duration = integer(p,"max_duration_ticks",72000,20,72000);
-                        integer(p,"idle_ticks",6000,20,duration); requireMachineTarget(goal);
+                        watchLimits(p); requireMachineTarget(goal);
                     }
                     case "cancel_watch" -> {
                         only(p,"operation","job_id","allow_use"); UUID.fromString(requiredString(p,"job_id",36)); bool(p,"allow_use",false);
@@ -160,7 +158,7 @@ final class MachineAbilityAdapter {
                             throw bad("ae2_supply requires target={kind:nearest}: it uses a natively accessible terminal, not a selected surveyed network");
                         }
                     }
-                    default -> throw bad("unsupported_machine_operation: choose run_production, drive_vehicle, set_control, open_menu, close_menu, deposit, withdraw or ae2_supply");
+                    default -> throw bad("unsupported_machine_operation: choose run_production, watch_production, cancel_watch, drive_vehicle, set_control, open_menu, close_menu, deposit, withdraw or ae2_supply");
                 }
             }
             case MODIFY -> {
@@ -265,9 +263,9 @@ final class MachineAbilityAdapter {
             if (!org.maiwithu.maicraft.client.server.ServerAssistClient.supported("machine.watch")) throw bad("machine_watch_requires_server_support");
             MachineSnapshots.Snapshot snapshot = boundSnapshot(goal,player,runtime);
             var plan = new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(snapshot.center(),snapshot.dimension(),p.getAsJsonObject("production"));
-            int duration = integer(p,"max_duration_ticks",72000,20,72000);
+            WatchLimits limits = watchLimits(p);
             var task = new org.maiwithu.maicraft.core.integration.machine.runtime.MachineWatchTaskRecord(callId,player.level().getGameTime()+6000,
-                    snapshot.label(),plan,integer(p,"minimum_process_events",1,1,100),duration,integer(p,"idle_ticks",6000,20,duration));
+                    snapshot.label(),plan,limits.minimumProcessEvents(),limits.durationTicks(),limits.idleTicks());
             MachineSnapshots.consume(snapshot); return new IntentAction.Native(task);
         }
         if ("run_production".equals(operation)) {
@@ -526,6 +524,14 @@ final class MachineAbilityAdapter {
         }
         if (!p.get(key).isJsonPrimitive() || !p.getAsJsonPrimitive(key).isBoolean()) throw bad(key + " must be boolean");
         return p.get(key).getAsBoolean();
+    }
+    record WatchLimits(int minimumProcessEvents, int durationTicks, int idleTicks) {}
+    static WatchLimits watchLimits(JsonObject p) {
+        int events = integer(p,"minimum_process_events",1,1,100);
+        int duration = integer(p,"max_duration_ticks",72000,20,72000);
+        // The default must fit a short observation; explicit values retain strict bounds.
+        int idle = integer(p,"idle_ticks",Math.min(6000,duration),20,duration);
+        return new WatchLimits(events,duration,idle);
     }
     private static int integer(JsonObject p, String key, int fallback, int min, int max) {
         // 机器参数使用精确整数转换，拒绝小数和溢出，然后再检查范围；不会默默把数值压到边界。

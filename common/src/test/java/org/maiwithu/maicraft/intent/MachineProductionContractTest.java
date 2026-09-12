@@ -39,6 +39,22 @@ public final class MachineProductionContractTest {
         Goal watched = goal(MachineAbilityAdapter.OPERATE,watch);
         if (!runtime.compile(watched,100).goal().parameters().get("production").equals(watch.get("production")))
             throw new AssertionError("Passive watch compilation must preserve the validated coordinate-bearing manifest");
+        JsonObject shortWatch = watch.deepCopy();
+        shortWatch.addProperty("max_duration_ticks",20);
+        accepts(MachineAbilityAdapter.OPERATE,shortWatch);
+        var limits = MachineAbilityAdapter.watchLimits(shortWatch);
+        if (limits.idleTicks() != 20 || limits.durationTicks() != 20 || limits.minimumProcessEvents() != 1
+                || MachineAbilityAdapter.watchLimits(watch).idleTicks() != 6000)
+            throw new AssertionError("Omitted idle timeout must fit the requested observation duration");
+        shortWatch.addProperty("idle_ticks",21);
+        rejects(MachineAbilityAdapter.OPERATE,shortWatch);
+        shortWatch.addProperty("idle_ticks",19);
+        rejects(MachineAbilityAdapter.OPERATE,shortWatch);
+        shortWatch.addProperty("max_duration_ticks",1200);
+        shortWatch.addProperty("idle_ticks",200);
+        accepts(MachineAbilityAdapter.OPERATE,shortWatch);
+        if (MachineAbilityAdapter.watchLimits(shortWatch).idleTicks() != 200)
+            throw new AssertionError("Explicit valid idle timeout must be preserved");
         JsonObject unsafeWatch = watch.deepCopy();
         unsafeWatch.getAsJsonObject("production").getAsJsonArray("nodes").get(0).getAsJsonObject().addProperty("slot",1);
         rejects(MachineAbilityAdapter.OPERATE,unsafeWatch);
