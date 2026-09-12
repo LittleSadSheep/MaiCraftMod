@@ -34,6 +34,7 @@ public final class MaiCraftNeoForgeClient {
         NeoForge.EVENT_BUS.addListener(this::onChatReceived);
         NeoForge.EVENT_BUS.addListener(this::onRegisterClientCommands);
         NeoForge.EVENT_BUS.addListener(this::onGameShuttingDown);
+        NeoForge.EVENT_BUS.addListener(this::onScreenRendered);
     }
 
     // 把初始化排到客户端工作队列，登记公共功能并启动 MCP 运行时。
@@ -50,6 +51,11 @@ public final class MaiCraftNeoForgeClient {
         // 每次客户端 tick 结束后推进共享运行时，具体业务逻辑不放在加载器事件里。
         ClientRuntime.tick(Minecraft.getInstance());
         PreviewController.tick(Minecraft.getInstance());
+    }
+
+    // Mod screens may override renderWithTooltip without calling Screen's implementation.
+    private void onScreenRendered(net.neoforged.neoforge.client.event.ScreenEvent.Render.Post event) {
+        org.maiwithu.maicraft.client.actor.MenuVisibility.rendered(event.getScreen());
     }
 
     // 系统提示没有发送者；普通消息尽量从当前连接查玩家名字，查不到时保留 UUID 和文字。

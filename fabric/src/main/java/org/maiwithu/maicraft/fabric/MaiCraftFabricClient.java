@@ -32,6 +32,9 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(ClientRuntime::tick);
         ClientTickEvents.END_CLIENT_TICK.register(PreviewController::tick);
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> ClientRuntime.stop());
+        net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AFTER_INIT.register((client, screen, width, height) ->
+                net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.afterRender(screen).register((rendered, graphics, mouseX, mouseY, delta) ->
+                        org.maiwithu.maicraft.client.actor.MenuVisibility.rendered(rendered)));
         // 聊天消息保留发送者身份；游戏提示按系统文字交给注意事件系统，这里没有单独使用动作栏 overlay 标志。
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receivedAt) ->
                 GameplayAttentionMonitor.chat(
