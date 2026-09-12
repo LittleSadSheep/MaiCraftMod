@@ -7,6 +7,7 @@ import static org.maiwithu.maicraft.core.integration.machine.runtime.ProductionE
 
 public final class ProductionEvidenceWindowTest {
     public static void main(String[] args) {
+        shortCommissioningAllowsNormalProcessLatency();
         var window = window();
         check(!window.accept(event("world-A", 1, 0, Provenance.OBSERVED_STORAGE_DELTA)), "growth must not prove processing");
         check(window.status(0) == Status.AWAITING_EVIDENCE, "storage is only supporting evidence");
@@ -43,6 +44,22 @@ public final class ProductionEvidenceWindowTest {
     private static ProductionEvidenceWindow window() {
         return new ProductionEvidenceWindow("world-A", Set.of("press"), new Requirement(
                 "items:create:iron_sheet", BigDecimal.valueOf(2), 2, 100, 120));
+    }
+
+    private static void shortCommissioningAllowsNormalProcessLatency() {
+        var manifest = ProductionObserverFixture.manifest(1); var settings = manifest.getAsJsonObject("observation");
+        settings.addProperty("window_ticks",20); settings.addProperty("max_idle_ticks",600);
+        settings.addProperty("minimum_events",2); settings.addProperty("minimum_output",2);
+        var parsed = org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.parse(manifest).observation();
+        var sample = new ProductionEvidenceWindow("world-A",Set.of("press"),new Requirement("items:create:iron_sheet",BigDecimal.valueOf(2),
+                parsed.minimumEvents(),parsed.windowTicks(),parsed.maxIdleTicks()));
+        sample.accept(event("world-A",1,10,Provenance.NATIVE_RECIPE_OUTPUT));
+        check(!sample.hasVerifiedRun(),"one event is not a repeated commissioning sample");
+        sample.accept(event("world-A",2,137,Provenance.NATIVE_RECIPE_OUTPUT));
+        check(sample.hasVerifiedRun(),"two normal machine cycles need not land exactly on the minimum sample span");
+        settings.addProperty("max_idle_ticks",72001);
+        try { org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.parse(manifest); throw new AssertionError("Unbounded idle allowance"); }
+        catch (IllegalArgumentException bounded) { /* Independent time limits remain bounded. */ }
     }
 
     private static Event event(String scope, long sequence, long tick, Provenance provenance) {

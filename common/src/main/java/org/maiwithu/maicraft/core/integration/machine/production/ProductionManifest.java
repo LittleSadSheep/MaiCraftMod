@@ -96,7 +96,7 @@ public record ProductionManifest(List<Node> nodes, List<Port> ports, List<Link> 
         keys(observe, "window_ticks", "minimum_output", "minimum_events", "max_idle_ticks");
         long window = number(observe, "window_ticks", 20, 72_000);
         Observation observation = new Observation(window, number(observe, "minimum_output", 1, Long.MAX_VALUE),
-                (int) number(observe, "minimum_events", 2, 10_000), number(observe, "max_idle_ticks", 1, window));
+                (int) number(observe, "minimum_events", 2, 10_000), number(observe, "max_idle_ticks", 1, 72_000));
         return new ProductionManifest(nodes, ports, links, configurations,
                 new Target(reference(target, "node", nodeIds), resource(target)), observation);
     }

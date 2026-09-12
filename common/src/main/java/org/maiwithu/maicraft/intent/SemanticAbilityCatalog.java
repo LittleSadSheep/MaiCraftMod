@@ -404,6 +404,7 @@ public final class SemanticAbilityCatalog {
                 + "links:[{id,from:port_id,to:port_id,medium,resource,amount,path?:[[x,y,z]],configurations?:[id]}],"
                 + "configurations:[{id,node,operation,stage:'configure|start',arguments:{}}],"
                 + "target:{node,medium,resource},observation:{window_ticks,minimum_output,minimum_events,max_idle_ticks}}. "
+                + "window_ticks is the minimum span of real output evidence; max_idle_ticks independently limits gaps (both bounded by 72000). A short commissioning sample may allow normal process latency longer than its minimum span. "
                 + "Offsets share the frozen blueprint/build anchor. Process nodes require an installed recipe and batches; "
                 + "source policy is inventory_only, storage_available or ordinary. Media: items, fluids, chemicals, energy, kinetic. "
                 + "Amounts are finite window budgets, kinetic amount is minimum rpm. Native resource identities returned by adapters retain components. "
