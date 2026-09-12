@@ -10,6 +10,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Link;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Port;
@@ -24,6 +25,7 @@ public final class ProductionConnectionSurvey {
     private final Supplier<String> dimension;
     private final LongSupplier clock;
     private final Function<BlockPos, String> nativeSystem;
+    private final Supplier<Vec3> bodyPosition;
     private Link active;
     private List<BlockPos> path = List.of();
     private List<ProductionConnectionPath.Segment> segments = List.of();
@@ -37,14 +39,44 @@ public final class ProductionConnectionSurvey {
     public ProductionConnectionSurvey(LocalPlayer player, ProductionRunPlan plan, ProductionWork work,
                                       Function<Resource, ProductionEvidence.Binding> bindings) {
         this(plan, work, bindings, () -> player.level().dimension().location().toString(), () -> player.level().getGameTime(),
-                position -> nativeSystemAt(player, position));
+                position -> nativeSystemAt(player, position), player::position);
     }
 
     /** Deterministic environment seam for request/range regressions without fabricating a running game. */
     ProductionConnectionSurvey(ProductionRunPlan plan, ProductionWork work, Function<Resource, ProductionEvidence.Binding> bindings,
                                Supplier<String> dimension, LongSupplier clock, Function<BlockPos, String> nativeSystem) {
+        this(plan, work, bindings, dimension, clock, nativeSystem, () -> null);
+    }
+
+    ProductionConnectionSurvey(ProductionRunPlan plan, ProductionWork work, Function<Resource, ProductionEvidence.Binding> bindings,
+                               Supplier<String> dimension, LongSupplier clock, Function<BlockPos, String> nativeSystem, Supplier<Vec3> bodyPosition) {
         this.plan = Objects.requireNonNull(plan); this.work = Objects.requireNonNull(work); this.bindings = Objects.requireNonNull(bindings);
         this.dimension = Objects.requireNonNull(dimension); this.clock = Objects.requireNonNull(clock); this.nativeSystem = Objects.requireNonNull(nativeSystem);
+        this.bodyPosition = Objects.requireNonNull(bodyPosition);
+    }
+
+    /** Choose at a settled boundary; pending navigation or an operation keeps its selected link. */
+    public Link nearestLink(List<Link> candidates) {
+        if (candidates.isEmpty()) throw new IllegalArgumentException("production_connection_links_missing");
+        if (active != null && !finished) {
+            if (!candidates.contains(active)) throw new IllegalStateException("production_connection_link_changed_before_completion");
+            return active;
+        }
+        Vec3 feet = bodyPosition.get();
+        if (feet == null) return candidates.getFirst();
+        Link nearest = candidates.getFirst(); double distance = Double.POSITIVE_INFINITY;
+        for (Link candidate : candidates) {
+            try {
+                List<BlockPos> points = pathFor(candidate);
+                var parts = ProductionConnectionPath.split(points, candidate.resource().medium());
+                double score = endpointDistance(feet, points, parts.getFirst());
+                // An unobserved authored adapter requires the original first-segment probe.
+                if (selectSystem(candidate, parts.getFirst(), points) != null)
+                    score = Math.min(score, endpointDistance(feet, points, parts.getLast()));
+                if (score < distance) { nearest = candidate; distance = score; }
+            } catch (IllegalArgumentException | ArithmeticException invalid) { return candidate; }
+        }
+        return nearest;
     }
 
     /** Null means movement or the same server request is still pending. A non-null report settles this link. */
@@ -63,7 +95,7 @@ public final class ProductionConnectionSurvey {
         if (!work.observe(segment.points(path))) return null;
         navigating = false;
         if (system == null) {
-            system = selectSystem(segment);
+            system = selectSystem(active, segment, path);
             if (system == null) return fail("production_connection_native_adapter_not_observed");
         }
         pending = query(segment);
@@ -84,6 +116,7 @@ public final class ProductionConnectionSurvey {
         if (active != null) result.addProperty("link", active.id());
         result.addProperty("segments_completed", segmentIndex); result.addProperty("segments_total", segments.size());
         result.addProperty("path_positions", path.size()); result.addProperty("request_pending", pending != null);
+        result.addProperty("visit_order", !segments.isEmpty() && segments.getFirst().start() > 0 ? "reverse" : "forward");
         if (failure != null) result.addProperty("reason", failure);
         if (binding != null) result.add("resource_binding", binding.report());
         return result;
@@ -93,8 +126,7 @@ public final class ProductionConnectionSurvey {
         reset(); active = link;
         try {
             Port from = plan.port(link.from()), to = plan.port(link.to());
-            path = link.path().isEmpty() ? List.of(plan.at(from.offset()), plan.at(to.offset()))
-                    : link.path().stream().map(plan::at).map(BlockPos::immutable).toList();
+            path = pathFor(link);
             segments = ProductionConnectionPath.split(path, link.resource().medium());
             if (!path.getFirst().equals(plan.at(from.offset())) || !path.getLast().equals(plan.at(to.offset()))
                     || !from.face().equals(ProductionConnectionPath.face(path.getFirst(), path.get(1)))
@@ -102,6 +134,11 @@ public final class ProductionConnectionSurvey {
                 failure = "production_connection_path_does_not_match_endpoint_faces"; finished = true; return;
             }
             binding = ProductionConnectionBinding.resolve(link.resource(), bindings);
+            // Adapter identity belongs to the authored origin, never to whichever end is nearer.
+            system = selectSystem(link, segments.getFirst(), path);
+            Vec3 feet = bodyPosition.get();
+            if (system != null && feet != null && endpointDistance(feet, path, segments.getLast())
+                    < endpointDistance(feet, path, segments.getFirst())) segments = List.copyOf(segments.reversed());
             responses = new ProductionConnectionResponses(path, plan.dimension(), link.resource().medium(), binding.exactId());
         } catch (IllegalArgumentException | ArithmeticException invalid) {
             failure = invalid.getMessage() == null ? "production_connection_path_invalid" : invalid.getMessage(); finished = true;
@@ -128,9 +165,12 @@ public final class ProductionConnectionSurvey {
         if (reply == null) return null;
         pending = null;
         ProductionConnectionPath.Segment segment = segments.get(segmentIndex);
+        long previousTick = responses.latestTick();
         responses.accept(segment.start(), segment.end(), system, reply);
         segmentIndex++;
-        work.extendDeadlineTo(Math.max(clock.getAsLong(), responses.latestTick()) + 1_200);
+        long now = clock.getAsLong(), acceptedTick = responses.latestTick();
+        if (acceptedTick > previousTick && acceptedTick >= Math.max(0, now - 1_200))
+            work.extendDeadlineTo(Math.max(now, acceptedTick) + 1_200);
         if (!plan.dimension().equals(dimension.get())) return fail("production_connection_world_changed");
         if (segmentIndex == segments.size()) { finished = true; return result(); }
         return null;
@@ -162,8 +202,17 @@ public final class ProductionConnectionSurvey {
         return result;
     }
 
-    private String selectSystem(ProductionConnectionPath.Segment segment) {
-        if (active.resource().medium().equals("kinetic")) return "create";
+    private List<BlockPos> pathFor(Link link) {
+        return link.path().isEmpty() ? List.of(plan.at(plan.port(link.from()).offset()), plan.at(plan.port(link.to()).offset()))
+                : link.path().stream().map(plan::at).map(BlockPos::immutable).toList();
+    }
+
+    private static double endpointDistance(Vec3 feet, List<BlockPos> path, ProductionConnectionPath.Segment segment) {
+        return feet.distanceToSqr(path.get(segment.start()).getCenter());
+    }
+
+    private String selectSystem(Link link, ProductionConnectionPath.Segment segment, List<BlockPos> path) {
+        if (link.resource().medium().equals("kinetic")) return "create";
         boolean ae = false, create = false;
         for (BlockPos position : segment.points(path)) {
             String adapter = nativeSystem.apply(position);

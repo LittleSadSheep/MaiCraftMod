@@ -27,6 +27,8 @@ final class ProductionConnectionFixture implements ProductionWork {
     int navDelay, remainingNavigation, replyInterval, serverLead;
     BlockPos observed, navigationTarget;
     JsonObject pending;
+    int progressUpdates;
+    java.util.function.UnaryOperator<JsonObject> replyEdit = java.util.function.UnaryOperator.identity();
 
     ProductionConnectionFixture(List<BlockPos> path, String medium, String adapter) {
         this.adapter = adapter;
@@ -73,10 +75,10 @@ final class ProductionConnectionFixture implements ProductionWork {
         }
         check(pending.equals(body), "Pending request arguments changed");
         pending = null; tick += replyInterval;
-        return reply(body, tick + serverLead, exact);
+        return replyEdit.apply(reply(body, tick + serverLead, exact));
     }
     @Override public TaskState advanceChild(Task task) { throw new AssertionError("Connection survey created a native action"); }
-    @Override public void extendDeadlineTo(long gameTick) { check(gameTick >= tick, "Deadline moved behind current observation"); }
+    @Override public void extendDeadlineTo(long gameTick) { check(gameTick >= tick, "Deadline moved behind current observation"); progressUpdates++; }
 
     static JsonObject reply(JsonObject body, long tick, String exact) {
         JsonObject result = new JsonObject(); result.addProperty("schema", "maicraft.connection_inspection.v1");
