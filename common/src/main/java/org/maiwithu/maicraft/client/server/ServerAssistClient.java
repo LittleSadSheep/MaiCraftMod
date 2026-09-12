@@ -10,6 +10,7 @@ public final class ServerAssistClient {
     private ServerAssistClient() {}
 
     public static boolean supported(String operation) { return ServerSessionRuntime.router().supported(operation); }
+    public static boolean renegotiating(String operation) { return ServerSessionRuntime.router().renegotiating(operation); }
     public static boolean serverSupported(String operation) {
         return ServerSessionRuntime.installed() && ServerSessionRuntime.router().serverSupported(operation);
     }

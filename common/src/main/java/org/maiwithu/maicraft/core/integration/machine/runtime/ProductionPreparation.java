@@ -54,7 +54,8 @@ final class ProductionPreparation {
     private void updateOperations() {
         var supported = new java.util.LinkedHashSet<String>();
         for (var c : plan.manifest().configurations())
-            if (org.maiwithu.maicraft.client.server.ServerAssistClient.supported(c.operation())) supported.add(c.operation());
+            if (org.maiwithu.maicraft.client.server.ServerAssistClient.supported(c.operation())
+                    || org.maiwithu.maicraft.client.server.ServerAssistClient.renegotiating(c.operation())) supported.add(c.operation());
         evidence.supportedOperations(supported);
     }
 

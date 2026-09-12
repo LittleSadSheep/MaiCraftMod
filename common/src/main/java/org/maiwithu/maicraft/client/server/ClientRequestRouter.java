@@ -32,6 +32,8 @@ public final class ClientRequestRouter {
     private int dispatchedThisTick;
     private int sentInScope;
     private boolean rotationRequested;
+    private Map<String, ServerCapabilityState.Feature> renewalFeatures = Map.of();
+    private long renewalConnection = -1, renewalBinding = -1;
 
     public ClientRequestRouter(BooleanSupplier available, Predicate<JsonObject> sender, Runnable requireThread,
                                Consumer<Runnable> dispatch, MutationGate mutations) {
@@ -69,11 +71,13 @@ public final class ClientRequestRouter {
         session.bind(connection, binding, dimension, authority, allowed, tick, operations.values());
         sentInScope = 0;
         rotationRequested = false;
+        clearRenewal();
     }
 
     public void control(long authority, boolean allowed) {
         requireThread.run();
         if (session.authority != authority || session.allowed != allowed) {
+            clearRenewal();
             session.control(authority, allowed);
             ledger.retire(request -> request.operation.mutating(), "control ownership changed");
         }
@@ -81,6 +85,7 @@ public final class ClientRequestRouter {
 
     public void disconnect() {
         requireThread.run();
+        clearRenewal();
         session.disconnect();
         ledger.retire(request -> true, "disconnected; submitted effects remain unknown until reconciled");
     }
@@ -90,6 +95,7 @@ public final class ClientRequestRouter {
         ledger.retire(request -> true, "client runtime stopped");
         session.close();
         session.disconnect();
+        clearRenewal();
     }
 
     public ClientRequestReceipt submit(String operationId, JsonObject arguments, boolean mutating) {
@@ -133,6 +139,7 @@ public final class ClientRequestRouter {
                 ledger.receive(envelope, receivedConnection);
             if (session.capabilities.state == ServerCapabilityState.State.DENIED)
                 ledger.retire(request -> request.operation.mutating(), "server authorization unavailable");
+            if (session.capabilities.state != ServerCapabilityState.State.NEGOTIATING) clearRenewal();
             var scope = session.capabilities.scope;
             if (scope != null && receivedConnection == scope.connection()
                     && scope.sessionId().equals(ServerCapabilityState.text(envelope, "sessionId"))) {
@@ -153,11 +160,15 @@ public final class ClientRequestRouter {
         ledger.tick(tick);
         if (session.capabilities.state == ServerCapabilityState.State.READY && !ledger.unresolvedMutation()
                 && (rotationRequested || sentInScope >= rotationThreshold())) {
+            renewalFeatures = session.capabilities.features();
+            renewalConnection = session.connection;
+            renewalBinding = session.binding;
             session.bind(session.connection, session.binding, session.dimension, session.authority,
                     session.allowed, tick, operations.values());
             sentInScope = 0;
             rotationRequested = false;
         }
+        if (session.capabilities.state != ServerCapabilityState.State.NEGOTIATING || !session.available.getAsBoolean()) clearRenewal();
     }
 
     /** Call within the actor tick; native client backends retain their ordinary actor/menu checks. */
@@ -237,6 +248,17 @@ public final class ClientRequestRouter {
         return operation != null && choose(operation, new JsonObject(), false).supported();
     }
 
+    /** Previously negotiated support while this exact world binding renews its bounded receipt scope. */
+    public boolean renegotiating(String operationId) {
+        requireThread.run();
+        if (session.capabilities.state != ServerCapabilityState.State.NEGOTIATING || !session.available.getAsBoolean()
+                || session.connection != renewalConnection || session.binding != renewalBinding) return false;
+        ClientOperation operation = operations.get(operationId);
+        ServerCapabilityState.Feature feature = renewalFeatures.get(operationId);
+        return operation != null && feature != null && feature.enabled()
+                && feature.version() == operation.version() && feature.mutating() == operation.mutating();
+    }
+
     public boolean serverSupported(String operationId) {
         requireThread.run();
         ClientOperation operation = operations.get(operationId);
@@ -271,5 +293,6 @@ public final class ClientRequestRouter {
         return ClientBackendSelection.choose(operation, arguments, session, ledger.unresolvedMutation(), forceClient);
     }
     private static boolean run(Runnable action) { action.run(); return true; }
+    private void clearRenewal() { renewalFeatures = Map.of(); renewalConnection = renewalBinding = -1; }
     private int rotationThreshold() { return Math.max(1, session.capabilities.limit("maxRequests", 512, 512) - 8); }
 }

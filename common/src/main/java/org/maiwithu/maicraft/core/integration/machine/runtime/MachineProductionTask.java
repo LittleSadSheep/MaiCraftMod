@@ -62,10 +62,11 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             case CHECK -> {
                 for (String capability : java.util.List.of("machine.snapshot", "machine.recipe", "machine.connections",
                         "machine.production_events", "inventory.quote", "inventory.transfer"))
-                    if (!ServerAssistClient.supported(capability))
+                    if (!ServerAssistClient.supported(capability) && !ServerAssistClient.renegotiating(capability))
                         return failure("production_server_support_required", "Verified production requires " + capability
                                 + "; ordinary client-only construction remains available without a production requirement");
-                if (!r.plan.manifest().configurations().isEmpty() && !ServerAssistClient.supported("machine.configuration"))
+                if (!r.plan.manifest().configurations().isEmpty() && !ServerAssistClient.supported("machine.configuration")
+                        && !ServerAssistClient.renegotiating("machine.configuration"))
                     return failure("production_configuration_reader_required", "The server cannot revalidate native configuration values");
                 phase = r.construction == null ? Phase.CONFIGURE : Phase.BUILD;
             }
