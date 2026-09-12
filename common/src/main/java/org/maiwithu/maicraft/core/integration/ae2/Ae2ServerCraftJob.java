@@ -122,7 +122,15 @@ final class Ae2ServerCraftJob {
         if (jobId != null && !status.equals("completed") && !status.equals("cancelled")
                 && port.mayCancel()) {
             // Cleanup has no task owner: retiring the original task must not delete its queued cancellation.
-            port.submit("inventory.ae2_craft_cancel", jobBody(), true);
+            JsonObject body = jobBody();
+            if (body.has("container_id")) {
+                var minecraft = net.minecraft.client.Minecraft.getInstance();
+                if (minecraft == null || minecraft.player == null
+                        || minecraft.player.containerMenu.containerId != body.get("container_id").getAsInt()
+                        || !org.maiwithu.maicraft.client.actor.MenuVisibility.matches(minecraft, minecraft.player.containerMenu))
+                    body.remove("container_id");
+            }
+            port.submit("inventory.ae2_craft_cancel", body, true);
         }
     }
 
@@ -135,7 +143,7 @@ final class Ae2ServerCraftJob {
         pending = port.submit(operation, body, mutating);
         pendingTick = tick;
     }
-    private JsonObject jobBody() { var body = new JsonObject(); body.addProperty("job_id", jobId); return body; }
+    private JsonObject jobBody() { var body = target.deepCopy(); body.addProperty("job_id", jobId); return body; }
     private Ae2ServerSupply.Progress running() {
         return new Ae2ServerSupply.Progress(Ae2ServerSupply.State.RUNNING, "native_crafting_" + status, "waiting for native AE2 CPU job " + jobId);
     }

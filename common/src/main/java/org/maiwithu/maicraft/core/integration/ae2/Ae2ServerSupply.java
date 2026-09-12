@@ -23,6 +23,7 @@ final class Ae2ServerSupply {
     private final Ae2TerminalAccess.FixedTarget target;
     private final Set<Integer> reserved;
     private final ToIntFunction<Ae2ResourceSupply.Group> groupProgress;
+    private final Integer containerId;
     private final List<ResourceLocation> queryItems;
     private final Ae2ServerStock stock = new Ae2ServerStock();
     private int queryIndex;
@@ -54,11 +55,18 @@ final class Ae2ServerSupply {
 
     Ae2ServerSupply(LocalPlayer player, Ae2ResourceSupply.Request request, Ae2TerminalAccess.FixedTarget target,
                     Set<Integer> reserved, ToIntFunction<Ae2ResourceSupply.Group> groupProgress) {
+        this(player, request, target, reserved, groupProgress, null);
+    }
+
+    Ae2ServerSupply(LocalPlayer player, Ae2ResourceSupply.Request request, Ae2TerminalAccess.FixedTarget target,
+                    Set<Integer> reserved, ToIntFunction<Ae2ResourceSupply.Group> groupProgress, Integer containerId) {
         this.player = player;
         this.request = request;
         this.target = target;
         this.reserved = Set.copyOf(reserved);
         this.groupProgress = groupProgress;
+        if (containerId != null && containerId < 1) throw new IllegalArgumentException("AE2 server supply requires a non-inventory menu id");
+        this.containerId = containerId;
         this.queryItems = request.acceptedItemIds().stream().sorted().toList();
     }
 
@@ -303,6 +311,7 @@ final class Ae2ServerSupply {
         JsonObject body = new JsonObject();
         body.add("position", position);
         body.addProperty("side", target.side().getSerializedName());
+        if (containerId != null) body.addProperty("container_id", containerId);
         return body;
     }
 }

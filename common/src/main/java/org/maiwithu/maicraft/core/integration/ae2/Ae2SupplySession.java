@@ -181,6 +181,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private Ae2WaterBucketFill pendingWaterFill;
     private final List<Map<String, Object>> waterFillReceipts = new ArrayList<>();
     private Ae2ServerSupply serverSupply;
+    private Ae2ServerMenuPresentation serverMenu;
+    private boolean preserveUnrelatedMenu;
     private boolean serverRouteConsidered;
     private boolean effectsBeforeServer;
     private Phase serverFallbackPhase;
@@ -285,6 +287,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     @Override
     public boolean mustSettleBeforeSatisfiedCancellation() {
         return terminal == null && (effectsStarted || craftingJobEffectPending
+                || nativeReceipt != null && !nativeReceipt.terminal() || menuReceipt != null && !menuReceipt.terminal()
                 || serverSupply != null && serverSupply.effectsStarted());
     }
 
@@ -471,7 +474,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
         if (!inPlace && !serverRouteConsidered && Ae2ServerSupply.available()) {
             var reachable = inPlaceTargets();
-            if (!reachable.isEmpty() && tryServerSupply(reachable.getFirst(), Phase.START)) return;
+            if (!reachable.isEmpty()) {
+                fixedCandidates = reachable; prepareFixedAccess(context); return;
+            }
         }
 
         wireless = Ae2TerminalAccess.findWireless(player);
@@ -731,7 +736,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
     }
 
-    // 原地模式检查真实射线命中；普通模式目前直接用计划中的位置和面构造命中，没有复查中间遮挡。
+    // Both ordinary and in-place sessions open the observed terminal through the actual first-person ray.
     private void openFixed(LocalPlayerContext context) {
         if (!worldAccessAvailable(context)) {
             beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "screen_open", "another GUI interrupted terminal opening");
@@ -744,19 +749,18 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     "fixed_terminal_changed", "the fixed AE2 terminal changed before opening");
             return;
         }
-        if (tryServerSupply(target, Phase.OPEN_FIXED)) return;
         if (!player.getMainHandItem().isEmpty()) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "safe_hand_unavailable",
                     "the selected hand is no longer empty for fixed-terminal interaction");
             return;
         }
-        BlockHitResult currentHit = inPlace ? inPlaceHit(player, target) : null;
-        if (inPlace && currentHit == null) {
+        BlockHitResult currentHit = inPlaceHit(player, target);
+        if (currentHit == null) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_left_reach",
-                    "falling player can no longer natively reach the selected terminal");
+                    "the selected terminal face is no longer visible within native reach");
             return;
         }
-        if (inPlace) {
+        {
             Vec3 eye = player.getEyePosition();
             currentHit = player.level().clip(new ClipContext(eye,
                     eye.add(player.getLookAngle().scale(player.blockInteractionRange())),
@@ -773,27 +777,41 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         nativeReceipt = context.actions().useBlock(
                 context,
                 InteractionHand.MAIN_HAND,
-                inPlace ? currentHit : new BlockHitResult(target.hit(), target.side(), target.position(), false),
+                currentHit,
                 NativeConfirmation.menuChanged(beforeContainer),
                 TERMINAL_OPEN_TICKS);
         setPhase(Phase.WAIT_OPEN);
     }
 
-    private boolean tryServerSupply(Ae2TerminalAccess.FixedTarget target, Phase fallback) {
+    private boolean tryServerSupply(LocalPlayerContext context, Ae2TerminalAccess.FixedTarget target, Phase fallback) {
         if (inPlace || serverRouteConsidered || request.operation() != Ae2ResourceSupply.Operation.SUPPLY
                 || !Ae2ServerSupply.available()) return false;
+        if (serverMenu == null) {
+            AbstractContainerMenu menu = player.containerMenu;
+            serverMenu = new Ae2ServerMenuPresentation(menu, () -> player.level().isLoaded(target.position())
+                    && bridge.matchesFixedTerminalMenu(menu, player.level().getBlockEntity(target.position()), target.side()));
+        }
+        if (!serverMenu.ready(context)) return true;
         serverRouteConsidered = true;
         effectsBeforeServer = effectsStarted;
         accessBeforeServer = terminalAccess;
         serverFallbackPhase = fallback;
         baseline = inventoryCounts();
-        serverSupply = new Ae2ServerSupply(player, request, target, reservedInventorySlots(), this::groupProgress);
+        serverSupply = new Ae2ServerSupply(player, request, target, reservedInventorySlots(), this::groupProgress, serverMenu.containerId());
         terminalAccess = "server_fixed_terminal";
         setPhase(Phase.SERVER_SUPPLY);
         return true;
     }
 
     private void tickServerSupply(LocalPlayerContext context) {
+        if (serverMenu == null) throw new Ae2ProtocolException("server_terminal_menu_missing");
+        try { if (!serverMenu.ready(context)) return; }
+        catch (Ae2ProtocolException changed) {
+            effectsStarted |= serverSupply.effectsStarted(); serverSupply.cancel();
+            if (effectsStarted) finishUncertain("server_terminal_menu_changed", changed.getMessage());
+            else finishNow(Ae2ResourceSupply.Status.FAILED, "server_terminal_menu_changed", changed.getMessage(), false);
+            return;
+        }
         var progress = serverSupply.tick(context);
         effectsStarted = effectsBeforeServer || serverSupply.effectsStarted();
         craftingRequests = serverSupply.craftPlans();
@@ -810,12 +828,13 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             case RUNNING -> { }
             case FALLBACK -> {
                 serverSupply = null;
+                serverMenu = null;
                 plan = null;
                 terminalAccess = accessBeforeServer;
                 setPhase(serverFallbackPhase);
             }
-            case SUCCEEDED -> beginFinish(Ae2ResourceSupply.Status.SUCCEEDED, progress.code(), progress.message());
-            case FAILED -> beginFinish(Ae2ResourceSupply.Status.FAILED, progress.code(), progress.message());
+            case SUCCEEDED -> { serverMenu.changed(context); beginFinish(Ae2ResourceSupply.Status.SUCCEEDED, progress.code(), progress.message()); }
+            case FAILED -> { serverMenu.changed(context); beginFinish(Ae2ResourceSupply.Status.FAILED, progress.code(), progress.message()); }
             case UNCERTAIN -> finishUncertain(progress.code(), progress.message());
         }
     }
@@ -862,6 +881,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     "ae2_network_disconnected", "the AE2 terminal is not connected to a storage network");
             return;
         }
+        if (fixedTarget != null && tryServerSupply(org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player),
+                fixedTarget, Phase.WAIT_REPOSITORY)) return;
         List<Ae2ReflectionBridge.Entry> entries = bridge.entries(menu);
         if (entries == null) {
             if (phaseTicks > REPOSITORY_READY_TICKS) {
@@ -1619,6 +1640,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     private void cleanClose(LocalPlayerContext context) {
         if (worldAccessAvailable(context)) {
+            serverMenu = null;
             setPhase(Phase.CLEAN_RESTORE);
             return;
         }
@@ -1626,12 +1648,14 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             finishCleanupFailure("unrelated_screen_open");
             return;
         }
+        if (serverSupply != null && serverMenu != null && !serverMenu.readyToClose(context)) return;
         menuReceipt = context.menus().close(context, INVENTORY_CONFIRM_TICKS);
         setPhase(Phase.CLEAN_WAIT_CLOSE);
     }
 
     private void cleanWaitClose(LocalPlayerContext context) {
         if (!settleMenuReceipt(context, "terminal_close_unconfirmed")) return;
+        serverMenu = null;
         inventoryGuiOwned = false;
         setPhase(Phase.CLEAN_RESTORE);
     }
@@ -1856,7 +1880,19 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private Object storageMenuOrFail() {
         Object menu = player.containerMenu;
         var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
-        if (bridge.isStorageMenu(menu) && MenuVisibility.matches(context.minecraft(), player.containerMenu)) return menu;
+        if (bridge.isStorageMenu(menu) && MenuVisibility.matches(context.minecraft(), player.containerMenu)) {
+            if (fixedTarget != null) {
+                try {
+                    if (!player.level().isLoaded(fixedTarget.position()) || !bridge.matchesFixedTerminalMenu(menu,
+                            player.level().getBlockEntity(fixedTarget.position()), fixedTarget.side())) {
+                        preserveUnrelatedMenu = true;
+                        beginFinish(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_menu_mismatch", "the opened storage menu belongs to another terminal");
+                        return null;
+                    }
+                } catch (Ae2ProtocolException unverifiable) { preserveUnrelatedMenu = true; throw unverifiable; }
+            }
+            return menu;
+        }
         beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
                 "ae2_menu_changed", "the AE2 storage GUI is no longer visibly open");
         return null;
@@ -1869,6 +1905,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     // 当前按可见菜单类型判断是否可收尾：AE2 仓库、合成界面，或自己打开的玩家库存。
     private boolean ownsOpenMenu(LocalPlayerContext context) {
+        if (preserveUnrelatedMenu) return false;
+        if (serverMenu != null) return serverMenu.owns(context);
         Object menu = player.containerMenu;
         return MenuVisibility.matches(context.minecraft(), player.containerMenu)
                 && (bridge.isStorageMenu(menu) || bridge.isCraftAmountMenu(menu) || bridge.isCraftConfirmMenu(menu)

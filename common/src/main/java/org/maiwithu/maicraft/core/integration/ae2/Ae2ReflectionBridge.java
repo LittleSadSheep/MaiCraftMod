@@ -173,6 +173,14 @@ final class Ae2ReflectionBridge {
         return part != null && terminalPartClass.isInstance(part);
     }
 
+    boolean matchesFixedTerminalMenu(Object menu, Object blockEntity, Direction side) {
+        if (!isStorageMenu(menu) || blockEntity == null || !cableBusBlockEntityClass.isInstance(blockEntity)) return false;
+        Object part = invoke(cableBusGetPart, blockEntity, side);
+        if (part == null || !terminalPartClass.isInstance(part)) return false;
+        try { return invoke(storageMenuClass.getMethod("getHost"), menu) == part; }
+        catch (NoSuchMethodException missing) { throw new Ae2ProtocolException("AE2 storage menu host identity is unavailable", missing); }
+    }
+
     /** Returns {@code null} until the synchronized client repository exists. */
     List<Entry> entries(Object menu) {
         requireStorageMenu(menu);
