@@ -32,6 +32,7 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildAimRetryTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPrecisionAimTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementDestinationTest.main(args);
+        org.maiwithu.maicraft.core.task.build.NativePlacementDirectionsTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementBudgetTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTaskSearchBudgetTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementConfirmationTest.main(args);

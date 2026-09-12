@@ -26,7 +26,6 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -590,12 +589,7 @@ final class BuildPlacementGeometry {
                                                      float yaw, float pitch, boolean sneak, BlockPos target,
                                                      boolean projectedSupport) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
-        Vec3 look = direction(yaw, pitch);
-        Direction[] nearest = Direction.values();
-        Arrays.sort(nearest, Comparator.comparingDouble(direction ->
-                -(direction.getStepX() * look.x
-                        + direction.getStepY() * look.y
-                        + direction.getStepZ() * look.z)));
+        Direction[] nearest = NativePlacementDirections.ordered(yaw, pitch);
         try {
             return PlacementSneakProjection.withCandidate(player, sneak, () -> {
                 BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(
@@ -613,13 +607,13 @@ final class BuildPlacementGeometry {
                     }
                     @Override public float getRotation() { return yaw; }
                     @Override public Direction getNearestLookingDirection() {
-                        return Direction.getNearest(look.x, look.y, look.z);
+                        return nearest[0];
                     }
                     @Override public Direction getNearestLookingVerticalDirection() {
-                        return look.y >= 0.0 ? Direction.UP : Direction.DOWN;
+                        return NativePlacementDirections.vertical(pitch);
                     }
                     @Override public Direction[] getNearestLookingDirections() {
-                        return nearest.clone();
+                        return NativePlacementDirections.forPlacement(nearest, getClickedFace(), replacingClickedOnBlock());
                     }
                 };
                 // 例如点同类半砖可能补成点击格的双层砖，而不是放到邻格；必须连落点也匹配本次目标。
@@ -632,13 +626,4 @@ final class BuildPlacementGeometry {
         }
     }
 
-    private static Vec3 direction(float yaw, float pitch) {
-        float pitchRad = pitch * ((float) Math.PI / 180.0F);
-        float yawRad = -yaw * ((float) Math.PI / 180.0F);
-        float cosYaw = net.minecraft.util.Mth.cos(yawRad);
-        float sinYaw = net.minecraft.util.Mth.sin(yawRad);
-        float cosPitch = net.minecraft.util.Mth.cos(pitchRad);
-        float sinPitch = net.minecraft.util.Mth.sin(pitchRad);
-        return new Vec3(sinYaw * cosPitch, -sinPitch, cosYaw * cosPitch);
-    }
 }
