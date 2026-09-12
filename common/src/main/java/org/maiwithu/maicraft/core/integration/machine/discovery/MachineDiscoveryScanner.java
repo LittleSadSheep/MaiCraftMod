@@ -40,6 +40,7 @@ public final class MachineDiscoveryScanner {
         String dimension();
         long gameTick();
         BlockPos playerPosition();
+        /** Detached immutable positions: this iterator can be retained across ticks, unlike a live native index. */
         Iterator<BlockPos> loadedBlockEntities(int chunkX, int chunkZ);
         BlockSample readLoaded(BlockPos position);
     }

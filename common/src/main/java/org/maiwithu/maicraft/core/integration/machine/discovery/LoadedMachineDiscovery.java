@@ -14,7 +14,9 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 /** Native adapter reads existing client chunk indexes; it never requests chunks, movement, menus or server mutations. */
 public final class LoadedMachineDiscovery {
-    private final MachineDiscoveryScanner scanner = new MachineDiscoveryScanner();
+    private final MachineDiscoveryScanner scanner;
+    public LoadedMachineDiscovery() { this(new MachineDiscoveryScanner()); }
+    LoadedMachineDiscovery(MachineDiscoveryScanner scanner) { this.scanner = java.util.Objects.requireNonNull(scanner); }
     public MachineDiscoveryScanner.Status status() { return scanner.status(); }
     public UUID requestRegion(BlockPos center, int radius) { requireThread(); return scanner.requestRegion(center, radius); }
     public void clear(MachineDiscoveryScanner.Sink sink) { requireThread(); scanner.clear(sink); }
@@ -39,7 +41,10 @@ public final class LoadedMachineDiscovery {
         private LevelChunk loaded(int x, int z) { return level().getChunkSource().getChunk(x, z, ChunkStatus.FULL, false); }
         public Iterator<BlockPos> loadedBlockEntities(int chunkX, int chunkZ) {
             LevelChunk chunk = loaded(chunkX, chunkZ);
-            return chunk == null ? null : chunk.getBlockEntities().keySet().iterator();
+            // Only positions survive this client tick. Native maps can clear or rehash before the next tick,
+            // and fastutil iterators may throw NPE rather than ConcurrentModificationException afterward.
+            return chunk == null ? null : chunk.getBlockEntities().keySet().stream()
+                    .map(BlockPos::immutable).toList().iterator();
         }
         public MachineDiscoveryScanner.BlockSample readLoaded(BlockPos pos) {
             if (level().isOutsideBuildHeight(pos) || !level().getWorldBorder().isWithinBounds(pos)) return null;
