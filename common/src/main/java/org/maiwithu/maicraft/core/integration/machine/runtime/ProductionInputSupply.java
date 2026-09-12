@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 
 /** Bounded real-player deposits into authored sources; machines transport all intermediate resources. */
 public final class ProductionInputSupply {
-    private enum Phase { OBSERVE, CARRIED, QUOTE, TRANSFER }
+    private enum Phase { OBSERVE, CARRIED, QUOTE, TRANSFER, CLOSE }
     private record Supply(ProductionSupplyBudget.Key key, Port port, ProductionSupplyBudget budget) {}
     private final LocalPlayer player;
     private final TaskRecord owner;
@@ -66,6 +66,12 @@ public final class ProductionInputSupply {
         if (cancelled) throw new IllegalStateException("Production input supply was cancelled");
         if (!player.level().dimension().location().toString().equals(plan.dimension()))
             throw new IllegalStateException("Production source dimension changed");
+        if (phase == Phase.CLOSE) {
+            if (!work.closeMachineMenu()) return false;
+            cursor++; phase = Phase.OBSERVE; body = null;
+            if (cursor >= supplies.size()) nextRefillTick = player.level().getGameTime() + 20;
+            return cursor >= supplies.size();
+        }
         if (cursor >= supplies.size()) return true;
         Supply supply = supplies.get(cursor);
         if (!supply.key().medium().equals("items")) {
@@ -95,6 +101,7 @@ public final class ProductionInputSupply {
         BlockPos position = plan.at(supply.port().offset());
         if (phase == Phase.OBSERVE || phase == Phase.CARRIED) {
             if (!work.approach(position)) return false;
+            if (phase == Phase.OBSERVE && !work.showMachineMenu(position, false)) return false;
         }
         switch (phase) {
             case OBSERVE -> {
@@ -134,6 +141,7 @@ public final class ProductionInputSupply {
                     if (policy == MaterialPolicy.INVENTORY_ONLY)
                         throw new IllegalStateException("production_input_missing_inventory: " + supply.key().resource());
                     // Acquire only the currently released chunk, never the entire observation-window budget.
+                    if (!work.closeMachineMenu()) return false;
                     acquisition.begin(player, owner.getToolCallId(), owner.getDeadlineGameTime(),
                         new Demand(List.of(ResourceLocation.parse(registryId)), pacer.quoteAmount(), "production source " + supply.key().source()),
                         policy, List.of(), false, protectedLabels);
@@ -141,6 +149,7 @@ public final class ProductionInputSupply {
                     status.put(supply.key(), "acquiring_material");
                     return false;
                 }
+                if (!work.showMachineMenu(position, false)) return false;
                 body = new JsonObject(); body.add("position", ProductionRunPlan.position(position));
                 body.addProperty("side", supply.port().face()); body.addProperty("mode", "deposit");
                 body.addProperty("player_slot", slot);
@@ -269,9 +278,8 @@ public final class ProductionInputSupply {
     }
 
     private boolean advance() {
-        cursor++; phase = Phase.OBSERVE; body = null;
-        if (cursor >= supplies.size()) nextRefillTick = player.level().getGameTime() + 20;
-        return cursor >= supplies.size();
+        phase = Phase.CLOSE;
+        return false;
     }
     private Resource selector(Supply supply) { return new Resource(supply.key().medium(), supply.key().resource()); }
     private int carriedSlot(Resource selector) {

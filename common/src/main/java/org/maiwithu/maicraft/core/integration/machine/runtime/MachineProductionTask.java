@@ -26,6 +26,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     }
     private enum Phase { CHECK, BUILD, CONFIGURE, PREPARE, BASELINE, SUPPLY, ADMIT_START, START, REFRESH, OBSERVE, FINAL_VERIFY, DONE }
     private final ProductionRequestSlot requests = new ProductionRequestSlot();
+    private final ProductionMenuPresentation menuPresentation;
     private ProductionInputSupply supply;
     private final ProductionPreparation preparation;
     private final ProductionConfigurationSupply configurationSupply;
@@ -61,6 +62,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         interactionNavigation = java.util.Objects.requireNonNull(navigation);
         observationNavigation = java.util.Objects.requireNonNull(observationRoutes);
         preparation = new ProductionPreparation(player, record.plan, this);
+        menuPresentation = new ProductionMenuPresentation(player, this);
         configurationSupply = new ProductionConfigurationSupply(player, record, this);
         var observation = record.plan.manifest().observation();
         watchdog = new ProductionProgressWatchdog(observation.windowTicks(), observation.maxIdleTicks(),
@@ -73,8 +75,8 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         try {
             // The construction child owns its target permissions; planned machine cells are not yet protected assets.
             if (phase == Phase.CHECK || phase == Phase.BUILD) return advance();
-            return org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.withProtectedArea(
-                    r.plan.positions(), java.util.List.of(), this::advance);
+            return org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.withPreservedStructures(
+                    r.plan.positions(), this::advance);
         } catch (IllegalArgumentException | IllegalStateException unavailable) {
             return failure("production_stage_failed", unavailable.getMessage());
         }
@@ -173,7 +175,9 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                     if (!preparation.compilation().valid()
                             || finalProof.status() != org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Status.VERIFIED)
                         return failure("production_connection_unverified", finalProof.detail());
-                    phase = Phase.DONE; r.verified(); return TaskState.SUCCESS;
+                    phase = Phase.DONE; r.verified();
+                    org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.commissioned(player,null,r.plan,output.report());
+                    return TaskState.SUCCESS;
                 }
             }
             case DONE -> { return TaskState.SUCCESS; }
@@ -190,6 +194,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         while (configuration < configurations.size()) {
             var next = configurations.get(configuration);
             if (!next.stage().equals(stage)) { configuration++; continue; }
+            if (!menuPresentation.beforeTravel(r.plan.at(r.plan.node(next.node())))) return false;
             if (!configurationRead) {
                 if (!observe(r.plan.at(r.plan.node(next.node())))) return false;
                 JsonObject current = request("machine.configuration", r.plan.configurationBody(next), false);
@@ -203,6 +208,13 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             }
             if (!requests.pending() && !configurationSupply.prepare(next)) return false;
             if (!approach(r.plan.at(r.plan.node(next.node())))) return false;
+            String action = next.arguments().get("action").getAsString();
+            if (action.startsWith("mekanism.") && !action.equals("mekanism.connection")
+                    || action.startsWith("ae2.")) {
+                net.minecraft.core.Direction side = action.startsWith("ae2.") && next.arguments().has("side")
+                        ? net.minecraft.core.Direction.byName(next.arguments().get("side").getAsString()) : null;
+                if (!menuPresentation.open(r.plan.at(r.plan.node(next.node())), true, side)) return false;
+            }
             if (next.arguments().get("action").getAsString().startsWith("create.")) {
                 org.maiwithu.maicraft.entity.InputDriver.sneak(player, true);
                 if (!player.isSecondaryUseActive()) return false;
@@ -217,7 +229,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             r.extendDeadlineTo(player.level().getGameTime() + 1_200);
             return false;
         }
-        return true;
+        return menuPresentation.close();
     }
 
     @Override public boolean approach(BlockPos position) {
@@ -290,7 +302,18 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                 && ProductionInteractionSight.visible(player.level(), player, position);
     }
 
-    @Override public JsonObject request(String operation, JsonObject arguments, boolean mutating) { return requests.call(operation, arguments, mutating); }
+    @Override public JsonObject request(String operation, JsonObject arguments, boolean mutating) {
+        JsonObject body = arguments;
+        if (mutating || operation.equals("inventory.quote")) {
+            Integer container = menuPresentation.containerId();
+            if (container != null) { body = arguments.deepCopy(); body.addProperty("container_id", container); }
+        }
+        JsonObject result = requests.call(operation, body, mutating);
+        if (result != null && mutating) menuPresentation.changed();
+        return result;
+    }
+    @Override public boolean showMachineMenu(BlockPos position, boolean required) { return menuPresentation.open(position, required); }
+    @Override public boolean closeMachineMenu() { return menuPresentation.close(); }
     @Override public TaskState advanceChild(Task child) { return runChild(child); }
     @Override public void stopMovement() { stopNav(); }
     @Override public Map<String, Long> processingProgress() { return output == null ? Map.of() : output.processingProgress(); }
@@ -317,7 +340,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             try { try { requests.cancel(); } finally { releaseObservation(); } }
             finally {
                 try { if (supply != null) supply.cancel(); }
-                finally { try { configurationSupply.cancel(); } finally { super.cleanup(); } }
+                finally { try { configurationSupply.cancel(); } finally { try { menuPresentation.cancel(); } finally { super.cleanup(); } } }
             }
         }
     }

@@ -14,6 +14,8 @@ public interface ProductionWork {
     /** Bounded group callers provide every position so native per-target range limits can be respected. */
     default boolean observe(java.util.List<BlockPos> positions) { return observe(positions.getFirst()); }
     default void stopMovement() {}
+    default boolean showMachineMenu(BlockPos position, boolean required) { return true; }
+    default boolean closeMachineMenu() { return true; }
     default java.util.Map<String, Long> processingProgress() { return java.util.Map.of(); }
     /** Returns null while pending. A settled result is consumed once; unknown mutations throw without replay. */
     JsonObject request(String operation, JsonObject arguments, boolean mutating);
