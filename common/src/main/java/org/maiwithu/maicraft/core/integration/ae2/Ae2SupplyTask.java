@@ -66,6 +66,16 @@ final class Ae2SupplyTask implements Task {
     }
 
     @Override
+    public boolean mustSettleBeforeSatisfiedCancellation() {
+        return terminal == null && session != null && session.mustSettleBeforeSatisfiedCancellation();
+    }
+
+    @Override
+    public void requestSatisfiedSettlement() {
+        if (terminal == null && session != null) session.requestSatisfiedSettlement();
+    }
+
+    @Override
     public void stop(LocalPlayer companion, StopReason why) {
         if (session == null || terminal != null) return;
         try {

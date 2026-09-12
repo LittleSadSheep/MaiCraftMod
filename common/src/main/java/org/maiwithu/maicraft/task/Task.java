@@ -69,6 +69,9 @@ public interface Task {
         return false;
     }
 
+    /** The parent fact is satisfied: settle committed effects and cleanup without starting further work. */
+    default void requestSatisfiedSettlement() {}
+
     /**
      * 交回给模型的结果信封。只有走到终态才有意义——常驻任务永远不会被调到。
      *

@@ -32,6 +32,8 @@ public final class Ae2ServerSupplyTest {
         fallbackAndCraftIdentity();
         serverFallbackRestoresAccess();
         confirmedProvenanceIsBounded();
+        inventoryArrivalSettlesSubmittedReceipt();
+        settlementDoesNotStartAnotherGroupOrNativeCraft();
         System.out.println("Ae2ServerSupplyTest: passed");
     }
 
@@ -171,6 +173,108 @@ public final class Ae2ServerSupplyTest {
                 ResourceLocation.parse("minecraft:iron_ingot"), 1)), false);
         return new Ae2ServerSupply(null, request, null, Set.of(), ignored -> 0);
     }
+
+    private static void inventoryArrivalSettlesSubmittedReceipt() throws Exception {
+        var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
+        var player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
+        var inventory = new Inventory(player); field(Player.class, "inventory").set(player, inventory);
+        var group = new Ae2ResourceSupply.Group(ResourceLocation.parse("minecraft:iron_ingot"), 1);
+        var request = new Ae2ResourceSupply.Request(List.of(group), false);
+        var supply = new Ae2ServerSupply(player, request, null, Set.of(), ignored -> inventory.getItem(7).getCount());
+        var sample = new ItemStack(Items.IRON_INGOT); sample.set(DataComponents.CUSTOM_NAME, Component.literal("exact"));
+        var allocation = new Ae2SupplyPlanner.Allocation(group.itemId(), sample, 1, false);
+        var plan = new Ae2SupplyPlanner.Plan(List.of(new Ae2SupplyPlanner.PlannedGroup(group, List.of(allocation))));
+        var stock = (Ae2ServerStock) field(Ae2ServerSupply.class, "stock").get(supply);
+        var page = new JsonObject(); page.addProperty("schema", "maicraft.ae2_network.v1");
+        page.addProperty("membership", "network-one"); var resources = new JsonArray();
+        resources.add(resource(sample, "opaque-component-key", 1, RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY)));
+        page.add("resources", resources); stock.append(page, RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY));
+        field(Ae2ServerSupply.class, "plan").set(supply, plan);
+        field(Ae2ServerSupply.class, "allocation").set(supply, allocation);
+        field(Ae2ServerSupply.class, "entry").set(supply, stock.select(allocation));
+        field(Ae2ServerSupply.class, "slot").set(supply, 7);
+        field(Ae2ServerSupply.class, "requested").set(supply, 1);
+        field(Ae2ServerSupply.class, "destinationBefore").set(supply, ItemStack.EMPTY);
+        var constructor = ClientRequestReceipt.class.getDeclaredConstructor(
+                org.maiwithu.maicraft.client.server.ClientOperation.class, JsonObject.class, long.class, long.class,
+                Runnable.class, java.util.function.Consumer.class);
+        constructor.setAccessible(true);
+        var receipt = constructor.newInstance(new org.maiwithu.maicraft.client.server.ClientOperation("inventory.ae2_supply", 1, true, null),
+                new JsonObject(), 1L, 1L, (Runnable) () -> {}, (java.util.function.Consumer<Runnable>) Runnable::run);
+        field(Ae2ServerSupply.class, "pending").set(supply, receipt);
+        var session = (Ae2SupplySession) memory.allocateInstance(Ae2SupplySession.class);
+        field(Ae2SupplySession.class, "serverSupply").set(session, supply);
+        var task = new Ae2SupplyTask(player, null); field(Ae2SupplyTask.class, "session").set(task, session);
+        check(!task.mustSettleBeforeSatisfiedCancellation(), "a queued unsent supply cannot extend acquisition after its goal is satisfied");
+        field(ClientRequestReceipt.class, "backend").set(receipt, ClientRequestReceipt.Backend.SERVER);
+        field(ClientRequestReceipt.class, "status").set(receipt, ClientRequestReceipt.Status.PENDING);
+        field(ClientRequestReceipt.class, "effect").set(receipt, ClientRequestReceipt.Effect.UNKNOWN);
+        check(task.mustSettleBeforeSatisfiedCancellation(), "a submitted extraction must settle even before the inventory packet arrives");
+        var applied = applied(); field(ClientRequestReceipt.class, "status").set(receipt, applied.status());
+        field(ClientRequestReceipt.class, "effect").set(receipt, applied.effect());
+        field(ClientRequestReceipt.class, "result").set(receipt, applied.result());
+        field(ClientRequestReceipt.class, "serverTick").set(receipt, applied.serverTick());
+        inventory.setItem(7, sample.copy());
+        check(task.mustSettleBeforeSatisfiedCancellation() && allocation.confirmedCount() == 0,
+                "inventory arriving before the next child tick cannot discard the unconsumed authoritative receipt");
+        check(!field(Ae2ServerSupply.class, "settlingSatisfied").getBoolean(supply), "barrier inspection is read-only");
+        task.requestSatisfiedSettlement();
+        var context = (org.maiwithu.maicraft.client.actor.LocalPlayerContext) java.lang.reflect.Proxy.newProxyInstance(
+                getClassLoader(), new Class<?>[]{org.maiwithu.maicraft.client.actor.LocalPlayerContext.class},
+                (proxy, method, args) -> { if (method.getName().equals("tickRevision")) return 10L;
+                    throw new AssertionError("receipt reconciliation must not perform another native action: " + method.getName()); });
+        check(supply.tick(context).state() == Ae2ServerSupply.State.RUNNING && allocation.confirmedCount() == 1,
+                "the existing receipt reconciles the exact player slot before planning or submitting another request");
+        check(supply.tick(context).state() == Ae2ServerSupply.State.SUCCEEDED
+                        && supply.evidence().get("server_supply_receipt_count").equals(1)
+                        && supply.evidence().get("server_supply_transferred").equals(1L)
+                        && inventory.getItem(7).getCount() == 1,
+                "one server receipt produces one audited transfer and settles without another extraction");
+        check(task.mustSettleBeforeSatisfiedCancellation(), "the parent also waits for the owned session cleanup");
+        field(Ae2SupplyTask.class, "terminal").set(task, org.maiwithu.maicraft.task.TaskState.SUCCESS);
+        check(!task.mustSettleBeforeSatisfiedCancellation(), "settled task releases its terminal barrier");
+    }
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void settlementDoesNotStartAnotherGroupOrNativeCraft() throws Exception {
+        var iron = new Ae2ResourceSupply.Group(ResourceLocation.parse("minecraft:iron_ingot"), 1);
+        var stick = new Ae2ResourceSupply.Group(ResourceLocation.parse("minecraft:stick"), 1);
+        var completed = new Ae2SupplyPlanner.Allocation(iron.itemId(), new ItemStack(Items.IRON_INGOT), 1, false);
+        completed.confirm(1);
+        var remaining = new Ae2SupplyPlanner.Allocation(stick.itemId(), new ItemStack(Items.STICK), 1, true);
+        var supply = new Ae2ServerSupply(null, new Ae2ResourceSupply.Request(List.of(iron, stick), true),
+                null, Set.of(), group -> group == iron ? 1 : 0);
+        field(Ae2ServerSupply.class, "plan").set(supply, new Ae2SupplyPlanner.Plan(List.of(
+                new Ae2SupplyPlanner.PlannedGroup(iron, List.of(completed)),
+                new Ae2SupplyPlanner.PlannedGroup(stick, List.of(remaining)))));
+        field(Ae2ServerSupply.class, "effectsStarted").setBoolean(supply, true);
+        supply.requestSatisfiedSettlement();
+        check(supply.tick(null).code().equals("satisfied_before_owned_supply_completed") && remaining.confirmedCount() == 0,
+                "a completed first group never authorizes extraction or crafting for another group during settlement");
+
+        var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
+        try (var world = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness()) {
+            field(net.minecraft.world.inventory.AbstractContainerMenu.class, "carried")
+                    .set(world.player.inventoryMenu, ItemStack.EMPTY);
+            var bridge = (Ae2ReflectionBridge) memory.allocateInstance(Ae2ReflectionBridge.class);
+            for (String phaseName : List.of("SUBMIT_CRAFT_AMOUNT", "WAIT_CRAFT_PLAN")) {
+                var session = new Ae2SupplySession(world.player,
+                        new Ae2ResourceSupply.Request(List.of(iron), true), bridge);
+                var phase = field(Ae2SupplySession.class, "phase");
+                phase.set(session, Enum.valueOf((Class) phase.getType(), phaseName));
+                field(Ae2SupplySession.class, "effectsStarted").setBoolean(session, true);
+                world.inventory.setItem(7, new ItemStack(Items.IRON_INGOT));
+                var task = new Ae2SupplyTask(world.player, null); field(Ae2SupplyTask.class, "session").set(task, session);
+                check(task.mustSettleBeforeSatisfiedCancellation(), "existing native menu transaction requires cleanup");
+                task.requestSatisfiedSettlement();
+                session.tick(org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(world.player));
+                check(session.phase().equals("clean_close")
+                                && field(Ae2SupplySession.class, "craftingJobsSubmitted").getInt(session) == 0,
+                        "an externally satisfied inventory skips native crafting submission and enters physical cleanup");
+                world.inventory.setItem(7, ItemStack.EMPTY);
+            }
+        }
+    }
+    private static ClassLoader getClassLoader() { return Ae2ServerSupplyTest.class.getClassLoader(); }
     private static ClientRequestReceipt.Snapshot applied() {
         var result = new JsonObject(); result.addProperty("transferred", 1); result.addProperty("requested", 1);
         result.addProperty("resource_id", "opaque-component-key"); result.addProperty("membership", "network-one");

@@ -50,6 +50,7 @@ final class Ae2ServerSupply {
     private final List<Map<String, Object>> confirmedReceipts = new ArrayList<>();
     private long confirmedTransfers;
     private int confirmedRequests;
+    private boolean settlingSatisfied;
 
     Ae2ServerSupply(LocalPlayer player, Ae2ResourceSupply.Request request, Ae2TerminalAccess.FixedTarget target,
                     Set<Integer> reserved, ToIntFunction<Ae2ResourceSupply.Group> groupProgress) {
@@ -69,6 +70,10 @@ final class Ae2ServerSupply {
     Progress tick(LocalPlayerContext context) {
         if (terminal != null) return terminal;
         try {
+            if (settlingSatisfied && craft != null) {
+                craft.cancel();
+                return finish(State.UNCERTAIN, "satisfied_craft_cancelled", "the parent goal is satisfied; owned crafting was cancelled without starting another job");
+            }
             if (craft != null) {
                 var progress = craft.tick(context.tickRevision());
                 if (progress.state() == State.RUNNING) return progress;
@@ -90,6 +95,14 @@ final class Ae2ServerSupply {
                 return running();
             }
             if (pending != null) return poll(context);
+            if (settlingSatisfied) {
+                boolean complete = plan != null && plan.groups().stream().allMatch(group ->
+                        group.confirmedCount() == group.group().count()
+                                && groupProgress.applyAsInt(group.group()) == group.confirmedCount());
+                return finish(complete ? State.SUCCEEDED : State.FAILED,
+                        complete ? "resources_supplied" : "satisfied_before_owned_supply_completed",
+                        "settled existing server supply; no further extraction or crafting will start");
+            }
             if (plan == null || refreshingStock) {
                 if (queryIndex < queryItems.size()) {
                     if (context.tickRevision() < nextStockQueryTick) return running();
@@ -235,6 +248,12 @@ final class Ae2ServerSupply {
     void cancel() {
         if (pending != null) ServerAssistClient.cancel(pending.id());
         if (craft != null) craft.cancel();
+    }
+    void requestSatisfiedSettlement() {
+        settlingSatisfied = true;
+        if (pending != null && pending.snapshot().mutating()
+                && pending.snapshot().status() == ClientRequestReceipt.Status.QUEUED)
+            ServerAssistClient.cancel(pending.id());
     }
     boolean effectsStarted() {
         if (effectsStarted) return true;

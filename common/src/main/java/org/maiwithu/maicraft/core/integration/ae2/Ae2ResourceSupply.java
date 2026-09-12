@@ -266,6 +266,11 @@ public final class Ae2ResourceSupply {
 
         String phase();
 
+        /** Inventory arrival cannot cancel the receipt and cleanup of an already submitted effect. */
+        default boolean mustSettleBeforeSatisfiedCancellation() { return false; }
+
+        default void requestSatisfiedSettlement() {}
+
         /**
          * True while a bounded native receipt, verified route, or already-submitted external
          * crafting job is still legitimately in flight. Callers may renew a liveness lease;

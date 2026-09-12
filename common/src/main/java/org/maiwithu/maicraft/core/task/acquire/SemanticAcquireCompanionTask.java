@@ -262,6 +262,7 @@ public final class SemanticAcquireCompanionTask
             // 子任务说“已有操作必须先结束”时仍让它做收尾；攻击任务目前把整场战斗和相关拾取都算在内。
             if (activeChild != null
                     && activeChild.mustSettleBeforeSatisfiedCancellation()) {
+                activeChild.requestSatisfiedSettlement();
                 return tickActiveChild();
             }
             cancelActiveBecauseSatisfied();
@@ -906,15 +907,18 @@ public final class SemanticAcquireCompanionTask
         activeNeed.lastObservedCount = liveCount;
         // The root fact is checked by onTick before this method. Check the active recursive need too:
         // an external pickup or the child's previous effect may have completed it already.
-        if (liveCount >= activeNeed.requiredFinalCount
-                && !activeChild.mustSettleBeforeSatisfiedCancellation()) {
-            Need satisfiedNeed = activeNeed;
-            cancelActiveBecauseSatisfied();
-            if (!needs.isEmpty() && needs.peek() == satisfiedNeed) {
-                Need satisfied = needs.pop();
-                propagateSatisfiedNeed(satisfied);
+        if (liveCount >= activeNeed.requiredFinalCount) {
+            if (activeChild.mustSettleBeforeSatisfiedCancellation()) {
+                activeChild.requestSatisfiedSettlement();
+            } else {
+                Need satisfiedNeed = activeNeed;
+                cancelActiveBecauseSatisfied();
+                if (!needs.isEmpty() && needs.peek() == satisfiedNeed) {
+                    Need satisfied = needs.pop();
+                    propagateSatisfiedNeed(satisfied);
+                }
+                return TaskState.RUNNING;
             }
-            return TaskState.RUNNING;
         }
         TaskState authorizationStop = revalidateActiveHuntAuthorization();
         if (authorizationStop != null) return authorizationStop;
@@ -982,6 +986,20 @@ public final class SemanticAcquireCompanionTask
                             "ambiguous_merged_drop_count", integer(result.data().get("ambiguous_merged_drop_count"), 0),
                             "inventory_progress", progress, "requires_narration", true));
         }
+        if (completedSource == SemanticAcquireTaskRecord.Source.STORAGE && result != null && result.data() != null) {
+            boolean uncertain = bool(result.data().get("outcome_uncertain"))
+                    || "uncertain".equals(result.data().get("status"));
+            boolean unsettled = terminal != TaskState.SUCCESS && bool(result.data().get("effects_started"));
+            if (uncertain || unsettled) {
+                outcomeUncertain |= uncertain;
+                failureNeed = completedNeed;
+                String code = uncertain ? "storage_effect_uncertain" : "storage_settlement_incomplete";
+                addIssue("storage", code, "storage effects did not settle; carried inventory alone cannot confirm them", result.data());
+                return failAcquisition(code,
+                        "storage may already have changed state, but its transaction did not settle; stop and review before retrying",
+                        uncertain ? FailureType.UNKNOWN : childFailureType(terminal, result));
+            }
+        }
         if (count(r.itemIds) >= r.count) return TaskState.SUCCESS;
         if (after >= completedNeed.requiredFinalCount) {
             if (!needs.isEmpty() && needs.peek() == completedNeed) {
@@ -1014,22 +1032,6 @@ public final class SemanticAcquireCompanionTask
             advanceSource(completedNeed);
             return TaskState.RUNNING;
         }
-        if (completedSource == SemanticAcquireTaskRecord.Source.STORAGE
-                && result != null && result.data() != null
-                && (bool(result.data().get("outcome_uncertain"))
-                        || "uncertain".equals(result.data().get("status")))) {
-            // 网络可能已经取过或合成过，但结果不明时不能直接再申请一遍，先交回调用者判断。
-            outcomeUncertain = true;
-            addIssue("storage", "storage_effect_uncertain",
-                    "the storage child reported an uncertain effect; blind retry is forbidden",
-                    result.data());
-            return failAcquisition(
-                    "storage_effect_uncertain",
-                    "storage may already have changed state, but the final inventory fact is still false; "
-                            + "stop and review before retrying",
-                    FailureType.UNKNOWN);
-        }
-
         if (progress == 0 || terminal != TaskState.SUCCESS) {
             addIssue(completedSource.name().toLowerCase(), "child_task_incomplete",
                     result == null ? "child task ended without a result" : result.message(),

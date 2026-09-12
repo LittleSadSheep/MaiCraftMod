@@ -148,6 +148,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private Ae2SupplyPlanner.Plan plan;
     private int groupIndex;
     private boolean effectsStarted;
+    private boolean settlingSatisfied;
     private String terminalAccess = "unavailable";
     private Ae2TerminalAccess.Wireless wireless;
     private List<Ae2TerminalAccess.FixedTarget> fixedCandidates = List.of();
@@ -220,6 +221,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return Optional.of(terminal);
         }
         try {
+            if (settleSatisfied(context)) return Optional.ofNullable(terminal);
             switch (phase) {
                 case START -> start(context);
                 case STAGE -> stage(context);
@@ -278,6 +280,36 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     @Override
     public String phase() {
         return stoppingInPlace && terminal == null ? "in_place_cleanup" : phase.name().toLowerCase();
+    }
+
+    @Override
+    public boolean mustSettleBeforeSatisfiedCancellation() {
+        return terminal == null && (effectsStarted || craftingJobEffectPending
+                || serverSupply != null && serverSupply.effectsStarted());
+    }
+
+    @Override
+    public void requestSatisfiedSettlement() {
+        settlingSatisfied = true;
+        if (serverSupply != null) serverSupply.requestSatisfiedSettlement();
+    }
+
+    /** Drain the submitted cursor/inventory action, then use the existing native cleanup stages. */
+    private boolean settleSatisfied(LocalPlayerContext context) {
+        if (!settlingSatisfied || pendingTerminal != null || phase == Phase.SERVER_SUPPLY) return false;
+        if (phase == Phase.WAIT_EXACT_PLACE) { waitExactPlace(context); return true; }
+        if (phase == Phase.WAIT_WATER_BUCKET) { waitWaterBucket(context); return true; }
+        if (nativeReceipt != null && !settleNativeReceipt(context, "satisfied_effect_unconfirmed")) return true;
+        if (menuReceipt != null && !settleMenuReceipt(context, "satisfied_menu_unconfirmed")) return true;
+        if (craftingJobEffectPending) {
+            finishUncertain("satisfied_craft_still_pending", "the inventory goal became true while the owned native crafting job remains unresolved");
+            return true;
+        }
+        boolean complete = finalAuditPasses();
+        beginFinish(complete ? Ae2ResourceSupply.Status.SUCCEEDED : Ae2ResourceSupply.Status.FAILED,
+                complete ? "resources_supplied" : "satisfied_before_owned_supply_completed",
+                complete ? "the approved supply settled before cleanup" : "the parent inventory goal is satisfied; no further extraction or crafting will start");
+        return true;
     }
 
     @Override
