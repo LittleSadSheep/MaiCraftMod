@@ -143,6 +143,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private FirstPersonActionGate selection = new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private final BuildPlacementSettling placementSettling = new BuildPlacementSettling();
+    private Map<String, Object> scaffoldDropRisk = Map.of();
     private final LinkedHashSet<Long> verifyFailed = new LinkedHashSet<>();
     private final List<ObservedCell> verifyFailureStates = new ArrayList<>();
     private List<BlockPos> scaffoldQueue = List.of();
@@ -1107,9 +1108,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // Supports used only to obtain a click face must not be required for final survival.
         if (supportedCell != null || isTemporary(cell) || cell.target().block() instanceof net.minecraft.world.level.block.FallingBlock
                 || !cell.target().desiredState().canSurvive(player.level(), cell.target().pos())) return null;
+        scaffoldDropRisk = Map.of();
         List<BlockPos> chain = BuildTemporarySupportPlan.find(player.level(), player.level()::isLoaded,
                 cell.target().pos(), pos -> scaffoldPermitted(pos, null));
-        if (chain.isEmpty()) return null;
+        if (chain.isEmpty()) {
+            if (scaffoldDropRisk.isEmpty()) return null;
+            failAt(cell.target().pos(), "temporary support alternatives exhausted; cleanup drops may reach a machine or container",
+                    FailureType.NO_PATH, "temporary_support_drop_risk", false);
+            return TaskState.FAILED;
+        }
         Item material = BuildTemporarySupportMaterials.choose(
                 org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials.of(player), scaffoldReservations(),
                 inventory::mainInventoryCount, chain.size(), player.getAbilities().instabuild && !r.consumeMaterials);
@@ -1646,14 +1653,21 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && player.level().isLoaded(placeAt) && scaffoldPermitted(placeAt, null);
     }
 
+    @Override public boolean permitsTemporaryScaffold(BlockPos placeAt) { return scaffoldPermitted(placeAt, null); }
+
     private boolean scaffoldPermitted(BlockPos pos, LongSet additionalProtection) {
         if (!player.level().isLoaded(pos)) return false;
         boolean hard = inheritedProtectedMutationCells.contains(pos.asLong())
                 || forbiddenBodyCells.contains(pos.asLong())
                 || additionalProtection != null && additionalProtection.contains(pos.asLong())
                 || NavigationSafetyContext.protectsMutation(pos) || NavigationSafetyContext.forbidsBody(pos);
-        return r.mutationGuardMatches(player, pos)
-                && r.scaffoldLedger().permits(targets.get(pos.asLong()), player.level().getBlockState(pos), hard);
+        if (!r.mutationGuardMatches(player, pos)
+                || !r.scaffoldLedger().permits(targets.get(pos.asLong()), player.level().getBlockState(pos), hard)) return false;
+        var risk = BuildScaffoldDropSafety.check(player.level(), player.level()::isLoaded,
+                at -> targets.containsKey(at.asLong()) ? targets.get(at.asLong()).desiredState() : null,
+                at -> r.scaffoldLedger().contains(at), pos);
+        if (risk != null) { scaffoldDropRisk = risk.evidence(); return false; }
+        return true;
     }
     private void registerProvider() {
         if (!providerRegistered) { BuildPlacementRegistry.register(player, this); providerRegistered = true; }
@@ -1710,6 +1724,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 "temporary_supports_remaining", r.scaffoldLedger().snapshot().size()));
         if (phase == Phase.AIM) data.put("placement", placementDiagnostics());
         if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
+        if (!scaffoldDropRisk.isEmpty()) data.put("scaffold_drop_risk", scaffoldDropRisk);
         if (layerKnown && constructionLayer != Integer.MAX_VALUE) data.put("construction_layer", constructionLayer);
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
         data.put("construction_access", stanceNavigation.stage());
@@ -1785,6 +1800,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("construction_access", stanceNavigation.stage());
         data.put("construction_navigation", navigationDiagnostics());
         if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
+        if (!scaffoldDropRisk.isEmpty()) data.put("scaffold_drop_risk", scaffoldDropRisk);
         data.put("temporary_supports_remaining", r.scaffoldLedger().snapshot().size());
         var diagnostics = new ArrayList<>(targetDiagnostics);
         if (failurePos != null) {

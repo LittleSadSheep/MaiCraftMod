@@ -38,6 +38,7 @@ public final class EmbeddedBaritoneNavigator {
     private final boolean sprintAllowed;
     private final TerrainBill ledger = new TerrainBill();
     private final EnumMap<PathEvent, Integer> events = new EnumMap<>(PathEvent.class);
+    private final it.unimi.dsi.fastutil.longs.LongOpenHashSet rejectedScaffolds = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
 
     private GoalCompiler.Compiled compiled;
     private GoalCompiler.CompiledFingerprint compiledFingerprint;
@@ -77,7 +78,9 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     LongSet protectedMutationCells() {
-        return contextProvider.embeddedProtectedMutationCells();
+        var cells = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(contextProvider.embeddedProtectedMutationCells());
+        cells.addAll(rejectedScaffolds);
+        return cells;
     }
 
     LongSet forbiddenBodyCells() {
@@ -109,6 +112,18 @@ public final class EmbeddedBaritoneNavigator {
     boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState state) {
         return contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider
                 && provider.permitsScaffoldSupport(clicked, placeAt, state);
+    }
+
+    boolean permitsTemporaryScaffold(BlockPos placeAt) {
+        return !rejectedScaffolds.contains(placeAt.asLong())
+                && (!(contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider)
+                || provider.permitsTemporaryScaffold(placeAt));
+    }
+
+    void rejectedTemporaryScaffold(BlockPos pos) {
+        if (rejectedScaffolds.size() < 64) rejectedScaffolds.add(pos.asLong());
+        else if (!rejectedScaffolds.contains(pos.asLong()))
+            failWhenSafe(FailureType.NO_PATH, "temporary scaffold placement exclusions exhausted the bounded navigation alternatives");
     }
 
     void recordConfirmedNativeAction() {
@@ -186,6 +201,7 @@ public final class EmbeddedBaritoneNavigator {
     // 保持地形时找不到路，可额外只计算“假如允许改地形会怎样”；这份计算不会真的挖掘或放置。
     private PlayerNav.Status diagnoseNoPath() {
         String detail = "Baritone found no path to " + plannedCenter.toShortString();
+        if (!rejectedScaffolds.isEmpty()) detail += "; temporary scaffold safety excluded " + rejectedScaffolds.size() + " placement cells";
         if (!terrainProbeRequested || permit != TerrainPermit.PRESERVE) {
             return failWhenSafe(FailureType.NO_PATH, detail);
         }

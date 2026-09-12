@@ -19,6 +19,7 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.pathing.util.SwimAirBudgetTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicyTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest.main(args);
+        org.maiwithu.maicraft.core.pathing.baritone.NavigationScaffoldDropGuardTest.main(args);
         org.maiwithu.maicraft.core.task.mine.MiningBatchTest.main(args);
         org.maiwithu.maicraft.core.task.mine.NaturalTreeSourceTest.main(args);
         org.maiwithu.maicraft.core.task.mine.NoPathVerdictTest.main(args);

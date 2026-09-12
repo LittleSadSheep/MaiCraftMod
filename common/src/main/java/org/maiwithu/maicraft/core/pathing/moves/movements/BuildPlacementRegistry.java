@@ -38,6 +38,9 @@ public final class BuildPlacementRegistry {
         /** Narrow native exception for a build's temporary support against its own finished block. */
         default boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState support) { return false; }
 
+        /** Positional cleanup/debris policy applies even when the clicked support is unprotected. */
+        default boolean permitsTemporaryScaffold(BlockPos placeAt) { return true; }
+
         /** Called only after the owning embedded navigator obtains a confirmed placement receipt. */
         default void confirmedScaffold(BlockPos placeAt, BlockState state) {}
         default void confirmedScaffoldRemoval(BlockPos placeAt) {}

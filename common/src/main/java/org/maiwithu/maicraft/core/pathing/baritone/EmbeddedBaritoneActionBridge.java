@@ -290,6 +290,7 @@ final class EmbeddedBaritoneActionBridge {
         }
         if (!org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldUseAllowed(context.player(), held)) return;
         BlockPos actual = placementCell(clicked, clickedState, hit);
+        if (!navigator.permitsTemporaryScaffold(actual)) { navigator.rejectedTemporaryScaffold(actual); return; }
         boolean protectedSupport = EmbeddedBaritonePolicy.protects(clicked);
         if (EmbeddedBaritonePolicy.protects(actual) || protectedSupport
                 && (!context.player().isSecondaryUseActive() || actual.equals(clicked)
