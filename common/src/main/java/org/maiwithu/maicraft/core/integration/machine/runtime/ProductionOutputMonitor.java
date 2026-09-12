@@ -58,7 +58,7 @@ final class ProductionOutputMonitor {
                 initialStock = stock; sinkBaselineTick = serverTick; return false;
             }
             List<BlockPos> group = groups.get(baselineGroup);
-            if (!work.observe(group.getFirst())) return false;
+            if (!work.observe(group)) return false;
             JsonObject body = eventBody(group);
             if (baselineGroup == 0) body.addProperty("baseline", true);
             requestedWatches.add(baselineGroup);
@@ -96,7 +96,7 @@ final class ProductionOutputMonitor {
                         && window.status(serverTick) != ProductionEvidenceWindow.Status.INVALIDATED && flow.verified(processingProgress());
             }
             List<BlockPos> group = groups.get(groupIndex);
-            if (!work.observe(group.getFirst())) return false;
+            if (!work.observe(group)) return false;
             JsonObject result = work.request("machine.production_events", eventBody(group), false);
             if (result == null) return false;
             ProductionEventCursor.Batch batch = cursor.page(groupIndex, result);
@@ -229,7 +229,7 @@ final class ProductionOutputMonitor {
         for (BlockPos position : positions) {
             List<BlockPos> group = groups.stream().filter(values -> values.size() < 4
                     && values.getFirst().distSqr(position) <= 16).findFirst().orElse(null);
-            // Work.observe reaches within 12 blocks of the first point; the others are at most 4 farther.
+            // The bounded cluster also lets Work.observe choose a stance respecting every native target's range.
             if (group == null) { group = new ArrayList<>(); groups.add(group); }
             group.add(position.immutable());
         }

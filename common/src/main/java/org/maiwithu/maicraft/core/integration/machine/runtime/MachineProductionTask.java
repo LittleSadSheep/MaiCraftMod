@@ -20,6 +20,9 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     @FunctionalInterface interface InteractionNavigation {
         PlayerNav to(BlockPos stance, java.util.function.BooleanSupplier reached);
     }
+    @FunctionalInterface interface ObservationNavigation {
+        PlayerNav to(BlockPos first, int radius, java.util.function.BooleanSupplier reached);
+    }
     private enum Phase { CHECK, BUILD, CONFIGURE, PREPARE, BASELINE, SUPPLY, ADMIT_START, START, REFRESH, OBSERVE, FINAL_VERIFY, DONE }
     private final ProductionRequestSlot requests = new ProductionRequestSlot();
     private ProductionInputSupply supply;
@@ -27,6 +30,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     private final ProductionConfigurationSupply configurationSupply;
     private final ProductionProgressWatchdog watchdog;
     private final InteractionNavigation interactionNavigation;
+    private final ObservationNavigation observationNavigation;
     private ProductionOutputMonitor output;
     private boolean started;
     private Phase phase = Phase.CHECK;
@@ -34,6 +38,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     private int configuration;
     private boolean configurationRead;
     private BlockPos navigationTarget;
+    private java.util.List<BlockPos> observationTargets = java.util.List.of();
     private BlockPos interactionStance;
     private final java.util.Set<Long> rejectedStances = new java.util.HashSet<>();
     private String failureCode;
@@ -45,8 +50,15 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     }
 
     MachineProductionTask(LocalPlayer player, MachineProductionTaskRecord record, InteractionNavigation navigation) {
+        this(player, record, navigation, (first, radius, reached) -> PlayerNav.toGoal(player,
+                () -> NavGoal.near(first, radius), 1.0, reached, PlayerNav.ContextProvider.DEFAULT));
+    }
+
+    MachineProductionTask(LocalPlayer player, MachineProductionTaskRecord record, InteractionNavigation navigation,
+                          ObservationNavigation observationRoutes) {
         super(player, record);
         interactionNavigation = java.util.Objects.requireNonNull(navigation);
+        observationNavigation = java.util.Objects.requireNonNull(observationRoutes);
         preparation = new ProductionPreparation(player, record.plan, this);
         configurationSupply = new ProductionConfigurationSupply(player, record, this);
         var observation = record.plan.manifest().observation();
@@ -225,18 +237,27 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     }
 
     @Override public boolean observe(BlockPos position) {
+        return observe(java.util.List.of(position));
+    }
+
+    @Override public boolean observe(java.util.List<BlockPos> requestedPositions) {
         if (requests.pending()) return true;
+        var positions = java.util.List.copyOf(requestedPositions);
+        if (!positions.equals(observationTargets)) { stopNav(); observationTargets = positions; }
+        BlockPos position = positions.getFirst();
+        java.util.function.BooleanSupplier ready = () -> positions.stream().allMatch(player.level()::isLoaded)
+                && ProductionObservationRange.ready(player.position(), positions, target -> ProductionObservationRange.radius(player.level(), target));
         selectNavigationTarget(position);
         if (interactionStance != null) { stopNav(); interactionStance = null; }
-        if (player.level().isLoaded(position) && player.distanceToSqr(position.getCenter()) <= 144) {
+        if (ready.getAsBoolean()) {
             stopNav(); return true;
         }
         if (nav == null) {
-            nav = PlayerNav.toGoal(player, () -> NavGoal.near(position, 10), 1.0,
-                    () -> player.level().isLoaded(position) && player.distanceToSqr(position.getCenter()) <= 144,
-                    PlayerNav.ContextProvider.DEFAULT);
+            int radius = ProductionObservationRange.goalRadius(positions, target -> ProductionObservationRange.radius(player.level(), target));
+            nav = observationNavigation.to(position, radius, ready);
         }
-        if (nav.tick() == PlayerNav.Status.FAILED) {
+        var status = nav.tick();
+        if (status == PlayerNav.Status.FAILED || status == PlayerNav.Status.ARRIVED && !ready.getAsBoolean()) {
             stopNav(); throw new IllegalArgumentException("production_observation_unreachable");
         }
         return false;

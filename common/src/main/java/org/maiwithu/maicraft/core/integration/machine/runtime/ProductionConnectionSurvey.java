@@ -59,9 +59,8 @@ public final class ProductionConnectionSurvey {
         if (finished) return result();
         if (!plan.dimension().equals(dimension.get())) return fail("production_connection_world_changed");
         ProductionConnectionPath.Segment segment = segments.get(segmentIndex);
-        BlockPos first = path.get(segment.start());
         navigating = true;
-        if (!work.observe(first)) return null;
+        if (!work.observe(segment.points(path))) return null;
         navigating = false;
         if (system == null) {
             system = selectSystem(segment);

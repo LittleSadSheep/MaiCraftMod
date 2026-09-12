@@ -11,6 +11,8 @@ public interface ProductionWork {
     boolean approach(BlockPos position);
     /** Read-only evidence can use the server's bounded observation range without touching the machine. */
     default boolean observe(BlockPos position) { return approach(position); }
+    /** Bounded group callers provide every position so native per-target range limits can be respected. */
+    default boolean observe(java.util.List<BlockPos> positions) { return observe(positions.getFirst()); }
     default void stopMovement() {}
     default java.util.Map<String, Long> processingProgress() { return java.util.Map.of(); }
     /** Returns null while pending. A settled result is consumed once; unknown mutations throw without replay. */

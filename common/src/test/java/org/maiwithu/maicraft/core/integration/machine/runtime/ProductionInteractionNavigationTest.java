@@ -64,7 +64,40 @@ public final class ProductionInteractionNavigationTest {
             check(task.approach(second), "real in-range visible arrival remains usable");
             check(h.blockUses() == 0 && h.itemUses() == 0, "the regression performs only navigation/readiness checks");
         }
+        changedObservationBatchCannotReuseItsOldRoute();
         System.out.println("ProductionInteractionNavigationTest: target-scoped stances and strict arrival range passed");
+    }
+
+    private static void changedObservationBatchCannotReuseItsOldRoute() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            field(Level.class, "worldBorder").set(h.level, new WorldBorder());
+            BlockPos first = new BlockPos(4, 3, 8), added = new BlockPos(0, 3, 8);
+            h.set(first, Blocks.STONE.defaultBlockState()); h.set(added, Blocks.STONE.defaultBlockState());
+            h.position(new Vec3(15.9, 0, 8.5));
+            int[] routes = {0};
+            var task = new MachineProductionTask(h.player, record(), (stance, reached) -> {
+                throw new AssertionError("Observation attempted an interaction route");
+            }, (anchor, radius, reached) -> {
+                routes[0]++;
+                return PlayerNav.toGoal(h.player, () -> NavGoal.near(anchor, radius), 1, () -> true).walkingOnly();
+            });
+            check(task.observe(first), "first target alone should already be within read range");
+            var old = PlayerNav.toGoal(h.player, () -> NavGoal.near(first, 10), 1, () -> true).walkingOnly();
+            field(task.getClass().getSuperclass(), "nav").set(task, old);
+            try {
+                task.observe(List.of(first, added));
+                throw new AssertionError("Premature ARRIVED admitted an out-of-range second target");
+            } catch (IllegalArgumentException expected) {
+                check(expected.getMessage().equals("production_observation_unreachable"), "Unexpected observation rejection");
+            }
+            check(routes[0] == 1 && field(task.getClass().getSuperclass(), "nav").get(task) == null,
+                    "Same-anchor batch change retained the old route or left a dead arrival active");
+            h.position(new Vec3(8.5, 0, 8.5));
+            check(task.observe(List.of(first, added)), "A stance covering both actual target ranges remains valid");
+            var requests = (ProductionRequestSlot) field(task.getClass(), "requests").get(task);
+            check(!requests.pending() && requests.report().isEmpty() && h.blockUses() == 0,
+                    "Read-range checks submitted a remote or physical mutation");
+        }
     }
 
     private static MachineProductionTaskRecord record() {
