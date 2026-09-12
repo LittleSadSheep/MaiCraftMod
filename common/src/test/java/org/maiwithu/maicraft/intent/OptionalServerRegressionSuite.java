@@ -47,6 +47,9 @@ public final class OptionalServerRegressionSuite {
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionReadScheduleTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionConnectionSurveyTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionConnectionResponsesTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.discovery.MachineDiscoveryScannerTest.main(args);
+        org.maiwithu.maicraft.server.machine.watch.MachineWatchProgressTest.main(args);
         System.out.println("OptionalServerRegressionSuite: passed");
     }
 }
