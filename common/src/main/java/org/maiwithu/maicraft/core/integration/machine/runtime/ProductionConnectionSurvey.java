@@ -26,6 +26,7 @@ public final class ProductionConnectionSurvey {
     private final LongSupplier clock;
     private final Function<BlockPos, String> nativeSystem;
     private final Supplier<Vec3> bodyPosition;
+    private final java.util.function.ToDoubleFunction<BlockPos> observationRadius;
     private Link active;
     private List<BlockPos> path = List.of();
     private List<ProductionConnectionPath.Segment> segments = List.of();
@@ -39,7 +40,8 @@ public final class ProductionConnectionSurvey {
     public ProductionConnectionSurvey(LocalPlayer player, ProductionRunPlan plan, ProductionWork work,
                                       Function<Resource, ProductionEvidence.Binding> bindings) {
         this(plan, work, bindings, () -> player.level().dimension().location().toString(), () -> player.level().getGameTime(),
-                position -> nativeSystemAt(player, position), player::position);
+                position -> nativeSystemAt(player, position), player::position,
+                position -> ProductionObservationRange.radius(player.level(), position));
     }
 
     /** Deterministic environment seam for request/range regressions without fabricating a running game. */
@@ -50,9 +52,16 @@ public final class ProductionConnectionSurvey {
 
     ProductionConnectionSurvey(ProductionRunPlan plan, ProductionWork work, Function<Resource, ProductionEvidence.Binding> bindings,
                                Supplier<String> dimension, LongSupplier clock, Function<BlockPos, String> nativeSystem, Supplier<Vec3> bodyPosition) {
+        this(plan, work, bindings, dimension, clock, nativeSystem, bodyPosition, null);
+    }
+
+    ProductionConnectionSurvey(ProductionRunPlan plan, ProductionWork work, Function<Resource, ProductionEvidence.Binding> bindings,
+                               Supplier<String> dimension, LongSupplier clock, Function<BlockPos, String> nativeSystem,
+                               Supplier<Vec3> bodyPosition, java.util.function.ToDoubleFunction<BlockPos> observationRadius) {
         this.plan = Objects.requireNonNull(plan); this.work = Objects.requireNonNull(work); this.bindings = Objects.requireNonNull(bindings);
         this.dimension = Objects.requireNonNull(dimension); this.clock = Objects.requireNonNull(clock); this.nativeSystem = Objects.requireNonNull(nativeSystem);
         this.bodyPosition = Objects.requireNonNull(bodyPosition);
+        this.observationRadius = observationRadius;
     }
 
     /** Choose at a settled boundary; pending navigation or an operation keeps its selected link. */
@@ -68,7 +77,7 @@ public final class ProductionConnectionSurvey {
         for (Link candidate : candidates) {
             try {
                 List<BlockPos> points = pathFor(candidate);
-                var parts = ProductionConnectionPath.split(points, candidate.resource().medium());
+                var parts = split(points, candidate.resource().medium());
                 double score = endpointDistance(feet, points, parts.getFirst());
                 // An unobserved authored adapter requires the original first-segment probe.
                 if (selectSystem(candidate, parts.getFirst(), points) != null)
@@ -127,7 +136,7 @@ public final class ProductionConnectionSurvey {
         try {
             Port from = plan.port(link.from()), to = plan.port(link.to());
             path = pathFor(link);
-            segments = ProductionConnectionPath.split(path, link.resource().medium());
+            segments = split(path, link.resource().medium());
             if (!path.getFirst().equals(plan.at(from.offset())) || !path.getLast().equals(plan.at(to.offset()))
                     || !from.face().equals(ProductionConnectionPath.face(path.getFirst(), path.get(1)))
                     || !to.face().equals(ProductionConnectionPath.face(path.getLast(), path.get(path.size() - 2)))) {
@@ -205,6 +214,11 @@ public final class ProductionConnectionSurvey {
     private List<BlockPos> pathFor(Link link) {
         return link.path().isEmpty() ? List.of(plan.at(plan.port(link.from()).offset()), plan.at(plan.port(link.to()).offset()))
                 : link.path().stream().map(plan::at).map(BlockPos::immutable).toList();
+    }
+
+    private List<ProductionConnectionPath.Segment> split(List<BlockPos> points, String medium) {
+        return observationRadius == null ? ProductionConnectionPath.split(points, medium)
+                : ProductionConnectionPath.split(points, medium, observationRadius);
     }
 
     private static double endpointDistance(Vec3 feet, List<BlockPos> path, ProductionConnectionPath.Segment segment) {

@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.core.integration.machine.runtime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.Predicate;
+import java.util.function.ToDoubleFunction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
@@ -17,6 +19,21 @@ final class ProductionConnectionPath {
     private ProductionConnectionPath() {}
 
     static List<Segment> split(List<BlockPos> path, String medium) {
+        return splitServiceable(path, medium, points -> near(points.getFirst(), points.getLast()));
+    }
+
+    /** Keep room for a nearby standing cell while checking every target's own native read radius. */
+    static List<Segment> split(List<BlockPos> path, String medium, ToDoubleFunction<BlockPos> radius) {
+        var observedRadii = new java.util.HashMap<BlockPos, Double>();
+        return splitServiceable(path, medium, points -> {
+            try {
+                return ProductionObservationRange.goalRadius(points,
+                        pos -> observedRadii.computeIfAbsent(pos, key -> radius.applyAsDouble(key))) >= 2;
+            } catch (IllegalArgumentException unavailable) { return false; }
+        });
+    }
+
+    private static List<Segment> splitServiceable(List<BlockPos> path, String medium, Predicate<List<BlockPos>> serviceable) {
         if (path == null || path.size() < 2) throw new IllegalArgumentException("connection_path_requires_two_endpoints");
         var seen = new HashSet<BlockPos>();
         for (int i = 0; i < path.size(); i++) {
@@ -32,10 +49,13 @@ final class ProductionConnectionPath {
         int start = 0;
         while (start < path.size() - 1) {
             int end = start + 1;
-            while (end + 1 < path.size() && end + 1 - start < MAX_POINTS && near(path.get(start), path.get(end + 1))) end++;
+            if (!serviceable.test(path.subList(start, end + 1)))
+                throw new IllegalArgumentException("connection_segment_exceeds_native_observation_range");
+            while (end + 1 < path.size() && end + 1 - start < MAX_POINTS
+                    && serviceable.test(path.subList(start, end + 2))) end++;
             segments.add(new Segment(start, end));
             if (end == path.size() - 1) break;
-            // Two valid native steps fit inside four blocks, so nonfinal segments must make progress here.
+            // A nonfinal segment must advance while retaining a complete shared edge.
             if (end - start < 2) throw new IllegalArgumentException("connection_segment_cannot_preserve_boundary_evidence");
             start = end - 1;
         }

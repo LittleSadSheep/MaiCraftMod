@@ -18,6 +18,7 @@ public final class ProductionConnectionSurveyTest {
         longSurveysExposeStaleEvidence();
         nativeRepliesCanLeadTheClientClock();
         ProductionConnectionOrderingTest.main(args);
+        ProductionConnectionRangeTest.main(args);
         System.out.println("ProductionConnectionSurveyTest: 7 orchestration groups passed; native game connections are not exercised");
     }
 
