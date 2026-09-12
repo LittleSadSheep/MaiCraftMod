@@ -37,6 +37,7 @@ final class RangedShot {
     RangedShot(LocalPlayer player, boolean crossbow) {
         this.player = player;
         this.crossbow = crossbow;
+        if (crossbow && CrossbowItem.isCharged(player.getMainHandItem())) state = State.READY_TO_FIRE;
     }
 
     static boolean stillHolding(boolean crossbow, ItemStack stack) {
@@ -70,16 +71,16 @@ final class RangedShot {
     boolean fired() { return fired; }
     boolean aboutToRelease() { return crossbow ? state == State.READY_TO_FIRE : held >= BOW_RELEASE_TICKS - 1; }
 
-    // 还在使用弓弩时请求松开；已经发出的箭不能撤回。这里只发停止请求，没有等待它确认完。
+    // 取消蓄力用切槽；松开弓会真的发射，不能用作取消。已经发出的箭不能撤回。
     void abort() {
-        if (receipt == null || receipt.kind() != NativeActionReceipt.Kind.USE_ITEM || !player.isUsingItem()) return;
-        var context = ClientRuntime.requireContext(player);
-        receipt = context.actions().releaseUsingItem(context, receipt);
+        if (receipt != null && receipt.kind() == NativeActionReceipt.Kind.USE_ITEM) {
+            var context = ClientRuntime.requireContext(player);
+            receipt = context.actions().cancelMainHandUse(context, receipt);
+        }
         state = State.MISFIRE;
     }
 
-    // 当前无论弩是否已装填，都先使用一次物品，再观察手中变化或使用状态。
-    // 对已装填弩，这一下原版就会直接发射，并不是开始装填；这里尚未检查瞄准角度，见 A40。
+    // 只有尚未装填的弩和弓需要开始使用；已装填弩由构造器直接送去瞄准阶段。
     private void startUse() {
         var context = ClientRuntime.requireContext(player);
         if (receipt == null) {
@@ -97,8 +98,10 @@ final class RangedShot {
         if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
             state = State.MISFIRE; return;
         }
-        state = crossbow && CrossbowItem.isCharged(player.getMainHandItem())
-                ? State.READY_TO_FIRE : State.USING;
+        if (crossbow && CrossbowItem.isCharged(player.getMainHandItem())) {
+            if (player.isUsingItem()) releaseLoad();
+            else { receipt = null; state = State.READY_TO_FIRE; }
+        } else state = State.USING;
     }
 
     // 使用状态中断就结束为失败。弩等装填时间到后松开；弓至少拉十五刻并尽量等准星对齐。
@@ -112,13 +115,12 @@ final class RangedShot {
             return;
         }
         double angle = Ballistics.angleDegrees(player.getViewVector(1.0f), aim.direction());
-        // 当前拉到四十刻会强制松开，不再要求 1.5° 内对准；它可能沿实际错误视角发射，见 A42。
-        if (canRelease(angle, held, BOW_RELEASE_TICKS) || held >= BOW_MAX_DRAW_TICKS) {
+        if (canRelease(angle, held, BOW_RELEASE_TICKS)) {
             pendingAim = aim; pendingTarget = target;
             var context = ClientRuntime.requireContext(player);
             receipt = context.actions().releaseUsingItem(context, receipt);
             state = State.FIRING;
-        }
+        } else if (held >= BOW_MAX_DRAW_TICKS) abort();
     }
 
     private void releaseLoad() {
@@ -139,7 +141,8 @@ final class RangedShot {
 
     // 已经装填好时等实际视线接近弹道方向，再右键发射。这里还要求旧 receipt 已清空。
     private void tickReady(Ballistics.Aim aim, Entity target) {
-        if (Ballistics.angleDegrees(player.getViewVector(1.0f), aim.direction()) > AIM_THRESHOLD_DEGREES) return;
+        if (!CrossbowItem.isCharged(player.getMainHandItem())) { state = State.MISFIRE; return; }
+        if (!canRelease(Ballistics.angleDegrees(player.getViewVector(1.0f), aim.direction()), 0, 0)) return;
         var context = ClientRuntime.requireContext(player);
         if (receipt == null) {
             ItemStack before = player.getMainHandItem().copy();

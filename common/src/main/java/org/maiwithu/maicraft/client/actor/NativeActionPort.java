@@ -39,6 +39,9 @@ public interface NativeActionPort {
 
     NativeActionReceipt releaseUsingItem(LocalPlayerContext context, NativeActionReceipt receipt);
 
+    /** 通过切换主手槽取消蓄力，不发送会让弓发射的 RELEASE_USE_ITEM。 */
+    NativeActionReceipt cancelMainHandUse(LocalPlayerContext context, NativeActionReceipt receipt);
+
     NativeActionReceipt selectHotbar(LocalPlayerContext context, int slot, int timeoutTicks);
 
     NativeActionReceipt creativeSetSlot(

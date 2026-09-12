@@ -154,10 +154,16 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
     }
 
     static final class UseMode extends MultiPlayerGameMode {
-        int items, blocks, attacks;
+        int items, blocks, attacks, releases;
+        java.util.function.Consumer<Player> itemUse, itemRelease;
         Runnable beforeBlockUse;
         private UseMode() { super(null, null); }
-        @Override public InteractionResult useItem(Player player, InteractionHand hand) { items++; return InteractionResult.PASS; }
+        @Override public InteractionResult useItem(Player player, InteractionHand hand) {
+            items++; if (itemUse != null) itemUse.accept(player); return InteractionResult.PASS;
+        }
+        @Override public void releaseUsingItem(Player player) {
+            releases++; if (itemRelease != null) itemRelease.accept(player); player.stopUsingItem();
+        }
         @Override public void attack(Player player, Entity target) { attacks++; }
         @Override public InteractionResult useItemOn(LocalPlayer player, InteractionHand hand, BlockHitResult hit) {
             if (beforeBlockUse != null) beforeBlockUse.run();

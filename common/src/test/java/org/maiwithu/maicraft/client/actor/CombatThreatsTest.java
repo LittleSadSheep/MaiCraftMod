@@ -31,6 +31,7 @@ public final class CombatThreatsTest {
         forgetsRetiredEntitiesAndBodies();
         MobDefenseDamageTest.main(args);
         CombatOutcomeTest.main(args);
+        RangedShotTest.main(args);
         System.out.println("CombatThreatsTest: client damage attribution and lifetime passed");
     }
 

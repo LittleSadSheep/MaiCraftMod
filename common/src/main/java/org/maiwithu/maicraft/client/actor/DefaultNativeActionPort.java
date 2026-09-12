@@ -268,6 +268,34 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     @Override
+    public NativeActionReceipt cancelMainHandUse(LocalPlayerContext context, NativeActionReceipt receipt) {
+        DefaultLocalPlayerContext current = requireSubmission(context);
+        requireActive(receipt, NativeActionReceipt.Kind.USE_ITEM);
+        if (current.player().isUsingItem() && current.player().getUsedItemHand() != InteractionHand.MAIN_HAND)
+            throw new IllegalStateException("main-hand cancellation cannot stop an offhand action");
+        current.claimMutation();
+        int replacement = (current.player().getInventory().selected + 1) % 9;
+        // 切槽和本地停止是同步动作；这里确认的是已提交的取消操作，不是箭命中或服务器回执。
+        NativeConfirmation stopped = new NativeConfirmation() {
+            public Verdict observe(LocalPlayerContext c) {
+                return !c.player().isUsingItem() && c.player().getInventory().selected == replacement
+                        ? Verdict.APPLIED : Verdict.PENDING;
+            }
+            public int stableTicksRequired() { return 1; }
+        };
+        var cancelled = oneShot(NativeActionReceipt.Kind.RELEASE_ITEM, current, stopped, 10);
+        try {
+            // 原版服务端 handleSetCarriedItem 在切换主手时 stopUsingItem，不会释放弓箭。
+            current.connection().send(new ServerboundSetCarriedItemPacket(replacement));
+            current.player().getInventory().selected = replacement;
+            current.player().stopUsingItem();
+        } catch (RuntimeException failure) {
+            cancelled.finish(NativeActionReceipt.Status.UNCERTAIN, "main-hand cancellation was not confirmed");
+        }
+        return poll(current, cancelled);
+    }
+
+    @Override
     public NativeActionReceipt submitControlProtocol(
             LocalPlayerContext context,
             String operation,

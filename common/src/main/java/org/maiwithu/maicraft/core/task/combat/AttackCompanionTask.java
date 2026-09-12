@@ -196,6 +196,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
         }
         settleFinishedTargets();
+        if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         if (phase == Phase.LOOT) {
             boolean threatened = r.indiscriminate && field.foes().stream().anyMatch(Battlefield.Foe::engaging);
             if (threatened != defendingDuringLoot) {
@@ -221,6 +222,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             abortShot();
             target = chosen;
         }
+        if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         if (target != null) {
             lastTargetPosition = target.position();
             lastTargetPositions.put(target.getId(), lastTargetPosition);
@@ -839,6 +841,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (shot.tick(aim, target)) {
             boolean fired = shot.fired();
             shot = null;
+            if (!fired) rangedSelection.reset();
             // 这里给发射成功记一次 strike，没有等待这一箭真正命中目标。
             if (fired) {
                 r.strike(target.getId());
@@ -1075,6 +1078,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (shot != null) {
             shot.abort();
             shot = null;
+            rangedSelection.reset();
         }
     }
 
