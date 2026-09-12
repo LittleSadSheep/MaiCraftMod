@@ -5,6 +5,7 @@ package org.maiwithu.maicraft.core.task.dimension;
 public final class PortalRegressionSuite {
     public static void main(String[] args) throws Exception {
         NetherPortalFrameTest.main(args);
+        EndPortalFrameTest.main(args);
         System.out.println("PortalRegressionSuite: passed");
     }
 }
