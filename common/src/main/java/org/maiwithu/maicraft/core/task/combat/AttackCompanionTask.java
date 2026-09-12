@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.combat.AttackPlan;
 import org.maiwithu.maicraft.core.combat.Battlefield;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
+import org.maiwithu.maicraft.core.combat.RetreatProgress;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.Haven;
 import org.maiwithu.maicraft.core.combat.Menace;
@@ -135,6 +136,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     private final Map<Item, Integer> inventoryBaseline = new HashMap<>();
     private final Map<Integer, Float> observedHealth = new HashMap<>();
+    private final Map<Integer, Entity> observedTargets = new HashMap<>();
     private final LootSweep loot;
 
     /**
@@ -144,7 +146,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private final java.util.Set<Integer> touchedIds = new java.util.LinkedHashSet<>();
 
     /** 退避的寻路连续失败次数。够了就是"退不掉",判据据此改判背水一战。 */
-    private int retreatFailures;
+    private final RetreatProgress retreat = new RetreatProgress();
 
     /** 上一行站位日志。数字没变就不再打,免得每 tick 一行把别的全冲掉。 */
     private String lastStandoffLog;
@@ -297,7 +299,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 Menace.effectiveHealth(player),
                 reachToTarget(),
                 loadout.hasMelee(), loadout.hasRanged(),
-                retreatFailures >= MAX_RETREAT_FAILURES, foes);
+                retreat.failures() >= MAX_RETREAT_FAILURES, foes);
     }
 
     private static boolean containsId(List<Battlefield.Foe> foes, int id) {
@@ -317,19 +319,28 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     /** 把已经有结果的目标记进账本(死了 / 不见了)。 */
-    // 逐个检查本任务涉及的目标：观察到死亡则记击败；目标离开客户端后，没有出手记录的记丢失。
-    // 目前只要曾有 strike，离开客户端也记击败；远程 strike 甚至只代表发射成功，这个推断见 A36。
+    // 活物必须有死亡证据；末影水晶沿用严格任务的“已出手且原位置仍加载”的移除凭证。
     private void settleFinishedTargets() {
         for (int id : r.indiscriminate ? List.copyOf(touchedIds) : r.entityIds) {
             if (r.terminal(id)) {
                 continue;
             }
             Entity e = player.clientLevel.getEntity(id);
+            Entity previousTarget = observedTargets.get(id);
+            if (e != null && previousTarget != null && e != previousTarget) {
+                r.lost(id); // 同一编号的新实体不能继承原目标身份或战果。
+                continue;
+            }
             if (e != null && !e.isRemoved()) {
+                observedTargets.put(id, e);
                 lastTargetPositions.put(id, e.position());
             }
             if (e == null || e.isRemoved()) {
-                if (r.strikes(id) > 0) {
+                Entity witnessed = observedTargets.get(id);
+                boolean dead = witnessed instanceof LivingEntity living && living.isDeadOrDying();
+                boolean crystalRemoved = witnessed instanceof EndCrystal && r.strictAuthorized
+                        && r.strikes(id) > 0 && player.level().isLoaded(witnessed.blockPosition());
+                if (dead || crystalRemoved) {
                     r.defeated(id);
                     renewCombatProgress();
                     beginLoot(id, lastTargetPositions.getOrDefault(id, lastTargetPosition));
@@ -387,16 +398,17 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     /** 打完了 —— 名单清空(点名),或没人再追她(无差别)。 */
-    // 清场模式结束时直接成功；明确目标列表只要有一个击败也会成功，并在文字里提示未完成数量。
-    // 这里没有要求指定列表全部完成，是否应采用部分成功由审计记录 D11 留待决定。
+    // 自卫以脱险结束；指定名单则必须全部确认击败，防御中额外处理的目标不能抵数。
     private TaskState finish() {
         InputDriver.halt(player);
         stopNav();
-        if (r.indiscriminate || !r.defeated().isEmpty()) {
+        if (r.indiscriminate || r.allRequestedDefeated()) {
             succeed();
             return TaskState.SUCCESS;
         }
-        fail("none of the requested entity ids could be attacked", FailureType.TARGET_LOST);
+        fail("not every requested entity was confirmed defeated (" + r.requestedDefeatedCount()
+                + "/" + r.entityIds.size() + ")", r.lost().isEmpty() && !r.unreachable().isEmpty()
+                ? FailureType.NO_PATH : FailureType.TARGET_LOST);
         return TaskState.FAILED;
     }
 
@@ -862,6 +874,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     // 近处危险和近期远程伤害都消失后才结束撤退；持续来袭的箭不能被近战扫描范围漏掉。
     private TaskState tickFlee() {
+        retreat.observe(player.position());
         var around = CombatThreats.around(player, Menace.FLEE_DISTANCE);
         if (around.isEmpty()) {
             clearHaven();
@@ -901,14 +914,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (status == PlayerNav.Status.FAILED) {
             stopNav();
             haven = null;   // 这个方向走不通,下一刻换一个
-            retreatFailures++;
+            retreat.failed();
         } else {
             if (status == PlayerNav.Status.ARRIVED) {
                 stopNav();
                 haven = null;
             }
-            // 当前只要导航不是 FAILED 就清零，连仍在计算路线的 RUNNING 也算；这会冲掉跨多刻的失败次数（A39）。
-            retreatFailures = 0;
         }
         return TaskState.RUNNING;
     }
@@ -1110,6 +1121,10 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("mode", r.indiscriminate ? "nearby_hostiles" : "authorized_targets");
         data.put("requested_targets", r.entityIds.size());
+        data.put("defeated_requested_targets", r.requestedDefeatedCount());
+        data.put("remaining_requested_targets", r.entityIds.size() - r.requestedDefeatedCount());
+        data.put("completion", r.indiscriminate ? "self_defense" : r.allRequestedDefeated()
+                ? "complete" : r.requestedDefeatedCount() > 0 ? "partial" : "unconfirmed");
         data.put("defeated_targets", r.defeated().size());
         data.put("lost_targets", r.lost().size());
         data.put("unreachable_targets", r.unreachable().size());

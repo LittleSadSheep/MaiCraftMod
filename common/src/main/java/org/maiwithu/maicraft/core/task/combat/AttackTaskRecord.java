@@ -58,6 +58,11 @@ public final class AttackTaskRecord extends TaskRecord {
     public Set<Integer> unreachable() { return Set.copyOf(unreachable); }
     public int strikes() { return strikes; }
 
+    public long requestedDefeatedCount() { return entityIds.stream().filter(defeated::contains).count(); }
+    public boolean allRequestedDefeated() {
+        return !entityIds.isEmpty() && requestedDefeatedCount() == entityIds.size();
+    }
+
     public void defeated(int id) { defeated.add(id); }
     public void lost(int id) { lost.add(id); }
     public void unreachable(int id) { unreachable.add(id); }

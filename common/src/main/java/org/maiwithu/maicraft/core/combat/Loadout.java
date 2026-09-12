@@ -62,8 +62,8 @@ public final class Loadout {
         Pick bow = null;
         Pick loadableCrossbow = null;
 
-        // 这里扫描整个 Inventory，包括副手；后面的选择器只接受前 36 格，范围不一致，见 A34。
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+        // 主手选择器只支持背包与快捷栏；副手候选不能挡住真正可用的主手武器。
+        for (int slot = 0; slot < Math.min(36, inventory.getContainerSize()); slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty()) {
                 continue;
