@@ -14,6 +14,7 @@ public final class OptionalServerRegressionSuite {
         org.maiwithu.maicraft.core.integration.ae2.Ae2ServerSupplyTest.main(args);
         org.maiwithu.maicraft.core.integration.ae2.Ae2ServerCraftJobTest.main(args);
         org.maiwithu.maicraft.server.machine.ServerNativeRegressionTest.main(args);
+        org.maiwithu.maicraft.server.machine.create.CreatePressInputInspectionTest.main(args);
         org.maiwithu.maicraft.server.machine.NativeInventoryRegressionTest.main(args);
         org.maiwithu.maicraft.server.machine.ProductionRetentionTest.main(args);
         org.maiwithu.maicraft.server.inventory.Ae2NativeCraftingCompletionTest.main(args);
@@ -21,6 +22,7 @@ public final class OptionalServerRegressionSuite {
         org.maiwithu.maicraft.server.machine.connectivity.ConnectionInspectionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.production.ProductionDesignCompilerTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidenceTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.production.ProductionPressInputObstructionTest.main(args);
         MachineProductionContractTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionEvidenceWindowTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.runtime.ProductionSupplyBudgetTest.main(args);

@@ -136,6 +136,18 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     @Override public Check process(Node node, Recipe recipe) {
         JsonObject result = recipes.get(node.id());
         if (!fresh(result) || !node.recipeId().equals(text(result,"recipe_id"))) return unknown("Read this recipe at the actual machine position");
+        JsonObject obstruction = object(result,"input_obstruction");
+        if ("blocked".equals(text(obstruction,"status"))
+                && "native_create_depot_held_item_and_press_recipe_selection".equals(text(obstruction,"provenance"))) {
+            JsonObject identity = object(obstruction,"identity"); Long amount = number(obstruction,"amount");
+            Point receiver = absolute(new Point(node.offset().x(), node.offset().y() - 2, node.offset().z()));
+            if (!receiver.equals(point(obstruction.get("receiver_position"))) || amount == null || amount <= 0
+                    || !"items".equals(text(identity,"kind")) || identityKey(identity) == null
+                    || !identityKey(identity).equals(text(obstruction,"resource_id")))
+                return unknown("Native press input obstruction is not bound to this depot and item");
+            return planned("Create press depot is blocked by " + amount + " " + text(identity,"id")
+                    + "; inspect the existing item before supplying this process");
+        }
         return Boolean.TRUE.equals(bool(result,"compatible")) && "verified".equals(text(result,"compatibility"))
                 ? verified("Native machine selects the declared installed recipe") : unknown("Native machine/recipe compatibility is not verified");
     }

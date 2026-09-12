@@ -46,6 +46,7 @@ public final class ServerMachineRecipe {
         result.addProperty("dimension", player.serverLevel().dimension().location().toString());
         result.addProperty("provenance", "server_recipe_manager_and_native_recipe_selection");
         JsonArray inputs = new JsonArray(), outputs = new JsonArray(), conditions = new JsonArray();
+        List<ItemStack> nativeOutputs = new java.util.ArrayList<>();
         JsonArray power = new JsonArray(), unknown = new JsonArray();
         result.add("inputs", inputs); result.add("outputs", outputs); result.add("conditions", conditions);
         result.add("minimum_power", power); result.add("unknown", unknown);
@@ -83,6 +84,7 @@ public final class ServerMachineRecipe {
                 if (++outputCount > 32) { complete = false; unknown.add("output_limit"); break; }
                 ItemStack stack = (ItemStack) NativeApi.call(output, "com.simibubi.create.content.processing.recipe.ProcessingOutput", "getStack");
                 if (stack.isEmpty()) continue;
+                nativeOutputs.add(stack.copy());
                 JsonObject value = new JsonObject();
                 value.add("resource", resource(stack, player));
                 value.addProperty("amount", stack.getCount());
@@ -110,6 +112,8 @@ public final class ServerMachineRecipe {
                 JsonObject checks = new JsonObject();
                 result.add("condition_checks", checks);
                 if (NativeApi.is(entity, PRESS)) {
+                    result.add("input_obstruction", org.maiwithu.maicraft.server.machine.create.CreatePressInputInspection
+                            .inspect(player, entity, recipe.getIngredients(), nativeOutputs));
                     double speed = ((Number) NativeApi.call(entity, PRESS, "getSpeed")).doubleValue();
                     checks.addProperty("create:nonzero_rotation", speed != 0 ? "verified" : "disabled");
                     checks.addProperty("create:not_overstressed", NativeApi.truth(NativeApi.call(entity, PRESS, "isOverStressed")) ? "disabled" : "verified");
