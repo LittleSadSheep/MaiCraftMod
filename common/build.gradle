@@ -170,3 +170,18 @@ tasks.register('optionalServerRegression', JavaExec) {
     doFirst { regressionDirectory.get().asFile.mkdirs() }
 }
 tasks.named('check') { dependsOn tasks.named('optionalServerRegression') }
+
+tasks.register('portalRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks portal preparation geometry, permissions and native activation evidence.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+    mainClass = 'org.maiwithu.maicraft.core.task.dimension.PortalRegressionSuite'
+    maxHeapSize = '512m'
+    timeout = java.time.Duration.ofSeconds(45)
+    def regressionDirectory = layout.buildDirectory.dir('portal-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
+}
+tasks.named('check') { dependsOn tasks.named('portalRegression') }
