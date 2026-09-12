@@ -64,4 +64,5 @@ final class ProductionConfigurationSupply {
     }
 
     void cancel() { supply.cancel(player); }
+    boolean active() { return supply.active(); }
 }

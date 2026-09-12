@@ -17,12 +17,16 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /** Coordinates native construction, bounded input budgets and production evidence without duplicating their executors. */
 final class MachineProductionTask extends AbstractCompanionTask<MachineProductionTaskRecord> implements ProductionWork {
+    @FunctionalInterface interface InteractionNavigation {
+        PlayerNav to(BlockPos stance, java.util.function.BooleanSupplier reached);
+    }
     private enum Phase { CHECK, BUILD, CONFIGURE, PREPARE, BASELINE, SUPPLY, ADMIT_START, START, REFRESH, OBSERVE, FINAL_VERIFY, DONE }
     private final ProductionRequestSlot requests = new ProductionRequestSlot();
     private ProductionInputSupply supply;
     private final ProductionPreparation preparation;
     private final ProductionConfigurationSupply configurationSupply;
     private final ProductionProgressWatchdog watchdog;
+    private final InteractionNavigation interactionNavigation;
     private ProductionOutputMonitor output;
     private boolean started;
     private Phase phase = Phase.CHECK;
@@ -36,7 +40,13 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     private Map<String, Object> constructionResult = Map.of();
 
     MachineProductionTask(LocalPlayer player, MachineProductionTaskRecord record) {
+        this(player, record, (stance, reached) -> PlayerNav.to(player,
+                () -> org.maiwithu.maicraft.core.pathing.goal.GoalCompiler.standOn(stance), 1.0, reached, PlayerNav.ContextProvider.DEFAULT));
+    }
+
+    MachineProductionTask(LocalPlayer player, MachineProductionTaskRecord record, InteractionNavigation navigation) {
         super(player, record);
+        interactionNavigation = java.util.Objects.requireNonNull(navigation);
         preparation = new ProductionPreparation(player, record.plan, this);
         configurationSupply = new ProductionConfigurationSupply(player, record, this);
         var observation = record.plan.manifest().observation();
@@ -183,16 +193,14 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
 
     @Override public boolean approach(BlockPos position) {
         if (requests.pending()) return true;
-        if (navigationTarget != null && !navigationTarget.equals(position)) {
-            stopNav(); interactionStance = null; rejectedStances.clear();
-        }
+        selectNavigationTarget(position);
         if (!player.level().isLoaded(position) || player.distanceToSqr(position.getCenter()) > 144) {
             observe(position); return false;
         }
-        if (player.distanceToSqr(position.getCenter()) <= 9
-                && ProductionInteractionSight.visible(player.level(), player, position)) { stopNav(); return true; }
+        if (interactionReady(position)) { stopNav(); return true; }
+        // An observation-range route cannot serve as the close interaction route for the same target.
+        if (nav != null && interactionStance == null) stopNav();
         if (nav == null) {
-            navigationTarget = position.immutable();
             if (interactionStance == null) interactionStance =
                     org.maiwithu.maicraft.core.integration.machine.assembly.AssemblyInteractionGeometry.nearestStand(
                             player, position, rejectedStances, eyes -> {
@@ -201,14 +209,14 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                                         ? ProductionInteractionSight.aimFrom(player.level(), player, position, eyes) : null;
                             }, net.minecraft.world.entity.Pose.STANDING);
             if (interactionStance == null) throw new IllegalArgumentException("production_access_unavailable: no visible reachable interaction stance");
-            nav = PlayerNav.to(player,
-                    () -> org.maiwithu.maicraft.core.pathing.goal.GoalCompiler.standOn(interactionStance), 1.0,
-                    () -> net.minecraft.world.phys.Vec3.atBottomCenterOf(interactionStance).distanceToSqr(player.position()) < .16
-                            && ProductionInteractionSight.visible(player.level(), player, position), PlayerNav.ContextProvider.DEFAULT);
+            final BlockPos stance = interactionStance.immutable();
+            nav = interactionNavigation.to(stance,
+                    () -> net.minecraft.world.phys.Vec3.atBottomCenterOf(stance).distanceToSqr(player.position()) < .16
+                            && interactionReady(position));
         }
         var status = nav.tick();
         if (status == PlayerNav.Status.FAILED || status == PlayerNav.Status.ARRIVED) {
-            if (status == PlayerNav.Status.ARRIVED && ProductionInteractionSight.visible(player.level(), player, position)) {
+            if (status == PlayerNav.Status.ARRIVED && interactionReady(position)) {
                 stopNav(); return true;
             }
             rejectedStances.add(interactionStance.asLong()); interactionStance = null; stopNav();
@@ -218,12 +226,12 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
 
     @Override public boolean observe(BlockPos position) {
         if (requests.pending()) return true;
-        if (navigationTarget != null && !navigationTarget.equals(position)) stopNav();
+        selectNavigationTarget(position);
+        if (interactionStance != null) { stopNav(); interactionStance = null; }
         if (player.level().isLoaded(position) && player.distanceToSqr(position.getCenter()) <= 144) {
             stopNav(); return true;
         }
         if (nav == null) {
-            navigationTarget = position.immutable();
             nav = PlayerNav.toGoal(player, () -> NavGoal.near(position, 10), 1.0,
                     () -> player.level().isLoaded(position) && player.distanceToSqr(position.getCenter()) <= 144,
                     PlayerNav.ContextProvider.DEFAULT);
@@ -232,6 +240,16 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             stopNav(); throw new IllegalArgumentException("production_observation_unreachable");
         }
         return false;
+    }
+
+    private void selectNavigationTarget(BlockPos position) {
+        if (position.equals(navigationTarget)) return;
+        stopNav(); navigationTarget = position.immutable(); interactionStance = null; rejectedStances.clear();
+    }
+
+    private boolean interactionReady(BlockPos position) {
+        return player.level().isLoaded(position) && player.distanceToSqr(position.getCenter()) <= 9
+                && ProductionInteractionSight.visible(player.level(), player, position);
     }
 
     @Override public JsonObject request(String operation, JsonObject arguments, boolean mutating) { return requests.call(operation, arguments, mutating); }
@@ -275,6 +293,24 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         }
     }
     @Override protected String successMessage() { return "Machine production and delivery verified over the declared observation window"; }
+    /** Live stage/receipt metadata only; native inventories, coordinates and the authored plan remain in their dedicated reports. */
+    @Override public Map<String, Object> progress() {
+        var result = new LinkedHashMap<String, Object>(super.progress());
+        result.put("task", name()); result.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        result.put("configuration_index", configuration); result.put("configuration_total", r.plan.manifest().configurations().size());
+        if (configuration < r.plan.manifest().configurations().size())
+            result.put("configuration_id", r.plan.manifest().configurations().get(configuration).id());
+        result.put("configuration_read", configurationRead); result.put("configuration_material_pending", configurationSupply.active());
+        result.put("construction_active", construction != null);
+        if (construction != null) result.put("construction_task", construction.name());
+        result.put("navigation_active", nav != null); result.put("preparation_complete", preparation.compilation() != null);
+        result.put("server_request_pending", requests.pending());
+        Map<String, Object> report = requests.report(); var request = new LinkedHashMap<String, Object>();
+        for (String key : java.util.List.of("request_id", "operation", "backend", "status", "effect", "code", "server_tick", "outcome_uncertain"))
+            if (report.containsKey(key)) request.put(key, report.get(key));
+        result.put("server_request", Map.copyOf(request));
+        return Map.copyOf(result);
+    }
     @Override protected Map<String, Object> resultData() {
         var result = new LinkedHashMap<String, Object>();
         result.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
