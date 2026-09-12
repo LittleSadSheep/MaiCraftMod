@@ -329,6 +329,15 @@ public final class EmbeddedBaritoneRuntime {
                 || ((PathingBehavior) backend.getPathingBehavior()).isSafeToCancel();
     }
 
+    /** A stopped route may still own a landing and its item-selection transaction. */
+    public static boolean yieldActiveForExternalAction(LocalPlayer player) {
+        requireClientThread();
+        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (owner != null) owner.settlePendingFailureAtSafeBoundary();
+        if (owner != null && owner.requiresOrphanContinuation()) return false;
+        return owner == null ? context.mutationAvailable() : owner.yieldForExternalAction();
+    }
+
     /** A normal jump keeps its trajectory until its feet have actually missed the target support. */
     public static boolean canHandOffMissedLanding(LocalPlayer player) {
         requireClientThread();

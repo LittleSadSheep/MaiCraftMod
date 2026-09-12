@@ -806,6 +806,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState selectItemTick() {
+        if (!org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime
+                .yieldActiveForExternalAction(player)) return TaskState.RUNNING;
         placementPostureAndMotion();
         if (currentPlacementComplete()) {
             finishPlaced();

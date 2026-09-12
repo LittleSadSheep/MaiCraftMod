@@ -111,7 +111,21 @@ public final class MenuVisibilityTest {
         check(MenuConfirmation.closedToInventory().observe(context, null)
                 == MenuConfirmation.Verdict.APPLIED, "close needs both inventory and no screen");
         visibility.reset();
+        pendingTransactionCannotOpenAnotherInventory();
         System.out.println("MenuVisibilityTest: passed");
+    }
+
+    private static void pendingTransactionCannotOpenAnotherInventory() throws Exception {
+        var h = new ActorControlTestHarness();
+        var port = h.actor.menus();
+        for (var kind : new MenuReceipt.Kind[]{MenuReceipt.Kind.SWAP_TO_HOTBAR, MenuReceipt.Kind.CLOSE}) {
+            var receipt = new MenuReceipt(kind, h.context, 0, 0, 20, kind == MenuReceipt.Kind.CLOSE,
+                    (context, pending) -> MenuConfirmation.Verdict.PENDING);
+            ActorControlTestHarness.field(DefaultMenuPort.class, "active").set(port, receipt);
+            check(!port.ensureVisible(h.context), "pending " + kind + " must keep a successor from reopening inventory");
+            check(h.minecraft.screen == null && h.context.mutationAvailable() && !receipt.terminal(),
+                    "waiting for the old receipt cannot replace it, mutate its result or consume another native operation");
+        }
     }
 
     private static void assign(Class<?> owner, Object target, String name, Object value) throws Exception {

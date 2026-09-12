@@ -22,7 +22,7 @@ public final class DefaultMenuPort implements MenuPort {
         // 先停移动。需要背包界面时打开它，并等它真的绘制过；不会直接在隐藏的物品栏对象上点击。
         DefaultLocalPlayerContext current = requireSubmission(context);
         current.body().releaseAll();
-        if (closingMenu != null) return false;
+        if (closingMenu != null || active != null && !active.terminal()) return false;
         // Chat coexists with automation; replace it with the real inventory before any clicks.
         // Other user dialogs remain untouched, and the new inventory still needs a rendered frame.
         if (DefaultBodyControlPort.permitsWorldMovement(current.minecraft().screen)

@@ -33,6 +33,7 @@ public final class NavigationHandoffTest {
         pollingYieldRetainsDrive();
         abandonedCallerStillReachesTheSafeBoundary(false);
         abandonedCallerStillReachesTheSafeBoundary(true);
+        buildSelectionWaitsForReleasedNavigation();
         System.out.println("NavigationHandoffTest: passed");
     }
 
@@ -78,6 +79,37 @@ public final class NavigationHandoffTest {
         }
     }
 
+    private static void buildSelectionWaitsForReleasedNavigation() throws Exception {
+        try (var world = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness();
+             Fixture fixture = new Fixture(world.player)) {
+            world.inventory.setItem(0, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE));
+            var target = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target(
+                    net.minecraft.world.level.block.Blocks.STONE, net.minecraft.world.item.Items.STONE,
+                    new net.minecraft.core.BlockPos(4, 1, 4), "navigation handoff", null, null, null);
+            var record = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord("handoff", 1000, java.util.List.of(target), false);
+            Class<?> type = Class.forName("org.maiwithu.maicraft.core.task.build.FirstPersonBuildCompanionTask");
+            var constructor = type.getDeclaredConstructor(LocalPlayer.class, record.getClass()); constructor.setAccessible(true);
+            Object task = constructor.newInstance(world.player, record);
+            var cellConstructor = Class.forName(type.getName() + "$CellPlan").getDeclaredConstructor(target.getClass(), java.util.List.class);
+            cellConstructor.setAccessible(true); field(type, "cell").set(task, cellConstructor.newInstance(target, java.util.List.of()));
+            var select = type.getDeclaredMethod("selectItemTick"); select.setAccessible(true);
+            fixture.nav.stop();
+            for (int tick = 0; tick < 3; tick++) {
+                world.nextTick();
+                check(select.invoke(task) == org.maiwithu.maicraft.task.TaskState.RUNNING,
+                        "construction waits while the stopped navigation still owns an unsafe movement");
+                var gate = (org.maiwithu.maicraft.core.task.FirstPersonActionGate) field(type, "selection").get(task);
+                check(!gate.started(), "construction must not start a competing inventory transaction before native navigation yields");
+                check(fixture.nav.requiresOrphanContinuation() && fixture.inputs.isInputForcedDown(Input.MOVE_FORWARD),
+                        "waiting construction must preserve orphan continuation and physical steering to safety");
+            }
+            fixture.finishMovement(); world.nextTick();
+            select.invoke(task);
+            check(field(type, "phase").get(task).toString().equals("AIM"),
+                    "the same construction resumes item selection once the old route releases ownership");
+        }
+    }
+
     // 拼出本测试会触及的导航和按键对象，并在结束时恢复全局状态；没有创建真实客户端窗口。
     private static final class Fixture implements AutoCloseable {
         private final Object previousMinecraft = field(Minecraft.class, "instance").get(null);
@@ -90,10 +122,12 @@ public final class NavigationHandoffTest {
         private final InputOverrideHandler inputs;
         private final EmbeddedBaritoneNavigator nav;
 
-        private Fixture() throws Exception {
+        private Fixture() throws Exception { this(null); }
+
+        private Fixture(LocalPlayer suppliedPlayer) throws Exception {
             memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
-            Minecraft minecraft = allocate(Minecraft.class);
-            minecraft.player = allocate(LocalPlayer.class); // Distinct from the unused null navigator player.
+            Minecraft minecraft = suppliedPlayer == null ? allocate(Minecraft.class) : Minecraft.getInstance();
+            if (suppliedPlayer == null) minecraft.player = allocate(LocalPlayer.class); // Unused by the pure navigation cases.
             set(minecraft, "gameThread", Thread.currentThread());
             field(Minecraft.class, "instance").set(null, minecraft);
             field(ClientRuntime.actor().getClass(), "minecraft").set(ClientRuntime.actor(), minecraft);
@@ -116,7 +150,7 @@ public final class NavigationHandoffTest {
             set(pathing, "current", allocate(PathExecutor.class));
             set(pathing, "toDispatch", new LinkedBlockingQueue<>());
             set(pathing, "safeToCancel", false);
-            nav = new EmbeddedBaritoneNavigator(null, () -> null, () -> false,
+            nav = new EmbeddedBaritoneNavigator(suppliedPlayer, () -> null, () -> false,
                     PlayerNav.ContextProvider.DEFAULT, true);
             field(EmbeddedBaritoneRuntime.class, "owner").set(null, nav);
             field(EmbeddedBaritoneRuntime.class, "backend").set(null, baritone);
