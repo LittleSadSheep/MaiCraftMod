@@ -30,5 +30,7 @@ public final class MaiCraftFabric implements ModInitializer {
         ServerPlayerEvents.AFTER_RESPAWN.register((previous, player, alive) ->
                 OptionalServerNetwork.worldChanged(player));
         ServerLifecycleEvents.SERVER_STOPPED.register(OptionalServerNetwork::stopped);
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(
+                org.maiwithu.maicraft.server.machine.watch.MachineWatchService::tick);
     }
 }

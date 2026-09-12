@@ -158,6 +158,12 @@ public final class ServerProductionEvents {
 
     private static Object connection(ServerPlayer player) { return player.connection == null ? player : player.connection; }
 
+    /** Server modules may read native history; this is not an RPC event ingestion endpoint. */
+    public static ProductionEventJournal trustedJournal(ServerLevel level) {
+        if (!level.getServer().isSameThread()) throw new IllegalStateException("Native history requires the server thread");
+        return journal(level);
+    }
+
     private static ProductionEventJournal journal(ServerLevel level) {
         return JOURNALS.computeIfAbsent(level, key -> new ProductionEventJournal(key.dimension().location().toString()));
     }

@@ -38,6 +38,11 @@ public final class ServerMachineOperations {
         events.addProperty("retained_endpoints_per_level", ProductionHistoryIndex.RETAINED_ENDPOINTS);
         events.addProperty("release_watch_supported", true);
         ServerOperationRegistry.register("machine.production_events", 1, false, events, ServerProductionEvents::inspect);
+        JsonObject watch = new JsonObject();
+        watch.addProperty("max_authorize_positions", 4); watch.addProperty("background_read_only", true);
+        watch.addProperty("registration_requires_nearby_native_access", true);
+        ServerOperationRegistry.register("machine.watch", 1, false, watch,
+                org.maiwithu.maicraft.server.machine.watch.MachineWatchService::execute);
         ServerOperationRegistry.register("machine.connections", 1, false, observation, ServerConnectionInspection::inspect);
         JsonObject inventory = new JsonObject();
         inventory.addProperty("max_amount", 64);

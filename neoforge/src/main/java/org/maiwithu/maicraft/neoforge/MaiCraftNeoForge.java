@@ -25,6 +25,7 @@ public final class MaiCraftNeoForge {
         NeoForge.EVENT_BUS.addListener(this::changedDimension);
         NeoForge.EVENT_BUS.addListener(this::respawn);
         NeoForge.EVENT_BUS.addListener(this::stopped);
+        NeoForge.EVENT_BUS.addListener(this::serverTick);
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
@@ -52,4 +53,7 @@ public final class MaiCraftNeoForge {
     }
 
     private void stopped(ServerStoppedEvent event) { OptionalServerNetwork.stopped(event.getServer()); }
+    private void serverTick(net.neoforged.neoforge.event.tick.ServerTickEvent.Post event) {
+        org.maiwithu.maicraft.server.machine.watch.MachineWatchService.tick(event.getServer());
+    }
 }

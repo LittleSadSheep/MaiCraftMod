@@ -54,10 +54,14 @@ public final class OptionalServerNetwork {
         var dispatcher = CONNECTIONS.get(player.connection);
         if (dispatcher != null) dispatcher.invalidateWorld();
         ServerProductionEvents.disconnected(player);
+        org.maiwithu.maicraft.server.machine.watch.MachineWatchService.disconnected(player);
     }
 
     public static void disconnected(ServerPlayer player) {
-        try { ServerProductionEvents.disconnected(player); }
+        try {
+            ServerProductionEvents.disconnected(player);
+            org.maiwithu.maicraft.server.machine.watch.MachineWatchService.disconnected(player);
+        }
         finally { CONNECTIONS.remove(player.connection); }
     }
     public static void stopped(MinecraftServer server) {
@@ -67,5 +71,6 @@ public final class OptionalServerNetwork {
                     .map(connection -> connection.player).toList();
         }
         remaining.forEach(OptionalServerNetwork::disconnected);
+        org.maiwithu.maicraft.server.machine.watch.MachineWatchService.stopped(server);
     }
 }
