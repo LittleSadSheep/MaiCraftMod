@@ -76,7 +76,7 @@ public final class BodyPostureObservationTest {
         var mode = h.allocate(ObservedUseMode.class);
         var previousContext = h.context;
         h.minecraft.gameMode = mode;
-        h.context = new DefaultLocalPlayerContext(h.actor, h.minecraft, h.player, null, mode, null,
+        h.context = new DefaultLocalPlayerContext(h.actor, h.minecraft, h.player, null, mode, h.connection,
                 0, 0, h.tick, true);
         ActorControlTestHarness.field(ClientActorBoundary.class, "activeContext").set(h.actor, h.context);
         h.actions.advance(h.context);

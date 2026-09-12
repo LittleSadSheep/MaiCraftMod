@@ -96,7 +96,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
     public void nextTick() throws Exception {
         h.nextTick(true); level.time++;
         ActorControlTestHarness.field(ClientActorBoundary.class, "tickRevision").setLong(actor, h.tick);
-        h.context = new DefaultLocalPlayerContext(actor, h.minecraft, player, level, mode, null, 0, 0, h.tick, true);
+        h.context = new DefaultLocalPlayerContext(actor, h.minecraft, player, level, mode, h.connection, 0, 0, h.tick, true);
         ActorControlTestHarness.field(ClientActorBoundary.class, "activeContext").set(actor, h.context);
     }
 
@@ -155,10 +155,12 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
 
     static final class UseMode extends MultiPlayerGameMode {
         int items, blocks, attacks;
+        Runnable beforeBlockUse;
         private UseMode() { super(null, null); }
         @Override public InteractionResult useItem(Player player, InteractionHand hand) { items++; return InteractionResult.PASS; }
         @Override public void attack(Player player, Entity target) { attacks++; }
         @Override public InteractionResult useItemOn(LocalPlayer player, InteractionHand hand, BlockHitResult hit) {
+            if (beforeBlockUse != null) beforeBlockUse.run();
             ((TestLevel) player.level()).blockSequence++;
             blocks++; return InteractionResult.PASS;
         }

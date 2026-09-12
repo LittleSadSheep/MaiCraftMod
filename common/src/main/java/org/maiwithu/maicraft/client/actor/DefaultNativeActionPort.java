@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.client.actor;
 
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.network.protocol.game.ServerboundSetCreativeModeSlotPacket;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
@@ -138,6 +140,14 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                 NativeActionReceipt.Kind.USE_BLOCK, current,
                 acknowledged == null ? confirmation : acknowledged, timeoutTicks);
         try {
+            // Tasks run after the player's movement packet; rendered camera updates can be newer.
+            // UseItemOn carries neither rotation nor crouch, so send the observed body first.
+            var player = current.player();
+            current.connection().send(new ServerboundMovePlayerPacket.Rot(
+                    player.getYRot(), player.getXRot(), player.onGround()));
+            current.connection().send(new ServerboundPlayerCommandPacket(player, player.isShiftKeyDown()
+                    ? ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY
+                    : ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY));
             var result = current.gameMode().useItemOn(current.player(), hand, hit);
             if (acknowledged != null) acknowledged.submitted();
             if (result.shouldSwing()) current.player().swing(hand);

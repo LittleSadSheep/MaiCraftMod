@@ -17,6 +17,7 @@ final class ActorControlTestHarness {
     final Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
     final Minecraft minecraft = allocate(Minecraft.class);
     final LocalPlayer player = allocate(TestPlayer.class);
+    final RecordingConnection connection = allocate(RecordingConnection.class);
     final ClientActorBoundary actor = new ClientActorBoundary(minecraft);
     final DefaultBodyControlPort body = actor.body();
     final DefaultNativeActionPort actions = actor.actions();
@@ -24,7 +25,9 @@ final class ActorControlTestHarness {
     long tick;
 
     ActorControlTestHarness() throws Exception {
+        connection.packets = new java.util.ArrayList<>();
         minecraft.player = player;
+        field(LocalPlayer.class, "connection").set(player, connection);
         field(Minecraft.class, "gameThread").set(minecraft, Thread.currentThread());
         field(ClientActorBoundary.class, "observedPlayer").set(actor, player);
         InventoryMenu inventory = allocate(InventoryMenu.class);
@@ -39,7 +42,7 @@ final class ActorControlTestHarness {
     DefaultLocalPlayerContext nextTick(boolean permitsNativeActions) throws Exception {
         tick++;
         field(ClientActorBoundary.class, "tickRevision").setLong(actor, tick);
-        context = new DefaultLocalPlayerContext(actor, minecraft, player, null, null, null,
+        context = new DefaultLocalPlayerContext(actor, minecraft, player, null, null, connection,
                 0, 0, tick, permitsNativeActions);
         field(ClientActorBoundary.class, "activeContext").set(actor, context);
         body.beginTick(tick);
@@ -73,6 +76,16 @@ final class ActorControlTestHarness {
 
     static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    static final class RecordingConnection extends net.minecraft.client.multiplayer.ClientPacketListener {
+        java.util.List<net.minecraft.network.protocol.Packet<?>> packets;
+        boolean failSend;
+        private RecordingConnection() { super(null, null, null); }
+        @Override public void send(net.minecraft.network.protocol.Packet<?> packet) {
+            if (failSend) throw new IllegalStateException("test connection send failed");
+            packets.add(packet);
+        }
     }
 
     /** Unsafe skips the constructor; sprinting is recorded without entity or network mutation. */

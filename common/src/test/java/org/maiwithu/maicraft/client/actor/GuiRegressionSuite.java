@@ -11,6 +11,7 @@ public final class GuiRegressionSuite {
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);
         BlockUseConfirmationTest.main(args);
+        BlockUsePostureSyncTest.main(args);
         BodyControlInputTest.main(args);
         BodyPostureObservationTest.main(args);
         BodyCameraSmoothingTest.main(args);
