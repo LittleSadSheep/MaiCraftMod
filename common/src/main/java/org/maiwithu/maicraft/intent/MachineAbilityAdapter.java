@@ -97,6 +97,17 @@ final class MachineAbilityAdapter {
                         if (p.has("material_policy")) SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(requiredString(p, "material_policy", 64));
                         requireMachineTarget(goal);
                     }
+                    case "watch_production" -> {
+                        only(p,"operation","snapshot_id","production","allow_use","minimum_process_events","idle_ticks","max_duration_ticks");
+                        requiredString(p,"snapshot_id",36); MachineProductionIntent.validate(p); bool(p,"allow_use",false);
+                        integer(p,"minimum_process_events",1,1,100);
+                        int duration = integer(p,"max_duration_ticks",72000,20,72000);
+                        integer(p,"idle_ticks",6000,20,duration); requireMachineTarget(goal);
+                    }
+                    case "cancel_watch" -> {
+                        only(p,"operation","job_id","allow_use"); UUID.fromString(requiredString(p,"job_id",36)); bool(p,"allow_use",false);
+                        if (goal.target() != null) throw bad("cancel_watch binds its job_id; omit target");
+                    }
                     case "drive_vehicle" -> {
                         only(p,"operation","structure_id","allow_use");
                         UUID.fromString(requiredString(p,"structure_id",36));
@@ -202,6 +213,7 @@ final class MachineAbilityAdapter {
         if (!player.level().isLoaded(center)) throw bad("machine_anchor_unloaded: travel closer before inspecting; unloaded terrain is not empty space");
         MachineSnapshots.Snapshot snapshot = MachineSnapshots.inspect(player, label, center, radius);
         runtime.remember(label, position);
+        org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.inspected(player,label,center,radius);
         return new IntentAction.Native(new org.maiwithu.maicraft.client.server.ServerMachineObservationTaskRecord(
                 "machine-inspection-" + UUID.randomUUID(), player.level().getGameTime() + 1_200, snapshot,
                 integer(p, "component_offset", 0, 0, 768), integer(p, "resource_offset", 0, 0, 4096)));
@@ -245,11 +257,25 @@ final class MachineAbilityAdapter {
         long deadline = player.level().getGameTime() + 3 * 60 * 20;
         String callId = "machine-" + UUID.randomUUID();
         String operation = requiredString(p, "operation", 64);
+        if ("cancel_watch".equals(operation)) {
+            var result = org.maiwithu.maicraft.client.server.ClientMachineWatches.cancel(player,UUID.fromString(requiredString(p,"job_id",36)));
+            return new IntentAction.Report(TaskResult.ok("后台观察取消已请求；机器本身不会被关闭。",Map.of("monitor",result)),null);
+        }
+        if ("watch_production".equals(operation)) {
+            if (!org.maiwithu.maicraft.client.server.ServerAssistClient.supported("machine.watch")) throw bad("machine_watch_requires_server_support");
+            MachineSnapshots.Snapshot snapshot = boundSnapshot(goal,player,runtime);
+            var plan = new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(snapshot.center(),snapshot.dimension(),p.getAsJsonObject("production"));
+            int duration = integer(p,"max_duration_ticks",72000,20,72000);
+            var task = new org.maiwithu.maicraft.core.integration.machine.runtime.MachineWatchTaskRecord(callId,player.level().getGameTime()+6000,
+                    snapshot.label(),plan,integer(p,"minimum_process_events",1,1,100),duration,integer(p,"idle_ticks",6000,20,duration));
+            MachineSnapshots.consume(snapshot); return new IntentAction.Native(task);
+        }
         if ("run_production".equals(operation)) {
             MachineProductionIntent.requireRuntime(p.getAsJsonObject("production"));
             MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
             var plan = new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(
                     snapshot.center(), snapshot.dimension(), p.getAsJsonObject("production"));
+            org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerPlan(player,snapshot.label(),plan);
             var protections = new java.util.LinkedHashSet<>(goal.inheritedProtectionLabels());
             if (p.has("protected_labels")) p.getAsJsonArray("protected_labels").forEach(value -> protections.add(value.getAsString()));
             var task = new org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord(
@@ -368,6 +394,8 @@ final class MachineAbilityAdapter {
                     task.getToolCallId(), deadline,
                     new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(anchor,
                             snapshot.dimension(), p.getAsJsonObject("production")), task, protectedLabels);
+            if (execution instanceof org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord production)
+                org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerPlan(player,snapshot.label(),production.plan);
             MachineSnapshots.consume(snapshot);
             // 一份观察只用于发起一次修改，即使后面的施工失败，也要重新观察才可另开一份修改任务。
             return new IntentAction.Native(execution);
