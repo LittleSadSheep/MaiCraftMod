@@ -5,6 +5,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.JsonOps;
 import java.util.Set;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.player.LocalPlayer;
@@ -28,6 +30,8 @@ public final class Ae2ServerSupplyTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         exactStockAndDestination();
         fallbackAndCraftIdentity();
+        serverFallbackRestoresAccess();
+        confirmedProvenanceIsBounded();
         System.out.println("Ae2ServerSupplyTest: passed");
     }
 
@@ -108,6 +112,74 @@ public final class Ae2ServerSupplyTest {
         return new ClientRequestReceipt.Snapshot(UUID.randomUUID(), "inventory.ae2_supply", 1, true,
                 ClientRequestReceipt.Backend.SERVER, ClientRequestReceipt.Status.REJECTED, effect, false,
                 code, "", 1, new JsonObject());
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void serverFallbackRestoresAccess() throws Exception {
+        var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
+        var session = (Ae2SupplySession) memory.allocateInstance(Ae2SupplySession.class);
+        var server = serverSupply();
+        field(Ae2ServerSupply.class, "terminal").set(server,
+                new Ae2ServerSupply.Progress(Ae2ServerSupply.State.FALLBACK, "unsupported_operation", "untouched"));
+        field(Ae2SupplySession.class, "serverSupply").set(session, server);
+        field(Ae2SupplySession.class, "terminalAccess").set(session, "server_fixed_terminal");
+        field(Ae2SupplySession.class, "accessBeforeServer").set(session, "fixed_terminal");
+        var fallback = field(Ae2SupplySession.class, "serverFallbackPhase");
+        fallback.set(session, Enum.valueOf((Class) fallback.getType(), "OPEN_FIXED"));
+        var tick = Ae2SupplySession.class.getDeclaredMethod("tickServerSupply",
+                org.maiwithu.maicraft.client.actor.LocalPlayerContext.class);
+        tick.setAccessible(true); tick.invoke(session, new Object[]{null});
+        check(session.phase().equals("open_fixed")
+                        && field(Ae2SupplySession.class, "serverSupply").get(session) == null
+                        && field(Ae2SupplySession.class, "terminalAccess").get(session).equals("fixed_terminal"),
+                "actual no-effect fallback resumes native terminal access without claiming the server route");
+    }
+
+    private static void confirmedProvenanceIsBounded() throws Exception {
+        var supply = serverSupply();
+        var record = Ae2ServerSupply.class.getDeclaredMethod("recordConfirmed", ClientRequestReceipt.Snapshot.class, int.class);
+        record.setAccessible(true);
+        for (int index = 0; index < 65; index++) record.invoke(supply, applied(), 7);
+        var evidence = supply.evidence();
+        var receipts = (List<?>) evidence.get("server_supply_receipts");
+        check(receipts.size() == 64 && evidence.get("server_supply_receipt_count").equals(65)
+                        && evidence.get("server_supply_transferred").equals(65L)
+                        && evidence.get("server_supply_receipts_truncated").equals(true),
+                "bounded provenance retains exact confirmed totals without unbounded receipt payloads");
+        var first = (Map<?, ?>) receipts.getFirst();
+        UUID.fromString((String) first.get("request_id"));
+        check(first.get("backend").equals("server") && first.get("amount").equals(1)
+                        && first.get("resource_id").equals("opaque-component-key") && first.get("player_slot").equals(7),
+                "provenance records the authoritative exact-key transfer and reconciled player destination");
+        for (var status : List.of(ClientRequestReceipt.Status.PENDING, ClientRequestReceipt.Status.UNKNOWN,
+                ClientRequestReceipt.Status.REJECTED)) {
+            var observed = applied();
+            var invalid = new ClientRequestReceipt.Snapshot(observed.requestId(), observed.operationId(), 1, true,
+                    observed.backend(), status, ClientRequestReceipt.Effect.UNKNOWN, false, "", "", 10, observed.result());
+            try { Ae2ServerSupply.confirmedReceipt(invalid, 7); throw new AssertionError("unconfirmed provenance accepted"); }
+            catch (IllegalStateException expected) { /* pending or uncertain extraction cannot become evidence */ }
+        }
+        var outcome = new Ae2ResourceSupply.Outcome(Ae2ResourceSupply.Status.SUCCEEDED, "resources_supplied", "",
+                List.of(), Ae2ResourceSupply.Operation.SUPPLY, false, 0, 0, true, false,
+                "server_fixed_terminal", List.of(), evidence);
+        check(outcome.data().get("server_supply_receipts").equals(receipts),
+                "actual supply result carries bounded provenance into acquire child_data");
+    }
+
+    private static Ae2ServerSupply serverSupply() {
+        var request = new Ae2ResourceSupply.Request(List.of(new Ae2ResourceSupply.Group(
+                ResourceLocation.parse("minecraft:iron_ingot"), 1)), false);
+        return new Ae2ServerSupply(null, request, null, Set.of(), ignored -> 0);
+    }
+    private static ClientRequestReceipt.Snapshot applied() {
+        var result = new JsonObject(); result.addProperty("transferred", 1); result.addProperty("requested", 1);
+        result.addProperty("resource_id", "opaque-component-key"); result.addProperty("membership", "network-one");
+        return new ClientRequestReceipt.Snapshot(UUID.randomUUID(), "inventory.ae2_supply", 1, true,
+                ClientRequestReceipt.Backend.SERVER, ClientRequestReceipt.Status.SUCCEEDED,
+                ClientRequestReceipt.Effect.APPLIED, false, "", "", 10, result);
+    }
+    private static java.lang.reflect.Field field(Class<?> type, String name) throws Exception {
+        var field = type.getDeclaredField(name); field.setAccessible(true); return field;
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
 }

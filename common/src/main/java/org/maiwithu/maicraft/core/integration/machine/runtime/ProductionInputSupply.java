@@ -35,6 +35,8 @@ public final class ProductionInputSupply {
     private final Map<ProductionSupplyBudget.Key, Long> observedStock = new LinkedHashMap<>();
     private final Map<ProductionSupplyBudget.Key, String> status = new LinkedHashMap<>();
     private final Map<ProductionSupplyBudget.Key, ProductionSupplyPacer> pacing = new LinkedHashMap<>();
+    private final List<Map<String, Object>> acquisitionReceipts = new ArrayList<>();
+    private int completedAcquisitions;
     private Phase phase = Phase.OBSERVE;
     private JsonObject body;
     private int cursor;
@@ -75,6 +77,14 @@ public final class ProductionInputSupply {
         if (acquisition.active()) {
             var result = acquisition.tick(player, work::advanceChild);
             work.extendDeadlineTo(acquisition.childDeadline());
+            if (result.status() != SemanticMaterialSupplyCoordinator.Status.RUNNING) {
+                completedAcquisitions++;
+                if (acquisitionReceipts.size() < 16) {
+                    Map<String, Object> evidence = new LinkedHashMap<>(result.receipt());
+                    evidence.put("source", supply.key().source());
+                    acquisitionReceipts.add(Map.copyOf(evidence));
+                }
+            }
             if (result.status() == SemanticMaterialSupplyCoordinator.Status.FAILED)
                 throw new IllegalStateException("production_input_acquisition_failed: " + result.message());
             if (result.status() == SemanticMaterialSupplyCoordinator.Status.RUNNING) return false;
@@ -250,6 +260,9 @@ public final class ProductionInputSupply {
         report.put("cancelled", cancelled); report.put("remaining_to_inject", remaining());
         report.put("confirmed_injected", confirmedInjected()); report.put("sources", List.copyOf(entries));
         report.put("next_refill_tick", nextRefillTick);
+        report.put("material_acquisitions", List.copyOf(acquisitionReceipts));
+        report.put("material_acquisition_count", completedAcquisitions);
+        report.put("material_acquisitions_truncated", completedAcquisitions > acquisitionReceipts.size());
         report.put("nonitem_supply", "native source observation and production preflight required; no fabricated transfers");
         if (acquisition.active()) report.put("acquisition", acquisition.progress());
         return Map.copyOf(report);

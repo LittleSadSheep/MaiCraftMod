@@ -61,6 +61,8 @@ public final class MachineRegressionSuite {
         org.maiwithu.maicraft.core.task.build.MachineBlueprintGeometryTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExecutionContextTest.main(args);
         org.maiwithu.maicraft.core.task.supply.BuildBatchCompletionTest.main(args);
+        try { org.maiwithu.maicraft.core.task.supply.MaterialSupplyReceiptTest.main(args); }
+        catch (Exception failure) { throw new AssertionError(failure); }
         try { org.maiwithu.maicraft.core.task.supply.BuildSupplyPreviewTest.main(args); }
         catch (Exception failure) { throw new AssertionError("preview before material supply", failure); }
         SemanticBuildPlannerTest.main(args);

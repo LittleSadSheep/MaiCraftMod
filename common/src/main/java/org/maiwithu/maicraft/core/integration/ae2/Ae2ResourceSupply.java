@@ -181,7 +181,8 @@ public final class Ae2ResourceSupply {
             boolean effectsStarted,
             boolean uncertain,
             String terminalAccess,
-            List<Map<String, Object>> containerFillReceipts) {
+            List<Map<String, Object>> containerFillReceipts,
+            Map<String, Object> serverSupplyEvidence) {
         public Outcome {
             Objects.requireNonNull(status, "status");
             Objects.requireNonNull(operation, "operation");
@@ -190,6 +191,14 @@ public final class Ae2ResourceSupply {
             groups = List.copyOf(groups);
             terminalAccess = terminalAccess == null ? "unavailable" : terminalAccess;
             containerFillReceipts = List.copyOf(containerFillReceipts);
+            serverSupplyEvidence = Map.copyOf(serverSupplyEvidence);
+        }
+
+        public Outcome(Status status, String code, String message, List<GroupDelta> groups, Operation operation,
+                       boolean craftingAllowed, int craftingRequests, int craftingJobsSubmitted, boolean effectsStarted,
+                       boolean uncertain, String terminalAccess, List<Map<String, Object>> containerFillReceipts) {
+            this(status, code, message, groups, operation, craftingAllowed, craftingRequests, craftingJobsSubmitted,
+                    effectsStarted, uncertain, terminalAccess, containerFillReceipts, Map.of());
         }
 
         public boolean terminal() {
@@ -244,6 +253,7 @@ public final class Ae2ResourceSupply {
             data.put("mechanical_retry_allowed", !effectsStarted && !uncertain);
             data.put("terminal_access", terminalAccess);
             if (!containerFillReceipts.isEmpty()) data.put("container_fill_receipts", containerFillReceipts);
+            data.putAll(serverSupplyEvidence);
             return Map.copyOf(data);
         }
     }

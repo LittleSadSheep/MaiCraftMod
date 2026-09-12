@@ -322,6 +322,22 @@ public final class SemanticMaterialSupplyCoordinator {
             if (options instanceof List<?> list) receipt.put("recovery_options", safeOptions(list));
             Object issues = childData.get("issues");
             if (issues instanceof List<?> list) receipt.put("issues", safeIssues(list));
+            List<Map<String, Object>> storage = new ArrayList<>();
+            if (childData.get("attempts") instanceof List<?> attempts) {
+                for (Object value : attempts) {
+                    if (value instanceof Map<?, ?> attempt && "storage".equals(attempt.get("source"))
+                            && attempt.get("child_data") instanceof Map<?, ?> evidence) {
+                        Map<String, Object> entry = new LinkedHashMap<>();
+                        for (String key : List.of("terminal_access", "server_supply_receipts",
+                                "server_supply_receipt_count", "server_supply_transferred",
+                                "server_supply_receipts_truncated")) {
+                            if (evidence.containsKey(key)) entry.put(key, evidence.get(key));
+                        }
+                        if (!entry.isEmpty()) storage.add(Map.copyOf(entry));
+                    }
+                }
+            }
+            if (!storage.isEmpty()) receipt.put("storage_attempts", List.copyOf(storage));
         }
         return Map.copyOf(receipt);
     }

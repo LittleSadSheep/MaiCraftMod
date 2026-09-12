@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.core.integration.ae2;
 
 import com.google.gson.JsonObject;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.ToIntFunction;
 import net.minecraft.client.player.LocalPlayer;
@@ -45,6 +47,9 @@ final class Ae2ServerSupply {
     private int awaitingOutputAmount;
     private long craftCompletedTick;
     private long nextStockQueryTick;
+    private final List<Map<String, Object>> confirmedReceipts = new ArrayList<>();
+    private long confirmedTransfers;
+    private int confirmedRequests;
 
     Ae2ServerSupply(LocalPlayer player, Ae2ResourceSupply.Request request, Ae2TerminalAccess.FixedTarget target,
                     Set<Integer> reserved, ToIntFunction<Ae2ResourceSupply.Group> groupProgress) {
@@ -198,6 +203,7 @@ final class Ae2ServerSupply {
         ItemStack after = player.getInventory().getItem(slot);
         int expected = destinationBefore.getCount() + transferred;
         if (ItemStack.isSameItemSameComponents(after, allocation.sample()) && after.getCount() == expected) {
+            recordConfirmed(receipt, slot);
             allocation.confirm(transferred);
             stock.debit(entry.serial(), transferred);
             awaitingInventory = false;
@@ -240,6 +246,33 @@ final class Ae2ServerSupply {
     Ae2SupplyPlanner.Plan plan() { return plan; }
     int craftPlans() { return craftPlans + (craft != null && craft.planned() ? 1 : 0); }
     int craftStarts() { return craftStarts + (craft != null && craft.started() ? 1 : 0); }
+    /** Called only after exact native result and the corresponding client inventory delta agree. */
+    private void recordConfirmed(ClientRequestReceipt.Snapshot receipt, int playerSlot) {
+        Map<String, Object> row = confirmedReceipt(receipt, playerSlot);
+        confirmedRequests++;
+        confirmedTransfers = Math.addExact(confirmedTransfers, ((Number) row.get("amount")).longValue());
+        if (confirmedReceipts.size() < 64) confirmedReceipts.add(row);
+    }
+    static Map<String, Object> confirmedReceipt(ClientRequestReceipt.Snapshot receipt, int playerSlot) {
+        if (receipt.backend() != ClientRequestReceipt.Backend.SERVER || !receipt.mutating() || receipt.retired()
+                || receipt.status() != ClientRequestReceipt.Status.SUCCEEDED
+                || receipt.effect() != ClientRequestReceipt.Effect.APPLIED
+                || !receipt.operationId().equals("inventory.ae2_supply"))
+            throw new IllegalStateException("Only a confirmed server extraction can enter supply provenance");
+        JsonObject result = receipt.result();
+        int moved = result.get("transferred").getAsBigDecimal().intValueExact();
+        int requestedAmount = result.get("requested").getAsBigDecimal().intValueExact();
+        if (moved < 1 || moved > requestedAmount) throw new IllegalStateException("Invalid confirmed extraction amount");
+        return Map.of("operation", receipt.operationId(), "request_id", receipt.requestId().toString(),
+                "backend", "server", "amount", moved, "requested", requestedAmount, "confirmed", true,
+                "resource_id", result.get("resource_id").getAsString(), "membership", result.get("membership").getAsString(),
+                "server_tick", receipt.serverTick(), "player_slot", playerSlot);
+    }
+    Map<String, Object> evidence() {
+        return Map.of("server_supply_receipts", List.copyOf(confirmedReceipts),
+                "server_supply_receipt_count", confirmedRequests, "server_supply_transferred", confirmedTransfers,
+                "server_supply_receipts_truncated", confirmedRequests > confirmedReceipts.size());
+    }
     boolean runningRequest() { return terminal == null && (pending != null || craft != null); }
     private Progress running() { return new Progress(State.RUNNING, "server_supply_pending", "waiting for authoritative supply evidence"); }
     private Progress finish(State state, String code, String message) { return terminal = new Progress(state, code, message); }

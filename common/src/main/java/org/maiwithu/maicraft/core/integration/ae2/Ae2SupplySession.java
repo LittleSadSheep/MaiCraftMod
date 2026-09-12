@@ -183,6 +183,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private boolean serverRouteConsidered;
     private boolean effectsBeforeServer;
     private Phase serverFallbackPhase;
+    private String accessBeforeServer;
 
     Ae2SupplySession(
             LocalPlayer player, Ae2ResourceSupply.Request request, Ae2ReflectionBridge bridge) {
@@ -751,6 +752,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 || !Ae2ServerSupply.available()) return false;
         serverRouteConsidered = true;
         effectsBeforeServer = effectsStarted;
+        accessBeforeServer = terminalAccess;
         serverFallbackPhase = fallback;
         baseline = inventoryCounts();
         serverSupply = new Ae2ServerSupply(player, request, target, reservedInventorySlots(), this::groupProgress);
@@ -777,6 +779,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             case FALLBACK -> {
                 serverSupply = null;
                 plan = null;
+                terminalAccess = accessBeforeServer;
                 setPhase(serverFallbackPhase);
             }
             case SUCCEEDED -> beginFinish(Ae2ResourceSupply.Status.SUCCEEDED, progress.code(), progress.message());
@@ -1734,7 +1737,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         terminal = new Ae2ResourceSupply.Outcome(
                 status, code, message, groupDeltas(), request.operation(), request.allowCrafting(),
                 craftingRequests, craftingJobsSubmitted, effectsStarted,
-                uncertain, terminalAccess, List.copyOf(waterFillReceipts));
+                uncertain, terminalAccess, List.copyOf(waterFillReceipts),
+                serverSupply == null ? Map.of() : serverSupply.evidence());
         phase = Phase.FINISHED;
     }
 
