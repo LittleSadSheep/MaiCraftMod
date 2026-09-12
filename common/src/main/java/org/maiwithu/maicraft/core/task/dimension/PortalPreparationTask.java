@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class PortalPreparationTask extends AbstractCompanionTask<PortalPreparationTaskRecord> {
     private enum Phase { SURVEY, SUPPLY, RETURN, BUILD, LOCATE, MOVE, ACTIVATE, VERIFY }
     private final ClientLevel world;
+    private final java.util.function.BiFunction<LocalPlayer, TaskRecord, Task> childFactory;
     private PortalSiteSurvey survey;
     private PortalPreparationSite site;
     private Phase phase = Phase.SURVEY;
@@ -48,7 +49,11 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     private int serial;
 
     public PortalPreparationTask(LocalPlayer player, PortalPreparationTaskRecord record) {
-        super(player, record); world = player.clientLevel;
+        this(player, record, TaskFactory::create);
+    }
+    PortalPreparationTask(LocalPlayer player, PortalPreparationTaskRecord record,
+                          java.util.function.BiFunction<LocalPlayer, TaskRecord, Task> childFactory) {
+        super(player, record); world = player.clientLevel; this.childFactory = childFactory;
     }
 
     @Override protected void onStart() {
@@ -140,7 +145,8 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         var item = end ? Items.ENDER_EYE : PlayerInv.count(player.getInventory(), Items.FLINT_AND_STEEL) > 0
                 ? Items.FLINT_AND_STEEL : Items.FIRE_CHARGE;
         activation = new PortalActivation(item, target, activationAim, Direction.UP,
-                () -> site.ready(world) && (!end || !world.getBlockState(target).getValue(EndPortalFrameBlock.HAS_EYE)),
+                () -> player.blockPosition().equals(activationStance) && site.ready(world)
+                        && (!end || !world.getBlockState(target).getValue(EndPortalFrameBlock.HAS_EYE)),
                 () -> end ? site.end().intact(p -> PortalPreparationSite.read(world, p))
                         && world.getBlockState(target).getValue(EndPortalFrameBlock.HAS_EYE) : site.active(world));
         return TaskState.RUNNING;
@@ -148,7 +154,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
 
     private TaskState start(TaskRecord record, Phase next) {
         phase = next; childRecord = record;
-        child = guarded(() -> TaskFactory.create(player, record));
+        child = guarded(() -> childFactory.apply(player, record));
         r.extendDeadlineTo(record.getDeadlineGameTime());
         return TaskState.RUNNING;
     }
@@ -170,12 +176,15 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         TaskState settled = terminal;
         TaskResult result = guarded(() -> child.result(settled));
         child = null; childRecord = null;
+        if (result == null) return blocked("portal_child_unconfirmed", "The preparation child ended without a result.");
         if (terminal != TaskState.SUCCESS || !result.success()) {
             Map<String, Object> evidence = new LinkedHashMap<>();
-            for (String key : List.of("issue_code", "allowed_dimensions", "recovery_options", "failure_type"))
+            for (String key : List.of("issue_code", "allowed_dimensions", "recovery_options", "failure_type", "requires_narration", "target_item_family"))
                 if (result.data() != null && result.data().containsKey(key)) evidence.put(key, result.data().get(key));
             childEvidence = Map.copyOf(evidence);
-            return blocked(evidence.getOrDefault("issue_code", "portal_" + phase.name().toLowerCase(java.util.Locale.ROOT) + "_failed").toString(), result.message());
+            String fallback = "requires_dimension".equals(evidence.get("failure_type")) ? "requires_dimension"
+                    : "portal_" + phase.name().toLowerCase(java.util.Locale.ROOT) + "_failed";
+            return blocked(evidence.getOrDefault("issue_code", fallback).toString(), result.message());
         }
         if (phase == Phase.SUPPLY) {
             if (!supplyNeed.satisfied(player)) return blocked("portal_supply_unverified", "Supply ended without the required inventory increase.");

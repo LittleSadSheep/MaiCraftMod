@@ -13,6 +13,8 @@ public final class PortalRegressionSuite {
         PortalPreparationTaskTest.main(args);
         org.maiwithu.maicraft.intent.PortalPreparationContractTest.main(args);
         DimensionPreparationFallbackTest.main(args);
+        PortalPreparationSupplyTest.main(args);
+        NetherPreparationWorkflowTest.main(args);
         System.out.println("PortalRegressionSuite: passed");
     }
 }

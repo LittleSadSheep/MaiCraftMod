@@ -34,6 +34,11 @@ final class PortalApproach {
             Vec3 eye = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(), 0);
             if (eye.distanceTo(aim) > player.blockInteractionRange() - .2) continue;
             Vec3 end = aim.add(aim.subtract(eye).normalize().scale(.02));
+            boolean loadedRay = true;
+            for (var pos : BlockPos.betweenClosed(BlockPos.containing(eye), BlockPos.containing(end))) {
+                if (!world.isLoaded(pos)) { loadedRay = false; break; }
+            }
+            if (!loadedRay) continue;
             var hit = world.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
             if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(target) || hit.getDirection() != Direction.UP) continue;
             double distance = feet.distSqr(player.blockPosition());

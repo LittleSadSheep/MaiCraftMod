@@ -7,13 +7,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.entity.InputDriver;
@@ -60,10 +61,8 @@ final class PortalActivation {
         InputDriver.lookAt(player, aim);
         if (now == firstTick || player.getViewVector(1).dot(aim.subtract(player.getEyePosition()).normalize()) < .9995)
             return TaskState.RUNNING;
-        var end = player.getEyePosition().add(player.getViewVector(1).scale(player.blockInteractionRange()));
-        var hit = player.level().clip(new ClipContext(player.getEyePosition(), end,
-                ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
-        if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(target)
+        var ray = Interaction.nativeRaytrace(player, player.blockInteractionRange());
+        if (!(ray instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(target)
                 || requiredFace != null && hit.getDirection() != requiredFace)
             return reject("the native crosshair does not hit the permitted portal face");
         if (!context.permitsNativeActions() || !context.mutationAvailable()) return TaskState.RUNNING;

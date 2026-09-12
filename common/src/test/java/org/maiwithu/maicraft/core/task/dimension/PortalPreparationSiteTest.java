@@ -29,6 +29,8 @@ public final class PortalPreparationSiteTest {
             check(!site.newSite(world.level), "a lava-side approach is unsuitable");
             var unloaded = new PortalPreparationSite(new NetherPortalFrame(new BlockPos(15, 2, 5), Direction.Axis.X, 2, 3), null);
             check(!unloaded.newSite(world.level), "surveying never reads across an unloaded chunk boundary");
+            var tooHigh = new PortalPreparationSite(new NetherPortalFrame(new BlockPos(5, 14, 5), Direction.Axis.X, 2, 3), null);
+            check(!tooHigh.valid(world.level), "air above the build-height ceiling cannot be treated as a construction site");
         }
         System.out.println("PortalPreparationSiteTest: bounded construction, repair and live protection passed");
     }

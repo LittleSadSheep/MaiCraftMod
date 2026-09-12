@@ -31,7 +31,10 @@ record PortalPreparationSite(NetherPortalFrame nether, EndPortalFrame end) {
         return List.copyOf(cells);
     }
 
-    static BlockState read(ClientLevel world, BlockPos pos) { return world.isLoaded(pos) ? world.getBlockState(pos) : null; }
+    static BlockState read(ClientLevel world, BlockPos pos) {
+        return pos.getY() >= world.getMinBuildHeight() && pos.getY() < world.getMaxBuildHeight()
+                && world.isLoaded(pos) ? world.getBlockState(pos) : null;
+    }
     boolean active(ClientLevel world) {
         return nether == null ? end.active(p -> read(world, p)) : nether.active(p -> read(world, p));
     }
