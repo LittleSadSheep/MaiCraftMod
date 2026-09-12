@@ -40,7 +40,10 @@ public final class MachineMenu {
     private MachineMenu() {}
 
     public record OpenRequest(String dimension, BlockPos center, int radius,
-            String structuralFingerprint, BlockPos machinePosition) {
+            String structuralFingerprint, BlockPos machinePosition, net.minecraft.core.Direction face) {
+        public OpenRequest(String dimension, BlockPos center, int radius, String structuralFingerprint, BlockPos machinePosition) {
+            this(dimension,center,radius,structuralFingerprint,machinePosition,null);
+        }
         public OpenRequest {
             if (machinePosition == null) throw new IllegalArgumentException("machine position is required");
             var region = new MachineSnapshots.Region(dimension, center, radius, structuralFingerprint);

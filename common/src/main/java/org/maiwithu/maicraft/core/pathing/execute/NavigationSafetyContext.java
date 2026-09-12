@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
  */
 public final class NavigationSafetyContext {
     private static final ThreadLocal<LongSet> PROTECTED_MUTATION_CELLS = new ThreadLocal<>();
+    private static final ThreadLocal<LongSet> PROTECTED_USE_CELLS = new ThreadLocal<>();
     private static final ThreadLocal<LongSet> FORBIDDEN_BODY_CELLS = new ThreadLocal<>();
 
     private NavigationSafetyContext() {}
@@ -42,13 +43,16 @@ public final class NavigationSafetyContext {
             Supplier<T> operation) {
         // 先记住外层保护，再把本层新增的格合进去；不改调用方传入的原集合。
         LongSet previousMutation = PROTECTED_MUTATION_CELLS.get();
+        LongSet previousUse = PROTECTED_USE_CELLS.get();
         LongSet previous = FORBIDDEN_BODY_CELLS.get();
         LongSet combinedMutation = combined(previousMutation, mutationCells);
+        LongSet combinedUse = combined(previousUse, mutationCells);
         LongSet combinedBody = combined(previous, bodyCells);
         if (combinedMutation.isEmpty() && combinedBody.isEmpty()) return operation.get();
         if (!combinedMutation.isEmpty()) {
             PROTECTED_MUTATION_CELLS.set(LongSets.unmodifiable(combinedMutation));
         }
+        if (!combinedUse.isEmpty()) PROTECTED_USE_CELLS.set(LongSets.unmodifiable(combinedUse));
         if (!combinedBody.isEmpty()) {
             FORBIDDEN_BODY_CELLS.set(LongSets.unmodifiable(combinedBody));
         }
@@ -58,6 +62,8 @@ public final class NavigationSafetyContext {
         } finally {
             if (previousMutation == null) PROTECTED_MUTATION_CELLS.remove();
             else PROTECTED_MUTATION_CELLS.set(previousMutation);
+            if (previousUse == null) PROTECTED_USE_CELLS.remove();
+            else PROTECTED_USE_CELLS.set(previousUse);
             if (previous == null) FORBIDDEN_BODY_CELLS.remove();
             else FORBIDDEN_BODY_CELLS.set(previous);
         }
@@ -78,6 +84,23 @@ public final class NavigationSafetyContext {
     // 只回答这格是否在“不能改动”名单里；不在名单里也不等于已经获得所有破坏权限。
     public static boolean protectsMutation(BlockPos pos) {
         return pos != null && protectedMutationCells().contains(pos.asLong());
+    }
+
+    /** Preserve the installation while navigating; an explicitly authorised menu operation may still use it. */
+    public static <T> T withPreservedStructures(Iterable<BlockPos> cells, Supplier<T> operation) {
+        LongSet previous = PROTECTED_MUTATION_CELLS.get();
+        LongSet next = combined(previous, packed(cells));
+        PROTECTED_MUTATION_CELLS.set(LongSets.unmodifiable(next));
+        try { return operation.get(); }
+        finally {
+            if (previous == null) PROTECTED_MUTATION_CELLS.remove(); else PROTECTED_MUTATION_CELLS.set(previous);
+        }
+    }
+
+    /** Explicit user/task protection still blocks use, including overlap with a preserved machine. */
+    public static boolean protectsUse(BlockPos pos) {
+        LongSet cells = PROTECTED_USE_CELLS.get();
+        return pos != null && cells != null && cells.contains(pos.asLong());
     }
 
     public static boolean forbidsBody(BlockPos pos) {

@@ -8,6 +8,7 @@ public final class NavigationRegressionSuite {
     // 从输入预算到路径、落地、飞行和交通依次检查；异常直接向外传给 Gradle，让 check 失败。
     public static void main(String[] args) throws Exception {
         org.maiwithu.maicraft.entity.InputDriverTest.main(args);
+        NavigationUseProtectionTest.main(args);
         org.maiwithu.maicraft.client.actor.PacketTickBudgetTest.main(args);
         org.maiwithu.maicraft.core.pathing.RegionalTerrainTest.main(args);
         org.maiwithu.maicraft.core.integration.jetpack.RegionalFlightTest.main(args);

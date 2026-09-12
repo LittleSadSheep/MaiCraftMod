@@ -78,7 +78,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
             return failure("machine_inventory_changed", "The player's inventory changed outside the confirmed transfer.", FailureType.UNKNOWN);
         }
         if (phase == Phase.VERIFY) return verify();
-        if (NavigationSafetyContext.protectsMutation(inspection.origin.position())) {
+        if (NavigationSafetyContext.protectsUse(inspection.origin.position())) {
             return failure("machine_transfer_protected", "The selected machine is explicitly protected from changes.", FailureType.UNSUPPORTED);
         }
         var context = ClientRuntime.requireContext(player);
@@ -106,7 +106,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         if (machine.container == player.getInventory() || !machine.isActive() || !MachineMenu.transferable(machine)) {
             return failure("machine_entry_not_real_inventory", "The selected machine entry does not expose verified real inventory backing.", FailureType.UNSUPPORTED);
         }
-        if (NavigationSafetyContext.protectsMutation(inspection.origin.position())) {
+        if (NavigationSafetyContext.protectsUse(inspection.origin.position())) {
             return failure("machine_transfer_protected", "The selected machine is explicitly protected from changes.", FailureType.UNSUPPORTED);
         }
         if (!BuiltInRegistries.ITEM.containsKey(r.itemId)) return failure("machine_item_unknown", "The selected item is not registered.", FailureType.NO_MATERIAL);

@@ -43,6 +43,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     private int dudTicks;
     private String failureCode;
     private JsonObject menuReport;
+    private BlockPos faceStance;
 
     public MachineMenuOpenTask(LocalPlayer player, MachineMenuOpenTaskRecord record) { super(player, record); }
 
@@ -56,7 +57,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         if (player.containerMenu != player.inventoryMenu) {
             return failure("machine_menu_busy", "An unrelated menu is already open.", FailureType.UNKNOWN);
         }
-        if (NavigationSafetyContext.protectsMutation(position)) {
+        if (NavigationSafetyContext.protectsUse(position)) {
             return failure("machine_menu_protected", "The selected machine is explicitly protected from use.", FailureType.UNSUPPORTED);
         }
         if (before != null && !player.level().getBlockState(position).equals(before)) {
@@ -88,8 +89,16 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         if (inReach()) {
             stopNav(); phase = Phase.HAND; return TaskState.RUNNING;
         }
-        if (nav == null) nav = PlayerNav.to(player, () -> GoalCompiler.interact(r.request.machinePosition()),
-                1.0, this::inReach, PlayerNav.ContextProvider.DEFAULT);
+        if (nav == null) {
+            if (r.request.face() != null) {
+                faceStance = org.maiwithu.maicraft.core.integration.machine.assembly.AssemblyInteractionGeometry.nearestStand(player,
+                        r.request.machinePosition(), java.util.Set.of(), eyes -> visibleFrom(eyes) ? aim() : null,
+                        net.minecraft.world.entity.Pose.STANDING);
+                if (faceStance == null) return failure("machine_menu_face_unreachable", "The requested native part face has no usable stance.", FailureType.OCCLUDED);
+            }
+            nav = PlayerNav.to(player, () -> r.request.face() == null ? GoalCompiler.interact(r.request.machinePosition()) : GoalCompiler.standOn(faceStance),
+                    1.0, this::inReach, PlayerNav.ContextProvider.DEFAULT);
+        }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> ++dudTicks < 10 ? TaskState.RUNNING : failure("machine_menu_no_stance",
@@ -132,7 +141,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         if (!aimGate.ready(player, aim.subtract(player.getEyePosition()))) return TaskState.RUNNING;
         HitResult trace = Interaction.nativeRaytrace(player, REACH);
         if (!(trace instanceof BlockHitResult hit) || trace.getType() != HitResult.Type.BLOCK
-                || !hit.getBlockPos().equals(r.request.machinePosition())) {
+                || !hit.getBlockPos().equals(r.request.machinePosition()) || r.request.face() != null && hit.getDirection() != r.request.face()) {
             return failure("machine_menu_occluded", "The native crosshair does not hit the selected machine.", FailureType.OCCLUDED);
         }
         var context = ClientRuntime.requireContext(player);
@@ -179,16 +188,22 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     }
 
     private Vec3 aim() {
+        if (r.request.face() != null) return Vec3.atCenterOf(r.request.machinePosition()).add(
+                r.request.face().getStepX() * .499, r.request.face().getStepY() * .499, r.request.face().getStepZ() * .499);
         var shape = before.getShape(player.level(), r.request.machinePosition());
         return shape.isEmpty() ? Vec3.atCenterOf(r.request.machinePosition())
                 : shape.bounds().getCenter().add(r.request.machinePosition().getX(), r.request.machinePosition().getY(), r.request.machinePosition().getZ());
     }
 
     private boolean inReach() {
-        Vec3 eye = player.getEyePosition(); Vec3 aim = aim();
+        return visibleFrom(player.getEyePosition());
+    }
+    private boolean visibleFrom(Vec3 eye) {
+        Vec3 aim = aim();
         if (eye.distanceToSqr(aim) > REACH * REACH) return false;
         var hit = player.level().clip(new ClipContext(eye, aim, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
-        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(r.request.machinePosition());
+        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(r.request.machinePosition())
+                && (r.request.face() == null || hit.getDirection() == r.request.face());
     }
 
     private TaskState failure(String code, String message, FailureType type) {
