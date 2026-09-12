@@ -26,9 +26,17 @@ public final class ProductionReadScheduleTest {
     private ProductionReadScheduleTest() {}
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        sharedSnapshotsAndFrozenRequests(); stageDeadlineDoesNotDependOnNavigationProgress();
-        compareOrder(fixture());
-        if (args.length == 1) compareOrder(JsonParser.parseString(Files.readString(Path.of(args[0]))).getAsJsonObject());
+        sharedSnapshotsAndFrozenRequests(); truncationSplitsOnlyOnce(); stageDeadlineDoesNotDependOnNavigationProgress();
+        compareOrder(fixture(), ignored -> 8);
+        if (args.length == 1) {
+            Path file = Path.of(args[0]); var create = new java.util.HashSet<BlockPos>();
+            var blueprint = JsonParser.parseString(Files.readString(file.resolveSibling("blueprint.json"))).getAsJsonObject();
+            for (var raw : blueprint.getAsJsonArray("blocks")) {
+                var block = raw.getAsJsonObject(); if (!block.get("block_id").getAsString().startsWith("create:")) continue;
+                var offset = block.getAsJsonArray("offset"); create.add(new BlockPos(offset.get(0).getAsInt(), offset.get(1).getAsInt(), offset.get(2).getAsInt()));
+            }
+            compareOrder(JsonParser.parseString(Files.readString(file)).getAsJsonObject(), position -> create.contains(position) ? 8 : 16);
+        }
         System.out.println("ProductionReadScheduleTest: shared native rows, bounded expiry refresh, immutable requests and finite stage budget passed");
     }
 
@@ -38,23 +46,24 @@ public final class ProductionReadScheduleTest {
         reads.submitted(); read.body().addProperty("tampered", true);
         check(reads.next(new Vec3(100, 0, 100)) == read && read.body().equals(original), "Pending read changed target or request body");
         rejects(reads::requireSettled, "before_receipt_consumed");
-        JsonObject response = snapshot(read.position(), 100); response.addProperty("tick", 999);
+        JsonObject response = snapshot(read, 100); response.addProperty("tick", 999);
         reads.complete(evidence, response);
         check(evidence.freshness(100).stream().filter(fact -> fact.kind() == ObservationKind.NODE && fact.id().equals("source"))
                 .allMatch(fact -> fact.tick() == 100), "Snapshot fan-out replaced the original row tick with its envelope tick");
-        boolean union = false, emptyNodeFaces = false;
+        boolean union = read.ports().contains("press.in") && read.ports().contains("press.out") && read.body().getAsJsonArray("faces").size() == 2;
+        boolean requiredFacesPreserved = read.body().getAsJsonArray("faces").size() <= 2;
         ProductionReadSchedule.Read next;
         while ((next = reads.next(Vec3.ZERO)) != null) {
             if (next.ports().contains("press.in")) {
                 check(next.ports().contains("press.out") && next.body().getAsJsonArray("faces").size() == 2, "Co-located ports lost their face union"); union = true;
             }
-            if (next.nodes().contains("press")) emptyNodeFaces = next.body().getAsJsonArray("faces").isEmpty();
+            requiredFacesPreserved &= next.body().has("faces") ? next.body().getAsJsonArray("faces").size() <= 2 : true;
             reads.submitted(); reads.complete(evidence, new JsonObject());
         }
-        check(union && emptyNodeFaces, "Shared snapshots changed node-default empty-face semantics");
+        check(union && requiredFacesPreserved, "Batch snapshots lost required faces or invented unrequested faces");
         var stale = evidence.freshness(1301).stream().filter(fact -> fact.kind() == ObservationKind.NODE && fact.id().equals("source")).findFirst().orElseThrow();
         check(stale.status() == FreshnessStatus.EXPIRED && reads.refresh(stale), "Expired accepted fact did not receive its bounded refresh");
-        var refreshed = reads.next(Vec3.ZERO); reads.submitted(); reads.complete(evidence, snapshot(refreshed.position(), 1301));
+        var refreshed = reads.next(Vec3.ZERO); reads.submitted(); reads.complete(evidence, snapshot(refreshed, 1301));
         var staleAgain = new ObservationFreshness(stale.kind(), stale.id(), FreshnessStatus.EXPIRED, 1301L, 1201);
         check(!reads.refresh(staleAgain), "A fresh UUID restarted the same fact's refresh allowance");
         for (FreshnessStatus state : List.of(FreshnessStatus.FRESH, FreshnessStatus.MISSING, FreshnessStatus.INVALID))
@@ -62,25 +71,42 @@ public final class ProductionReadScheduleTest {
         check(!ProductionDesignCompiler.compile(plan.authoredJson(), evidence).canEnter("supply"), "Missing/invalid native recipe evidence became ready");
     }
 
-    private static void compareOrder(JsonObject authored) {
+    private static void compareOrder(JsonObject authored, java.util.function.ToDoubleFunction<BlockPos> nativeRadius) {
         var plan = plan(authored); var old = new ArrayList<BlockPos>();
         plan.manifest().nodes().forEach(node -> old.add(plan.at(node)));
         plan.manifest().ports().forEach(port -> old.add(plan.at(port.offset())));
         plan.manifest().nodes().stream().filter(node -> node.kind().equals("process")).forEach(node -> old.add(plan.at(node)));
         plan.manifest().configurations().forEach(configuration -> old.add(plan.at(plan.node(configuration.node()))));
-        var reads = new ProductionReadSchedule(plan); var evidence = evidence(plan); var ordered = new ArrayList<BlockPos>(); Vec3 feet = Vec3.ZERO;
+        var reads = new ProductionReadSchedule(plan, nativeRadius); var evidence = evidence(plan); var ordered = new ArrayList<BlockPos>(); Vec3 feet = Vec3.ZERO;
         ProductionReadSchedule.Read read;
         while ((read = reads.next(feet)) != null) {
             check(Set.of("machine.snapshot", "machine.recipe", "machine.configuration").contains(read.operation()), "Preparation scheduled a mutation");
+            check(read.positions().size() <= 4 && ProductionObservationRange.goalRadius(read.positions(), nativeRadius) >= 1,
+                    "Batch has no reachable first-point goal inside every native range");
             ordered.add(read.position()); feet = read.position().getCenter(); reads.submitted(); reads.complete(evidence, new JsonObject());
         }
         check(ordered.size() < old.size() && distance(ordered) < distance(old), "Spatial read jobs did not reduce requests and repeated plant traversal");
         var progress = reads.progress();
         check(progress.get("nodes").equals(plan.manifest().nodes().size()) && progress.get("ports").equals(plan.manifest().ports().size()), "Shared requests omitted native subjects");
         if (plan.manifest().nodes().size() == 21 && plan.manifest().ports().size() == 21)
-            check(old.size() == 62 && ordered.size() == 45, "Actual four-station read count changed unexpectedly");
+            check(old.size() == 62 && ordered.size() == 27, "Actual four-station batched read count changed unexpectedly");
         System.out.println("Read target model: old_requests=" + old.size() + " scheduled_requests=" + ordered.size()
                 + " old_target_distance=" + distance(old) + " scheduled_target_distance=" + distance(ordered));
+    }
+
+    private static void truncationSplitsOnlyOnce() {
+        var plan = plan(fixture()); double[] radius = {16}; int[] probes = {0};
+        var reads = new ProductionReadSchedule(plan, ignored -> { probes[0]++; return radius[0]; });
+        check(probes[0] == 0, "Batch ranges were read before construction and configuration could finish");
+        radius[0] = 8; var batch = reads.next(Vec3.ZERO); var evidence = evidence(plan);
+        check(batch.positions().size() == 3, "First PREPARE read ignored the now-loaded native radius");
+        var partial = snapshot(batch, 100); partial.addProperty("truncated", true); partial.addProperty("complete", false);
+        reads.submitted(); reads.complete(evidence, partial);
+        check(evidence.freshness(100).stream().noneMatch(fact -> fact.status() == FreshnessStatus.FRESH),
+                "A partial shared resource budget was silently certified as complete native facts");
+        check(reads.progress().get("snapshot_batch_splits").equals(1), "Truncated batch did not split once");
+        var single = reads.next(Vec3.ZERO); check(single.positions().size() == 1, "Fallback repeated the same oversized batch");
+        reads.submitted(); rejects(() -> reads.complete(evidence, partial), "production_snapshot_truncated");
     }
 
     private static void stageDeadlineDoesNotDependOnNavigationProgress() throws Exception {
@@ -104,6 +130,11 @@ public final class ProductionReadScheduleTest {
         JsonObject row = new JsonObject(); row.add("position", ProductionRunPlan.position(position)); row.addProperty("tick", tick);
         row.addProperty("provenance", "server_native"); row.addProperty("block_id", "minecraft:barrel");
         JsonArray rows = new JsonArray(); rows.add(row); result.add("observations", rows); return result;
+    }
+    private static JsonObject snapshot(ProductionReadSchedule.Read read, long tick) {
+        JsonObject result = snapshot(read.position(), tick); JsonArray rows = result.getAsJsonArray("observations");
+        for (int i = 1; i < read.positions().size(); i++) rows.addAll(snapshot(read.positions().get(i), tick + i).getAsJsonArray("observations"));
+        return result;
     }
     private static double distance(List<BlockPos> positions) { double length = 0; Vec3 at = Vec3.ZERO; for (BlockPos position : positions) { length += at.distanceTo(position.getCenter()); at = position.getCenter(); } return length; }
     private static ProductionRunPlan plan(JsonObject json) { return new ProductionRunPlan(BlockPos.ZERO, "minecraft:overworld", json); }

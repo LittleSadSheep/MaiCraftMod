@@ -35,7 +35,7 @@ final class ProductionPreparation {
         evidence = new ProductionNativeEvidence(plan.manifest());
         evidence.bind(plan.dimension(), new Point(plan.anchor().getX(), plan.anchor().getY(), plan.anchor().getZ()));
         updateOperations();
-        reads = new ProductionReadSchedule(plan);
+        reads = new ProductionReadSchedule(plan, position -> ProductionObservationRange.radius(player.level(), position));
         remainingLinks.addAll(plan.manifest().links());
         connectionSurvey = new ProductionConnectionSurvey(player, plan, work, resource -> {
             if (!plan.bound()) return evidence.resolve(resource);
@@ -58,7 +58,7 @@ final class ProductionPreparation {
     void refresh() {
         reads.requireSettled();
         connectionSurvey.reset();
-        linkIndex = 0; reads = new ProductionReadSchedule(plan);
+        linkIndex = 0; reads = new ProductionReadSchedule(plan, position -> ProductionObservationRange.radius(player.level(), position));
         connectionsStarted = false;
         stageStarted = -1; acceptedNewFacts = 0; activeLink = null;
         remainingLinks.clear(); remainingLinks.addAll(plan.manifest().links()); refreshedLinks.clear();
@@ -78,7 +78,7 @@ final class ProductionPreparation {
         if (now - stageStarted > MAX_STAGE_TICKS) throw new IllegalArgumentException("production_preparation_budget_exhausted: native facts did not settle within 3600 ticks");
         ProductionReadSchedule.Read read = reads.next(player.position());
         if (read != null) {
-            if (!reads.pending() && !work.observe(read.position())) return false;
+            if (!reads.pending() && !work.observe(read.positions())) return false;
             var before = evidence.freshness(now);
             reads.submitted();
             JsonObject result = work.request(read.operation(), read.body(), false);
