@@ -158,8 +158,10 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             }
             case FINAL_VERIFY -> {
                 if (preparation.tick()) {
-                    if (!preparation.compilation().valid() || !preparation.topologyVerified())
-                        return failure("production_connection_unverified", "The declared native machine connections changed or remain unverified");
+                    var finalProof = preparation.finalVerification();
+                    if (!preparation.compilation().valid()
+                            || finalProof.status() != org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Status.VERIFIED)
+                        return failure("production_connection_unverified", finalProof.detail());
                     phase = Phase.DONE; r.verified(); return TaskState.SUCCESS;
                 }
             }
@@ -325,6 +327,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         result.put("construction_active", construction != null);
         if (construction != null) result.put("construction_task", construction.name());
         result.put("navigation_active", nav != null); result.put("preparation_complete", preparation.compilation() != null);
+        result.put("preparation", preparation.progress());
         result.put("server_request_pending", requests.pending());
         Map<String, Object> report = requests.report(); var request = new LinkedHashMap<String, Object>();
         for (String key : java.util.List.of("request_id", "operation", "backend", "status", "effect", "code", "server_tick", "outcome_uncertain"))
