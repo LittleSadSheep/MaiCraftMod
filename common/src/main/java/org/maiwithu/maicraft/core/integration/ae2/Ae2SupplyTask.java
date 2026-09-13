@@ -37,7 +37,7 @@ final class Ae2SupplyTask implements Task {
             return;
         }
         try {
-            session = Ae2ResourceSupply.begin(player, record.request);
+            session = Ae2ResourceSupply.begin(player, record.request, record.depositAccess);
         } catch (RuntimeException failure) {
             earlyFailure = "could not start AE2 resource supply: " + failure.getMessage();
             terminal = TaskState.FAILED;
@@ -110,6 +110,10 @@ final class Ae2SupplyTask implements Task {
             }
         }
         Map<String, Object> data = outcome == null ? Map.of() : outcome.data();
+        // 会话根本没开始时可以确定没有存入；已有会话却丢失上下文时仍保留未知，不能冒报零影响。
+        if (outcome == null && session == null && record.request.operation() == Ae2ResourceSupply.Operation.DEPOSIT)
+            data = Map.of("operation", "deposit", "deposited", Map.of(), "confirmed_deposited_total", 0,
+                    "effects_started", false, "outcome_uncertain", false, "failure_code", "ae2_deposit_not_started");
         String message = outcome != null ? outcome.message()
                 : earlyFailure != null ? earlyFailure : "AE2 resource supply did not settle";
         return switch (finalState) {

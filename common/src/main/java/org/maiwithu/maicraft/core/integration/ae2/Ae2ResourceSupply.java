@@ -41,7 +41,9 @@ public final class Ae2ResourceSupply {
     /** Whether a request moves items to the player or only prepares complete network stock. */
     public enum Operation {
         SUPPLY,
-        PREPARE
+        PREPARE,
+        /** 把指定数量的普通物品经可见终端存入网络，不合成、不通过服务器供料接口写库存。 */
+        DEPOSIT
     }
 
     public enum SelectionMode {
@@ -105,6 +107,9 @@ public final class Ae2ResourceSupply {
                 throw new IllegalArgumentException("an AE2 request needs between 1 and 128 groups");
             }
             groups = List.copyOf(groups);
+            if (operation == Operation.DEPOSIT && (allowCrafting || groups.stream().anyMatch(group -> group.acceptableItemIds().size() != 1)
+                    || groups.stream().mapToLong(Group::count).sum() > 65_536))
+                throw new IllegalArgumentException("AE2 deposit requires exact single item IDs, no crafting and at most 65536 items");
             // 不同组不能接受同一种物品，避免同一库存被两份要求重复算作够用。
             Map<ResourceLocation, ResourceLocation> owners = new LinkedHashMap<>();
             for (Group group : groups) {
@@ -144,9 +149,13 @@ public final class Ae2ResourceSupply {
             int before,
             int after,
             int acquired,
+            int deposited,
             boolean selected) {
         public ItemDelta {
             Objects.requireNonNull(itemId, "itemId");
+        }
+        public ItemDelta(ResourceLocation itemId, int before, int after, int acquired, boolean selected) {
+            this(itemId, before, after, acquired, 0, selected);
         }
     }
 
@@ -160,11 +169,17 @@ public final class Ae2ResourceSupply {
             int before,
             int after,
             int acquired,
+            int deposited,
             int missing,
             List<ItemDelta> acceptedItemEvidence) {
         public GroupDelta {
             acceptableItemIds = List.copyOf(acceptableItemIds);
             acceptedItemEvidence = List.copyOf(acceptedItemEvidence);
+        }
+        public GroupDelta(ResourceLocation itemId, List<ResourceLocation> acceptableItemIds, SelectionMode selectionMode,
+                          ResourceLocation selectedItemId, int requested, int before, int after, int acquired, int missing,
+                          List<ItemDelta> acceptedItemEvidence) {
+            this(itemId, acceptableItemIds, selectionMode, selectedItemId, requested, before, after, acquired, 0, missing, acceptedItemEvidence);
         }
     }
 
@@ -220,7 +235,9 @@ public final class Ae2ResourceSupply {
                 value.put("requested", delta.requested());
                 value.put("before", delta.before());
                 value.put("after", delta.after());
-                value.put("acquired", delta.acquired());
+                value.put(operation == Operation.DEPOSIT ? "deposited" : "acquired",
+                        operation == Operation.DEPOSIT ? delta.deposited() : delta.acquired());
+                if (operation == Operation.DEPOSIT) value.put("inventory_net_decrease", delta.before() - delta.after());
                 value.put("missing", delta.missing());
                 List<Map<String, Object>> itemEvidence = new ArrayList<>();
                 for (ItemDelta item : delta.acceptedItemEvidence()) {
@@ -228,7 +245,7 @@ public final class Ae2ResourceSupply {
                             "item_id", item.itemId().toString(),
                             "before", item.before(),
                             "after", item.after(),
-                            "acquired", item.acquired(),
+                            operation == Operation.DEPOSIT ? "deposited" : "acquired", operation == Operation.DEPOSIT ? item.deposited() : item.acquired(),
                             "selected", item.selected()));
                 }
                 value.put("accepted_item_evidence", List.copyOf(itemEvidence));
@@ -239,6 +256,14 @@ public final class Ae2ResourceSupply {
             data.put("status", status.name().toLowerCase(Locale.ROOT));
             data.put("operation", operation.name().toLowerCase(Locale.ROOT));
             data.put("actual_delta", List.copyOf(deltas));
+            if (operation == Operation.DEPOSIT) {
+                Map<String, Integer> deposited = new LinkedHashMap<>();
+                groups.stream().filter(group -> group.deposited() > 0).forEach(group -> deposited.put(group.itemId().toString(), group.deposited()));
+                data.put("deposited", Map.copyOf(deposited));
+                data.put("network_deposit_completed", status == Status.SUCCEEDED);
+                data.put("confirmed_deposited_total", groups.stream().mapToInt(GroupDelta::deposited).sum());
+                data.put("server_insert_api_used", false);
+            }
             if (operation == Operation.PREPARE) {
                 data.put("network_supply_prepared", status == Status.SUCCEEDED);
                 data.put("prepared_groups", groups.stream().map(group -> Map.of(
@@ -396,12 +421,17 @@ public final class Ae2ResourceSupply {
     }
 
     public static Session begin(LocalPlayer player, Request request) {
+        return begin(player, request, position -> true);
+    }
+
+    /** 存入可限制固定终端位置；携带的无线终端沿用其原生权限，其他操作忽略此新增约束。 */
+    public static Session begin(LocalPlayer player, Request request, java.util.function.Predicate<BlockPos> depositAccess) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(request, "request");
         Ae2ReflectionBridge bridge = Ae2ReflectionBridge.availability().bridge().orElseThrow(
                 () -> new IllegalStateException(
                         "AE2 client integration is unavailable: " + availabilityDetail()));
-        return new Ae2SupplySession(player, request, bridge);
+        return new Ae2SupplySession(player, request, bridge, false, Objects.requireNonNull(depositAccess));
     }
 
     /** Available while falling: use wireless/currently reachable access; never start navigation. */
@@ -423,5 +453,10 @@ public final class Ae2ResourceSupply {
     public static Ae2SupplyTaskRecord taskRecord(
             String toolCallId, long deadlineGameTime, Request request) {
         return new Ae2SupplyTaskRecord(toolCallId, deadlineGameTime, request);
+    }
+
+    public static Ae2SupplyTaskRecord taskRecord(String toolCallId, long deadlineGameTime, Request request,
+                                                java.util.function.Predicate<BlockPos> depositAccess) {
+        return new Ae2SupplyTaskRecord(toolCallId, deadlineGameTime, request, depositAccess);
     }
 }

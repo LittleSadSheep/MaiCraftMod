@@ -53,6 +53,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         WAIT_OPEN,
         WAIT_REPOSITORY,
         PROCESS_ITEM,
+        DEPOSIT_ITEM,
         FILL_WATER_BUCKET,
         WAIT_WATER_BUCKET,
         COLLECT_EXACT,
@@ -187,6 +188,11 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private boolean effectsBeforeServer;
     private Phase serverFallbackPhase;
     private String accessBeforeServer;
+    private Ae2DepositTransfer deposit;
+    private AbstractContainerMenu depositMenu;
+    private net.minecraft.client.gui.screens.Screen depositScreen;
+    private final java.util.function.Predicate<BlockPos> depositAccessPolicy;
+    private Ae2DepositAccess.Bound depositAccess;
 
     Ae2SupplySession(
             LocalPlayer player, Ae2ResourceSupply.Request request, Ae2ReflectionBridge bridge) {
@@ -195,6 +201,11 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     Ae2SupplySession(LocalPlayer player, Ae2ResourceSupply.Request request,
             Ae2ReflectionBridge bridge, boolean inPlace) {
+        this(player, request, bridge, inPlace, position -> true);
+    }
+
+    Ae2SupplySession(LocalPlayer player, Ae2ResourceSupply.Request request, Ae2ReflectionBridge bridge, boolean inPlace,
+                     java.util.function.Predicate<BlockPos> depositAccessPolicy) {
         this.player = player;
         this.request = request;
         this.bridge = bridge;
@@ -203,6 +214,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         this.callerOrigin = player.blockPosition().immutable();
         this.callerDimension = player.level().dimension().location();
         this.baseline = inventoryCounts();
+        this.depositAccessPolicy = java.util.Objects.requireNonNull(depositAccessPolicy);
     }
 
     @Override
@@ -240,6 +252,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 case WAIT_OPEN -> waitOpen(context);
                 case WAIT_REPOSITORY -> waitRepository();
                 case PROCESS_ITEM -> processItem(context);
+                case DEPOSIT_ITEM -> depositItem(context);
                 case FILL_WATER_BUCKET -> fillWaterBucket(context);
                 case WAIT_WATER_BUCKET -> waitWaterBucket(context);
                 case COLLECT_EXACT -> collectExact(context);
@@ -300,6 +313,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     /** Drain the submitted cursor/inventory action, then use the existing native cleanup stages. */
     private boolean settleSatisfied(LocalPlayerContext context) {
         if (!settlingSatisfied || pendingTerminal != null || phase == Phase.SERVER_SUPPLY) return false;
+        if (phase == Phase.DEPOSIT_ITEM) { deposit.requestSettlement(); depositItem(context); return true; }
         if (phase == Phase.WAIT_EXACT_PLACE) { waitExactPlace(context); return true; }
         if (phase == Phase.WAIT_WATER_BUCKET) { waitWaterBucket(context); return true; }
         if (nativeReceipt != null && !settleNativeReceipt(context, "satisfied_effect_unconfirmed")) return true;
@@ -317,6 +331,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     @Override
     public boolean livenessActive() {
+        if (deposit != null && deposit.pending()) return true;
         if (serverSupply != null && serverSupply.runningRequest()) return true;
         if (stoppingInPlace && terminal == null) return true;
         if (craftingJobEffectPending
@@ -339,6 +354,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     public Ae2ResourceSupply.Outcome cancel(LocalPlayerContext context, String reason) {
         if (terminal != null) return terminal;
         validateContext(context);
+        if (deposit != null) {
+            deposit.cancel(context); effectsStarted |= deposit.effectsStarted();
+            preserveUnrelatedMenu |= deposit.preserveMenu();
+        }
         if (serverSupply != null) {
             effectsStarted |= serverSupply.effectsStarted();
             serverSupply.cancel();
@@ -457,6 +476,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         if (!player.containerMenu.getCarried().isEmpty()) {
+            if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) preserveUnrelatedMenu = true;
             finishNow(Ae2ResourceSupply.Status.FAILED, "inventory_cursor_busy",
                     "clear the inventory cursor before exact AE2 extraction", false);
             return;
@@ -472,7 +492,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
 
-        if (!inPlace && !serverRouteConsidered && Ae2ServerSupply.available()) {
+        if (request.operation() != Ae2ResourceSupply.Operation.DEPOSIT && !inPlace && !serverRouteConsidered && Ae2ServerSupply.available()) {
             var reachable = inPlaceTargets();
             if (!reachable.isEmpty()) {
                 fixedCandidates = reachable; prepareFixedAccess(context); return;
@@ -500,6 +520,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
 
         remembered = Ae2TerminalAccess.remembered(player);
+        if (remembered != null && !fixedAccessAllowed(remembered.position())) remembered = null;
         if (remembered != null && !Ae2TerminalAccess.isLoaded(player, remembered.position())) {
             // Unloaded is not evidence of removal. Travel to the last verified access point; the
             // terminal is authoritatively revalidated only after its chunk becomes loaded.
@@ -536,6 +557,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     private void prepareFixedAccess(LocalPlayerContext context) {
+        fixedCandidates = fixedCandidates.stream().filter(target -> fixedAccessAllowed(target.position())).toList();
         if (fixedCandidates.isEmpty()) {
             finishNow(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_not_found",
                     "no loaded fixed AE2 terminal with an interaction approach was observed nearby; "
@@ -625,6 +647,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     // 把所有候选站位作为同一个导航目标；原记忆位置走不通时再查一次附近终端，不只盯最近的一处。
     private void navigateFixed() {
         if (inPlace) throw new IllegalStateException("in-place AE supply cannot navigate");
+        var allowed = fixedCandidates.stream().filter(target -> fixedAccessAllowed(target.position())).toList();
+        if (!allowed.equals(fixedCandidates)) { stopNavigation(); fixedCandidates = allowed; }
         if (fixedCandidates.isEmpty()) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "fixed_terminal_unreachable",
                     "no fixed-terminal approach remains");
@@ -738,6 +762,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     // Both ordinary and in-place sessions open the observed terminal through the actual first-person ray.
     private void openFixed(LocalPlayerContext context) {
+        if (fixedTarget != null && !fixedAccessAllowed(fixedTarget.position())) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "ae2_deposit_access_denied", "The fixed terminal is outside the approved deposit access scope");
+            return;
+        }
         if (!worldAccessAvailable(context)) {
             beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "screen_open", "another GUI interrupted terminal opening");
             return;
@@ -876,6 +904,14 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private void waitRepository() {
         Object menu = storageMenuOrFail();
         if (menu == null) return;
+        if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT && depositAccess == null) {
+            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+            depositMenu = player.containerMenu; depositScreen = context.minecraft().screen;
+            depositAccess = Ae2DepositAccess.read(depositMenu, player);
+            if (!depositAccessAllowed()) {
+                beginFinish(Ae2ResourceSupply.Status.FAILED, "ae2_deposit_access_denied", "The open terminal does not satisfy the approved fixed/wireless access scope"); return;
+            }
+        }
         if (!bridge.connected(menu)) {
             beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
                     "ae2_network_disconnected", "the AE2 terminal is not connected to a storage network");
@@ -890,6 +926,15 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                         "ae2_repository_pending", "the AE2 client repository did not become ready");
             }
             return;
+        }
+        if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) {
+            // 存入保留创建会话时的背包基线；路上少了余料不能悄悄降低应留存量，更不能转入合成分支。
+            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+            var reserved = new java.util.LinkedHashSet<>(reservedInventorySlots());
+            if (depositAccess.itemSlot() != null) reserved.add(depositAccess.itemSlot());
+            deposit = new Ae2DepositTransfer(context, request, bridge, reserved, baseline, depositAccess.itemSlot());
+            if (fixedTarget != null) Ae2TerminalAccess.remember(player, fixedTarget);
+            setPhase(Phase.DEPOSIT_ITEM); return;
         }
         if (canUseStoredWater()
                 && (reflexRequest() ? stockPlan(entries, 0).failure() != null
@@ -916,6 +961,35 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private boolean canUseStoredWater() {
         if (Ae2WaterBucketFill.supports(request)) return true;
         return reflexRequest() && request.groups().getFirst().acceptableItemIds().contains(Ae2WaterBucketFill.WATER_BUCKET);
+    }
+
+    private void depositItem(LocalPlayerContext context) {
+        if (storageMenuOrFail() == null) return;
+        try {
+            var state = deposit.tick(context); effectsStarted |= deposit.effectsStarted();
+            if (state == Ae2DepositTransfer.Status.RUNNING) return;
+            if (deposit.preserveMenu()) preserveUnrelatedMenu = true;
+            if (state == Ae2DepositTransfer.Status.UNCERTAIN) {
+                finishUncertain(deposit.code(), "AE2 native deposit did not settle; inspect the exact confirmed deposited counts before any retry");
+            } else beginFinish(state == Ae2DepositTransfer.Status.SUCCEEDED ? Ae2ResourceSupply.Status.SUCCEEDED : Ae2ResourceSupply.Status.FAILED,
+                    deposit.code(), state == Ae2DepositTransfer.Status.SUCCEEDED
+                            ? "AE2 visibly received the exact approved ordinary items through native GUI clicks"
+                            : "AE2 deposit stopped with its confirmed quantities preserved: " + deposit.code());
+        } catch (RuntimeException | LinkageError failure) {
+            effectsStarted |= deposit.effectsStarted(); preserveUnrelatedMenu = true;
+            finishNow(effectsStarted ? Ae2ResourceSupply.Status.UNCERTAIN : Ae2ResourceSupply.Status.FAILED,
+                    "ae2_deposit_native_adapter_failed", "AE2 deposit stopped without another click: " + failure.getMessage(), effectsStarted);
+        }
+    }
+
+    private boolean fixedAccessAllowed(BlockPos position) {
+        return request.operation() != Ae2ResourceSupply.Operation.DEPOSIT || player.level().dimension().location().equals(callerDimension)
+                && !org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.protectsUse(position) && depositAccessPolicy.test(position);
+    }
+    private boolean depositAccessAllowed() {
+        return depositAccess != null && player.level().dimension().location().equals(callerDimension)
+                && (depositAccess.position() == null || fixedAccessAllowed(depositAccess.position()))
+                && Ae2DepositAccess.current(depositAccess, depositMenu, player, bridge);
     }
 
     private boolean reflexRequest() {
@@ -1581,6 +1655,17 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private void beginFinish(
             Ae2ResourceSupply.Status status, String code, String message) {
         if (terminal != null || pendingTerminal != null) return;
+        if (deposit != null && deposit.pending()) {
+            preserveUnrelatedMenu = true;
+            finishNow(Ae2ResourceSupply.Status.UNCERTAIN, code + "_deposit_unsettled", message + "; deposit confirmation must be reconciled before cleanup", true);
+            return;
+        }
+        if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT && !player.containerMenu.getCarried().isEmpty()) {
+            // 取物失败的旧收尾会把鼠标送回网络；存入尾数绝不能走这条路径，否则会多存未授权的物品。
+            preserveUnrelatedMenu = true;
+            finishNow(Ae2ResourceSupply.Status.UNCERTAIN, code + "_cursor_preserved", message + "; the cursor and GUI were left untouched", true);
+            return;
+        }
         if (nativeReceipt != null && !nativeReceipt.terminal() || craftingJobEffectPending) {
             finishUncertain(code + "_outcome_uncertain",
                     message + "; an AE2 server transaction is still unconfirmed");
@@ -1782,6 +1867,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private void finishNow(
             Ae2ResourceSupply.Status status, String code, String message, boolean uncertain) {
         if (terminal != null) return;
+        if (deposit != null) deposit.captureConfirmed();
+        if (deposit != null && deposit.preserveMenu()) preserveUnrelatedMenu = true;
         try {
             var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
             if (!stoppingInPlace && ownsOpenMenu(context) && (menuReceipt == null || menuReceipt.terminal()
@@ -1794,7 +1881,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 status, code, message, groupDeltas(), request.operation(), request.allowCrafting(),
                 craftingRequests, craftingJobsSubmitted, effectsStarted,
                 uncertain, terminalAccess, List.copyOf(waterFillReceipts),
-                serverSupply == null ? Map.of() : serverSupply.evidence());
+                deposit != null ? deposit.evidence() : serverSupply == null ? Map.of() : serverSupply.evidence());
         phase = Phase.FINISHED;
     }
 
@@ -1880,6 +1967,16 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private Object storageMenuOrFail() {
         Object menu = player.containerMenu;
         var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+        if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT && depositMenu != null
+                && (menu != depositMenu || context.minecraft().screen != depositScreen)) {
+            preserveUnrelatedMenu = true;
+            finishNow(Ae2ResourceSupply.Status.UNCERTAIN, "ae2_deposit_menu_replaced", "The deposit terminal was replaced; its cursor and replacement GUI were preserved", true);
+            return null;
+        }
+        if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT && depositAccess != null && !depositAccessAllowed()) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "ae2_deposit_access_revoked", "The original terminal access no longer satisfies this deposit request");
+            return null;
+        }
         if (bridge.isStorageMenu(menu) && MenuVisibility.matches(context.minecraft(), player.containerMenu)) {
             if (fixedTarget != null) {
                 try {
@@ -1906,6 +2003,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     // 当前按可见菜单类型判断是否可收尾：AE2 仓库、合成界面，或自己打开的玩家库存。
     private boolean ownsOpenMenu(LocalPlayerContext context) {
         if (preserveUnrelatedMenu) return false;
+        if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT && depositMenu != null && player.containerMenu != player.inventoryMenu
+                && (player.containerMenu != depositMenu || context.minecraft().screen != depositScreen)) return false;
         if (serverMenu != null) return serverMenu.owns(context);
         Object menu = player.containerMenu;
         return MenuVisibility.matches(context.minecraft(), player.containerMenu)
@@ -2010,6 +2109,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     private List<Ae2ResourceSupply.GroupDelta> groupDeltas() {
+        if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) return depositDeltas();
         List<Ae2ResourceSupply.GroupDelta> result = new ArrayList<>();
         for (Ae2ResourceSupply.Group group : request.groups()) {
             int before = group.acceptableItemIds().stream()
@@ -2037,8 +2137,22 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return List.copyOf(result);
     }
 
-    // 取物模式最终再核对真实背包增量；准备模式当前只看此前每组已确认数量，不重读最终网络库存。
+    private List<Ae2ResourceSupply.GroupDelta> depositDeltas() {
+        List<Ae2ResourceSupply.GroupDelta> result = new ArrayList<>();
+        var confirmed = deposit == null ? Map.<ResourceLocation, Integer>of() : deposit.deposited();
+        for (var group : request.groups()) {
+            ResourceLocation id = group.itemId(); int before = baseline.getOrDefault(id, 0), after = inventoryCount(id);
+            int deposited = confirmed.getOrDefault(id, 0);
+            result.add(new Ae2ResourceSupply.GroupDelta(id, group.acceptableItemIds(), group.selectionMode(), id,
+                    group.count(), before, after, 0, deposited, Math.max(0, group.count() - deposited),
+                    List.of(new Ae2ResourceSupply.ItemDelta(id, before, after, 0, deposited, true))));
+        }
+        return List.copyOf(result);
+    }
+
+    // 取物模式最终再核对真实背包增量；存入使用双边已确认量；准备模式保留原来的网络准备检查。
     private boolean finalAuditPasses() {
+        if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) return deposit != null && deposit.complete() && player.containerMenu.getCarried().isEmpty();
         if (waterBucketRoute) return player.containerMenu.getCarried().isEmpty()
                 && waterFillReceipts.size() == request.groups().getFirst().count()
                 && groupProgress(request.groups().getFirst()) == waterFillReceipts.size();

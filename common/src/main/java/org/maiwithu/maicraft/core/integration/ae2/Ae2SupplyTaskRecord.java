@@ -14,16 +14,24 @@ public final class Ae2SupplyTaskRecord extends TaskRecord {
     }
 
     public final Ae2ResourceSupply.Request request;
+    public final java.util.function.Predicate<net.minecraft.core.BlockPos> depositAccess;
 
     public Ae2SupplyTaskRecord(
             String toolCallId, long deadlineGameTime, Ae2ResourceSupply.Request request) {
+        this(toolCallId, deadlineGameTime, request, position -> true);
+    }
+
+    /** 仅存入固定终端使用此范围／保护约束；旧供料和网络准备行为保持原样。 */
+    public Ae2SupplyTaskRecord(String toolCallId, long deadlineGameTime, Ae2ResourceSupply.Request request,
+                              java.util.function.Predicate<net.minecraft.core.BlockPos> depositAccess) {
         super("ae2_supply", toolCallId, deadlineGameTime);
         this.request = Objects.requireNonNull(request, "request");
+        this.depositAccess = Objects.requireNonNull(depositAccess, "depositAccess");
     }
 
     @Override
     public String describe() {
-        return "ae2_supply " + request.totalCount() + " item(s) in "
+        return (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT ? "ae2_deposit " : "ae2_supply ") + request.totalCount() + " item(s) in "
                 + request.groups().size() + " group(s)";
     }
 }
