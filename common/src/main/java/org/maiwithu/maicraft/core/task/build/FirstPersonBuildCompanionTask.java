@@ -1828,7 +1828,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private NativeConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before, BlockState predicted) {
-        lastUseConfirmation = new BuildPlacementConfirmation(plan.target(), plan.generated(), before, predicted);
+        // 上下两半沿用本次原生预测，同时保留每格作者明确指定的摆放属性；只确认这次点击，不拆掉已正确放好的门。
+        lastUseConfirmation = new BuildPlacementConfirmation(plan.target(), plan.generated(), before, predicted, targets).trackMaterial(player);
         return lastUseConfirmation;
     }
 
