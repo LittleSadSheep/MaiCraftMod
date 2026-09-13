@@ -75,11 +75,11 @@ final class BuildCellRules {
     /** 检查基岩等无法破坏的方块；门和床要连另一半也检查，不能只证明主格放得下。 */
     private boolean unbreakableAt(BlockPos pos, BlockState desired) {
         var level = player.level();
-        if (peek(pos).getDestroySpeed(level, pos) == -1) {
+        if (peek(pos).getDestroySpeed(level, pos) < 0) {
             return true;
         }
         BlockPos other = otherHalfOf(pos, desired);
-        return other != null && peek(other).getDestroySpeed(level, other) == -1;
+        return other != null && peek(other).getDestroySpeed(level, other) < 0;
     }
 
     /**

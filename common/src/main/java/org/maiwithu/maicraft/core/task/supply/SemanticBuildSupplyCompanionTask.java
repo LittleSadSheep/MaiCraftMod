@@ -73,6 +73,13 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected void onStart() {
+        var terrain = org.maiwithu.maicraft.core.task.build.BuildSiteConstraints.conflicts(player, activePlan.targets);
+        if (!terrain.isEmpty()) {
+            stopWith("build_terrain_conflict", "The design intersects terrain that cannot be excavated: "
+                    + String.join("; ", terrain) + ". Revise basement depth, raise the building or choose another site.",
+                    FailureType.NO_SUPPORT);
+            return;
+        }
         // 普通分批供料只接方块物品计划；摆设、箱内数据等组合效果要走专用流程。
         if (!activePlan.cellNeeds().isEmpty() || !activePlan.blockEntityData.isEmpty()
                 || !activePlan.entities.isEmpty()) {

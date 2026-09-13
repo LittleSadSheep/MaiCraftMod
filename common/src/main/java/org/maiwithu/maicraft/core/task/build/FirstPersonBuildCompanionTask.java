@@ -372,6 +372,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState finishPreflight() {
+        var terrain = BuildSiteConstraints.conflicts(player, r.targets);
+        if (!terrain.isEmpty()) {
+            failPreflight("The design intersects terrain that cannot be excavated: " + String.join("; ", terrain)
+                    + ". Revise basement depth, raise the building or choose another site.",
+                    FailureType.NO_SUPPORT, "build_terrain_conflict");
+            return TaskState.FAILED;
+        }
         // 全部检查结束后汇总拒绝原因；允许分批时只要还有可做的格子就开工，材料不足留给供料父任务处理。
         if (!r.preflightGuardMatches(player)) {
             failAt(siteMin, "observed build region changed before construction", FailureType.TARGET_LOST,

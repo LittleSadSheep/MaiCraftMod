@@ -131,6 +131,11 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         @Override public ClientChunkCache getChunkSource() { searches++; return chunks; }
         @Override public int getHeight() { return 16; }
         @Override public int getMinBuildHeight() { return 0; }
+        private net.minecraft.world.level.border.WorldBorder testBorder;
+        @Override public net.minecraft.world.level.border.WorldBorder getWorldBorder() {
+            if (testBorder == null) testBorder = new net.minecraft.world.level.border.WorldBorder();
+            return testBorder;
+        }
         @Override public long getGameTime() { return time; }
         @Override public Entity getEntity(int id) { return entities.get(id); }
         @Override public Iterable<Entity> entitiesForRendering() { return List.copyOf(entities.values()); }
