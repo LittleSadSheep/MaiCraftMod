@@ -11,11 +11,11 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.Nameable;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
-import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
@@ -71,19 +71,23 @@ public final class ContainerSupplySources {
         return List.of(at.immutable(), peer.immutable());
     }
     public static boolean allowed(LocalPlayer player, BlockPos at, List<String> protectedLabels) {
-        // 任一半受主人保护就整箱不碰；保护地标找不到时，也不能当作已经获得开箱许可。
+        // 普通仓库仍只认箱、桶、潜影盒；任一半不允许访问就整箱不碰，不能把 AE 终端当普通槽位扫描。
         List<BlockPos> footprint = footprint(player.level(), at); if (footprint.isEmpty()) return false;
-        for (BlockPos cell : footprint) {
-            if (NavigationSafetyContext.protectsUse(cell)) return false;
-            var entity = player.level().getBlockEntity(cell);
-            for (String label : protectedLabels) {
-                var landmark = IntentRuntime.get().landmark(label); if (landmark == null || landmark.position() == null) return false;
-                var position = landmark.position();
-                if ((position.dimension() == null || position.dimension().equals(player.level().dimension().location().toString()))
-                        && cell.distSqr(new BlockPos(position.x(), position.y(), position.z())) <= 12 * 12) return false;
-                if (entity instanceof BaseContainerBlockEntity named && named.getCustomName() != null
-                        && label.equalsIgnoreCase(named.getCustomName().getString())) return false;
-            }
+        for (BlockPos cell : footprint) if (!accessAllowed(player, cell, protectedLabels)) return false;
+        return true;
+    }
+    /** 通用访问保护只回答这一个位置能否使用；调用者仍须核对自己的机器类型、身份和可见界面。 */
+    public static boolean accessAllowed(LocalPlayer player, BlockPos at, List<String> protectedLabels) {
+        if (player == null || at == null || !player.level().isLoaded(at) || NavigationSafetyContext.protectsUse(at)) return false;
+        var entity = player.level().getBlockEntity(at);
+        // 保护地标缺失时拒绝访问；只读当前保护范围和原生命名，不开界面、不读库存，也不缓存旧许可。
+        for (String label : protectedLabels == null ? List.<String>of() : protectedLabels) {
+            var landmark = IntentRuntime.get().landmark(label); if (landmark == null || landmark.position() == null) return false;
+            var position = landmark.position();
+            if ((position.dimension() == null || position.dimension().equals(player.level().dimension().location().toString()))
+                    && at.distSqr(new BlockPos(position.x(), position.y(), position.z())) <= 12 * 12) return false;
+            if (entity instanceof Nameable named && named.getCustomName() != null
+                    && label.equalsIgnoreCase(named.getCustomName().getString())) return false;
         }
         return true;
     }
