@@ -116,7 +116,8 @@ final class BuildPlacementAccessSearch {
     }
     private boolean within(BlockPos pos) {
         return Math.abs(pos.getX() - target.pos().getX()) <= 8 && Math.abs(pos.getZ() - target.pos().getZ()) <= 8
-                && pos.getY() >= Math.min(origin.y, target.pos().getY()) - 2 && pos.getY() <= Math.max(origin.y, target.pos().getY()) + 2;
+                // 高阶下面的支撑可能需先沿既有楼梯回到房间地面再放；仍按真实连续落脚和总节点额度限制这条绕行。
+                && pos.getY() >= Math.min(origin.y, target.pos().getY()) - 6 && pos.getY() <= Math.max(origin.y, target.pos().getY()) + 2;
     }
     boolean accepted() { return complete && access != null; }
     Access access() { return access; }
