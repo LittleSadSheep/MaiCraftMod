@@ -110,7 +110,10 @@ public final class BuildExcavationSpoilSupply {
         else { terminal = runChild.apply(child); if (terminal == null || terminal == TaskState.RUNNING) return new Tick(Status.RUNNING, receipt()); }
         TaskResult result = child.result(terminal); child = null; childRecord = null;
         if (result == null || result.data() == null) return fail("excavation_spoil_receipt_missing");
-        lastContainer = result.data(); uncertain |= Boolean.TRUE.equals(lastContainer.get("outcome_uncertain"));
+        var evidence = new LinkedHashMap<String, Object>(result.data());
+        // 保留实际失败原因，终端适配失败不能只剩一个错误码，让续建检查无法解释为何没存进去。
+        if (result.message() != null) evidence.put("message", result.message());
+        lastContainer = Map.copyOf(evidence); uncertain |= Boolean.TRUE.equals(lastContainer.get("outcome_uncertain"));
         int moved;
         try { moved = verifiedCount(lastContainer, childItem, childLimit); }
         catch (IllegalArgumentException invalid) { uncertain = true; return fail("excavation_spoil_receipt_mismatch"); }
@@ -167,7 +170,10 @@ public final class BuildExcavationSpoilSupply {
     private boolean accountAe(TaskResult result) {
         // AE 会话已经核对网络增加；整理器再核对每种物品的背包减少，不能只凭物品离开背包就记成入库。
         if (result == null || result.data() == null) { uncertain = true; return false; }
-        lastContainer = result.data(); uncertain |= Boolean.TRUE.equals(lastContainer.get("outcome_uncertain"));
+        var evidence = new LinkedHashMap<String, Object>(result.data());
+        // AE 的协议或界面失败也保留原始说明，避免只回报“没有箱子”而隐藏真正需要修复的适配原因。
+        if (result.message() != null) evidence.put("message", result.message());
+        lastContainer = Map.copyOf(evidence); uncertain |= Boolean.TRUE.equals(lastContainer.get("outcome_uncertain"));
         try {
             Map<ResourceLocation, Integer> moved = verifiedAeCounts(lastContainer, aeLimits);
             for (ResourceLocation item : aeLimits.keySet()) if (count(owner, item) != aeBefore.get(item) - moved.getOrDefault(item, 0))

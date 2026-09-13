@@ -105,6 +105,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.integration.ae2.Ae2DepositLedgerTest.main(args);
         org.maiwithu.maicraft.core.integration.ae2.Ae2DepositTransferTest.main(args);
         org.maiwithu.maicraft.core.integration.ae2.Ae2DepositAccessPolicyTest.main(args);
+        // 原生客户端不保存服务端 locator，仍须从当前真实终端宿主证明来源和访问边界。
+        org.maiwithu.maicraft.core.integration.ae2.Ae2DepositHostAccessTest.main(args);
         VisibleMenuSessionTest.main(args);
         LegacyInventoryBoundaryTest.main(args);
         GuiBoundaryAuditTest.main(args);

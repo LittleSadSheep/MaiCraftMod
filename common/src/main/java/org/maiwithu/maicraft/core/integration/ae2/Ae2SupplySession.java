@@ -907,7 +907,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT && depositAccess == null) {
             var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
             depositMenu = player.containerMenu; depositScreen = context.minecraft().screen;
-            depositAccess = Ae2DepositAccess.read(depositMenu, player);
+            depositAccess = Ae2DepositAccess.read(depositMenu, player, bridge, fixedTarget);
             if (!depositAccessAllowed()) {
                 beginFinish(Ae2ResourceSupply.Status.FAILED, "ae2_deposit_access_denied", "The open terminal does not satisfy the approved fixed/wireless access scope"); return;
             }
