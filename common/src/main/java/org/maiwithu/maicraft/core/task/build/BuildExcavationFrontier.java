@@ -12,8 +12,8 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 
-/** Clear authored occupied cells from the exposed top down before laying the lowest floor. */
-final class BuildExcavationFrontier {
+/** 先从露出的地表往下刨坑，清掉蓝图中的阻挡物，再铺地下室地板，避免直接寻路到埋在土里的底层。 */
+public final class BuildExcavationFrontier {
     private final Set<BlockPos> pending = new LinkedHashSet<>();
     private final Set<BlockPos> rejected = new LinkedHashSet<>();
 
@@ -23,7 +23,22 @@ final class BuildExcavationFrontier {
     void cleared(BlockPos pos) { pending.remove(pos); rejected.clear(); }
     void reject(BlockPos pos) { rejected.add(pos); }
 
+    /** 角色还在图纸范围内且比已加载的外部安全地面低超过一格，才先出坑再取料；未知地形不推测出口。 */
+    public static boolean needsSupplyAccess(LocalPlayer player, List<BuildTaskRecord.Target> targets) {
+        if (targets.isEmpty()) return false;
+        int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (var target : targets) {
+            minX = Math.min(minX, target.pos().getX()); minZ = Math.min(minZ, target.pos().getZ());
+            maxX = Math.max(maxX, target.pos().getX()); maxZ = Math.max(maxZ, target.pos().getZ());
+        }
+        BlockPos feet = player.blockPosition();
+        if (feet.getX() < minX || feet.getX() > maxX || feet.getZ() < minZ || feet.getZ() > maxZ) return false;
+        BlockPos ground = exit(player, new BlockPos(minX, feet.getY(), minZ), new BlockPos(maxX, feet.getY(), maxZ));
+        return player.getY() < ground.getY() - 1;
+    }
+
     static boolean safeDescent(LocalPlayer player, BlockPos target) {
+        // 刨脚下方块前，先确认下一格有安全落脚面；不能把角色送进深坑、岩浆块或流体里。
         if (!target.equals(player.blockPosition().below())) return true;
         var level = player.level();
         var landing = target.below();
@@ -32,7 +47,7 @@ final class BuildExcavationFrontier {
                 && level.getBlockState(landing).isFaceSturdy(level, landing, net.minecraft.core.Direction.UP);
     }
 
-    /** A resumed task may start inside its pit; use loaded exterior ground instead of that buried starting point. */
+    /** 从坑内续建时重新找外侧实际地面，不能把恢复时的坑底位置当作出坑终点。 */
     static BlockPos exit(LocalPlayer player, BlockPos min, BlockPos max) {
         BlockPos start = player.blockPosition();
         if (min == null || max == null) return start.immutable();
@@ -58,6 +73,7 @@ final class BuildExcavationFrontier {
     }
 
     BlockPos next(LocalPlayer player) {
+        // 优先保留能一并连锁的完整土方，减少先挖散边角再来回换站位；最终选区仍由原生准星决定。
         pending.removeIf(pos -> player.level().isLoaded(pos) && player.level().getBlockState(pos).isAir());
         if (org.maiwithu.maicraft.core.integration.ultimine.UltimineNative.available()
                 && org.maiwithu.maicraft.core.integration.ultimine.UltimineNative.serverAvailable()) {
@@ -87,7 +103,7 @@ final class BuildExcavationFrontier {
                         .thenComparingLong(BlockPos::asLong)).orElse(null);
     }
 
-    /** A ground approach must expose a real face without standing on the block being removed. */
+    /** 找能真正看见目标面的地面站位，同时避开流体、伤害方块以及马上要拆掉的落脚块。 */
     static List<NavGoal> approaches(LocalPlayer player, BlockPos target) {
         var level = player.level();
         List<NavGoal> result = new ArrayList<>();

@@ -55,7 +55,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         level.section = new LevelChunkSection(new PalettedContainer<>(Block.BLOCK_STATE_REGISTRY,
                 Blocks.AIR.defaultBlockState(), PalettedContainer.Strategy.SECTION_STATES), null);
         level.chunks = h.allocate(LoadedChunks.class);
-        level.chunks.chunk = h.allocate(LevelChunk.class);
+        // 让预检和导航的“只读已加载区块”入口读取同一份测试地形，不落入未初始化的原版区块内部字段。
+        var chunk = h.allocate(TestChunk.class); chunk.owner = level; level.chunks.chunk = chunk;
         ActorControlTestHarness.field(LevelChunk.class, "sections").set(level.chunks.chunk,
                 new LevelChunkSection[]{level.section});
         ActorControlTestHarness.field(Level.class, "dimension").set(level, Level.OVERWORLD);
@@ -154,6 +155,14 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
             return entities.values().stream().map(type::tryCast).filter(java.util.Objects::nonNull)
                     .filter(e -> e.getBoundingBox().intersects(bounds) && filter.test(e)).toList();
         }
+    }
+
+    private static final class TestChunk extends LevelChunk {
+        private TestLevel owner;
+        private TestChunk() { super(null, new net.minecraft.world.level.ChunkPos(0, 0)); }
+        @Override public BlockState getBlockState(BlockPos pos) { return owner.getBlockState(pos); }
+        @Override public FluidState getFluidState(BlockPos pos) { return owner.getFluidState(pos); }
+        @Override public net.minecraft.world.level.ChunkPos getPos() { return new net.minecraft.world.level.ChunkPos(0, 0); }
     }
 
     private static final class LoadedChunks extends ClientChunkCache {

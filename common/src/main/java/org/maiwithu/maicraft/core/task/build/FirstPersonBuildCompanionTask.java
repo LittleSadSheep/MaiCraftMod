@@ -55,6 +55,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private static final int PREFLIGHT_BUDGET = 24;
     private static final int USE_TIMEOUT = 40;
 
+    // 刨坑 -> 出坑 -> 拿材料 -> 建房；每一步都等真实游戏操作确认后，再交给下一步接管角色。
     private enum Phase { PREFLIGHT, EXCAVATE, EXCAVATE_EXIT, SELECT, CLEAR_NAV, CLEAR, CLEAR_RELEASE, PLACE_NAV, WORKSITE, SELECT_ITEM,
         AIM, WAIT_USE, SUPPORT_VERIFY, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, FINAL_STATE, ROUTE_VERIFY }
     private record CellPlan(BuildTaskRecord.Target target,
@@ -79,8 +80,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private boolean ultimineArmed;
     private String ultimineFailure;
     private int ultimineBatches;
+    private int ultimineHeldTicks;
+    private Map<String, Object> lastUltimineHold = Map.of();
     private Map<String, Object> ultimineEvidence = Map.of();
     private BlockPos excavationExit;
+    private boolean supplyAccessReady;
     private Phase afterExcavationExit;
     private final BuildExcavationSpoilSupply spoilSupply = new BuildExcavationSpoilSupply();
     private final List<Map<String, Object>> spoilReceipts = new ArrayList<>();
@@ -412,6 +416,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failPreflight("site contains protected or unbreakable cells",
                     FailureType.NO_SUPPORT, "blocked_site_cells"); return TaskState.FAILED;
         }
+        if (r.supplyAccessOnly()) {
+            // 地层和保护预检通过后，补料准备直接走出口，不因缺少建筑材料停在坑里，也不开始建房。
+            preflightDone = true;
+            excavationExit = BuildExcavationFrontier.exit(player, siteMin, siteMax);
+            if (!BuildExcavationFrontier.needsSupplyAccess(player, r.targets)) {
+                supplyAccessReady = true; return TaskState.SUCCESS;
+            }
+            registerProvider(); phase = Phase.EXCAVATE_EXIT; return TaskState.RUNNING;
+        }
         r.excavationCargo().begin(player);
         excavationExit = BuildExcavationFrontier.exit(player, siteMin, siteMax);
         for (CellPlan plan : plans) {
@@ -437,6 +450,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState excavationTick() {
+        // 先处理需要存回仓库的土石，再从当前最高的阻挡层继续开挖，不能直接奔向还埋在地下的地板。
         resetCell();
         if (spoilSupply.active()) {
             var deposited = NavigationSafetyContext.withProtectedArea(
@@ -490,11 +504,27 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState excavationExitTick() {
-        if (nav == null) nav = PlayerNav.toGoal(player, () -> NavGoal.nearGround(excavationExit, 2, 1), 1.0,
-                () -> player.blockPosition().distSqr(excavationExit) <= 5, this).walkingOnly();
+        // 刨坑 -> 站到外部地面 -> 拿材料；坑边低一格的近点不算出口，否则普通仓库寻路仍会被困住。
+        if (nav == null) nav = PlayerNav.toGoal(player, () -> NavGoal.exact(excavationExit), 1.0,
+                () -> player.blockPosition().equals(excavationExit), this).walkingOnly();
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
-            case ARRIVED -> { stopNav(); drainScaffolds(); phase = afterExcavationExit; yield TaskState.RUNNING; }
+            case ARRIVED -> {
+                stopNav(); drainScaffolds();
+                if (!player.blockPosition().equals(excavationExit)) {
+                    failAt(excavationExit, "The exact exterior supply exit has not been reached",
+                            FailureType.NO_PATH, "supply_access_not_reached", false);
+                    yield TaskState.FAILED;
+                }
+                if (r.supplyAccessOnly()) {
+                    supplyAccessReady = !BuildExcavationFrontier.needsSupplyAccess(player, r.targets);
+                    if (supplyAccessReady) yield TaskState.SUCCESS;
+                    failAt(excavationExit, "The body is still below the observed exterior supply route",
+                            FailureType.NO_PATH, "supply_access_not_reached", false);
+                    yield TaskState.FAILED;
+                }
+                phase = afterExcavationExit; yield TaskState.RUNNING;
+            }
             case FAILED -> {
                 String reason = nav.failReason(); stopNav();
                 failAt(excavationExit, "Could not establish a ground exit before resupply: " + reason,
@@ -540,6 +570,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (!clearQueue.isEmpty()) { clearing = clearQueue.get(0); phase = Phase.CLEAR_NAV; }
             else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
             else {
+                if (r.allowPartial && (r.consumeMaterials || !player.getAbilities().instabuild)
+                        && !inventory.hasItems(cell.target().item(), cell.target().materialCount(), true)) {
+                    // 缺砖就留在能够补料的位置，不能空手回到坑底后才宣布材料不足。
+                    failAt(cell.target().pos(), "required block item is not in synchronized inventory; resupply before approaching the cell",
+                            FailureType.NO_MATERIAL, "material_exhausted", false);
+                    return TaskState.FAILED;
+                }
                 phase = Phase.PLACE_NAV;
             }
             return TaskState.RUNNING;
@@ -548,7 +585,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private List<BlockPos> clearCells(CellPlan plan) {
-        // 当前把主格和自动生成格里“不为空且不匹配”的方块加入待清除列表，这里没有再按替换许可过滤。
+        // 收集蓝图主格及门、床另一半的现存阻挡；真正下手时还会重读替换许可和保护条件。
         LinkedHashSet<BlockPos> out = new LinkedHashSet<>();
         if (player.level().isLoaded(plan.target().pos())) {
             BlockState live = player.level().getBlockState(plan.target().pos());
@@ -622,6 +659,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState clearTick() {
         if (ultimineArmed && digger.hasPendingBreak()) {
             var decision = ultimine.tickInFlight(ClientRuntime.requireContext(player));
+            if (decision.ready()) ultimineHeldTicks++;
             var holding = new LinkedHashMap<>(ultimineEvidence);
             holding.putAll(ultimine.holdEvidence()); holding.put("status", "holding_native_break");
             ultimineEvidence = Map.copyOf(holding);
@@ -632,7 +670,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 return TaskState.FAILED;
             }
         }
-        // 对准目标挖掘并等待确认；当前没有在这里重新调用 blockedByMode 检查预检后出现的普通方块。
+        // 对准目标持续挖掘；每次下手前重读现场保护，已开始的连锁则持续保持原生启用键直到破坏确认。
         if (!player.level().isLoaded(clearing)) {
             failAt(clearing, "break target unloaded", FailureType.TARGET_LOST,
                     "clear_target_lost", false); return TaskState.FAILED;
@@ -677,6 +715,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState nextClear() {
+        // 本批破坏确认后才松开连锁键，再等 FTB 确认松开，避免下一项普通操作误带连锁效果。
         if (ultimine != null) {
             var release = ultimine.finish(ClientRuntime.requireContext(player));
             if (release.status() == org.maiwithu.maicraft.core.integration.ultimine.UltimineSession.Status.WAITING) {
@@ -687,7 +726,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 failAt(clearing, release.code(), FailureType.TARGET_LOST, "ultimine_release_interrupted", false);
                 return TaskState.FAILED;
             }
-            if (ultimineArmed) ultimineBatches++;
+            if (ultimineArmed) { ultimineBatches++; lastUltimineHold = ultimine.holdEvidence(); }
             ultimine = null; ultimineArmed = false;
         }
         // 清完一格继续下一格；冲突全部清完后，要么空气目标已完成，要么进入放置阶段。
@@ -722,6 +761,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private boolean prepareExcavationBreak(BlockHitResult hit) {
+        // 按准星实际命中面使用原生选区；蓝图中已经挖空的格子仍在施工范围内，成品和受保护方块始终排除。
         if (!excavating) return true;
         if (ultimine == null) ultimine = new org.maiwithu.maicraft.core.integration.ultimine.UltimineSession();
         var decision = ultimine.prepare(ClientRuntime.requireContext(player), hit, excavationAuthority, at -> {
@@ -2081,6 +2121,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!excavationTools.receipts().isEmpty()) data.put("excavation_tool_receipts", excavationTools.receipts());
         if (!spoilReceipts.isEmpty()) data.put("excavation_spoil_receipts", List.copyOf(spoilReceipts));
         data.put("confirmed_ultimine_batches", ultimineBatches);
+        data.put("ultimine_held_break_ticks", ultimineHeldTicks);
+        if (!lastUltimineHold.isEmpty()) data.put("last_confirmed_ultimine_hold", lastUltimineHold);
         if (!ultimineEvidence.isEmpty()) data.put("ultimine", ultimineEvidence);
         data.put("stopped_phase", phase.name().toLowerCase(java.util.Locale.ROOT));
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
@@ -2135,6 +2177,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
         if (traversabilityResult != null) {
             data.put("traversability_verification", traversabilityResult.evidence());
+        }
+
+        if (r.supplyAccessOnly()) {
+            // 出坑只满足补料的前置条件；即使现场恰好已经全对，也不由这张内部回执验收整栋建筑。
+            data.put("supply_access_only", true);
+            data.put("supply_access_ready", supplyAccessReady && failureCode == null);
+            data.put("goal_satisfied", false);
+            if (excavationExit != null) data.put("supply_exit", position(excavationExit));
+            return data;
         }
 
         // 再次读取现场，全部目标相符时给出场地中心；它表示已核对的建筑位置，不表示角色站在中心。
@@ -2195,6 +2246,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     @Override
     protected String successMessage() {
+        if (r.supplyAccessOnly()) return "reached the exterior ground for material supply; temporary supports remain tracked for construction";
         return "built and re-verified " + r.completed() + "/" + r.targets.size()
                 + " block(s) through first-person actions; placed " + r.placed()
                 + ", cleared " + r.broken() + " (" + note

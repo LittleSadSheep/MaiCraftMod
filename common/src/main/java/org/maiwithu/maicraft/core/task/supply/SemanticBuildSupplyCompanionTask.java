@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildOrder;
+import org.maiwithu.maicraft.core.task.build.BuildExcavationFrontier;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifier;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
@@ -29,7 +30,7 @@ import org.maiwithu.maicraft.task.TaskState;
 /** 大建筑的供料父任务：先确定整份方案的材料，确认预览，再循环“取一批材料、建一批”，直到成品验收通过。 */
 final class SemanticBuildSupplyCompanionTask
         extends AbstractCompanionTask<SemanticBuildSupplyTaskRecord> {
-    private enum ChildKind { BUILD }
+    private enum ChildKind { BUILD, BUILD_ACCESS }
     private record BatchNeed(Item item, int fetch, int consumableBeforeBlock) {}
 
     private final Map<Item, Integer> fullLedger = new LinkedHashMap<>();
@@ -146,7 +147,9 @@ final class SemanticBuildSupplyCompanionTask
             return TaskState.RUNNING;
         }
         if (need.fetch() > 0) {
-            startBatchSupply(need);
+            // 缺料时先看脚下：还在地下施工区就借施工权限出坑，站稳地面后才让普通仓库供料接手。
+            if (BuildExcavationFrontier.needsSupplyAccess(player, activePlan.targets)) startBuild(true);
+            else startBatchSupply(need);
             return TaskState.RUNNING;
         }
         if (need.consumableBeforeBlock() > 0) {
@@ -183,6 +186,20 @@ final class SemanticBuildSupplyCompanionTask
         activeRecord = null;
         activeKind = null;
 
+        if (kind == ChildKind.BUILD_ACCESS) {
+            // 出口完成单独记账，并复查身体高度；它不能替代成品验收，也不能放宽仓库的普通导航权限。
+            boolean ready = terminal == TaskState.SUCCESS && result != null && result.success()
+                    && result.data() != null && Boolean.TRUE.equals(result.data().get("supply_access_only"))
+                    && Boolean.TRUE.equals(result.data().get("supply_access_ready"))
+                    && !BuildExcavationFrontier.needsSupplyAccess(player, activePlan.targets);
+            if (ready) return TaskState.RUNNING;
+            stopFromChild("construction_supply_access_failed",
+                    "could not reach the exterior ground before material supply"
+                            + (result == null || result.message() == null ? "" : ": " + result.message()),
+                    result, FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+
         if (result != null && result.data() != null) finalBuildData = Map.copyOf(result.data());
         batchVerified = batchCompleted(terminal, result);
         if (batchVerified && allMatched() && !activePlan.hasTrackedScaffolds()) return finishMatched();
@@ -212,6 +229,7 @@ final class SemanticBuildSupplyCompanionTask
      */
     static boolean batchCompleted(TaskState terminal, TaskResult result) {
         if (terminal != TaskState.SUCCESS || result == null || !result.success()) return false;
+        if (result.data() != null && Boolean.TRUE.equals(result.data().get("supply_access_only"))) return false;
         Object remaining = result.data() == null ? null : result.data().get("remaining_scaffolds");
         return remaining == null || remaining instanceof java.util.Collection<?> cells && cells.isEmpty();
     }
@@ -285,13 +303,16 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private void startBuild() {
+        startBuild(false);
+    }
+
+    private void startBuild(boolean accessOnly) {
         // 新建一份施工任务单，共享整份蓝图的保护、预览和脚手架记录；世界里已经正确的格子会跳过。
-        buildRounds++;
-        batchVerified = false;
+        if (!accessOnly) { buildRounds++; batchVerified = false; }
         long now = player.level().getGameTime();
         BuildTaskRecord source = activePlan;
         BuildTaskRecord batch = new BuildTaskRecord(
-                childId("build"), now + BuildTool.timeoutTicksFor(source.targets.size(), true),
+                childId(accessOnly ? "build-access" : "build"), now + BuildTool.timeoutTicksFor(source.targets.size(), true),
                 source.targets, source.replaceMode, source.replaceExisting,
                 true, true, source.blockEntityData, source.entities, source.replaceBlockEntities);
         batch.cellNeeds(source.cellNeeds());
@@ -299,10 +320,11 @@ final class SemanticBuildSupplyCompanionTask
         batch.semanticFacts(source.semanticFacts());
         batch.traversabilityContract(source.traversabilityContract());
         source.copyExecutionContextTo(batch);
+        batch.supplyAccessOnly(accessOnly);
         batch.toolSupply(new BuildTaskRecord.ToolSupply(r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels));
         batch.previewManaged(true);
-        remainingCellsBeforeBuild = remainingCellCount();
-        startChild(ChildKind.BUILD, batch);
+        if (!accessOnly) remainingCellsBeforeBuild = remainingCellCount();
+        startChild(accessOnly ? ChildKind.BUILD_ACCESS : ChildKind.BUILD, batch);
     }
 
     private void startChild(ChildKind kind, TaskRecord record) {
@@ -565,7 +587,7 @@ final class SemanticBuildSupplyCompanionTask
     @Override public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("task", name());
-        data.put("phase", supply.active() ? "material_supply" : activeChild != null ? "building"
+        data.put("phase", supply.active() ? "material_supply" : activeKind == ChildKind.BUILD_ACCESS ? "preparing_supply_access" : activeChild != null ? "building"
                 : traversabilityScan != null ? "verifying" : !prepared ? "preparing_materials"
                 : "awaiting_preview_or_batch");
         data.put("construction_batches_started", buildRounds);

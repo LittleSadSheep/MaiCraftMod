@@ -55,6 +55,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private java.util.function.BiConsumer<net.minecraft.client.player.LocalPlayer, BlockPos> confirmedMutation = (player, pos) -> {};
     private boolean hasExecutionGuards;
     private boolean previewManaged;
+    /** 仅供内部补料流程使用：先回到施工区外地面，临时支撑仍留在共享账中，后续正常施工负责清理。 */
+    private boolean supplyAccessOnly;
     private BuildScaffoldLedger scaffoldLedger = new BuildScaffoldLedger();
     private BuildExcavationCargo excavationCargo = new BuildExcavationCargo();
     BuildExcavationCargo excavationCargo() { return excavationCargo; }
@@ -85,6 +87,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     public void toolSupply(ToolSupply value) { toolSupply = Objects.requireNonNull(value); }
 
     public boolean previewManaged() { return previewManaged; }
+    public boolean supplyAccessOnly() { return supplyAccessOnly; }
+    public void supplyAccessOnly(boolean value) { supplyAccessOnly = value; }
     public boolean hasTrackedScaffolds() { return !scaffoldLedger.isEmpty(); }
     public void previewManaged(boolean value) { previewManaged = value; }
     public List<BlockPos> materialSupplyProtection() { return materialSupplyProtection; }
@@ -94,6 +98,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
     /** 分批施工时共享原来的预览决定、临时支撑账和场地检查，不能每一批都忘掉前一批的保护要求。 */
     public void copyExecutionContextTo(BuildTaskRecord destination) {
+        // 只共享场地约束与施工账，不传递“仅出坑”模式，避免下一批拿到材料后仍只走出口。
         destination.projectId = projectId;
         destination.projectProtectionLabels = projectProtectionLabels;
         destination.projectCheckpoint = projectCheckpoint;
@@ -296,6 +301,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     /** 显示已确认符合蓝图的格数；外界把成品改坏后，这个数可以在复查时减少。 */
     @Override
     public String describe() {
+        if (supplyAccessOnly) return "准备施工补料出口";
         return "搭建 " + completed + "/" + targets.size();
     }
 
