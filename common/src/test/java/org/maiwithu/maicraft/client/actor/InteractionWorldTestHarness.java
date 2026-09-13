@@ -119,6 +119,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         LevelChunkSection section;
         LoadedChunks chunks;
         public int blockReads, searches;
+        public boolean clientHeightmapsOnly;
         long time;
         private TestLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
         @Override public boolean isLoaded(BlockPos pos) { return pos.getX() >> 4 == 0 && pos.getZ() >> 4 == 0; }
@@ -136,6 +137,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         @Override public int getHeight() { return 16; }
         @Override public int getMinBuildHeight() { return 0; }
         @Override public int getHeight(net.minecraft.world.level.levelgen.Heightmap.Types type, int x, int z) {
+            // 模拟真实客户端：服务端不会发来的高度图没有地面数据，不能误用它判断出坑位置。
+            if (clientHeightmapsOnly && !type.sendToClient()) return getMinBuildHeight();
             for (int y = 15; y >= 0; y--) if (!getBlockState(new BlockPos(x, y, z)).isAir()) return y + 1;
             return 0;
         }

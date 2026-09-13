@@ -34,6 +34,7 @@ public final class BuildExcavationFrontierTest {
             for (BlockPos column : Set.of(new BlockPos(2, 3, 4), new BlockPos(6, 3, 4),
                     new BlockPos(4, 3, 2), new BlockPos(4, 3, 6))) h.set(column, net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
             h.position(new net.minecraft.world.phys.Vec3(4.5, 1, 4.5));
+            h.level.clientHeightmapsOnly = true;
             BlockPos exit = BuildExcavationFrontier.exit(h.player, new BlockPos(3, 0, 3), new BlockPos(5, 4, 5));
             check(exit.getY() == 4 && (exit.getX() < 3 || exit.getX() > 5 || exit.getZ() < 3 || exit.getZ() > 5),
                     "resuming in a dug pit finds exterior observed ground, not the buried current feet");

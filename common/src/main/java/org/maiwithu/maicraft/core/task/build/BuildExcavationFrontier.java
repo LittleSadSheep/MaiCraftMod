@@ -60,7 +60,8 @@ public final class BuildExcavationFrontier {
                 new BlockPos(x, start.getY(), max.getZ() + 1))) {
             var level = player.level();
             if (!level.isLoaded(column)) continue;
-            int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, column.getX(), column.getZ());
+            // 客户端只用服务器实际同步的高度图，再核对地面方块；NO_LEAVES 属于服务端数据，不能拿空高度当作坑底出口。
+            int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, column.getX(), column.getZ());
             BlockPos feet = new BlockPos(column.getX(), y, column.getZ());
             if (level.isOutsideBuildHeight(feet.above()) || !level.isLoaded(feet.below())
                     || !level.getBlockState(feet.below()).isFaceSturdy(level, feet.below(), net.minecraft.core.Direction.UP)
