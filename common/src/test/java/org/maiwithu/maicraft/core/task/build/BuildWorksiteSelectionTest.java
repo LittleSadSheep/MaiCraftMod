@@ -48,7 +48,13 @@ final class BuildWorksiteSelectionTest {
             install(task, targets);
             var attempts = (PlacementAttemptLedger) field("placementAttempts").get(task);
             for (var target : targets.subList(0, targets.size() - 1)) attempts.rejectStance(target, h.player.blockPosition());
-            check((boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null),
+            boolean selected = false;
+            // Selection intentionally yields after four milliseconds; cold native geometry may
+            // consume the first slice, so exercise bounded client ticks instead of assuming one call.
+            for (int tick = 0; tick < 10 && !selected; tick++) {
+                h.nextTick(); selected = (boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null);
+            }
+            check(selected,
                     "local ranking finds useful nearby work without being trapped by the old queue prefix");
             install(task, targets);
             Vec3 feet = new Vec3(7.5, 1, 8.5);

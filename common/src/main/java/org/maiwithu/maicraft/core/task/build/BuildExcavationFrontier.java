@@ -28,6 +28,7 @@ final class BuildExcavationFrontier {
         var level = player.level();
         var landing = target.below();
         return level.isLoaded(landing) && level.getBlockState(landing).getFluidState().isEmpty()
+                && !org.maiwithu.maicraft.core.pathing.util.BlockHelper.isHazard(level, landing)
                 && level.getBlockState(landing).isFaceSturdy(level, landing, net.minecraft.core.Direction.UP);
     }
 
@@ -71,6 +72,9 @@ final class BuildExcavationFrontier {
                     || !level.isLoaded(feet.below())) continue;
             var floor = level.getBlockState(feet.below());
             if (floor.getCollisionShape(level, feet.below()).isEmpty() || !floor.getFluidState().isEmpty()) continue;
+            if (org.maiwithu.maicraft.core.pathing.util.BlockHelper.isHazard(level, feet.below())
+                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet)
+                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet.above())) continue;
             Vec3 body = Vec3.atBottomCenterOf(feet);
             AABB box = player.getDimensions(player.getPose()).makeBoundingBox(body);
             if (!level.noCollision(player, box)) continue;

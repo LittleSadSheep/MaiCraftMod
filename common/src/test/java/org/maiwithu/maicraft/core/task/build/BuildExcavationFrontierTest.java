@@ -28,6 +28,8 @@ public final class BuildExcavationFrontierTest {
             check(!BuildExcavationFrontier.safeDescent(h.player, support), "do not mine footing over an open drop");
             h.set(support.below(), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
             check(BuildExcavationFrontier.safeDescent(h.player, support), "a proven one-block descent can open the next excavation layer");
+            h.set(support.below(), net.minecraft.world.level.block.Blocks.MAGMA_BLOCK.defaultBlockState());
+            check(!BuildExcavationFrontier.safeDescent(h.player, support), "solid but damaging terrain is not a safe descent landing");
         }
         System.out.println("BuildExcavationFrontierTest: passed");
     }
