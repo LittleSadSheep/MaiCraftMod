@@ -33,6 +33,7 @@ public final class CreateMechanicalPlacementGeometryTest {
             check(!CreateMechanicalPlacementGeometry.feasibleView(beneath.east(1), middle, false), "an arbitrary side stance cannot invent a vertical axis without native inheritance");
             check(h.blockUses() == 0 && h.itemUses() == 0, "route and jump checks remain read-only");
         }
+        CreateMechanicalPlacementAttemptTest.main(args);
         System.out.println("CreateMechanicalPlacementGeometryTest: native-axis stance, real top-face jump and roof protection passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

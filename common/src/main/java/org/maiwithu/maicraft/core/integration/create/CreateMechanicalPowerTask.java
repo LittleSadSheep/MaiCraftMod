@@ -92,8 +92,7 @@ final class CreateMechanicalPowerTask
     private long constructionProgressRevision;
     private int readyTicks;
     private int networkWaitTicks;
-    private boolean jumpedForFace;
-    private int jumpTicks;
+    private CreateMechanicalPlacementAttempt placementAttempt = new CreateMechanicalPlacementAttempt();
     private NativeActionReceipt placementReceipt;
     private BlockPos activeStand;
     private long bodyEpoch;
@@ -688,32 +687,49 @@ final class CreateMechanicalPowerTask
             return TaskState.RUNNING;
         }
         Vec3 point = faceCenter(cell.support(), cell.supportFace());
+        BlockHitResult actualHit = nativeRaycast(player);
+        boolean exactHit = actualHit != null && actualHit.getBlockPos().equals(cell.support()) && actualHit.getDirection() == cell.supportFace();
+        float[] look = lookAngles(player.getEyePosition(), point);
+        placementAttempt.observe(player.position(), player.getEyePosition(), player.getDeltaMovement(), player.onGround(),
+                player.input != null && player.input.jumping, player.isShiftKeyDown(), player.getPose().name(), context.minecraft().screen != null,
+                cell.stand(), cell.support(), cell.supportFace().getSerializedName(), actualHit == null ? "miss" : actualHit.getBlockPos().toShortString(),
+                actualHit == null ? "none" : actualHit.getDirection().getSerializedName(), exactHit, Math.abs(player.getXRot() - look[1]));
         InputDriver.halt(player);
         InputDriver.sneak(player, false);
-        if (player.isShiftKeyDown() || !jumpedForFace && !player.onGround()) return TaskState.RUNNING;
+        if (player.isShiftKeyDown() || !placementAttempt.jumpRequested() && !player.onGround()) return TaskState.RUNNING;
+        if (!placementAttempt.jumpRequested() && !CreateMechanicalPlacementAttempt.centered(player.position(), player.getDeltaMovement(), cell.stand())) {
+            if (placementAttempt.centerExpired() || !context.level().noCollision(player,
+                    player.getBoundingBox().move(Vec3.atBottomCenterOf(cell.stand()).subtract(player.position())))) {
+                beginFailure("placement_stance_not_centered", "the physical body could not settle at the surveyed placement stance",
+                        FailureType.STANCE_DUD, List.of("inspect_placement_diagnostics", "cancel"), false);
+                return TaskState.RUNNING;
+            }
+            context.body().applyMovement(CreateMechanicalPlacementAttempt.centerMovement(player.position(), cell.stand(), player.getYRot()), context.tickRevision());
+            return TaskState.RUNNING;
+        }
         InputDriver.lookAt(player, point);
-        float[] look = lookAngles(player.getEyePosition(), point);
-        if (jumpedForFace && ++jumpTicks > 30) {
+        if (placementAttempt.holdJump()) { InputDriver.jump(player); placementAttempt.jumpCommand(); }
+        if (placementAttempt.expired()) {
             beginFailure("placement_jump_unsettled", "the native jump did not expose the declared support face",
                     FailureType.STANCE_DUD, List.of("make_alternate_stance", "cancel"), false);
             return TaskState.RUNNING;
         }
-        if (!lookReady(player, look[0], look[1])) {
+        if (!lookReady(player, look[0], look[1]) && !(placementAttempt.airborne() && exactHit)) {
             readyTicks = 0;
             return TaskState.RUNNING;
         }
         if (CreateMechanicalPlacementGeometry.needsTopFaceJump(player.getEyePosition(), point, cell.supportFace())) {
-            if (!jumpedForFace && player.onGround()) {
+            if (!placementAttempt.jumpRequested() && player.onGround()) {
                 if (!CreateMechanicalPlacementGeometry.clearForJump(context.level(), PlayerNav.playerFeet(player))) {
                     beginFailure("placement_jump_blocked", "the support top needs a native jump but its headroom is blocked",
                             FailureType.STANCE_DUD, List.of("make_alternate_stance", "cancel"), false);
                     return TaskState.RUNNING;
                 }
-                jumpedForFace = true; jumpTicks = 0; InputDriver.jump(player);
+                placementAttempt.requestJump(); InputDriver.jump(player); placementAttempt.jumpCommand();
             }
             return TaskState.RUNNING;
         }
-        BlockHitResult hit = nativeRaycast(player);
+        BlockHitResult hit = actualHit;
         if (hit == null || !hit.getBlockPos().equals(cell.support())
                 || hit.getDirection() != cell.supportFace()) {
             readyTicks = 0;
@@ -727,7 +743,7 @@ final class CreateMechanicalPowerTask
         }
         networkWaitTicks = 0;
         readyTicks++;
-        if (readyTicks < READY_TICKS) return TaskState.RUNNING;
+        if (readyTicks < (placementAttempt.airborne() ? 1 : READY_TICKS)) return TaskState.RUNNING;
         ItemStack beforeStack = player.getMainHandItem().copy();
         if (CreateMechanicalStager.usable(beforeStack, chainItem) <= 0) {
             beginFailure("material_changed", "the selected chain-drive stack changed before placement",
@@ -770,7 +786,7 @@ final class CreateMechanicalPowerTask
             return TaskState.RUNNING;
         }
         cursor++;
-        jumpedForFace = false; jumpTicks = 0;
+        placementAttempt = new CreateMechanicalPlacementAttempt();
         renewProgressLease();
         readyTicks = 0;
         context.body().clearLook();
@@ -1099,6 +1115,7 @@ final class CreateMechanicalPowerTask
         safe.put("supply_receipts", List.copyOf(supplyReceipts));
         if (!supplyFailure.isEmpty()) safe.put("supply_failure", supplyFailure);
         if (failureDetail != null) safe.put("detail", failureDetail);
+        safe.put("placement_diagnostics", placementAttempt.report());
         return safe;
     }
 
