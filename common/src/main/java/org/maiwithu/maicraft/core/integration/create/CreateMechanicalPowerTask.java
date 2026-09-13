@@ -38,6 +38,9 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.TaskResult;
 
 /**
  * 完成接线全过程：调查、准备一批材料、复查、走到站位、瞄准放一格、确认消耗和状态，再验证目标开始转动并归位物品。
@@ -106,6 +109,10 @@ final class CreateMechanicalPowerTask
     private boolean continuationIssued;
     private boolean resumedConstructionPrefix;
     private Task.StopReason forcedStop;
+    private boolean economicAfterEndpoints;
+    private Task economicTask;
+    private TaskRecord economicRecord;
+    private TaskResult economicResult;
 
     CreateMechanicalPowerTask(LocalPlayer player, CreateMechanicalPowerTaskRecord record) {
         super(player, record);
@@ -117,6 +124,16 @@ final class CreateMechanicalPowerTask
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         bodyEpoch = context.bodyEpoch();
         dimension = context.level().dimension().location().toString();
+        if (r.continuationToken == null && r.request.transmission() == CreateMechanicalPower.Transmission.AUTO && !r.request.allowFreeReceiver()) {
+            if (!r.request.preserveExisting() || !CreateMechanicalPower.availability().available()) {
+                failNow("mechanical_auto_preflight_failed", "AUTO requires preserving existing blocks and an available native kinetic API", FailureType.UNSUPPORTED, List.of("inspect_endpoints", "cancel"));
+                return;
+            }
+            economicAfterEndpoints = true;
+            progressiveSurvey = new CreateProgressiveSurvey(r.request, true);
+            progressiveProgressRevision = progressiveSurvey.progressRevision(); phase = Phase.PROGRESSIVE;
+            renewProgressLease(); return;
+        }
         ResourceLocation id;
         id = ResourceLocation.tryParse(CreateMechanicalPower.CHAIN_DRIVE_ID);
         if (id == null) {
@@ -168,6 +185,7 @@ final class CreateMechanicalPowerTask
                     return;
                 }
                 progressiveSurvey = endpointContinuation.survey();
+                economicAfterEndpoints = endpointContinuation.economicAfterEndpoints();
                 progressiveSurvey.authorizeNextEndpointFrontier();
                 progressiveProgressRevision = progressiveSurvey.progressRevision();
                 data.put("resumed_from", r.continuationToken.toString());
@@ -231,6 +249,7 @@ final class CreateMechanicalPowerTask
     @Override
     protected TaskState onTick() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
+        if (economicTask != null) return advanceEconomicalTask();
         if (context.bodyEpoch() != bodyEpoch
                 || !context.level().dimension().location().toString().equals(dimension)) {
             beginFailure("body_or_dimension_changed",
@@ -326,6 +345,12 @@ final class CreateMechanicalPowerTask
     private TaskState progressSurvey(LocalPlayerContext context) {
         CreateProgressiveSurvey.Status status = progressiveSurvey.tick(context);
         observeProgressiveSurveyProgress();
+        if (economicAfterEndpoints && progressiveSurvey.endpointsResolved()) {
+            economicRecord = CreateEconomicEndpointBridge.resolved(r, dimension, progressiveSurvey.resolvedSource(), progressiveSurvey.resolvedDestination());
+            progressiveSurvey.stop(); progressiveSurvey = null;
+            economicTask = TaskFactory.create(player, economicRecord);
+            return TaskState.RUNNING;
+        }
         if (status == CreateProgressiveSurvey.Status.RUNNING) return TaskState.RUNNING;
         if (status == CreateProgressiveSurvey.Status.FAILED) {
             CreateProgressiveSurvey.Failure failure = progressiveSurvey.failure();
@@ -333,7 +358,7 @@ final class CreateMechanicalPowerTask
                     || "destination_needs_exploration".equals(failure.code())) {
                 CreateEndpointContinuations.Entry continuation =
                         CreateEndpointContinuations.issue(
-                                r.request, progressiveSurvey, bodyEpoch, dimension);
+                                r.request, progressiveSurvey, bodyEpoch, dimension, economicAfterEndpoints);
                 data.put("continuation_token", continuation.token().toString());
                 data.put("continuation_policy",
                         "continue one additional first-person endpoint evidence frontier after explicit recovery choice");
@@ -365,6 +390,16 @@ final class CreateMechanicalPowerTask
         if (!initializeApprovedPlan(true)) return TaskState.RUNNING;
         phase = Phase.PREPARE;
         return TaskState.RUNNING;
+    }
+
+    private TaskState advanceEconomicalTask() {
+        TaskState state = player.level().getGameTime() >= economicRecord.getDeadlineGameTime() ? TaskState.TIMEOUT : runChild(economicTask);
+        r.extendDeadlineTo(economicRecord.getDeadlineGameTime());
+        if (state == null) return TaskState.RUNNING;
+        if (state == TaskState.TIMEOUT) economicTask.stop(player, Task.StopReason.REPLACED);
+        economicResult = economicTask.result(state); economicTask = null;
+        if (!economicResult.success()) fail(economicResult.message(), FailureType.UNKNOWN);
+        return state;
     }
 
     // 按剩余线路和背包可容纳量确定一批数量；第一批材料未齐先补料，后续批次先归位再继续。
@@ -1021,6 +1056,7 @@ final class CreateMechanicalPowerTask
 
     @Override
     public void stop(LocalPlayer companion, Task.StopReason why) {
+        if (economicTask != null) economicTask.stop(companion, why);
         if (why != Task.StopReason.PREEMPTED) forcedStop = why;
         if (why != Task.StopReason.PREEMPTED && failureCode == null) {
             failureCode = why == Task.StopReason.BODY_GONE ? "body_gone" : "cancelled";
@@ -1048,6 +1084,9 @@ final class CreateMechanicalPowerTask
 
     @Override
     protected void cleanup() {
+        if (economicTask != null) {
+            economicTask.stop(player, Task.StopReason.REPLACED); economicResult = economicTask.result(TaskState.CANCELLED); economicTask = null;
+        }
         if (supply.active()) supply.cancel(player);
         if (progressiveSurvey != null) progressiveSurvey.stop();
         constructionTravel.stop();
@@ -1089,6 +1128,9 @@ final class CreateMechanicalPowerTask
     @Override
     // 对外保留实际进度、材料与失败原因，不把内部路线格和状态哈希全部当成模型需要填写的参数。
     protected Map<String, Object> resultData() {
+        if (economicResult != null) {
+            var result = new LinkedHashMap<>(economicResult.data()); result.put("semantic_endpoints_resolved", true); return result;
+        }
         Map<String, Object> safe = new LinkedHashMap<>();
         copyResultField(data, safe,
                 "progressive_survey", "progressive_travel_segments",
@@ -1130,12 +1172,14 @@ final class CreateMechanicalPowerTask
 
     @Override
     protected String successMessage() {
+        if (economicResult != null) return economicResult.message();
         return "mechanical power connected through " + cursor
                 + " confirmed first-person chain-drive placements";
     }
 
     @Override
     protected String timeoutMessage() {
+        if (economicResult != null) return economicResult.message();
         if (failureCode == null) {
             failureCode = "timeout";
             failureDetail = "the mechanical connection stopped making verifiable progress and its liveness lease expired";
@@ -1150,6 +1194,7 @@ final class CreateMechanicalPowerTask
 
     @Override
     protected String cancelledMessage() {
+        if (economicResult != null) return economicResult.message();
         return failureDetail == null ? "mechanical connection interrupted" : failureDetail;
     }
 

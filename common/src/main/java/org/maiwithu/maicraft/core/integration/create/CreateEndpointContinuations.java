@@ -16,7 +16,7 @@ final class CreateEndpointContinuations {
             CreateMechanicalPower.Request request,
             CreateProgressiveSurvey survey,
             long bodyEpoch,
-            String dimension) {}
+            String dimension, boolean economicAfterEndpoints) {}
 
     private CreateEndpointContinuations() {}
 
@@ -25,9 +25,13 @@ final class CreateEndpointContinuations {
             CreateProgressiveSurvey survey,
             long bodyEpoch,
             String dimension) {
+        return issue(request, survey, bodyEpoch, dimension, false);
+    }
+    static synchronized Entry issue(CreateMechanicalPower.Request request, CreateProgressiveSurvey survey,
+            long bodyEpoch, String dimension, boolean economicAfterEndpoints) {
         survey.pause();
         UUID token = UUID.randomUUID();
-        Entry entry = new Entry(token, request, survey, bodyEpoch, dimension);
+        Entry entry = new Entry(token, request, survey, bodyEpoch, dimension, economicAfterEndpoints);
         ENTRIES.put(token, entry);
         return entry;
     }

@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /**
  * 机械动力连接的入口：调用者给出两个语义位置，模块自己找真实接口、调查路线、补料并逐格安装。
- * 目前自动方式也使用竖轴封装链传动，保留原有方块；同步 survey 只作前置判断，完整调查由任务继续。
+ * AUTO 比较完整传动方案的材料和建造成本；显式封装链传动与旧续接凭据保留原执行器。
  */
 public final class CreateMechanicalPower {
     public static final String CHAIN_DRIVE_ID = "create:encased_chain_drive";
@@ -91,6 +91,16 @@ public final class CreateMechanicalPower {
             boolean allowHarm,
             List<String> protectedLabels) {
         install();
+        Objects.requireNonNull(request, "request");
+        if (request.transmission() == Transmission.AUTO && !request.allowFreeReceiver()) {
+            var player = net.minecraft.client.Minecraft.getInstance().player;
+            if (player == null) throw new IllegalArgumentException("mechanical_connection_requires_live_player");
+            if (CreateEconomicEndpointBridge.direct(player.level(), request)) return new org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord(
+                    callId,deadlineGameTime,player.level().dimension().location().toString(),request.source().name(),
+                    request.source().center(),request.source().exactFace(),request.destination().name(),
+                    request.destination().center(),request.destination().exactFace(),null,0,64,false,
+                    materialPolicy,protectedLabels,allowedSources,allowHarm);
+        }
         return new CreateMechanicalPowerTaskRecord(callId, deadlineGameTime,
                 Objects.requireNonNull(request, "request"), null, materialPolicy,
                 allowedSources, allowHarm, protectedLabels);

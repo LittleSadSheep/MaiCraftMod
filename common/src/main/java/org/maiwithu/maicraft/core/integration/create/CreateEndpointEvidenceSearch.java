@@ -34,6 +34,7 @@ final class CreateEndpointEvidenceSearch {
     private final CreateMechanicalPower.Endpoint endpoint;
     private final boolean poweredOnly;
     private final boolean allowFreeReceiver;
+    private final boolean economicInterfaces;
     private final Map<EndpointKey, CreateMechanicalPlan.KineticEndpoint> endpoints =
             new LinkedHashMap<>();
     private int chunkRing;
@@ -59,9 +60,13 @@ final class CreateEndpointEvidenceSearch {
             CreateMechanicalPower.Endpoint endpoint,
             boolean poweredOnly,
             boolean allowFreeReceiver) {
+        this(endpoint, poweredOnly, allowFreeReceiver, false);
+    }
+    CreateEndpointEvidenceSearch(CreateMechanicalPower.Endpoint endpoint, boolean poweredOnly, boolean allowFreeReceiver, boolean economicInterfaces) {
         this.endpoint = endpoint;
         this.poweredOnly = poweredOnly;
         this.allowFreeReceiver = allowFreeReceiver;
+        this.economicInterfaces = economicInterfaces;
     }
 
     Status tick(ClientLevel level) {
@@ -326,7 +331,9 @@ final class CreateEndpointEvidenceSearch {
             CreateKineticsBridge.Facts kinetic = CreateKineticsBridge.inspect(level, position);
             if (kinetic == null || poweredOnly && !kinetic.powered()) return;
             BlockState state = level.getBlockState(position);
-            for (Direction face : new Direction[]{Direction.UP, Direction.DOWN}) {
+            boolean chainLink = economicInterfaces && endpoint.exactFace() == null
+                    && net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals("create:chain_conveyor");
+            for (Direction face : economicInterfaces ? Direction.values() : new Direction[]{Direction.UP, Direction.DOWN}) {
                 if (endpoint.exactFace() != null && face != endpoint.exactFace()) continue;
                 if (!CreateKineticsBridge.hasShaftTowards(level, position, state, face)) continue;
                 BlockPos adjacent = position.relative(face);
@@ -335,7 +342,7 @@ final class CreateEndpointEvidenceSearch {
                 // An unloaded adjacent cell is provisional evidence. The corridor survey must
                 // load and prove it empty before the first placement, so this never authorizes a
                 // blind mutation at a chunk boundary.
-                if (level.isLoaded(adjacent)
+                if (!chainLink && level.isLoaded(adjacent)
                         && !CreateMechanicalPlanner.isEmptyRouteCell(level, adjacent)) continue;
                 CreateMechanicalPlan.KineticEndpoint candidate =
                         new CreateMechanicalPlan.KineticEndpoint(position.immutable(), state, face,

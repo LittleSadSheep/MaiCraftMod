@@ -69,10 +69,13 @@ final class CreateProgressiveSurvey {
     private BlockPos activeEndpointObservation;
 
     CreateProgressiveSurvey(CreateMechanicalPower.Request request) {
+        this(request, false);
+    }
+    CreateProgressiveSurvey(CreateMechanicalPower.Request request, boolean economicInterfaces) {
         this.request = request;
-        sourceSearch = new CreateEndpointEvidenceSearch(request.source(), true, false);
+        sourceSearch = new CreateEndpointEvidenceSearch(request.source(), true, false, economicInterfaces);
         destinationSearch = new CreateEndpointEvidenceSearch(
-                request.destination(), false, request.allowFreeReceiver());
+                request.destination(), false, request.allowFreeReceiver(), economicInterfaces);
     }
 
     Status tick(LocalPlayerContext context) {
@@ -91,6 +94,9 @@ final class CreateProgressiveSurvey {
     }
 
     CreateMechanicalPlan plan() { return plan; }
+    boolean endpointsResolved() { return !sourceCandidates.isEmpty() && !destinationCandidates.isEmpty(); }
+    CreateMechanicalPlan.KineticEndpoint resolvedSource() { return sourceCandidates.getFirst(); }
+    CreateMechanicalPlan.KineticEndpoint resolvedDestination() { return destinationCandidates.getFirst(); }
     Failure failure() { return failure; }
     int travelSegments() { return travelSegments; }
     int sourceLoadedCells() { return sourceLoadedCells; }
