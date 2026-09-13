@@ -16,12 +16,20 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 final class BuildScaffoldLedger {
     private final Map<BlockPos, BlockState> placed = new LinkedHashMap<>();
+    private java.util.function.Consumer<Map<BlockPos, BlockState>> checkpoint = ignored -> {};
+    private boolean persistenceBound;
+
+    void persistence(Map<BlockPos, BlockState> restored, java.util.function.Consumer<Map<BlockPos, BlockState>> checkpoint) {
+        if (persistenceBound || !placed.isEmpty()) throw new IllegalStateException("scaffold ledger is already active");
+        // 调用方完成世界和状态核验后才载入；恢复不冒充新放置，也不会触发保存覆盖旧证据。
+        placed.putAll(restored); this.checkpoint = java.util.Objects.requireNonNull(checkpoint); persistenceBound = true;
+    }
 
     // 空气和含流体的状态不登记为可清理的临时支撑。
     void confirmed(BlockPos pos, BlockState state) {
-        if (!state.isAir() && state.getFluidState().isEmpty()) placed.put(pos.immutable(), state);
+        if (!state.isAir() && state.getFluidState().isEmpty() && !state.equals(placed.put(pos.immutable(), state))) checkpoint.accept(snapshot());
     }
-    void cleared(BlockPos pos) { placed.remove(pos); }
+    void cleared(BlockPos pos) { if (placed.remove(pos) != null) checkpoint.accept(snapshot()); }
     boolean contains(BlockPos pos) { return placed.containsKey(pos); }
     boolean isEmpty() { return placed.isEmpty(); }
     boolean owns(BlockPos pos, BlockState current) { return current.equals(placed.get(pos)); }

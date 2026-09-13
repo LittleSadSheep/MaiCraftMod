@@ -74,6 +74,10 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     public void persistProject() { projectCheckpoint.accept(this); }
 
     BuildScaffoldLedger scaffoldLedger() { return scaffoldLedger; }
+    /** 项目存储完成核验后绑定原生支撑变化回调；每个施工批次继续共享同一本账。 */
+    public void scaffoldPersistence(Map<BlockPos, BlockState> restored, java.util.function.Consumer<Map<BlockPos, BlockState>> checkpoint) {
+        scaffoldLedger.persistence(restored, checkpoint);
+    }
     private List<BlockPos> materialSupplyProtection = List.of();
     public record ToolSupply(org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy policy,
             List<org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source> sources,

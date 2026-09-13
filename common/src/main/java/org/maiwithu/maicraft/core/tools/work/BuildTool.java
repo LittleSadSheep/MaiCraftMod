@@ -321,6 +321,8 @@ public final class BuildTool implements MaiCraftTool {
             String id = args.has("project_id") ? args.get("project_id").getAsString()
                     : store.save(dimension, args, plan.targets);
             plan.project(id, frozen -> store.save(id, dimension, args, frozen.targets));
+            // 支撑所有权只从本世界的项目账恢复，不能由工具参数声称附近泥土属于本次施工。
+            store.bindScaffolds(plan, companion.level());
         });
         if (consume && allowPartial) {
             org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord
