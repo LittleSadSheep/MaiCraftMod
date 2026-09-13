@@ -81,6 +81,8 @@ public final class MachineConstructionPlan {
     public static SemanticMachineLayout.Result reviewExplicit(SemanticMachineLayout.Result layout) {
         if (!layout.buildable()) return layout;
         JsonObject report = layout.report().deepCopy();
+        report.add("external_inputs",org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.json(
+                org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.parse(layout.blueprint())));
         try {
             compile(BlockPos.ZERO, layout, false);
             report.addProperty("native_installation_validated", true);
@@ -254,4 +256,8 @@ public final class MachineConstructionPlan {
         return List.copyOf(positions);
     }
     public JsonObject report() { return report.deepCopy(); }
+    public List<org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.Input> utilityInputs() {
+        if (!report.has("external_inputs")) return List.of();
+        return org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.parseDeclarations(report.getAsJsonArray("external_inputs"));
+    }
 }

@@ -25,6 +25,7 @@ public final class MachineCatalog {
     private final MachineCatalogStore store;
     private final Map<String, Device> devices = new LinkedHashMap<>();
     private final Map<String, Line> lines = new LinkedHashMap<>();
+    private final Map<String, UtilityInstallation> installations = new LinkedHashMap<>();
     private final Map<String, Long> currentTicks = new LinkedHashMap<>();
     private final ConcurrentLinkedQueue<Runnable> completed = new ConcurrentLinkedQueue<>();
     private Binding binding;
@@ -51,13 +52,14 @@ public final class MachineCatalog {
         binding = new Binding(key, sessionKey, ++generation); currentTicks.clear(); error = "";
         if (sameReadyIdentity) { observeSave(lastSave, generation, saveRevision); return binding; }
         // Same-process reconnect keeps unsaved history, never current observation status.
-        devices.clear(); lines.clear(); dirty = false; state = State.LOADING; lastSave = CompletableFuture.completedFuture(null);
+        devices.clear(); lines.clear(); installations.clear(); dirty = false; state = State.LOADING; lastSave = CompletableFuture.completedFuture(null);
         long requestedGeneration = generation;
         try {
             store.load(key).whenComplete((loaded, failure) -> completed.add(() -> {
                 if (generation != requestedGeneration) return;
                 if (failure != null) { state = State.FAILED; error = "catalog_load_failed"; return; }
                 loaded.snapshot().devices().forEach(device -> devices.put(device.id(), device)); loaded.snapshot().lines().forEach(line -> lines.put(line.id(), line));
+                loaded.snapshot().installations().forEach(value -> installations.put(value.id(),value));
                 dirty = loaded.needsSave(); state = State.READY;
             }));
         } catch (RuntimeException unavailable) { state = State.FAILED; error = "catalog_load_failed"; }
@@ -65,7 +67,7 @@ public final class MachineCatalog {
     }
     public void unbind() {
         requireOwner(); poll(); if (state == State.READY && dirty) saveAsync();
-        generation++; binding = null; devices.clear(); lines.clear(); currentTicks.clear(); state = State.UNBOUND; dirty = false; error = "";
+        generation++; binding = null; devices.clear(); lines.clear(); installations.clear(); currentTicks.clear(); state = State.UNBOUND; dirty = false; error = "";
     }
     public void poll() { requireOwner(); for (int i = 0; i < 64; i++) { Runnable next = completed.poll(); if (next == null) break; next.run(); } }
     public boolean ready() { requireOwner(); poll(); return state == State.READY; }
@@ -131,6 +133,26 @@ public final class MachineCatalog {
                 .limit(limit).map(device -> view(device, nowGameTick)).toList();
     }
     public Optional<Line> line(String id) { requireReady(); return Optional.ofNullable(lines.get(id)); }
+    public String registerInstallation(String label, String dimension, Position anchor,
+            List<org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.Input> inputs, long now) {
+        requireReady(); dimension = CatalogLimits.registry(dimension,"dimension"); label = CatalogLimits.text(label,160,"installation label");
+        String id = UtilityInstallation.locationId(binding.identityKey(),dimension,anchor);
+        if (!installations.containsKey(id) && installations.size() >= CatalogLimits.LINES) throw new IllegalStateException("catalog_installation_capacity");
+        String encoded = UtilityInstallation.encode(inputs);
+        installations.put(id,new UtilityInstallation(id,label,dimension,anchor,encoded,CatalogLimits.hash(encoded),now,0)); dirty = true; return id;
+    }
+    public Optional<UtilityInstallation> installation(String dimension, Position anchor) {
+        requireReady(); dimension = CatalogLimits.registry(dimension,"dimension");
+        return Optional.ofNullable(installations.get(UtilityInstallation.locationId(binding.identityKey(),dimension,anchor)));
+    }
+    public List<UtilityInstallation> installations() { requireReady(); return List.copyOf(installations.values()); }
+    public void recordInstallationBuilt(String dimension, Position anchor,
+            List<org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.Input> inputs, long now) {
+        requireReady(); dimension = CatalogLimits.registry(dimension,"dimension");
+        var value = installation(dimension,anchor).orElseThrow(() -> new IllegalArgumentException("catalog_installation_missing"));
+        if (!value.inputsJson().equals(UtilityInstallation.encode(inputs))) throw new IllegalArgumentException("catalog_installation_changed");
+        installations.put(value.id(),new UtilityInstallation(value.id(),value.label(),dimension,anchor,value.inputsJson(),value.inputsFingerprint(),value.registeredAtMillis(),now)); dirty = true;
+    }
     public List<Line> lines() { requireReady(); return List.copyOf(lines.values()); }
     public List<Line> linesByLabel(String label) {
         requireReady(); String key = CatalogLimits.labelKey(label); return lines.values().stream().filter(line -> CatalogLimits.labelKey(line.label()).equals(key)).toList();
@@ -153,7 +175,7 @@ public final class MachineCatalog {
     }
     public CompletableFuture<Void> saveAsync() {
         requireReady(); long revision = ++saveRevision, expectedGeneration = generation;
-        lastSave = store.save(new CatalogCodec.Snapshot(binding.identityKey(), List.copyOf(devices.values()), List.copyOf(lines.values())));
+        lastSave = store.save(new CatalogCodec.Snapshot(binding.identityKey(), List.copyOf(devices.values()), List.copyOf(lines.values()),List.copyOf(installations.values())));
         dirty = false; CompletableFuture<Void> requested = lastSave;
         observeSave(requested, expectedGeneration, revision);
         return requested;

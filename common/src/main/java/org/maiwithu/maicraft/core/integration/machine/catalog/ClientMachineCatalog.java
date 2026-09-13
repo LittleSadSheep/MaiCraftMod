@@ -78,6 +78,27 @@ public final class ClientMachineCatalog {
         try { return catalog.registerLine(actual, plan.dimension(), position(plan.anchor()), plan.authoredJson(), System.currentTimeMillis()); }
         catch (RuntimeException unavailable) { reportIssue(unavailable); return null; }
     }
+    public static boolean registerInstallation(LocalPlayer player, String label,
+            org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan plan) {
+        if (plan.utilityInputs().isEmpty()) return true;
+        if (!ready(player)) {
+            if (catalog != null && catalog.status().state() == MachineCatalog.State.FAILED)
+                throw new IllegalArgumentException("machine_catalog_unavailable: cannot retain external input locations");
+            return false;
+        }
+        catalog.registerInstallation(label,player.level().dimension().location().toString(),position(plan.anchor()),plan.utilityInputs(),System.currentTimeMillis());
+        return true;
+    }
+    public static void installationBuilt(LocalPlayer player, org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan plan) {
+        if (plan.utilityInputs().isEmpty() || !ready(player)) return;
+        try { catalog.recordInstallationBuilt(player.level().dimension().location().toString(),position(plan.anchor()),plan.utilityInputs(),System.currentTimeMillis()); }
+        catch (RuntimeException unavailable) { reportIssue(unavailable); }
+    }
+    public static UtilityInstallation requireInstallation(LocalPlayer player, BlockPos anchor) {
+        if (!ready(player)) throw new IllegalArgumentException("machine_catalog_not_ready");
+        return catalog.installation(player.level().dimension().location().toString(),position(anchor))
+                .orElseThrow(() -> new IllegalArgumentException("machine_external_inputs_unknown: build or register a blueprint with external_inputs first"));
+    }
     public static void commissioned(LocalPlayer player, String label, ProductionRunPlan plan, java.util.Map<String, Object> observed) {
         String id = registerPlan(player, label, plan); if (id == null) return;
         try {
@@ -90,12 +111,16 @@ public final class ClientMachineCatalog {
         } catch (RuntimeException unavailable) { reportIssue(unavailable); }
     }
     public static JsonObject view(LocalPlayer player, String focus) {
-        JsonObject result = MachineSnapshots.summaries(player); JsonArray devices = new JsonArray(), lines = new JsonArray();
+        JsonObject result = MachineSnapshots.summaries(player); JsonArray devices = new JsonArray(), lines = new JsonArray(), installations = new JsonArray();
         result.add("remembered_devices", devices); result.add("production_lines", lines);
+        result.add("utility_installations",installations);
         result.addProperty("catalog_status", catalog == null ? "unbound" : catalog.status().state().name().toLowerCase(java.util.Locale.ROOT));
         result.addProperty("automatic_discovery", "loaded_nearby_chunks_only"); result.addProperty("automatic_factory_inference", false);
         if (!issue.isEmpty()) result.addProperty("catalog_issue", issue);
         if (!ready(player)) return result;
+        catalog.installations().stream().filter(value -> focus == null || focus.isBlank() || value.id().equals(focus)
+                || value.label().equalsIgnoreCase(focus) || value.inputs().stream().anyMatch(input -> (value.label()+"/"+input.id()).equals(focus)))
+                .limit(16).forEach(value -> installations.add(value.json(false)));
         long now = player.level().getGameTime();
         if (focus == null || focus.isBlank()) {
             catalog.nearby(player.level().dimension().location().toString(), position(player.blockPosition()), 128, 32, now).forEach(device -> devices.add(device.json(false)));
@@ -119,6 +144,14 @@ public final class ClientMachineCatalog {
     }
     public static Goal.WorldPosition resolveLabel(LocalPlayer player, String label) {
         if (!ready(player) || label == null) return null;
+        var utilityLocations = new java.util.LinkedHashSet<Goal.WorldPosition>();
+        for (var value : catalog.installations()) {
+            if (value.id().equals(label) || value.label().equalsIgnoreCase(label)) utilityLocations.add(world(value.dimension(),value.anchor()));
+            for (var input : value.inputs()) if ((value.label()+"/"+input.id()).equals(label) || (value.id()+"/"+input.id()).equals(label))
+                utilityLocations.add(world(value.dimension(),value.anchor().plus(input.offset().getX(),input.offset().getY(),input.offset().getZ())));
+        }
+        if (utilityLocations.size() == 1) return utilityLocations.iterator().next();
+        if (utilityLocations.size() > 1) return null;
         var identifiedLine = catalog.line(label);
         if (identifiedLine.isPresent()) return world(identifiedLine.get().dimension(),identifiedLine.get().anchor());
         var identifiedDevice = catalog.device(label,player.level().getGameTime());

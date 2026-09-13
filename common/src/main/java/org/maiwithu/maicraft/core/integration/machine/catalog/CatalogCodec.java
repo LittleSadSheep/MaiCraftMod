@@ -13,22 +13,25 @@ import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCata
 
 /** Strict bounded file format. Current-session observations and operation permissions are never serialized. */
 final class CatalogCodec {
-    record Snapshot(String identityKey, List<Device> devices, List<Line> lines) {
-        Snapshot { devices = List.copyOf(devices); lines = List.copyOf(lines); }
+    record Snapshot(String identityKey, List<Device> devices, List<Line> lines, List<UtilityInstallation> installations) {
+        Snapshot(String identityKey, List<Device> devices, List<Line> lines) { this(identityKey,devices,lines,List.of()); }
+        Snapshot { devices = List.copyOf(devices); lines = List.copyOf(lines); installations = List.copyOf(installations); }
     }
     private CatalogCodec() {}
     static String encode(Snapshot snapshot) {
-        if (snapshot.devices().size() > CatalogLimits.DEVICES || snapshot.lines().size() > CatalogLimits.LINES)
+        if (snapshot.devices().size() > CatalogLimits.DEVICES || snapshot.lines().size() > CatalogLimits.LINES || snapshot.installations().size() > CatalogLimits.LINES)
             throw new IllegalArgumentException("Catalog entry count exceeds budget");
-        var root = new JsonObject(); root.addProperty("version", 1); root.addProperty("identity_key", snapshot.identityKey());
+        var root = new JsonObject(); root.addProperty("version", 2); root.addProperty("identity_key", snapshot.identityKey());
         var devices = new JsonArray(); snapshot.devices().forEach(device -> devices.add(device(device)));
         var lines = new JsonArray(); snapshot.lines().forEach(line -> lines.add(line(line)));
-        root.add("devices", devices); root.add("lines", lines); return root.toString();
+        var installations = new JsonArray(); snapshot.installations().forEach(value -> installations.add(installation(value)));
+        root.add("devices", devices); root.add("lines", lines); root.add("installations",installations); return root.toString();
     }
     static Snapshot decode(String json, String identityKey) {
         CatalogLimits.jsonDepth(json);
-        var root = JsonParser.parseString(json).getAsJsonObject(); keys(root, "version", "identity_key", "devices", "lines");
-        if (number(root, "version") != 1 || !identityKey.equals(text(root, "identity_key"))) throw new IllegalArgumentException("Catalog version or identity mismatch");
+        var root = JsonParser.parseString(json).getAsJsonObject(); keys(root, "version", "identity_key", "devices", "lines", "installations");
+        long version = number(root,"version");
+        if (version < 1 || version > 2 || !identityKey.equals(text(root, "identity_key"))) throw new IllegalArgumentException("Catalog version or identity mismatch");
         var devices = new ArrayList<Device>(); var lines = new ArrayList<Line>(); Set<String> ids = new HashSet<>();
         for (var raw : array(root, "devices", CatalogLimits.DEVICES)) {
             var row = raw.getAsJsonObject();
@@ -54,7 +57,22 @@ final class CatalogCodec {
             if (!line.id().equals(lineId(identityKey, line.dimension(), line.anchor())) || !ids.add(line.id())) throw new IllegalArgumentException("Duplicate or foreign catalog line");
             lines.add(line);
         }
-        return new Snapshot(identityKey, devices, lines);
+        var installations = new ArrayList<UtilityInstallation>(); ids.clear();
+        if (root.has("installations")) for (var raw : array(root,"installations",CatalogLimits.LINES)) {
+            var row = raw.getAsJsonObject(); keys(row,"id","label","dimension","anchor","inputs","inputs_fingerprint","registered_at_ms","built_at_ms");
+            var value = new UtilityInstallation(text(row,"id"),text(row,"label"),text(row,"dimension"),position(row.getAsJsonObject("anchor")),
+                    row.getAsJsonArray("inputs").toString(),text(row,"inputs_fingerprint"),number(row,"registered_at_ms"),number(row,"built_at_ms"));
+            if (!value.id().equals(UtilityInstallation.locationId(identityKey,value.dimension(),value.anchor())) || !ids.add(value.id()))
+                throw new IllegalArgumentException("Duplicate or foreign utility installation");
+            installations.add(value);
+        }
+        return new Snapshot(identityKey, devices, lines, installations);
+    }
+    private static JsonObject installation(UtilityInstallation value) {
+        var row = new JsonObject(); row.addProperty("id",value.id()); row.addProperty("label",value.label()); row.addProperty("dimension",value.dimension());
+        row.add("anchor",CatalogViews.position(value.anchor())); row.add("inputs",JsonParser.parseString(value.inputsJson()));
+        row.addProperty("inputs_fingerprint",value.inputsFingerprint()); row.addProperty("registered_at_ms",value.registeredAtMillis());
+        row.addProperty("built_at_ms",value.builtAtMillis()); return row;
     }
     private static JsonObject device(Device device) {
         var row = new JsonObject(); row.addProperty("id", device.id()); row.addProperty("label", device.label()); row.addProperty("custom_label", device.customLabel());

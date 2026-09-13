@@ -233,7 +233,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         }
         if (verifyConfigIndex >= configurations.size()) {
             if (completion.acceptGeometry()) {
-                phase = Phase.DONE; r.verified(); return TaskState.SUCCESS;
+                phase = Phase.DONE; r.verified(); rememberInstallation(); return TaskState.SUCCESS;
             }
             phase = Phase.COMMISSION; commissioningDeadline = 0;
         }
@@ -264,7 +264,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             commissioning.add(evidence); requirementIndex++; commissioningDeadline = 0; return TaskState.RUNNING;
         }
         completion.acceptCommissioning();
-        phase = Phase.DONE; r.verified(); return TaskState.SUCCESS;
+        phase = Phase.DONE; r.verified(); rememberInstallation(); return TaskState.SUCCESS;
     }
 
     private void start(TaskRecord record) { childRecord = record; child = TaskFactory.create(player, record); }
@@ -314,6 +314,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private long deadline() { return player.level().getGameTime() + 3 * 60 * 20; }
     private String id() { return r.getToolCallId() + "-assembly-" + (++serial); }
     private TaskState failure(String code, String message) { failureCode = code; fail(message, FailureType.UNKNOWN); return TaskState.FAILED; }
+    private void rememberInstallation() { org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.installationBuilt(player,r.plan); }
 
     // 结束时停止尚在运行的子任务、取消供料、释放预览，再清理公共导航状态。
     @Override protected void cleanup() {
@@ -324,6 +325,11 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>(completion.report());
         data.put("machine_layout", r.plan.report());
+        if (!r.plan.utilityInputs().isEmpty()) {
+            data.put("external_inputs",org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.json(r.plan.utilityInputs()));
+            data.put("utility_connection_verified",false);
+            data.put("next_phase","connect_external_input_then_run_production");
+        }
         data.put("commissioning", commissioning); data.put("installed_parts", partIndex);
         data.put("configured_interfaces", configIndex); data.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
         data.put("initialized_containers", contentsIndex);
