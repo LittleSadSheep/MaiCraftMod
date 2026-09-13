@@ -50,6 +50,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.container.ContainerSplitTransferTest.main(args);
         org.maiwithu.maicraft.core.task.container.ContainerSupplySourcesTest.main(args);
         org.maiwithu.maicraft.core.task.acquire.OrdinaryStorageAcquireTest.main(args);
+        // 出坑后补料应找到较远的已加载仓库，同时保持采矿范围和主人指定的查找距离。
+        org.maiwithu.maicraft.core.task.acquire.StorageSupplyRadiusTest.main(args);
         org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicyTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupplyTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExcavationCargoTest.main(args);

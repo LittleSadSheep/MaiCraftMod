@@ -382,7 +382,8 @@ public final class SemanticAcquireCompanionTask
         int missing = missing(need);
         if (missing <= 0 || !takePlannerStep()) return TaskState.RUNNING;
         if (need.containerAttempts < ContainerSupplySources.MAX_ATTEMPTS) {
-            var ordinary = ContainerSupplySources.candidates(player, player.blockPosition(), r.searchRadius,
+            // 仓库使用独立的有界半径；找得到主城箱子并不意味着可以在同样大的区域内挖矿。
+            var ordinary = ContainerSupplySources.candidates(player, player.blockPosition(), r.storageSearchRadius,
                     need.itemIds, need.visitedContainers, r.protectedLabels);
             if (!ordinary.isEmpty()) {
                 var source = ordinary.getFirst(); need.visitedContainers.addAll(source.footprint()); need.containerAttempts++;
@@ -1904,7 +1905,8 @@ public final class SemanticAcquireCompanionTask
         long tick = player.level().getGameTime();
         if (stockHintNeed != parent || stockHintTick != tick) {
             stockHintNeed = parent; stockHintTick = tick; recipeStockPriorities.clear();
-            recipeObservedStock = ContainerSupplySources.observedCounts(player, player.blockPosition(), r.searchRadius, r.protectedLabels);
+            // 已打开仓库的库存提示与实际开箱候选共用同一范围，避免远处已有材料被错误排除、转去重新生产。
+            recipeObservedStock = ContainerSupplySources.observedCounts(player, player.blockPosition(), r.storageSearchRadius, r.protectedLabels);
             Map<ResourceLocation, Long> carried = new LinkedHashMap<>();
             for (int slot = 0; slot < Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); slot++) {
                 ItemStack stack = player.getInventory().items.get(slot);

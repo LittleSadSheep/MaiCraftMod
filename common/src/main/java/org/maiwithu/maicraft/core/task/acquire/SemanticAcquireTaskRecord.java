@@ -94,6 +94,8 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public final SourceHint sourceHint;
     public final List<String> protectedLabels;
     public final int searchRadius;
+    /** 内部补料可单独查更远的已加载仓库；附近采集、采矿等仍使用原来的 searchRadius。 */
+    public final int storageSearchRadius;
 
     static {
         TaskFactory.register(SemanticAcquireTaskRecord.class,
@@ -110,6 +112,15 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
             SourceHint sourceHint,
             List<String> protectedLabels,
             int searchRadius) {
+        this(toolCallId, deadlineGameTime, itemIds, count, allowedSources, allowHarm,
+                sourceHint, protectedLabels, searchRadius, searchRadius);
+    }
+
+    /** 仅内部组合任务传入独立仓库范围；公开获取入口继续使用上面的构造，尊重主人显式指定的半径。 */
+    public SemanticAcquireTaskRecord(
+            String toolCallId, long deadlineGameTime, List<ResourceLocation> itemIds, int count,
+            List<Source> allowedSources, boolean allowHarm, SourceHint sourceHint,
+            List<String> protectedLabels, int searchRadius, int storageSearchRadius) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.itemIds = validateItems(itemIds);
         this.count = Math.clamp(count, 1, MAX_FINAL_COUNT);
@@ -119,6 +130,8 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
         this.protectedLabels = normalizedStrings(
                 protectedLabels, 64, "protected labels");
         this.searchRadius = Math.clamp(searchRadius, 1, MAX_RADIUS);
+        this.storageSearchRadius = this.allowedSources.contains(Source.STORAGE)
+                ? Math.clamp(storageSearchRadius, 1, MAX_RADIUS) : this.searchRadius;
     }
 
     /** Calling this method forces static task registration during Mod initialization. */

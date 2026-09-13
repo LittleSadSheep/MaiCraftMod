@@ -192,7 +192,10 @@ public final class SemanticMaterialSupplyCoordinator {
                 allowHarm,
                 SemanticAcquireTaskRecord.SourceHint.empty(),
                 protectedLabels,
-                SemanticAcquireTaskRecord.DEFAULT_RADIUS);
+                SemanticAcquireTaskRecord.DEFAULT_RADIUS,
+                // 出坑后仓库可能超过十六格；只扩大已授权仓库的查找，不能顺带扩大采矿或附近采集范围。
+                sources.contains(SemanticAcquireTaskRecord.Source.STORAGE)
+                        ? SemanticAcquireTaskRecord.MAX_RADIUS : SemanticAcquireTaskRecord.DEFAULT_RADIUS);
         childRecord = record;
         child = new SemanticAcquireCompanionTask(player, record);
     }
