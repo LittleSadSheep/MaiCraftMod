@@ -21,6 +21,7 @@ public final class BuildFoodPreparationTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         thresholdsAndOrdinaryFood();
         refillAndObserveRecovery();
+        injuredBodyRestoresRegenerationFood();
         neverAcceptAClaimWithoutFoodEvidence();
         missingFoodAndUnchangingHealthAreBounded();
         directNativeChildAndCancellation();
@@ -28,8 +29,11 @@ public final class BuildFoodPreparationTest {
     }
 
     private static void thresholdsAndOrdinaryFood() {
-        check(BuildFoodPreparation.needs(false, 14, 20) && !BuildFoodPreparation.needs(false, 15, 20), "ordinary work starts food preparation at fourteen hunger");
-        check(BuildFoodPreparation.needs(false, 20, 1) && !BuildFoodPreparation.needs(true, 0, 1), "a fed critical body still rests; creative mode does not manufacture meals");
+        check(BuildFoodPreparation.needs(false, 14, 20, 20) && !BuildFoodPreparation.needs(false, 15, 20, 20), "ordinary work starts food preparation at fourteen hunger");
+        check(BuildFoodPreparation.needs(false, 20, 1, 20) && !BuildFoodPreparation.needs(true, 0, 1, 20), "a fed critical body still rests; creative mode does not manufacture meals");
+        check(BuildFoodPreparation.needs(false, 17, 11, 20) && !BuildFoodPreparation.needs(false, 18, 11, 20)
+                && !BuildFoodPreparation.needs(false, 17, 20, 20), "injury below the natural-regeneration hunger threshold is a separate reason to eat");
+        check(BuildFoodPreparation.needs(false, 17, 20, 40), "injury uses the actual maximum health rather than assuming twenty health is always full");
         var stocks = new ArrayList<ItemStack>();
         stocks.add(new ItemStack(Items.CHORUS_FRUIT)); stocks.add(new ItemStack(Items.SUSPICIOUS_STEW));
         stocks.add(new ItemStack(Items.GOLDEN_APPLE)); stocks.add(new ItemStack(Items.ROTTEN_FLESH)); stocks.add(new ItemStack(Items.HONEY_BOTTLE));
@@ -79,6 +83,37 @@ public final class BuildFoodPreparationTest {
             check(prep.tick(h.player, owner(), child -> TaskState.SUCCESS) == BuildFoodPreparation.Status.FAILED
                     && prep.failure().equals("build_food_unconfirmed") && h.inventory.getItem(0).getCount() == 2,
                     "a claimed eating success without actual item and hunger changes cannot restart work");
+        }
+    }
+
+    private static void injuredBodyRestoresRegenerationFood() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 重放私有实机的十一点生命、十七饱食度和五十八面包；首个安全边界应正常吃一件，不直接加血。
+            h.player.setHealth(11); h.player.getFoodData().setFoodLevel(17); h.inventory.setItem(0, new ItemStack(Items.BREAD, 58));
+            var prep = new BuildFoodPreparation((p, r) -> new ObservedMeal()); var owner = owner();
+            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner, child -> null) == BuildFoodPreparation.Status.RUNNING
+                    && h.inventory.getItem(0).getCount() == 58 && h.player.getHealth() == 11,
+                    "the live injury state must start preparation without predicting consumption or healing");
+            h.nextTick();
+            check(prep.tick(h.player, owner, child -> {
+                h.inventory.getItem(0).shrink(1); h.player.getFoodData().setFoodLevel(20); return TaskState.SUCCESS;
+            }) == BuildFoodPreparation.Status.RUNNING, "the normal native-food receipt settles before construction resumes");
+            h.nextTick();
+            check(prep.tick(h.player, owner, child -> { throw new AssertionError("one bread already restored hunger"); }) == BuildFoodPreparation.Status.READY
+                    && h.inventory.getItem(0).getCount() == 57 && h.player.getHealth() == 11,
+                    "a moderate injury resumes with regeneration food available, without waiting for or manufacturing full health");
+            check(prep.receipts().size() == 1 && Boolean.TRUE.equals(prep.receipts().getFirst().get("confirmed"))
+                    && prep.receipts().getFirst().get("food_before").equals(17) && prep.receipts().getFirst().get("food_after").equals(20),
+                    "the injury-triggered meal keeps the same confirmed inventory and body evidence");
+            for (int i = 0; i < 6; i++) { h.nextTick(); check(!prep.shouldPrepare(h.player), "already-fed moderate injury must not repeatedly consume bread"); }
+        }
+        try (var h = new InteractionWorldTestHarness()) {
+            h.player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH).setBaseValue(40);
+            h.player.setHealth(30); h.player.getFoodData().setFoodLevel(17);
+            var prep = new BuildFoodPreparation((p, r) -> { throw new AssertionError("no food may be invented"); });
+            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED
+                    && prep.failure().equals("build_food_unavailable") && h.inventory.isEmpty() && h.player.getHealth() == 30,
+                    "higher maximum health still detects injury, and missing food pauses without items or healing");
         }
     }
 

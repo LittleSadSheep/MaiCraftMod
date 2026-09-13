@@ -40,11 +40,14 @@ final class BuildFoodPreparation {
     BuildFoodPreparation() { this(EatCompanionTask::new); }
     BuildFoodPreparation(BiFunction<LocalPlayer, EatItemTaskRecord, Task> eater) { this.eater = eater; }
 
-    static boolean needs(boolean creative, int food, float health) { return !creative && (food <= 14 || health < 6); }
+    static boolean needs(boolean creative, int food, float health, float maxHealth) {
+        // 受伤但饱食度十七时也不能自然回血，不能等到快饿或只剩六点生命才吃；健康身体仍沿用普通补食阈值。
+        return !creative && (food <= 14 || health < 6 || food < 18 && health < maxHealth);
+    }
     boolean active() { return maintaining || child != null; }
     boolean shouldPrepare(LocalPlayer player) {
         return failure != null || active() || !player.getAbilities().instabuild
-                && needs(false, player.getFoodData().getFoodLevel(), player.getHealth());
+                && needs(false, player.getFoodData().getFoodLevel(), player.getHealth(), player.getMaxHealth());
     }
     String failure() { return failure; }
     String message() { return message; }
@@ -59,7 +62,7 @@ final class BuildFoodPreparation {
         int food = player.getFoodData().getFoodLevel(); float health = player.getHealth();
         if (health <= 0) return fail("build_body_not_alive", "Construction stopped because the body is no longer alive", FailureType.UNKNOWN);
         if (!maintaining) {
-            if (!needs(false, food, health)) return Status.READY;
+            if (!needs(false, food, health, player.getMaxHealth())) return Status.READY;
             // 长任务先松开施工动作，再吃到接近饱；危急低血量多补到二十，给真实自然恢复留出条件。
             maintaining = true; recovery = health < 6; episodeMeals = 0;
             deadline = now + EPISODE_TIMEOUT; restStarted = -1; lastHealth = health; healthProgress = now;
@@ -75,7 +78,8 @@ final class BuildFoodPreparation {
             if (!consumed) return fail("build_food_unconfirmed", "The native food action did not confirm one consumed item and increased hunger", FailureType.UNKNOWN);
             return Status.RUNNING; // 吃完和继续施工分开一刻，先让持用和必要的背包界面完整收尾。
         }
-        int targetFood = recovery ? 20 : 18;
+        // 受伤时本次补到二十，给真实自然恢复留余量；这里只吃已有食物，不直接写生命值，也不要求普通伤势等到满血。
+        int targetFood = recovery || health < player.getMaxHealth() ? 20 : 18;
         if (food < targetFood) {
             Item chosen = choose(player.getInventory().items, food);
             if (chosen == null) return fail("build_food_unavailable", "Construction paused: no ordinary carried food is available", FailureType.NO_MATERIAL);
