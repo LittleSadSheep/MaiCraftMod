@@ -53,7 +53,8 @@ public final class KineticRecipeSnapshot {
             evidence.addProperty("dimension", context.level().dimension().location().toString());
             for (int slot = 0; slot < Math.min(36, player.getInventory().items.size()); slot++) {
                 ItemStack stack = player.getInventory().getItem(slot);
-                if (!stack.isEmpty() && stack.getComponentsPatch().isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+                if (!stack.isEmpty() && (!stack.is(net.minecraft.world.item.Items.CHAIN) || stack.getComponentsPatch().isEmpty()))
+                    carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
             }
             for (String id : List.of("minecraft:andesite", "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:copper_ingot"))
                 if (BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(id))) raw.put(id, 1.0);
@@ -71,7 +72,7 @@ public final class KineticRecipeSnapshot {
                 if (output.isEmpty()) { emptyResults++; continue; }
                 String id = BuiltInRegistries.ITEM.getKey(output.getItem()).toString();
                 var bucket = index.computeIfAbsent(id, ignored -> new ArrayList<>()); bucket.add(holder);
-                bucket.sort(Comparator.comparing(value -> value.id().toString()));
+                bucket.sort(Comparator.comparingInt(KineticRecipeSnapshot::recipePriority).thenComparing(value -> value.id().toString()));
                 if (bucket.size() > MAX_RECIPES_PER_ITEM) { bucket.removeLast(); overfull.add(id); }
             }
             complete = !iterator.hasNext(); if (!complete) issues.add("native_recipe_scan_truncated");
@@ -100,8 +101,16 @@ public final class KineticRecipeSnapshot {
         evidence.addProperty("examined_native_recipes", examined); evidence.addProperty("native_scan_complete", complete);
         evidence.addProperty("without_readable_static_result", emptyResults); evidence.addProperty("ingredient_entries", ingredientEntries);
         var units = new JsonObject(); raw.forEach(units::addProperty); evidence.add("raw_unit_anchors", units);
-        evidence.addProperty("plain_carried_stacks_only", true);
+        evidence.addProperty("carried_scope", "buildable_main_inventory");
+        evidence.addProperty("special_chains_excluded", true);
         return new Snapshot(recipes, raw, carried, unknown, issues.stream().limit(64).toList(), evidence);
+    }
+
+    private static int recipePriority(RecipeHolder<?> holder) {
+        String type = holder.value().getClass().getName(); String shortName = type.substring(type.lastIndexOf('.') + 1);
+        if (type.equals("net.minecraft.world.item.crafting." + shortName) && VANILLA.contains(shortName))
+            return Set.of("ShapedRecipe", "ShapelessRecipe", "StonecutterRecipe").contains(shortName) ? 0 : 2;
+        return CREATE.contains(type) ? 1 : 3;
     }
 
     private static KineticMaterialCosts.Recipe interpret(RecipeHolder<?> holder, HolderLookup.Provider registries) {

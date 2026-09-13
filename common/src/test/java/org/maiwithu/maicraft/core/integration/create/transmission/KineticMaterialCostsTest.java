@@ -11,6 +11,7 @@ import static org.maiwithu.maicraft.core.integration.create.transmission.Kinetic
 /** Real batch ratios, stock opportunity cost, tag alternatives and cycles, with no game instance needed. */
 public final class KineticMaterialCostsTest {
     public static void main(String[] args) {
+        KineticLiveRecipeRegressionTest.main(args);
         Map<String, List<Recipe>> recipes = new LinkedHashMap<>();
         recipes.put("create:shaft", List.of(recipe("test:craft_shafts", "create:shaft", 8, ingredient("create:andesite_alloy", 2))));
         Snapshot normal = snapshot(recipes, Map.of("create:andesite_alloy", 1.0), Map.of());
