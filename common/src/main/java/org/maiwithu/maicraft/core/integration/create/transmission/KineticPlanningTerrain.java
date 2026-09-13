@@ -23,8 +23,21 @@ final class KineticPlanningTerrain implements KineticRouteGeometry.Terrain {
     public boolean passable(BlockPos at) { return loaded(at) && state(at).isAir() && state(at).getFluidState().isEmpty(); }
     public boolean protectedCell(BlockPos at) { return NavigationSafetyContext.protectsMutation(at) || NavigationSafetyContext.forbidsBody(at); }
     public boolean kinetic(BlockPos at) { return KineticNativeView.kinetic(level,at); }
+    public boolean matches(KineticRouteGeometry.Placement placement) {
+        if(!loaded(placement.position()))return false;
+        var observed=state(placement.position());
+        if(!net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(observed.getBlock()).toString().equals(placement.blockId()))return false;
+        for(var entry:placement.properties().entrySet()) {
+            var property=observed.getBlock().getStateDefinition().getProperty(entry.getKey());
+            if(property==null||!observed.getValue(property).toString().equalsIgnoreCase(entry.getValue()))return false;
+        }
+        return true;
+    }
     public Integer groundHeight(int x,int z) {
         var chunk=level.getChunkSource().getChunk(x>>4,z>>4,ChunkStatus.FULL,false);
-        return chunk==null ? null : chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x&15,z&15);
+        // NO_LEAVES is server-only: client LevelChunk still allocates an empty map for it, yielding minY-1.
+        if(chunk==null || !chunk.hasPrimedHeightmap(Heightmap.Types.MOTION_BLOCKING)) return null;
+        int height=chunk.getHeight(Heightmap.Types.MOTION_BLOCKING,x&15,z&15);
+        return height<level.getMinBuildHeight() || height>=level.getMaxBuildHeight() ? null : height;
     }
 }
