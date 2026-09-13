@@ -88,6 +88,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Phase afterExcavationExit;
     private final BuildExcavationSpoilSupply spoilSupply = new BuildExcavationSpoilSupply();
     private final List<Map<String, Object>> spoilReceipts = new ArrayList<>();
+    private final BuildFoodPreparation foodPreparation = new BuildFoodPreparation();
     private final java.util.function.BiFunction<LocalPlayer, Double, HitResult> placementRay;
     private final Map<Long, BuildTaskRecord.Target> targets = new LinkedHashMap<>();
     private final LongOpenHashSet protectedCells = new LongOpenHashSet();
@@ -248,7 +249,29 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (preflightDone) registerProvider();
         drainScaffolds();
         // 一刻内可接着处理不需要等待的阶段；已发点击、正在改创造背包或本刻不能再操作时停下来。
-        TaskState result = BuildTickPipeline.advance(() -> phase, this::stepPhase,
+        TaskState result = BuildTickPipeline.advance(() -> phase, () -> {
+            // 刨完一批或准备下一格 -> 松开已结算的施工动作 -> 吃东西 -> 必要时等血量恢复 -> 继续原阶段。
+            // 检查放在每次阶段推进前，防止同一刻从连锁松键直接跳到下一批，把低饥饿检查一直跳过去。
+            boolean boundary = phase == Phase.EXCAVATE || phase == Phase.SELECT || phase == Phase.SCAFFOLD_SELECT
+                    || phase == Phase.EXCAVATE_EXIT && nav == null; // 仅出坑补料也先保养，但不抢走已经启动的出口导航。
+            boolean settled = useReceipt == null && !selection.pending() && digger.current() == null
+                    && !digger.hasPendingBreak() && ultimine == null && !ultimineArmed
+                    && !excavationTools.active() && !spoilSupply.active() && player.onGround()
+                    && (nav == null || nav.isSafeToCancel());
+            if (boundary && settled && (foodPreparation.active() || !player.isUsingItem())
+                    && foodPreparation.shouldPrepare(player)) {
+                if (!foodPreparation.active()) { stopNav(); InputDriver.halt(player); }
+                var food = foodPreparation.tick(player, r, this::runChild);
+                r.extendDeadlineTo(foodPreparation.deadline());
+                if (food == BuildFoodPreparation.Status.FAILED) {
+                    failAt(player.blockPosition(), foodPreparation.message(), foodPreparation.failureType(), foodPreparation.failure(), false);
+                    return TaskState.FAILED;
+                }
+                if (food == BuildFoodPreparation.Status.RUNNING) return TaskState.RUNNING;
+                selection.reset(); // 食物可能从主背包换入手中，恢复施工时重新确认所需建材或工具。
+            }
+            return stepPhase();
+        },
                 () -> phase != Phase.WAIT_USE && phase != Phase.CLEAR_CREATIVE
                         && ClientRuntime.requireContext(player).mutationAvailable());
         if (result == TaskState.SUCCESS && player.getAbilities().instabuild && creativeMaterials.hasOwned(player)) {
@@ -726,7 +749,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 failAt(clearing, release.code(), FailureType.TARGET_LOST, "ultimine_release_interrupted", false);
                 return TaskState.FAILED;
             }
-            if (ultimineArmed) { ultimineBatches++; lastUltimineHold = ultimine.holdEvidence(); }
+            if (ultimineArmed) {
+                ultimineBatches++; lastUltimineHold = ultimine.holdEvidence();
+                // 本批松键后更新显示状态，上一批的持键证明不能再被当作角色此刻仍按着连锁键。
+                var released = new LinkedHashMap<>(ultimineEvidence);
+                released.put("status", "released_after_confirmation"); released.put("confirmed_native_batches", ultimineBatches);
+                ultimineEvidence = Map.copyOf(released);
+            }
             ultimine = null; ultimineArmed = false;
         }
         // 清完一格继续下一格；冲突全部清完后，要么空气目标已完成，要么进入放置阶段。
@@ -2039,6 +2068,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("construction_access", stanceNavigation.stage());
         data.put("construction_navigation", navigationDiagnostics());
         data.put("excavation_remaining", excavation.remaining());
+        data.put("food_preparation", foodPreparation.progress(player));
         if (excavationTools.active()) data.put("excavation_tool_supply", excavationTools.progress());
         if (!ultimineEvidence.isEmpty()) data.put("ultimine", ultimineEvidence);
         if (excavating && clearing != null) data.put("excavation_target", clearing.toShortString());
@@ -2088,6 +2118,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        foodPreparation.stop(player);
         spoilSupply.cancel(player);
         if (ultimine != null) { ultimine.close(); ultimine = null; ultimineArmed = false; }
         excavationTools.stop(player);
@@ -2097,6 +2128,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         drainScaffolds(); unregisterProvider(); super.stop(companion, why); InputDriver.halt(player);
     }
     @Override protected void cleanup() {
+        foodPreparation.stop(player);
         spoilSupply.cancel(player);
         if (ultimine != null) { ultimine.close(); ultimine = null; ultimineArmed = false; }
         excavationTools.stop(player);
@@ -2117,6 +2149,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("completed", r.completed());
         data.put("placed", r.placed());
         data.put("cleared", r.broken());
+        data.put("food_preparation", foodPreparation.progress(player));
+        if (!foodPreparation.receipts().isEmpty()) data.put("completed_food_receipts", foodPreparation.receipts());
         if ("build_terrain_conflict".equals(failureCode)) data.put("mechanical_retry_allowed", false);
         if (!excavationTools.receipts().isEmpty()) data.put("excavation_tool_receipts", excavationTools.receipts());
         if (!spoilReceipts.isEmpty()) data.put("excavation_spoil_receipts", List.copyOf(spoilReceipts));
