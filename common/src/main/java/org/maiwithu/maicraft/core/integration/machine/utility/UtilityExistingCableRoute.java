@@ -36,47 +36,46 @@ public final class UtilityExistingCableRoute {
             throw rejected("endpoints_required");
         requireLoaded(world, source); requireLoaded(world, target);
         Map<BlockPos, Cell> observations = new HashMap<>();
-        Set<BlockPos> visited = new HashSet<>();
-        UtilityConnectionPlanner.Route found = null;
-        for (Direction face : eligibleSourceFaces.stream().distinct().sorted().toList()) {
-            BlockPos start = source.relative(face);
-            if (start.equals(target) || visited.contains(start) || observe(world, start, observations) != Cell.CABLE) continue;
-            var graph = component(source, start, target, target.relative(exactTargetFace), world, observations, visited);
-            int edges = graph.values().stream().mapToInt(List::size).sum() / 2;
-            if (edges >= graph.size()) throw rejected("loop");
-            boolean complete = graph.containsKey(target.relative(exactTargetFace));
-            for (var entry : graph.entrySet()) {
-                int degree = entry.getValue().size() + (entry.getKey().equals(start) ? 1 : 0)
-                        + (entry.getKey().equals(target.relative(exactTargetFace)) ? 1 : 0);
-                if (degree > 2) throw rejected("branch");
-            }
-            if (!complete) continue;
-            if (found != null) throw rejected("multiple_routes");
-            List<BlockPos> path = new ArrayList<>(); path.add(source);
-            BlockPos previous = source, at = start;
-            while (true) {
-                path.add(at);
-                if (at.equals(target.relative(exactTargetFace))) break;
-                BlockPos next = null;
-                for (BlockPos neighbor : graph.get(at)) if (!neighbor.equals(previous)) { next = neighbor; break; }
-                if (next == null) throw rejected("incomplete_path");
-                previous = at; at = next;
-            }
-            path.add(target); found = new UtilityConnectionPlanner.Route(face, path);
+        BlockPos end = target.relative(exactTargetFace);
+        // A fresh machine must not trigger exploration of the city's existing outlets and their consumers.
+        if (end.equals(source) || observe(world, end, observations) != Cell.CABLE) return null;
+        var graph = component(source, target, end, world, observations, new HashSet<>());
+        int edges = graph.values().stream().mapToInt(List::size).sum() / 2;
+        if (edges >= graph.size()) throw rejected("loop");
+        List<BlockPos> sourceContacts = graph.keySet().stream().filter(at -> at.distManhattan(source) == 1).toList();
+        if (sourceContacts.size() > 1) throw rejected("unexpected_endpoint_face");
+        for (var entry : graph.entrySet()) {
+            int degree = entry.getValue().size() + (entry.getKey().distManhattan(source) == 1 ? 1 : 0)
+                    + (entry.getKey().equals(end) ? 1 : 0);
+            if (degree > 2) throw rejected("branch");
         }
-        return found;
+        if (sourceContacts.isEmpty()) return null;
+        BlockPos start = sourceContacts.getFirst();
+        Direction face = eligibleSourceFaces.stream().filter(candidate -> source.relative(candidate).equals(start)).findFirst().orElse(null);
+        if (face == null) throw rejected("unexpected_endpoint_face");
+        List<BlockPos> path = new ArrayList<>(); path.add(source);
+        BlockPos previous = source, at = start;
+        while (true) {
+            path.add(at);
+            if (at.equals(end)) break;
+            BlockPos next = null;
+            for (BlockPos neighbor : graph.get(at)) if (!neighbor.equals(previous)) { next = neighbor; break; }
+            if (next == null) throw rejected("incomplete_path");
+            previous = at; at = next;
+        }
+        path.add(target); return new UtilityConnectionPlanner.Route(face, path);
     }
 
-    private static Map<BlockPos, List<BlockPos>> component(BlockPos source, BlockPos start, BlockPos target, BlockPos end,
+    private static Map<BlockPos, List<BlockPos>> component(BlockPos source, BlockPos target, BlockPos end,
             WorldView world, Map<BlockPos, Cell> observations, Set<BlockPos> visited) {
         Map<BlockPos, List<BlockPos>> graph = new LinkedHashMap<>();
-        ArrayDeque<BlockPos> queue = new ArrayDeque<>(); enqueue(start, queue, visited);
+        ArrayDeque<BlockPos> queue = new ArrayDeque<>(); enqueue(end, queue, visited);
         while (!queue.isEmpty()) {
             BlockPos at = queue.removeFirst(); List<BlockPos> neighbors = new ArrayList<>();
             for (Direction direction : Direction.values()) {
                 BlockPos next = at.relative(direction);
                 if (next.equals(source) || next.equals(target)) {
-                    if (next.equals(source) && !at.equals(start) || next.equals(target) && !at.equals(end))
+                    if (next.equals(target) && !at.equals(end))
                         throw rejected("unexpected_endpoint_face");
                     continue;
                 }

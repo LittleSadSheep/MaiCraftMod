@@ -12,6 +12,7 @@ public final class UtilityExistingCableRouteTest {
     public static void main(String[] args) {
         findsAnExactIsolatedRetryPath();
         stopsAtCableEndpointsAndPreservesTheDeclaredFace();
+        freshAndReusableInputsIgnoreOtherCityOutlets();
         rejectsBranchesLoopsAndForeignDevices();
         unloadedCellsAreNeverRead();
         gapsAndAbsentCablesHaveNoReusablePath();
@@ -35,9 +36,11 @@ public final class UtilityExistingCableRouteTest {
         var route = UtilityExistingCableRoute.find(BlockPos.ZERO, List.of(Direction.EAST), target, Direction.WEST, world);
         check(route.cables().size() == 5 && !world.checked.contains(target.east()) && !world.checked.contains(BlockPos.ZERO.west()),
                 "endpoint cables are boundaries, so their private networks are not traversed");
-        rejects(() -> UtilityExistingCableRoute.find(BlockPos.ZERO, List.of(Direction.EAST), target, Direction.NORTH, world), "unexpected_endpoint_face");
-        World wrongSource = new World();
-        wrongSource.cables.addAll(List.of(new BlockPos(1, 0, 0), new BlockPos(1, 0, 1), new BlockPos(0, 0, 1)));
+        World wrongTarget = straight(5); wrongTarget.cables.add(target.north()); wrongTarget.cables.add(target.west().north());
+        rejects(() -> UtilityExistingCableRoute.find(BlockPos.ZERO, List.of(Direction.EAST), target, Direction.NORTH, wrongTarget), "unexpected_endpoint_face");
+        rejects(() -> UtilityExistingCableRoute.find(BlockPos.ZERO, List.of(Direction.NORTH), target, Direction.WEST, world), "unexpected_endpoint_face");
+        World wrongSource = straight(5);
+        wrongSource.cables.addAll(List.of(new BlockPos(1, 0, 1), new BlockPos(0, 0, 1)));
         rejects(() -> UtilityExistingCableRoute.find(BlockPos.ZERO, List.of(Direction.EAST, Direction.SOUTH), target, Direction.WEST, wrongSource), "unexpected_endpoint_face");
     }
     private static void rejectsBranchesLoopsAndForeignDevices() {
@@ -48,11 +51,21 @@ public final class UtilityExistingCableRouteTest {
         rejects(() -> find(loop, target), "loop");
         World foreign = straight(5); foreign.devices.add(new BlockPos(3, 0, 1));
         rejects(() -> find(foreign, target), "foreign_device");
-        World unsafeAlternative = new World();
-        for (int y = 1; y <= 5; y++) unsafeAlternative.cables.add(new BlockPos(0, y, 0));
-        unsafeAlternative.cables.add(new BlockPos(1, 0, 0)); unsafeAlternative.cables.add(new BlockPos(2, 0, 0));
-        unsafeAlternative.devices.add(new BlockPos(2, 1, 0));
-        rejects(() -> UtilityExistingCableRoute.find(BlockPos.ZERO, List.of(Direction.UP, Direction.EAST), new BlockPos(0, 6, 0), Direction.DOWN, unsafeAlternative), "foreign_device");
+    }
+    private static void freshAndReusableInputsIgnoreOtherCityOutlets() {
+        BlockPos target = new BlockPos(6, 0, 0);
+        World fresh = new World(); fresh.cables.add(BlockPos.ZERO.east()); fresh.cables.add(BlockPos.ZERO.east().above());
+        fresh.devices.add(new BlockPos(2, 0, 0)); fresh.unloaded.add(new BlockPos(1, -1, 0));
+        check(UtilityExistingCableRoute.find(BlockPos.ZERO, List.of(Direction.EAST, Direction.NORTH), target, Direction.WEST, fresh) == null,
+                "an empty input approach does not validate or reject existing city consumers");
+        check(fresh.checked.equals(Set.of(target.west())), "fresh input reads only its own adjoining cell");
+        World reuse = straight(5); reuse.cables.add(BlockPos.ZERO.west()); reuse.cables.add(BlockPos.ZERO.west().above());
+        reuse.devices.add(new BlockPos(-2, 0, 0)); reuse.unloaded.add(new BlockPos(-1, -1, 0));
+        var route = UtilityExistingCableRoute.find(BlockPos.ZERO, List.of(Direction.WEST, Direction.EAST), target, Direction.WEST, reuse);
+        check(route != null && route.cables().size() == 5 && route.sourceFace() == Direction.EAST,
+                "retry reuses the target-side path without traversing another eligible city outlet");
+        check(!reuse.loadedChecks.contains(BlockPos.ZERO.west()) && !reuse.checked.contains(new BlockPos(-2, 0, 0)),
+                "the city source remains the inspection boundary regardless of its other networks");
     }
     private static void unloadedCellsAreNeverRead() {
         World gap = straight(5); gap.unloaded.add(new BlockPos(3, 0, 0));
