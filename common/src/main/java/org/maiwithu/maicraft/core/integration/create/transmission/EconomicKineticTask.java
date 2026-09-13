@@ -160,7 +160,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         return true;
     }
     private TaskState checkSource(boolean after) {
-        BlockPos at=selected.source().position();if(!near(at))return TaskState.RUNNING;
+        BlockPos at=selected.source().position();if(serverProof&&!near(at))return TaskState.RUNNING;
         if(serverProof) {
             var row=reads.snapshot(at,r.dimension);if(row==null)return TaskState.RUNNING;
             String observedId=net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString();
@@ -173,15 +173,15 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             if(live==null||!live.powered())return failure("kinetic_client_source_not_powered");
             if(after)sourceAfter=KineticPowerEvidence.client(live);else sourceBefore=KineticPowerEvidence.client(live);
         }
-        phase=after?Phase.TARGET_AFTER:Phase.TARGET;return TaskState.RUNNING;
+        phase=after?Phase.TARGET_AFTER:resumingRoute||selected.family().equals("existing_connection")?Phase.TARGET:Phase.BUILD;return TaskState.RUNNING;
     }
     private TaskState checkTarget(boolean after) {
-        if(!near(r.target))return TaskState.RUNNING;
+        if(serverProof&&!near(r.target))return TaskState.RUNNING;
         if(serverProof) {
             var row=reads.snapshot(r.target,r.dimension);if(row==null)return TaskState.RUNNING;
             if(!target.blockId().equals(KineticNativeReads.text(row,"block_id")))return failure("kinetic_native_target_changed");
             if(!after&&KineticNativeReads.powered(row,0)) {
-                if(!KineticNativeReads.sameNetwork(sourceBefore,row)||!KineticNativeReads.powered(row,r.minimumRpm))
+                if(sourceBefore==null||!KineticNativeReads.sameNetwork(sourceBefore,row)||!KineticNativeReads.powered(row,r.minimumRpm))
                     return failure("kinetic_target_powered_by_different_or_insufficient_network");
                 if(!resumingRoute){phase=Phase.EXISTING;return TaskState.RUNNING;}
             }
@@ -201,14 +201,14 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         }
         if(after&&!KineticRouteBuild.matches(player,selected))return failure("kinetic_built_geometry_changed");
         if(!after&&selected.family().equals("existing_connection"))return failure("kinetic_existing_power_disappeared");
-        phase=after?Phase.DONE:materialsReady?Phase.BUILD:Phase.MATERIALS;return after?TaskState.SUCCESS:TaskState.RUNNING;
+        phase=after?Phase.DONE:materialsReady?(resumingRoute?Phase.BUILD:Phase.SOURCE):Phase.MATERIALS;return after?TaskState.SUCCESS:TaskState.RUNNING;
     }
     private TaskState existing() {
         var face=r.targetFace;
         if(face==null) face=target.endpoint().shaftFaces().stream().filter(side->world.isLoaded(r.target.relative(side))
                 &&KineticNativeView.kinetic(world,r.target.relative(side))).findFirst().orElse(null);
         if(face==null)return failure("kinetic_existing_entry_needs_inspection");
-        if(!near(r.target.relative(face)))return TaskState.RUNNING;
+        if(serverProof&&!near(r.target.relative(face)))return TaskState.RUNNING;
         if(serverProof) {
             if(!ServerAssistClient.serverSupported("machine.connections"))return failure("kinetic_existing_entry_native_check_required");
             if(!reads.connectedFace(r.target,face,r.dimension))return TaskState.RUNNING;
@@ -228,12 +228,14 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
                     r.materialPolicy,r.allowedSources,r.allowHarm,r.protectedLabels);
             return TaskState.RUNNING;
         }
-        materialsReady=true;phase=Phase.SOURCE;return TaskState.RUNNING;
+        materialsReady=true;phase=resumingRoute?Phase.SOURCE:Phase.TARGET;return TaskState.RUNNING;
     }
     private TaskState build() {
         if(!KineticRouteGeometry.clearanceValid(selected,new KineticPlanningTerrain(player.clientLevel)))return failure("kinetic_route_clearance_changed");
         if(!chainCapacity(selected))return failure("kinetic_chain_capacity_changed_before_construction");
         var source=KineticNativeView.read(world,selected.source().position(),selected.sourceFace(),selected.source().chainInterface());
+        var destination=KineticNativeView.read(world,r.target,selected.targetFace(),selected.target().chainInterface());
+        if(!resumingRoute&&destination.powered())return failure("kinetic_target_power_changed_before_construction");
         KineticRpmBudget.validate(selected,source.rpm(),r.minimumRpm,KineticRpmBudget.maximumRotationSpeed());
         if(KineticRouteBuild.matches(player,selected)){phase=Phase.LINKS;return TaskState.RUNNING;}
         for(var cell:selected.placements()) if(!KineticRouteBuild.matches(player,cell)&&(!KineticRouteBuild.emptyAndIsolated(player,selected,cell.position())
