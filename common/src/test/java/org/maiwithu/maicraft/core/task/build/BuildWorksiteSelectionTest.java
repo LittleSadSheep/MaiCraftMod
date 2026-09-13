@@ -48,13 +48,7 @@ final class BuildWorksiteSelectionTest {
             install(task, targets);
             var attempts = (PlacementAttemptLedger) field("placementAttempts").get(task);
             for (var target : targets.subList(0, targets.size() - 1)) attempts.rejectStance(target, h.player.blockPosition());
-            boolean selected = false;
-            // Selection intentionally yields after four milliseconds; cold native geometry may
-            // consume the first slice, so exercise bounded client ticks instead of assuming one call.
-            for (int tick = 0; tick < 10 && !selected; tick++) {
-                h.nextTick(); selected = (boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null);
-            }
-            check(selected,
+            check(selectWithinTicks(h, task, null),
                     "local ranking finds useful nearby work without being trapped by the old queue prefix");
             install(task, targets);
             Vec3 feet = new Vec3(7.5, 1, 8.5);
@@ -65,7 +59,7 @@ final class BuildWorksiteSelectionTest {
             invoke(task, "retainUsefulWorksite");
             check(((List<?>) field("queue").get(task)).getFirst().equals(cell(covered)),
                     "a still useful covered target moves before the blocked prefix");
-            check((boolean) invoke(task, "selectNearbyPlacement", Vec3.class, feet),
+            check(selectWithinTicks(h, task, feet),
                     "the current picker can now place toward the retained destination");
             check(field("placementWalkTarget").get(task).equals(feet), "along-the-way selection retains the approach");
         }
@@ -140,7 +134,7 @@ final class BuildWorksiteSelectionTest {
                 invoke(task, "worksiteTick");
                 if (field("worksiteSearch").get(task) == null) break;
             }
-            check((boolean) invoke(task, "selectNearbyPlacement", Vec3.class, null),
+            check(selectWithinTicks(h, task, null),
                     "without higher useful footing, ordinary current-position placement remains available");
             var air = new BuildTaskRecord.Target(Blocks.AIR, Items.AIR, new BlockPos(6, 0, 6),
                     "eventual support cleanup", null, null, null);
@@ -157,6 +151,13 @@ final class BuildWorksiteSelectionTest {
         var type = Class.forName(FirstPersonBuildCompanionTask.class.getName() + "$CellPlan");
         var constructor = type.getDeclaredConstructor(BuildTaskRecord.Target.class, List.class);
         constructor.setAccessible(true); return constructor.newInstance(target, List.of());
+    }
+    private static boolean selectWithinTicks(InteractionWorldTestHarness h, FirstPersonBuildCompanionTask task, Vec3 approach) throws Exception {
+        // 找可放块站位会主动让出超时的一刻；模拟有限几刻继续判断，不能把原版几何首次加载误报为寻路失败。
+        for (int tick = 0; tick < 10; tick++) {
+            h.nextTick(); if ((boolean) invoke(task, "selectNearbyPlacement", Vec3.class, approach)) return true;
+        }
+        return false;
     }
     private static void install(FirstPersonBuildCompanionTask task, List<BuildTaskRecord.Target> targets) throws Exception {
         var queue = new ArrayList<>(); var plans = new LinkedHashMap<Long, Object>();
