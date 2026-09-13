@@ -182,6 +182,12 @@ final class Ae2ReflectionBridge {
     }
 
     /** Returns {@code null} until the synchronized client repository exists. */
+    Object repositoryIdentity(Object menu) {
+        requireStorageMenu(menu);
+        return invoke(getClientRepo, menu);
+    }
+
+    /** 逐次重读同一客户端仓库；存入会话另外保留仓库对象身份，换界面不能沿用旧数量。 */
     List<Entry> entries(Object menu) {
         requireStorageMenu(menu);
         Object repository = invoke(getClientRepo, menu);
