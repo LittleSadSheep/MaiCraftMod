@@ -179,7 +179,7 @@ public final class SemanticContainerCompanionTask
                     + "semantic supply path; generic transfer will not guess its terminal slots.",
                     FailureType.UNSUPPORTED);
         }
-        List<Candidate> candidates = loadedCandidates(center);
+        List<Candidate> candidates = new ArrayList<>(loadedCandidates(center));
         if (candidates.isEmpty()) {
             return failFinal("no_safe_loaded_container", "No matching, loaded and unprotected "
                     + "block container can be selected safely.", FailureType.TARGET_LOST);

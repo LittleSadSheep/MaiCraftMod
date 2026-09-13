@@ -31,6 +31,7 @@ public final class ContainerSupplySourcesTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         cacheNeverConfusesContainersOrWorlds();
         choosesOnlyLoadedOrdinarySourcesAndProtectsBothChestHalves();
+        fixedTargetSurveyActuallyRunsForWithdrawalAndDeposit();
         partialWithdrawalAndMenuOwnershipRemainExplicit();
     }
     private static void cacheNeverConfusesContainersOrWorlds() {
@@ -97,6 +98,25 @@ public final class ContainerSupplySourcesTest {
             task.result(TaskState.FAILED);
             check(h.player.containerMenu == foreign && h.blockUses() == 0 && h.itemUses() == 0, "cleanup leaves a replacement menu untouched");
         }
+    }
+    private static void fixedTargetSurveyActuallyRunsForWithdrawalAndDeposit() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var entities = worldEntities(h); BlockPos closer = new BlockPos(3, 1, 3), exact = new BlockPos(6, 1, 3);
+            addBarrel(h, entities, closer); addBarrel(h, entities, exact);
+            ResourceLocation barrel = ResourceLocation.parse("minecraft:barrel");
+            for (var record : List.of(
+                    SemanticContainerTaskRecord.withdrawAvailableAt("fixed-withdraw-survey", 1000, List.of(IRON), 10, exact, barrel, List.of()),
+                    SemanticContainerTaskRecord.depositAvailableAt("fixed-deposit-survey", 1000, IRON, 5, exact, barrel, List.of()))) {
+                var task = new SemanticContainerCompanionTask(h.player, record);
+                task.start(h.player);
+                check(task.tick(h.player) == TaskState.RUNNING, "actual fixed-target survey must accept immutable discovery results without failing during sort");
+                Object selected = field(task.getClass(), "target").get(task);
+                check(selected != null && field(selected.getClass(), "position").get(selected).equals(exact)
+                        && field(task.getClass(), "phase").get(task).toString().equals("OPEN"),
+                        "survey must retain the exact bound warehouse and advance toward its native GUI, ignoring a nearer barrel");
+            }
+            check(h.blockUses() == 0 && h.itemUses() == 0, "survey itself performs no interaction or material mutation");
+        } finally { ContainerSupplySources.reset(); }
     }
     public static Map<BlockPos, BlockEntity> worldEntities(InteractionWorldTestHarness h) throws Exception {
         field(Level.class, "isClientSide").setBoolean(h.level, true);
