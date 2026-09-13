@@ -175,6 +175,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final LinkedHashSet<Long> verifyFailed = new LinkedHashSet<>();
     private final List<ObservedCell> verifyFailureStates = new ArrayList<>();
     private List<BlockPos> scaffoldQueue = List.of();
+    private final LinkedHashSet<BlockPos> deferredScaffolds = new LinkedHashSet<>();
+    private int scaffoldCleanupPasses, scaffoldPassRemovals, scaffoldConfirmedRemovals;
+    private Map<String, Object> lastDeferredScaffold = Map.of();
     private BuildScaffoldCleanup scaffoldCleanup;
     private BlockPos scaffold, siteMin, siteMax, failurePos;
     private String failureCode, note = "all native actions re-verified";
@@ -1850,6 +1853,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         || BuildCellRules.isAirTarget(targets.get(p.asLong())))
                 .sorted(Comparator.comparingInt((BlockPos position) -> position.getY()).reversed()
                         .thenComparingDouble(p -> p.distSqr(player.blockPosition()))).toList();
+        deferredScaffolds.clear(); scaffoldPassRemovals = 0; scaffoldCleanupPasses++;
         scaffoldAt = 0; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
     }
 
@@ -1868,8 +1872,29 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (player.level().getBlockState(scaffold).isAir()) {
                 r.scaffoldLedger().cleared(scaffold); scaffoldAt++; continue;
             }
+            // 先找当前位置就能安全拆的自有支撑，避免为远处高柱反复走动，仍在破坏边界重查所有权。
+            for (int i = scaffoldAt; i < scaffoldQueue.size(); i++) {
+                BlockPos at = scaffoldQueue.get(i);
+                if (!player.level().isLoaded(at) || !scaffoldMutationAllowed(at, player.level().getBlockState(at))
+                        || at.distToCenterSqr(player.getEyePosition()) > 36) continue;
+                var ready = new BuildScaffoldCleanup(player, at, forbiddenBodyCells);
+                if (!ready.ready()) continue;
+                var ordered = new ArrayList<>(scaffoldQueue); ordered.remove(i); ordered.add(scaffoldAt, at);
+                scaffoldQueue = List.copyOf(ordered); scaffold = at; scaffoldCleanup = ready;
+                phase = Phase.SCAFFOLD_BREAK; return TaskState.RUNNING;
+            }
             scaffoldCleanup = new BuildScaffoldCleanup(player, scaffold, forbiddenBodyCells);
             phase = Phase.SCAFFOLD_NAV; return TaskState.RUNNING;
+        }
+        if (!deferredScaffolds.isEmpty()) {
+            // 只有本轮真实确认拆掉了支撑，才有新的通路证据可重试；整轮无变化就保留剩余账并停止。
+            if (scaffoldPassRemovals == 0) {
+                failAt(deferredScaffolds.iterator().next(), "No support was removed in the complete cleanup pass; unreachable supports remain tracked",
+                        FailureType.NO_PATH, "scaffold_cleanup_no_progress", false); return TaskState.FAILED;
+            }
+            scaffoldQueue = List.copyOf(deferredScaffolds); deferredScaffolds.clear();
+            scaffoldAt = 0; scaffoldPassRemovals = 0; scaffoldCleanupPasses++;
+            phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
         }
         finalStateAt = 0; phase = Phase.FINAL_STATE;
         return TaskState.RUNNING;
@@ -1985,9 +2010,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             var candidate = scaffoldCleanup.next();
             if (candidate == null) {
                 if (!scaffoldCleanup.exhausted()) return TaskState.RUNNING;
-                failAt(scaffold, "no remaining visible cleanup stance on independently supported existing footing",
-                        FailureType.OCCLUDED, "scaffold_cleanup_stances_exhausted", false);
-                return TaskState.FAILED;
+                // 这一根暂时无路不代表其他支撑都无路；本轮只推迟一次，不清所有权、不立即重试。
+                lastDeferredScaffold = scaffoldCleanup.evidence(); deferredScaffolds.add(scaffold);
+                note = "cleanup deferred until another support is removed"; scaffoldAt++;
+                phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
             }
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(candidate.cell()), BuildStanceNavigation.PRECISE_WALK,
                     scaffoldCleanup::ready, stanceNavigation.walkingContext(Integer.MIN_VALUE)).walkingOnly();
@@ -2001,6 +2027,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 yield TaskState.RUNNING;
             }
             case FAILED -> {
+                scaffoldCleanup.routeFailed(nav.failReason());
                 note = "cleanup stance unreachable: " + nav.failReason(); stopNav();
                 yield TaskState.RUNNING;
             }
@@ -2018,10 +2045,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             r.scaffoldLedger().cleared(scaffold);
             scaffoldAt++; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
         }
-        if (inheritedProtectedMutationCells.contains(scaffold.asLong())
-                || forbiddenBodyCells.contains(scaffold.asLong())
-                || NavigationSafetyContext.protectsMutation(scaffold) || NavigationSafetyContext.forbidsBody(scaffold)
-                || !r.scaffoldLedger().owns(scaffold, live) || !r.mutationGuardMatches(player, scaffold)) {
+        if (!scaffoldMutationAllowed(scaffold, live)) {
             failAt(scaffold, "temporary scaffold changed or gained protection before cleanup",
                     FailureType.TARGET_LOST, "scaffold_cleanup_guard_changed", true);
             return TaskState.FAILED;
@@ -2033,9 +2057,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return switch (digger.digTargetStep(scaffold)) {
             case PROGRESSING -> TaskState.RUNNING;
             case BROKE_TARGET -> {
-                r.scaffoldLedger().cleared(scaffold);
-                r.brokeOne(); renewBuildProgress(); scaffoldAt++;
-                phase = Phase.SCAFFOLD_SELECT; yield TaskState.RUNNING;
+                confirmedScaffoldBreak(); yield TaskState.RUNNING;
             }
             case BROKE_OCCLUDER -> {
                 failAt(scaffold, "scaffold cleanup changed another block", FailureType.INTERNAL,
@@ -2046,6 +2068,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 yield TaskState.RUNNING;
             }
         };
+    }
+
+    private boolean scaffoldMutationAllowed(BlockPos at, BlockState live) {
+        return !inheritedProtectedMutationCells.contains(at.asLong()) && !forbiddenBodyCells.contains(at.asLong())
+                && !NavigationSafetyContext.protectsMutation(at) && !NavigationSafetyContext.forbidsBody(at)
+                && r.scaffoldLedger().owns(at, live) && r.mutationGuardMatches(player, at);
+    }
+
+    private void confirmedScaffoldBreak() {
+        // 仅由原生 BROKE_TARGET 回执进入；看到空气或尝试过一次导航都不能算作开启下一轮的拆除进展。
+        r.scaffoldLedger().cleared(scaffold); r.brokeOne(); renewBuildProgress();
+        scaffoldPassRemovals++; scaffoldConfirmedRemovals++; scaffoldAt++;
+        phase = Phase.SCAFFOLD_SELECT;
     }
 
     private NativeConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before, BlockState predicted) {
@@ -2399,6 +2434,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
         if (!scaffoldDropRisk.isEmpty()) data.put("scaffold_drop_risk", scaffoldDropRisk);
         data.put("temporary_supports_remaining", r.scaffoldLedger().snapshot().size());
+        if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
+        data.put("scaffold_cleanup_passes", scaffoldCleanupPasses);
+        data.put("scaffold_cleanup_confirmed_removals", scaffoldConfirmedRemovals);
+        data.put("scaffold_cleanup_deferred_count", deferredScaffolds.size());
+        if (!lastDeferredScaffold.isEmpty()) data.put("last_deferred_scaffold", lastDeferredScaffold);
         var diagnostics = new ArrayList<>(targetDiagnostics);
         if (failurePos != null) {
             var failure = new LinkedHashMap<>(BuildFailureEvidence.describe(failureCode, failurePos,

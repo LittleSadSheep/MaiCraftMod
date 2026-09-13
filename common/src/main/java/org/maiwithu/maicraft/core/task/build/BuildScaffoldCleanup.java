@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
@@ -34,6 +35,9 @@ final class BuildScaffoldCleanup {
     private final List<BlockPos> cells = new ArrayList<>();
     private final Set<BlockPos> rejected = new HashSet<>();
     private int cursor, offered;
+    private int failedRoutes;
+    private String lastRouteFailure = "";
+    private Candidate lastCandidate;
 
     BuildScaffoldCleanup(LocalPlayer player, BlockPos target, LongSet forbidden) {
         this.player = player; this.target = target.immutable();
@@ -46,6 +50,12 @@ final class BuildScaffoldCleanup {
 
     boolean exhausted() { return cursor >= cells.size() || offered >= 24; }
     void rejectCurrent() { rejected.add(PlayerNav.playerFeet(player).immutable()); }
+
+    // 回收站位有视线但走不过去时，保留实际导航原因，避免只剩“搜索耗尽”而无法判断被哪里挡住。
+    void routeFailed(String reason) {
+        failedRoutes++;
+        lastRouteFailure = reason == null ? "navigation failed" : reason.substring(0, Math.min(240, reason.length()));
+    }
 
     Candidate next() {
         var physical = PhysicalObstacleSnapshot.capture(player.clientLevel, Vec3.atCenterOf(target));
@@ -60,7 +70,8 @@ final class BuildScaffoldCleanup {
                 if (feet != null && ground(removed, forbidden, physical).clear(feet, feet)
                         && visible(world(false), feet.add(0, player.getEyeHeight(Pose.STANDING), 0))) {
                     offered++;
-                    return new Candidate(cell, feet);
+                    lastCandidate = new Candidate(cell, feet);
+                    return lastCandidate;
                 }
             }
             if (System.nanoTime() >= deadline) break;
@@ -80,9 +91,15 @@ final class BuildScaffoldCleanup {
     }
 
     Map<String, Object> evidence() {
-        return Map.of("checked_stances", cursor, "candidate_stances", cells.size(),
+        var data = new LinkedHashMap<String, Object>(Map.of("checked_stances", cursor, "candidate_stances", cells.size(),
                 "offered_stances", offered, "rejected_actual_stances", rejected.size(),
-                "search_complete", exhausted(), "routing", "existing_footing_only");
+                "search_complete", exhausted(), "routing", "existing_footing_only"));
+        // 支撑可能在蓝图外，单靠正式目标序号无法定位；把本次目标、候选落脚高度与路由失败一起记入施工证据。
+        data.put("target", List.of(target.getX(), target.getY(), target.getZ()));
+        data.put("failed_routes", failedRoutes);
+        data.put("last_route_failure", lastRouteFailure);
+        if (lastCandidate != null) data.put("candidate_feet", List.of(lastCandidate.feet.x, lastCandidate.feet.y, lastCandidate.feet.z));
+        return data;
     }
 
     private LongSet forbidden() {
