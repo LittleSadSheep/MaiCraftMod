@@ -55,7 +55,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private static final int PREFLIGHT_BUDGET = 24;
     private static final int USE_TIMEOUT = 40;
 
-    private enum Phase { PREFLIGHT, SELECT, CLEAR_NAV, CLEAR, PLACE_NAV, WORKSITE, SELECT_ITEM,
+    private enum Phase { PREFLIGHT, EXCAVATE, SELECT, CLEAR_NAV, CLEAR, PLACE_NAV, WORKSITE, SELECT_ITEM,
         AIM, WAIT_USE, SUPPORT_VERIFY, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, FINAL_STATE, ROUTE_VERIFY }
     private record CellPlan(BuildTaskRecord.Target target,
                             List<BuildPlacementGeometry.GeneratedCell> generated) {
@@ -70,6 +70,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BuildCellRules rules;
     private final BuildInventory inventory;
     private final BlockDigger digger;
+    private final BuildExcavationFrontier excavation = new BuildExcavationFrontier();
+    private final Map<Long, CellPlan> excavationOwners = new HashMap<>();
+    private boolean excavating;
     private final java.util.function.BiFunction<LocalPlayer, Double, HitResult> placementRay;
     private final Map<Long, BuildTaskRecord.Target> targets = new LinkedHashMap<>();
     private final LongOpenHashSet protectedCells = new LongOpenHashSet();
@@ -238,7 +241,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState stepPhase() {
         return switch (phase) {
-            case PREFLIGHT -> preflightTick(); case SELECT -> selectTick();
+            case PREFLIGHT -> preflightTick(); case EXCAVATE -> excavationTick(); case SELECT -> selectTick();
             case CLEAR_NAV -> clearNavTick(); case CLEAR -> clearTick();
             case PLACE_NAV -> placeNavTick(); case SELECT_ITEM -> selectItemTick();
             case WORKSITE -> worksiteTick();
@@ -392,11 +395,17 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failPreflight("site contains protected or unbreakable cells",
                     FailureType.NO_SUPPORT, "blocked_site_cells"); return TaskState.FAILED;
         }
+        for (CellPlan plan : plans) {
+            if (ownedAirScaffold(plan.target(), player.level().getBlockState(plan.target().pos()))) continue;
+            for (BlockPos pos : clearCells(plan)) {
+                excavation.add(pos); excavationOwners.put(pos.asLong(), plan);
+            }
+        }
         // 预检按未完成目标的完整材料数核对背包，不扣除现场已有的半层等中间状态。
         if (r.consumeMaterials || !player.getAbilities().instabuild) required.forEach((item, count) -> {
             int have = inventory.mainInventoryCount(item); if (have < count) missing.put(item, count - have);
         });
-        if (!missing.isEmpty() && !(r.allowPartial && anyAffordable())) {
+        if (!missing.isEmpty() && !(r.allowPartial && (anyAffordable() || excavation.remaining() > 0))) {
             failureCode = "missing_materials";
             fail("construction did not start; missing " + BuildMaterialSummary.summarizeShortfall(missing),
                     FailureType.NO_MATERIAL); return TaskState.FAILED;
@@ -404,7 +413,25 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!missing.isEmpty()) note = "partial mode pauses when carried materials run out";
         preflightDone = true; queue = new ArrayList<>(plans); queueAt = 0;
         queue.sort(java.util.Comparator.comparing(CellPlan::target, BuildLayerFrontier.order(targets)));
-        registerProvider(); phase = Phase.SELECT; return TaskState.RUNNING;
+        registerProvider(); phase = Phase.EXCAVATE; return TaskState.RUNNING;
+    }
+
+    private TaskState excavationTick() {
+        resetCell();
+        BlockPos next = excavation.next(player);
+        if (next == null) {
+            excavating = false;
+            if (excavation.remaining() == 0) { phase = Phase.SELECT; return TaskState.RUNNING; }
+            failAt(siteMin, "No exposed ground approach reaches the remaining excavation layer; "
+                    + "access outside the authored cells needs a revised site plan", FailureType.NO_PATH,
+                    "excavation_access_blocked", false);
+            return TaskState.FAILED;
+        }
+        excavating = true;
+        cell = excavationOwners.get(next.asLong());
+        clearing = next; clearQueue = List.of(next); clearAt = 0;
+        phase = Phase.CLEAR_NAV;
+        return TaskState.RUNNING;
     }
 
     // 允许部分施工时，只要还有一格能用现有物品完成，或有一格可清空，就可以先开工。
@@ -482,15 +509,25 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.TARGET_LOST, "site_changed_after_preflight", false);
             return TaskState.FAILED;
         }
+        if (!clearingPermitted(live)) return TaskState.FAILED;
+        if (excavating && !clearing.equals(player.blockPosition().below()) && digger.reachableHit(clearing) != null) {
+            stopNav(); phase = Phase.CLEAR; return TaskState.RUNNING;
+        }
         if (nav == null) {
             BlockPos at = clearing.immutable();
-            nav = PlayerNav.toGoal(player, () -> NavGoal.mineStance(at), 1.0, () -> inReach(at), this);
+            if (excavating) {
+                var approaches = BuildExcavationFrontier.approaches(player, at);
+                if (approaches.isEmpty()) { excavation.reject(at); phase = Phase.EXCAVATE; return TaskState.RUNNING; }
+                nav = PlayerNav.toGoal(player, () -> NavGoal.composite(approaches), 1.0,
+                        () -> !at.equals(player.blockPosition().below()) && digger.reachableHit(at) != null, this).walkingOnly();
+            } else nav = PlayerNav.toGoal(player, () -> NavGoal.mineStance(at), 1.0, () -> inReach(at), this).walkingOnly();
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> { stopNav(); phase = Phase.CLEAR; yield TaskState.RUNNING; }
             case FAILED -> {
                 FailureType type = nav.failType(); String reason = nav.failReason(); stopNav();
+                if (excavating) { excavation.reject(clearing); phase = Phase.EXCAVATE; yield TaskState.RUNNING; }
                 failAt(clearing, "no breaking stance: " + reason, type, "clear_stance_failed", false);
                 yield TaskState.FAILED;
             }
@@ -504,7 +541,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     "clear_target_lost", false); return TaskState.FAILED;
         }
         if (player.level().getBlockState(clearing).isAir()) {
-            if (!r.hasExecutionGuards()) return nextClear();
+            if (!r.hasExecutionGuards() && !clearing.equals(digger.current())) return nextClear();
             // A guarded machine edit accepts disappearance only through its own pending break receipt.
             return switch (digger.settleGone(true)) {
                 case PROGRESSING -> TaskState.RUNNING;
@@ -522,6 +559,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failAt(clearing, "observed target changed before breaking", FailureType.TARGET_LOST,
                     "build_target_changed", false); return TaskState.FAILED;
         }
+        if (!clearingPermitted(player.level().getBlockState(clearing))) return TaskState.FAILED;
         return switch (digger.digTargetStep(clearing)) {
             case PROGRESSING -> TaskState.RUNNING;
             case BROKE_TARGET -> {
@@ -533,6 +571,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         "unexpected_break_target", true); yield TaskState.FAILED;
             }
             case NO_SHOT -> {
+                if (excavating) { digger.cancel(); excavation.reject(clearing); phase = Phase.EXCAVATE; yield TaskState.RUNNING; }
                 failAt(clearing, "no verified crosshair ray reaches obstruction", FailureType.OCCLUDED,
                         "clear_occluded", false); yield TaskState.FAILED;
             }
@@ -543,6 +582,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 清完一格继续下一格；冲突全部清完后，要么空气目标已完成，要么进入放置阶段。
         if (clearing != null && player.level().isLoaded(clearing)
                 && player.level().getBlockState(clearing).isAir()) r.scaffoldLedger().cleared(clearing);
+        if (excavating) {
+            excavation.cleared(clearing); markComplete(cell); stopNav(); phase = Phase.EXCAVATE;
+            return TaskState.RUNNING;
+        }
         clearAt++; stopNav();
         if (clearAt < clearQueue.size()) { clearing = clearQueue.get(clearAt); phase = Phase.CLEAR_NAV; }
         else if (BuildCellRules.isAirTarget(cell.target())) finishCell();
@@ -551,6 +594,20 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             phase = Phase.PLACE_NAV;
         }
         return TaskState.RUNNING;
+    }
+
+    private boolean clearingPermitted(BlockState live) {
+        var declared = targets.get(clearing.asLong());
+        BlockState desired = declared == null ? Blocks.AIR.defaultBlockState() : declared.desiredState();
+        if (inheritedProtectedMutationCells.contains(clearing.asLong())
+                || !r.replaceMode.allows(live, desired) || live.getDestroySpeed(player.level(), clearing) < 0
+                || !live.getFluidState().isEmpty() || live.hasBlockEntity() && !r.replaceBlockEntities
+                || declared != null && declared.constructionMatches(live)) {
+            failAt(clearing, "Excavation cell changed or is protected, fluid-filled or unbreakable",
+                    FailureType.TARGET_LOST, "excavation_cell_changed", false);
+            return false;
+        }
+        return true;
     }
 
     private TaskState placeNavTick() {
@@ -1805,6 +1862,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
         data.put("construction_access", stanceNavigation.stage());
         data.put("construction_navigation", navigationDiagnostics());
+        data.put("excavation_remaining", excavation.remaining());
+        if (excavating && clearing != null) data.put("excavation_target", clearing.toShortString());
         data.put("creative_materials", creativeMaterials.progress());
         if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
         if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),

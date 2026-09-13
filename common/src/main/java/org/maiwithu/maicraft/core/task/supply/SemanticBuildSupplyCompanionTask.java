@@ -134,6 +134,12 @@ final class SemanticBuildSupplyCompanionTask
         if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
             return TaskState.CANCELLED;
 
+        boolean excavationNeeded = activePlan.targets.stream().anyMatch(target -> player.level().isLoaded(target.pos())
+                && !player.level().getBlockState(target.pos()).isAir() && !constructionMatches(target));
+        if (excavationNeeded && !activePlan.hasTrackedScaffolds()) {
+            startBuild();
+            return TaskState.RUNNING;
+        }
         BatchNeed need = nextNeed();
         if (need == null) {
             startBuild();
@@ -183,7 +189,8 @@ final class SemanticBuildSupplyCompanionTask
         String childCode = result == null || result.data() == null
                 ? null : String.valueOf(result.data().get("failure_code"));
         int remainingNow = remainingCellCount();
-        boolean progress = remainingNow < remainingCellsBeforeBuild;
+        boolean progress = remainingNow < remainingCellsBeforeBuild || result != null && result.data() != null
+                && result.data().get("cleared") instanceof Number count && count.intValue() > 0;
         if (terminal == TaskState.FAILED
                 && ("material_exhausted".equals(childCode)
                         || "missing_materials".equals(childCode)) && progress) {

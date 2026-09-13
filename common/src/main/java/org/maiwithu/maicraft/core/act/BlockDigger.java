@@ -432,7 +432,7 @@ public final class BlockDigger {
      */
     // 从方块实际形状的中心和六个方向找可见点，射线必须真的落到目标格。
     // 门、楼梯等不是完整立方体，不能只拿整格中心判断能不能挖。
-    private BlockHitResult reachableHit(BlockPos pos) {
+    public BlockHitResult reachableHit(BlockPos pos) {
         Level level = player.level();
         if (!level.isLoaded(pos)) {
             return null;
