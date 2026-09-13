@@ -22,6 +22,7 @@ import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
@@ -34,6 +35,7 @@ final class BuildScaffoldCleanup {
     private final LongSet inheritedForbidden;
     private final List<BlockPos> cells = new ArrayList<>();
     private final Set<BlockPos> rejected = new HashSet<>();
+    private final Set<BlockPos> routeCells = new java.util.LinkedHashSet<>();
     private int cursor, offered;
     private int failedRoutes;
     private String lastRouteFailure = "";
@@ -55,6 +57,16 @@ final class BuildScaffoldCleanup {
     void routeFailed(String reason) {
         failedRoutes++;
         lastRouteFailure = reason == null ? "navigation failed" : reason.substring(0, Math.min(240, reason.length()));
+        // 同一次导航已经比较整组可见站位；整组无路后不能拆成单个目标再重复寻路。
+        routeCells.clear();
+    }
+
+    NavGoal goal() {
+        // 每刻继续有界观察，把这一根支撑的所有安全站位交给一次路线比较，交互仍由真实到达后的射线确认。
+        if (!exhausted()) next();
+        if (!exhausted()) return null;
+        var goals = routeCells.stream().filter(cell -> !rejected.contains(cell)).map(NavGoal::exact).toList();
+        return goals.isEmpty() ? null : NavGoal.composite(goals);
     }
 
     Candidate next() {
@@ -71,6 +83,7 @@ final class BuildScaffoldCleanup {
                         && visible(world(false), feet.add(0, player.getEyeHeight(Pose.STANDING), 0))) {
                     offered++;
                     lastCandidate = new Candidate(cell, feet);
+                    routeCells.add(cell.immutable());
                     return lastCandidate;
                 }
             }
@@ -97,6 +110,7 @@ final class BuildScaffoldCleanup {
         // 支撑可能在蓝图外，单靠正式目标序号无法定位；把本次目标、候选落脚高度与路由失败一起记入施工证据。
         data.put("target", List.of(target.getX(), target.getY(), target.getZ()));
         data.put("failed_routes", failedRoutes);
+        data.put("grouped_route_stances", routeCells.size());
         data.put("last_route_failure", lastRouteFailure);
         if (lastCandidate != null) data.put("candidate_feet", List.of(lastCandidate.feet.x, lastCandidate.feet.y, lastCandidate.feet.z));
         return data;

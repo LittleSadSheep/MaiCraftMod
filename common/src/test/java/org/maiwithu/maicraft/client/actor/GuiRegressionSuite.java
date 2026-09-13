@@ -115,6 +115,7 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupGuardTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupScheduleTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupReceiptTest.main(args);
         org.maiwithu.maicraft.core.task.build.MachineSealingTest.main(args);
         CompanionCancellationTest.main(args);
         SleepSafetyTest.main(args);

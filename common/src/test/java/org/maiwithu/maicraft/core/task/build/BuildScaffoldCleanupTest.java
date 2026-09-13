@@ -37,7 +37,28 @@ public final class BuildScaffoldCleanupTest {
         forbiddenAirborneAndUnloadedPositionsAreRejected();
         bodyCollisionAndHazardDoNotBecomeSafeShots();
         partialOutlineMustUseTheSameNativeFaceProbes();
-        System.out.println("BuildScaffoldCleanupTest: 5 native geometry groups passed; no navigation or digging actions submitted");
+        visibleStancesShareOneNavigationGoal();
+        System.out.println("BuildScaffoldCleanupTest: 6 native geometry groups passed; no navigation or digging actions submitted");
+    }
+
+    private static void visibleStancesShareOneNavigationGoal() throws Exception {
+        try (var world = scene(new Vec3(8.5, 1, 5.5))) {
+            // 两侧都能看到同一支撑时，一次导航可以选任意安全侧；拒绝实际站位只剔除这一侧。
+            var cleanup = new BuildScaffoldCleanup(world.player, TARGET, LongSets.emptySet());
+            org.maiwithu.maicraft.core.pathing.calc.NavGoal goal = null;
+            for (int ticks = 0; ticks < 2000 && goal == null && !cleanup.exhausted(); ticks++) goal = cleanup.goal();
+            BlockPos left = new BlockPos(7, 1, 6), right = new BlockPos(9, 1, 6);
+            check(goal != null && goal.isAt(left) && goal.isAt(right) && !goal.isAt(TARGET.above()),
+                    "整组目标包含左右安全站位，但不能借用待拆方块作为唯一落脚点");
+            world.position(Vec3.atBottomCenterOf(left)); cleanup.rejectCurrent();
+            check(!cleanup.goal().isAt(left) && cleanup.goal().isAt(right), "实际射线拒绝后还可选择另一侧");
+            int offered = (Integer) cleanup.evidence().get("offered_stances");
+            cleanup.routeFailed("group has no native walking path");
+            check(cleanup.goal() == null && cleanup.exhausted()
+                            && cleanup.evidence().get("offered_stances").equals(offered),
+                    "整组无路后不会拆成单站位重试或续开另一轮观察");
+            unchanged(world);
+        }
     }
 
     private static void nearbyOccludedPositionNeedsAnotherStance() throws Exception {

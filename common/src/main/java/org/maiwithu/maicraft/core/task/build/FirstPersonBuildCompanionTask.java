@@ -2007,15 +2007,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (nav == null) {
             if (scaffoldCleanup.ready()) { phase = Phase.SCAFFOLD_BREAK; return TaskState.RUNNING; }
-            var candidate = scaffoldCleanup.next();
-            if (candidate == null) {
+            var cleanupGoal = scaffoldCleanup.goal();
+            if (cleanupGoal == null) {
                 if (!scaffoldCleanup.exhausted()) return TaskState.RUNNING;
                 // 这一根暂时无路不代表其他支撑都无路；本轮只推迟一次，不清所有权、不立即重试。
                 lastDeferredScaffold = scaffoldCleanup.evidence(); deferredScaffolds.add(scaffold);
                 note = "cleanup deferred until another support is removed"; scaffoldAt++;
                 phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
             }
-            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(candidate.cell()), BuildStanceNavigation.PRECISE_WALK,
+            nav = PlayerNav.toGoal(player, () -> cleanupGoal, BuildStanceNavigation.PRECISE_WALK,
                     scaffoldCleanup::ready, stanceNavigation.walkingContext(Integer.MIN_VALUE)).walkingOnly();
         }
         return switch (nav.tick()) {
@@ -2042,6 +2042,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         BlockState live = player.level().getBlockState(scaffold);
         if (live.isAir()) {
+            // 自己刚挖的支撑可能先在画面上消失，必须等原生回执再记拆除进展，不能被“已是空气”捷径吞掉。
+            if (scaffold.equals(digger.current())) {
+                return switch (digger.settleGone(true)) {
+                    case PROGRESSING -> TaskState.RUNNING;
+                    case BROKE_TARGET -> { confirmedScaffoldBreak(); yield TaskState.RUNNING; }
+                    default -> {
+                        failAt(scaffold, "temporary support disappeared without the pending native break being confirmed",
+                                FailureType.TARGET_LOST, "scaffold_cleanup_confirmation_missing", true);
+                        yield TaskState.FAILED;
+                    }
+                };
+            }
             r.scaffoldLedger().cleared(scaffold);
             scaffoldAt++; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
         }
