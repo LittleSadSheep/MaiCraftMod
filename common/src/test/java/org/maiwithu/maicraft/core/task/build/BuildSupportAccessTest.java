@@ -58,7 +58,7 @@ public final class BuildSupportAccessTest {
             field("cell").set(task, cell); field("queue").set(task, new ArrayList<>(List.of(cell)));
             check(invoke(task, "prepareTemporarySupports") == TaskState.RUNNING, "support preparation must yield to verification");
             check(((Map<?, ?>) field("temporaryTargets").get(task)).isEmpty(), "no proposed cell becomes executable before proof");
-            check(invoke(task, "supportVerifyTick") == TaskState.FAILED, "sealed support proposal must fail without world work");
+            check(finishTaskSupport(h, task) == TaskState.FAILED, "sealed support proposal must fail without world work");
             check(record.placed() == 0 && h.blockUses() == 0 && record.scaffoldLedger().isEmpty(),
                     "rejected proposals grant neither mutation nor cleanup ownership");
             @SuppressWarnings("unchecked") var data = (Map<String, Object>) invoke(task, "resultData");
@@ -114,7 +114,7 @@ public final class BuildSupportAccessTest {
             Object original = ctor.newInstance(target, List.of());
             field("cell").set(task, original); field("queue").set(task, new ArrayList<>(List.of(original)));
             invoke(task, "prepareTemporarySupports");
-            for (int i = 0; i < 4096 && field("phase").get(task).toString().equals("SUPPORT_VERIFY"); i++) invoke(task, "supportVerifyTick");
+            finishTaskSupport(h, task);
             check(field("phase").get(task).toString().equals("SELECT"), "a useful proposal becomes executable only after proof");
             var queue = (List<?>) field("queue").get(task);
             field("cell").set(task, queue.getFirst());
@@ -123,7 +123,7 @@ public final class BuildSupportAccessTest {
                     "arriving to place each support requires fresh projected access before right-click");
             for (Direction direction : Direction.values()) if (direction != Direction.DOWN)
                 h.set(target.pos().relative(direction), Blocks.STONE.defaultBlockState());
-            check(invoke(task, "supportVerifyTick") == TaskState.FAILED && h.blockUses() == 0,
+            check(finishTaskSupport(h, task) == TaskState.FAILED && h.blockUses() == 0,
                     "a newly sealed target invalidates the approved plan without a support click");
         }
         try (var h = world()) {
@@ -149,6 +149,7 @@ public final class BuildSupportAccessTest {
 
     private static InteractionWorldTestHarness world() throws Exception {
         var h = new InteractionWorldTestHarness();
+        h.player.setDeltaMovement(Vec3.ZERO);
         var dimensions = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
         dimensions.set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
         return h;
@@ -192,7 +193,7 @@ public final class BuildSupportAccessTest {
             Object original = ctor.newInstance(target, List.of());
             field("cell").set(task, original); field("queue").set(task, new ArrayList<>(List.of(original)));
             invoke(task, "prepareTemporarySupports");
-            for (int i = 0; i < 4096 && field("phase").get(task).toString().equals("SUPPORT_VERIFY"); i++) invoke(task, "supportVerifyTick");
+            finishTaskSupport(h, task);
             h.set(target.pos().below(), Blocks.DIRT.defaultBlockState());
             h.set(target.pos(), target.desiredState());
             invoke(task, "selectTick");
@@ -203,6 +204,14 @@ public final class BuildSupportAccessTest {
     private static void finish(BuildSupportAccess proof) {
         for (int i = 0; i < 4096; i++) if (proof.advance(16)) return;
         throw new AssertionError("support validation did not terminate within its finite budget");
+    }
+    private static TaskState finishTaskSupport(InteractionWorldTestHarness h, FirstPersonBuildCompanionTask task) throws Exception {
+        // 施工入口现在先等实际连续站稳，夹具也推进独立游戏刻，不能在同一刻反复调用来绕过稳定检查。
+        for (int i = 0; i < 4096; i++) {
+            h.nextTick(); TaskState state = (TaskState) invoke(task, "supportVerifyTick");
+            if (state != TaskState.RUNNING || !field("phase").get(task).toString().equals("SUPPORT_VERIFY")) return state;
+        }
+        throw new AssertionError("support task failed to finish its bounded settling and proof");
     }
     private static Field field(String name) throws Exception {
         Field field = FirstPersonBuildCompanionTask.class.getDeclaredField(name); field.setAccessible(true); return field;

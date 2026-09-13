@@ -27,6 +27,9 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildPlacementStageTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTemporarySupportPlanTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildSupportAccessTest.main(args);
+        // 从实机下台阶与惯性样本复核：先自然落稳再建立支撑快照，真实环境变化不能借身体重证绕过。
+        org.maiwithu.maicraft.core.task.build.BuildSupportSettlingTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildSupportSchedulingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementGestureTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildAimRetryTest.main(args);

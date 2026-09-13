@@ -105,6 +105,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private List<BlockPos> supportChain = List.of();
     private BlockState supportMaterial;
     private BuildSupportAccess supportAccess;
+    private final BuildSupportSettling supportSettling = new BuildSupportSettling();
+    private List<BlockPos> supportVerificationRemaining = List.of();
+    private int supportBodyReproofs;
     private BuildPlacementGeometry.Gesture supportWitness;
     private boolean supportProposal, supportStepApproved;
     private Map<String, Object> supportAccessEvidence = Map.of();
@@ -1470,21 +1473,49 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private void beginSupportVerification(List<BlockPos> remaining, boolean proposal) {
         stopNav(); InputDriver.halt(player); supportProposal = proposal;
-        supportAccess = new BuildSupportAccess(player, supportedCell.target(), remaining, supportMaterial,
-                pos -> scaffoldPermitted(pos, null), unionForbidden(NavigationSafetyContext.forbiddenBodyCells()),
-                org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles());
+        // 停键不等于停住：先让角色自然落地、消退惯性，再以实际稳定身体位置创建支撑快照。
+        supportVerificationRemaining = List.copyOf(remaining); supportAccess = null; supportWitness = null;
+        supportBodyReproofs = 0; supportSettling.reset();
         phase = Phase.SUPPORT_VERIFY;
     }
 
     private TaskState supportVerifyTick() {
         InputDriver.halt(player);
-        boolean done = supportAccess.advance(16); supportAccessEvidence = supportAccess.evidence();
+        if (supportAccess == null) {
+            var settled = supportSettling.observe(player.position(), player.getDeltaMovement(), player.onGround(),
+                    !player.isInWater() && !player.isPassenger(), player.level().getGameTime());
+            if (settled != BuildSupportSettling.Status.READY) {
+                supportAccessEvidence = Map.of("reason", settled == BuildSupportSettling.Status.FAILED
+                                ? "support_body_settle_timeout" : "waiting_for_support_body_settle", "verified", false,
+                        "proposed_supports", supportVerificationRemaining.size(), "body_reproofs", supportBodyReproofs,
+                        "body_settling", supportSettling.evidence());
+                if (settled != BuildSupportSettling.Status.FAILED) return TaskState.RUNNING;
+                failAt(supportedCell.target().pos(), "The body did not naturally settle before support verification; no support was submitted",
+                        FailureType.NO_PATH, "temporary_support_access_unproven", false); return TaskState.FAILED;
+            }
+            supportAccess = new BuildSupportAccess(player, supportedCell.target(), supportVerificationRemaining, supportMaterial,
+                    pos -> scaffoldPermitted(pos, null), unionForbidden(NavigationSafetyContext.forbiddenBodyCells()),
+                    org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles());
+        }
+        boolean done = supportAccess.advance(16);
+        var evidence = new LinkedHashMap<>(supportAccess.evidence());
+        evidence.put("body_reproofs", supportBodyReproofs); evidence.put("body_settling", supportSettling.evidence());
+        supportAccessEvidence = Map.copyOf(evidence);
         if (!done) return TaskState.RUNNING;
         if (!supportAccess.accepted() || !supportAccess.current()) {
-            if (supportAccess.accepted()) {
+            String invalidation = supportAccess.invalidationReason();
+            if (invalidation != null) {
                 var changed = new LinkedHashMap<>(supportAccessEvidence);
-                changed.put("verified", false); changed.put("reason", "support_access_observation_changed");
+                changed.put("verified", false); changed.put("invalidation", invalidation);
+                if (supportAccess.accepted()) changed.put("reason", "support_access_observation_changed");
                 supportAccessEvidence = Map.copyOf(changed);
+            }
+            // 尚未点击且只有起点变化时，丢弃旧见证，有限等站稳后完整重证；世界、支撑和保护变化仍直接拒绝。
+            if ("support_access_body_moved".equals(invalidation)
+                    && "support_access_observation_changed".equals(supportAccessEvidence.get("reason"))
+                    && supportBodyReproofs < 2 && useReceipt == null && !selection.pending() && !digger.hasPendingBreak()) {
+                supportBodyReproofs++; supportAccess = null; supportWitness = null; supportStepApproved = false;
+                supportSettling.reset(); return TaskState.RUNNING;
             }
             failAt(supportedCell.target().pos(), "temporary supports have no verified post-placement access: "
                             + supportAccessEvidence.get("reason") + "; no additional support was submitted",
@@ -1551,6 +1582,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
     private void releaseSupportPlan() {
         supportedCell = null; supportWitness = null; supportChain = List.of(); supportAccessEvidence = Map.of();
+        supportAccess = null; supportVerificationRemaining = List.of(); supportSettling.reset(); supportBodyReproofs = 0;
     }
     private void resetCell() {
         worksitePass = 0; worksiteAttempts = 0; worksiteMovement.reset();

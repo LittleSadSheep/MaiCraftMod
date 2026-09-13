@@ -37,6 +37,7 @@ final class BuildSupportAccess {
     private boolean initialized, complete;
     private int checkedStances;
     private String reason = "checking_projected_support_access";
+    private String invalidation;
 
     BuildSupportAccess(LocalPlayer player, BuildTaskRecord.Target target, List<BlockPos> supports,
                        BlockState material, Predicate<BlockPos> allowed, LongSet forbidden,
@@ -61,7 +62,8 @@ final class BuildSupportAccess {
                     checkedStances++;
                     witness = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet);
                     if (witness != null) {
-                        if (!current()) reject("support_access_observation_changed");
+                        invalidation = currentIssue();
+                        if (invalidation != null) reject("support_access_observation_changed");
                         else { complete = true; reason = "projected_stance_and_click_face_verified"; }
                         break;
                     }
@@ -118,17 +120,22 @@ final class BuildSupportAccess {
 
     boolean accepted() { return complete && witness != null; }
     BuildPlacementGeometry.Gesture witness() { return witness; }
-    boolean current() {
-        if (origin.distanceToSqr(player.position()) > .01) return false;
-        if (!physical.boxes().equals(org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles().boxes())) return false;
+    boolean current() { return currentIssue() == null; }
+    String invalidationReason() { String current = currentIssue(); return current == null ? invalidation : current; }
+    private String currentIssue() {
+        // 先检查世界和权限，再区分只是身体起点变了；真实环境变化不能伪装成惯性位移而获得重试许可。
+        if (!physical.boxes().equals(org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles().boxes())) return "support_access_physical_changed";
         for (BlockPos pos : supports) if (!allowed.test(pos) || !player.level().isLoaded(pos)
-                || !player.level().getBlockState(pos).isAir()) return false;
-        return world.unchanged();
+                || !player.level().getBlockState(pos).isAir()) return "support_projection_site_changed";
+        if (!world.unchanged()) return "support_access_world_changed";
+        return origin.distanceToSqr(player.position()) > .01 ? "support_access_body_moved" : null;
     }
     private void reject(String value) { complete = true; witness = null; reason = value; }
     Map<String, Object> evidence() {
-        return Map.of("reason", reason, "verified", accepted(), "proposed_supports", supports.size(),
+        var data = new LinkedHashMap<String, Object>(Map.of("reason", reason, "verified", accepted(), "proposed_supports", supports.size(),
                 "checked_stances", checkedStances, "reachable_stances", visited.size(),
-                "observed_blocks", world.reads(), "target_faces", List.copyOf(faces));
+                "observed_blocks", world.reads(), "target_faces", List.copyOf(faces)));
+        if (invalidation != null) data.put("invalidation", invalidation);
+        return Map.copyOf(data);
     }
 }
