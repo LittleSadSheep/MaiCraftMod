@@ -66,6 +66,19 @@ final class CreateEndpointEvidenceSearch {
 
     Status tick(ClientLevel level) {
         if (status == Status.READY || status == Status.EXHAUSTED) return status;
+        if (endpoint.exactFace() != null) {
+            // A declared utility interface must never drift to a nearby machine or another face.
+            if (!level.isLoaded(endpoint.center())) {
+                nextObservation = endpoint.center();
+                return Status.NEEDS_OBSERVATION;
+            }
+            scanKineticPosition(level, endpoint.center());
+            observedChunks = 1;
+            nextObservation = null;
+            status = endpoints.isEmpty() ? Status.EXHAUSTED : Status.READY;
+            markProgress();
+            return status;
+        }
         if (nextObservation != null) {
             if (!level.isLoaded(nextObservation)) return Status.NEEDS_OBSERVATION;
             nextObservation = null;
@@ -305,11 +318,16 @@ final class CreateEndpointEvidenceSearch {
     // 当前只接上下方向的竖轴接口，并要求旁边能留出新传动格；已有占用不会被清掉。
     private void scanKineticEvidence(ClientLevel level, LevelChunk chunk) {
         for (var entry : chunk.getBlockEntities().entrySet()) {
-            BlockPos position = entry.getKey();
+            scanKineticPosition(level, entry.getKey());
+        }
+    }
+
+    private void scanKineticPosition(ClientLevel level, BlockPos position) {
             CreateKineticsBridge.Facts kinetic = CreateKineticsBridge.inspect(level, position);
-            if (kinetic == null || poweredOnly && !kinetic.powered()) continue;
+            if (kinetic == null || poweredOnly && !kinetic.powered()) return;
             BlockState state = level.getBlockState(position);
             for (Direction face : new Direction[]{Direction.UP, Direction.DOWN}) {
+                if (endpoint.exactFace() != null && face != endpoint.exactFace()) continue;
                 if (!CreateKineticsBridge.hasShaftTowards(level, position, state, face)) continue;
                 BlockPos adjacent = position.relative(face);
                 if (level.isOutsideBuildHeight(adjacent)
@@ -324,7 +342,6 @@ final class CreateEndpointEvidenceSearch {
                                 kinetic.speed(), kinetic.hasNetwork());
                 endpoints.putIfAbsent(new EndpointKey(position.asLong(), face), candidate);
             }
-        }
     }
 
     // 已知候选必须比所有未观察区域可能提供的最近距离更近，才结束这次端点定位。

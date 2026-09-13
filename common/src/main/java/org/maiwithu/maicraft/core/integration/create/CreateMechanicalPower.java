@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.UUID;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
@@ -20,8 +21,9 @@ public final class CreateMechanicalPower {
 
     public enum Transmission { AUTO, ENCASED_CHAIN_DRIVE }
 
-    /** A semantic endpoint anchor; physical discovery expands from it inside the Mod. */
-    public record Endpoint(String name, BlockPos center) {
+    /** An anchor normally expands into live evidence; exactFace binds an existing utility interface. */
+    public record Endpoint(String name, BlockPos center, Direction exactFace) {
+        public Endpoint(String name, BlockPos center) { this(name, center, null); }
         public Endpoint {
             name = Objects.requireNonNull(name, "name").trim();
             center = Objects.requireNonNull(center, "center").immutable();
