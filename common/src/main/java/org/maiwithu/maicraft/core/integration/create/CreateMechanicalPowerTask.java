@@ -1095,9 +1095,7 @@ final class CreateMechanicalPowerTask
                 "progressive_rejected_route_candidates", "source_loaded_cells",
                 "source_unloaded_cells", "destination_loaded_cells",
                 "destination_unloaded_cells", "numeric_stress_margin_supported",
-                "stress_evidence", "delivery_kind", "required_chain_drives_this_attempt",
-                "total_route_chain_drives", "remaining_route_chain_drives",
-                "available_chain_drives", "material_batches",
+                "stress_evidence", "delivery_kind", "material_batches",
                 "source_speed", "destination_speed",
                 "source_overstressed", "destination_overstressed", "speed_unit",
                 "network_live", "source_verification", "acceptance_basis",
@@ -1109,6 +1107,17 @@ final class CreateMechanicalPowerTask
         if (!recoveryOptions.isEmpty()) safe.put("recovery_options", recoveryOptions);
         safe.put("confirmed_placements", cursor);
         safe.put("planned_placements", plan == null ? 0 : plan.cells().size());
+        if (plan != null) {
+            safe.put("total_route_chain_drives", plan.cells().size());
+            safe.put("remaining_route_chain_drives", Math.max(0, plan.cells().size() - cursor));
+        }
+        if (data.containsKey("available_chain_drives")) {
+            safe.put("batch_initial_chain_drives", initialInventoryCount);
+            safe.put("batch_start_confirmed_prefix", startCursor);
+            safe.put("batch_initial_requested_chain_drives", data.get("required_chain_drives_this_attempt"));
+            if (!nativeOutcomeUncertain) safe.put("expected_carried_chain_drives", Math.max(0, initialInventoryCount - (cursor - startCursor)));
+            safe.put("inventory_count_basis", "batch_start_observation_minus_confirmed_placements; not_a_fresh_inventory_observation");
+        }
         safe.put("native_outcome_uncertain", nativeOutcomeUncertain);
         safe.put("material_policy", r.materialPolicy.id());
         safe.put("supply_rounds", supplyRounds);

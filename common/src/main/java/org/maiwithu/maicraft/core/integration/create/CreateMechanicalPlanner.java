@@ -68,17 +68,25 @@ final class CreateMechanicalPlanner {
     }
 
     static BlockPos findPlacementStand(ClientLevel level, BlockPos target, Set<BlockPos> route, boolean inheritsVertical) {
+        return findPlacementStand(level, target, route, inheritsVertical, null);
+    }
+
+    static BlockPos findPlacementStand(ClientLevel level, BlockPos target, Set<BlockPos> route,
+            boolean inheritsVertical, BlockPos workingFeet) {
         List<BlockPos> candidates = new ArrayList<>();
         for (int dy = -2; dy <= 2; dy++) {
             for (int dx = -4; dx <= 4; dx++) {
                 for (int dz = -4; dz <= 4; dz++) {
                     BlockPos feet = target.offset(dx, dy, dz);
                     if (route.contains(feet) || route.contains(feet.above())) continue;
+                    if (inheritsVertical && (route.contains(feet.above(2)) || route.contains(feet.above(3)))) continue;
                     candidates.add(feet);
                 }
             }
         }
-        candidates.sort(Comparator.comparingDouble((BlockPos position) -> position.distSqr(target))
+        // A reachable working floor should not lose to a nearby machine roof merely because that roof is taller.
+        candidates.sort(Comparator.comparingInt((BlockPos position) -> workingFeet == null ? 0 : Math.abs(position.getY() - workingFeet.getY()))
+                .thenComparingDouble(position -> position.distSqr(target))
                 .thenComparingLong(BlockPos::asLong));
         for (BlockPos feet : candidates) {
             if (standable(level, feet) && CreateMechanicalPlacementGeometry.feasibleView(feet, target, inheritsVertical)
@@ -416,13 +424,24 @@ final class CreateMechanicalPlanner {
             BlockPos receiver,
             List<BlockPos> positions,
             String geometry,
-            String routeHash) {}
+            String routeHash) {
+        BlockPos supportFor(int index) {
+            BlockPos position = positions.get(index);
+            if (index == 0) return source.position();
+            if (index == positions.size() - 1 && destination != null) {
+                if (!position.equals(destination.position().relative(destination.shaftFace())))
+                    throw new IllegalArgumentException("mechanical_receiver_does_not_match_declared_face");
+                return destination.position();
+            }
+            return positions.get(index - 1);
+        }
+    }
 
     static CreateMechanicalPlan.RouteCell surveyCell(
             ClientLevel level, TentativeRoute route, int index) {
         if (index < 0 || index >= route.positions().size()) return null;
         BlockPos position = route.positions().get(index);
-        BlockPos support = index == 0 ? route.source().position() : route.positions().get(index - 1);
+        BlockPos support = route.supportFor(index);
         Direction face = CreateMechanicalPlan.between(support, position);
         if (face == null || !level.isLoaded(position) || !level.isLoaded(support)
                 || !isEmptyRouteCell(level, position)) return null;

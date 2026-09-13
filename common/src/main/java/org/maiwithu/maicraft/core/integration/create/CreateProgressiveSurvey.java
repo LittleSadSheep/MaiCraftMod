@@ -360,8 +360,7 @@ final class CreateProgressiveSurvey {
         int budget = CELLS_PER_TICK;
         while (corridorIndex >= 0 && budget-- > 0) {
             BlockPos position = route.positions().get(corridorIndex);
-            BlockPos support = corridorIndex == 0
-                    ? source.position() : route.positions().get(corridorIndex - 1);
+            BlockPos support = route.supportFor(corridorIndex);
             if (!level.isLoaded(position) || !level.isLoaded(support)) {
                 // Move a short distance INTO the unsurveyed prefix. Walking merely to the
                 // already-loaded boundary cell can leave its adjacent support across the chunk
@@ -371,7 +370,7 @@ final class CreateProgressiveSurvey {
                         "corridor_unreachable",
                         "could not load a continuous observation window along the proposed mechanical corridor");
             }
-            CreateMechanicalPlan.RouteCell cell = surveyCell(level, corridorIndex);
+            CreateMechanicalPlan.RouteCell cell = surveyCell(context, corridorIndex);
             if (cell == null) {
                 String detail = CreateMechanicalPlanner.isEmptyRouteCell(level, position)
                         ? "a proposed route cell has no loaded safe first-person placement stance"
@@ -397,35 +396,21 @@ final class CreateProgressiveSurvey {
         return Status.RUNNING;
     }
 
-    private CreateMechanicalPlan.RouteCell surveyCell(ClientLevel level, int index) {
+    private CreateMechanicalPlan.RouteCell surveyCell(LocalPlayerContext context, int index) {
+        ClientLevel level = context.level();
         BlockPos position = route.positions().get(index);
-        BlockPos support = index == 0 ? source.position() : route.positions().get(index - 1);
+        BlockPos support = route.supportFor(index);
         net.minecraft.core.Direction face = CreateMechanicalPlan.between(support, position);
         if (face == null || !CreateMechanicalPlanner.isEmptyRouteCell(level, position)) return null;
-        BlockPos stand = findStandForRoute(level, position);
+        BlockPos stand = findStandForRoute(context, position);
         return stand == null ? null
                 : new CreateMechanicalPlan.RouteCell(position, support, face, stand);
     }
 
-    private BlockPos findStandForRoute(ClientLevel level, BlockPos position) {
+    private BlockPos findStandForRoute(LocalPlayerContext context, BlockPos position) {
+        ClientLevel level = context.level();
         boolean inheritsVertical = CreateMechanicalPlacementGeometry.inheritsVerticalAxis(level, position);
-        // Reuse the planner's conservative body geometry, then reject any stand occupied by a
-        // future route cell. Expanding shells preserve deterministic choice.
-        for (int radius = 0; radius <= 4; radius++) {
-            for (int dy = -2; dy <= 2; dy++) {
-                for (int dx = -radius; dx <= radius; dx++) {
-                    for (int dz = -radius; dz <= radius; dz++) {
-                        if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
-                        BlockPos probe = position.offset(dx, dy, dz);
-                        if (routeSet.contains(probe) || routeSet.contains(probe.above())) continue;
-                        BlockPos stand = CreateMechanicalPlanner.findTravelStand(level, probe, 0, 0);
-                        if (stand != null && CreateMechanicalPlacementGeometry.feasibleView(stand, position, inheritsVertical)
-                                && (!inheritsVertical || CreateMechanicalPlacementGeometry.clearForJump(level, stand))) return stand;
-                    }
-                }
-            }
-        }
-        return null;
+        return CreateMechanicalPlanner.findPlacementStand(level, position, routeSet, inheritsVertical, PlayerNav.playerFeet(context.player()));
     }
 
     // 回到施工起点后，再确认动力源和起点附近已调查的路线没变，才交出可执行计划。

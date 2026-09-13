@@ -34,6 +34,7 @@ public final class CreateMechanicalPlacementGeometryTest {
             check(h.blockUses() == 0 && h.itemUses() == 0, "route and jump checks remain read-only");
         }
         CreateMechanicalPlacementAttemptTest.main(args);
+        CreateMechanicalTerminalSupportTest.main(args);
         System.out.println("CreateMechanicalPlacementGeometryTest: native-axis stance, real top-face jump and roof protection passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
