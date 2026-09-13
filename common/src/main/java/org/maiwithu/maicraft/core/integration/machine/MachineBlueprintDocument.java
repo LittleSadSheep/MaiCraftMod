@@ -10,13 +10,14 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 
 /**
  * 处理当前版本的逐格机器蓝图：普通方块占整格，AE2 部件可以共用宿主的不同安装面。
  * 允许保存观察资料，但资料里的 NBT 和实体不会自动成为可以执行的安装操作。
  */
 public final class MachineBlueprintDocument {
-    private static final Set<String> FIELDS = Set.of("schema_version", "blocks", "metadata", "evidence", "entities");
+    private static final Set<String> FIELDS = Set.of("schema_version", "blocks", "metadata", "evidence", "entities", "external_inputs", "supply_preference", "onsite_reason");
     private static final Set<String> BLOCK_FIELDS = Set.of("offset", "block_id", "properties", "nbt");
     private static final Set<String> PART_FIELDS = Set.of("offset", "item_id", "part");
     private static final Set<String> SIDES = Set.of("center", "up", "down", "north", "south", "east", "west");
@@ -56,6 +57,10 @@ public final class MachineBlueprintDocument {
         report.addProperty("verification_contract", "Declared blocks, explicit state properties and native parts only; use operate_machine to configure, start and observe production. Omitted positions are preserved; explicit minecraft:air requests clearance.");
         report.addProperty("tutorial_evidence_is_configuration", false);
         report.addProperty("evidence_attached", document.has("evidence"));
+        report.add("external_inputs", MachineUtilityInputs.json(MachineUtilityInputs.parse(blueprint)));
+        report.addProperty("supply_preference", MachineUtilityInputs.supplyPreference(blueprint));
+        if (blueprint.has("onsite_reason")) report.add("onsite_reason", blueprint.get("onsite_reason").deepCopy());
+        report.addProperty("utility_connection_verified", false);
         JsonObject validation = new JsonObject(); validation.addProperty("valid", errors.isEmpty());
         JsonArray errorRows = new JsonArray(); errors.stream().limit(32).forEach(errorRows::add);
         validation.add("errors", errorRows); validation.addProperty("error_count", errors.size());
@@ -121,6 +126,10 @@ public final class MachineBlueprintDocument {
             result.add("entities", document.get("entities").deepCopy());
         }
         for (String field : Set.of("metadata", "evidence")) if (document.has(field)) result.add(field, document.get(field).deepCopy());
+        result.addProperty("supply_preference", MachineUtilityInputs.supplyPreference(document));
+        if (document.has("onsite_reason")) result.add("onsite_reason", document.get("onsite_reason").deepCopy());
+        if (document.has("external_inputs")) result.add("external_inputs", document.get("external_inputs").deepCopy());
+        if (result.has("external_inputs")) result.add("external_inputs", MachineUtilityInputs.json(MachineUtilityInputs.parse(result)));
         return result;
     }
 

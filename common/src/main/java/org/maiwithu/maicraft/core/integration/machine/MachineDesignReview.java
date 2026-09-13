@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 
 /**
  * 先检查机器设计写得是否完整：部件叫什么、要多少个、两端怎么连接、物品是否已安装。这里不读取场地，也不施工。
@@ -26,7 +27,7 @@ public final class MachineDesignReview {
     public static final int MAX_COMPONENT_COUNT = MachinePlanningBudget.current().maxTargets();
     public static final int MAX_TOTAL_BLOCKS = MachinePlanningBudget.current().maxTargets();
     private static final int MAX_ERRORS = 64;
-    private static final Set<String> DESIGN_FIELDS = Set.of("components", "connections", "expected_output", "style", "constraints");
+    private static final Set<String> DESIGN_FIELDS = Set.of("components", "connections", "expected_output", "style", "constraints", "external_inputs", "supply_preference", "onsite_reason");
     private static final Set<String> CONSTRAINT_FIELDS = Set.of(
             "max_width", "max_depth", "max_height", "terrain_fit",
             "maintenance_access", "preserve_existing", "throughput");
@@ -125,8 +126,23 @@ public final class MachineDesignReview {
             }
             connections.add(new Connection(from, to, medium, purpose, resource));
         }
+        List<MachineUtilityInputs.Declaration> inputs = List.of();
+        try {
+            inputs = MachineUtilityInputs.parseDesign(design, byName.keySet());
+            for (var input : inputs) checkRegistry(blockExists, MachineUtilityInputs.connector(input.medium()), "$.external_inputs", "block", errors);
+        } catch (IllegalArgumentException invalid) { error(errors, "$.external_inputs", "invalid_external_input", invalid.getMessage()); }
         if (!errors.isEmpty()) return invalid(errors);
-        return report(components, connections, expectedOutput, style, constraints, (int) total);
+        JsonObject result = report(components, connections, expectedOutput, style, constraints, (int) total, inputs);
+        JsonArray rows = new JsonArray(); inputs.forEach(input -> rows.add(input.json()));
+        result.getAsJsonObject("graph").add("external_inputs", rows);
+        result.getAsJsonObject("graph").addProperty("supply_preference", MachineUtilityInputs.supplyPreference(design));
+        if (design.has("onsite_reason")) result.getAsJsonObject("graph").add("onsite_reason", design.get("onsite_reason").deepCopy());
+        if (!inputs.isEmpty()) {
+            obligation(result.getAsJsonArray("obligations"), "external_utility_connection", "separate_hookup",
+                    "Build passive boundary ports and internal routes first; connect an observed existing utility network separately and verify native supply before production.");
+            result.getAsJsonArray("unsupported_obligations").add("external_utility_connection");
+        }
+        return result;
     }
 
     // 把通过格式检查的设计整理成报告，列出仍需验证的事情和声明的方块数；这份数量不含连接管线及合成原料。
@@ -136,7 +152,8 @@ public final class MachineDesignReview {
             String expectedOutput,
             String style,
             JsonObject constraints,
-            int total) {
+            int total,
+            List<MachineUtilityInputs.Declaration> inputs) {
         JsonObject result = base(true, new JsonArray());
         JsonObject graph = new JsonObject();
         JsonArray componentRows = new JsonArray();
@@ -146,6 +163,7 @@ public final class MachineDesignReview {
         Set<String> namespaces = new LinkedHashSet<>();
         Set<String> media = new LinkedHashSet<>();
         Set<String> connected = new HashSet<>();
+        for (var input : inputs) { connected.addAll(input.consumers()); media.add(input.medium()); }
         for (Component component : components) {
             JsonObject row = new JsonObject();
             row.addProperty("name", component.name());
