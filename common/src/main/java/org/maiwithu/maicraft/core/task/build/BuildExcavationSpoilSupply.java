@@ -28,6 +28,7 @@ public final class BuildExcavationSpoilSupply {
     public record Tick(Status status, Map<String, Object> receipt) {}
     private LocalPlayer owner;
     private Level world;
+    private BlockPos searchOrigin;
     private String callId, failure;
     private long deadline;
     private int radius, index, attempts, serial;
@@ -38,7 +39,7 @@ public final class BuildExcavationSpoilSupply {
     private Task child;
     private SemanticContainerTaskRecord childRecord;
     private ResourceLocation childItem;
-    private int childLimit;
+    private int childLimit, childBefore;
     private boolean uncertain;
     private Status status = Status.DEPOSITED;
     private Map<String, Object> lastContainer = Map.of();
@@ -52,10 +53,15 @@ public final class BuildExcavationSpoilSupply {
         status = Status.FAILED;
         failure = null; uncertain = false; lastContainer = Map.of(); child = null; childRecord = null;
         owner = player; world = player.level(); this.callId = callId == null ? "excavation-spoil" : callId;
-        deadline = deadlineGameTime; this.radius = radius; this.protectedLabels = protectedLabels == null ? List.of() : List.copyOf(protectedLabels);
+        // 固定出坑后的仓库搜索中心，并限制整次整理时长，不能走到一只箱子后再向外扩张搜索范围。
+        searchOrigin = player.blockPosition().immutable();
+        deadline = Math.min(deadlineGameTime, world.getGameTime() + 10L * 60 * 20);
+        this.radius = radius; this.protectedLabels = protectedLabels == null ? List.of() : List.copyOf(protectedLabels);
         for (var entry : provenCounts.entrySet()) {
             ResourceLocation item = entry.getKey(); Integer count = entry.getValue();
             if (item == null || !BuiltInRegistries.ITEM.containsKey(item) || BuiltInRegistries.ITEM.get(item) == Items.AIR
+                    || !BuildExcavationCargo.ordinary(BuiltInRegistries.ITEM.get(item))
+                    || !BuildExcavationCargo.plain(player, BuiltInRegistries.ITEM.get(item))
                     || count == null || count < 1 || count > SemanticContainerTaskRecord.MAX_COUNT || count > count(player, item))
                 throw new IllegalArgumentException("excavation_spoil_quantity_not_carried");
             proved.put(item, count); retained.put(item, count(player, item) - count);
@@ -73,19 +79,27 @@ public final class BuildExcavationSpoilSupply {
         if (index == items.size()) { status = Status.DEPOSITED; return new Tick(status, receipt()); }
         if (world.getGameTime() >= deadline) return fail("excavation_spoil_deadline");
         ResourceLocation item = items.get(index); int remaining = remaining(item);
+        if (!BuildExcavationCargo.plain(player, BuiltInRegistries.ITEM.get(item))) return fail("excavation_spoil_item_components_changed");
         if (count(player, item) < retained.get(item) + remaining) return fail("excavation_spoil_inventory_changed_before_deposit");
         if (attempts >= ContainerSupplySources.MAX_ATTEMPTS) return fail("excavation_spoil_no_verified_storage_capacity");
-        var candidates = ContainerSupplySources.candidates(player, player.blockPosition(), radius, List.of(item), visited, protectedLabels);
+        var candidates = ContainerSupplySources.candidates(player, searchOrigin, radius, List.of(item), visited, protectedLabels).stream()
+                .filter(candidate -> candidate.footprint().stream().allMatch(at -> at.distSqr(searchOrigin) <= (long) radius * radius))
+                .sorted(java.util.Comparator.comparingDouble(candidate -> candidate.position().distSqr(player.blockPosition()))).toList();
         if (candidates.isEmpty()) return fail("excavation_spoil_no_safe_loaded_container");
         var target = candidates.getFirst(); visited.addAll(target.footprint()); attempts++; childItem = item; childLimit = remaining;
+        childBefore = count(player, item);
         childRecord = SemanticContainerTaskRecord.depositAvailableAt(callId + "-deposit-" + (++serial),
                 Math.min(deadline, world.getGameTime() + 2L * 60 * 20), item, remaining, target.position(), target.blockId(), protectedLabels);
         child = TaskFactory.create(player, childRecord);
         return new Tick(Status.RUNNING, receipt());
     }
     private Tick tickChild(Function<Task, TaskState> runChild) {
+        // 去仓库途中若物品被改名或赋予组件，先结束自己的界面任务，不能继续按同一编号存入珍藏。
+        if (!BuildExcavationCargo.plain(owner, BuiltInRegistries.ITEM.get(childItem))) {
+            cancel(owner); return fail("excavation_spoil_item_components_changed");
+        }
         TaskState terminal;
-        if (world.getGameTime() >= childRecord.getDeadlineGameTime()) { child.stop(owner, Task.StopReason.REPLACED); terminal = TaskState.TIMEOUT; }
+        if (world.getGameTime() >= Math.min(deadline, childRecord.getDeadlineGameTime())) { child.stop(owner, Task.StopReason.REPLACED); terminal = TaskState.TIMEOUT; }
         else { terminal = runChild.apply(child); if (terminal == null || terminal == TaskState.RUNNING) return new Tick(Status.RUNNING, receipt()); }
         TaskResult result = child.result(terminal); child = null; childRecord = null;
         if (result == null || result.data() == null) return fail("excavation_spoil_receipt_missing");
@@ -93,6 +107,8 @@ public final class BuildExcavationSpoilSupply {
         int moved;
         try { moved = verifiedCount(lastContainer, childItem, childLimit); }
         catch (IllegalArgumentException invalid) { uncertain = true; return fail("excavation_spoil_receipt_mismatch"); }
+        // 除了箱子子任务的双侧回执，还复核真实背包差量；并发拾取或丢失导致不符时不盲目重放。
+        if (count(owner, childItem) != childBefore - moved) { uncertain = true; return fail("excavation_spoil_inventory_delta_mismatch"); }
         deposited.merge(childItem, moved, Math::addExact);
         if (uncertain || terminal != TaskState.SUCCESS && Boolean.TRUE.equals(lastContainer.get("effects_started")))
             return fail("excavation_spoil_transfer_unsettled");
@@ -115,7 +131,7 @@ public final class BuildExcavationSpoilSupply {
         return actual;
     }
     public boolean active() { return status == Status.RUNNING; }
-    public long childDeadline() { return childRecord == null ? deadline : childRecord.getDeadlineGameTime(); }
+    public long childDeadline() { return childRecord == null ? deadline : Math.min(deadline, childRecord.getDeadlineGameTime()); }
     public boolean mustSettleBeforeSatisfiedCancellation() { return child != null && child.mustSettleBeforeSatisfiedCancellation(); }
     public void cancel(LocalPlayer player) {
         if (child != null) {
@@ -133,6 +149,8 @@ public final class BuildExcavationSpoilSupply {
         result.put("confirmed_deposited", strings(deposited)); Map<ResourceLocation, Integer> remaining = new LinkedHashMap<>(); proved.keySet().forEach(item -> remaining.put(item, remaining(item)));
         result.put("remaining", strings(remaining)); result.put("outcome_uncertain", uncertain); result.put("warehouse_attempts", serial);
         result.put("all_proven_spoil_deposited", status == Status.DEPOSITED); result.put("discard_action_requested", false);
+        if (searchOrigin != null) result.put("storage_search_origin", List.of(searchOrigin.getX(), searchOrigin.getY(), searchOrigin.getZ()));
+        result.put("storage_search_radius", radius);
         if (failure != null) result.put("failure_code", failure);
         if (!lastContainer.isEmpty()) result.put("last_container_receipt", lastContainer);
         return Map.copyOf(result);
