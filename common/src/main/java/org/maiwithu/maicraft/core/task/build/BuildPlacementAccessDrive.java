@@ -99,7 +99,7 @@ final class BuildPlacementAccessDrive {
         if (!itemPrepared) {
             // 导航进入锚点附近还不够：先用同一原生微动对齐到实地锚点，站稳后才能打开背包换材料。
             if (!anchorAligned) {
-                if (anchorAlignment == null) anchorAlignment = new BuildEdgeMotion(access.approach(), access.approach(), forbidden(), this::bodyAllowed);
+                if (anchorAlignment == null) anchorAlignment = BuildEdgeMotion.alignAt(access.approach(), forbidden(), this::bodyAllowed);
                 phase = "aligning_safe_anchor";
                 var aligned = anchorAlignment.tick(player);
                 if (aligned == BuildEdgeMotion.Status.FAILED) return fail(anchorAlignment.failure());
@@ -175,6 +175,8 @@ final class BuildPlacementAccessDrive {
         var data = new LinkedHashMap<String, Object>(); data.put("phase", phase); data.put("route_attempts", routes);
         if (failure != null) data.put("reason", failure);
         if (search != null) { data.put("reachable_stances", search.visited()); data.put("checked_stances", search.checked()); }
+        // 锚点未对齐时也公开实际身体与目标的差异，不能只留下笼统的“贴边失败”而丢失半阶高度证据。
+        if (anchorAlignment != null) data.put("anchor_alignment", anchorAlignment.evidence());
         if (returning != null) data.put("edge", returning.evidence()); else if (edge != null) data.put("edge", edge.evidence());
         return Map.copyOf(data);
     }

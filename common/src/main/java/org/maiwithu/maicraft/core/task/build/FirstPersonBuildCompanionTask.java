@@ -2355,6 +2355,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
         data.put("construction_access", stanceNavigation.stage());
         data.put("construction_navigation", navigationDiagnostics());
+        // 失败回执也保留对齐或贴边时的实际位置证据，供后续修复判断真实半格差异。
+        if (placementAccess != null) data.put("placement_access", placementAccess.evidence());
         if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
         if (!scaffoldDropRisk.isEmpty()) data.put("scaffold_drop_risk", scaffoldDropRisk);
         data.put("temporary_supports_remaining", r.scaffoldLedger().snapshot().size());

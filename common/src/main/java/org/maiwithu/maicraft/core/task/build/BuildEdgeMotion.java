@@ -36,7 +36,7 @@ public final class BuildEdgeMotion {
     private int stableTicks;
     private Status status = Status.RUNNING;
     private String failure = "";
-    private boolean released, observedSneak;
+    private boolean released, observedSneak, alignment;
 
     public BuildEdgeMotion(Vec3 approachFeet, Vec3 edgeFeet, LongSet forbidden, Predicate<BlockPos> permittedBody) {
         if (!finite(approachFeet) || !finite(edgeFeet) || Math.abs(approachFeet.y - edgeFeet.y) > 1e-5
@@ -44,6 +44,12 @@ public final class BuildEdgeMotion {
             throw new IllegalArgumentException("edge motion needs one proven same-height segment of at most 0.7 blocks");
         approach = approachFeet; target = edgeFeet;
         this.forbidden = Objects.requireNonNull(forbidden); this.permittedBody = Objects.requireNonNull(permittedBody);
+    }
+
+    /** 图节点已到而身体还在楼梯矮半阶时，只用原生慢走补齐至真实锚点，不继承水平檐边的高度假定。 */
+    public static BuildEdgeMotion alignAt(Vec3 anchor, LongSet forbidden, Predicate<BlockPos> permittedBody) {
+        var result = new BuildEdgeMotion(anchor, anchor, forbidden, permittedBody);
+        result.alignment = true; return result;
     }
 
     public Status tick(LocalPlayer player) {
@@ -64,10 +70,12 @@ public final class BuildEdgeMotion {
         if (context.minecraft().screen != null || !player.onGround() || player.isInWater() || player.isPassenger()
                 || player.getPose() != Pose.STANDING && player.getPose() != Pose.CROUCHING || !finite(velocity))
             return fail(context, "edge_body_not_grounded_dry_and_available");
-        if (!inside(entry, target, observed)) return fail(context, "edge_left_proven_segment");
+        if (!bounded(observed)) return fail(context, "edge_left_proven_segment");
         if (status != Status.ARRIVED && context.tickRevision() - startedTick > 100) return fail(context, "edge_motion_timeout");
         Vec3 drift = observed.add(velocity.x * 3, 0, velocity.z * 3);
-        if (!inside(entry, target, drift) || !safe(player, observed, target, drift)) return fail(context, "edge_support_or_sweep_changed");
+        // 低天花下先在矮半阶蹲下；姿态尚未兑现时，不拿站立身体去要求高半阶的头顶空间。
+        Vec3 checkedTarget = alignment && !observedSneak ? observed : target;
+        if (!bounded(drift) || !safe(player, observed, checkedTarget, drift)) return fail(context, "edge_support_or_sweep_changed");
         // 先等原生姿态真的蹲下；停止水平输入靠游戏摩擦自然减速，常规落地重力 vy=-0.0784 不算漂浮。
         if (!observedSneak || horizontal(velocity) > .08) {
             stableTicks = 0; previous = observed; command(context, Vec3.ZERO, 0); return status;
@@ -94,7 +102,7 @@ public final class BuildEdgeMotion {
         Vec3 at = player.position(), speed = player.getDeltaMovement();
         Vec3 drift = at.add(speed.x * 3, 0, speed.z * 3);
         if (!player.onGround() || player.isInWater() || player.isPassenger() || !finite(speed)
-                || !inside(entry, target, at) || !inside(entry, target, drift) || !safe(player, at, at, drift))
+                || !bounded(at) || !bounded(drift) || !safe(player, at, at, drift))
             fail(context, "edge_hold_support_changed");
         command(context, Vec3.ZERO, 0);
         return status;
@@ -114,6 +122,7 @@ public final class BuildEdgeMotion {
     public Map<String, Object> evidence() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("state", status.name().toLowerCase(java.util.Locale.ROOT)); out.put("failure", failure);
+        out.put("alignment", alignment);
         out.put("approach", coordinates(approach)); out.put("target", coordinates(target));
         if (observed != null) out.put("actual_feet", coordinates(observed));
         out.put("velocity", coordinates(velocity)); out.put("observed_sneak", observedSneak);
@@ -135,6 +144,7 @@ public final class BuildEdgeMotion {
             var dynamic = new PhysicalObstacleSnapshot(boxes, physical.blockReads(), physical.conservativeStructures(), physical.state());
             var hard = new LongOpenHashSet(forbidden); hard.addAll(NavigationSafetyContext.forbiddenBodyCells());
             Predicate<BlockPos> loaded = pos -> world.isLoaded(pos) && world.getWorldBorder().isWithinBounds(pos);
+            if (alignment) return BuildAnchorStepGeometry.safe(player, loaded, hard, permittedBody, dynamic, from, to, drift);
             return safeSweep(world, loaded, width, height, hard, permittedBody, dynamic, from, to)
                     && safeSweep(world, loaded, width, height, hard, permittedBody, dynamic, from, drift);
         } catch (RuntimeException | LinkageError unavailable) { return false; }
@@ -179,6 +189,12 @@ public final class BuildEdgeMotion {
     }
     private static LocalPlayerContext context(LocalPlayer player) {
         return ClientRuntime.actor().activeContext().filter(c -> c.player() == player && c.isCurrent() && c.body().automationOwnsControls()).orElse(null);
+    }
+    private boolean bounded(Vec3 at) {
+        if (!alignment) return inside(entry, target, at);
+        if (!finite(at) || target.y < entry.y - 1e-5 || target.y - entry.y > .5 + 1e-5
+                || at.y < entry.y - 1e-5 || at.y > target.y + 1e-5) return false;
+        return inside(entry, new Vec3(target.x, entry.y, target.z), new Vec3(at.x, entry.y, at.z));
     }
     private static boolean inside(Vec3 from, Vec3 to, Vec3 at) {
         if (!finite(at) || Math.abs(at.y - from.y) > 1e-5) return false;

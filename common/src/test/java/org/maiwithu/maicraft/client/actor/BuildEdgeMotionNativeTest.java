@@ -69,7 +69,56 @@ public final class BuildEdgeMotionNativeTest {
             check(interrupted.tick(f.player) == BuildEdgeMotion.Status.FAILED, "removing live support invalidates the running segment");
             f.flush(); check(!moving(f.player), "lost support cannot leave a previous forward command active");
         }
+        halfStepAlignment();
         System.out.println("BuildEdgeMotionNativeTest: native pose waiting, friction arrival, edge hold and reverse movement passed");
+    }
+
+    private static void halfStepAlignment() throws Exception {
+        Vec3 start = new Vec3(4.5, 1.5, 6.19), anchor = new Vec3(4.5, 2, 6.5);
+        try (var f = halfStepFixture(start)) {
+            var align = BuildEdgeMotion.alignAt(anchor, new LongOpenHashSet(), p -> true);
+            boolean climbed = false, narrowContact = false, arrived = false;
+            for (int tick = 0; tick < 100; tick++) {
+                var status = align.tick(f.player);
+                check(status != BuildEdgeMotion.Status.FAILED, "native half-step alignment failed: " + align.evidence());
+                f.flush(); check(!f.player.input.jumping, "half-step alignment must never request a one-block jump");
+                f.player.nativePose(); f.player.nativeTravel();
+                check(f.player.onGround() && f.player.getY() >= 1.5 && f.player.getY() <= 2.00001,
+                        "native collision stepping must remain supported and bounded to the actual half-block rise");
+                if (f.player.getY() > 1.9) {
+                    climbed = true;
+                    double overlap = f.player.getBoundingBox().maxZ - 6.5;
+                    narrowContact |= overlap > 0 && overlap < .05;
+                }
+                if (status == BuildEdgeMotion.Status.ARRIVED) { arrived = true; break; }
+                f.h.nextTick();
+            }
+            check(arrived && climbed && narrowContact && f.player.position().distanceTo(anchor) <= .035,
+                    "the native body must step onto the initially narrow upper contact and finish at the real anchor height");
+            check(f.player.getPose() == Pose.CROUCHING && f.player.getBoundingBox().maxY <= 3.50001,
+                    "the low ceiling is respected by real crouching dimensions without a jump or forced pose");
+        }
+        for (boolean removeSupport : new boolean[]{true, false}) try (var f = halfStepFixture(start)) {
+            var align = BuildEdgeMotion.alignAt(anchor, new LongOpenHashSet(), p -> true);
+            align.tick(f.player); f.flush(); f.player.nativePose();
+            // 在准备蹲下后改变真实地形，不能借旧证明继续踏阶或推入新障碍。
+            f.h.set(new BlockPos(4, removeSupport ? 1 : 2, 6), removeSupport ? Blocks.AIR.defaultBlockState() : Blocks.STONE.defaultBlockState());
+            f.h.nextTick();
+            check(align.tick(f.player) == BuildEdgeMotion.Status.FAILED, "changed half-step support or body collision must stop alignment");
+            f.flush(); check(!moving(f.player) && !f.player.input.jumping, "a rejected alignment leaves no walking or jumping command");
+        }
+    }
+
+    private static Fixture halfStepFixture(Vec3 start) throws Exception {
+        var f = new Fixture();
+        f.h.set(new BlockPos(4, 1, 6), Blocks.DARK_OAK_STAIRS.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.StairBlock.FACING, net.minecraft.core.Direction.SOUTH));
+        // 高半阶上仅留1.5格潜行净空；从矮半阶起跳会顶头，普通原生踏阶则可通过。
+        f.h.set(new BlockPos(4, 3, 6), Blocks.STONE_SLAB.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.SlabBlock.TYPE, net.minecraft.world.level.block.state.properties.SlabType.TOP));
+        f.h.position(start); f.player.setDeltaMovement(0, -.0784, 0);
+        field(Entity.class, "mainSupportingBlockPos").set(f.player, Optional.of(new BlockPos(4, 1, 6)));
+        f.h.nextTick(); return f;
     }
 
     private static int finish(Fixture f, BuildEdgeMotion motion, Vec3 target) throws Exception {

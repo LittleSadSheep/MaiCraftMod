@@ -52,6 +52,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildEdgeMotionTest.main(args);
         BuildEdgeMotionNativeTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildEdgeHandoffTest.main(args);
+        // 补齐半阶对齐的余速侧偏边界，主方向可走不代表惯性方向也可走。
+        org.maiwithu.maicraft.core.task.build.BuildAnchorDriftTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildEavePlacementProofTest.main(args);
         // 正确朝向的屋顶楼梯可借已有结构升高贴边，不能把内侧已铺地板伪装成空气站位。
         org.maiwithu.maicraft.core.task.build.BuildRoofStairAccessTest.main(args);
