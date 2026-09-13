@@ -118,6 +118,7 @@ public final class MachineAssemblyTest {
         largeOptions.addProperty("width", 19);
         expectFailure(() -> MekanismMatrixTemplate.compile("ultimate", largeOptions, ignored -> true, ignored -> true));
         MekanismFilterTest.main(args);
+        MekanismTransmitterAimTest.main(args);
         System.out.println("MachineAssemblyTest: passed");
     }
     public static final class KineticsFixture {

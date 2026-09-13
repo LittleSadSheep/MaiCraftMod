@@ -104,7 +104,8 @@ public final class MekanismNativeConfiguration {
         if (!isTransmitter(player.level(), target)) return hit.getDirection() == desiredFace;
         try {
             Object entity = player.level().getBlockEntity(target);
-            Object segment = entity.getClass().getMethod("getSideLookingAt", net.minecraft.world.entity.player.Player.class).invoke(entity, player);
+            Object segment = entity.getClass().getMethod("getSideLookingAt", net.minecraft.world.entity.player.Player.class, Direction.class)
+                    .invoke(entity, player, hit.getDirection());
             return segment == desiredFace;
         } catch (ReflectiveOperationException | RuntimeException failure) { return false; }
     }
