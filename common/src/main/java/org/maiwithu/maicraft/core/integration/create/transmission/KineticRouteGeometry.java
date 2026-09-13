@@ -31,6 +31,8 @@ public final class KineticRouteGeometry {
         boolean passable(BlockPos position);
         boolean protectedCell(BlockPos position);
         boolean kinetic(BlockPos position);
+        /** Exact ID and every declared state property; default never adopts an existing block as our work. */
+        default boolean matches(Placement placement) { return false; }
         /** Highest observed solid bearing surface Y in this column; null means unknown. Never loads chunks. */
         Integer groundHeight(int x, int z);
     }
@@ -78,6 +80,12 @@ public final class KineticRouteGeometry {
         public JsonObject transmissionJson() { return KineticTransmissionRatios.json(this); }
     }
     private KineticRouteGeometry() {}
+
+    /** Re-read an admitted plan with current terrain; callers also retain endpoint identity/permission guards. */
+    public static boolean clearanceValid(Plan plan, Terrain terrain) { return clearanceValid(plan, terrain, 3); }
+    public static boolean clearanceValid(Plan plan, Terrain terrain, int clearance) {
+        return KineticClearanceRevalidation.valid(plan, terrain, clearance);
+    }
 
     public static List<Plan> generate(Endpoint source, Endpoint target, Terrain terrain, Limits limits) {
         Objects.requireNonNull(source); Objects.requireNonNull(target); Objects.requireNonNull(terrain); Objects.requireNonNull(limits);

@@ -14,6 +14,19 @@ import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGe
 final class KineticCogwheelGeometry {
     private record Takeoff(BlockPos at, String family, Direction.Axis axis, String kind) {}
     private KineticCogwheelGeometry() {}
+    static boolean clearanceValid(Plan plan, Terrain terrain) {
+        if (!plan.family().startsWith("cog_mesh_")) return true;
+        if (plan.placements().isEmpty()) return false;
+        Placement p = plan.placements().getFirst(); String family = p.blockId().substring(p.blockId().indexOf(':') + 1);
+        Direction.Axis axis = Direction.Axis.valueOf(p.properties().get("axis").toUpperCase(java.util.Locale.ROOT));
+        if (KineticTransmissionRatios.mesh(plan.source().family(), plan.source().axis(), family, axis, p.position().subtract(plan.source().position())) == 0) return false;
+        Map<BlockPos, Placement> remainder = new LinkedHashMap<>(); plan.placements().stream().skip(1).forEach(b -> remainder.put(b.position(), b));
+        List<Direction> exits = java.util.Arrays.stream(Direction.values()).filter(face -> face.getAxis() == axis && remainder.containsKey(p.position().relative(face))).toList();
+        if (exits.size() != 1) return false;
+        Endpoint virtual = new Endpoint(p.position(), axis, exits, family);
+        Plan base = new Plan(plan.family(), virtual, exits.getFirst(), plan.target(), plan.targetFace(), List.copyOf(remainder.values()), plan.chainLinks(), plan.bom());
+        return clearGear(plan.source(), plan.target(), new Takeoff(p.position(), family, axis, ""), terrain, base);
+    }
     static List<Plan> candidates(Endpoint source, Endpoint target, Terrain terrain, Limits limits) {
         if (!source.family().equals("cogwheel") && !source.family().equals("large_cogwheel")) return List.of();
         Map<String, List<Plan>> groups = new LinkedHashMap<>();
