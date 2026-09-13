@@ -66,6 +66,27 @@ public final class WorkToolPreparation {
 
     public record UseTool(ResourceLocation itemId, boolean carried, boolean stockOnly) {}
 
+    /** Bulk excavation reuses adequate owned tools and prepares a cheap replacement before exhaustion. */
+    public static ResourceLocation excavationTool(LocalPlayer player, BlockState source, int work) {
+        return excavationTool(inventory(player), source, work,
+                PlayerInv.buildableCount(player.getInventory(), Items.IRON_INGOT));
+    }
+
+    static ResourceLocation excavationTool(List<ItemStack> inventory, BlockState source, int work, long iron) {
+        if (work < BATCH_SIZE && !source.requiresCorrectToolForDrops()) return null;
+        var baseline = missing(List.of(), List.of(source), Math.max(BATCH_SIZE, work), 0, 0, 1);
+        if (baseline == null) return null;
+        ItemStack reference = new ItemStack(BuiltInRegistries.ITEM.get(baseline.requirement().acceptableItemIds().getFirst()));
+        for (ItemStack stack : inventory) {
+            if (!stack.isEmpty() && (!source.requiresCorrectToolForDrops() || stack.isCorrectToolForDrops(source))
+                    && stack.getDestroySpeed(source) >= reference.getDestroySpeed(source)
+                    && (!stack.isDamageableItem() || stack.getMaxDamage() - stack.getDamageValue() >= Math.min(9, work) + 1))
+                return null;
+        }
+        return missing(List.of(), List.of(source), Math.max(BATCH_SIZE, work), iron, 0, 2)
+                .requirement().acceptableItemIds().getFirst();
+    }
+
     /** Ordinary tilling shares the same material thresholds, but must select an actual hoe. */
     public static UseTool tillingTool(LocalPlayer player) {
         List<ItemStack> inventory = inventory(player);

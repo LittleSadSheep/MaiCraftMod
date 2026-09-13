@@ -71,6 +71,16 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
     BuildScaffoldLedger scaffoldLedger() { return scaffoldLedger; }
     private List<BlockPos> materialSupplyProtection = List.of();
+    public record ToolSupply(org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy policy,
+            List<org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source> sources,
+            boolean allowHarm, List<String> protectedLabels) {
+        public ToolSupply { sources = List.copyOf(sources); protectedLabels = List.copyOf(protectedLabels); }
+    }
+    private ToolSupply toolSupply = new ToolSupply(
+            org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY,
+            List.of(), false, List.of());
+    public ToolSupply toolSupply() { return toolSupply; }
+    public void toolSupply(ToolSupply value) { toolSupply = Objects.requireNonNull(value); }
 
     public boolean previewManaged() { return previewManaged; }
     public boolean hasTrackedScaffolds() { return !scaffoldLedger.isEmpty(); }
@@ -88,6 +98,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         destination.previewManaged = previewManaged;
         destination.scaffoldLedger = scaffoldLedger;
         destination.materialSupplyProtection = materialSupplyProtection;
+        destination.toolSupply = toolSupply;
         if (hasExecutionGuards) destination.executionGuards(protectedNavigationCells,
                 preflightGuard, mutationGuard, confirmedMutation);
     }

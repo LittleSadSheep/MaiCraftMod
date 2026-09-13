@@ -193,6 +193,11 @@ public final class BuildSupplyPreviewTest {
                             ? lower.setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER) : lower);
         }
         @Override public boolean isLoaded(BlockPos pos) { return !unloaded; }
+        @Override public int getMinBuildHeight() { return -64; }
+        @Override public int getHeight() { return 384; }
+        @Override public net.minecraft.world.level.border.WorldBorder getWorldBorder() {
+            return new net.minecraft.world.level.border.WorldBorder();
+        }
         @Override public BlockState getBlockState(BlockPos pos) {
             return blocks == null ? Blocks.AIR.defaultBlockState()
                     : blocks.getOrDefault(pos, Blocks.AIR.defaultBlockState());

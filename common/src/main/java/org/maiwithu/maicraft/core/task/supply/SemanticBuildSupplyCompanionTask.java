@@ -299,6 +299,7 @@ final class SemanticBuildSupplyCompanionTask
         batch.semanticFacts(source.semanticFacts());
         batch.traversabilityContract(source.traversabilityContract());
         source.copyExecutionContextTo(batch);
+        batch.toolSupply(new BuildTaskRecord.ToolSupply(r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels));
         batch.previewManaged(true);
         remainingCellsBeforeBuild = remainingCellCount();
         startChild(ChildKind.BUILD, batch);

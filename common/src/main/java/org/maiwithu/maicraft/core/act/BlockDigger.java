@@ -46,6 +46,8 @@ public final class BlockDigger {
     private MenuReceipt toolCloseReceipt;
     private MenuReceipt toolStageReceipt;
     private int pendingToolSlot = -1;
+    private int minimumToolDurability;
+    public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
     private int blockHitDelay;    // post-break cooldown (survives reset())
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
     private net.minecraft.world.item.ItemStack destroyingItem;
@@ -332,7 +334,7 @@ public final class BlockDigger {
         reset();
         pos = target.immutable();
         pendingToolSlot = selectTool && player.level().isLoaded(pos)
-                ? ToolSelect.bestSlot(player, player.level().getBlockState(pos))
+                ? ToolSelect.bestSlot(player, player.level().getBlockState(pos), minimumToolDurability)
                 : -1;
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) {

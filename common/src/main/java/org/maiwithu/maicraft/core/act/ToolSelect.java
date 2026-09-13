@@ -26,6 +26,10 @@ public final class ToolSelect {
      * 背包里的工具选出来以后，调用方仍需把它搬到快捷栏并等游戏确认。
      */
     public static int bestSlot(LocalPlayer p, BlockState state) {
+        return bestSlot(p, state, 0);
+    }
+
+    public static int bestSlot(LocalPlayer p, BlockState state, int minimumDurability) {
         Inventory inv = p.getInventory();
         boolean tierGated = state.requiresCorrectToolForDrops();
         int harvest = -1, any = -1;
@@ -34,6 +38,7 @@ public final class ToolSelect {
         int usableSlots = Math.min(36, inv.getContainerSize());
         for (int i = 0; i < usableSlots; i++) {
             ItemStack s = inv.getItem(i);
+            if (s.isDamageableItem() && s.getMaxDamage() - s.getDamageValue() < minimumDurability) continue;
             float spd = s.getDestroySpeed(state);
             if (spd <= 1.0f) continue;
             if (!tierGated || s.isCorrectToolForDrops(state)) {

@@ -73,6 +73,20 @@ public final class WorkToolPreparationTest {
         check(WorkToolPreparation.tillingTool(List.of(new ItemStack(Items.IRON_HOE)), 0, 0).carried(),
                 "reuse a suitable hoe already carried");
         System.out.println("WorkToolPreparationTest: passed");
+        BlockState dirt = Blocks.DIRT.defaultBlockState();
+        check(WorkToolPreparation.excavationTool(List.of(), dirt, 900, 0).getPath().equals("stone_shovel"),
+                "bulk soil excavation prepares a cheap shovel instead of using bare hands");
+        check(WorkToolPreparation.excavationTool(List.of(), dirt, 900, 64).getPath().equals("iron_shovel"),
+                "abundant carried iron permits the normal iron tool preference");
+        ItemStack shovel = new ItemStack(Items.DIAMOND_SHOVEL);
+        shovel.setDamageValue(shovel.getMaxDamage() - 10);
+        check(WorkToolPreparation.excavationTool(List.of(shovel), dirt, 900, 0) == null,
+                "reuse an owned tool until its bounded batch reserve is reached");
+        shovel.setDamageValue(shovel.getMaxDamage() - 9);
+        check(WorkToolPreparation.excavationTool(List.of(shovel), dirt, 900, 0) != null,
+                "prepare a replacement before a native nine-cell selection could exhaust the tool");
+        check(WorkToolPreparation.excavationTool(List.of(), Blocks.OBSIDIAN.defaultBlockState(), 1, 0)
+                        .getPath().equals("diamond_pickaxe"), "even one tier-gated cell needs a correct harvesting tool");
     }
 
     private static WorkToolPreparation.Choice choose(List<ItemStack> inventory, BlockState state,

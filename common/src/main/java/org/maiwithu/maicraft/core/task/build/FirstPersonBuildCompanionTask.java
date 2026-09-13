@@ -73,6 +73,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BuildExcavationFrontier excavation = new BuildExcavationFrontier();
     private final Map<Long, CellPlan> excavationOwners = new HashMap<>();
     private boolean excavating;
+    private final BuildExcavationTools excavationTools;
     private final java.util.function.BiFunction<LocalPlayer, Double, HitResult> placementRay;
     private final Map<Long, BuildTaskRecord.Target> targets = new LinkedHashMap<>();
     private final LongOpenHashSet protectedCells = new LongOpenHashSet();
@@ -168,6 +169,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         rules = new BuildCellRules(player, record);
         inventory = new BuildInventory(player);
         digger = new BlockDigger(player);
+        excavationTools = new BuildExcavationTools(record);
         for (BuildTaskRecord.Target target : record.targets) {
             targets.put(target.pos().asLong(), target);
             protectedCells.add(target.pos().asLong());
@@ -493,6 +495,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState clearNavTick() {
+        if (excavating && (excavationTools.active() || player.level().isLoaded(clearing)
+                && !player.level().getBlockState(clearing).isAir())
+                && !excavationTools.ready(player, r, clearing, excavation.remaining(), this::runChild)) {
+            stopNav();
+            if (excavationTools.failure() == null) return TaskState.RUNNING;
+            failAt(clearing, excavationTools.failure(), FailureType.NO_MATERIAL, "excavation_tool_unavailable", false);
+            return TaskState.FAILED;
+        }
+        digger.minimumToolDurability(excavating ? Math.min(9, excavation.remaining()) + 1 : 0);
         // 走到能挖的位置前再次核对专用观察守卫和箱子等保护；普通建造的守卫默认允许通过。
         if (!player.level().isLoaded(clearing)) {
             failAt(clearing, "cell unloaded after preflight", FailureType.TARGET_LOST,
@@ -1863,6 +1874,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("construction_access", stanceNavigation.stage());
         data.put("construction_navigation", navigationDiagnostics());
         data.put("excavation_remaining", excavation.remaining());
+        if (excavationTools.active()) data.put("excavation_tool_supply", excavationTools.progress());
         if (excavating && clearing != null) data.put("excavation_target", clearing.toShortString());
         data.put("creative_materials", creativeMaterials.progress());
         if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
@@ -1910,12 +1922,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        excavationTools.stop(player);
         // 暂停时先停当前挖掘、撤掉导航的施工协助并松键；任务进度仍保留，恢复后可以重新登记协助。
         if (digger.current() != null) digger.cancel();
         if (doorRepair != null) doorRepair.pause();
         drainScaffolds(); unregisterProvider(); super.stop(companion, why); InputDriver.halt(player);
     }
     @Override protected void cleanup() {
+        excavationTools.stop(player);
         // 结束时释放预览、挖掘和菜单；中断保留创造材料与已建方块，正常完成先经过材料清理阶段。
         BuildPreviewGate.release(r);
         if (doorRepair != null) { doorRepair.stop(); doorRepair = null; }
