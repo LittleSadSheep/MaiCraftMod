@@ -61,7 +61,7 @@ public final class SemanticContainerCompanionTask
     private static final int LANDMARK_PROTECTION_RADIUS = 12;
     private static final int OTHER_PLAYER_RADIUS = 6;
     private static final long MENU_WAIT_TICKS = 80L;
-    /** A verified equal-and-opposite inventory delta renews a long multi-stack transfer. */
+    /** 玩家和木桶两边数量确实一增一减，才给大批量搬运续时；一直等点击回执不算进展。 */
     private static final long TRANSFER_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
 
     private enum Phase { SURVEY, APPROACH, OPEN, WAIT_MENU, PLAN, TRANSFER, CLEANUP, COMPLETE }
@@ -236,7 +236,7 @@ public final class SemanticContainerCompanionTask
     }
 
     // 只扫描已加载区块里的容器方块实体，不读未加载区域。
-    // 保护和去重都以单个方块位置为单位，没有把一个大箱子的两半当成同一容器（A50／A52）。
+    // 内部供料已经选定具体仓库，并由 ContainerSupplySources 保护大箱子两半；普通选择器仍按方块找候选。
     private List<Candidate> loadedCandidates(BlockPos center) {
         if (r.storageSupply()) {
             if (!ContainerSupplySources.allowed(player, center, r.protectedLabels)) return List.of();
@@ -349,6 +349,7 @@ public final class SemanticContainerCompanionTask
                 FailureType.ENTITY_BLOCKED);
         openRequested = true;
         if (r.storageSupply()) {
+            // 取料也要走到木桶前、准备空手并实际打开 GUI；沿用机器开菜单流程，避免手持工具误用在箱子上。
             var request = new org.maiwithu.maicraft.core.integration.machine.MachineMenu.OpenRequest(
                     player.level().dimension().location().toString(), target.position(), 0,
                     org.maiwithu.maicraft.core.integration.machine.MachineSurvey.fingerprint(player, target.position(), 0), target.position());
@@ -368,6 +369,7 @@ public final class SemanticContainerCompanionTask
             if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
             AbstractContainerMenu menu = player.containerMenu;
             if (r.storageSupply() && !org.maiwithu.maicraft.core.inventory.StockEvidence.isContainerSynchronized(player, menu)) {
+                // 界面刚出现时的空槽可能尚未同步，不能因此判定仓库没货并转去别处找材料。
                 if (player.level().getGameTime() - waitMenuSince > MENU_WAIT_TICKS)
                     return failFinal("container_contents_unconfirmed", "The visible storage menu did not receive native item synchronization.", FailureType.TARGET_LOST);
                 return TaskState.RUNNING;
@@ -490,6 +492,7 @@ public final class SemanticContainerCompanionTask
         Planning planning = buildPlan(direction, plannedAmount);
         if (r.storageSupply() && r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT
                 && !planning.success() && "destination_full_or_locked".equals(planning.failureCode())) {
+            // 存余料时先求这只箱子实际装得下多少；已存数量会写入回执，剩余部分交给上层另找箱子。
             int low = 0, high = plannedAmount;
             while (low < high) {
                 int amount = low + (high - low + 1) / 2; Planning candidate = buildPlan(direction, amount);
@@ -544,7 +547,7 @@ public final class SemanticContainerCompanionTask
         return all;
     }
 
-    /** Builds the complete bounded plan before the first click; failure leaves both sides untouched. */
+    /** 每次点击前把本次剩余数量完整分配到菜单槽位；容量或权限不足时，不先拿一半到鼠标上。 */
     // 在菜单副本上先完整分配目标容量，确认每个源格允许取出、每个目标格允许放入，才开始真实点击。
     private Planning buildPlan(Direction selectedDirection, int amount) {
         List<Integer> sources = selectedDirection == Direction.DEPOSIT
@@ -667,7 +670,8 @@ public final class SemanticContainerCompanionTask
                     + "between verified moves. MaiCraft paused instead of using a stale plan.",
                     FailureType.TARGET_LOST);
         }
-        // QUICK_MOVE owns its destination order. Only settled, conserved moves may replace the old simulation with live slot allocation.
+        // 整堆快速移动由游戏决定落在哪些槽；上一笔确认守恒后，按真实空槽重新安排剩余物品。
+        // 例如 1121 块石砖搬完 17 堆后，最后 33 块不能继续使用最初预测、现在已经装满的目标槽。
         if (movedCount > 0) {
             Planning remaining = buildPlan(direction, plannedAmount - movedCount);
             if (!remaining.success()) return failFinal(remaining.failureCode(), remaining.failureMessage(), remaining.failureType());
@@ -739,8 +743,8 @@ public final class SemanticContainerCompanionTask
         return movedCount == plannedAmount;
     }
 
-    // 已经回到无界面的背包就结束；否则创建关闭当前菜单的子任务。
-    // 它没有绑定原菜单身份，因此 menuLost 的错误归属会让它关掉替换菜单（A51）。
+    // 收尾先保留来历不明的鼠标物品；已绑定的木桶菜单若被别的界面替换，也保留新界面不关闭。
+    // 只有仍由这次开箱管理、且鼠标为空的菜单，才进入正常关闭流程。
     private TaskState cleanupMenu() {
         if (!player.containerMenu.getCarried().isEmpty()) {
             outcomeUncertain = true; openedMenu = false; openRequested = false;
@@ -879,6 +883,7 @@ public final class SemanticContainerCompanionTask
     private boolean targetStillValid() {
         if (target == null || !player.level().isLoaded(target.position())) return false;
         if (r.storageSupply()) {
+            // 走去开箱和继续搬料前都核对原箱子身份，不能在箱子被替换后仍沿用旧库存和旧许可。
             if (!ContainerSupplySources.allowed(player, target.position(), r.protectedLabels)) return false;
             var footprint = ContainerSupplySources.footprint(player.level(), target.position());
             if (!supplyIdentities.keySet().equals(Set.copyOf(footprint)) || supplyIdentities.entrySet().stream()

@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuTransferTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuCloseTaskRecord;
 
+/** 核对多箱取料只用已加载普通仓库，保护大箱子两半，并保留后来出现的外来菜单。 */
 public final class ContainerSupplySourcesTest {
     private static final ResourceLocation IRON = ResourceLocation.parse("minecraft:iron_ingot");
     public static void main(String[] args) throws Exception {

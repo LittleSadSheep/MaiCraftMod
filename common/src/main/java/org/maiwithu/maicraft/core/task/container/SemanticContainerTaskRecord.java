@@ -63,7 +63,7 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
     public final Selection selection;
     public final List<String> protectedLabels;
     public final int radius;
-    /** Internal acquisition binding; public semantic container requests still use their existing selectors. */
+    /** 内部多箱供料绑定的确切木桶／箱子坐标；公开存取请求仍按原有地标和选择方式找容器。 */
     public final BlockPos supplyPosition;
 
     // 明确物品编号组与物品标签只能二选一；具体搬多少与目标数量也不能同时给，balance 必须给目标数量。
@@ -142,12 +142,13 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
         this.supplyPosition = supplyPosition == null ? null : supplyPosition.immutable();
     }
 
+    /** 从这一只已选箱子补到背包目标数量；它不够时只取实际可取的部分，再由供料任务继续找下一箱。 */
     public static SemanticContainerTaskRecord withdrawAvailableAt(String callId, long deadline, List<ResourceLocation> items,
             int finalCount, BlockPos source, ResourceLocation blockId, List<String> protectedLabels) {
         return new SemanticContainerTaskRecord(callId, deadline, Operation.WITHDRAW, items, null, null, finalCount,
                 blockId, null, Selection.NEAREST, protectedLabels, 1, java.util.Objects.requireNonNull(source));
     }
-    /** Internal proven-spoil deposit: count is an upper bound, and visible native capacity may require several warehouses. */
+    /** 把已证明属于开挖余料的物品存入指定箱子；数量是上限，装不完时通过回执保留剩余量。 */
     public static SemanticContainerTaskRecord depositAvailableAt(String callId, long deadline, ResourceLocation item,
             int count, BlockPos destination, ResourceLocation blockId, List<String> protectedLabels) {
         return new SemanticContainerTaskRecord(callId, deadline, Operation.DEPOSIT, List.of(item), null, count, null,

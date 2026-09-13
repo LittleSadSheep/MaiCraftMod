@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.task.TaskState;
  */
 public final class ContainerTransferCompanionTask
         extends AbstractCompanionTask<ContainerTransferTaskRecord> {
-    /** Confirmed native menu changes keep a large transfer alive; pending receipts do not. */
+    /** 只有游戏确认一次菜单点击生效才给长搬运续时；等待中的点击不能无限续时。 */
     private static final long CLICK_PROGRESS_LEASE_TICKS = 60L * 20L;
     private enum Phase { BEGIN, QUICK, PICKUP, PLACE_ALL, PLACE_ONE, SWAP_DEST, RETURN_CURSOR, CLOSE, FAILING }
     private int moveIndex;
@@ -115,7 +115,8 @@ public final class ContainerTransferCompanionTask
         return TaskState.SUCCESS;
     }
 
-    // 检查源格、目标格和数量；同一格搬给自己算零件完成。整堆可快速移动，也可拾起后放到指定格。
+    // 每笔都重读实际源格、目标格和数量；同一格搬给自己算零件完成，已有外来游标则原样保留。
+    // 整堆可快速移动；尾数必须有明确目标槽，不能靠快速移动把整堆多取走。
     private TaskState beginMove(ContainerTransferTaskRecord.Move move) {
         if (!player.containerMenu.getCarried().isEmpty()) return rejectBeforePickup("cursor was not empty before this transfer");
         if (!validSlot(move.from()) || (move.to() >= 0 && !validSlot(move.to()))) {
@@ -156,6 +157,7 @@ public final class ContainerTransferCompanionTask
             return TaskState.RUNNING;
         }
         var destinationSlot = player.containerMenu.getSlot(move.to());
+        // 不仅看物品最多能叠多少，还要服从这个真实槽的放入限制，避免尾数点进已经满了或锁住的槽。
         int capacity = destinationSlot.mayPlace(source) ? Math.max(0,
                 Math.min(source.getMaxStackSize(), destinationSlot.getMaxStackSize(source)) - destination.getCount()) : 0;
         if (capacity < requested) {
@@ -206,7 +208,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** A full compatible stack is one ordinary left click, not one right click per item. */
+    /** 完整兼容的一堆物品通过一次普通左键放入，尾数才逐件右键分出。 */
     // 整堆放入一般要求目标格增加指定数量、鼠标清空。
     // 调用方明确允许机器立即消耗时，可改用源格准确扣减与鼠标清空来确认，不要求机器槽长期保留原物品。
     private TaskState submitAll(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
@@ -321,6 +323,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.FAILED;
     }
     private TaskState rejectBeforePickup(String reason) {
+        // 还没由本任务拿起物品，鼠标上出现的东西就不能擅自退回源格或通过关界面丢到地上。
         preserveUnexpectedCursor = !player.containerMenu.getCarried().isEmpty();
         fail(reason, FailureType.TARGET_LOST); return TaskState.FAILED;
     }
@@ -329,8 +332,7 @@ public final class ContainerTransferCompanionTask
     private static boolean same(ItemStack a, ItemStack b) {
         return a.getCount() == b.getCount() && ItemStack.isSameItemSameComponents(a, b);
     }
-    // 只有玩家还在同一个菜单时才安排关闭；替换成别的菜单时不向它做回退或关闭。
-    // 外层父任务也应保留这个限制，不能在这里正确停手后又把新菜单关掉（A51）。
+    // 只有仍在同一个菜单、且没有标记外来游标时才安排收尾关闭；换成别的界面时不向它回退或点击。
     @Override protected void cleanup() {
         if (!preserveUnexpectedCursor && menu != null && player.containerMenu == menu && (!completed || r.closeAfter)
                 && (receipt == null || receipt.terminal() || receipt.kind() != MenuReceipt.Kind.CLOSE)) {

@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
 
+/** 核对外部库存只作有时效的备料线索，已取进背包的物品不再重复算成仓库余量。 */
 public final class StockEvidenceTest {
     public static void main(String[] args) {
         var iron = ResourceLocation.parse("minecraft:iron_ingot");

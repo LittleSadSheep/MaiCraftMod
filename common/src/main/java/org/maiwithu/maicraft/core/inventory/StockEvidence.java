@@ -29,7 +29,7 @@ public final class StockEvidence {
                            Set<ResourceLocation> craftable, long observedGameTick) {
         public Snapshot { stored = Map.copyOf(stored); craftable = Set.copyOf(craftable); }
         public long storedCount(ResourceLocation item) { return stored.getOrDefault(item, 0L); }
-        /** A source family with a real acquisition adapter; actual location/stock still needs a fresh check. */
+        /** 只有已经接通真实取料流程的来源能用于工具备料；实际取物时仍要重新确认位置和库存。 */
         public boolean supportsToolSupply() { return source == Source.AE2 || source == Source.CONTAINER; }
     }
 
@@ -38,7 +38,7 @@ public final class StockEvidence {
     private static LocalPlayer synchronizedPlayer;
     private StockEvidence() {}
 
-    /** Called after a complete server container-content packet, never from a client block entity. */
+    /** 收到完整的服务器菜单内容后才登记，不把客户端木桶方块实体里的空列表当成仓库没货。 */
     // 只有这次服务器菜单同步对应玩家当前菜单，才记为已同步；仅打开一个客户端界面还不算。
     public static void containerSynchronized(AbstractContainerMenu menu) {
         LocalPlayer player = Minecraft.getInstance().player;
@@ -48,7 +48,7 @@ public final class StockEvidence {
         }
     }
 
-    /** Exact menu-instance evidence; an unsynchronized freshly constructed GUI is not empty stock. */
+    /** 必须是同一玩家当前打开的那个已同步菜单；新界面还没收到物品时，不能按零库存处理。 */
     public static boolean isContainerSynchronized(LocalPlayer player, AbstractContainerMenu menu) {
         return player != null && synchronizedPlayer == player && synchronizedMenu == menu && player.containerMenu == menu;
     }

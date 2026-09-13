@@ -25,7 +25,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Native ChestMenu/Slot routing plus parent receipt reconciliation; network acknowledgements are not simulated. */
+/** 用原生箱子菜单验证实际落槽顺序和双边守恒；测试不伪造服务器网络确认。 */
 public final class ContainerBatchReplanTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -33,6 +33,7 @@ public final class ContainerBatchReplanTest {
         System.out.println("ContainerBatchReplanTest: 1121-item reverse quick moves, live remainder allocation, conservation and cursor guards passed");
     }
     private static void fullStacksThenThirtyThree() throws Exception {
+        // 复现取 1121 块石砖：17 次整堆移动填满旧尾数槽，最后 33 块必须按当前空槽重新安排。
         try (var fixture = new Fixture(1121, 1234)) {
             var initial = (List<?>) field(SemanticContainerCompanionTask.class, "plan").get(fixture.task);
             int staleDestination = move(initial.getLast()).to();
@@ -67,6 +68,7 @@ public final class ContainerBatchReplanTest {
         }
     }
     private static void externalChangeDoesNotReplan() throws Exception {
+        // 别人改过箱子后不能把新状态吞进重规划，继续执行尚未确认的旧取料请求。
         try (var fixture = new Fixture(128, 192)) {
             var first = fixture.next(); fixture.apply(first); fixture.confirm();
             fixture.stock.setItem(0, new ItemStack(Items.STONE_BRICKS, 1));

@@ -111,6 +111,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     // 先用现成空快捷栏；全满时把手持物经可见背包移到真正的空主背包格，并等关闭确认。
     private TaskState prepareHand() {
         var context = ClientRuntime.requireContext(player);
+        // 背包腾手已经开始就先等它完成，不能同时切换别的快捷栏或提前右键机器。
         if (handParking.started()) return parkHand(context);
         if (receipt != null) {
             receipt = context.actions().poll(context, receipt);
@@ -134,6 +135,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     }
 
     private TaskState parkHand(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
+        // 空手准备只搬存现有物品；背包也满时明确缺空间，工具不会被删除或扔掉。
         var state = handParking.tick(context);
         if (state == MachineMenuHandParking.Status.FAILED) return failure(handParking.failure(),
                 "Empty-hand inventory preparation stopped without discarding items: " + handParking.failure(),
@@ -143,6 +145,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     }
 
     private TaskState aimAndOpen() {
+        // 背包关闭并重新确认主手为空后才进入世界右键，避免手持扳手、铲子等触发另一种方块操作。
         if (!inReach()) { phase = Phase.APPROACH; aimGate.reset(); return TaskState.RUNNING; }
         if (!player.getMainHandItem().isEmpty()) return failure("machine_menu_hand_changed",
                 "The empty main hand changed before opening.", FailureType.UNKNOWN);

@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 
-/** Loaded ordinary warehouses only. Client block-entity inventories never prove stored quantities. */
+/** 只寻找已加载的木桶、箱子和潜影盒；箱内数量必须实际打开界面看过，不能从客户端方块实体猜。 */
 public final class ContainerSupplySources {
     public static final int MAX_ATTEMPTS = 8, MAX_SCANNED = 4096;
     public record Candidate(BlockPos position, ResourceLocation blockId, List<BlockPos> footprint, int stockRank) {
@@ -36,6 +36,7 @@ public final class ContainerSupplySources {
     private ContainerSupplySources() {}
     public static List<Candidate> candidates(LocalPlayer player, BlockPos center, int radius,
             List<ResourceLocation> items, Set<BlockPos> visited, List<String> protectedLabels) {
+        // 多箱取料时跳过已经尝试过的整只箱子，优先去最近看见有货的箱子；不为找货强行加载区块。
         List<Candidate> found = new ArrayList<>(); Set<BlockPos> seen = new java.util.HashSet<>(); int examined = 0;
         int chunks = (radius + 15) / 16;
         outer: for (int x = -chunks; x <= chunks; x++) for (int z = -chunks; z <= chunks; z++) {
@@ -58,6 +59,7 @@ public final class ContainerSupplySources {
                 .thenComparingDouble(value -> value.position().distSqr(center)).thenComparingLong(value -> value.position().asLong())).limit(MAX_ATTEMPTS).toList();
     }
     public static List<BlockPos> footprint(Level level, BlockPos at) {
+        // 大箱子的两半是一份库存；两边都仍在、且互相连接，才允许把它当作同一个取料来源。
         if (!level.isLoaded(at) || !ordinary(level.getBlockEntity(at))) return List.of();
         var state = level.getBlockState(at);
         if (!(state.getBlock() instanceof ChestBlock) || state.getValue(ChestBlock.TYPE) == ChestType.SINGLE) return List.of(at.immutable());
@@ -69,6 +71,7 @@ public final class ContainerSupplySources {
         return List.of(at.immutable(), peer.immutable());
     }
     public static boolean allowed(LocalPlayer player, BlockPos at, List<String> protectedLabels) {
+        // 任一半受主人保护就整箱不碰；保护地标找不到时，也不能当作已经获得开箱许可。
         List<BlockPos> footprint = footprint(player.level(), at); if (footprint.isEmpty()) return false;
         for (BlockPos cell : footprint) {
             if (NavigationSafetyContext.protectsUse(cell)) return false;
@@ -85,6 +88,7 @@ public final class ContainerSupplySources {
         return true;
     }
     public static void rememberVisible(LocalPlayer player, BlockPos at, AbstractContainerMenu menu, List<Integer> slots) {
+        // 只有当前真实显示、且服务器已同步内容的菜单能更新库存线索；取存后用新数量覆盖旧观察。
         if (!StockEvidence.isContainerSynchronized(player, menu) || !MenuVisibility.matches(ClientRuntime.requireContext(player).minecraft(), menu)) return;
         var footprint = footprint(player.level(), at); if (footprint.isEmpty()) return;
         Map<ResourceLocation, Long> counts = new LinkedHashMap<>();
@@ -93,7 +97,7 @@ public final class ContainerSupplySources {
                 StockEvidence.Source.CONTAINER, counts, Set.of(), player.level().getGameTime()));
     }
     public static void reset() { CACHE.clear(); }
-    /** Bounded planning hint only. No region scan, menu opening or client block-entity inventory inspection. */
+    /** 汇总附近最近实际看过的库存，供选工具或备料参考；这里不开箱、不扫描区域，也不保证货还在。 */
     public static Map<ResourceLocation, Long> observedCounts(LocalPlayer player, BlockPos center, int radius, List<String> protectedLabels) {
         if (player == null || center == null || radius < 0) return Map.of();
         List<String> labels = protectedLabels == null ? List.of() : protectedLabels;
@@ -115,6 +119,7 @@ public final class ContainerSupplySources {
             while (entries.size() > 64) entries.remove(entries.keySet().iterator().next());
         }
         StockEvidence.Snapshot latest(Object owner, Object level, BlockPos at, Map<BlockPos, Object> identities, long tick) {
+            // 箱子任一半被换掉、观察过期或换了存档，就作废旧数量，不能拿上一只箱子的货继续算。
             bind(owner, level); Entry entry = entries.get(at); if (entry == null) return null;
             if (tick < entry.stock.observedGameTick() || tick - entry.stock.observedGameTick() > StockEvidence.MAX_AGE_TICKS
                     || !entry.identities.keySet().equals(identities.keySet())
@@ -127,6 +132,7 @@ public final class ContainerSupplySources {
                 java.util.function.Predicate<BlockPos> usable,
                 java.util.function.Function<BlockPos, Map<BlockPos, Object>> currentFootprint) {
             bind(owner, level); Map<ResourceLocation, Long> counts = new LinkedHashMap<>();
+            // 一个大箱子虽然登记两个坐标，汇总备料时只计算一次里面的物品。
             Set<Entry> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
             for (Entry entry : List.copyOf(entries.values())) {
                 if (!seen.add(entry)) continue;

@@ -18,7 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuHandParking;
 
-/** Visible-GUI fixture with delayed native swap/close receipts; never emulates creative clearing or a world click. */
+/** 在可见背包中延迟确认换槽与关闭，核对腾空手保留工具、满背包停下、外来界面不被关闭。 */
 public final class MachineMenuHandParkingTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
