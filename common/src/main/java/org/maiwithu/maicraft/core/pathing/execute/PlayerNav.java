@@ -156,6 +156,7 @@ public final class PlayerNav {
     }
     public String outcomeSummary() { return navigator.outcomeSummary(); }
     public boolean planningInFlight() { return navigator.planningInFlight(); }
+    public NavigationStep executionStep(long clientRevision) { return navigator.executionStep(clientRevision); }
     public void stop() { navigator.stop(); }
     public void pause() { navigator.pause(); }
     public void abandon() { navigator.abandon(); }

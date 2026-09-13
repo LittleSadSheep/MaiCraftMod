@@ -226,6 +226,9 @@ public final class TransportNavigator {
                 || player.level().getGameTime() - progressTick <= ticks || ground.hasRecentPhysicalProgress(ticks);
     }
     public boolean planningInFlight() { return targets != null || session != null && session.phase().contains("plan") || ground.planningInFlight(); }
+    public org.maiwithu.maicraft.core.pathing.execute.NavigationStep executionStep(long clientRevision) {
+        return session == null && targets == null ? ground.executionStep(clientRevision) : null;
+    }
     public String outcomeSummary() { return ground.outcomeSummary() + "; transport=" + attempts + (targets == null ? "" : targets.diagnostic()); }
     public Map<String, Object> diagnostics() {
         return Map.of("mode", mode.name().toLowerCase(), "attempts", List.copyOf(attempts), "unavailable", unavailable,

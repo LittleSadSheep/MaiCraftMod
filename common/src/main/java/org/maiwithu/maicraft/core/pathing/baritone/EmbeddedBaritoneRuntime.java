@@ -216,6 +216,7 @@ public final class EmbeddedBaritoneRuntime {
     /** Called exactly once at the end of an open MaiCraft actor tick. */
     public static void tick(LocalPlayerContext context, boolean schedulerAllowsBodyWork) {
         requireClientThread();
+        lastDrivenOwner = null;
         IBaritone baritone = backend;
         if (baritone == null) return;
         syncWorld(baritone, context.level());
@@ -283,6 +284,8 @@ public final class EmbeddedBaritoneRuntime {
                     events.apply(EventState.PRE, TickEvent.Type.IN));
             baritone.getGameEventHandler().onPostTick(
                     events.apply(EventState.POST, TickEvent.Type.IN));
+            lastDrivenOwner = current;
+            lastDrivenRevision = context.tickRevision();
         } catch (RuntimeException failure) {
             Constants.LOG.error("[maicraft-path] embedded Baritone tick failed", failure);
             current.internalFailure("embedded pathing tick failed: "
@@ -386,6 +389,7 @@ public final class EmbeddedBaritoneRuntime {
 
     public static void bodyGone() {
         requireClientThread();
+        lastDrivenOwner = null;
         if (owner != null) owner.preempted("the local-player body or world disappeared");
         if (pendingStart != null) {
             pendingStart.navigator().preempted(
@@ -440,6 +444,23 @@ public final class EmbeddedBaritoneRuntime {
         return owner == navigator && backend != null
                 && backend.getPathingBehavior().getCurrent() == null
                 && backend.getPathingBehavior().getInProgress().isPresent();
+    }
+
+    private static EmbeddedBaritoneNavigator lastDrivenOwner;
+    private static long lastDrivenRevision = Long.MIN_VALUE;
+
+    static org.maiwithu.maicraft.core.pathing.execute.NavigationStep executionStep(
+            EmbeddedBaritoneNavigator navigator, long clientRevision) {
+        requireClientThread();
+        if (owner != navigator || backend == null || lastDrivenOwner != navigator
+                || lastDrivenRevision != clientRevision - 1 || ACTIONS.pending()) return null;
+        var executor = ((PathingBehavior) backend.getPathingBehavior()).getCurrent();
+        if (executor == null) return null;
+        int index = executor.getPosition();
+        var movements = executor.getPath().movements();
+        if (index < 0 || index >= movements.size()) return null;
+        var movement = movements.get(index);
+        return new org.maiwithu.maicraft.core.pathing.execute.NavigationStep(movement.getSrc(), movement.getDest());
     }
 
     /** The driven water route owns normal ascent/refill; the reflex covers idle or suspended bodies. */

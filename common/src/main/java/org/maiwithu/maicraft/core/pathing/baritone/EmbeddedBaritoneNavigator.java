@@ -488,6 +488,10 @@ public final class EmbeddedBaritoneNavigator {
         return EmbeddedBaritoneRuntime.planningInFlight(this);
     }
 
+    public org.maiwithu.maicraft.core.pathing.execute.NavigationStep executionStep(long clientRevision) {
+        return EmbeddedBaritoneRuntime.executionStep(this, clientRevision);
+    }
+
     public void stop() {
         if (stopped) return;
         stopped = true;
