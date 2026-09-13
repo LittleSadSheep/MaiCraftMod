@@ -101,6 +101,7 @@ public final class SemanticContainerCompanionTask
     private boolean openRequested;
     private boolean outcomeUncertain;
     private boolean effectsStarted;
+    private int confirmedSplitClicks;
     private boolean satisfiedSettlement;
     private AbstractContainerMenu ownedMenu;
     private Map<BlockPos, BlockEntity> supplyIdentities = Map.of();
@@ -774,6 +775,10 @@ public final class SemanticContainerCompanionTask
         }
         TaskResult result = activeChild.result(terminal);
         Purpose purpose = activePurpose;
+        // 只累计游戏已确认的分堆点击，便于核对少量拆半操作就拿齐材料，而不是按计划步数宣称变快。
+        if (purpose == Purpose.TRANSFER && result != null && result.data() != null
+                && result.data().get("confirmed_split_clicks") instanceof Number clicks)
+            confirmedSplitClicks += Math.max(0, clicks.intValue());
         activeChild = null;
         activeRecord = null;
         activePurpose = null;
@@ -1028,6 +1033,7 @@ public final class SemanticContainerCompanionTask
         data.put("outcome_partial", movedCount > 0 && !goalSatisfied);
         data.put("outcome_uncertain", outcomeUncertain);
         data.put("effects_started", effectsStarted);
+        data.put("confirmed_split_clicks", confirmedSplitClicks);
         if (r.storageSupply()) data.put(r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT
                 ? "bounded_storage_deposit" : "bounded_storage_withdrawal", true);
         if (r.count != null) data.put("requested_count", r.count);

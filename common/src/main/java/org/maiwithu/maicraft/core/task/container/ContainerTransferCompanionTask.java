@@ -23,7 +23,7 @@ public final class ContainerTransferCompanionTask
         extends AbstractCompanionTask<ContainerTransferTaskRecord> {
     /** 只有游戏确认一次菜单点击生效才给长搬运续时；等待中的点击不能无限续时。 */
     private static final long CLICK_PROGRESS_LEASE_TICKS = 60L * 20L;
-    private enum Phase { BEGIN, QUICK, PICKUP, PLACE_ALL, PLACE_ONE, SWAP_DEST, RETURN_CURSOR, CLOSE, FAILING }
+    private enum Phase { BEGIN, QUICK, PICKUP, PLACE_ALL, SPLIT, SWAP_DEST, RETURN_CURSOR, CLOSE, FAILING }
     private int moveIndex;
     private Phase phase = Phase.BEGIN;
     private MenuReceipt receipt;
@@ -33,7 +33,9 @@ public final class ContainerTransferCompanionTask
     private int requested;
     private int movedThis;
     private boolean swapMode;
-    private boolean wholePlacement;
+    private ContainerSplitTransfer split;
+    private Map<String, Object> splitEvidence = Map.of();
+    private int confirmedSplitClicks;
     private final List<Integer> moved = new ArrayList<>();
     private String pendingFailure;
     private AbstractContainerMenu menu;
@@ -91,7 +93,7 @@ public final class ContainerTransferCompanionTask
             case QUICK -> submitQuick(context, move);
             case PICKUP -> submitPickup(context, move);
             case PLACE_ALL -> submitAll(context, move);
-            case PLACE_ONE -> submitOne(context, move);
+            case SPLIT -> splitTick(context);
             case SWAP_DEST -> submitSwap(context, move);
             case RETURN_CURSOR -> submitReturn(context, move);
             case CLOSE -> closeCompleted(context);
@@ -164,8 +166,27 @@ public final class ContainerTransferCompanionTask
             return beginFailure("destination slot " + move.to() + " has room for only " + capacity
                     + " item(s), fewer than requested " + requested);
         }
-        wholePlacement = requested == source.getCount();
-        phase = Phase.PICKUP;
+        if (requested < source.getCount()) {
+            // 尾数先求普通左右键的分堆路径；例如 64 取 49 分成 32、16、1，不临时向背包装入超额物品。
+            try { split = new ContainerSplitTransfer(player, player.containerMenu, move, requested); }
+            catch (IllegalArgumentException unsupported) { return beginFailure(unsupported.getMessage()); }
+            phase = Phase.SPLIT;
+        } else phase = Phase.PICKUP;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState splitTick(LocalPlayerContext context) {
+        var status = split.tick(context);
+        splitEvidence = split.evidence();
+        if (split.confirmedThisTick()) {
+            confirmedSplitClicks++;
+            r.extendDeadlineTo(player.level().getGameTime() + CLICK_PROGRESS_LEASE_TICKS);
+        }
+        if (status == ContainerSplitTransfer.Status.FAILED) {
+            preserveUnexpectedCursor = split.preserveMenu();
+            fail(split.failure(), FailureType.TARGET_LOST); return TaskState.FAILED;
+        }
+        if (status == ContainerSplitTransfer.Status.COMPLETE) completeMove(requested);
         return TaskState.RUNNING;
     }
 
@@ -198,17 +219,7 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
-    // 右键放一个，通过鼠标上的数量少一来确认；要放几件就重复几次，剩余的随后还给源格。
-    private TaskState submitOne(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
-        int before = player.containerMenu.getCarried().getCount();
-        receipt = context.menus().click(
-                context, move.to(), 1, ClickType.PICKUP,
-                (c, ignored) -> c.player().containerMenu.getCarried().getCount() == before - 1
-                        ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING, 20);
-        return TaskState.RUNNING;
-    }
-
-    /** 完整兼容的一堆物品通过一次普通左键放入，尾数才逐件右键分出。 */
+    /** 完整兼容的一堆物品通过一次普通左键放入；尾数由分堆执行器选择半堆和少量逐件操作。 */
     // 整堆放入一般要求目标格增加指定数量、鼠标清空。
     // 调用方明确允许机器立即消耗时，可改用源格准确扣减与鼠标清空来确认，不要求机器槽长期保留原物品。
     private TaskState submitAll(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
@@ -281,16 +292,8 @@ public final class ContainerTransferCompanionTask
     private void afterConfirmedClick() {
         switch (phase) {
             case QUICK -> completeMove(requested);
-            case PICKUP -> phase = swapMode ? Phase.SWAP_DEST
-                    : wholePlacement ? Phase.PLACE_ALL : Phase.PLACE_ONE;
+            case PICKUP -> phase = swapMode ? Phase.SWAP_DEST : Phase.PLACE_ALL;
             case PLACE_ALL -> completeMove(requested);
-            case PLACE_ONE -> {
-                movedThis++;
-                phase = movedThis >= requested
-                        ? (player.containerMenu.getCarried().isEmpty() ? Phase.BEGIN : Phase.RETURN_CURSOR)
-                        : Phase.PLACE_ONE;
-                if (movedThis >= requested && player.containerMenu.getCarried().isEmpty()) completeMove(movedThis);
-            }
             case SWAP_DEST -> {
                 movedThis = requested;
                 phase = Phase.RETURN_CURSOR;
@@ -308,7 +311,7 @@ public final class ContainerTransferCompanionTask
         sourceKind = ItemStack.EMPTY;
         sourceBefore = ItemStack.EMPTY;
         destinationBefore = ItemStack.EMPTY;
-        requested = 0; movedThis = 0; swapMode = false; wholePlacement = false;
+        requested = 0; movedThis = 0; swapMode = false; split = null;
     }
 
     // 失败时若鼠标还拿着东西且源格有效，先尝试放回；放回后仍报告原失败，不把回收鼠标物品当任务成功。
@@ -334,6 +337,7 @@ public final class ContainerTransferCompanionTask
     }
     // 只有仍在同一个菜单、且没有标记外来游标时才安排收尾关闭；换成别的界面时不向它回退或点击。
     @Override protected void cleanup() {
+        if (split != null && split.preserveMenu()) preserveUnexpectedCursor = true;
         if (!preserveUnexpectedCursor && menu != null && player.containerMenu == menu && (!completed || r.closeAfter)
                 && (receipt == null || receipt.terminal() || receipt.kind() != MenuReceipt.Kind.CLOSE)) {
             try {
@@ -346,7 +350,12 @@ public final class ContainerTransferCompanionTask
         super.cleanup();
     }
     @Override protected Map<String, Object> resultData() {
-        return Map.of("completed_moves", moveIndex, "moved_counts", List.copyOf(moved));
+        var data = new java.util.LinkedHashMap<String, Object>();
+        data.put("completed_moves", moveIndex); data.put("moved_counts", List.copyOf(moved));
+        // 原生回执确认后才累计，计划七次或已经点出七次都不能直接当作七次成功。
+        data.put("confirmed_split_clicks", confirmedSplitClicks);
+        if (!splitEvidence.isEmpty()) data.put("split_transfer", splitEvidence);
+        return Map.copyOf(data);
     }
     @Override protected String successMessage() { return "confirmed " + moveIndex + " container transfer(s)"; }
     @Override protected String cancelledMessage() { return "container transfer interrupted"; }
