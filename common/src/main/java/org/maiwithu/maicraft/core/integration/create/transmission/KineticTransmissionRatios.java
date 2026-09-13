@@ -16,7 +16,10 @@ import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGe
 /** Installed Create 6.0.10 RotationPropagator gear ratios and directional gearbox propagation. */
 final class KineticTransmissionRatios {
     record Mesh(BlockPos from, BlockPos to, String fromFamily, String toFamily, Direction.Axis fromAxis, Direction.Axis toAxis, double multiplier) {}
-    record Result(Double multiplier, List<Mesh> meshes) {}
+    record Result(Double multiplier, List<Mesh> meshes, Map<BlockPos, Double> nodeMultipliers) {
+        Result(Double multiplier, List<Mesh> meshes) { this(multiplier, List.copyOf(meshes), Map.of()); }
+        Result { meshes = List.copyOf(meshes); nodeMultipliers = Map.copyOf(nodeMultipliers); }
+    }
     private record Node(BlockPos at, String family, Direction.Axis axis, Map<String, String> state) {}
     private record Edge(BlockPos to, double multiplier, Direction face) {}
     private KineticTransmissionRatios() {}
@@ -60,7 +63,7 @@ final class KineticTransmissionRatios {
                 else if (Math.abs(known - expected) > 1e-9) return new Result(null, meshes);
             }
         }
-        return new Result(ratios.size() == nodes.size() ? ratios.get(plan.target().position()) : null, List.copyOf(meshes));
+        return new Result(ratios.size() == nodes.size() ? ratios.get(plan.target().position()) : null, meshes, ratios);
     }
     static JsonObject json(Plan plan) {
         Result result = calculate(plan); JsonObject out = new JsonObject();
