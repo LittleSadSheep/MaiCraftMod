@@ -23,7 +23,8 @@ public final class BuildSupplyHandoffTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         try (var h = new InteractionWorldTestHarness()) {
-            h.player.inventoryMenu.setCarried(ItemStack.EMPTY); h.position(new Vec3(7.5, 10, 7.5));
+            // 高处离场由专门回归验证；这一段从已落到地面的施工出口开始，专查连续取料交接。
+            h.player.inventoryMenu.setCarried(ItemStack.EMPTY); h.position(new Vec3(7.5, 1, 7.5));
             var first = new BuildTaskRecord.Target(Blocks.STONE_BRICKS, Items.STONE_BRICKS, new BlockPos(7, 2, 7), "wall", null, null, null);
             var second = new BuildTaskRecord.Target(Blocks.SMOOTH_QUARTZ, Items.SMOOTH_QUARTZ, new BlockPos(7, 3, 7), "trim", null, null, null);
             var plan = new BuildTaskRecord("upper-wall", 1000, List.of(first, second), false);
@@ -31,14 +32,14 @@ public final class BuildSupplyHandoffTest {
                     SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE,
                     List.of(SemanticAcquireTaskRecord.Source.STORAGE), false, List.of(), false);
             var task = new SemanticBuildSupplyCompanionTask(h.player, record, (owner, frozen) -> Decision.DISABLED);
-            task.start(h.player); check(task.tick(h.player) == TaskState.RUNNING, "高处缺料时先开始第一种材料获取");
+            task.start(h.player); check(task.tick(h.player) == TaskState.RUNNING, "到达施工出口后开始第一种材料获取");
             var supply = (SemanticMaterialSupplyCoordinator) field(task, "supply").get(task);
             check(supply.active() && field(supply, "returnPolicy").get(supply) == SemanticMaterialSupplyCoordinator.ReturnPolicy.CALLER_HANDOFF,
                     "只有建筑父任务明确选用交接策略");
             // 模拟角色已经在仓库取得第一种材料，让真实获取任务按当前背包事实完成。
             h.position(new Vec3(1.5, 1, 1.5)); h.inventory.setItem(0, new ItemStack(Items.STONE_BRICKS)); h.nextTick();
             for (int i = 0; i < 4 && supply.active(); i++) { task.tick(h.player); h.nextTick(); }
-            check(!supply.active() && field(supply, "returnNavigation").get(supply) == null, "第一种材料确认后不尝试返回原墙顶");
+            check(!supply.active() && field(supply, "returnNavigation").get(supply) == null, "第一种材料确认后不强行返回出发点");
             task.tick(h.player);
             check(supply.active() && h.player.blockPosition().equals(field(supply, "investigationOrigin").get(supply))
                     && field(task, "activeChild").get(task) == null, "仍在仓库就近获取第二种材料，尚未派施工返程");

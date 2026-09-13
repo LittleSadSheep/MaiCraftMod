@@ -454,16 +454,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.NO_SUPPORT, "blocked_site_cells"); return TaskState.FAILED;
         }
         if (r.supplyAccessOnly()) {
-            // 地层和保护预检通过后，补料准备直接走出口，不因缺少建筑材料停在坑里，也不开始建房。
+            // 地层和保护预检通过后先证明离场；高处或坑内均不得因缺料直接交给只能沿已有道路走的仓库任务。
             preflightDone = true;
-            excavationExit = BuildExcavationFrontier.exit(player, siteMin, siteMax);
-            if (!BuildExcavationFrontier.needsSupplyAccess(player, r.targets)) {
+            var access = BuildExcavationFrontier.supplyAccess(player, r);
+            if (access.status() == BuildExcavationFrontier.AccessStatus.READY) {
                 supplyAccessReady = true; return TaskState.SUCCESS;
             }
+            if (access.status() == BuildExcavationFrontier.AccessStatus.BLOCKED) return supplyExitUnavailable(access.code());
+            excavationExit = access.exit();
             registerProvider(); phase = Phase.EXCAVATE_EXIT; return TaskState.RUNNING;
         }
         r.excavationCargo().begin(player);
-        excavationExit = BuildExcavationFrontier.exit(player, siteMin, siteMax);
+        excavationExit = null; // 真正要离开时按已挖现场重查，不缓存尚未开挖时的地表或后来留下的柱顶。
         for (CellPlan plan : plans) {
             if (ownedAirScaffold(plan.target(), player.level().getBlockState(plan.target().pos()))) continue;
             for (BlockPos pos : clearCells(plan)) {
@@ -506,7 +508,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             var excess = r.excavationCargo().unloadable(player, scaffoldReservations());
             if (!excess.isEmpty() && r.toolSupply().policy()
                     != org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY) {
-                if (leaveExcavationBefore(Phase.EXCAVATE)) return TaskState.RUNNING;
+                TaskState access = leaveExcavationBefore(Phase.EXCAVATE);
+                if (access != null) return access;
                 spoilSupply.begin(player, r.getToolCallId() + "/excavation-spoil", r.getDeadlineGameTime(),
                         excess, r.toolSupply().protectedLabels(), 48);
                 return TaskState.RUNNING;
@@ -517,8 +520,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             excavating = false;
             digger.preferTopFace(false);
             if (excavation.remaining() == 0) {
-                if (required.entrySet().stream().anyMatch(e -> inventory.mainInventoryCount(e.getKey()) < e.getValue())
-                        && leaveExcavationBefore(Phase.SELECT)) return TaskState.RUNNING;
+                if (r.toolSupply().policy() != org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
+                        && required.entrySet().stream().anyMatch(e -> inventory.mainInventoryCount(e.getKey()) < e.getValue())) {
+                    TaskState access = leaveExcavationBefore(Phase.SELECT);
+                    if (access != null) return access;
+                }
                 phase = Phase.SELECT; return TaskState.RUNNING;
             }
             failAt(siteMin, "No exposed ground approach reaches the remaining excavation layer; "
@@ -534,10 +540,20 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return TaskState.RUNNING;
     }
 
-    private boolean leaveExcavationBefore(Phase resume) {
-        if (excavationExit == null || player.getY() >= excavationExit.getY() - 1) return false;
+    private TaskState leaveExcavationBefore(Phase resume) {
+        var access = BuildExcavationFrontier.supplyAccess(player, r);
+        if (access.status() == BuildExcavationFrontier.AccessStatus.READY) return null;
+        if (access.status() == BuildExcavationFrontier.AccessStatus.BLOCKED) return supplyExitUnavailable(access.code());
+        excavationExit = access.exit();
         stopNav(); afterExcavationExit = resume; phase = Phase.EXCAVATE_EXIT;
-        return true;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState supplyExitUnavailable(String reason) {
+        // 缺少真实出口时保留现场，明确报告通行准备失败，不能拿当前位置充当离场完成。
+        failAt(player.blockPosition(), "No verified exterior supply exit: " + reason,
+                FailureType.NO_PATH, "construction_supply_exit_unavailable", false);
+        return TaskState.FAILED;
     }
 
     private TaskState excavationExitTick() {
@@ -554,9 +570,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     yield TaskState.FAILED;
                 }
                 if (r.supplyAccessOnly()) {
-                    supplyAccessReady = !BuildExcavationFrontier.needsSupplyAccess(player, r.targets);
+                    supplyAccessReady = BuildExcavationFrontier.supplyAccess(player, r).status() == BuildExcavationFrontier.AccessStatus.READY;
                     if (supplyAccessReady) yield TaskState.SUCCESS;
-                    failAt(excavationExit, "The body is still below the observed exterior supply route",
+                    failAt(excavationExit, "The body has not reached a verified exterior supply route",
                             FailureType.NO_PATH, "supply_access_not_reached", false);
                     yield TaskState.FAILED;
                 }
@@ -641,8 +657,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && !player.level().getBlockState(clearing).isAir()
                 && r.toolSupply().policy() != org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                 && org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.excavationTool(
-                        player, player.level().getBlockState(clearing), excavation.remaining()) != null
-                && leaveExcavationBefore(Phase.CLEAR_NAV)) return TaskState.RUNNING;
+                        player, player.level().getBlockState(clearing), excavation.remaining()) != null) {
+            TaskState access = leaveExcavationBefore(Phase.CLEAR_NAV);
+            if (access != null) return access;
+        }
         if (excavating && (excavationTools.active() || player.level().isLoaded(clearing)
                 && !player.level().getBlockState(clearing).isAir())
                 && !excavationTools.ready(player, r, clearing, excavation.remaining(), this::runChild)) {

@@ -162,10 +162,9 @@ final class SemanticBuildSupplyCompanionTask
             return TaskState.RUNNING;
         }
         if (need.fetch() > 0) {
-            // 缺料时先看脚下：还在地下施工区就借施工权限出坑，站稳地面后才让普通仓库供料接手。
-            if (BuildExcavationFrontier.needsSupplyAccess(player, activePlan.targets)) startBuild(true);
-            else startBatchSupply(need);
-            return TaskState.RUNNING;
+            // 坑底、屋顶和图纸旁脚手架都先交给施工离场；未找到可靠出口时不能让仓库失败再递归去采原料。
+            if (!prepareSupplyAccess()) startBatchSupply(need);
+            return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
         }
         if (need.consumableBeforeBlock() > 0) {
             startBuild();
@@ -211,7 +210,7 @@ final class SemanticBuildSupplyCompanionTask
             boolean ready = !buildOutcomeUncertain && terminal == TaskState.SUCCESS && result != null && result.success()
                     && result.data() != null && Boolean.TRUE.equals(result.data().get("supply_access_only"))
                     && Boolean.TRUE.equals(result.data().get("supply_access_ready"))
-                    && !BuildExcavationFrontier.needsSupplyAccess(player, activePlan.targets);
+                    && BuildExcavationFrontier.supplyAccess(player, activePlan).status() == BuildExcavationFrontier.AccessStatus.READY;
             if (ready) return TaskState.RUNNING;
             stopFromChild("construction_supply_access_failed",
                     "could not reach the exterior ground before material supply"
@@ -351,11 +350,21 @@ final class SemanticBuildSupplyCompanionTask
                 return false;
             }
         }
-        if (BuildExcavationFrontier.needsSupplyAccess(player, activePlan.targets)) { startBuild(true); return true; }
+        if (prepareSupplyAccess()) return true;
         cargoCheckPending = false;
         cargoSearchOrigin = player.blockPosition().immutable();
         cargoEffectsSeen = false;
         spoilSupply.begin(player, childId("excavation-spoil"), r.getDeadlineGameTime(), excess, r.protectedLabels, 48);
+        return true;
+    }
+
+    private boolean prepareSupplyAccess() {
+        // 同一离场证明同时服务于存废料和取建材；未知出口不冒充已到地面，也不授予普通仓库改地形权限。
+        var access = BuildExcavationFrontier.supplyAccess(player, activePlan);
+        if (access.status() == BuildExcavationFrontier.AccessStatus.READY) return false;
+        if (access.status() == BuildExcavationFrontier.AccessStatus.BLOCKED)
+            stopWith("construction_supply_exit_unavailable", "No verified exterior supply route: " + access.code(), FailureType.NO_PATH);
+        else startBuild(true);
         return true;
     }
 

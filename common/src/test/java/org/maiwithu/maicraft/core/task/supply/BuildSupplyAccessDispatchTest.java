@@ -32,6 +32,8 @@ public final class BuildSupplyAccessDispatchTest {
             TaskFactory.register(BuildTaskRecord.class, BuildCompanionTask::new);
             accessPrecedesSupplyAndDoesNotCountAsBuilding();
             falseArrivalStopsBeforeStorage();
+            roofAccessPrecedesStorage();
+            unknownExitStopsBeforeAcquisition();
         } finally {
             if (before == null) runners.remove(BuildTaskRecord.class); else runners.put(BuildTaskRecord.class, before);
         }
@@ -52,7 +54,8 @@ public final class BuildSupplyAccessDispatchTest {
             check(task.progress().get("phase").equals("preparing_supply_access")
                     && field(task, "buildRounds").getInt(task) == 0, "access has its own progress phase and is not a built batch");
             // 只注入已经站到地面的观察，然后推进真实子任务预检；这一步不能把未建的木地板算完成。
-            h.position(new Vec3(2.5, 4, 4.5)); h.nextTick();
+            var exit = org.maiwithu.maicraft.core.task.build.BuildExcavationFrontier.supplyAccess(h.player, access).exit();
+            h.position(Vec3.atBottomCenterOf(exit)); h.nextTick();
             for (int i = 0; i < 4 && field(task, "activeChild").get(task) != null; i++) {
                 check(task.tick(h.player) == TaskState.RUNNING, "access completion leaves the parent building goal pending"); h.nextTick();
             }
@@ -65,7 +68,7 @@ public final class BuildSupplyAccessDispatchTest {
             check(!SemanticBuildSupplyCompanionTask.batchCompleted(TaskState.SUCCESS, TaskResult.ok("access only",
                     Map.of("supply_access_only", true, "supply_access_ready", true))), "the shared batch predicate also rejects an access-only success");
             task.tick(h.player);
-            check(supply.active() && new BlockPos(2, 4, 4).equals(field(supply, "investigationOrigin").get(supply)),
+            check(supply.active() && exit.equals(field(supply, "investigationOrigin").get(supply)),
                     "后续取料从安全出口地面开始，再由建筑任务接管施工站位");
             // 对比原来的供料规则；正常背包检查与仓储合成仍保留，出坑准备不能额外开放采矿等来源。
             check(field(supply, "sources").get(supply).equals(SemanticMaterialSupplyCoordinator.resolveSources(
@@ -96,6 +99,43 @@ public final class BuildSupplyAccessDispatchTest {
                     "a body still inside the pit invalidates a claimed access success");
             check(!((SemanticMaterialSupplyCoordinator) field(task, "supply").get(task)).active()
                     && field(task, "buildRounds").getInt(task) == 0, "failed preparation neither fetches nor fabricates construction progress");
+            task.result(TaskState.FAILED);
+        }
+    }
+
+    private static void roofAccessPrecedesStorage() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var task = task(h);
+            // 角色在图纸外一格的施工柱顶，材料仍缺；先调度施工离场，不能把“出了图纸边界”当成到达地面。
+            h.set(new BlockPos(6, 7, 4), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+            h.position(new Vec3(6.5, 8, 4.5)); task.start(h.player);
+            check(task.tick(h.player) == TaskState.RUNNING
+                            && ((BuildTaskRecord) field(task, "activeRecord").get(task)).supplyAccessOnly(),
+                    "a rooftop support outside the blueprint must dispatch construction access before the warehouse");
+            check(!((SemanticMaterialSupplyCoordinator) field(task, "supply").get(task)).active()
+                            && field(task, "buildRounds").getInt(task) == 0 && h.blockUses() == 0 && h.itemUses() == 0,
+                    "dispatch grants no item acquisition, building completion or speculative native clicks");
+            task.result(TaskState.CANCELLED);
+        }
+    }
+
+    private static void unknownExitStopsBeforeAcquisition() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var task = task(h);
+            // 已加载范围只剩孤柱和危险地面：查询必须报告出口未证实，不得递归转去采木头凑建材。
+            for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++) {
+                h.set(new BlockPos(x, 0, z), net.minecraft.world.level.block.Blocks.MAGMA_BLOCK.defaultBlockState());
+                for (int y = 1; y < 8; y++) h.set(new BlockPos(x, y, z), net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+            }
+            h.set(new BlockPos(4, 7, 4), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+            h.position(new Vec3(4.5, 8, 4.5)); task.start(h.player);
+            check(task.tick(h.player) == TaskState.FAILED
+                            && task.resultData().get("failure_code").equals("construction_supply_exit_unavailable"),
+                    "an unverified exit fails with an access reason before choosing acquisition sources");
+            check(!((SemanticMaterialSupplyCoordinator) field(task, "supply").get(task)).active()
+                            && field(task, "activeChild").get(task) == null && h.inventory.isEmpty()
+                            && h.blockUses() == 0 && h.itemUses() == 0,
+                    "unknown access cannot open containers, mine replacement resources or manufacture items");
             task.result(TaskState.FAILED);
         }
     }
