@@ -39,7 +39,8 @@ final class SemanticGoalContract {
         }
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
             if (BuildingSceneContract.supports(goal)) BuildingSceneContract.validate(goal);
-            if (goal.parameters().has("project_id")) {
+            // 明确采用模型修订另走严格契约；普通续建仍禁止混入新设计或新取材条件。
+            if (goal.parameters().has("project_id") && !"revise_project".equals(BuildingSceneContract.operation(goal))) {
                 java.util.UUID.fromString(BuildingSceneContract.string(goal.parameters(), "project_id"));
                 for (String key : goal.parameters().keySet())
                     if (!Set.of("project_id", "protected_labels").contains(key))

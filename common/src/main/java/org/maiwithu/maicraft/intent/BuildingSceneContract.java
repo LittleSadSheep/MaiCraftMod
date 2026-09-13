@@ -11,9 +11,9 @@ import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
  */
 final class BuildingSceneContract {
     static final Set<String> OPERATIONS = Set.of("create_scene", "update_scene", "get_scene_info",
-            "get_object_info", "export_scene", "preview", "build");
+            "get_object_info", "export_scene", "preview", "revise_project", "build");
     private static final Set<String> FIELDS = Set.of("operation", "scene", "scene_id", "blueprint",
-            "edits", "object_name", "format", "page", "replace_existing", "material_policy", "protected_labels");
+            "edits", "object_name", "format", "page", "replace_existing", "material_policy", "protected_labels", "project_id");
 
     private BuildingSceneContract() {}
 
@@ -49,8 +49,14 @@ final class BuildingSceneContract {
         if (p.has("scene")) BuildingSceneCompiler.validateWire(object(p, "scene"));
         if (p.has("blueprint")) MachineBlueprintDocument.validateWire(object(p, "blueprint"));
         if (p.has("scene_id")) java.util.UUID.fromString(string(p, "scene_id"));
-        if (Set.of("update_scene", "get_scene_info", "get_object_info", "export_scene").contains(op)
+        if (Set.of("update_scene", "get_scene_info", "get_object_info", "export_scene", "revise_project").contains(op)
                 && !p.has("scene_id")) throw new IllegalArgumentException(op + " needs scene_id");
+        // 采用新场景修订必须明确指向旧项目，且不夹带新的取材、地点或替换权限；普通续建仍只读取冻结目标。
+        if (op.equals("revise_project")) {
+            java.util.UUID.fromString(string(p, "project_id"));
+            if (goal.target() != null || !Set.of("operation", "scene_id", "project_id").containsAll(p.keySet()))
+                throw new IllegalArgumentException("revise_project keeps the original site and policies; supply only scene_id and project_id");
+        } else if (p.has("project_id")) throw new IllegalArgumentException("model operations accept project_id only with revise_project");
         if ("create_scene".equals(op) && !p.has("scene")) throw new IllegalArgumentException("create_scene needs scene");
         if ("update_scene".equals(op)) validateEdits(object(p, "edits"));
         else if (p.has("edits")) throw new IllegalArgumentException("edits is only used by update_scene");

@@ -29,6 +29,7 @@ public final class BuildingSceneRuntimeTest {
         JsonObject p = new JsonObject(); p.add("scene", scene); p.addProperty("operation", "create_scene");
         Goal goal = goal(p);
         IntentRuntime runtime = IntentRuntime.get();
+        projectRevisionIsExplicitAndIdle(runtime);
         Plan plan = runtime.compile(goal, 100);
         check(IntentRuntime.isReadOnlyDesign(goal), "modelling must use the no-body execution path");
         var saved = IntentStateCodec.encode("test", List.of(plan), List.of(), Map.of(), List.of());
@@ -119,6 +120,20 @@ public final class BuildingSceneRuntimeTest {
             }
             check(f.blockUses() == 0 && f.itemUses() == 0, "scene compilation and storage must not issue game interactions");
         }
+    }
+    private static void projectRevisionIsExplicitAndIdle(IntentRuntime runtime) {
+        // 采用模型修订必须单独声明项目和新模型，不能混进普通续建请求或悄悄改变取料权限。
+        JsonObject parameters=new JsonObject();parameters.addProperty("operation","revise_project");
+        parameters.addProperty("scene_id",java.util.UUID.randomUUID().toString());parameters.addProperty("project_id",java.util.UUID.randomUUID().toString());
+        Goal revision=goal(parameters).withTarget(null);runtime.compile(revision,100);
+        check(IntentRuntime.isReadOnlyDesign(revision),"adopting a scene revision cannot submit body work");
+        try { runtime.compile(goal(parameters),100);throw new AssertionError("a revision moved the site"); } catch(IllegalArgumentException expected) { }
+        var bad=parameters.deepCopy();bad.addProperty("material_policy","ordinary");
+        try { runtime.compile(goal(bad).withTarget(null),100);throw new AssertionError("a revision changed supply policy"); } catch(IllegalArgumentException expected) { }
+        bad=parameters.deepCopy();bad.addProperty("operation","build");rejects(runtime,bad);
+        var active=new org.maiwithu.maicraft.core.task.build.BuildTaskRecord("active-revision",100,List.of(),false);
+        try { BuildingSceneAdapter.requireRevisionIdle(active);throw new AssertionError("pending body work was ignored"); } catch(IllegalArgumentException expected) { }
+        active.setState(org.maiwithu.maicraft.task.TaskState.CANCELLED);BuildingSceneAdapter.requireRevisionIdle(active);BuildingSceneAdapter.requireRevisionIdle(null);
     }
 
     private static org.maiwithu.maicraft.task.TaskResult sceneReport(Goal goal, net.minecraft.client.player.LocalPlayer player,

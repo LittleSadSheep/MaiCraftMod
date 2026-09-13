@@ -41,6 +41,8 @@ final class BuildingSceneAdapter {
         BuildingSceneContract.validate(goal);
         JsonObject p = goal.parameters();
         String op = BuildingSceneContract.operation(goal);
+        // 修订冻结项目之前先结束身体任务，避免旧施工单在材料检查点把新修订覆盖回去。
+        if (op.equals("revise_project")) requireRevisionIdle(org.maiwithu.maicraft.task.CompanionTickDispatcher.current());
         String dimension = player.level().dimension().location().toString();
         BuildingSceneStore.Entry entry = null;
         BuildingSceneStore store = null;
@@ -83,6 +85,15 @@ final class BuildingSceneAdapter {
         JsonObject args = buildArguments(blueprint, anchor, p);
         // 先确认注册名和状态能被当前游戏表达，再保存新版本；缺材料种类不会被换成近似方块。
         var targets = BuildTool.resolvedTargets(args.getAsJsonArray("ops"), true);
+        if (op.equals("revise_project")) {
+            var revision = org.maiwithu.maicraft.core.blueprint.BuildProjectStore.current().reviseFromScene(
+                    p.get("project_id").getAsString(), player.level(), entry.parentSceneId(), entry.sceneId(), targets);
+            // 这里只更新确定的施工要求；原世界、材料和原生支撑记录保留，后续仍须显式续建才能挖掉旧地板。
+            return new IntentAction.Report(TaskResult.ok("Building project adopted the scene revision; no construction was started",
+                    Map.of("construction_started", false, "project_id", revision.projectId(), "scene_id", revision.sceneId(),
+                            "previous_scene_id", revision.previousSceneId(), "changed_targets", revision.changedTargets(),
+                            "retained_scaffolds", revision.retainedScaffolds())), null);
+        }
         if (op.equals("update_scene")) entry = store.updatePrepared(entry.sceneId(), dimension, prepared);
         if (entry == null && prepared != null) entry = store.savePrepared(prepared, anchor);
         Map<String, Object> data = new LinkedHashMap<>();
@@ -168,6 +179,10 @@ final class BuildingSceneAdapter {
         var anchor = entry.anchor();
         result.put("anchor", Map.of("x", anchor.x(), "y", anchor.y(), "z", anchor.z(), "dimension", anchor.dimension()));
         return result;
+    }
+    static void requireRevisionIdle(org.maiwithu.maicraft.task.TaskRecord active) {
+        if (active != null && !active.getState().isTerminal())
+            throw new IllegalArgumentException("Finish or cancel the active body task before revising a frozen building project");
     }
 
     @SuppressWarnings("unchecked")
