@@ -27,7 +27,6 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
@@ -50,7 +49,6 @@ final class CreateMechanicalPowerTask
     private static final int NETWORK_CONFIRM_TICKS = 80;
     private static final int READY_TICKS = 2;
     private static final float LOOK_EPSILON = 1.5f;
-    private static final float MIN_VERTICAL_PITCH = 48.0f;
     /** Renewable liveness window; this is deliberately not a maximum task duration. */
     private static final long PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
     private static final int PROGRESS_GRACE_TICKS = 100;
@@ -94,6 +92,8 @@ final class CreateMechanicalPowerTask
     private long constructionProgressRevision;
     private int readyTicks;
     private int networkWaitTicks;
+    private boolean jumpedForFace;
+    private int jumpTicks;
     private NativeActionReceipt placementReceipt;
     private BlockPos activeStand;
     private long bodyEpoch;
@@ -674,7 +674,7 @@ final class CreateMechanicalPowerTask
         return TaskState.RUNNING;
     }
 
-    // 复查真实准星、足够陡的放置角度和原版预计轴向；同时确认现场仍空、手里物品没变后才提交一次放置。
+    // 复查真实准星与原生预计轴向；竖轴邻接可继承轴向，够不到顶面时只做一次有净空的原生跳跃。
     private TaskState alignAndPlace(LocalPlayerContext context) {
         CreateMechanicalPlan.RouteCell cell = plan.cells().get(cursor);
         if (!context.level().isLoaded(cell.position()) || !context.level().isLoaded(cell.support())) {
@@ -689,16 +689,28 @@ final class CreateMechanicalPowerTask
         }
         Vec3 point = faceCenter(cell.support(), cell.supportFace());
         InputDriver.halt(player);
+        InputDriver.sneak(player, false);
+        if (player.isShiftKeyDown() || !jumpedForFace && !player.onGround()) return TaskState.RUNNING;
         InputDriver.lookAt(player, point);
         float[] look = lookAngles(player.getEyePosition(), point);
-        if (Math.abs(look[1]) < MIN_VERTICAL_PITCH) {
-            beginFailure("endpoint_orientation_unsupported",
-                    "the verified stance cannot aim steeply enough to place a vertical-axis chain drive",
-                    FailureType.STANCE_DUD, List.of("choose_other_endpoint", "make_alternate_stance", "cancel"), false);
+        if (jumpedForFace && ++jumpTicks > 30) {
+            beginFailure("placement_jump_unsettled", "the native jump did not expose the declared support face",
+                    FailureType.STANCE_DUD, List.of("make_alternate_stance", "cancel"), false);
             return TaskState.RUNNING;
         }
         if (!lookReady(player, look[0], look[1])) {
             readyTicks = 0;
+            return TaskState.RUNNING;
+        }
+        if (CreateMechanicalPlacementGeometry.needsTopFaceJump(player.getEyePosition(), point, cell.supportFace())) {
+            if (!jumpedForFace && player.onGround()) {
+                if (!CreateMechanicalPlacementGeometry.clearForJump(context.level(), PlayerNav.playerFeet(player))) {
+                    beginFailure("placement_jump_blocked", "the support top needs a native jump but its headroom is blocked",
+                            FailureType.STANCE_DUD, List.of("make_alternate_stance", "cancel"), false);
+                    return TaskState.RUNNING;
+                }
+                jumpedForFace = true; jumpTicks = 0; InputDriver.jump(player);
+            }
             return TaskState.RUNNING;
         }
         BlockHitResult hit = nativeRaycast(player);
@@ -715,10 +727,6 @@ final class CreateMechanicalPowerTask
         }
         networkWaitTicks = 0;
         readyTicks++;
-        if (cursor == 0) {
-            context.body().applyMovement(new BodyControlPort.Movement(0, 0, false, true, false),
-                    context.tickRevision());
-        }
         if (readyTicks < READY_TICKS) return TaskState.RUNNING;
         ItemStack beforeStack = player.getMainHandItem().copy();
         if (CreateMechanicalStager.usable(beforeStack, chainItem) <= 0) {
@@ -762,6 +770,7 @@ final class CreateMechanicalPowerTask
             return TaskState.RUNNING;
         }
         cursor++;
+        jumpedForFace = false; jumpTicks = 0;
         renewProgressLease();
         readyTicks = 0;
         context.body().clearLook();
@@ -858,7 +867,7 @@ final class CreateMechanicalPowerTask
         return TaskState.FAILED;
     }
 
-    // 目标要变成预计状态且恰好少一件物品；当前还要求被点击的支撑完全不变，合法链条连接状态更新也会被当作偏离。
+    // 目标和一件材料消耗必须同时确认；链条支撑仅允许该次放置的原生 updateShape 结果。
     private NativeConfirmation placementConfirmation(
             CreateMechanicalPlan.RouteCell cell,
             BlockState targetBefore,
@@ -866,6 +875,8 @@ final class CreateMechanicalPowerTask
             BlockState expected,
             ItemStack stackBefore,
             int totalBefore) {
+        BlockState supportAfter = supportBefore.getBlock() == chainBlock
+                ? supportBefore.updateShape(cell.supportFace(), expected, player.level(), cell.support(), cell.position()) : supportBefore;
         return context -> {
             ClientLevel level = context.level();
             if (!level.isLoaded(cell.position()) || !level.isLoaded(cell.support())) {
@@ -874,7 +885,7 @@ final class CreateMechanicalPowerTask
             BlockState target = level.getBlockState(cell.position());
             BlockState support = level.getBlockState(cell.support());
             ItemStack held = context.player().getMainHandItem();
-            if (!support.equals(supportBefore)) return NativeConfirmation.Verdict.DIVERGED;
+            if (!support.equals(supportBefore) && !support.equals(supportAfter)) return NativeConfirmation.Verdict.DIVERGED;
             boolean blockAfter = target.equals(expected) && "y".equals(axisName(target));
             boolean itemAfter = exactlyOneConsumed(stackBefore, held)
                     && inventoryCount(context.player(), chainItem) == totalBefore - 1;

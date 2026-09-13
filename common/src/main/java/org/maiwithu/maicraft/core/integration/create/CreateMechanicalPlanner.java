@@ -64,6 +64,10 @@ final class CreateMechanicalPlanner {
     }
 
     private static BlockPos findStand(ClientLevel level, BlockPos target, Set<BlockPos> route) {
+        return findPlacementStand(level, target, route, CreateMechanicalPlacementGeometry.inheritsVerticalAxis(level, target));
+    }
+
+    static BlockPos findPlacementStand(ClientLevel level, BlockPos target, Set<BlockPos> route, boolean inheritsVertical) {
         List<BlockPos> candidates = new ArrayList<>();
         for (int dy = -2; dy <= 2; dy++) {
             for (int dx = -4; dx <= 4; dx++) {
@@ -77,8 +81,8 @@ final class CreateMechanicalPlanner {
         candidates.sort(Comparator.comparingDouble((BlockPos position) -> position.distSqr(target))
                 .thenComparingLong(BlockPos::asLong));
         for (BlockPos feet : candidates) {
-            if (standable(level, feet) && withinPlacementReach(feet, target)
-                    && verticalAxisPlacementAngle(feet, target)) return feet.immutable();
+            if (standable(level, feet) && CreateMechanicalPlacementGeometry.feasibleView(feet, target, inheritsVertical)
+                    && (!inheritsVertical || CreateMechanicalPlacementGeometry.clearForJump(level, feet))) return feet.immutable();
         }
         return null;
     }
@@ -108,23 +112,6 @@ final class CreateMechanicalPlanner {
                 feet.getX() + 0.8, feet.getY() + 1.8, feet.getZ() + 0.8);
         // 这里没有排除操作者自己，也没有仅保留会阻挡身体的实体；玩家已经站在这里时反而会被拒绝。
         return level.getEntities(null, body).isEmpty();
-    }
-
-    private static boolean withinPlacementReach(BlockPos feet, BlockPos target) {
-        double eyeX = feet.getX() + 0.5;
-        double eyeY = feet.getY() + 1.62;
-        double eyeZ = feet.getZ() + 0.5;
-        double dx = target.getX() + 0.5 - eyeX;
-        double dy = target.getY() + 0.5 - eyeY;
-        double dz = target.getZ() + 0.5 - eyeZ;
-        return dx * dx + dy * dy + dz * dz <= 4.35 * 4.35;
-    }
-
-    private static boolean verticalAxisPlacementAngle(BlockPos feet, BlockPos target) {
-        double dx = target.getX() - feet.getX();
-        double dz = target.getZ() - feet.getZ();
-        double dy = target.getY() + 0.5 - (feet.getY() + 1.62);
-        return Math.toDegrees(Math.atan2(Math.abs(dy), Math.sqrt(dx * dx + dz * dz))) >= 48.0;
     }
 
     static boolean isEmptyRouteCell(ClientLevel level, BlockPos position) {

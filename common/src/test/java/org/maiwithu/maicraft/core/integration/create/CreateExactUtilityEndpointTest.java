@@ -21,6 +21,7 @@ public final class CreateExactUtilityEndpointTest {
                     "exact input absence cannot initiate unrelated chunk exploration");
             check(h.blockUses() == 0 && h.itemUses() == 0, "missing input must fail without actions");
         }
+        CreateMechanicalPlacementGeometryTest.main(args);
         System.out.println("CreateExactUtilityEndpointTest: legacy and exact interface boundaries passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

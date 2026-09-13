@@ -408,9 +408,10 @@ final class CreateProgressiveSurvey {
     }
 
     private BlockPos findStandForRoute(ClientLevel level, BlockPos position) {
+        boolean inheritsVertical = CreateMechanicalPlacementGeometry.inheritsVerticalAxis(level, position);
         // Reuse the planner's conservative body geometry, then reject any stand occupied by a
         // future route cell. Expanding shells preserve deterministic choice.
-        for (int radius = 1; radius <= 4; radius++) {
+        for (int radius = 0; radius <= 4; radius++) {
             for (int dy = -2; dy <= 2; dy++) {
                 for (int dx = -radius; dx <= radius; dx++) {
                     for (int dz = -radius; dz <= radius; dz++) {
@@ -418,21 +419,13 @@ final class CreateProgressiveSurvey {
                         BlockPos probe = position.offset(dx, dy, dz);
                         if (routeSet.contains(probe) || routeSet.contains(probe.above())) continue;
                         BlockPos stand = CreateMechanicalPlanner.findTravelStand(level, probe, 0, 0);
-                        if (stand != null && steepEnough(stand, position)) return stand;
+                        if (stand != null && CreateMechanicalPlacementGeometry.feasibleView(stand, position, inheritsVertical)
+                                && (!inheritsVertical || CreateMechanicalPlacementGeometry.clearForJump(level, stand))) return stand;
                     }
                 }
             }
         }
         return null;
-    }
-
-    private static boolean steepEnough(BlockPos stand, BlockPos target) {
-        double dx = target.getX() + 0.5 - (stand.getX() + 0.5);
-        double dz = target.getZ() + 0.5 - (stand.getZ() + 0.5);
-        double dy = target.getY() + 0.5 - (stand.getY() + 1.62);
-        double pitch = Math.toDegrees(Math.atan2(Math.abs(dy), Math.sqrt(dx * dx + dz * dz)));
-        double reachSq = dx * dx + dy * dy + dz * dz;
-        return pitch >= 48.0 && reachSq <= 4.35 * 4.35;
     }
 
     // 回到施工起点后，再确认动力源和起点附近已调查的路线没变，才交出可执行计划。
