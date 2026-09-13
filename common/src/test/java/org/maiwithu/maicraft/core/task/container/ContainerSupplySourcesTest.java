@@ -24,6 +24,13 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTask;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuTransferTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuCloseTaskRecord;
 
 public final class ContainerSupplySourcesTest {
     private static final ResourceLocation IRON = ResourceLocation.parse("minecraft:iron_ingot");
@@ -32,6 +39,7 @@ public final class ContainerSupplySourcesTest {
         cacheNeverConfusesContainersOrWorlds();
         choosesOnlyLoadedOrdinarySourcesAndProtectsBothChestHalves();
         fixedTargetSurveyActuallyRunsForWithdrawalAndDeposit();
+        fixedTargetOpenRegistersItsRunnerAndPreservesChildFailure();
         partialWithdrawalAndMenuOwnershipRemainExplicit();
     }
     private static void cacheNeverConfusesContainersOrWorlds() {
@@ -117,6 +125,39 @@ public final class ContainerSupplySourcesTest {
             }
             check(h.blockUses() == 0 && h.itemUses() == 0, "survey itself performs no interaction or material mutation");
         } finally { ContainerSupplySources.reset(); }
+    }
+    @SuppressWarnings("unchecked")
+    private static void fixedTargetOpenRegistersItsRunnerAndPreservesChildFailure() throws Exception {
+        Map<Class<?>, Object> runners = (Map<Class<?>, Object>) (Map<?, ?>) field(TaskFactory.class, "RUNNERS").get(null);
+        List<Class<?>> types = List.of(MachineMenuOpenTaskRecord.class, MachineMenuTransferTaskRecord.class, MachineMenuCloseTaskRecord.class);
+        Map<Class<?>, Object> previous = new LinkedHashMap<>(); for (Class<?> type : types) if (runners.containsKey(type)) previous.put(type, runners.get(type));
+        runners.remove(MachineMenuOpenTaskRecord.class);
+        try (var h = new InteractionWorldTestHarness()) {
+            field(h.player.connection.getClass(), "playerInfoMap").set(h.player.connection, new java.util.HashMap<>());
+            var entities = worldEntities(h); BlockPos at = new BlockPos(3, 1, 3); addBarrel(h, entities, at);
+            var record = SemanticContainerTaskRecord.withdrawAvailableAt("fresh-storage-open", 1000, List.of(IRON), 10, at,
+                    ResourceLocation.parse("minecraft:barrel"), List.of());
+            var task = new SemanticContainerCompanionTask(h.player, record); task.start(h.player);
+            check(task.tick(h.player) == TaskState.RUNNING && task.tick(h.player) == TaskState.RUNNING,
+                    "actual fixed-target survey and OPEN must both advance on a fresh client");
+            check(field(task.getClass(), "activeChild").get(task) instanceof MachineMenuOpenTask,
+                    "warehouse OPEN must install the native menu runner, not silently create UnsupportedTask");
+            String reason = "specific native opening failure retained by parent";
+            field(task.getClass(), "activeChild").set(task, new Task() {
+                public TaskState tick(net.minecraft.client.player.LocalPlayer player) { return TaskState.FAILED; }
+                public void stop(net.minecraft.client.player.LocalPlayer player, StopReason why) {}
+                public TaskResult result(TaskState state) { return new TaskResult(false, reason, false, false, Map.of("failure_code", "opening_fixture_failure")); }
+                public String name() { return "failing opening fixture"; }
+            });
+            task.tick(h.player);
+            check(task.tick(h.player) == TaskState.FAILED, "opening failure must reach its normal terminal phase");
+            TaskResult failed = task.result(TaskState.FAILED);
+            check(reason.equals(failed.data().get("open_failure_message")), "underlying open failure must remain available in the result");
+            check(h.blockUses() == 0 && h.itemUses() == 0, "runner dispatch regression does not simulate a real GUI interaction");
+        } finally {
+            for (Class<?> type : types) { runners.remove(type); if (previous.containsKey(type)) runners.put(type, previous.get(type)); }
+            ContainerSupplySources.reset();
+        }
     }
     public static Map<BlockPos, BlockEntity> worldEntities(InteractionWorldTestHarness h) throws Exception {
         field(Level.class, "isClientSide").setBoolean(h.level, true);

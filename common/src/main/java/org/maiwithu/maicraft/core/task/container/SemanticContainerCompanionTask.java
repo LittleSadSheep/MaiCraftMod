@@ -123,6 +123,7 @@ public final class SemanticContainerCompanionTask
     private boolean goalSatisfied;
     private String failureCode;
     private String failureMessage;
+    private String openFailureMessage;
     private FailureType failureType = FailureType.UNKNOWN;
 
     public SemanticContainerCompanionTask(LocalPlayer player, SemanticContainerTaskRecord record) {
@@ -351,7 +352,7 @@ public final class SemanticContainerCompanionTask
             var request = new org.maiwithu.maicraft.core.integration.machine.MachineMenu.OpenRequest(
                     player.level().dimension().location().toString(), target.position(), 0,
                     org.maiwithu.maicraft.core.integration.machine.MachineSurvey.fingerprint(player, target.position(), 0), target.position());
-            return start(new org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTaskRecord(
+            return start(org.maiwithu.maicraft.core.integration.machine.MachineMenu.openTask(
                     childId("open-storage"), childDeadline(30L * 20L), request), Purpose.OPEN);
         }
         return start(new InteractAtTaskRecord(childId("open"), childDeadline(30L * 20L),
@@ -776,13 +777,16 @@ public final class SemanticContainerCompanionTask
         if (!success) {
             return switch (purpose) {
                 case OPEN -> {
+                    if (result != null && result.data() != null) outcomeUncertain |= Boolean.TRUE.equals(result.data().get("outcome_uncertain"));
+                    openFailureMessage = result == null || result.message() == null ? "no opening child result" : result.message();
+                    if (openFailureMessage.length() > 512) openFailureMessage = openFailureMessage.substring(0, 512);
                     if (player.containerMenu != player.inventoryMenu) {
                         openedMenu = true;
                         yield failFinal("container_open_unconfirmed", "A menu appeared but the "
-                                + "native open receipt was not confirmed.", lastFailure());
+                                + "native open receipt was not confirmed: " + openFailureMessage, lastFailure());
                     }
                     yield failFinal("container_interaction_failed", "The selected container could "
-                            + "not be opened through ordinary first-person interaction.",
+                            + "not be opened through ordinary first-person interaction: " + openFailureMessage,
                             lastFailure());
                 }
                 case TRANSFER -> {
@@ -1028,6 +1032,7 @@ public final class SemanticContainerCompanionTask
             data.put("decision", Map.of("required", true, "reason_code", failureCode,
                     "recovery_options", recoveryOptions(failureCode, movedCount > 0)));
         }
+        if (openFailureMessage != null) data.put("open_failure_message", openFailureMessage);
         return data;
     }
 
