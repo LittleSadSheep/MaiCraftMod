@@ -147,6 +147,12 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
         return new SemanticContainerTaskRecord(callId, deadline, Operation.WITHDRAW, items, null, null, finalCount,
                 blockId, null, Selection.NEAREST, protectedLabels, 1, java.util.Objects.requireNonNull(source));
     }
+    /** Internal proven-spoil deposit: count is an upper bound, and visible native capacity may require several warehouses. */
+    public static SemanticContainerTaskRecord depositAvailableAt(String callId, long deadline, ResourceLocation item,
+            int count, BlockPos destination, ResourceLocation blockId, List<String> protectedLabels) {
+        return new SemanticContainerTaskRecord(callId, deadline, Operation.DEPOSIT, List.of(item), null, count, null,
+                blockId, null, Selection.NEAREST, protectedLabels, 1, java.util.Objects.requireNonNull(destination));
+    }
     public boolean storageSupply() { return supplyPosition != null; }
 
     @Override

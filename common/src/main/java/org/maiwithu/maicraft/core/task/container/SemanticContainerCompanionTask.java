@@ -487,6 +487,19 @@ public final class SemanticContainerCompanionTask
                     FailureType.UNSUPPORTED);
         }
         Planning planning = buildPlan(direction, plannedAmount);
+        if (r.storageSupply() && r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT
+                && !planning.success() && "destination_full_or_locked".equals(planning.failureCode())) {
+            int low = 0, high = plannedAmount;
+            while (low < high) {
+                int amount = low + (high - low + 1) / 2; Planning candidate = buildPlan(direction, amount);
+                if (candidate.success()) low = amount;
+                else if ("destination_full_or_locked".equals(candidate.failureCode())) high = amount - 1;
+                else return failFinal(candidate.failureCode(), candidate.failureMessage(), candidate.failureType());
+            }
+            plannedAmount = low;
+            if (low == 0) { goalSatisfied = false; phase = Phase.CLEANUP; return TaskState.RUNNING; }
+            planning = buildPlan(direction, low);
+        }
         if (!planning.success()) {
             return failFinal(planning.failureCode(), planning.failureMessage(), planning.failureType());
         }
@@ -508,7 +521,8 @@ public final class SemanticContainerCompanionTask
     // balance 把背包调到 target_count；普通存取若给 target_count，则只补足目的侧的差额。
     // 给 count 就搬指定数量；两者都省略时搬源侧全部匹配物品。
     private int requestedAmount(int playerCount, int containerCount, Direction selectedDirection) {
-        if (r.storageSupply()) return Math.min(containerCount, Math.max(0, r.targetCount - playerCount));
+        if (r.storageSupply()) return r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT
+                ? Math.min(playerCount, r.count) : Math.min(containerCount, Math.max(0, r.targetCount - playerCount));
         if (r.operation == SemanticContainerTaskRecord.Operation.BALANCE) {
             return Math.abs(playerCount - r.targetCount);
         }
@@ -713,6 +727,7 @@ public final class SemanticContainerCompanionTask
 
     // 最后按用户目标检查：balance 要背包恰好等于目标；补足模式要求目的侧至少达到目标；普通搬运要求累计量相等。
     private boolean goalSatisfied() {
+        if (r.storageSupply() && r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT) return movedCount >= r.count;
         if (r.operation == SemanticContainerTaskRecord.Operation.BALANCE) {
             return lastPlayerCount == r.targetCount;
         }
@@ -726,6 +741,10 @@ public final class SemanticContainerCompanionTask
     // 已经回到无界面的背包就结束；否则创建关闭当前菜单的子任务。
     // 它没有绑定原菜单身份，因此 menuLost 的错误归属会让它关掉替换菜单（A51）。
     private TaskState cleanupMenu() {
+        if (!player.containerMenu.getCarried().isEmpty()) {
+            outcomeUncertain = true; openedMenu = false; openRequested = false;
+            return failFinal("container_cursor_preserved", "The cursor contains an unconfirmed stack; its menu was left open without closing or discarding it.", FailureType.UNKNOWN);
+        }
         if (player.containerMenu == player.inventoryMenu && ClientRuntime.requireContext(player).minecraft().screen == null) {
             openedMenu = false;
             openRequested = false;
@@ -974,6 +993,7 @@ public final class SemanticContainerCompanionTask
         }
         if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu
                 && (ownedMenu == null || player.containerMenu == ownedMenu)) {
+            if (!player.containerMenu.getCarried().isEmpty()) { outcomeUncertain = true; super.cleanup(); return; }
             try {
                 var context = ClientRuntime.requireContext(player);
                 context.menus().closeForTaskBoundary(context, 40, "semantic container task ended");
@@ -999,7 +1019,8 @@ public final class SemanticContainerCompanionTask
         data.put("outcome_partial", movedCount > 0 && !goalSatisfied);
         data.put("outcome_uncertain", outcomeUncertain);
         data.put("effects_started", effectsStarted);
-        if (r.storageSupply()) data.put("bounded_storage_withdrawal", true);
+        if (r.storageSupply()) data.put(r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT
+                ? "bounded_storage_deposit" : "bounded_storage_withdrawal", true);
         if (r.count != null) data.put("requested_count", r.count);
         if (r.targetCount != null) data.put("target_count", r.targetCount);
         if (failureCode != null) {
