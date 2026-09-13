@@ -34,6 +34,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     private static final double REACH = 4.5;
     private enum Phase { START, APPROACH, HAND, AIM, CONFIRM }
     private final ActualViewConvergenceGate aimGate = new ActualViewConvergenceGate();
+    private final MachineMenuHandParking handParking = new MachineMenuHandParking();
     private Phase phase = Phase.START;
     private BlockState before;
     private ResourceLocation blockId;
@@ -107,9 +108,10 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         };
     }
 
-    // 当前只寻找空手或空快捷栏，不会把手持物移到普通背包空格；快捷栏全满就报告需要空手。
+    // 先用现成空快捷栏；全满时把手持物经可见背包移到真正的空主背包格，并等关闭确认。
     private TaskState prepareHand() {
         var context = ClientRuntime.requireContext(player);
+        if (handParking.started()) return parkHand(context);
         if (receipt != null) {
             receipt = context.actions().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
@@ -127,7 +129,17 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
                 return TaskState.RUNNING;
             }
         }
-        return failure("machine_menu_empty_hand_required", "An empty main hand or empty hotbar entry is required for ordinary machine use.", FailureType.NO_SPACE);
+        if (!fresh()) return TaskState.FAILED;
+        return parkHand(context);
+    }
+
+    private TaskState parkHand(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
+        var state = handParking.tick(context);
+        if (state == MachineMenuHandParking.Status.FAILED) return failure(handParking.failure(),
+                "Empty-hand inventory preparation stopped without discarding items: " + handParking.failure(),
+                "machine_menu_empty_hand_required".equals(handParking.failure()) ? FailureType.NO_SPACE : FailureType.UNKNOWN);
+        if (state == MachineMenuHandParking.Status.READY) phase = Phase.AIM;
+        return TaskState.RUNNING;
     }
 
     private TaskState aimAndOpen() {
@@ -212,6 +224,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
 
     @Override protected void cleanup() {
         super.cleanup(); aimGate.reset();
+        handParking.cleanup(player);
         if (receipt != null && !receipt.terminal()) {
             try {
                 var context = ClientRuntime.requireContext(player);
@@ -230,15 +243,16 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("menu_open_verified", verified);
         data.put("effects_started", openAttempted);
-        data.put("outcome_uncertain", openAttempted && !verified);
-        data.put("mechanical_retry_allowed", !openAttempted);
+        data.put("outcome_uncertain", openAttempted && !verified || handParking.uncertain());
+        data.put("hand_preparation", handParking.evidence());
+        data.put("mechanical_retry_allowed", !openAttempted && !handParking.uncertain());
         data.put("machine_production_verified", false);
         if (menuReport != null) data.put("menu_report", menuReport);
         if (failureCode != null) data.put("failure_code", failureCode);
         return data;
     }
 
-    @Override public boolean mustSettleBeforeSatisfiedCancellation() { return openAttempted && !verified && receipt != null && !receipt.terminal(); }
+    @Override public boolean mustSettleBeforeSatisfiedCancellation() { return handParking.settling() || openAttempted && !verified && receipt != null && !receipt.terminal(); }
     @Override protected String successMessage() { return "Opened and inspected the selected machine's native menu; item entries and data values are observed, recipe roles remain to be analyzed."; }
     @Override protected String cancelledMessage() { return "Machine menu opening interrupted; inspect the active menu before another use."; }
 }
