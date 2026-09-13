@@ -130,12 +130,11 @@ public final class MachineConstructionPlan {
                     .forEach(entry -> properties.put(entry.getKey(), entry.getValue().getAsString()));
             BlockState state = MachinePlacementRules.resolveState(id, properties);
             Block block = state.getBlock();
-            if (!state.isAir() && (!(block.asItem() instanceof BlockItem item) || item.getBlock() != block))
-                throw new IllegalArgumentException("machine block needs a native installation adapter: " + id);
+            var placementItem = MachinePlacementItems.itemFor(state);
             // 同一种方块只查一次连带结构规则；这里尚未读现场，因此已有同种机器也要先通过这项安装规则。
             if (effectsChecked.add(block)) MachinePlacementRules.requireModeledEffects(block);
             if (!occupied.add(position)) throw new IllegalArgumentException("overlapping machine targets");
-            blocks.put(position, new BuildTaskRecord.Target(state, state.isAir() ? Items.AIR : block.asItem(),
+            blocks.put(position, new BuildTaskRecord.Target(state, placementItem,
                     position, id, null, null, null, false, properties.keySet(), true));
         }
         // Generated halves must be declared even for model-authored blueprints.

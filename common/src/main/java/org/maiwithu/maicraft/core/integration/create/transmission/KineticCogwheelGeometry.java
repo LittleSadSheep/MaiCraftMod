@@ -49,7 +49,8 @@ final class KineticCogwheelGeometry {
                     String key = gear.kind + '/' + base.family(); List<Plan> bucket = groups.computeIfAbsent(key, ignored -> new ArrayList<>());
                     if (bucket.size() >= 2 || !clearGear(source, target, gear, terrain, base)) continue;
                     List<Placement> blocks = new ArrayList<>(); blocks.add(new Placement(gear.at, "create:" + gear.family, Map.of("axis", gear.axis.getName()))); blocks.addAll(base.placements());
-                    Map<String, Integer> bom = new LinkedHashMap<>(base.bom()); bom.merge("create:" + gear.family, 1, Math::addExact);
+                    Map<String, Integer> bom = new LinkedHashMap<>(base.bom());
+                    bom.merge(org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems.itemId("create:" + gear.family, Map.of("axis", gear.axis.getName())), 1, Math::addExact);
                     if (blocks.size() > limits.maxPlacements()) continue;
                     Plan plan = new Plan("cog_mesh_" + gear.kind + '/' + base.family(), source, null, target, base.targetFace(), blocks, base.chainLinks(), bom);
                     if (plan.transmissionRatio() == null || bucket.stream().anyMatch(prior -> prior.bom().equals(plan.bom())

@@ -40,7 +40,8 @@ final class KineticRouteContinuations {
         var result=new LinkedHashMap<String,Integer>();
         for(var cell:plan.placements()) {
             if(!player.level().isLoaded(cell.position()))throw new IllegalArgumentException("kinetic_route_unloaded_before_supply");
-            if(!KineticRouteBuild.matches(player,cell))result.merge(cell.blockId(),1,Integer::sum);
+            if(!KineticRouteBuild.matches(player,cell))result.merge(
+                    org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems.itemId(cell.blockId(),cell.properties()),1,Integer::sum);
         }
         for(var link:plan.chainLinks()) {
             if(!player.level().isLoaded(link.from())||!player.level().isLoaded(link.to()))throw new IllegalArgumentException("kinetic_chain_unloaded_before_supply");

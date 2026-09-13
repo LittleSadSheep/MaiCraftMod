@@ -137,7 +137,8 @@ public final class KineticRouteGeometryTest {
     }
     private static void verifyMaterials(List<Plan> plans) {
         for (Plan plan : plans) {
-            Map<String, Integer> expected = new HashMap<>(); plan.placements().forEach(p -> expected.merge(p.blockId(), 1, Integer::sum));
+            Map<String, Integer> expected = new HashMap<>(); plan.placements().forEach(p -> expected.merge(
+                    org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems.itemId(p.blockId(), p.properties()), 1, Integer::sum));
             plan.chainLinks().forEach(link -> expected.merge("minecraft:chain", (int) Math.max(1, Math.round(Math.sqrt(link.from().distSqr(link.to())) / 2.5)), Integer::sum));
             check(expected.equals(plan.bom()), "candidate BOM is exactly its real block placements plus native chain charges");
             check(plan.placements().stream().map(Placement::position).distinct().count() == plan.placements().size(), "a physical cell appears only once in materials and construction");
