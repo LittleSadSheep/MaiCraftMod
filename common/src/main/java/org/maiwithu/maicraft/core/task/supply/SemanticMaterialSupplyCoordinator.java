@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * 供料流程的共用帮助类：按总任务给的缺料需求取物，再回到出发工位附近，告诉总任务可以重新观察后继续。
+ * 按总任务的缺料需求取物，默认返回出发工位；建筑可明确接管后续站位，让角色在仓库继续取齐材料。
  * 它只负责材料和返程；房子怎么建、管线怎么接、原计划是否仍有效，仍由调用它的总任务判断。
  */
 public final class SemanticMaterialSupplyCoordinator {
@@ -91,6 +91,8 @@ public final class SemanticMaterialSupplyCoordinator {
     }
 
     public enum Status { RUNNING, SUPPLIED_REPLAN, FAILED }
+    /** 通用机器任务仍回原工位；建筑交接只免去本协调器的返程，不增加导航或修改地形的权限。 */
+    public enum ReturnPolicy { RETURN_ORIGIN, CALLER_HANDOFF }
 
     public record Tick(
             Status status,
@@ -102,6 +104,7 @@ public final class SemanticMaterialSupplyCoordinator {
     private SemanticAcquireTaskRecord childRecord;
     private Demand demand;
     private MaterialPolicy materialPolicy;
+    private ReturnPolicy returnPolicy = ReturnPolicy.RETURN_ORIGIN;
     private List<SemanticAcquireTaskRecord.Source> sources = List.of();
     private int serial;
     private long childDeadline;
@@ -118,7 +121,9 @@ public final class SemanticMaterialSupplyCoordinator {
 
     public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("phase", child != null ? "acquiring_material" : "returning_to_work_site");
+        data.put("phase", child != null ? "acquiring_material" : returnPolicy == ReturnPolicy.CALLER_HANDOFF
+                ? "handing_materials_to_caller" : "returning_to_work_site");
+        data.put("return_policy", returnPolicy.name().toLowerCase(Locale.ROOT));
         if (demand != null) {
             data.put("required_final_count", demand.requiredFinalCount());
             data.put("acceptable_item_count", demand.acceptableItemIds().size());
@@ -164,10 +169,19 @@ public final class SemanticMaterialSupplyCoordinator {
             boolean allowHarm,
             List<String> protectedLabels,
             Iterable<BlockPos> forbiddenNavigationCells) {
+        begin(player, parentCallId, parentDeadline, demand, policy, requestedSources, allowHarm,
+                protectedLabels, forbiddenNavigationCells, ReturnPolicy.RETURN_ORIGIN);
+    }
+
+    /** 建筑使用明确交接策略：确认取料并收好界面后留在当前位置，下一站由原施工任务选择。 */
+    public void begin(LocalPlayer player, String parentCallId, long parentDeadline, Demand demand,
+            MaterialPolicy policy, List<SemanticAcquireTaskRecord.Source> requestedSources, boolean allowHarm,
+            List<String> protectedLabels, Iterable<BlockPos> forbiddenNavigationCells, ReturnPolicy returnPolicy) {
         // 同时只做一趟供料，记住出发维度和位置；取料期间仍要遵守总任务不许进入的区域。
         if (active()) throw new IllegalStateException("material supply child is already active");
         this.demand = Objects.requireNonNull(demand, "demand");
         this.materialPolicy = policy == null ? MaterialPolicy.ORDINARY : policy;
+        this.returnPolicy = Objects.requireNonNull(returnPolicy, "return policy");
         this.sources = resolveSources(this.materialPolicy, requestedSources);
         LinkedHashSet<BlockPos> forbidden = new LinkedHashSet<>();
         if (forbiddenNavigationCells != null) {
@@ -220,6 +234,8 @@ public final class SemanticMaterialSupplyCoordinator {
         TaskResult result = child.result(terminal);
         int observed = inventoryCount(player, demand.acceptableItemIds());
         boolean proven = terminal == TaskState.SUCCESS && result != null && result.success()
+                && (result.data() == null || !Boolean.TRUE.equals(result.data().get("outcome_uncertain"))
+                        && !Boolean.TRUE.equals(result.data().get("world_change_uncertain")))
                 && observed >= demand.requiredFinalCount();
         Map<String, Object> receipt = receipt(result, terminal, observed, proven);
         FailureType type = proven ? FailureType.UNKNOWN : failureType(result, terminal);
@@ -233,7 +249,7 @@ public final class SemanticMaterialSupplyCoordinator {
             return new Tick(Status.FAILED, receipt, type, message);
         }
         pendingReceipt = receipt;
-        // 材料拿到了还没结束这个组合流程，接下来先返回工位；返程失败时会明确保留“材料已取得”的说明。
+        // 取料子任务先完成自己的点击与界面收尾，再按调用方事先选好的策略返回或原地交接。
         pendingMessage = message;
         return tickReturn(player);
     }
@@ -314,13 +330,17 @@ public final class SemanticMaterialSupplyCoordinator {
         receipt.put("observed_final_count", observed);
         receipt.put("missing", Math.max(0, demand.requiredFinalCount() - observed));
         receipt.put("goal_satisfied", proven);
+        receipt.put("materials_obtained", proven);
+        receipt.put("return_policy", returnPolicy.name().toLowerCase(Locale.ROOT));
+        receipt.put("return_required", returnPolicy == ReturnPolicy.RETURN_ORIGIN);
+        receipt.put("returned_to_investigation_site", false);
         receipt.put("terminal_state", terminal.name().toLowerCase(Locale.ROOT));
         receipt.put("allowed_sources", sources.stream()
                 .map(source -> source.name().toLowerCase(Locale.ROOT)).toList());
         if (result != null && result.data() != null) {
             Map<String, Object> childData = result.data();
             copy(childData, receipt, "failure_type", "failure_code", "requires_decision",
-                    "requires_narration", "outcome_uncertain");
+                    "requires_narration", "outcome_uncertain", "world_change_uncertain");
             Object options = childData.get("recovery_options");
             if (options instanceof List<?> list) receipt.put("recovery_options", safeOptions(list));
             Object issues = childData.get("issues");
@@ -362,7 +382,7 @@ public final class SemanticMaterialSupplyCoordinator {
         return Map.copyOf(receipt);
     }
 
-    /** 当前要求回到原出发位置两格内才报告供料流程完成；拿到材料但回不去仍返回失败，供总任务决定。 */
+    /** 默认仍须回原工位两格内；只有事先选择建筑交接的调用方可以在仓库接回控制。 */
     private Tick tickReturn(LocalPlayer player) {
         Map<String, Object> receipt = new LinkedHashMap<>(pendingReceipt);
         if (!player.level().dimension().location().toString().equals(originDimension)) {
@@ -378,6 +398,25 @@ public final class SemanticMaterialSupplyCoordinator {
             clear();
             return new Tick(Status.FAILED, Map.copyOf(receipt),
                     FailureType.TARGET_LOST, message);
+        }
+        if (returnPolicy == ReturnPolicy.CALLER_HANDOFF) {
+            // 不建返程导航、不瞬移，也不把当前位置说成原墙顶；先确认背包仍够且没有遗留菜单或鼠标物品。
+            int carried = inventoryCount(player, demand.acceptableItemIds());
+            boolean settled = player.containerMenu == player.inventoryMenu && player.inventoryMenu.getCarried() != null
+                    && player.inventoryMenu.getCarried().isEmpty() && net.minecraft.client.Minecraft.getInstance().screen == null;
+            if (!settled || carried < demand.requiredFinalCount()) {
+                receipt.put("goal_satisfied", false); receipt.put("caller_handoff", false);
+                receipt.put("observed_final_count", carried); receipt.put("missing", Math.max(0, demand.requiredFinalCount() - carried));
+                receipt.put("failure_code", settled ? "supply_handoff_inventory_changed" : "supply_handoff_unsettled");
+                if (!settled) receipt.put("outcome_uncertain", true);
+                clear();
+                return new Tick(Status.FAILED, Map.copyOf(receipt), settled ? FailureType.NO_MATERIAL : FailureType.UNKNOWN,
+                        "material supply could not hand control back before inventory and menu settlement were verified");
+            }
+            receipt.put("caller_handoff", true);
+            String message = pendingMessage + "; materials confirmed; the caller owns the next work position";
+            clear();
+            return new Tick(Status.SUPPLIED_REPLAN, Map.copyOf(receipt), FailureType.UNKNOWN, message);
         }
         if (player.blockPosition().distSqr(investigationOrigin) <= 4.0D) {
             receipt.put("returned_to_investigation_site", true);
@@ -504,5 +543,6 @@ public final class SemanticMaterialSupplyCoordinator {
         pendingReceipt = null;
         pendingMessage = null;
         forbiddenNavigationCells = List.of();
+        returnPolicy = ReturnPolicy.RETURN_ORIGIN;
     }
 }

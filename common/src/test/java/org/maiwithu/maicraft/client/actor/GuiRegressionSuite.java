@@ -73,6 +73,9 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildFoodPreparationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildFoodBoundaryTest.main(args);
         org.maiwithu.maicraft.core.task.supply.BuildSupplyAccessDispatchTest.main(args);
+        // 建筑拿齐材料后在仓库交还控制，不要求普通导航重新爬回墙顶；通用机器任务仍保持返程规则。
+        org.maiwithu.maicraft.core.task.supply.MaterialSupplyReturnPolicyTest.main(args);
+        org.maiwithu.maicraft.core.task.supply.BuildSupplyHandoffTest.main(args);
         org.maiwithu.maicraft.client.actor.MachineMenuHandParkingTest.main(args);
         org.maiwithu.maicraft.client.actor.ItemUseTimingTest.main(args);
         org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest.main(args);
@@ -107,6 +110,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.integration.ae2.Ae2DepositAccessPolicyTest.main(args);
         // 原生客户端不保存服务端 locator，仍须从当前真实终端宿主证明来源和访问边界。
         org.maiwithu.maicraft.core.integration.ae2.Ae2DepositHostAccessTest.main(args);
+        // 每次新存入都等真实菜单的新画面，前置检查未通过不能记成已经提交点击。
+        org.maiwithu.maicraft.core.integration.ae2.Ae2DepositVisibilityTest.main(args);
         VisibleMenuSessionTest.main(args);
         LegacyInventoryBoundaryTest.main(args);
         GuiBoundaryAuditTest.main(args);

@@ -287,8 +287,10 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private void beginSupply(SemanticMaterialSupplyCoordinator.Demand demand) {
+        // 在仓库连续取齐下一批建材，之后由施工任务按已有支撑选择站位，不要求普通导航爬回旧墙顶。
         supply.begin(player, r.getToolCallId(), r.getDeadlineGameTime(), demand,
-                r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels);
+                r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels, List.of(),
+                SemanticMaterialSupplyCoordinator.ReturnPolicy.CALLER_HANDOFF);
         r.extendDeadlineTo(supply.childDeadline());
     }
 

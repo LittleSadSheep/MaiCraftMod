@@ -66,7 +66,7 @@ public final class BuildSupplyAccessDispatchTest {
                     Map.of("supply_access_only", true, "supply_access_ready", true))), "the shared batch predicate also rejects an access-only success");
             task.tick(h.player);
             check(supply.active() && new BlockPos(2, 4, 4).equals(field(supply, "investigationOrigin").get(supply)),
-                    "the later supply trip returns to the safe exterior ground, not the old pit floor");
+                    "后续取料从安全出口地面开始，再由建筑任务接管施工站位");
             // 对比原来的供料规则；正常背包检查与仓储合成仍保留，出坑准备不能额外开放采矿等来源。
             check(field(supply, "sources").get(supply).equals(SemanticMaterialSupplyCoordinator.resolveSources(
                     SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE, List.of(SemanticAcquireTaskRecord.Source.STORAGE))),
