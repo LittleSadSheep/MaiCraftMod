@@ -1735,7 +1735,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private void resetCell() {
         worksitePass = 0; worksiteAttempts = 0; worksiteMovement.reset();
         if (worksite != null && worksite.heightLoss() > 1e-5) worksite = null;
-        supportStepApproved = false; supportAccess = null;
+        // 切换到支撑队列的下一格时保留整链的移动见证；每块真正点击前仍清除批准标记，重新证明剩余支撑。
+        supportStepApproved = false;
+        if (supportedCell == null) supportAccess = null;
         layerKnown = false;
         stanceNavigation.startAt(PlayerNav.playerFeet(player));
         placementWalkTarget = null;

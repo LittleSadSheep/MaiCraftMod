@@ -29,6 +29,7 @@ public final class BuildSupportSchedulingTest {
         landedBodyProducesOneFreshProof();
         onlyBodyInvalidationMayReprove(false);
         onlyBodyInvalidationMayReprove(true);
+        selectingASupportRetainsItsPrerequisite();
         System.out.println("BuildSupportSchedulingTest: passed");
     }
     private static void landedBodyProducesOneFreshProof() throws Exception {
@@ -89,6 +90,25 @@ public final class BuildSupportSchedulingTest {
         check(invoke(task, "prepareTemporarySupports") == TaskState.RUNNING
                 && ((List<?>) field("supportChain").get(task)).equals(List.of(SUPPORT)), "the ordinary bounded support planner selects only the original allowed west cell");
         return task;
+    }
+    private static void selectingASupportRetainsItsPrerequisite() throws Exception {
+        try (var h = world()) {
+            var task = prepared(h); finish(h, task);
+            var proven = (BuildSupportAccess) field("supportAccess").get(task);
+            check(proven.accepted() && proven.placementFor(SUPPORT) != null, "proposal first proves the support's actual reachable placement");
+            // 重放 SUPPORT_VERIFY -> SELECT -> 支撑格的真实交接；不能在重置普通格状态时丢掉已经验证的路线。
+            check(invoke(task, "selectTick") == TaskState.RUNNING && field("supportAccess").get(task) == proven
+                            && !field("supportStepApproved").getBoolean(task),
+                    "selecting a temporary support preserves its movement witness but does not preapprove its click");
+            h.set(SUPPORT, Blocks.STONE.defaultBlockState());
+            check(invoke(task, "aimTick") == TaskState.RUNNING && field("supportAccess").get(task) == null,
+                    "the click boundary discards the old observation and requests a new proof");
+            TaskState state=TaskState.RUNNING;
+            for(int i=0;i<64 && state==TaskState.RUNNING;i++) { h.nextTick();state=(TaskState)invoke(task,"supportVerifyTick"); }
+            check(state==TaskState.FAILED && h.level.getBlockState(SUPPORT).is(Blocks.STONE)
+                            && h.inventory.getItem(0).getCount()==16 && h.blockUses()==0 && h.itemUses()==0,
+                    "a changed support site is rejected without replacing it or consuming the retained material");
+        }
     }
     private static BuildTaskRecord.Target target() { return new BuildTaskRecord.Target(Blocks.SPRUCE_FENCE.defaultBlockState(), Items.SPRUCE_FENCE,
             TARGET, "fence", null, null, null, false, Set.of(), true, Set.of()); }
