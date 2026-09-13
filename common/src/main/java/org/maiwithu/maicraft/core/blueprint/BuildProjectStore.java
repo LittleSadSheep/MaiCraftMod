@@ -44,6 +44,44 @@ public final class BuildProjectStore {
         return id;
     }
 
+    /** 修订施工要求只更新原项目计划；保留支撑原账，完成程度仍由下次施工读取真实世界。 */
+    public record Revision(String projectId, String previousSceneId, String sceneId, int changedTargets, int retainedScaffolds) {}
+
+    public Revision reviseFromScene(String projectId, Level level, String parentSceneId, String newSceneId,
+                                    List<BuildTaskRecord.Target> revisedTargets) {
+        String dimension = level.dimension().location().toString();
+        JsonObject arguments = load(projectId, dimension);
+        var scenes = new BuildingSceneStore(identity);
+        var revisedScene = scenes.load(newSceneId, dimension);
+        // 父版本必须来自真实模型记录；仅传来一个旧编号，不能收编任意模型或周围现成泥土。
+        if (parentSceneId == null || !parentSceneId.equals(revisedScene.parentSceneId()) || parentSceneId.equals(newSceneId)
+                || !arguments.has("semantic_contract") || !arguments.get("semantic_contract").isJsonObject())
+            throw new IllegalArgumentException("project revision requires the actual saved scene parent");
+        JsonObject contract = arguments.getAsJsonObject("semantic_contract");
+        if (!contract.has("scene_id") || !parentSceneId.equals(contract.get("scene_id").getAsString())
+                || !scenes.load(parentSceneId, dimension).anchor().equals(revisedScene.anchor()))
+            throw new IllegalArgumentException("project scene parent or fixed anchor does not match");
+        var previous = BuildProjectTargets.decode(arguments.getAsJsonArray("project_targets"));
+        if (revisedTargets == null || revisedTargets.isEmpty()) throw new IllegalArgumentException("project revision needs concrete targets");
+        // 编码往返先拒绝重复坐标、不可表达状态或材料；暂只准同一完整坐标集合内改方块，不扩缩施工范围。
+        var revised = BuildProjectTargets.decode(BuildProjectTargets.encode(List.copyOf(revisedTargets)));
+        Map<BlockPos, BuildTaskRecord.Target> oldAt = new java.util.HashMap<>();
+        previous.forEach(target -> oldAt.put(target.pos(), target));
+        var nextPositions = revised.stream().map(BuildTaskRecord.Target::pos).collect(java.util.stream.Collectors.toSet());
+        if (previous.size() != revised.size() || !oldAt.keySet().equals(nextPositions))
+            throw new IllegalArgumentException("project revision cannot add or remove target coordinates");
+        Path sidecar = file(projectId).resolveSibling(projectId + ".scaffolds.json");
+        var saved = readScaffolds(sidecar, projectId, dimension);
+        if (!BuildProjectScaffolds.observed(saved, level, revised).equals(saved))
+            throw new IllegalArgumentException("project revision requires every saved scaffold to remain observed and unchanged");
+        int changed = (int) revised.stream().filter(target -> !BuildProjectTargets.encode(List.of(target))
+                .equals(BuildProjectTargets.encode(List.of(oldAt.get(target.pos()))))).count();
+        contract.addProperty("previous_scene_id", parentSceneId); contract.addProperty("scene_id", newSceneId);
+        // 此前没有写文件；全部核验成功后只替换项目本体一次，原材料策略、保护标签和支撑sidecar原样保留。
+        save(projectId, dimension, arguments, revised);
+        return new Revision(projectId, parentSceneId, newSceneId, changed, saved.size());
+    }
+
     // 同一编号可更新一次确定下来的材料方案；去掉原始 ops，保存完整目标，恢复时禁止重新换材料种类。
     public void save(String id, String dimension, JsonObject arguments, List<BuildTaskRecord.Target> targets) {
         if (dimension == null || dimension.isBlank() || targets.isEmpty())
