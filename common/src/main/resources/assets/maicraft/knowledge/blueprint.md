@@ -146,10 +146,12 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 1. 使用不带 `production` 的 `build_machine` 完成设备；不能把入口声明当成免费能源。
 2. 从 `perceive(view="machines")` 的 `utility_installations` 读取入口 ID，并重新 `inspect_machine`。
-3. 以机器标签为目标，调用 `modify_machine`，参数 `operation:"connect_external_input"`、`snapshot_id`、`input_id`、明确的主城设施 `source_label`、`allow_modify:true`，按需指定 `material_policy`。
+3. 以机器标签为目标，调用 `modify_machine`，参数 `operation:"connect_external_input"`、`snapshot_id`、`input_id`、`allow_modify:true`，按需指定 `material_policy`。动力输入可省略 `source_label`，比较附近已加载的现有动力出口；显式指定时固定使用该源。`source_radius` 默认 64，范围 8..128，不强加载区块或为扫描而走动。其他介质仍须给出明确主城设施标签。
 4. 接线结果分别提供 `native_connected`、`source_power_observed`、`destination_power_observed` 和 `power_ready`。之后才执行需要的配置、供料及 `run_production`，或者在下一批前登记 `watch_production`。
 
-当前自动外部接线要求服务端增强，覆盖竖轴 Create 接口和 FE／Mek 电缆；其他已声明介质在修改前返回具体不支持项。接线可复用已完成的电缆路径，但须重新确认它仅连接指定源和入口，没有分叉、环、旁接设备或未加载部分；只配置该路径上身份未变化的源侧接口，不替换主城源设备。历史接口档案没有当前操作权限或持续供能保证。已知创造专用物品在生存设计中需要真实携带或已安装配方产物证据；常规缺料继续走供料流程。
+Create 自动接线比较可行的轴、齿轮箱、链式传动箱和架高锁链传动轮线路，计入全部支柱、转向组件和原生锁链用量；当前配方、已有库存、补料缺口及施工工作量共同影响估价。`cost_comparison` 提供材料账和候选比较，这是有界方案估算，不是全地图最优解或机器产能承诺。施工前先备齐整条线路的材料，保留原有方块；锁链通过真实物品点击连接。服务端可提供原生观察，纯客户端结果明确区分同步观察。FE／Mek 电缆仍要求服务端增强；其他已声明介质在修改前返回具体不支持项。
+
+接线可复用已完成的电缆路径，但须重新确认它仅连接指定源和入口，没有分叉、环、旁接设备或未加载部分；只配置该路径上身份未变化的源侧接口，不替换主城源设备。历史接口档案没有当前操作权限或持续供能保证。已知创造专用物品在生存设计中需要真实携带或已安装配方产物证据；常规缺料继续走供料流程。
 
 `window_ticks` 是实际产出样本的最小跨度；`max_idle_ticks` 独立限制两次加工之间的间隔，两者都有 72000 tick 上限。调试可以只取少量真实完成样本，正常加工所需时间不必恰好等于最小样本跨度。
 

@@ -57,6 +57,18 @@ public final class OptionalServerRegressionSuite {
         org.maiwithu.maicraft.core.integration.machine.utility.UtilityExistingCableRouteTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskGuardTest.main(args);
         org.maiwithu.maicraft.core.integration.create.CreateExactUtilityEndpointTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.CreateEconomicEndpointBridgeTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometryTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticTransmissionAlternativesTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticCogwheelGeometryTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCostsTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteChoiceTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticRpmBudgetTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticClientHeightmapTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticClearanceRevalidationTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteContinuationTest.main(args);
+        org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorContractTest.main(args);
+        org.maiwithu.maicraft.server.machine.connectivity.ChainConveyorConnectionPathTest.main(args);
         org.maiwithu.maicraft.server.machine.watch.MachineWatchProgressTest.main(args);
         System.out.println("OptionalServerRegressionSuite: passed");
     }

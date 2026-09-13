@@ -51,7 +51,7 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
                 .integer("destination_x", "Internally resolved destination X.")
                 .integer("destination_y", "Internally resolved destination Y.")
                 .integer("destination_z", "Internally resolved destination Z.")
-                .optionalEnum("transmission", "Automatic or encased chain drive.", "auto", "encased_chain_drive")
+                .optionalEnum("transmission", "Compare complete shaft, gearbox and raised chain-conveyor costs, or require encased chain drive.", "auto", "encased_chain_drive")
                 .optionalBool("allow_free_receiver", "Allow nearest authoritative destination evidence to be a verified empty receiver.")
                 .optionalEnum("material_policy", "Material source policy after route investigation.",
                         "ordinary", "storage_available", "inventory_only")

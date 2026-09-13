@@ -168,8 +168,9 @@ final class MachineAbilityAdapter {
                     only(p, "operation", "snapshot_id", "source_label", "allow_modify");
                     requiredString(p, "source_label", 160);
                 } else if ("connect_external_input".equals(operation)) {
-                    only(p,"operation","snapshot_id","source_label","input_id","allow_modify","material_policy","protected_labels");
-                    requiredString(p,"source_label",160); requiredString(p,"input_id",64);
+                    only(p,"operation","snapshot_id","source_label","source_radius","input_id","allow_modify","material_policy","protected_labels");
+                    optionalString(p,"source_label",160); requiredString(p,"input_id",64);
+                    integer(p,"source_radius",64,8,128);
                     SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p,"material_policy",64));
                 } else if ("apply_blueprint".equals(operation)) {
                     only(p, "operation", "snapshot_id", "blueprint", "blueprint_uri", "allow_modify",
@@ -347,15 +348,24 @@ final class MachineAbilityAdapter {
         if ("connect_external_input".equals(p.get("operation").getAsString())) {
             MachineSnapshots.Snapshot snapshot = boundSnapshot(goal,player,runtime);
             var installation = org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.requireInstallation(player,snapshot.center());
-            String inputId = requiredString(p,"input_id",64), sourceLabel = requiredString(p,"source_label",160);
+            String inputId = requiredString(p,"input_id",64), sourceLabel = optionalString(p,"source_label",160);
             var input = installation.inputs().stream().filter(value -> value.id().equals(inputId)).findFirst()
                     .orElseThrow(() -> bad("machine_external_input_unknown: " + inputId));
-            BlockPos source = block(resolve(new Goal.SemanticTarget("landmark",sourceLabel,null,null),player,runtime));
+            BlockPos source = sourceLabel == null ? null : block(resolve(new Goal.SemanticTarget("landmark",sourceLabel,null,null),player,runtime));
+            var protections = new java.util.LinkedHashSet<>(goal.inheritedProtectionLabels());
+            if (p.has("protected_labels")) p.getAsJsonArray("protected_labels").forEach(value -> protections.add(value.getAsString()));
+            if (input.medium().equals("kinetic")) {
+                var task = new org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord(
+                        "machine-utility-"+UUID.randomUUID(),player.level().getGameTime()+15L*60*20,snapshot.dimension(),
+                        sourceLabel,source,null,inputId,snapshot.center().offset(input.offset()),input.face(),input.blockId(),
+                        input.minimumRpm()==null?0:input.minimumRpm(),integer(p,"source_radius",64,8,128),false,
+                        SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p,"material_policy",64)),List.copyOf(protections));
+                MachineSnapshots.consume(snapshot);return new IntentAction.Native(task);
+            }
+            if(source==null)throw bad("source_label is required for this utility medium");
             var request = new org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskRecord.Request(
                     source,snapshot.center().offset(input.offset()),input.face(),input.blockId(),input.medium(),
                     input.minimumRpm() == null ? 0 : input.minimumRpm(),0,input.resource());
-            var protections = new java.util.LinkedHashSet<>(goal.inheritedProtectionLabels());
-            if (p.has("protected_labels")) p.getAsJsonArray("protected_labels").forEach(value -> protections.add(value.getAsString()));
             var task = new org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskRecord(
                     "machine-utility-"+UUID.randomUUID(),player.level().getGameTime()+15L*60*20,snapshot.dimension(),sourceLabel,inputId,request,
                     SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p,"material_policy",64)),List.copyOf(protections));

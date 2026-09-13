@@ -92,8 +92,9 @@ public final class SemanticAbilityCatalog {
                     fields(
                             field("operation", "string", "apply_blueprint, connect_mechanical_power or connect_external_input. External utility hookup is a separate task after construction; inspect the machine and choose a remembered city source."),
                             field("snapshot_id", "string", "Fresh complete receipt for the exact destination machine label; consumed before execution. Resurvey before another attempt."),
-                            field("source_label", "string", "connect_mechanical_power/connect_external_input: explicit remembered source outlet in the same dimension; existing city supply is preferred."),
-                            field("input_id", "string", "connect_external_input only: exact external input id from perceive(machines). Requires server-assisted native checks; currently vertical Create shaft and FE/Mek cable hookup. Other media reject before mutation."),
+                            field("source_label", "string", "Remembered existing outlet in the same dimension. For a kinetic connect_external_input, omit to compare nearby loaded powered sources; an explicit source remains fixed. Required for other utility media and connect_mechanical_power."),
+                            field("source_radius", "integer", "Kinetic connect_external_input automatic source search radius, 8..128 blocks, default 64. Never loads distant chunks or walks solely to scan."),
+                            field("input_id", "string", "connect_external_input only: exact external input id from perceive(machines). Create compares native interfaces and full transmission costs; FE/Mek cable hookup requires server assistance. Other media reject before mutation."),
                             blueprintField(), blueprintUriField(),
                             field("material_policy", "string", "apply_blueprint/connect_external_input: ordinary, storage_available or inventory_only."),
                             field("replace_existing", "boolean", "apply_blueprint only: allow replacing ordinary obstructing blocks, default false. Declare minecraft:air to request removal at an explicit offset."),
@@ -430,7 +431,7 @@ public final class SemanticAbilityCatalog {
                 + "These are passive physical connection points, not generators. supply_preference defaults to external; "
                 + "onsite requires onsite_reason explaining a deliberate local source. In survival, known creative-only "
                 + "materials require real carried items or installed recipe evidence; that evidence is not a complete acquisition plan. "
-                + "Build external-input machines without production, then inspect and connect_external_input to a source_label; "
+                + "Build external-input machines without production, then inspect and connect_external_input; kinetic inputs may compare nearby loaded sources when source_label is omitted. "
                 + "run_production is separate. Read remembered ports from perceive(machines).";
     }
 

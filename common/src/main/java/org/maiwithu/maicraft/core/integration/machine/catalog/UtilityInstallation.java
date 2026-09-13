@@ -38,7 +38,7 @@ public record UtilityInstallation(String id, String label, String dimension, Pos
             entries.add(entry);
         }
         result.add("external_inputs", entries); if (includeLocation) result.add("anchor", CatalogViews.position(anchor));
-        result.addProperty("next_operation", "inspect_machine then modify_machine connect_external_input with an explicit source_label");
+        result.addProperty("next_operation", "inspect_machine then modify_machine connect_external_input; kinetic inputs may omit source_label to compare nearby loaded powered outlets");
         return result;
     }
     static String encode(List<MachineUtilityInputs.Input> inputs) { var entries = new JsonArray(); inputs.forEach(input -> entries.add(input.json())); return entries.toString(); }
