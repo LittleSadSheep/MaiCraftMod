@@ -41,6 +41,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildFailureEvidenceTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildWorksitePlannerTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildStanceNavigationTest.main(args);
+        // 精确施工挪位保持步行，已证明能连续走通的路段不逐格停开导航。
+        org.maiwithu.maicraft.core.task.build.BuildWorksiteRouteTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildNavigationRetryTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildLayerFrontierTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest.main(args);
@@ -55,6 +57,10 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicyTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupplyTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExcavationCargoTest.main(args);
+        // 续建先保留建材与垫脚储备，再把普通土石存进有空位的仓库；没有确认回执不能继续取料。
+        org.maiwithu.maicraft.core.task.build.BuildExcavationCargoRecoveryTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilBoundaryTest.main(args);
+        org.maiwithu.maicraft.core.task.supply.BuildSupplyCargoDispatchTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildSupplyAccessTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildFoodPreparationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildFoodBoundaryTest.main(args);

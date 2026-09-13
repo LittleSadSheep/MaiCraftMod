@@ -17,6 +17,8 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildOrder;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationFrontier;
+import org.maiwithu.maicraft.core.task.build.BuildExcavationCargo;
+import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupply;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifier;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
@@ -45,6 +47,7 @@ final class SemanticBuildSupplyCompanionTask
     private boolean batchVerified;
     private int remainingCellsBeforeBuild;
     private boolean prepared;
+    private boolean cargoCheckPending = true;
     private String failureCode;
     private Map<String, Object> finalBuildData = Map.of();
     private BuildTraversabilityVerifier.Result traversabilityResult;
@@ -53,6 +56,7 @@ final class SemanticBuildSupplyCompanionTask
     private SemanticBuildMaterialBinding.Proposal materialProposal;
     private final SemanticMaterialSupplyCoordinator supply =
             new SemanticMaterialSupplyCoordinator();
+    private final BuildExcavationSpoilSupply spoilSupply = new BuildExcavationSpoilSupply();
     private final Map<ResourceLocation, ResourceLocation> selectedVariants =
             new LinkedHashMap<>();
     private final List<BlockPos> plannedMutationCells = new ArrayList<>();
@@ -118,11 +122,9 @@ final class SemanticBuildSupplyCompanionTask
     protected TaskState onTick() {
         // 正在取料或施工就先推进那件事；不能看见目标方块恰好都存在，就跳过尚未结束的点击和支撑清理。
         if (supply.active()) return tickSupply();
+        if (spoilSupply.active()) return tickSpoilSupply();
         if (activeChild != null) return tickChild();
         if (traversabilityScan != null) return finishMatched();
-        // Let the first-person child finish its receipt checks and scaffold cleanup before the
-        // outer coordinator performs aggregate route verification.
-        if (allMatched() && !activePlan.hasTrackedScaffolds() && (buildRounds == 0 || batchVerified)) return finishMatched();
         if (!prepared) {
             advanceMaterialBinding();
             return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
@@ -134,6 +136,10 @@ final class SemanticBuildSupplyCompanionTask
             return TaskState.RUNNING;
         if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
             return TaskState.CANCELLED;
+
+        // 新开或恢复项目、施工批次结束都检查旧土石；先出坑再存余料，真实存入确认后才取新建材。
+        if (cargoCheckPending && prepareCargo()) return TaskState.RUNNING;
+        if (allMatched() && !activePlan.hasTrackedScaffolds() && (buildRounds == 0 || batchVerified)) return finishMatched();
 
         boolean excavationNeeded = activePlan.targets.stream().anyMatch(target -> player.level().isLoaded(target.pos())
                 && !player.level().getBlockState(target.pos()).isAir() && !constructionMatches(target));
@@ -185,6 +191,7 @@ final class SemanticBuildSupplyCompanionTask
         activeChild = null;
         activeRecord = null;
         activeKind = null;
+        cargoCheckPending = true;
 
         if (kind == ChildKind.BUILD_ACCESS) {
             // 出口完成单独记账，并复查身体高度；它不能替代成品验收，也不能放宽仓库的普通导航权限。
@@ -202,7 +209,7 @@ final class SemanticBuildSupplyCompanionTask
 
         if (result != null && result.data() != null) finalBuildData = Map.copyOf(result.data());
         batchVerified = batchCompleted(terminal, result);
-        if (batchVerified && allMatched() && !activePlan.hasTrackedScaffolds()) return finishMatched();
+        if (batchVerified && allMatched() && !activePlan.hasTrackedScaffolds()) return TaskState.RUNNING;
         String childCode = result == null || result.data() == null
                 ? null : String.valueOf(result.data().get("failure_code"));
         int remainingNow = remainingCellCount();
@@ -304,6 +311,34 @@ final class SemanticBuildSupplyCompanionTask
 
     private void startBuild() {
         startBuild(false);
+    }
+
+    private boolean prepareCargo() {
+        // 只用背包策略不擅自开仓；其他建造策略沿用开挖期间已有的授权普通仓库存入流程。
+        if (r.materialPolicy == SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY) {
+            cargoCheckPending = false; return false;
+        }
+        Map<ResourceLocation, Integer> excess = BuildExcavationCargo.surplus(player, ledger(true));
+        if (excess.isEmpty()) { cargoCheckPending = false; return false; }
+        if (BuildExcavationFrontier.needsSupplyAccess(player, activePlan.targets)) { startBuild(true); return true; }
+        cargoCheckPending = false;
+        spoilSupply.begin(player, childId("excavation-spoil"), r.getDeadlineGameTime(), excess, r.protectedLabels, 48);
+        return true;
+    }
+
+    private TaskState tickSpoilSupply() {
+        // 所有物品通过看得见的容器界面逐箱存放，当前建筑和保护区不能为了找仓库被拆开。
+        var tick = NavigationSafetyContext.withProtectedArea(plannedMutationCells, List.of(),
+                () -> spoilSupply.tick(player, this::runChild));
+        r.extendDeadlineTo(spoilSupply.childDeadline());
+        if (tick.status() == BuildExcavationSpoilSupply.Status.RUNNING) return TaskState.RUNNING;
+        rounds.add(Map.of("kind", "excavation_spoil", "terminal_state", tick.status().name().toLowerCase(), "data", tick.receipt()));
+        if (tick.status() == BuildExcavationSpoilSupply.Status.FAILED) {
+            stopWith("excavation_spoil_storage_failed", "Excavation surplus storage stopped: " + tick.receipt(), FailureType.NO_SPACE);
+            return TaskState.FAILED;
+        }
+        cargoCheckPending = true;
+        return TaskState.RUNNING;
     }
 
     private void startBuild(boolean accessOnly) {
@@ -456,10 +491,11 @@ final class SemanticBuildSupplyCompanionTask
 
     private int capacityFor(Item item) {
         ItemStack sample = new ItemStack(item);
-        int capacity = 0;
+        int capacity = 0, empty = 0;
         for (int slot = 0; slot <= 35; slot++) {
             ItemStack stack = player.getInventory().getItem(slot);
-            if (stack.isEmpty()) capacity += sample.getMaxStackSize();
+            // 取建材不能立即塞回满包；留四个空格给挖掘掉落、工具和合成中间产物。
+            if (stack.isEmpty()) { if (++empty > 4) capacity += sample.getMaxStackSize(); }
             else if (stack.is(item)) capacity += Math.max(0, stack.getMaxStackSize() - stack.getCount());
         }
         return capacity;
@@ -516,10 +552,15 @@ final class SemanticBuildSupplyCompanionTask
         data.put("initial_remaining_material_ledger", stringLedger(initialRemaining));
         data.put("remaining_material_ledger", stringLedger(ledger(true)));
         data.put("remaining_cells", remainingCellCount());
+        if (!spoilSupply.receipt().get("proven_spoil").equals(Map.of())) {
+            data.put("excavation_spoil", spoilSupply.receipt());
+            // 存入未确认时把不确定性传到总任务，不能只藏在嵌套回执里让续建器直接重放。
+            data.put("outcome_uncertain", spoilSupply.receipt().get("outcome_uncertain"));
+        }
         boolean traversalSatisfied = activePlan.traversabilityContract() == null
                 || traversabilityResult != null && traversabilityResult.valid();
         boolean complete = allMatched() && traversalSatisfied && !activePlan.hasTrackedScaffolds()
-                && failureCode == null && (buildRounds == 0 || batchVerified);
+                && failureCode == null && !cargoCheckPending && !spoilSupply.active() && (buildRounds == 0 || batchVerified);
         data.put("goal_satisfied", complete);
         data.put("batches", List.copyOf(rounds));
         if (!issues.isEmpty()) data.put("issues", List.copyOf(issues));
@@ -587,11 +628,12 @@ final class SemanticBuildSupplyCompanionTask
     @Override public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("task", name());
-        data.put("phase", supply.active() ? "material_supply" : activeKind == ChildKind.BUILD_ACCESS ? "preparing_supply_access" : activeChild != null ? "building"
+        data.put("phase", spoilSupply.active() ? "storing_excavation_spoil" : supply.active() ? "material_supply" : activeKind == ChildKind.BUILD_ACCESS ? "preparing_supply_access" : activeChild != null ? "building"
                 : traversabilityScan != null ? "verifying" : !prepared ? "preparing_materials"
                 : "awaiting_preview_or_batch");
         data.put("construction_batches_started", buildRounds);
-        if (supply.active()) data.put("child", supply.progress());
+        if (spoilSupply.active()) data.put("child", spoilSupply.receipt());
+        else if (supply.active()) data.put("child", supply.progress());
         else if (activeChild != null) data.put("child", activeChild.progress());
         return Map.copyOf(data);
     }
@@ -600,11 +642,18 @@ final class SemanticBuildSupplyCompanionTask
         // 总任务结束时，取料与施工小任务也要停止，并释放整份方案的预览记录。
         org.maiwithu.maicraft.core.task.build.BuildPreviewGate.release(r);
         if (supply.active()) supply.cancel(player);
+        if (spoilSupply.active()) spoilSupply.cancel(player);
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
             activeChild.result(TaskState.CANCELLED);
             activeChild = null;
         }
         super.cleanup();
+    }
+
+    @Override public boolean mustSettleBeforeSatisfiedCancellation() {
+        // 即使施工格已全部匹配，正在存土石的鼠标和容器回执仍须先收尾，不能半次搬运时宣告完成。
+        return spoilSupply.mustSettleBeforeSatisfiedCancellation()
+                || activeChild != null && activeChild.mustSettleBeforeSatisfiedCancellation();
     }
 }
