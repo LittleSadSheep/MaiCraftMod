@@ -23,18 +23,29 @@ public final class BuildExcavationFrontier {
     void cleared(BlockPos pos) { pending.remove(pos); rejected.clear(); }
     void reject(BlockPos pos) { rejected.add(pos); }
 
-    /** 角色还在图纸范围内且比已加载的外部安全地面低超过一格，才先出坑再取料；未知地形不推测出口。 */
-    public static boolean needsSupplyAccess(LocalPlayer player, List<BuildTaskRecord.Target> targets) {
-        if (targets.isEmpty()) return false;
+    public enum AccessStatus { READY, EXIT_REQUIRED, BLOCKED }
+    /** 离场证明只描述已观察通行条件，既不生成地面，也不把未知出口视为准备完成。 */
+    public record SupplyAccess(AccessStatus status, BlockPos exit, String code) {}
+    public static SupplyAccess supplyAccess(LocalPlayer player, BuildTaskRecord plan) {
+        return supplyAccess(player, plan.targets, plan.scaffoldLedger().snapshot().keySet());
+    }
+    public static SupplyAccess supplyAccess(LocalPlayer player, List<BuildTaskRecord.Target> targets) {
+        return supplyAccess(player, targets, Set.of());
+    }
+    public static SupplyAccess supplyAccess(LocalPlayer player, List<BuildTaskRecord.Target> targets, Set<BlockPos> scaffolds) {
+        if (targets.isEmpty()) return new SupplyAccess(AccessStatus.READY, null, "empty_build_footprint");
         int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
         for (var target : targets) {
             minX = Math.min(minX, target.pos().getX()); minZ = Math.min(minZ, target.pos().getZ());
             maxX = Math.max(maxX, target.pos().getX()); maxZ = Math.max(maxZ, target.pos().getZ());
         }
-        BlockPos feet = player.blockPosition();
-        if (feet.getX() < minX || feet.getX() > maxX || feet.getZ() < minZ || feet.getZ() > maxZ) return false;
-        BlockPos ground = exit(player, new BlockPos(minX, feet.getY(), minZ), new BlockPos(maxX, feet.getY(), maxZ));
-        return player.getY() < ground.getY() - 1;
+        return supplyAccess(player, new BlockPos(minX, 0, minZ), new BlockPos(maxX, 0, maxZ), scaffolds);
+    }
+    public static SupplyAccess supplyAccess(LocalPlayer player, BlockPos min, BlockPos max, Set<BlockPos> scaffolds) {
+        return BuildSupplyExit.inspect(player, min, max, scaffolds);
+    }
+    public static boolean needsSupplyAccess(LocalPlayer player, List<BuildTaskRecord.Target> targets) {
+        return supplyAccess(player, targets).status() != AccessStatus.READY;
     }
 
     static boolean safeDescent(LocalPlayer player, BlockPos target) {
@@ -47,30 +58,9 @@ public final class BuildExcavationFrontier {
                 && level.getBlockState(landing).isFaceSturdy(level, landing, net.minecraft.core.Direction.UP);
     }
 
-    /** 从坑内续建时重新找外侧实际地面，不能把恢复时的坑底位置当作出坑终点。 */
+    /** 保留旧的只读出口查询入口；未知出口返回空，不能拿当前柱顶假装已经离场。 */
     static BlockPos exit(LocalPlayer player, BlockPos min, BlockPos max) {
-        BlockPos start = player.blockPosition();
-        if (min == null || max == null) return start.immutable();
-        if (start.getX() < min.getX() || start.getX() > max.getX()
-                || start.getZ() < min.getZ() || start.getZ() > max.getZ()) return start.immutable();
-        int x = Math.floorDiv(min.getX() + max.getX(), 2), z = Math.floorDiv(min.getZ() + max.getZ(), 2);
-        List<BlockPos> choices = new ArrayList<>();
-        for (BlockPos column : List.of(new BlockPos(min.getX() - 1, start.getY(), z),
-                new BlockPos(max.getX() + 1, start.getY(), z), new BlockPos(x, start.getY(), min.getZ() - 1),
-                new BlockPos(x, start.getY(), max.getZ() + 1))) {
-            var level = player.level();
-            if (!level.isLoaded(column)) continue;
-            // 客户端只用服务器实际同步的高度图，再核对地面方块；NO_LEAVES 属于服务端数据，不能拿空高度当作坑底出口。
-            int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, column.getX(), column.getZ());
-            BlockPos feet = new BlockPos(column.getX(), y, column.getZ());
-            if (level.isOutsideBuildHeight(feet.above()) || !level.isLoaded(feet.below())
-                    || !level.getBlockState(feet.below()).isFaceSturdy(level, feet.below(), net.minecraft.core.Direction.UP)
-                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.isHazard(level, feet.below())
-                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet)
-                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet.above())) continue;
-            if (level.noCollision(player, player.getBoundingBox().move(Vec3.atBottomCenterOf(feet).subtract(player.position())))) choices.add(feet);
-        }
-        return choices.stream().min(Comparator.comparingDouble(at -> at.distSqr(start))).orElse(start).immutable();
+        return supplyAccess(player, min, max, Set.of()).exit();
     }
 
     BlockPos next(LocalPlayer player) {

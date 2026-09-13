@@ -30,16 +30,28 @@ public final class BuildSupplyAccessTest {
     private static void observedDepthGate() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             var targets = preparePit(h);
-            check(BuildExcavationFrontier.needsSupplyAccess(h.player, targets), "a resumed three-block pit needs its own build access before storage navigation");
+            check(BuildExcavationFrontier.supplyAccess(h.player, targets).status() == BuildExcavationFrontier.AccessStatus.EXIT_REQUIRED,
+                    "从真实三格深坑恢复时，先准备施工离场再让普通仓库导航接手");
+            // 给一格高度差案例真实落脚平台，避免只改玩家坐标却让身体悬在空中。
+            for (int x = 3; x <= 5; x++) for (int z = 3; z <= 5; z++) h.set(new BlockPos(x, 2, z), Blocks.STONE.defaultBlockState());
             h.position(new Vec3(4.5, 3, 4.5));
-            check(!BuildExcavationFrontier.needsSupplyAccess(h.player, targets), "a one-block step does not add a needless access task");
+            check(BuildExcavationFrontier.supplyAccess(h.player, targets).status() == BuildExcavationFrontier.AccessStatus.READY,
+                    "有真实落脚且只差一格的可走平台不增加无谓出坑任务");
             h.position(new Vec3(7.5, 1, 4.5));
-            check(!BuildExcavationFrontier.needsSupplyAccess(h.player, targets), "an exterior body cannot authorize construction access through another area");
+            check(BuildExcavationFrontier.supplyAccess(h.player, targets).status() == BuildExcavationFrontier.AccessStatus.READY,
+                    "图纸外的真实低地已经能走开，不因邻近坑壁更高就强制爬回墙上");
+            for (int x = 3; x <= 5; x++) for (int z = 3; z <= 5; z++) h.set(new BlockPos(x, 2, z), Blocks.AIR.defaultBlockState());
             h.position(new Vec3(4.5, 1, 4.5));
-            for (BlockPos pos : List.of(new BlockPos(2, 3, 4), new BlockPos(6, 3, 4), new BlockPos(4, 3, 2), new BlockPos(4, 3, 6)))
-                h.set(pos, Blocks.MAGMA_BLOCK.defaultBlockState());
-            check(!BuildExcavationFrontier.needsSupplyAccess(h.player, targets), "unsafe exterior columns cannot become observed supply exits");
-            check(!BuildExcavationFrontier.needsSupplyAccess(h.player, List.of()), "an empty blueprint has no authorized footprint");
+            // 所有已观察外地面都危险才构成真正无出口，不能只封旧的四个采样点而忽略旁边安全大地。
+            for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++) if (x < 3 || x > 5 || z < 3 || z > 5)
+                for (int y = 0; y <= 3; y++) {
+                    BlockPos at = new BlockPos(x, y, z); if (!h.level.getBlockState(at).isAir()) h.set(at, Blocks.MAGMA_BLOCK.defaultBlockState());
+                }
+            var blocked = BuildExcavationFrontier.supplyAccess(h.player, targets);
+            check(blocked.status() == BuildExcavationFrontier.AccessStatus.BLOCKED && blocked.exit() == null
+                    && blocked.code() != null && !blocked.code().isBlank(), "无可靠出口须明确阻塞，不能把当前位置当作已离场");
+            check(BuildExcavationFrontier.supplyAccess(h.player, List.of()).status() == BuildExcavationFrontier.AccessStatus.READY,
+                    "空蓝图没有需要施工离场的区域");
         }
     }
 
@@ -89,7 +101,7 @@ public final class BuildSupplyAccessTest {
     private static void accessNeverVerifiesTheBuilding() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             var targets = preparePit(h); targets.forEach(target -> h.set(target.pos(), target.desiredState()));
-            h.position(new Vec3(2.5, 4, 4.5));
+            h.position(new Vec3(4.5, 4, 8.5));
             var access = new BuildTaskRecord("already-outside", 1000, targets, false, true);
             access.supplyAccessOnly(true); access.previewManaged(true); access.semanticFacts(Map.of("rooms", 1));
             var task = new FirstPersonBuildCompanionTask(h.player, access); task.start(h.player);
@@ -105,6 +117,9 @@ public final class BuildSupplyAccessTest {
     public static List<BuildTaskRecord.Target> preparePit(InteractionWorldTestHarness h) throws Exception {
         for (int x = 2; x <= 6; x++) for (int z = 2; z <= 6; z++)
             if (x == 2 || x == 6 || z == 2 || z == 6) for (int y = 1; y <= 3; y++) h.set(new BlockPos(x, y, z), Blocks.STONE.defaultBlockState());
+        // 南侧坑沿连着一整片地层，东侧(7,1,4)仍保留原有低地，覆盖高低两种真实离场情况。
+        for (int x = 0; x < 16; x++) for (int z = 6; z < 16; z++)
+            for (int y = 1; y <= 3; y++) h.set(new BlockPos(x, y, z), Blocks.STONE.defaultBlockState());
         var targets = new ArrayList<BuildTaskRecord.Target>();
         for (int x = 3; x <= 5; x++) for (int z = 3; z <= 5; z++) for (int y = 1; y <= 3; y++)
             targets.add(new BuildTaskRecord.Target(y == 1 ? Blocks.OAK_PLANKS : Blocks.AIR,
