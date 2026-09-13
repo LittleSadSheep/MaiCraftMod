@@ -93,6 +93,14 @@ public final class ContainerSupplySources {
                 StockEvidence.Source.CONTAINER, counts, Set.of(), player.level().getGameTime()));
     }
     public static void reset() { CACHE.clear(); }
+    /** Bounded planning hint only. No region scan, menu opening or client block-entity inventory inspection. */
+    public static Map<ResourceLocation, Long> observedCounts(LocalPlayer player, BlockPos center, int radius, List<String> protectedLabels) {
+        if (player == null || center == null || radius < 0) return Map.of();
+        List<String> labels = protectedLabels == null ? List.of() : protectedLabels;
+        return CACHE.observed(player, player.level(), center, radius, player.level().getGameTime(),
+                at -> player.level().isLoaded(at) && allowed(player, at, labels),
+                at -> identities(player.level(), footprint(player.level(), at)));
+    }
     private static boolean ordinary(BlockEntity entity) { return entity instanceof ChestBlockEntity || entity instanceof BarrelBlockEntity || entity instanceof ShulkerBoxBlockEntity; }
     private static Map<BlockPos, Object> identities(Level level, List<BlockPos> positions) {
         Map<BlockPos, Object> result = new LinkedHashMap<>(); positions.forEach(pos -> result.put(pos, level.getBlockEntity(pos))); return result;
@@ -114,6 +122,30 @@ public final class ContainerSupplySources {
                 entries.remove(at); return null;
             }
             return entry.stock;
+        }
+        Map<ResourceLocation, Long> observed(Object owner, Object level, BlockPos center, int radius, long tick,
+                java.util.function.Predicate<BlockPos> usable,
+                java.util.function.Function<BlockPos, Map<BlockPos, Object>> currentFootprint) {
+            bind(owner, level); Map<ResourceLocation, Long> counts = new LinkedHashMap<>();
+            Set<Entry> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            for (Entry entry : List.copyOf(entries.values())) {
+                if (!seen.add(entry)) continue;
+                long age = tick - entry.stock.observedGameTick();
+                if (age < 0 || age > StockEvidence.MAX_AGE_TICKS) {
+                    entries.entrySet().removeIf(row -> row.getValue() == entry); continue;
+                }
+                if (entry.identities.isEmpty() || entry.identities.keySet().stream()
+                        .anyMatch(at -> at.distSqr(center) > (long) radius * radius || !usable.test(at))) continue;
+                Map<BlockPos, Object> current = currentFootprint.apply(entry.identities.keySet().iterator().next());
+                if (current == null || !entry.identities.keySet().equals(current.keySet())
+                        || entry.identities.entrySet().stream().anyMatch(row -> current.get(row.getKey()) != row.getValue())) {
+                    entries.entrySet().removeIf(row -> row.getValue() == entry); continue;
+                }
+                entry.stock.stored().forEach((item, amount) -> {
+                    if (amount > 0) counts.merge(item, amount, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b);
+                });
+            }
+            return Map.copyOf(counts);
         }
         private void bind(Object owner, Object level) { if (player != owner || world != level) { clear(); player = owner; world = level; } }
         void clear() { entries.clear(); player = world = null; }

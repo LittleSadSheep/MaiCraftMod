@@ -200,6 +200,11 @@ public final class SemanticAcquireCompanionTask
     private final List<Map<String, Object>> recipeTrace = new ArrayList<>();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
     private Map<ResourceLocation, List<CraftingRecipe>> structuralCraftRecipes;
+    private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> observedStockRecipes = new HashMap<>();
+    private Need stockHintNeed;
+    private long stockHintTick = Long.MIN_VALUE;
+    private Map<ResourceLocation, Long> recipeObservedStock = Map.of(), recipeCarriedStock = Map.of();
+    private final Map<String, Integer> recipeStockPriorities = new HashMap<>();
     private Map<ResourceLocation, Integer> initialCounts = Map.of();
     private Need rootNeed;
     private Task activeChild;
@@ -495,6 +500,7 @@ public final class SemanticAcquireCompanionTask
                 .sorted(Comparator
                         .comparingInt((CraftCandidate candidate) ->
                                 candidate.cost().surface().ordinal())
+                        .thenComparingInt(candidate -> observedStockPriority(candidate, need))
                         .thenComparingInt(candidate ->
                                 recursiveCandidateStructureCost(candidate, need))
                         .thenComparing(CraftCandidate::cost, CraftPlanCost.ORDER))
@@ -572,6 +578,7 @@ public final class SemanticAcquireCompanionTask
                 "depth", need.depth,
                 "missing_item_ids", itemStrings(ingredient.itemIds()),
                 "missing_count", ingredient.missing(),
+                "observed_stock_material_hint", observedStockPriority(chosen, need) == 0,
                 "source_order", childSources.stream()
                         .map(source -> source.name().toLowerCase(java.util.Locale.ROOT))
                         .toList()));
@@ -1889,6 +1896,65 @@ public final class SemanticAcquireCompanionTask
                     total + missing * Math.max(1, best + 1));
         }
         return total;
+    }
+
+    /** Fresh authorized warehouse contents influence preference only; executable crafting still requires carried items. */
+    private int observedStockPriority(CraftCandidate candidate, Need parent) {
+        if (!parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)) return 1;
+        long tick = player.level().getGameTime();
+        if (stockHintNeed != parent || stockHintTick != tick) {
+            stockHintNeed = parent; stockHintTick = tick; recipeStockPriorities.clear();
+            recipeObservedStock = ContainerSupplySources.observedCounts(player, player.blockPosition(), r.searchRadius, r.protectedLabels);
+            Map<ResourceLocation, Long> carried = new LinkedHashMap<>();
+            for (int slot = 0; slot < Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); slot++) {
+                ItemStack stack = player.getInventory().items.get(slot);
+                if (!stack.isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()), (long) stack.getCount(), Long::sum);
+            }
+            recipeCarriedStock = Map.copyOf(carried);
+        }
+        if (recipeObservedStock.isEmpty()) return 1;
+        return recipeStockPriorities.computeIfAbsent(candidate.recipeId(), ignored -> {
+            Object raw = candidate.data().get("ingredients"); if (!(raw instanceof List<?> rows)) return 1;
+            List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
+            for (Object row : rows) {
+                if (!(row instanceof Map<?, ?> values)) return 1;
+                Map<String, Object> fact = stringKeyMap(values);
+                if (bool(fact.get("acceptable_item_ids_truncated"))) return 1;
+                int required = integer(fact.get("required"), -1); if (required < 1 || required > 32768) return 1;
+                Object acceptable = fact.get("acceptable_item_ids"); if (!(acceptable instanceof List<?> ids)) return 1;
+                List<ResourceLocation> alternatives = new ArrayList<>();
+                for (Object value : ids) {
+                    ResourceLocation id = ResourceLocation.tryParse(String.valueOf(value));
+                    if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return 1;
+                    alternatives.add(id);
+                }
+                ingredients.add(new ObservedRecipeStockCost.Need(alternatives, required));
+            }
+            return ObservedRecipeStockCost.priority(true, recipeObservedStock, recipeCarriedStock, ingredients,
+                    this::observedStockRecipes, parent.lineageItems);
+        });
+    }
+
+    private List<ObservedRecipeStockCost.Recipe> observedStockRecipes(ResourceLocation output) {
+        return observedStockRecipes.computeIfAbsent(output, ignored -> {
+            List<ObservedRecipeStockCost.Recipe> result = new ArrayList<>();
+            for (CraftingRecipe recipe : structuralCraftRecipes().getOrDefault(output, List.of()).stream().limit(64).toList()) {
+                try {
+                    if (recipe.isSpecial() || recipe instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped
+                            && (shaped.getWidth() > 3 || shaped.getHeight() > 3)) continue;
+                    ItemStack stack = RecipeProbe.resultOf(recipe, player.level().registryAccess()); if (stack.isEmpty()) continue;
+                    List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
+                    for (Ingredient ingredient : recipe.getIngredients()) {
+                        if (ingredient == null || ingredient.isEmpty()) continue;
+                        var ids = java.util.Arrays.stream(ingredient.getItems()).filter(value -> value != null && !value.isEmpty())
+                                .map(value -> BuiltInRegistries.ITEM.getKey(value.getItem())).distinct().toList();
+                        ingredients.add(new ObservedRecipeStockCost.Need(ids, 1));
+                    }
+                    if (!ingredients.isEmpty() && ingredients.size() <= 9) result.add(new ObservedRecipeStockCost.Recipe(stack.getCount(), ingredients));
+                } catch (RuntimeException unavailable) { /* This hint cannot make an uninspectable recipe usable. */ }
+            }
+            return List.copyOf(result);
+        });
     }
 
     private int recursiveCraftDepth(
