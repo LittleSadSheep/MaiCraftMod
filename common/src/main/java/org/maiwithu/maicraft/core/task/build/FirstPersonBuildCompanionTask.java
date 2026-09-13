@@ -830,6 +830,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState placeNavTick() {
+        // 起跳或落地动作未交还控制时，只继续原导航；不能因路过可放位置而抢换槽、转头或取消腾空路线。
+        if (nav != null && !nav.isSafeToCancel()) {
+            nav.tick();
+            return TaskState.RUNNING;
+        }
         // 外界或延迟同步已经完成目标时也先退回实地，不能为一个已完成格继续走向檐边。
         if (currentPlacementComplete()) { finishPlaced(); return TaskState.RUNNING; }
         stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
@@ -865,9 +870,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 failAt(cell.target().pos(), "No reachable placement prerequisite was retained for this support", FailureType.NO_PATH,
                         "support_step_witness_missing", false); return TaskState.FAILED;
             }
-            boolean edgeCandidate = !BuildCellRules.isAirTarget(cell.target()) && cell.target().pos().getY() + .5 <= player.getY()
-                    && player.getY() - cell.target().pos().getY() <= 3 && cell.target().pos().distToCenterSqr(player.position()) <= 144;
-            if (known != null || edgeCandidate) {
+            // 同层楼梯也可先登上已建台阶再贴边续放；这里只筛近处，最终脚位、碰撞与原生朝向仍由实际搜索证明。
+            boolean edgeCandidate = !BuildCellRules.isAirTarget(cell.target()) && Math.abs(player.getY() - cell.target().pos().getY()) <= 3
+                    && cell.target().pos().distToCenterSqr(player.position()) <= 144
+                    && (!seekBetterFooting(cell.target()) || worksite != null && worksite.constructionAccess());
+            // 已证明的实地工作站可直接继续；尚无路线或原方案需要搭路时，再检查能否利用现有边缘减少支撑。
+            if (known != null || edgeCandidate && (worksite == null || worksite.constructionAccess())) {
                 // 先试现有檐边直接放正式方块；支撑则使用逐前缀证明的可达见证，不再枚举没有地板的格心。
                 var accessTarget = cell.target();
                 placementAccess = new BuildPlacementAccessDrive(player, accessTarget, stanceNavigation.walkingContext(Integer.MIN_VALUE),

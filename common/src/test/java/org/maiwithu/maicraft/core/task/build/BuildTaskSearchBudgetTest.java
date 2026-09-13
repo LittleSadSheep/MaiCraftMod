@@ -36,6 +36,7 @@ public final class BuildTaskSearchBudgetTest {
             var queue = new ArrayList<>(List.of(cell, later));
             field("cell").set(task, cell); field("queue").set(task, queue);
             field("worksiteSearched").setBoolean(task, true);
+            exhaustedEdgeSearch(task, target);
             for (Object phase : field("phase").getType().getEnumConstants())
                 if (phase.toString().equals("PLACE_NAV")) field("phase").set(task, phase);
             var initialPosition = h.player.position();
@@ -68,6 +69,7 @@ public final class BuildTaskSearchBudgetTest {
                     "resetting a cell must release its cursor and progress together");
             field("cell").set(task, later); field("queue").set(task, new ArrayList<>(List.of(later)));
             field("worksiteSearched").setBoolean(task, true);
+            exhaustedEdgeSearch(task, nextTarget);
             h.nextTick();
             check(invoke(task, "placeNavTick") == TaskState.RUNNING
                             && field("gestureSearch").get(task) != retained,
@@ -93,6 +95,7 @@ public final class BuildTaskSearchBudgetTest {
             field("cell").set(task, positiveCell);
             field("queue").set(task, new ArrayList<>(List.of(positiveCell)));
             field("worksiteSearched").setBoolean(task, true);
+            exhaustedEdgeSearch(task, positiveTarget);
             var positive = new BuildPlacementGeometry.PlanSearch(h.player, positiveTarget, Map.of());
             var positiveDone = finish(positive);
             check(!positive.results().isEmpty(), "the positive fixture must cache actual native gestures");
@@ -129,6 +132,15 @@ public final class BuildTaskSearchBudgetTest {
         for (int slice = 0; slice < 10_000 && !progress.complete(); slice++) progress = search.advance(64);
         check(progress.complete(), "finite fixture search must finish before exercising stale-cache invalidation");
         return progress;
+    }
+    private static void exhaustedEdgeSearch(Object task, BuildTaskRecord.Target target) throws Exception {
+        // 本测试从贴边机会已排除后的完整站位枚举开始，专查旧搜索的逐刻预算；真实贴边路径另由外檐回归覆盖。
+        var drive = new BuildPlacementAccessDrive((net.minecraft.client.player.LocalPlayer) field("player").get(task), target,
+                org.maiwithu.maicraft.core.pathing.execute.PlayerNav.ContextProvider.DEFAULT, () -> true,
+                null, () -> BuildPlacementAccessDrive.Status.UNAVAILABLE);
+        var status = BuildPlacementAccessDrive.class.getDeclaredField("status"); status.setAccessible(true);
+        status.set(drive, BuildPlacementAccessDrive.Status.UNAVAILABLE);
+        field("placementAccess").set(task, drive); field("placementAccessTarget").set(task, target.pos());
     }
     private static void checkCleared(Object task, String detail) throws Exception {
         check(field("gestureSearch").get(task) == null && field("gestureProgress").get(task) == null

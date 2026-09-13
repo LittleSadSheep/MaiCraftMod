@@ -704,12 +704,9 @@ public final class EmbeddedBaritoneRuntime {
         settings.smoothLook.value = false;
         settings.randomLooking.value = 0D;
         settings.randomLooking113.value = 0D;
-        settings.allowSprint.value = sprintAllowed;
+        configureWalking(settings, sprintAllowed);
         settings.sprintAscends.value = true;
         settings.sprintInWater.value = true;
-        // 非放置型跑酷(跨洞跳跃)不改动地形,PRESERVE 下也安全;放置型跑酷仍由
-        // permit 门控(allowParkourPlace)。
-        settings.allowParkour.value = true;
         configureTerrain(settings, permit);
         // 当前关闭 Baritone 自行整理普通背包的行为；这条桥只直接支持已在快捷栏中的选择，不能据携带总量推定马上可用。
         settings.allowInventory.value = false;
@@ -717,6 +714,12 @@ public final class EmbeddedBaritoneRuntime {
                 baritone.getPlayerContext().player());
         settings.logger.value = message -> Constants.LOG.debug(
                 "[embedded-path] {}", message.getString());
+    }
+
+    static void configureWalking(Settings settings, boolean sprintAllowed) {
+        // 精细施工步行保持连续落脚，不为短距换站位安排跨空跑酷；普通长途导航仍保留原有跳跃能力。
+        settings.allowSprint.value = sprintAllowed;
+        settings.allowParkour.value = sprintAllowed;
     }
 
     // 把本次许可明确写到 Baritone：能否挖、能否搭路、能否用水桶分别从这份许可决定，不沿用上一次导航的状态。

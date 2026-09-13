@@ -34,6 +34,8 @@ public final class NavigationHandoffTest {
         abandonedCallerStillReachesTheSafeBoundary(false);
         abandonedCallerStillReachesTheSafeBoundary(true);
         buildSelectionWaitsForReleasedNavigation();
+        buildKeepsAnUnfinishedApproach();
+        precisionWalkingDoesNotPlanGapJumps();
         System.out.println("NavigationHandoffTest: passed");
     }
 
@@ -75,6 +77,47 @@ public final class NavigationHandoffTest {
             } else {
                 check(field(EmbeddedBaritoneRuntime.class, "owner").get(null) == fixture.nav,
                         "temporary yield discarded the reusable navigation owner");
+            }
+        }
+    }
+
+    private static void precisionWalkingDoesNotPlanGapJumps() throws Exception {
+        var constructor = baritone.api.Settings.class.getDeclaredConstructor(); constructor.setAccessible(true);
+        var settings = constructor.newInstance();
+        // 施工短步、长途移动交替时，每次都覆盖自己的跑酷规则；禁跑酷仍允许普通上台阶和获准搭路。
+        for (boolean travel : new boolean[]{true, false, true, false}) {
+            EmbeddedBaritoneRuntime.configureWalking(settings, travel);
+            EmbeddedBaritoneRuntime.configureTerrain(settings, org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.TERRAFORM);
+            check(settings.allowSprint.value == travel && settings.allowParkour.value == travel,
+                    "precision walking must not inherit a previous travel route's gap jumps");
+            check(settings.allowPlace.value, "avoiding gap jumps must not remove authorized ordinary construction access");
+        }
+    }
+
+    private static void buildKeepsAnUnfinishedApproach() throws Exception {
+        try (var world = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness(); Fixture fixture = new Fixture(world.player)) {
+            var target = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target(
+                    net.minecraft.world.level.block.Blocks.STONE, net.minecraft.world.item.Items.STONE,
+                    new net.minecraft.core.BlockPos(4, 1, 4), "nearby during jump", null, null, null);
+            var record = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord("active-jump", 1000, java.util.List.of(target), false);
+            Class<?> type = Class.forName("org.maiwithu.maicraft.core.task.build.FirstPersonBuildCompanionTask");
+            var constructor = type.getDeclaredConstructor(LocalPlayer.class, record.getClass()); constructor.setAccessible(true);
+            Object task = constructor.newInstance(world.player, record);
+            var cellConstructor = Class.forName(type.getName() + "$CellPlan").getDeclaredConstructor(target.getClass(), java.util.List.class);
+            cellConstructor.setAccessible(true); Object cell = cellConstructor.newInstance(target, java.util.List.of());
+            field(type, "cell").set(task, cell); field(type, "queue").set(task, new ArrayList<>(java.util.List.of(cell)));
+            var navigation = PlayerNav.toGoal(world.player, () -> org.maiwithu.maicraft.core.pathing.calc.NavGoal.exact(target.pos()), .8, () -> false).walkingOnly();
+            Object transport = field(PlayerNav.class, "navigator").get(navigation); set(transport, "ground", fixture.nav);
+            field(type, "nav").set(task, navigation);
+            var phase = field(type, "phase"); Object originalPhase = phase.get(task);
+            var approach = type.getDeclaredMethod("placeNavTick"); approach.setAccessible(true);
+            // 目标此刻已经可伸手放到，但腾空路线仍未落稳；运行实际施工入口，不能换掉原导航或提前进入选物。
+            for (int tick = 0; tick < 3; tick++) {
+                world.nextTick(); approach.invoke(task);
+                check(field(type, "nav").get(task) == navigation && phase.get(task) == originalPhase
+                                && field(type, "cell").get(task) == cell && fixture.nav.consumeDriveRequest(),
+                        "an unfinished approach keeps its target, steering and construction phase");
+                check(world.blockUses() == 0 && world.itemUses() == 0, "the airborne handoff issues no construction action");
             }
         }
     }
