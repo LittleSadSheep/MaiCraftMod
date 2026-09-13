@@ -72,8 +72,9 @@ public final class BuildSharedWorksiteTest {
             field(task,"worksitePass").setInt(task,2);field(task,"worksiteAttempts").setInt(task,4);
             var advance=FirstPersonBuildCompanionTask.class.getDeclaredMethod("nextWorksitePass",String.class);advance.setAccessible(true);
             Object state=advance.invoke(task,"bounded shared routes exhausted");
-            check(state==org.maiwithu.maicraft.task.TaskState.RUNNING&&field(task,"phase").get(task).toString().equals("SUPPORT_VERIFY"),
-                    "four failed route attempts must still reach the separately bounded support verification");
+            // 当前身体离浮空工程较远，支撑回退先到施工区域；之后仍须经过独立的完整放置证明。
+            check(state==org.maiwithu.maicraft.task.TaskState.RUNNING&&field(task,"phase").get(task).toString().equals("SUPPORT_APPROACH"),
+                    "four failed route attempts retain the support fallback, beginning with its remote approach");
             check(h.blockUses()==0&&h.itemUses()==0,"support fallback must be proved before placing anything");
         }
     }

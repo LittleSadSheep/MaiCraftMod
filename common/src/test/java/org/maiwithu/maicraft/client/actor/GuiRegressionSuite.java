@@ -30,6 +30,8 @@ public final class GuiRegressionSuite {
         // 从实机下台阶与惯性样本复核：先自然落稳再建立支撑快照，真实环境变化不能借身体重证绕过。
         org.maiwithu.maicraft.core.task.build.BuildSupportSettlingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildSupportSchedulingTest.main(args);
+        // 清障和建造切换到其他楼层时先通行，再从真实新起点证明支撑。
+        org.maiwithu.maicraft.core.task.build.BuildSupportApproachTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementGestureTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildAimRetryTest.main(args);

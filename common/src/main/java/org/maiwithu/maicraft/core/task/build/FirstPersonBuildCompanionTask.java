@@ -57,7 +57,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     // 刨坑 -> 出坑 -> 拿材料 -> 建房；每一步都等真实游戏操作确认后，再交给下一步接管角色。
     private enum Phase { PREFLIGHT, EXCAVATE, EXCAVATE_EXIT, SELECT, CLEAR_NAV, CLEAR, CLEAR_RELEASE, PLACE_NAV, WORKSITE, SELECT_ITEM,
-        AIM, WAIT_USE, EDGE_RETURN, SUPPORT_VERIFY, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, FINAL_STATE, ROUTE_VERIFY }
+        AIM, WAIT_USE, EDGE_RETURN, SUPPORT_APPROACH, SUPPORT_VERIFY, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, FINAL_STATE, ROUTE_VERIFY }
     private record CellPlan(BuildTaskRecord.Target target,
                             List<BuildPlacementGeometry.GeneratedCell> generated) {
         CellPlan { generated = List.copyOf(generated); }
@@ -111,6 +111,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private BuildPlacementGeometry.Gesture supportWitness;
     private boolean supportProposal, supportStepApproved;
     private Map<String, Object> supportAccessEvidence = Map.of();
+    private long supportApproachDeadline;
     private final Map<Item, Integer> required = new LinkedHashMap<>();
     private final Map<Item, Integer> missing = new LinkedHashMap<>();
     private final List<Map<String, Object>> unsupported = new ArrayList<>();
@@ -305,6 +306,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             case AIM -> aimTick(); case WAIT_USE -> waitUseTick();
             case EDGE_RETURN -> returnFromPlacementEdge();
             case SUPPORT_VERIFY -> supportVerifyTick();
+            case SUPPORT_APPROACH -> supportApproachTick();
             case CLEAR_CREATIVE -> clearCreativeTick(); case VERIFY -> verifyTick();
             case SCAFFOLD_SELECT -> scaffoldSelectTick(); case SCAFFOLD_NAV -> scaffoldNavTick();
             case SCAFFOLD_BREAK -> scaffoldBreakTick();
@@ -1616,8 +1618,44 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         supportedCell = cell; supportChain = chain;
         supportMaterial = ((BlockItem) material).getBlock().defaultBlockState();
+        // 上一楼层或清障高台不是下一段楼梯的局部起点；先用原施工导航回到目标附近，之后才证明各块支撑。
+        if (cell.target().pos().distToCenterSqr(player.position()) > 36
+                || Math.abs(cell.target().pos().getY() - player.getY()) > 3) {
+            stopNav(); worksiteMovement.reset(); supportApproachDeadline=player.level().getGameTime()+600;
+            phase=Phase.SUPPORT_APPROACH; return TaskState.RUNNING;
+        }
         beginSupportVerification(chain, true);
         return TaskState.RUNNING;
+    }
+
+    private TaskState supportApproachTick() {
+        BlockPos target=supportedCell.target().pos();
+        // 不仅横向靠近，还回到目标下方一层附近；不能停在上层柱顶后再次让只读局部搜索负责拆柱下楼。
+        if (nav==null) nav=PlayerNav.toGoal(player,()->NavGoal.nearGround(target.below(),3,1),BuildStanceNavigation.PRECISE_WALK,
+                ()->player.onGround() && Math.abs(player.getY()-target.getY()+1)<=1.01
+                        && target.distToCenterSqr(player.position())<=16,this).walkingOnly();
+        var context=ClientRuntime.requireContext(player);
+        boolean stalled=worksiteMovement.observe(player.position(),target.getCenter(),context.tickRevision(),nav.executionStep(context.tickRevision()));
+        // 规划消息不续期；有实际动作也保留本次半分钟上限，腾空时先让导航安全落地再报告失败。
+        if ((stalled || player.level().getGameTime()>=supportApproachDeadline) && nav.isSafeToCancel()) {
+            stopNav(); failAt(target,"Could not reach local support work within the bounded approach",FailureType.NO_PATH,"support_approach_no_progress",false);
+            return TaskState.FAILED;
+        }
+        return switch(nav.tick()) {
+            case RUNNING -> TaskState.RUNNING;
+            case FAILED -> {
+                String reason=nav.failReason();stopNav();failAt(target,"Could not approach the next support work: "+reason,FailureType.NO_PATH,"support_approach_failed",false);
+                yield TaskState.FAILED;
+            }
+            case ARRIVED -> {
+                stopNav();drainScaffolds();
+                if(!player.onGround() || Math.abs(player.getY()-target.getY()+1)>1.01 || target.distToCenterSqr(player.position())>25) {
+                    failAt(target,"The body has not reached the next local support area",FailureType.NO_PATH,"support_approach_not_reached",false);
+                    yield TaskState.FAILED;
+                }
+                beginSupportVerification(supportChain,true);yield TaskState.RUNNING;
+            }
+        };
     }
 
     private void beginSupportVerification(List<BlockPos> remaining, boolean proposal) {
