@@ -26,6 +26,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
     private enum Phase { DISCOVER, PLAN, SOURCE, TARGET, EXISTING, MATERIALS, BUILD, LINKS, SOURCE_AFTER, TARGET_AFTER, DONE }
     private final Level world;
     private final KineticNativeReads reads=new KineticNativeReads();
+    private final KineticSupplyProgress materialProgress=new KineticSupplyProgress();
     private final List<KineticRouteGeometry.Plan> candidates=new ArrayList<>();
     private final List<Map<String,Object>> linkEvidence=new ArrayList<>();
     private final org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator supply=
@@ -222,6 +223,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             int carried=org.maiwithu.maicraft.core.PlayerInv.buildableCount(player.getInventory(),
                     net.minecraft.core.registries.BuiltInRegistries.ITEM.get(net.minecraft.resources.ResourceLocation.parse(entry.getKey())));
             if(carried>=required)continue;
+            if(!materialProgress.begin(player.getInventory()))return failure("kinetic_material_stock_cycle: gather the remaining bill without consuming its other reserved materials");
             supply.begin(player,r.getToolCallId(),r.getDeadlineGameTime(),
                     new org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.Demand(
                             List.of(net.minecraft.resources.ResourceLocation.parse(entry.getKey())),required,"complete selected kinetic transmission"),

@@ -18,6 +18,13 @@ public final class KineticRouteContinuationTest {
         SharedConstants.tryDetectVersion();Bootstrap.bootStrap();
         try(var h=new InteractionWorldTestHarness()) {
             h.player.setUUID(UUID.randomUUID());var a=new BlockPos(1,1,1);var b=new BlockPos(5,1,1);var cell=new BlockPos(3,1,1);
+            var supplyProgress=new KineticSupplyProgress();
+            h.inventory.setItem(0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE,4));
+            check(supplyProgress.begin(h.inventory),"first missing-material inventory is admitted");
+            h.inventory.setItem(0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.COBBLESTONE,4));
+            check(supplyProgress.begin(h.inventory),"changed stock can advance another material demand");
+            h.inventory.setItem(0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE,4));
+            check(!supplyProgress.begin(h.inventory),"reversible conversions must not endlessly consume each other's reserved final materials");
             var source=new KineticRouteGeometry.Endpoint(a,Direction.Axis.X,List.of(Direction.EAST),"shaft");
             var target=new KineticRouteGeometry.Endpoint(b,Direction.Axis.X,List.of(Direction.WEST),"shaft");
             var plan=new KineticRouteGeometry.Plan("axial_shaft",source,Direction.EAST,target,Direction.WEST,
