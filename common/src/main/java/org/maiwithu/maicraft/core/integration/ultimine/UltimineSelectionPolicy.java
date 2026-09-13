@@ -7,7 +7,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
-/** An entire native shape must be admitted; a cropped outline never grants mining permission. */
+/** 原生形状可能涉及的完整范围都须获准；只显示出来的部分轮廓不能代表连锁挖掘安全。 */
 public final class UltimineSelectionPolicy {
     public static final String SQUARE = "ftbultimine:small_square";
     public static final String SQUARE_CLASS = "dev.ftb.mods.ftbultimine.shape.SmallSquareShape";
@@ -37,6 +37,7 @@ public final class UltimineSelectionPolicy {
         if (preview.actualCount <= 0 || preview.actualCount != preview.visibleBlocks.size()) return rejected("ultimine_preview_incomplete_or_truncated");
         if (preview.actualCount > 9 || new HashSet<>(preview.visibleBlocks).size() != preview.actualCount || !preview.visibleBlocks.contains(origin))
             return rejected("ultimine_native_selection_inconsistent");
+        // 手持工具须能完成整次原生选区，挖完仍至少留一点耐久，不能只够破坏准星下的一块。
         if (remainingDurability <= preview.actualCount) return rejected("ultimine_tool_durability_insufficient_for_selection");
         List<BlockPos> envelope = square(origin, face);
         if (!envelope.containsAll(preview.visibleBlocks)) return rejected("ultimine_selection_outside_native_shape");
@@ -44,7 +45,7 @@ public final class UltimineSelectionPolicy {
         if (unsafe != null) return rejected(unsafe);
         return new Admission(true, "ultimine_complete_native_square_admitted", preview.visibleBlocks, envelope);
     }
-    /** Reject unsafe faces before pressing the key; only FTB's later preview admits a batch. */
+    /** 按键前先排除命中面上越界或受保护的九格范围；之后仍须等原生完整预览才能允许连锁。 */
     public static String envelopeFailure(BlockPos origin, Direction face, View view) {
         for (BlockPos at : square(origin, face)) {
             Cell cell = view.inspect(at);
@@ -57,6 +58,7 @@ public final class UltimineSelectionPolicy {
         return null;
     }
     public static List<BlockPos> square(BlockPos origin, Direction face) {
+        // 上下面对应水平九格，侧面对应竖直九格，跟随玩家真正看向的面而非固定挖掘方向。
         List<BlockPos> result = new ArrayList<>();
         for (int a = -1; a <= 1; a++) for (int b = -1; b <= 1; b++) result.add(switch (face.getAxis()) {
             case X -> origin.offset(0, a, b); case Y -> origin.offset(a, 0, b); case Z -> origin.offset(a, b, 0);

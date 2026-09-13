@@ -8,7 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy.*;
 
-/** Tests the complete native envelope, including positions not drawn or not selected by the current matcher. */
+/** 验证原生完整九格范围，包括当前没有绘制或匹配出来的格子也不能越权破坏。 */
 public final class UltimineSelectionPolicyTest {
     private static int checks;
     private static final BlockPos ORIGIN = new BlockPos(10, 64, 10);
@@ -22,6 +22,7 @@ public final class UltimineSelectionPolicyTest {
         System.out.println("UltimineSelectionPolicyTest: " + checks + " checks passed");
     }
     private static void admitsOnlyTheWholeAuthorizedNativeSquare() {
+        // 六个命中面都使用对应平面的九格，原生只匹配少数方块时也要求整个潜在范围获准。
         for (Direction face : Direction.values()) {
             List<BlockPos> square = UltimineSelectionPolicy.square(ORIGIN, face);
             var admission = UltimineSelectionPolicy.admit(preview(square, 9), ORIGIN, face, at -> SAFE, 10);
@@ -41,6 +42,7 @@ public final class UltimineSelectionPolicyTest {
                 "ultimine_envelope_outside_clearance_permission");
     }
     private static void croppedAndStaleNativeSelectionsNeverBecomeSafe() {
+        // 截短、重复、偏离命中面或原生拒绝的预览，都不能冒充可开始挖掘的完整连锁选区。
         List<BlockPos> square = UltimineSelectionPolicy.square(ORIGIN, Direction.UP);
         rejects(preview(square.subList(0, 4), 9), at -> SAFE, 10, "ultimine_preview_incomplete_or_truncated");
         rejects(preview(List.of(), 9), at -> SAFE, 10, "ultimine_preview_incomplete_or_truncated");
@@ -57,6 +59,7 @@ public final class UltimineSelectionPolicyTest {
         rejects(released, at -> SAFE, 10, "ultimine_native_key_not_active");
     }
     private static void everyPotentialCellKeepsItsProtectionAndDropRequirements() {
+        // 边缘范围在按键前就排除；没有画进预览的角落仍须检查保护、容器、流体和掉落工具。
         BlockPos topCorner = ORIGIN.offset(1, 0, 1);
         View boundary = at -> at.equals(topCorner) ? new Cell(true, false, false, false, false, false) : SAFE;
         check(UltimineSelectionPolicy.envelopeFailure(ORIGIN, Direction.UP, boundary) != null,
@@ -73,12 +76,14 @@ public final class UltimineSelectionPolicyTest {
         check(detached.visibleBlocks().size() == 9, "native preview facts do not share the caller's mutable list");
     }
     private static void durabilityReservesTheWholeNativeSelection() {
+        // 九格批量至少需要十点剩余耐久，验证不会拿仅够单格挖掘的工具启动整批连锁。
         Preview nine = preview(UltimineSelectionPolicy.square(ORIGIN, Direction.UP), 9);
         rejects(nine, at -> SAFE, 9, "ultimine_tool_durability_insufficient_for_selection");
         rejects(nine, at -> SAFE, 3, "ultimine_tool_durability_insufficient_for_selection");
         check(UltimineSelectionPolicy.admit(nine, ORIGIN, Direction.UP, at -> SAFE, 10).allowed(), "nine-block admission retains at least one durability afterwards");
     }
     private static void missingOptionalModCanBeClosedWithoutInitializingIt() {
+        // 未安装可选模组时，检测和取消都能安全结束，不会为了松键强行初始化原生客户端。
         if (!org.maiwithu.maicraft.server.machine.NativeApi.present("dev.ftb.mods.ftbultimine.client.FTBUltimineClient")) {
             check(!UltimineNative.available(), "missing Ultimine is detected before taking any native input");
             new UltimineSession().close(); checks++;

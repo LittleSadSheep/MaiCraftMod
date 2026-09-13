@@ -10,7 +10,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Read-only FTB Ultimine 2101.1.15 integration; key state is consumed by FTB's own client tick. */
+/** 读取 FTB Ultimine 2101.1.15 的原生状态并复用原生滚轮入口；启用键仍由 FTB 自己的 tick 处理。 */
 public final class UltimineNative {
     private static final String CLIENT = "dev.ftb.mods.ftbultimine.client.FTBUltimineClient";
     private static final String SHAPES = "dev.ftb.mods.ftbultimine.shape.ShapeRegistry";
@@ -36,6 +36,7 @@ public final class UltimineNative {
         Object client = NativeApi.call(null, CLIENT, "getInstance"); return client != null && (Boolean) read(client, "pressed");
     }
     public static boolean serverAvailable() {
+        // 客户端能找到模组不代表服务器支持连锁，须以原生通信通道是否可用决定能否启用。
         try {
             return NativeApi.truth(NativeApi.call(null, "dev.architectury.networking.NetworkManager", "canServerReceive",
                     net.minecraft.resources.ResourceLocation.parse("ftbultimine:key_pressed_packet")))
@@ -56,10 +57,11 @@ public final class UltimineNative {
     }
     public static void scrollShape(Minecraft minecraft, boolean next) {
         Object client = NativeApi.call(null, CLIENT, "getInstance");
-        // This is the registered native scroll handler. FTB alone applies menu conditions and emits its ordinary packet.
+        // 调用原本注册的滚轮处理：菜单条件、形状变化和正常消息都由 FTB 执行，不直接改选区。
         NativeApi.call(client, CLIENT, "onMouseScrolled", minecraft, 0d, next ? -1d : 1d);
     }
     public static UltimineSelectionPolicy.Preview preview(LocalPlayer player) {
+        // 同时读取实际选中数量和用于绘制的坐标，后续才能识别被显示上限截短的不完整预览。
         Object client = NativeApi.call(null, CLIENT, "getInstance");
         if (client == null) return null;
         Object collection = NativeApi.call(client, CLIENT, "getSelectedBlocks");
