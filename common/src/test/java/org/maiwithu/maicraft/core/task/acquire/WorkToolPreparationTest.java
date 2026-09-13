@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 public final class WorkToolPreparationTest {
+    // 大面积挖土选铲子、挖石头选能掉落材料的镐；优先用现有工具，快坏时再准备下一把。
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         BuiltInRegistries.BLOCK.bindTags(Map.of(

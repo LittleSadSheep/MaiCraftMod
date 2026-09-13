@@ -8,7 +8,7 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * 只帮挖掘任务挑工具，不动背包。
  * 例如挖铁矿时，优先选能挖出材料的镐；不合等级但速度更快的工具排在后面。
- * “最佳”只按这里读取的物品挖掘速度比较，没有计算剩余耐久或玩家所有效果带来的实际速度。
+ * 普通选择比较物品挖掘速度；大面积施工还可要求最低耐久，避免换工具后又选回快坏的旧工具。
  */
 public final class ToolSelect {
 
@@ -30,6 +30,7 @@ public final class ToolSelect {
     }
 
     public static int bestSlot(LocalPlayer p, BlockState state, int minimumDurability) {
+        // 先排除撑不住本批开挖的工具，再优先选择能正常掉落材料、挖得更快的一把。
         Inventory inv = p.getInventory();
         boolean tierGated = state.requiresCorrectToolForDrops();
         int harvest = -1, any = -1;

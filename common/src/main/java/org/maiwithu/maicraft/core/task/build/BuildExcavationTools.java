@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Obtain tools through the same visible, permission-bound supply path as building materials. */
+/** 大面积挖掘前先备好合适工具；取料和合成都复用正常可见界面，并遵守本次建造允许的材料来源。 */
 final class BuildExcavationTools {
     private final SemanticMaterialSupplyCoordinator supply = new SemanticMaterialSupplyCoordinator();
     private final List<BlockPos> protection;
@@ -30,6 +30,7 @@ final class BuildExcavationTools {
                   Function<Task, TaskState> childRunner) {
         if (player.getAbilities().instabuild) return true;
         if (supply.active()) {
+            // 木桶取料或合成还没收尾时继续等待，不能刚看见铲子进包就抢走操作、直接回去刨坑。
             var result = NavigationSafetyContext.withProtectedArea(protection, List.of(),
                     () -> supply.tick(player, childRunner));
             record.extendDeadlineTo(supply.childDeadline());
@@ -45,6 +46,7 @@ final class BuildExcavationTools {
             return false;
         }
         int existing = PlayerInv.buildableCount(player.getInventory(), BuiltInRegistries.ITEM.get(item));
+        // 背包里快坏的旧铲子不算新工具，明确再取得一把，避免数量已达标却始终换不到能用的工具。
         supply.begin(player, record.getToolCallId() + "/excavation-tool", record.getDeadlineGameTime(),
                 new SemanticMaterialSupplyCoordinator.Demand(List.of(item), existing + 1, "tool for bulk excavation"),
                 options.policy(), options.sources(), options.allowHarm(), options.protectedLabels());

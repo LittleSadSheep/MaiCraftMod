@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.build;
 
 public final class BuildSiteConstraintsTest {
+    // 地下室撞到基岩或高度边界就拒绝开工；已经匹配的基岩地板则按原样保留。
     public static void main(String[] args) {
         check("unbreakable_terrain".equals(BuildSiteConstraints.conflict(false, false, true, -1)),
                 "a basement must not excavate bedrock at any world elevation");

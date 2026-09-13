@@ -4,6 +4,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 
 public final class BuildExcavationFrontierTest {
+    // 从地表逐层刨坑，保住脚下和危险落点；从坑底续建时必须重新找到外侧真实地面。
     public static void main(String[] args) throws Exception {
         BlockPos feet = new BlockPos(0, 65, 0), top = new BlockPos(2, 64, 0);
         BlockPos floor = new BlockPos(0, 59, 0), footing = feet.below();

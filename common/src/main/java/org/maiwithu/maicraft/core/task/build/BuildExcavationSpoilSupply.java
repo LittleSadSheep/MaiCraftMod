@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Deposits only the caller's proven excavation surplus. The caller retains tools/materials and owns returning to the worksite. */
+/** 将施工确认可存的余料通过真实木桶界面分箱存好；保留工具、建材和返程安排，不直接清包或丢物。 */
 public final class BuildExcavationSpoilSupply {
     public enum Status { RUNNING, DEPOSITED, FAILED }
     public record Tick(Status status, Map<String, Object> receipt) {}
@@ -64,6 +64,7 @@ public final class BuildExcavationSpoilSupply {
         status = items.isEmpty() ? Status.DEPOSITED : Status.RUNNING;
     }
     public Tick tick(LocalPlayer player, Function<Task, TaskState> runChild) {
+        // 存土石 -> 确认背包与箱内数量变化 -> 关箱；外来界面或游标出现时先停下，不替玩家处理它们。
         if (status != Status.RUNNING) return new Tick(status, receipt());
         if (player != owner || player.level() != world) { cancel(owner); return fail("excavation_spoil_body_or_world_changed"); }
         if (child != null) return tickChild(runChild);

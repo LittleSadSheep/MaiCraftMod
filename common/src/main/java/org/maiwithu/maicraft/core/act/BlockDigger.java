@@ -49,7 +49,7 @@ public final class BlockDigger {
     private int minimumToolDurability;
     public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
     private java.util.function.Predicate<BlockHitResult> preparation = hit -> true;
-    /** Called after native tool/menu/aim settling and before the first break submission. */
+    /** 工具真正拿好、界面关闭且准星对准后，才检查连锁准备；未通过前不提交第一下破坏。 */
     public void beforeBreak(java.util.function.Predicate<BlockHitResult> gate) {
         preparation = java.util.Objects.requireNonNull(gate);
     }
@@ -467,6 +467,7 @@ public final class BlockDigger {
                 offsetOn(pos, shape, 1.0, 0.5, 0.5),
         };
         if (preferTopFace) {
+            // 自上而下刨坑时先试着瞄准上表面；返回的仍是实际射线命中面，不把侧面伪装成上面。
             Vec3 center = aims[0]; aims[0] = aims[2]; aims[2] = center;
         }
         for (Vec3 aim : aims) {

@@ -6,11 +6,12 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Read actual loaded terrain; world presets do not determine excavation feasibility. */
+/** 按现场已加载方块检查地下室能否开挖；基岩和世界高度都读实际存档，不针对超平坦写特例。 */
 public final class BuildSiteConstraints {
     private BuildSiteConstraints() {}
 
     public static List<String> conflicts(LocalPlayer player, List<BuildTaskRecord.Target> targets) {
+        // 开工和取料前先指出图纸撞到的不可挖地层，让规划调整地下室深度、整体高度或选址。
         var level = player.level();
         List<String> result = new ArrayList<>();
         for (var target : targets) {

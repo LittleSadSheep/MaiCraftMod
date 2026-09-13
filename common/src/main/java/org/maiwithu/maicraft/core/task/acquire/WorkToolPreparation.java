@@ -66,13 +66,14 @@ public final class WorkToolPreparation {
 
     public record UseTool(ResourceLocation itemId, boolean carried, boolean stockOnly) {}
 
-    /** Bulk excavation reuses adequate owned tools and prepares a cheap replacement before exhaustion. */
+    /** 大面积刨坑先复用已有的合适工具，耐久不足时再按材料存量准备便宜的石制或铁制替代品。 */
     public static ResourceLocation excavationTool(LocalPlayer player, BlockState source, int work) {
         return excavationTool(inventory(player), source, work,
                 PlayerInv.buildableCount(player.getInventory(), Items.IRON_INGOT));
     }
 
     static ResourceLocation excavationTool(List<ItemStack> inventory, BlockState source, int work, long iron) {
+        // 零星挖土可以不开新工具，但需要正确镐级别的方块以及大面积施工必须先满足工具条件。
         if (work < BATCH_SIZE && !source.requiresCorrectToolForDrops()) return null;
         var baseline = missing(List.of(), List.of(source), Math.max(BATCH_SIZE, work), 0, 0, 1);
         if (baseline == null) return null;

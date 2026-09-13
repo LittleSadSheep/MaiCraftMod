@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
 public final class BuildExcavationCargoTest {
+    // 卸下新挖的土石时保留开工物资、建材、食物与工具，分批施工也不能忘记这条底线。
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         try (var h = new InteractionWorldTestHarness()) {
