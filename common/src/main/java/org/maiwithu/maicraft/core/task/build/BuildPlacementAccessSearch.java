@@ -22,6 +22,7 @@ final class BuildPlacementAccessSearch {
     }
     private record Node(Vec3 feet, Node previous) {}
     private static final Direction[] EDGES = {Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST};
+    private static final int TARGET_MARGIN = 8, ORIGIN_MARGIN = 2, MAX_SPAN = 32, MAX_VISITS = 512;
     private final LocalPlayer player;
     private final BuildTaskRecord.Target target;
     private final BuildSupportWorld world;
@@ -30,6 +31,7 @@ final class BuildPlacementAccessSearch {
     private final GroundCorridor corridor;
     private final boolean edgesOnly;
     private final int visitLimit;
+    private final int minX, maxX, minZ, maxZ;
     private final ArrayDeque<Node> frontier = new ArrayDeque<>();
     private final Set<BlockPos> visited = new HashSet<>();
     private Node node;
@@ -41,7 +43,13 @@ final class BuildPlacementAccessSearch {
     BuildPlacementAccessSearch(LocalPlayer player, BuildTaskRecord.Target target, BuildSupportWorld world, Vec3 origin,
                                LongSet forbidden, PhysicalObstacleSnapshot physical, int visitLimit, boolean edgesOnly) {
         this.player = player; this.target = target; this.world = world; this.origin = origin;
-        this.visitLimit = Math.max(0, visitLimit); this.edgesOnly = edgesOnly;
+        this.visitLimit = Math.min(MAX_VISITS, Math.max(0, visitLimit)); this.edgesOnly = edgesOnly;
+        // 角色可能仍在另一间房：把当前脚位的小范围出口和目标附近合成有限包围框，再沿真实地板走进去。
+        BlockPos start = BlockPos.containing(origin);
+        minX = Math.min(start.getX() - ORIGIN_MARGIN, target.pos().getX() - TARGET_MARGIN);
+        maxX = Math.max(start.getX() + ORIGIN_MARGIN, target.pos().getX() + TARGET_MARGIN);
+        minZ = Math.min(start.getZ() - ORIGIN_MARGIN, target.pos().getZ() - TARGET_MARGIN);
+        maxZ = Math.max(start.getZ() + ORIGIN_MARGIN, target.pos().getZ() + TARGET_MARGIN);
         double height = Math.max(player.getBbHeight(), player.getDimensions(Pose.STANDING).height());
         walking = new BuildSupportWalking(world, player.level()::isLoaded, player.getBbWidth(), height, forbidden, physical);
         corridor = new GroundCorridor(world, player.level()::isLoaded, player.getBbWidth(), height, forbidden, physical);
@@ -53,6 +61,10 @@ final class BuildPlacementAccessSearch {
             for (int work = 0; work < Math.max(0, budget) && !complete && System.nanoTime() < deadline; work++) {
                 if (!initialized) {
                     initialized = true;
+                    // 太远属于本地证明范围不足，必须明确交回；不能只把起点塞进队列后因第一步越界伪装成无路。
+                    if ((long) maxX - minX > MAX_SPAN || (long) maxZ - minZ > MAX_SPAN) {
+                        fail("placement_access_span_exceeded"); break;
+                    }
                     // 实际脚位可能已在安全檐边，不能先强制量化到外侧无地板格心；直接验证完整身体的足底支撑。
                     if (visitLimit == 0 || !corridor.clear(origin, origin)) { fail("current_footing_not_connected"); break; }
                     visited.add(BlockPos.containing(origin)); frontier.add(new Node(origin, null));
@@ -115,7 +127,7 @@ final class BuildPlacementAccessSearch {
         return best;
     }
     private boolean within(BlockPos pos) {
-        return Math.abs(pos.getX() - target.pos().getX()) <= 8 && Math.abs(pos.getZ() - target.pos().getZ()) <= 8
+        return pos.getX() >= minX && pos.getX() <= maxX && pos.getZ() >= minZ && pos.getZ() <= maxZ
                 // 高阶下面的支撑可能需先沿既有楼梯回到房间地面再放；仍按真实连续落脚和总节点额度限制这条绕行。
                 && pos.getY() >= Math.min(origin.y, target.pos().getY()) - 6 && pos.getY() <= Math.max(origin.y, target.pos().getY()) + 2;
     }

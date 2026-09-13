@@ -59,6 +59,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildRoofStairAccessTest.main(args);
         // 内部楼梯的支撑可先从地下室地面放置，再回到较高阶面完成正式楼梯。
         org.maiwithu.maicraft.core.task.build.BuildBasementSupportAccessTest.main(args);
+        // 跨房间时搜索包含真实起点，缺口和保护仍会拒绝，不把超出范围误报成当前一格无路。
+        org.maiwithu.maicraft.core.task.build.BuildPlacementAccessBoundsTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildNavigationRetryTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildLayerFrontierTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest.main(args);
@@ -104,6 +106,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildScaffoldLedgerTest.main(args);
         // 重启只恢复本项目记录且现场仍匹配的支撑，不能扫描泥土冒认所有权。
         org.maiwithu.maicraft.core.task.build.BuildProjectScaffoldPersistenceTest.main(args);
+        // 明确采用新场景时保留旧项目支撑，并拒绝不匹配父版本或改变过的原生证据。
+        org.maiwithu.maicraft.core.task.build.BuildProjectRevisionTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldDropSafetyTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterialsTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupTest.main(args);
