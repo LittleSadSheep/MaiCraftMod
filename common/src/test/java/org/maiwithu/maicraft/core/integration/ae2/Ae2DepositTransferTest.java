@@ -105,6 +105,7 @@ public final class Ae2DepositTransferTest {
             menu = ChestMenu.threeRows(91, world.inventory, new SimpleContainer(27)); world.player.containerMenu = menu;
             Minecraft.getInstance().screen = new ContainerScreen(menu, world.inventory, Component.literal("AE deposit observation fixture"));
             MenuPort port = (MenuPort) Proxy.newProxyInstance(MenuPort.class.getClassLoader(), new Class<?>[]{MenuPort.class}, (proxy, method, args) -> switch (method.getName()) {
+                case "ensureVisible" -> true;
                 case "click" -> {
                     check(args[3] == ClickType.QUICK_MOVE && menu.getSlot((int) args[1]).container == world.inventory, "deposit only shifts a real player inventory slot");
                     shifts++; clicked = (int) args[1]; confirmation = (MenuConfirmation) args[4];

@@ -103,6 +103,11 @@ final class Ae2DepositTransfer {
         while (groupIndex < request.groups().size() && ledger.deposited(request.groups().get(groupIndex).itemId()) == request.groups().get(groupIndex).count()) groupIndex++;
         if (groupIndex == request.groups().size()) { status = Status.SUCCEEDED; code = "resources_deposited"; return status; }
         if (settleOnly) return fail("ae2_deposit_settled_before_full_request", false);
+        // 匹配到菜单对象不等于绘制等待已完成；先让真实菜单端口登记并等新画面，旧回执仍在上面单独轮询。
+        if (!context.menus().ensureVisible(context)) {
+            if (context.tickRevision() - readyWaitStarted > 100) return fail("ae2_deposit_gui_not_rendered", false);
+            return status;
+        }
         if (context.tickRevision() - readyWaitStarted > 100) return fail("ae2_deposit_network_not_stable", false);
         var entries = view.entries(menu);
         if (entries == null) return fail("ae2_deposit_repository_unavailable", effects);
@@ -131,15 +136,18 @@ final class Ae2DepositTransfer {
         if (!context.mutationAvailable()) return status;
         // 客户端 AE quickMove 不假扣背包，正常窗口点击包交给服务器的原生 Shift 路径处理。
         batch = stack.getCount(); shiftSource = source; shiftBefore = inventory(); networkBefore = visible.get(item);
-        stableTick = -1; stableAmount = stableCount = verifiedAmount = 0; effects = true; shifts++;
+        stableTick = -1; stableAmount = stableCount = verifiedAmount = 0;
         receipt = context.menus().click(context, slots.get(source), 0, ClickType.QUICK_MOVE, this::observeShift, 100);
+        // 前置渲染／权限检查会直接抛错；真正进入原生事务后的异常则返回 UNCERTAIN 回执，二者不能混算。
+        effects = true; shifts++;
         return status;
     }
     private Status stage(LocalPlayerContext context) {
         if (!stagingStarted) { staging.start(player); stagingStarted = true; }
-        effects = true;
         if (player.level().getGameTime() >= stagingRecord.getDeadlineGameTime()) return fail("ae2_deposit_split_timeout", true);
+        boolean nativeSlotFree = context.mutationAvailable();
         TaskState result = staging.tick(player);
+        effects |= nativeSlotFree && !context.mutationAvailable();
         if (!result.isTerminal()) return status;
         var outcome = staging.result(result); staging = null;
         if (result != TaskState.SUCCESS || outcome == null || !outcome.success()) return fail("ae2_deposit_split_unconfirmed", true);
