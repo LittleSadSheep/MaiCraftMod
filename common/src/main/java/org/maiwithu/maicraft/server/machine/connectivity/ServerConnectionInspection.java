@@ -34,7 +34,7 @@ public final class ServerConnectionInspection {
         for (int index = 0; index < positions.size() - 1; index++) {
             final int i = index;
             ConnectionEvidence edge = nativeRead(() -> switch (path.system()) {
-                case "create" -> CreateConnectionInspection.edge(path.medium(), entities.get(i), entities.get(i + 1));
+                case "create" -> CreateConnectionInspection.edge(path.medium(), entities.get(i), entities.get(i + 1), body.has("link_kind"));
                 case "ae2" -> Ae2ConnectionInspection.edge(path.medium(), entities.get(i), entities.get(i + 1));
                 case "mekanism" -> MekanismConnectionInspection.edge(path.medium(), entities.get(i), entities.get(i + 1),
                         positions.get(i), positions.get(i + 1), i == 0, i == positions.size() - 2);
@@ -60,6 +60,7 @@ public final class ServerConnectionInspection {
         JsonObject result = ConnectionEvidence.summarize(evidence);
         result.addProperty("schema", "maicraft.connection_inspection.v1");
         result.addProperty("system", path.system()); result.addProperty("medium", path.medium());
+        if (body.has("link_kind")) result.add("link_kind", body.get("link_kind").deepCopy());
         result.addProperty("dimension", player.serverLevel().dimension().location().toString());
         result.addProperty("tick", player.serverLevel().getGameTime());
         result.addProperty("complete", true);

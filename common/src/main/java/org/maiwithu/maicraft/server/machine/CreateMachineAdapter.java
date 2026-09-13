@@ -25,6 +25,7 @@ final class CreateMachineAdapter {
         observation.getAsJsonObject("native").add("create", state);
         state.addProperty("production_attribution", "query_machine.production_events");
         try {
+            CreateChainConveyorObservation.inspect(player, entity, state);
             if (NativeApi.is(entity, KINETIC)) {
                 for (String method : new String[]{"getSpeed", "getTheoreticalSpeed", "getGeneratedSpeed", "isOverStressed",
                         "isSpeedRequirementFulfilled", "hasSource", "hasNetwork"}) scalar(state, method, NativeApi.call(entity, KINETIC, method));

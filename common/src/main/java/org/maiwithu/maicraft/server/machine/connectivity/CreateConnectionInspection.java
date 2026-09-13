@@ -7,6 +7,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import java.util.ArrayList;
 import java.util.List;
+import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorBridge;
 
 /** Create 6: query propagation rules and existing memberships without creating a network. */
 final class CreateConnectionInspection {
@@ -18,12 +19,21 @@ final class CreateConnectionInspection {
     private CreateConnectionInspection() {}
 
     static ConnectionEvidence edge(String medium, BlockEntity from, BlockEntity to) {
+        return edge(medium, from, to, false);
+    }
+    static ConnectionEvidence edge(String medium, BlockEntity from, BlockEntity to, boolean requireChainConveyor) {
         if (!medium.equals("kinetic") || !NativeApi.present(KINETIC)) {
             return evidence("unsupported", false, false, "create_adapter_requires_kinetic_api");
         }
         if (!NativeApi.is(from, KINETIC) || !NativeApi.is(to, KINETIC)) {
             return evidence("planned", false, false, "expected_kinetic_block_missing");
         }
+        if (requireChainConveyor && (!ChainConveyorBridge.isConveyor(from) || !ChainConveyorBridge.isConveyor(to)))
+            return evidence("unsupported", false, false, "explicit_chain_link_requires_two_conveyors");
+        if (ChainConveyorBridge.isConveyor(from) && ChainConveyorBridge.isConveyor(to)
+                && (!ChainConveyorBridge.connections(from).contains(to.getBlockPos().subtract(from.getBlockPos()))
+                || !ChainConveyorBridge.connections(to).contains(from.getBlockPos().subtract(to.getBlockPos()))))
+            return evidence("planned", false, false, "native_chain_conveyor_link_absent_or_one_sided");
         // isConnected itself assumes the caller already selected a propagation neighbor.
         // In particular, aligned shafts at arbitrary distances must never be accepted.
         boolean neighbor = candidate(from, to) || candidate(to, from);

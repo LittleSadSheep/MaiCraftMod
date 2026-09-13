@@ -35,6 +35,10 @@ record ConnectionPath(String system, String medium, List<Point> positions) {
             throw new IllegalArgumentException("path must include both endpoints and every intermediate position");
         }
         var array = body.getAsJsonArray("path");
+        boolean conveyor = body.has("link_kind");
+        if (conveyor && (!text(body, "link_kind").equals("chain_conveyor") || !system.equals("create")
+                || !medium.equals("kinetic") || array.size() != 2))
+            throw new IllegalArgumentException("chain_conveyor link_kind requires exactly two Create kinetic endpoints");
         if (array.size() < 2 || array.size() > MAX_POSITIONS) {
             throw new IllegalArgumentException("path must contain 2..128 positions; split longer paths with overlap");
         }
@@ -46,7 +50,7 @@ record ConnectionPath(String system, String medium, List<Point> positions) {
             Point point = new Point(integer(position, "x", 30_000_000), integer(position, "y", 2048),
                     integer(position, "z", 30_000_000));
             if (!seen.add(point)) throw new IllegalArgumentException("path must not repeat a position");
-            if (!points.isEmpty()) checkStep(points.getLast(), point, system.equals("create") && medium.equals("kinetic"));
+            if (!points.isEmpty() && !conveyor) checkStep(points.getLast(), point, system.equals("create") && medium.equals("kinetic"));
             points.add(point);
         }
         checkFace(body, "from_face", points.getFirst(), points.get(1));
