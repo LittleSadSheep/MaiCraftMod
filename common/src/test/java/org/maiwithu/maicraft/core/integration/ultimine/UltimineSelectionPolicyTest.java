@@ -57,6 +57,12 @@ public final class UltimineSelectionPolicyTest {
         rejects(released, at -> SAFE, 10, "ultimine_native_key_not_active");
     }
     private static void everyPotentialCellKeepsItsProtectionAndDropRequirements() {
+        BlockPos topCorner = ORIGIN.offset(1, 0, 1);
+        View boundary = at -> at.equals(topCorner) ? new Cell(true, false, false, false, false, false) : SAFE;
+        check(UltimineSelectionPolicy.envelopeFailure(ORIGIN, Direction.UP, boundary) != null,
+                "an unsafe horizontal envelope is rejected before acquiring any Ultimine key");
+        check(UltimineSelectionPolicy.envelopeFailure(ORIGIN, Direction.EAST, boundary) == null,
+                "the actual side hit uses a vertical plane instead of a fixed horizontal square");
         Preview partial = preview(List.of(ORIGIN, ORIGIN.east()), 2); BlockPos hidden = ORIGIN.west().north();
         List<Cell> unsafe = List.of(new Cell(false, true, false, false, false, false), new Cell(true, true, true, false, false, false),
                 new Cell(true, true, false, true, false, false), new Cell(true, true, false, false, true, false),

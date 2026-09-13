@@ -40,16 +40,21 @@ public final class UltimineSelectionPolicy {
         if (remainingDurability <= preview.actualCount) return rejected("ultimine_tool_durability_insufficient_for_selection");
         List<BlockPos> envelope = square(origin, face);
         if (!envelope.containsAll(preview.visibleBlocks)) return rejected("ultimine_selection_outside_native_shape");
-        // blockBroken recomputes on the server, so all nine possible positions must be safe, even absent from this preview.
-        for (BlockPos at : envelope) {
-            Cell cell = view.inspect(at);
-            if (cell == null || !cell.loaded) return rejected("ultimine_envelope_unloaded");
-            if (!cell.authorized || cell.preserved) return rejected("ultimine_envelope_outside_clearance_permission");
-            if (cell.blockEntity) return rejected("ultimine_envelope_contains_block_entity");
-            if (cell.unbreakable || cell.fluid) return rejected("ultimine_envelope_contains_unsafe_block");
-            if (!cell.correctTool) return rejected("ultimine_tool_cannot_harvest_entire_envelope");
-        }
+        String unsafe = envelopeFailure(origin, face, view);
+        if (unsafe != null) return rejected(unsafe);
         return new Admission(true, "ultimine_complete_native_square_admitted", preview.visibleBlocks, envelope);
+    }
+    /** Reject unsafe faces before pressing the key; only FTB's later preview admits a batch. */
+    public static String envelopeFailure(BlockPos origin, Direction face, View view) {
+        for (BlockPos at : square(origin, face)) {
+            Cell cell = view.inspect(at);
+            if (cell == null || !cell.loaded) return "ultimine_envelope_unloaded";
+            if (!cell.authorized || cell.preserved) return "ultimine_envelope_outside_clearance_permission";
+            if (cell.blockEntity) return "ultimine_envelope_contains_block_entity";
+            if (cell.unbreakable || cell.fluid) return "ultimine_envelope_contains_unsafe_block";
+            if (!cell.correctTool) return "ultimine_tool_cannot_harvest_entire_envelope";
+        }
+        return null;
     }
     public static List<BlockPos> square(BlockPos origin, Direction face) {
         List<BlockPos> result = new ArrayList<>();

@@ -72,6 +72,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BlockDigger digger;
     private final BuildExcavationFrontier excavation = new BuildExcavationFrontier();
     private final Map<Long, CellPlan> excavationOwners = new HashMap<>();
+    private final Set<BlockPos> excavationAuthority;
     private boolean excavating;
     private final BuildExcavationTools excavationTools;
     private org.maiwithu.maicraft.core.integration.ultimine.UltimineSession ultimine;
@@ -175,6 +176,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 保存全部目标并按施工顺序排序，记住不能让导航破坏的格子，以及上一批留下的临时支撑。
         super(player, record);
         this.placementRay = placementRay;
+        excavationAuthority = record.targets.stream().map(BuildTaskRecord.Target::pos)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
         rules = new BuildCellRules(player, record);
         inventory = new BuildInventory(player);
         digger = new BlockDigger(player);
@@ -410,7 +413,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.NO_SUPPORT, "blocked_site_cells"); return TaskState.FAILED;
         }
         r.excavationCargo().begin(player);
-        excavationExit = player.blockPosition().immutable();
+        excavationExit = BuildExcavationFrontier.exit(player, siteMin, siteMax);
         for (CellPlan plan : plans) {
             if (ownedAirScaffold(plan.target(), player.level().getBlockState(plan.target().pos()))) continue;
             for (BlockPos pos : clearCells(plan)) {
@@ -619,6 +622,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState clearTick() {
         if (ultimineArmed && digger.hasPendingBreak()) {
             var decision = ultimine.tickInFlight(ClientRuntime.requireContext(player));
+            var holding = new LinkedHashMap<>(ultimineEvidence);
+            holding.putAll(ultimine.holdEvidence()); holding.put("status", "holding_native_break");
+            ultimineEvidence = Map.copyOf(holding);
             if (decision.status() == org.maiwithu.maicraft.core.integration.ultimine.UltimineSession.Status.ABORT
                     || decision.status() == org.maiwithu.maicraft.core.integration.ultimine.UltimineSession.Status.BLOCKED) {
                 digger.cancel();
@@ -718,10 +724,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private boolean prepareExcavationBreak(BlockHitResult hit) {
         if (!excavating) return true;
         if (ultimine == null) ultimine = new org.maiwithu.maicraft.core.integration.ultimine.UltimineSession();
-        var decision = ultimine.prepare(ClientRuntime.requireContext(player), hit, excavation.cells(), at -> {
+        var decision = ultimine.prepare(ClientRuntime.requireContext(player), hit, excavationAuthority, at -> {
             var target = targets.get(at.asLong());
             return r.hasExecutionGuards() || target == null || at.equals(player.blockPosition().below())
                     || inheritedProtectedMutationCells.contains(at.asLong()) || r.scaffoldLedger().contains(at)
+                    || !r.replaceMode.allows(player.level().getBlockState(at), target.desiredState())
                     || !BuildCellRules.isAirTarget(target) && target.constructionMatches(player.level().getBlockState(at));
         });
         ultimineEvidence = Map.of("status", decision.status().name().toLowerCase(java.util.Locale.ROOT),

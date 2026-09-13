@@ -33,6 +33,9 @@ public final class UltimineSession implements AutoCloseable {
     private String fallback;
     private long releaseBegan;
     private boolean acquired, inFlight, closed;
+    private int heldBreakTicks;
+    private long lastHeldTick = Long.MIN_VALUE;
+    private boolean lastNativePressed, lastKeyDown;
 
     /** Call only after the desired tool/hotbar and the visible crosshair have been established. */
     public Decision prepare(LocalPlayerContext context, BlockHitResult hit, Set<BlockPos> allowedClearCells, Predicate<BlockPos> preserve) {
@@ -58,6 +61,11 @@ public final class UltimineSession implements AutoCloseable {
             if (context.level().getGameTime() - openedTick > 120) return single(context, "ultimine_preview_or_shape_timeout");
             if (preview == null) return result(Status.WAITING, "ultimine_native_preview_pending");
             if (!acquired) {
+                String unsafe = UltimineSelectionPolicy.envelopeFailure(origin, face, at -> inspect(context, at));
+                if (unsafe != null) return single(context, unsafe);
+                long occupied = UltimineSelectionPolicy.square(origin, face).stream()
+                        .filter(at -> !context.level().getBlockState(at).isAir()).count();
+                if (occupied < 2) return single(context, "ultimine_only_one_remaining_block");
                 if (preview.pressed()) return result(Status.WAITING, "ultimine_waiting_for_prior_key_release");
                 if (!UltimineInputLease.acquire(this, context)) return single(context, "ultimine_input_binding_unavailable");
                 acquired = true; initialRevision = preview.revision();
@@ -97,6 +105,10 @@ public final class UltimineSession implements AutoCloseable {
             if (admitted == null || !bound(context) || !UltimineInputLease.heldBy(this)) return abort("ultimine_inflight_binding_lost");
             inFlight = true;
             var preview = UltimineNative.preview(context.player());
+            lastNativePressed = preview != null && preview.pressed();
+            lastKeyDown = UltimineNative.key().isDown();
+            if (!lastNativePressed || !lastKeyDown) return abort("ultimine_native_key_released_during_break");
+            if (lastHeldTick != context.level().getGameTime()) { heldBreakTicks++; lastHeldTick = context.level().getGameTime(); }
             if (preview == null || !preview.shapeId().equals(UltimineSelectionPolicy.SQUARE)
                     || !preview.implementation().equals(UltimineSelectionPolicy.SQUARE_CLASS)) return abort("ultimine_shape_changed_during_break");
             for (BlockPos at : admitted.potentialSelection()) {
@@ -111,6 +123,11 @@ public final class UltimineSession implements AutoCloseable {
         } catch (RuntimeException invalid) { return abort("ultimine_inflight_native_state_unavailable"); }
     }
     public Decision keepAlive(LocalPlayerContext context) { return tickInFlight(context); }
+    public java.util.Map<String, Object> holdEvidence() {
+        return java.util.Map.of("held_break_ticks", heldBreakTicks,
+                "native_pressed_at_last_break_tick", lastNativePressed, "key_down_at_last_break_tick", lastKeyDown,
+                "hit_face", face == null ? "none" : face.getName());
+    }
     /** Call after the native break receipt settles. WAITING means FTB has not processed the normal key release yet. */
     public Decision finish(LocalPlayerContext context) { inFlight = false; closed = true; return released(context, "ultimine_batch_finished"); }
     @Override public void close() { UltimineInputLease.release(this); acquired = false; closed = true; }

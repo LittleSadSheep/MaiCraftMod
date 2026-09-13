@@ -129,8 +129,15 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         }
         @Override public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
         @Override public ClientChunkCache getChunkSource() { searches++; return chunks; }
+        @Override public net.minecraft.world.level.BlockGetter getChunkForCollisions(int x, int z) {
+            return x == 0 && z == 0 ? this : null;
+        }
         @Override public int getHeight() { return 16; }
         @Override public int getMinBuildHeight() { return 0; }
+        @Override public int getHeight(net.minecraft.world.level.levelgen.Heightmap.Types type, int x, int z) {
+            for (int y = 15; y >= 0; y--) if (!getBlockState(new BlockPos(x, y, z)).isAir()) return y + 1;
+            return 0;
+        }
         private net.minecraft.world.level.border.WorldBorder testBorder;
         @Override public net.minecraft.world.level.border.WorldBorder getWorldBorder() {
             if (testBorder == null) testBorder = new net.minecraft.world.level.border.WorldBorder();

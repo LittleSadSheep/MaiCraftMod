@@ -32,6 +32,31 @@ final class BuildExcavationFrontier {
                 && level.getBlockState(landing).isFaceSturdy(level, landing, net.minecraft.core.Direction.UP);
     }
 
+    /** A resumed task may start inside its pit; use loaded exterior ground instead of that buried starting point. */
+    static BlockPos exit(LocalPlayer player, BlockPos min, BlockPos max) {
+        BlockPos start = player.blockPosition();
+        if (min == null || max == null) return start.immutable();
+        if (start.getX() < min.getX() || start.getX() > max.getX()
+                || start.getZ() < min.getZ() || start.getZ() > max.getZ()) return start.immutable();
+        int x = Math.floorDiv(min.getX() + max.getX(), 2), z = Math.floorDiv(min.getZ() + max.getZ(), 2);
+        List<BlockPos> choices = new ArrayList<>();
+        for (BlockPos column : List.of(new BlockPos(min.getX() - 1, start.getY(), z),
+                new BlockPos(max.getX() + 1, start.getY(), z), new BlockPos(x, start.getY(), min.getZ() - 1),
+                new BlockPos(x, start.getY(), max.getZ() + 1))) {
+            var level = player.level();
+            if (!level.isLoaded(column)) continue;
+            int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, column.getX(), column.getZ());
+            BlockPos feet = new BlockPos(column.getX(), y, column.getZ());
+            if (level.isOutsideBuildHeight(feet.above()) || !level.isLoaded(feet.below())
+                    || !level.getBlockState(feet.below()).isFaceSturdy(level, feet.below(), net.minecraft.core.Direction.UP)
+                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.isHazard(level, feet.below())
+                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet)
+                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet.above())) continue;
+            if (level.noCollision(player, player.getBoundingBox().move(Vec3.atBottomCenterOf(feet).subtract(player.position())))) choices.add(feet);
+        }
+        return choices.stream().min(Comparator.comparingDouble(at -> at.distSqr(start))).orElse(start).immutable();
+    }
+
     BlockPos next(LocalPlayer player) {
         pending.removeIf(pos -> player.level().isLoaded(pos) && player.level().getBlockState(pos).isAir());
         if (org.maiwithu.maicraft.core.integration.ultimine.UltimineNative.available()
@@ -76,7 +101,7 @@ final class BuildExcavationFrontier {
                     || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet)
                     || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet.above())) continue;
             Vec3 body = Vec3.atBottomCenterOf(feet);
-            AABB box = player.getDimensions(player.getPose()).makeBoundingBox(body);
+            AABB box = player.getBoundingBox().move(body.subtract(player.position()));
             if (!level.noCollision(player, box)) continue;
             Vec3 eye = body.add(0, player.getEyeHeight(), 0);
             if (FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, target, 4.5) != null)
