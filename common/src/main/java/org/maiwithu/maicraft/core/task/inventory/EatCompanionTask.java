@@ -30,6 +30,8 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     private int beforeCount;
     private float beforeHp;
     private int beforeFood;
+    private int nativeUseDuration;
+    private long useStartedTick = -1;
     private String doneMessage = "done";
 
     public EatCompanionTask(LocalPlayer player, EatItemTaskRecord record) {
@@ -58,6 +60,10 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     @Override
     // 记下物品总量、红心和饥饿值作为前后比较，再找要拿到主手的槽位。
     protected void onStart() {
+        if (player.isUsingItem()) {
+            fail("another item use is already active; it was left untouched", FailureType.UNKNOWN);
+            return;
+        }
         // 先记住吃之前的物品数量、血量和饥饿值，最后才能说明发生了什么变化。
         beforeCount = PlayerInv.count(player.getInventory(), r.item);
         beforeHp = player.getHealth();
@@ -77,6 +83,10 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
                 fail("couldn't select " + r.label + ": " + selection.failure(), FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
+            // 面包正常需要 32 刻；以真正拿到手的物品时长留出动画和同步时间，不靠提前扣食物完成。
+            nativeUseDuration = player.getMainHandItem().getUseDuration(player);
+            useStartedTick = player.level().getGameTime();
+            r.extendDeadlineTo(useStartedTick + Math.max(40L, nativeUseDuration + 40L));
             eat = Interaction.useInAir(player, InteractionHand.MAIN_HAND, Interaction.Timing.hold());
         }
         return switch (eat.tick()) {
@@ -91,12 +101,12 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
 
     /** 使用动作结束后，用同类型物品数量是否减少来判断有没有吃掉，增加的血量和饥饿值只是附加说明。 */
     // 当前只用该物品总量是否减少来判吃成；期间补进同种食物可能抵消减少量。
-    // 数量没少就写“已经吃饱”，没有核实失败原因；这是 A47 记录的问题。
+    // 数量没少时保留“未观察到消耗”的结果，不能把未证实的进食当成成功。
     private TaskState finish() {
         int now = PlayerInv.count(player.getInventory(), r.item);
         if (now >= beforeCount) {
-            // 没看到数量减少就报告失败；当前提示统一说“已经吃饱”，这里没有进一步证明失败原因。
-            fail("didn't eat " + r.label + " — already full (hunger " + beforeFood + "/20). Kept it.",
+            // 原生动作结束仍未看到扣食物，就明确保留未证实结果，不把所有失败都解释成已经吃饱。
+            fail("native use ended without observed consumption of " + r.label + " (hunger " + player.getFoodData().getFoodLevel() + "/20)",
                     FailureType.UNKNOWN);
             return TaskState.FAILED;
         }
@@ -122,6 +132,11 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
         }
     }
 
+    @Override public void stop(LocalPlayer companion, StopReason reason) {
+        if (eat != null) eat.stop();
+        super.stop(companion, reason);
+    }
+
     @Override
     protected Map<String, Object> resultData() {
         // 无论成功还是失败，附上此刻的血量和饥饿值，方便调用者看当前身体状态。
@@ -129,6 +144,11 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
         data.put("item", r.label);
         data.put("hp", player.getHealth());
         data.put("hunger", player.getFoodData().getFoodLevel());
+        data.put("food_count_before", beforeCount);
+        data.put("food_count_after", PlayerInv.count(player.getInventory(), r.item));
+        data.put("consumed_count", Math.max(0, beforeCount - PlayerInv.count(player.getInventory(), r.item)));
+        data.put("native_use_duration_ticks", nativeUseDuration);
+        data.put("elapsed_use_ticks", useStartedTick < 0 ? 0 : Math.max(0L, player.level().getGameTime() - useStartedTick));
         return data;
     }
 
@@ -143,8 +163,8 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
     }
 
     @Override
-    // 这段固定文字目前声称没有效果，但取消前食物可能已经消耗，不能把它当成副作用证据（A47）。
+    // 取消前可能已经吃完一口；是否扣了食物由上面的前后数量说明，不保证取消等于没有效果。
     protected String cancelledMessage() {
-        return "eating " + r.label + " interrupted — no effect";
+        return "eating " + r.label + " interrupted; inspect the observed food counts before another use";
     }
 }

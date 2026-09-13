@@ -22,7 +22,8 @@
     "ContainerStockSyncMixin",
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin",
-    "UltimineInputMixin"
+    "UltimineInputMixin",
+    "ItemUseInputMixin"
   ],
   "server": [],
   "injectors": {

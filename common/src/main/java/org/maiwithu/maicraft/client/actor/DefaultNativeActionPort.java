@@ -22,6 +22,12 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     /** Non-null while an ownerless break must be physically stopped by {@link #advance}. */
     private String pendingBreakCancellationReason;
 
+    // 持用按键只能绑定仍是本端口当前动作的回执；新动作接管后，旧吃饭任务不能继续按住或松开。
+    public boolean ownsItemUse(NativeActionReceipt receipt) {
+        return receipt != null && receipt == active && receipt.kind() == NativeActionReceipt.Kind.USE_ITEM
+                && (!receipt.terminal() || receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED);
+    }
+
     @Override
     public NativeActionReceipt startBreaking(LocalPlayerContext context, BlockHitResult hit, int timeoutTicks) {
         // 先检查当前控制权和有无旧动作，再占用本刻操作机会，记录目标原状态后开始挖。
@@ -445,6 +451,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     void revokeForBoundary(String reason) {
+        ItemUseInputLease.revoke(this);
         // 换身体或控制权时旧结果不再可信，结束为不确定；这里只改等待记录，不再次发世界操作。
         if (active != null && !active.terminal()) {
             active.finish(NativeActionReceipt.Status.UNCERTAIN, reason);

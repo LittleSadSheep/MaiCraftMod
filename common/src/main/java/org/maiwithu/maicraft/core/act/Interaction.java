@@ -100,6 +100,7 @@ public final class Interaction {
     private int fires;
     private int cooldown;             // ticks until the next discrete press
     private int held;                 // USE+air: ticks held so far
+    private ItemStack heldUseBefore;
     private boolean hardFail;         // a fire hit an unrecoverable error
     private String failReason = "interaction failed";
     private FailureType failType = FailureType.UNKNOWN;
@@ -330,7 +331,12 @@ public final class Interaction {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (receipt == null) {
             if (!requiredBlockPresent()) return Status.FAILED;
+            if (player.isUsingItem()) {
+                failReason = "another item use was already active; it was left untouched";
+                return Status.FAILED;
+            }
             ItemStack before = player.getItemInHand(hand).copy();
+            heldUseBefore = before;
             int beforeMenu = player.containerMenu.containerId;
             NativeConfirmation confirmation = NativeConfirmation.anyOf(
                     NativeConfirmation.heldItemChanged(hand, before),
@@ -339,9 +345,16 @@ public final class Interaction {
                             ? NativeConfirmation.Verdict.APPLIED
                             : NativeConfirmation.Verdict.PENDING);
             receipt = context.actions().useItem(
-                    context, hand, confirmation, CONFIRM_TIMEOUT_TICKS);
+                    context, hand, confirmation, timing.hold
+                            ? Math.max(CONFIRM_TIMEOUT_TICKS, (int) Math.min(1200L, (long) before.getUseDuration(player) + CONFIRM_TIMEOUT_TICKS))
+                            : CONFIRM_TIMEOUT_TICKS);
+            if (timing.hold) org.maiwithu.maicraft.client.actor.ItemUseInputLease.renew(this, context, receipt, hand, heldUseBefore);
             return Status.RUNNING;
         }
+        // 原生 handleKeybinds 每刻会检查是否松手；只为本次回执续持用，不重发 useItem 或修改食物数量。
+        if (timing.hold && !releasing && context.actions() instanceof org.maiwithu.maicraft.client.actor.DefaultNativeActionPort actions
+                && actions.ownsItemUse(receipt))
+            org.maiwithu.maicraft.client.actor.ItemUseInputLease.renew(this, context, receipt, hand, heldUseBefore);
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) {
             return Status.RUNNING;
@@ -362,10 +375,16 @@ public final class Interaction {
         if (!timing.hold) {
             return Status.DONE;
         }
+        if (player.isUsingItem() && !org.maiwithu.maicraft.client.actor.ItemUseInputLease.owns(this, context, receipt)) {
+            failReason = "the held item use no longer belongs to this interaction";
+            return Status.FAILED;
+        }
         if (!player.isUsingItem()) {
+            org.maiwithu.maicraft.client.actor.ItemUseInputLease.release(this);
             return Status.DONE;
         }
         if (timing.maxHold > 0 && ++held >= timing.maxHold) {
+            org.maiwithu.maicraft.client.actor.ItemUseInputLease.release(this);
             receipt = context.actions().releaseUsingItem(context, receipt);
             releasing = true;
             return Status.RUNNING;
@@ -670,10 +689,14 @@ public final class Interaction {
         if (digger != null) digger.cancel();
         if (receipt != null && receipt.kind() == NativeActionReceipt.Kind.USE_ITEM
                 && player.isUsingItem() && !releasing) {
-            LocalPlayerContext context = ClientRuntime.requireContext(player);
-            receipt = context.actions().releaseUsingItem(context, receipt);
-            releasing = true;
+            LocalPlayerContext context = ClientRuntime.actor().activeContext().filter(c -> c.player() == player).orElse(null);
+            if (context != null && context.mutationAvailable() && (block != null || entity != null || !timing.hold
+                    || org.maiwithu.maicraft.client.actor.ItemUseInputLease.owns(this, context, receipt))) {
+                receipt = context.actions().releaseUsingItem(context, receipt);
+                releasing = true;
+            }
         }
+        org.maiwithu.maicraft.client.actor.ItemUseInputLease.release(this);
         InputDriver.halt(player);
     }
 }
