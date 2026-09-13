@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Cell;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 
 /**
  * 把“有哪些机器、谁连谁”的设计展开成具体格子：排机器和维护空间、铺连接线、列配置与初始物品要求。
@@ -47,6 +48,8 @@ public final class SemanticMachineLayout {
             return work.finish();
         }
         work.expectedOutput = design.has("expected_output") ? design.get("expected_output").getAsString() : null;
+        work.supplyPreference = MachineUtilityInputs.supplyPreference(design);
+        work.onsiteReason = design.has("onsite_reason") ? design.get("onsite_reason").getAsString() : null;
         JsonObject constraints = design.has("constraints") ? design.getAsJsonObject("constraints") : new JsonObject();
         int width = bounded(constraints, "max_width", 2 * radius + 1, 2 * radius + 1);
         int depth = bounded(constraints, "max_depth", 2 * radius + 1, 2 * radius + 1);
@@ -148,6 +151,16 @@ public final class SemanticMachineLayout {
                         edge, "connection:" + edgeIndex + ":" + i, bounds);
             }
             edgeIndex++;
+        }
+        for (var input : MachineUtilityInputs.parseDesign(design, groups.keySet())) {
+            List<MachineLayoutUtilityInputs.Consumer> consumers = new ArrayList<>();
+            for (String name : input.consumers()) for (Instance instance : groups.get(name)) {
+                Endpoint target = endpoint(instance, input.medium(), false);
+                if (target == null) work.fail("external_input_consumer_unavailable", input.id() + " -> " + instance.name + " has no supported " + input.medium() + " input.");
+                else consumers.add(new MachineLayoutUtilityInputs.Consumer(instance.name, instance.id, target.blockId, target.position, target.sides));
+            }
+            if (!work.errors.isEmpty()) return work.finish();
+            MachineLayoutUtilityInputs.compile(work, input, consumers, bounds);
         }
         work.pending("native_placement_preflight", "construction", "Resolve each registered block/part item, support and reachable placement gesture; verify the entire occupied and maintenance volume before mutation.");
         work.pending("recipe_chain_and_throughput", "production", design.has("expected_output")

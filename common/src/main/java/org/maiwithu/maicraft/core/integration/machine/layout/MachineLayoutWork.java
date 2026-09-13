@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import static org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout.position;
 
 /**
@@ -23,6 +24,7 @@ final class MachineLayoutWork {
     final Map<Pos, Cell> cells = new LinkedHashMap<>();
     final List<Cell> attachments = new ArrayList<>();
     final Set<Pos> clearance = new LinkedHashSet<>();
+    final Set<Pos> utilityRays = new LinkedHashSet<>();
     final Map<String,String> aeNetworks = new LinkedHashMap<>();
     final Set<String> aeTopologyNetworks = new LinkedHashSet<>();
     final JsonObject report = new JsonObject();
@@ -30,6 +32,8 @@ final class MachineLayoutWork {
     final JsonArray initialContents = new JsonArray();
     final JsonArray seals = new JsonArray();
     final JsonArray filters = new JsonArray();
+    final JsonArray externalInputs = new JsonArray();
+    String supplyPreference = "external", onsiteReason;
     String expectedOutput;
     final Set<String> failures = new LinkedHashSet<>();
     MachineLayoutWork(SemanticMachineLayout.Registry registry) {
@@ -82,6 +86,10 @@ final class MachineLayoutWork {
             materials.merge(cell.id(), 1, Math::addExact);
         }
         blueprint.add("blocks", blocks);
+        blueprint.addProperty("supply_preference", supplyPreference);
+        if (onsiteReason != null) blueprint.addProperty("onsite_reason", onsiteReason);
+        if (buildable && !externalInputs.isEmpty()) blueprint.add("external_inputs", externalInputs.deepCopy());
+        if (buildable) MachineUtilityInputs.parse(blueprint);
         initialContents.forEach(e -> { JsonObject content = e.getAsJsonObject(); materials.merge(content.get("item_id").getAsString(), content.get("count").getAsInt(), Math::addExact); });
         JsonArray clear = new JsonArray(); clearance.forEach(at -> clear.add(position(at)));
         JsonObject materialCounts = new JsonObject(); materials.forEach(materialCounts::addProperty);
@@ -94,11 +102,18 @@ final class MachineLayoutWork {
         report.add("initial_contents", initialContents);
         report.add("seal_after_cleanup", seals);
         report.add("filters", filters);
+        report.add("external_inputs", externalInputs.deepCopy()); report.addProperty("supply_preference", supplyPreference);
+        if (onsiteReason != null) report.addProperty("onsite_reason", onsiteReason);
+        report.addProperty("utility_connection_verified", false);
         JsonArray commissioning = new JsonArray();
         modules.forEach(e -> { if (e.getAsJsonObject().has("kind")) commissioning.add(e.deepCopy()); });
         report.add("commissioning_requirements", commissioning);
         JsonArray stages = new JsonArray();
         for (String stage : List.of("survey_and_clearance_preflight", "acquire_materials", "place_equipment", "install_transport_routes", "remove_temporary_supports", "seal_enclosures", "install_initial_contents", "configure_output_filters", "configure_native_interfaces", "verify_networks", "measure_production")) stages.add(stage);
+        if (!externalInputs.isEmpty()) {
+            stages = new JsonArray();
+            for (String stage : List.of("survey_and_clearance_preflight", "acquire_materials", "place_equipment", "install_internal_routes", "remove_temporary_supports", "seal_enclosures", "await_external_utility_hookup", "connect_existing_utilities", "configure_native_interfaces", "verify_networks", "measure_production")) stages.add(stage);
+        }
         report.add("construction_stages", stages);
         return new SemanticMachineLayout.Result(buildable, blueprint, report);
     }

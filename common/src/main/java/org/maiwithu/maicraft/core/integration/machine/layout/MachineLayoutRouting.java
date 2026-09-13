@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 
 /**
  * 在声明的场地范围里给两台设备找管线路径，绕开设备和维护空间；不同资源连接保持分离。
- * AE2 同一支路的致密电缆可以复用，其他管线目前不会借用已有线路作为共用干线。
+ * AE2 同一支路及显式外部输入的内部干线可以复用；不同输入和未声明的相邻网络保持分离。
  */
 final class MachineLayoutRouting {
     record Pos(int x, int y, int z) {
@@ -94,8 +94,11 @@ final class MachineLayoutRouting {
         Map<Node, Node> parents = new HashMap<>();
         Map<Node, Integer> costs = new HashMap<>();
         Node first = new Node(start, true);
-        open.add(new Frontier(first,0,start.distance(end))); parents.put(first, null); costs.put(first,0);
-        if (kinetic) { Node other = new Node(start, false); open.add(new Frontier(other,0,start.distance(end))); parents.put(other, null); costs.put(other,0); }
+        if (!kinetic || compatibleAxis(first, occupied)) { open.add(new Frontier(first,0,start.distance(end))); parents.put(first, null); costs.put(first,0); }
+        if (kinetic) {
+            Node other = new Node(start, false);
+            if (compatibleAxis(other, occupied)) { open.add(new Frontier(other,0,start.distance(end))); parents.put(other, null); costs.put(other,0); }
+        }
         while (!open.isEmpty() && parents.size() <= budget) {
             checkpoint();
             Frontier next = open.remove(); Node at = next.node;
@@ -112,9 +115,11 @@ final class MachineLayoutRouting {
                 if (kinetic && direction.y == 0 && (direction.x != 0) != at.alongX) continue;
                 Pos nextPos = at.pos.step(direction);
                 if (!available(nextPos, from, to, transport, owner, occupied, clearance, bounds)) continue;
-                offer(new Node(nextPos, at.alongX), at, open, parents, costs, end);
+                Node onward = new Node(nextPos, at.alongX);
+                if (!kinetic || compatibleAxis(onward, occupied)) offer(onward, at, open, parents, costs, end);
                 // Chain drives turn by changing their horizontal connection axis on a vertical shaft step.
-                if (kinetic && direction.y != 0) offer(new Node(nextPos, !at.alongX), at, open, parents, costs, end);
+                Node turned = new Node(nextPos, !at.alongX);
+                if (kinetic && direction.y != 0 && compatibleAxis(turned, occupied)) offer(turned, at, open, parents, costs, end);
             }
         }
         return new Search(null, parents.size());
@@ -128,13 +133,21 @@ final class MachineLayoutRouting {
     }
 
     private static boolean reusable(Cell cell, String transport, String owner) {
-        return cell != null && transport.equals(MachineLayoutAeNetworks.DENSE) && cell.id.equals(transport) && cell.owner.equals(owner);
+        return cell != null && (transport.equals(MachineLayoutAeNetworks.DENSE) || owner.startsWith("external_input:"))
+                && cell.id.equals(transport) && cell.owner.equals(owner);
+    }
+    private static boolean compatibleAxis(Node node, Map<Pos, Cell> occupied) {
+        Cell cell = occupied.get(node.pos);
+        return cell == null || "y".equals(cell.properties.get("axis"))
+                && Boolean.toString(node.alongX).equals(cell.properties.get("axis_along_first"));
     }
 
     // 除了不能占住别的设备，还要避开会意外接上的相邻设备和同种管线；声明的这两个端点及本支路可复用电缆例外。
     private static boolean available(Pos at, Pos source, Pos destination, String transport, String owner,
                                      Map<Pos, Cell> occupied, Set<Pos> clearance, Bounds bounds) {
         if (!bounds.contains(at) || occupied.containsKey(at) && !reusable(occupied.get(at),transport,owner) || clearance.contains(at)) return false;
+        // A reused cell was already isolated when installed; retain its intentional connection to earlier consumers.
+        if (reusable(occupied.get(at), transport, owner)) return true;
         for (Side side : Side.values()) {
             Pos neighbor = at.step(side);
             Cell cell = occupied.get(neighbor);
