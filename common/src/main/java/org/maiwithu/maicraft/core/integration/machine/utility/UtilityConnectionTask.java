@@ -49,6 +49,7 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
     private int edgeStart;
     private boolean routeBuilt, nativeConnected, sourcePowered, destinationPowered, noChange;
     private String failureCode;
+    private boolean routeReused;
 
     UtilityConnectionTask(LocalPlayer player, UtilityConnectionTaskRecord record) {
         super(player, record); world = player.level();
@@ -168,6 +169,13 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
             if (!energyFaces(target, false).contains(r.request.targetFace())) return failure("utility_target_face_not_native_energy_input");
             var faces = energyFaces(source, true).stream().filter(face -> storedEnergy(source, face) > 0).toList();
             if (faces.isEmpty()) return failure("utility_source_has_no_powered_native_energy_outlet");
+            route = UtilityCableConstruction.existing(player,r.request.sourceAnchor(),faces,r.request.target(),r.request.targetFace());
+            if (route != null) {
+                routeReused = true; sourceFace = route.sourceFace();
+                ownedSourceCable = world.getBlockEntity(route.cables().getFirst());
+                if (ownedSourceCable == null) return failure("utility_existing_cable_entity_unavailable");
+                phase = Phase.TOOL; return TaskState.RUNNING;
+            }
             route = UtilityConnectionPlanner.plan(r.request.sourceAnchor(), faces, r.request.target(), r.request.targetFace(),
                     at -> UtilityCableConstruction.empty(player, at, endpoints));
             sourceFace = route.sourceFace(); phase = Phase.BUILD;
@@ -265,6 +273,7 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> result = readiness(routeBuilt, nativeConnected, sourcePowered, destinationPowered, noChange);
         result.put("input_id", r.inputId); result.put("source_label", r.sourceLabel); result.put("medium", r.request.medium());
+        result.put("existing_isolated_route_reused",routeReused);
         result.put("endpoint_blocks_preserved", true); result.put("target", position(r.request.target()));
         result.put("target_face", r.request.targetFace().getSerializedName()); result.put("last_native_stage", lastChild);
         result.put("connection_evidence", List.copyOf(connections));

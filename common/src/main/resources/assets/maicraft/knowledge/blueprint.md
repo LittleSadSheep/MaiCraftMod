@@ -149,7 +149,7 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 3. 以机器标签为目标，调用 `modify_machine`，参数 `operation:"connect_external_input"`、`snapshot_id`、`input_id`、明确的主城设施 `source_label`、`allow_modify:true`，按需指定 `material_policy`。
 4. 接线结果分别提供 `native_connected`、`source_power_observed`、`destination_power_observed` 和 `power_ready`。之后才执行需要的配置、供料及 `run_production`，或者在下一批前登记 `watch_production`。
 
-当前自动外部接线要求服务端增强，覆盖竖轴 Create 接口和 FE／Mek 电缆；其他已声明介质在修改前返回具体不支持项。新电缆只在本任务安装且身份未变化的接口上配置，不替换主城源设备。历史接口档案没有当前操作权限或持续供能保证。已知创造专用物品在生存设计中需要真实携带或已安装配方产物证据；常规缺料继续走供料流程。
+当前自动外部接线要求服务端增强，覆盖竖轴 Create 接口和 FE／Mek 电缆；其他已声明介质在修改前返回具体不支持项。接线可复用已完成的电缆路径，但须重新确认它仅连接指定源和入口，没有分叉、环、旁接设备或未加载部分；只配置该路径上身份未变化的源侧接口，不替换主城源设备。历史接口档案没有当前操作权限或持续供能保证。已知创造专用物品在生存设计中需要真实携带或已安装配方产物证据；常规缺料继续走供料流程。
 
 `window_ticks` 是实际产出样本的最小跨度；`max_idle_ticks` 独立限制两次加工之间的间隔，两者都有 72000 tick 上限。调试可以只取少量真实完成样本，正常加工所需时间不必恰好等于最小样本跨度。
 

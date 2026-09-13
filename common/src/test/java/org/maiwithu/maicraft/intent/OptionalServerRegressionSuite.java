@@ -54,6 +54,7 @@ public final class OptionalServerRegressionSuite {
         org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutUtilityInputsTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.catalog.UtilityInstallationCatalogTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionPlannerTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.utility.UtilityExistingCableRouteTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskGuardTest.main(args);
         org.maiwithu.maicraft.core.integration.create.CreateExactUtilityEndpointTest.main(args);
         org.maiwithu.maicraft.server.machine.watch.MachineWatchProgressTest.main(args);

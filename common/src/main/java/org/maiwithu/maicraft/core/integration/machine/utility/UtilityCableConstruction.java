@@ -23,6 +23,17 @@ final class UtilityCableConstruction {
     static boolean available() {
         return BuiltInRegistries.ITEM.getOptional(CABLE).orElse(null) instanceof BlockItem;
     }
+    static UtilityConnectionPlanner.Route existing(LocalPlayer player, BlockPos source, List<Direction> faces, BlockPos target, Direction targetFace) {
+        var world = player.level();
+        return UtilityExistingCableRoute.find(source,faces,target,targetFace,new UtilityExistingCableRoute.WorldView() {
+            public boolean loaded(BlockPos at) {
+                return world.isLoaded(at) && !world.isOutsideBuildHeight(at) && world.getWorldBorder().isWithinBounds(at)
+                        && !NavigationSafetyContext.protectsUse(at);
+            }
+            public boolean cable(BlockPos at) { return BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).equals(CABLE); }
+            public boolean device(BlockPos at) { return world.getBlockEntity(at) != null; }
+        });
+    }
     static boolean empty(LocalPlayer player, BlockPos position, List<BlockPos> endpoints) {
         var world = player.level();
         if (!world.isLoaded(position) || world.isOutsideBuildHeight(position)
