@@ -66,6 +66,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         ActorControlTestHarness.field(Player.class, "abilities").set(player, new net.minecraft.world.entity.player.Abilities());
         ActorControlTestHarness.field(Player.class, "attributes").set(player,
                 new net.minecraft.world.entity.ai.attributes.AttributeMap(Player.createAttributes().build()));
+        initializeVitals();
         ActorControlTestHarness.field(Entity.class, "eyeHeight").setFloat(player, 1.62F);
         ActorControlTestHarness.field(Entity.class, "onGround").setBoolean(player, true);
         position(new Vec3(.5, 1, 3.5));
@@ -103,6 +104,22 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
 
     public int itemUses() { return mode.items; }
     public int blockUses() { return mode.blocks; }
+
+    private void initializeVitals() throws Exception {
+        // 正常施工会持续观察生命和饥饿；夹具默认健康吃饱，具体饥饿测试再显式改成低值，不能依赖未初始化字段。
+        ActorControlTestHarness.field(Player.class, "foodData").set(player, new net.minecraft.world.food.FoodData());
+        var builder = new net.minecraft.network.syncher.SynchedEntityData.Builder(player);
+        define(builder, "DATA_SHARED_FLAGS_ID", (byte) 0); define(builder, "DATA_AIR_SUPPLY_ID", 300);
+        define(builder, "DATA_CUSTOM_NAME_VISIBLE", false); define(builder, "DATA_CUSTOM_NAME", java.util.Optional.empty());
+        define(builder, "DATA_SILENT", false); define(builder, "DATA_NO_GRAVITY", false);
+        define(builder, "DATA_POSE", net.minecraft.world.entity.Pose.STANDING); define(builder, "DATA_TICKS_FROZEN", 0);
+        var method = Player.class.getDeclaredMethod("defineSynchedData", net.minecraft.network.syncher.SynchedEntityData.Builder.class);
+        method.setAccessible(true); method.invoke(player, builder);
+        ActorControlTestHarness.field(Entity.class, "entityData").set(player, builder.build()); player.setHealth(20);
+    }
+    @SuppressWarnings("unchecked") private static <T> void define(net.minecraft.network.syncher.SynchedEntityData.Builder builder, String name, T value) throws Exception {
+        builder.define((net.minecraft.network.syncher.EntityDataAccessor<T>) ActorControlTestHarness.field(Entity.class, name).get(null), value);
+    }
 
     // 先释放测试按键和索引，再逐项还原原来的全局对象，避免影响后面测试。
     public void close() throws Exception {
