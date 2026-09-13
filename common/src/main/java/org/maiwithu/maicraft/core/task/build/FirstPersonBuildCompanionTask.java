@@ -2070,6 +2070,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("completed", r.completed());
         data.put("placed", r.placed());
         data.put("cleared", r.broken());
+        if ("build_terrain_conflict".equals(failureCode)) data.put("mechanical_retry_allowed", false);
         if (!excavationTools.receipts().isEmpty()) data.put("excavation_tool_receipts", excavationTools.receipts());
         if (!spoilReceipts.isEmpty()) data.put("excavation_spoil_receipts", List.copyOf(spoilReceipts));
         data.put("confirmed_ultimine_batches", ultimineBatches);

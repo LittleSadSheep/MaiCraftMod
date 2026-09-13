@@ -509,6 +509,14 @@ final class SemanticBuildSupplyCompanionTask
                     Map.of("id", "inspect_material_supply", "risk", "none"),
                     Map.of("id", "change_material_policy", "risk", "design_change"),
                     Map.of("id", "stop", "risk", "none")));
+            if ("build_terrain_conflict".equals(failureCode)) {
+                data.put("mechanical_retry_allowed", false);
+                data.put("recovery_options", List.of(
+                        Map.of("id", "reduce_basement_depth", "risk", "design_change"),
+                        Map.of("id", "raise_building", "risk", "design_change"),
+                        Map.of("id", "choose_another_site", "risk", "design_change"),
+                        Map.of("id", "stop", "risk", "none")));
+            }
         }
         if (traversabilityResult != null) {
             data.put("traversability_verification", traversabilityResult.evidence());
