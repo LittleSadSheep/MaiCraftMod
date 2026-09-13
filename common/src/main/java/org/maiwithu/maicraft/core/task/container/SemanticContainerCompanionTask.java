@@ -534,8 +534,7 @@ public final class SemanticContainerCompanionTask
                     source, take, destinations, menu, simulated);
             int allocated = allocations.stream().mapToInt(Allocation::count).sum();
             if (allocated != take) return Planning.fail("destination_full_or_locked",
-                    "The destination cannot safely hold the complete requested amount. Nothing was "
-                            + "moved.", FailureType.NO_SPACE);
+                    "The destination cannot safely hold the complete remaining requested amount.", FailureType.NO_SPACE);
 
             ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(source.getItem());
             if (view.quickMoveSafe() && take == source.getCount()) {
@@ -553,7 +552,7 @@ public final class SemanticContainerCompanionTask
             remaining -= take;
         }
         if (remaining != 0) return Planning.fail("transfer_plan_incomplete",
-                "A complete safe slot-semantic plan could not be proven. Nothing was moved.",
+                "A complete safe slot-semantic plan could not be proven for the remaining amount.",
                 FailureType.UNSUPPORTED);
         return Planning.ok(moves);
     }
@@ -590,7 +589,7 @@ public final class SemanticContainerCompanionTask
     // 每笔开始前核对菜单及内容没有被外界改动，再交给低层搬运任务执行。
     // 这里的其他玩家检查只在笔与笔之间进行，长子任务内部不会每刻回来检查。
     private TaskState transfer() {
-        if (planIndex >= plan.size()) {
+        if (movedCount >= plannedAmount) {
             goalSatisfied = goalSatisfied();
             if (!goalSatisfied) {
                 outcomeUncertain = true;
@@ -653,6 +652,12 @@ public final class SemanticContainerCompanionTask
         if (playerDelta != expectedPlayerDelta
                 || containerDelta != -expectedPlayerDelta
                 || playerItemDelta != expectedPlayerDelta) {
+        // QUICK_MOVE owns its destination order. Only settled, conserved moves may replace the old simulation with live slot allocation.
+        if (movedCount > 0) {
+            Planning remaining = buildPlan(direction, plannedAmount - movedCount);
+            if (!remaining.success()) return failFinal(remaining.failureCode(), remaining.failureMessage(), remaining.failureType());
+            plan = remaining.moves(); planIndex = 0;
+        }
             outcomeUncertain = true;
             return failFinal("transfer_delta_diverged", "The real menu did not show equal and "
                     + "opposite container/main-inventory deltas for the confirmed semantic item. "

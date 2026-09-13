@@ -38,6 +38,7 @@ public final class ContainerTransferCompanionTask
     private String pendingFailure;
     private AbstractContainerMenu menu;
     private boolean completed;
+    private boolean preserveUnexpectedCursor;
 
     public ContainerTransferCompanionTask(LocalPlayer player, ContainerTransferTaskRecord record) {
         super(player, record);
@@ -116,11 +117,13 @@ public final class ContainerTransferCompanionTask
 
     // 检查源格、目标格和数量；同一格搬给自己算零件完成。整堆可快速移动，也可拾起后放到指定格。
     private TaskState beginMove(ContainerTransferTaskRecord.Move move) {
+        if (!player.containerMenu.getCarried().isEmpty()) return rejectBeforePickup("cursor was not empty before this transfer");
         if (!validSlot(move.from()) || (move.to() >= 0 && !validSlot(move.to()))) {
             return beginFailure("transfer references an unavailable menu slot");
         }
         ItemStack source = player.containerMenu.getSlot(move.from()).getItem();
         if (source.isEmpty()) return beginFailure("source slot " + move.from() + " is empty");
+        if (!player.containerMenu.getSlot(move.from()).mayPickup(player)) return beginFailure("source slot is not currently available for pickup");
         if (move.from() == move.to()) {
             completeMove(0);
             return TaskState.RUNNING;
@@ -152,7 +155,9 @@ public final class ContainerTransferCompanionTask
             phase = Phase.PICKUP;
             return TaskState.RUNNING;
         }
-        int capacity = source.getMaxStackSize() - destination.getCount();
+        var destinationSlot = player.containerMenu.getSlot(move.to());
+        int capacity = destinationSlot.mayPlace(source) ? Math.max(0,
+                Math.min(source.getMaxStackSize(), destinationSlot.getMaxStackSize(source)) - destination.getCount()) : 0;
         if (capacity < requested) {
             return beginFailure("destination slot " + move.to() + " has room for only " + capacity
                     + " item(s), fewer than requested " + requested);
@@ -172,14 +177,19 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
-    // 先把源物品拿到鼠标上；当前确认种类和组件匹配，没有在这一阶段核对准确数量。
+    // 点击前重读源格和目标，拾起后确认完整数量及组件；已有的不明游标不属于本任务。
     private TaskState submitPickup(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
+        if (!same(player.containerMenu.getSlot(move.from()).getItem(), sourceBefore)
+                || !player.containerMenu.getCarried().isEmpty()) return rejectBeforePickup("source or cursor changed before pickup; no pickup was submitted");
+        if (move.destinationMode() == ContainerTransferTaskRecord.DestinationMode.EXACT
+                && !same(player.containerMenu.getSlot(move.to()).getItem(), destinationBefore))
+            return rejectBeforePickup("destination changed before pickup; no pickup was submitted");
         receipt = context.menus().click(
                 context, move.from(), 0, ClickType.PICKUP,
                 (c, ignored) -> {
                     ItemStack carried = c.player().containerMenu.getCarried();
                     if (carried.isEmpty()) return MenuConfirmation.Verdict.PENDING;
-                    return ItemStack.isSameItemSameComponents(carried, sourceKind)
+                    return ItemStack.isSameItemSameComponents(carried, sourceKind) && carried.getCount() == sourceBefore.getCount()
                             ? MenuConfirmation.Verdict.APPLIED
                             : MenuConfirmation.Verdict.DIVERGED;
                 }, 20);
@@ -310,6 +320,10 @@ public final class ContainerTransferCompanionTask
         fail(reason, FailureType.UNKNOWN);
         return TaskState.FAILED;
     }
+    private TaskState rejectBeforePickup(String reason) {
+        preserveUnexpectedCursor = !player.containerMenu.getCarried().isEmpty();
+        fail(reason, FailureType.TARGET_LOST); return TaskState.FAILED;
+    }
 
     private boolean validSlot(int slot) { return slot >= 0 && slot < player.containerMenu.slots.size(); }
     private static boolean same(ItemStack a, ItemStack b) {
@@ -318,7 +332,7 @@ public final class ContainerTransferCompanionTask
     // 只有玩家还在同一个菜单时才安排关闭；替换成别的菜单时不向它做回退或关闭。
     // 外层父任务也应保留这个限制，不能在这里正确停手后又把新菜单关掉（A51）。
     @Override protected void cleanup() {
-        if (menu != null && player.containerMenu == menu && (!completed || r.closeAfter)
+        if (!preserveUnexpectedCursor && menu != null && player.containerMenu == menu && (!completed || r.closeAfter)
                 && (receipt == null || receipt.terminal() || receipt.kind() != MenuReceipt.Kind.CLOSE)) {
             try {
                 var context = ClientRuntime.requireContext(player);
