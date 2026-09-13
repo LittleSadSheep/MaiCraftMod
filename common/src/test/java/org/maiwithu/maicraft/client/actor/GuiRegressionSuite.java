@@ -116,6 +116,9 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupGuardTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupScheduleTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupReceiptTest.main(args);
+        // 高处清理先证明整柱与退路，再验原生确认和逐格落稳，不能把计划当成实际下降。
+        org.maiwithu.maicraft.core.task.build.BuildScaffoldDescentTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildScaffoldDescentBoundsTest.main(args);
         org.maiwithu.maicraft.core.task.build.MachineSealingTest.main(args);
         CompanionCancellationTest.main(args);
         SleepSafetyTest.main(args);
