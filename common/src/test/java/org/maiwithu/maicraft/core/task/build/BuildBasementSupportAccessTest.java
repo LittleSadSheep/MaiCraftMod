@@ -25,6 +25,7 @@ public final class BuildBasementSupportAccessTest {
     private static final Vec3 ORIGIN = new Vec3(-4.49919785 + 10, 63 - 59, -1.507613 + 7);
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        revisedOpeningRestoresStandingAccess();
         try (var h = basement()) {
             var target = target();
             check(h.level.getBlockState(at(-5, 59, 1)).is(Blocks.STONE_BRICKS)
@@ -77,6 +78,17 @@ public final class BuildBasementSupportAccessTest {
         for (BlockPos dirt : List.of(at(-6, 60, -3), at(-5, 61, -2), at(-6, 62, -1))) h.set(dirt, Blocks.DIRT.defaultBlockState());
         h.position(ORIGIN); h.inventory.setItem(0, new ItemStack(Items.DIRT, 64)); h.player.inventoryMenu.setCarried(ItemStack.EMPTY);
         return h;
+    }
+    private static void revisedOpeningRestoresStandingAccess() throws Exception {
+        try (var h=basement()) {
+            var walking=new BuildSupportWalking(h.level,h.level::isLoaded,.6,1.8,LongSets.emptySet(),PhysicalObstacleSnapshot.EMPTY);
+            Vec3 upper=new Vec3(-4.5+10,64-59,-.5+7);
+            check(!walking.edge(ORIGIN,upper),"原洞口会让正常身体在升到较高阶面时撞上后方天花");
+            // 与公开场景修订完全一致：只向北多开两格，不挪动楼梯，不把角色缩小成能穿过旧洞口。
+            h.set(at(-6,65,-2),Blocks.AIR.defaultBlockState());h.set(at(-5,65,-2),Blocks.AIR.defaultBlockState());
+            check(walking.edge(ORIGIN,upper),"修订后的两格净空允许同一正常身体经过完整升阶扫掠");
+            check(h.player.position().equals(ORIGIN) && h.blockUses()==0 && h.itemUses()==0,"净空回归只证明几何，不冒充真实挖掘或身体移动");
+        }
     }
     private static BuildTaskRecord.Target target() {
         var desired = Blocks.SPRUCE_STAIRS.defaultBlockState().setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH)

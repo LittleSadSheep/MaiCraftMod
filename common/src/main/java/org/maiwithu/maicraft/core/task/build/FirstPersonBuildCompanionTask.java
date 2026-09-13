@@ -533,7 +533,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.FAILED;
         }
         excavating = true;
-        digger.preferTopFace(true);
+        // 地面向下挖时优先上表面；修正头顶洞口时使用真实可见面，不要求从天花板背后点击。
+        digger.preferTopFace(next.getY() < player.getY());
         cell = excavationOwners.get(next.asLong());
         clearing = next; clearQueue = List.of(next); clearAt = 0;
         phase = Phase.CLEAR_NAV;

@@ -76,10 +76,10 @@ public final class BuildExcavationFrontier {
     }
 
     static Set<BlockPos> clusters(Set<BlockPos> pending, BlockPos feet) {
-        int top = pending.stream().mapToInt(BlockPos::getY).max().orElse(Integer.MIN_VALUE);
+        int layer = workLayer(pending, feet);
         Set<BlockPos> result = new LinkedHashSet<>();
         for (BlockPos center : pending) {
-            if (center.getY() != top) continue;
+            if (center.getY() != layer) continue;
             var square = org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy.square(center, net.minecraft.core.Direction.UP);
             if (!square.contains(feet.below()) && pending.containsAll(square)) result.add(center);
         }
@@ -87,11 +87,22 @@ public final class BuildExcavationFrontier {
     }
 
     static BlockPos select(Set<BlockPos> pending, Set<BlockPos> rejected, BlockPos feet) {
-        int top = pending.stream().mapToInt(BlockPos::getY).max().orElse(Integer.MIN_VALUE);
-        return pending.stream().filter(pos -> pos.getY() == top && !rejected.contains(pos))
+        int layer = workLayer(pending, feet);
+        return pending.stream().filter(pos -> pos.getY() == layer && !rejected.contains(pos))
                 .min(Comparator.comparing((BlockPos pos) -> pos.equals(feet.below()))
                         .thenComparingDouble(pos -> pos.distSqr(feet))
                         .thenComparingLong(BlockPos::asLong)).orElse(null);
+    }
+
+    /** 全部待清格都在脚位上方时，先打开最近的低层头顶通路；只要仍有同高或更低土方就保持从上往下挖。 */
+    static boolean overhead(Set<BlockPos> pending, BlockPos feet) {
+        return !pending.isEmpty() && pending.stream().allMatch(pos -> pos.getY() > feet.getY());
+    }
+
+    private static int workLayer(Set<BlockPos> pending, BlockPos feet) {
+        var heights = pending.stream().mapToInt(BlockPos::getY).summaryStatistics();
+        // 层级由所有未完成格决定，再排除本层失败点；不能因为低层被拒绝，就越过它去追高处阁楼。
+        return !pending.isEmpty() && heights.getMin() > feet.getY() ? heights.getMin() : heights.getMax();
     }
 
     /** 找能真正看见目标面的地面站位，同时避开流体、伤害方块以及马上要拆掉的落脚块。 */

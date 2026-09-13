@@ -22,6 +22,7 @@ public final class BuildExcavationFrontierTest {
                 "choose an intact native square before fragmenting it with individual edge breaks");
         check(BuildExcavationFrontier.clusters(square, top.above()).isEmpty(),
                 "a native batch must not remove the player's own footing");
+        overheadClearanceOpensLowerLayersFirst();
         net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
         try (var h = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness()) {
             h.position(new net.minecraft.world.phys.Vec3(4.5, 4, 4.5));
@@ -46,6 +47,31 @@ public final class BuildExcavationFrontierTest {
         }
         unownedExteriorPillarIsNotGround();
         System.out.println("BuildExcavationFrontierTest: passed");
+    }
+
+    private static void overheadClearanceOpensLowerLayersFirst() {
+        BlockPos feet = new BlockPos(0, 63, 0);
+        BlockPos low = new BlockPos(0, 65, 1), lowPeer = low.east(), middle = new BlockPos(0, 71, 1), high = new BlockPos(0, 76, 1);
+        var remaining = new java.util.LinkedHashSet<>(Set.of(low, lowPeer, middle, high));
+        check(BuildExcavationFrontier.overhead(remaining, feet)
+                && BuildExcavationFrontier.select(remaining, Set.of(), feet).equals(low), "三层头顶障碍先清最近低层，不能先找最高阁楼");
+        check(BuildExcavationFrontier.select(remaining, Set.of(low), feet).equals(lowPeer), "同层一个点失败时仍可尝试该层另一点");
+        check(BuildExcavationFrontier.select(remaining, Set.of(low, lowPeer), feet) == null,
+                "最低层全被拒绝就停止，不能把尚未打开的通路跳过去");
+        remaining.remove(low); remaining.remove(lowPeer);
+        check(BuildExcavationFrontier.select(remaining, Set.of(), feet).equals(middle), "低层确实清完才升到下一层");
+        remaining.remove(middle);
+        check(BuildExcavationFrontier.select(remaining, Set.of(), feet).equals(high), "中层清完后才处理最高层");
+        remaining.add(feet.below());
+        check(!BuildExcavationFrontier.overhead(remaining, feet)
+                && BuildExcavationFrontier.select(remaining, Set.of(), feet).equals(high), "仍有脚下土方时保留原先最高层优先规则");
+
+        var upperSquare = org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy.square(middle, net.minecraft.core.Direction.UP);
+        var mixed = new java.util.LinkedHashSet<>(upperSquare); mixed.add(low); mixed.add(lowPeer);
+        check(BuildExcavationFrontier.clusters(mixed, feet).isEmpty(), "高层即使有完整连锁方块，也不能覆盖低层头顶清障顺序");
+        var lowerSquare = org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy.square(low, net.minecraft.core.Direction.UP);
+        mixed.addAll(lowerSquare);
+        check(BuildExcavationFrontier.clusters(mixed, feet).equals(Set.of(low)), "连锁候选同样只从当前最低头顶层选取");
     }
 
     private static void unownedExteriorPillarIsNotGround() throws Exception {
