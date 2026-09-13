@@ -35,8 +35,14 @@ public final class BuildFootingTest {
             var site = finish(search).best();
             check(site != null && site.heightLoss() == 0 && site.feet().y == 3,
                     "a wall turn must remain useful without descending to the floor");
-            check(site.route().size() >= 7 && site.route().stream().allMatch(p -> p.y >= 3),
-                    "the worksite retains a witnessed route around the corner, not a diagonal shortcut");
+            // 检查真实转角和脚下支撑，不能用每格一个节点的旧数量要求阻止连续走完整段墙顶。
+            check(site.route().contains(new Vec3(7.5, 3, 3.5)) && site.route().stream().allMatch(p -> p.y >= 3),
+                    "the worksite retains the supported wall corner without descending");
+            var corridor = new org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor(h.level, h.level::isLoaded,
+                    .6, 1.8, LongSets.emptySet(), org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY);
+            check(!corridor.clear(site.route().getFirst(), site.route().getLast()), "the diagonal shortcut crosses unsupported air");
+            for (int at = 1; at < site.route().size(); at++) check(corridor.clear(site.route().get(at - 1), site.route().get(at)),
+                    "each retained route segment stays on the actual wall top");
             check(h.blockUses() == 0, "search may not construct its own route");
         }
     }

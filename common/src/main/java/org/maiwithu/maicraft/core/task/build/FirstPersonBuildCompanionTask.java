@@ -528,7 +528,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState excavationExitTick() {
         // 刨坑 -> 站到外部地面 -> 拿材料；坑边低一格的近点不算出口，否则普通仓库寻路仍会被困住。
-        if (nav == null) nav = PlayerNav.toGoal(player, () -> NavGoal.exact(excavationExit), 1.0,
+        if (nav == null) nav = PlayerNav.toGoal(player, () -> NavGoal.exact(excavationExit), BuildStanceNavigation.PRECISE_WALK,
                 () -> player.blockPosition().equals(excavationExit), this).walkingOnly();
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
@@ -663,9 +663,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (excavating) {
                 var approaches = BuildExcavationFrontier.approaches(player, at);
                 if (approaches.isEmpty()) { excavation.reject(at); phase = Phase.EXCAVATE; return TaskState.RUNNING; }
-                nav = PlayerNav.toGoal(player, () -> NavGoal.composite(approaches), 1.0,
+                nav = PlayerNav.toGoal(player, () -> NavGoal.composite(approaches), BuildStanceNavigation.PRECISE_WALK,
                         () -> BuildExcavationFrontier.safeDescent(player, at) && digger.reachableHit(at) != null, this).walkingOnly();
-            } else nav = PlayerNav.toGoal(player, () -> NavGoal.mineStance(at), 1.0, () -> inReach(at), this).walkingOnly();
+            } else nav = PlayerNav.toGoal(player, () -> NavGoal.mineStance(at), BuildStanceNavigation.PRECISE_WALK, () -> inReach(at), this).walkingOnly();
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
@@ -865,7 +865,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             gestureFromCurrent = false;
             BlockPos stance = gesture.stance();
             stanceNavigation.attempted();
-            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), 1.0,
+            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), BuildStanceNavigation.PRECISE_WALK,
                     () -> PlayerNav.playerFeet(player).equals(stance), stanceNavigation.contextFor(stance));
         }
         return switch (nav.tick()) {
@@ -1092,7 +1092,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (worksite.constructionAccess()) {
             if (nav == null) {
                 BlockPos destination = worksite.stance(); stanceNavigation.attempted();
-                nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), 1,
+                nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), BuildStanceNavigation.PRECISE_WALK,
                         () -> PlayerNav.playerFeet(player).equals(destination), this).walkingOnly();
             }
             return switch (nav.tick()) {
@@ -1116,7 +1116,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             Vec3 next = worksite.route().get(worksiteRouteAt);
             BlockPos destination = BlockPos.containing(next);
             stanceNavigation.attempted();
-            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), 1.0,
+            // 共线小段已合并：这一份导航持续走到拐角或最终站位，途中原生路径仍实时检查障碍和禁行格。
+            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), BuildStanceNavigation.PRECISE_WALK,
                     () -> PlayerNav.playerFeet(player).equals(destination),
                     stanceNavigation.walkingContext((int) Math.floor(Math.min(player.getY(), next.y)))).walkingOnly();
         }
@@ -1767,7 +1768,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         FailureType.OCCLUDED, "scaffold_cleanup_stances_exhausted", false);
                 return TaskState.FAILED;
             }
-            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(candidate.cell()), 1.0,
+            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(candidate.cell()), BuildStanceNavigation.PRECISE_WALK,
                     scaffoldCleanup::ready, stanceNavigation.walkingContext(Integer.MIN_VALUE)).walkingOnly();
         }
         return switch (nav.tick()) {

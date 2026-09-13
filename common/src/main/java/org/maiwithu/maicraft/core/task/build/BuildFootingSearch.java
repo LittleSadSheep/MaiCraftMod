@@ -82,6 +82,7 @@ final class BuildFootingSearch {
         var points = new ArrayList<Vec3>();
         for (Node step = node; step != null; step = step.previous()) points.add(step.feet());
         java.util.Collections.reverse(points);
-        return new Route(node.feet(), node.distance(), node.lowestY(), List.copyOf(points));
+        // 一条已证明的直线交给同一个导航走完，不再把每个格心变成“停下再起步”的小终点。
+        return new Route(node.feet(), node.distance(), node.lowestY(), BuildWorksiteRoute.compact(points));
     }
 }

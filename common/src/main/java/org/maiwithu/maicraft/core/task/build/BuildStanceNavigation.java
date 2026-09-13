@@ -13,6 +13,9 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
  * 对整组站位依次尝试保持高度、已有地形和施工导航；单个站位失败不能提前放宽为搭支撑。
  */
 final class BuildStanceNavigation {
+    // 施工站位、清障和收支撑都是精确挪位：禁用短段疾跑，避免每换一格就开关疾跑。
+    // PlayerNav 的 speed 小于一仅传递“不允许疾跑”，不会把原版步行速度再缩小。
+    static final double PRECISE_WALK = .8;
     private final PlayerNav.ContextProvider construction;
     private int pass, floor = Integer.MIN_VALUE;
     private BlockPos target;
