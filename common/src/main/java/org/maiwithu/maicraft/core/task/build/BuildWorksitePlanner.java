@@ -26,13 +26,17 @@ final class BuildWorksitePlanner {
 
     record Placement(BuildTaskRecord.Target target, BuildPlacementGeometry.Gesture gesture) {}
     record Worksite(BlockPos stance, Vec3 feet, List<Placement> placements, double distanceSquared,
-                    double heightLoss, List<Vec3> route) {
+                    double heightLoss, List<Vec3> route, boolean constructionAccess) {
         Worksite { stance = stance.immutable(); placements = List.copyOf(placements); route = List.copyOf(route); }
+        Worksite(BlockPos stance, Vec3 feet, List<Placement> placements, double distanceSquared, double heightLoss, List<Vec3> route) {
+            this(stance, feet, placements, distanceSquared, heightLoss, route, false);
+        }
         Worksite(BlockPos stance, Vec3 feet, List<Placement> placements, double distanceSquared) {
             this(stance, feet, placements, distanceSquared, 0, List.of(feet));
         }
         int coverage() { return placements.size(); }
-        double overhead() { return placements.stream().mapToDouble(p -> Math.max(0, p.target().pos().getY() + 1 - feet.y)).average().orElse(0); }
+        double overhead() { return placements.stream().mapToDouble(p -> Math.max(0,
+                p.target().pos().getY() + (constructionAccess ? 0 : 1) - feet.y)).average().orElse(0); }
     }
     /** A partial result may be used immediately, but an unfinished empty result is never no-path. */
     record Progress(boolean complete, Worksite best, int candidateChecks, int placementChecks) {}
@@ -50,6 +54,8 @@ final class BuildWorksitePlanner {
         private final CandidateRows candidates = new CandidateRows();
         private final Map<BlockPos, List<BuildTaskRecord.Target>> buckets = new HashMap<>();
         private final Vec3 origin;
+        private final int accessPass;
+        private final Predicate<BlockPos> accessAllowed;
         private final BuildFootingSearch footing;
         private boolean footingDone;
         private BuildFootingSearch.Route scoringRoute;
@@ -66,9 +72,18 @@ final class BuildWorksitePlanner {
                Map<Long, BuildTaskRecord.Target> targets, Predicate<BlockPos> allowed,
                LongSet forbidden, Set<BlockPos> rejected,
                BiPredicate<BuildTaskRecord.Target, BuildPlacementGeometry.Gesture> gestureAllowed) {
+            this(player, pending, targets, allowed, forbidden, rejected, gestureAllowed, 1, ignored -> false);
+        }
+
+        Search(LocalPlayer player, List<BuildTaskRecord.Target> pending,
+               Map<Long, BuildTaskRecord.Target> targets, Predicate<BlockPos> allowed,
+               LongSet forbidden, Set<BlockPos> rejected,
+               BiPredicate<BuildTaskRecord.Target, BuildPlacementGeometry.Gesture> gestureAllowed,
+               int accessPass, Predicate<BlockPos> accessAllowed) {
             this.player = player; this.targets = targets; this.allowed = allowed;
             this.gestureAllowed = gestureAllowed;
             this.forbidden = forbidden; this.rejected = Set.copyOf(rejected); origin = player.position();
+            this.accessPass = accessPass; this.accessAllowed = accessAllowed;
             seeds = pending.stream().filter(t -> !BuildCellRules.isAirTarget(t)
                             && BuildPlacementGeometry.primaryOf(t).equals(t.pos()))
                     .sorted(Comparator.comparingDouble((BuildTaskRecord.Target t) -> t.pos().distToCenterSqr(origin))
@@ -106,8 +121,9 @@ final class BuildWorksitePlanner {
                 if (rejected.contains(cell) || !allowed.test(cell)) continue;
                 candidateChecks++;
                 scoringRoute = footing.route(cell);
-                if (scoringRoute == null) continue;
-                Vec3 feet = scoringRoute.feet();
+                if (scoringRoute == null && (accessPass != 2 || !accessAllowed.test(cell))) continue;
+                if (scoringRoute != null && accessPass == 0 && scoringRoute.lowestY() < origin.y - 1e-5) continue;
+                Vec3 feet = scoringRoute == null ? Vec3.atBottomCenterOf(cell) : scoringRoute.feet();
                 scoringCell = cell; scoringFeet = feet; nearbyAt = 0; placements.clear();
                 nearby = nearby(feet);
             }
@@ -138,7 +154,9 @@ final class BuildWorksitePlanner {
         private void finishCandidate() {
             if (!placements.isEmpty()) {
                 var worksite = new Worksite(scoringCell, scoringFeet, placements,
-                        scoringRoute.distance() * scoringRoute.distance(), Math.max(0, origin.y - scoringRoute.lowestY()), scoringRoute.points());
+                        scoringRoute == null ? origin.distanceToSqr(scoringFeet) : scoringRoute.distance() * scoringRoute.distance(),
+                        Math.max(0, origin.y - (scoringRoute == null ? scoringFeet.y : scoringRoute.lowestY())),
+                        scoringRoute == null ? List.of(scoringFeet) : scoringRoute.points(), scoringRoute == null);
                 if (best == null || compare(worksite, best) < 0) best = worksite;
             }
             scoringCell = null; scoringFeet = null; nearby = List.of(); placements.clear();
@@ -192,12 +210,18 @@ final class BuildWorksitePlanner {
 
     // 不为多够到几格而丢掉已有高度；同类落脚点中再比较连续施工数量与实际路程。
     private static int compare(Worksite a, Worksite b) {
+        int access = Boolean.compare(a.constructionAccess(), b.constructionAccess());
+        if (access != 0) return access;
         int height = Double.compare(a.heightLoss(), b.heightLoss());
         if (height != 0) return height;
         int overhead = Double.compare(a.overhead(), b.overhead());
         if (overhead != 0) return overhead;
         int count = Integer.compare(b.coverage(), a.coverage());
         if (count != 0) return count;
+        if (a.constructionAccess()) {
+            int rise = Double.compare(a.feet().y, b.feet().y);
+            if (rise != 0) return rise;
+        }
         int distance = Double.compare(a.distanceSquared(), b.distanceSquared());
         if (distance != 0) return distance;
         int order = BuildOrder.BUILD_ORDER.compare(a.placements().getFirst().target(), b.placements().getFirst().target());

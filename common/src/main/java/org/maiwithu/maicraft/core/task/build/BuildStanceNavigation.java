@@ -47,6 +47,11 @@ final class BuildStanceNavigation {
     void environmentChanged() { environmentRevision++; unreachable.clear(); lastFailure = ""; }
     private void clearPass() { environmentChanged(); routeAttempts = 0; skippedGestures = 0; }
     boolean nextExistingPass() { if (pass != 0) return false; pass = 1; clearPass(); return true; }
+    boolean selectPass(int next) {
+        if (next < 0 || next > 2 || next == 2 && !construction.permit().mayAlter()) return false;
+        if (pass != next) { pass = next; clearPass(); }
+        return true;
+    }
     boolean allowTerrain() { if (pass != 1 || !construction.permit().mayAlter()) return false; pass = 2; clearPass(); return true; }
     String stage() { return pass == 0 ? "retain_height" : pass == 1 ? "existing_footing" : "construction_access"; }
     Map<String, Object> evidence() {

@@ -121,6 +121,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private BuildWorksitePlanner.Worksite worksite;
     private BuildWorksitePlanner.Progress worksiteProgress;
     private int worksiteRouteAt;
+    private int worksitePass, worksiteAttempts;
+    private final BuildWorksiteProgress worksiteMovement = new BuildWorksiteProgress();
     private boolean worksiteSearched;
     private final Set<BlockPos> rejectedWorksites = new HashSet<>();
     private final PlacementAttemptLedger placementAttempts = new PlacementAttemptLedger();
@@ -676,7 +678,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         for (int i : candidates) {
             if (proofs >= 16 || System.nanoTime() >= deadline) break;
             CellPlan candidate = queue.get(i);
-            if (approach != null && candidate != cell && i != queueAt && (lastPlacedTarget == null
+            if (approach != null && candidate != cell && i != queueAt && !coveredByWorksite(candidate) && (lastPlacedTarget == null
                     || lastPlacedTarget.getY() != candidate.target().pos().getY()
                     || lastPlacedTarget.distManhattan(candidate.target().pos()) != 1)) continue;
             if (!readyForWorksite(candidate) || seekBetterFooting(candidate.target())) continue;
@@ -692,6 +694,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             gesture = available; gestureFromCurrent = true; phase = Phase.SELECT_ITEM; return true;
         }
         return false;
+    }
+
+    private boolean coveredByWorksite(CellPlan candidate) {
+        return worksite != null && worksite.placements().stream().anyMatch(p -> p.target().pos().equals(candidate.target().pos()));
     }
 
     private boolean seekBetterFooting(BuildTaskRecord.Target target) {
@@ -725,7 +731,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 // Resume only the unchecked tail next time; a slice ending is not invalidation.
                 worksite = new BuildWorksitePlanner.Worksite(worksite.stance(), worksite.feet(),
                         worksite.placements().subList(at, worksite.placements().size()), worksite.distanceSquared(),
-                        worksite.heightLoss(), worksite.route());
+                        worksite.heightLoss(), worksite.route(), worksite.constructionAccess());
                 return;
             }
             var placement = worksite.placements().get(at);
@@ -745,13 +751,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     // 把当前不用清障的目标交给多格站位搜索，逐刻累计检查；全部查完后才采用最佳站位。
     private TaskState worksiteTick() {
+        if (worksiteAttempts >= 4) return nextWorksitePass("four worksite approaches exhausted without completing a block");
         if (worksiteSearch == null) {
             var pending = queue.subList(queueAt, queue.size()).stream().filter(this::readyForWorksite)
                     .map(CellPlan::target).toList();
             worksiteSearch = new BuildWorksitePlanner.Search(player, pending, targets,
                     pos -> !forbiddenBodyCells.contains(pos.asLong()) && !NavigationSafetyContext.forbidsBody(pos),
                     unionForbidden(NavigationSafetyContext.forbiddenBodyCells()), rejectedWorksites,
-                    placementAttempts::allows);
+                    placementAttempts::allows, worksitePass, this::canPrepareWorksite);
+            stanceNavigation.selectPass(worksitePass);
         }
         var progress = worksiteSearch.advance(256);
         worksiteProgress = progress;
@@ -760,30 +768,85 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!progress.complete()) return TaskState.RUNNING;
         worksite = progress.best(); worksiteSearch = null; worksiteSearched = true;
         worksiteRouteAt = 0;
+        if (worksite == null) return nextWorksitePass("no usable worksite covers the unfinished construction layer");
         if (worksite != null) {
+            worksiteAttempts++; worksiteMovement.reset();
             BuildTaskRecord.Target first = worksite.placements().getFirst().target();
             for (int i = queueAt; i < queue.size(); i++) if (queue.get(i).target() == first) {
                 java.util.Collections.swap(queue, queueAt, i); cell = queue.get(queueAt); break;
             }
             gesture = worksite.placements().getFirst().gesture(); liveGestures = List.of(); gestureAt = 0;
             stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
+            stanceNavigation.selectPass(worksitePass);
         }
         // No direct corridor does not mean no route: ordinary navigation still tries around obstacles.
         phase = Phase.PLACE_NAV; return TaskState.RUNNING;
     }
 
+    private TaskState nextWorksitePass(String reason) {
+        worksite = null; worksiteSearch = null; worksiteSearched = false;
+        if (worksitePass < 2 && (worksitePass == 0 || permit().mayAlter())) {
+            worksitePass++; worksiteAttempts = 0; rejectedWorksites.clear();
+            stanceNavigation.selectPass(worksitePass); phase = Phase.WORKSITE;
+            note = reason + "; evaluating shared " + stanceNavigation.stage();
+            return TaskState.RUNNING;
+        }
+        // The bounded shared-route budget must not skip the independently verified support fallback.
+        if (cell != null) {
+            TaskState support = prepareTemporarySupports();
+            if (support != null) return support;
+        }
+        failAt(cell == null ? siteMin : cell.target().pos(), reason + "; no shared construction access was proven",
+                FailureType.NO_PATH, "construction_worksite_unproven", false);
+        return TaskState.FAILED;
+    }
+
+    private boolean canPrepareWorksite(BlockPos feet) {
+        if (!player.level().isLoaded(feet) || !player.level().isLoaded(feet.below())) return false;
+        if (feet.getY() <= player.level().getMinBuildHeight() || feet.getY() > player.level().getMaxBuildHeight()) return false;
+        try {
+        var box = player.getBoundingBox();
+        var corridor = new org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor(player.level(), player.level()::isLoaded,
+                box.getXsize(), box.getYsize(), unionForbidden(NavigationSafetyContext.forbiddenBodyCells()),
+                org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles());
+        Vec3 standing = corridor.stance(feet);
+        return standing != null && Math.abs(standing.y - feet.getY()) < 1e-5
+                || player.level().getBlockState(feet.below()).isAir() && scaffoldPermitted(feet.below(), null);
+        } catch (RuntimeException | LinkageError unavailable) { return false; }
+    }
+
     // 只沿现有地面走向选中的站位。走途中若能放置，placeNavTick 会先接手；到达后仍没有机会则排除该站位重找。
     private TaskState walkToWorksite() {
+        var context = ClientRuntime.requireContext(player);
+        if (nav != null && worksiteMovement.observe(player.position(), worksite.feet(), context.tickRevision(), nav.executionStep(context.tickRevision()))
+                && nav.isSafeToCancel()) return rejectWorksite("worksite approach revisited known cells without new construction progress");
+        if (worksite.constructionAccess()) {
+            if (nav == null) {
+                BlockPos destination = worksite.stance(); stanceNavigation.attempted();
+                nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), 1,
+                        () -> PlayerNav.playerFeet(player).equals(destination), this).walkingOnly();
+            }
+            return switch (nav.tick()) {
+                case RUNNING -> TaskState.RUNNING;
+                case FAILED -> rejectWorksite(nav.failReason());
+                case ARRIVED -> {
+                    stopNav();
+                    worksite = new BuildWorksitePlanner.Worksite(worksite.stance(), player.position(), worksite.placements(),
+                            0, 0, List.of(player.position()), false);
+                    worksiteRouteAt = 0; yield TaskState.RUNNING;
+                }
+            };
+        }
         if (nav == null) for (int at = worksiteRouteAt; at < worksite.route().size(); at++)
             if (BlockPos.containing(worksite.route().get(at)).equals(PlayerNav.playerFeet(player))
                     && Math.abs(worksite.route().get(at).y - player.getY()) < .51) worksiteRouteAt = at + 1;
         if (worksiteRouteAt >= worksite.route().size()) {
-            rejectedWorksites.add(worksite.stance()); stopNav(); worksite = null;
-            worksiteSearched = false; phase = Phase.WORKSITE; return TaskState.RUNNING;
+            return rejectWorksite("worksite reached but no current native placement was available");
         }
         if (nav == null) {
             Vec3 next = worksite.route().get(worksiteRouteAt);
             BlockPos destination = BlockPos.containing(next);
+            stanceNavigation.attempted();
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), 1.0,
                     () -> PlayerNav.playerFeet(player).equals(destination),
                     stanceNavigation.walkingContext((int) Math.floor(Math.min(player.getY(), next.y)))).walkingOnly();
@@ -791,12 +854,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> { stopNav(); worksiteRouteAt++; yield TaskState.RUNNING; }
-            case FAILED -> {
-                // Arrival without any live placement (checked above) is stale evidence, not an aim request.
-                rejectedWorksites.add(worksite.stance()); stopNav(); worksite = null;
-                worksiteSearched = false; phase = Phase.WORKSITE; yield TaskState.RUNNING;
-            }
+            case FAILED -> rejectWorksite(nav.failReason());
         };
+    }
+
+    private TaskState rejectWorksite(String reason) {
+        stanceNavigation.failed(worksite.stance(), reason); rejectedWorksites.add(worksite.stance());
+        stopNav(); worksite = null; worksiteSearch = null; worksiteSearched = false;
+        note = reason; phase = Phase.WORKSITE; return TaskState.RUNNING;
     }
 
     private boolean supportExists(BuildPlacementGeometry.Gesture g) {
@@ -1022,6 +1087,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     // 附近方块变了，旧的“这里放不了”可能已经不成立；清掉六格内对应记录，允许用新支撑重试。
     private void placementEnvironmentChanged(BlockPos pos) {
+        if (worksite != null) worksiteMovement.changed(pos);
         placementAttempts.changedNear(pos);
         exhaustedPlacementStates.keySet().removeIf(key -> BlockPos.of(key).distSqr(pos) <= 36);
         if (cell != null && cell.target().pos().distSqr(pos) <= 36) {
@@ -1217,6 +1283,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         supportedCell = null; supportWitness = null; supportChain = List.of(); supportAccessEvidence = Map.of();
     }
     private void resetCell() {
+        worksitePass = 0; worksiteAttempts = 0; worksiteMovement.reset();
+        if (worksite != null && worksite.heightLoss() > 1e-5) worksite = null;
         supportStepApproved = false; supportAccess = null;
         layerKnown = false;
         stanceNavigation.startAt(PlayerNav.playerFeet(player));
@@ -1640,6 +1708,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void confirmedScaffoldRemoval(BlockPos pos) {
+        if (worksite != null) worksiteMovement.changed(pos);
         if (r.scaffoldLedger().contains(pos)) placementEnvironmentChanged(pos);
         r.scaffoldLedger().cleared(pos);
     }
@@ -1741,6 +1810,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private Map<String, Object> worksiteProgress() {
         Map<String, Object> data = new LinkedHashMap<>();
+        data.put("approach_attempts", worksiteAttempts); data.put("stagnant_ticks", worksiteMovement.stagnantTicks());
         if (worksiteProgress != null) {
             data.put("search_complete", worksiteProgress.complete());
             data.put("candidate_checks", worksiteProgress.candidateChecks());
@@ -1748,6 +1818,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             data.put("best_coverage", worksiteProgress.best() == null ? 0 : worksiteProgress.best().coverage());
         }
         if (worksite != null) {
+            data.put("requires_construction_access", worksite.constructionAccess());
             data.put("distance_to_worksite", Math.sqrt(player.position().distanceToSqr(worksite.feet())));
             data.put("remaining_targets", worksite.placements().stream().filter(p -> player.level().isLoaded(p.target().pos())
                     && !p.target().matches(player.level().getBlockState(p.target().pos()))).count());
@@ -1766,6 +1837,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private Map<String, Object> navigationDiagnostics() {
         var data = new LinkedHashMap<>(stanceNavigation.evidence());
+        data.put("worksite_movement",worksiteMovement.evidence());
         if (cell != null) for (int i = 0; i < r.targets.size(); i++)
             if (r.targets.get(i).pos().equals(cell.target().pos())) { data.put("target_index", i); break; }
         return Map.copyOf(data);
