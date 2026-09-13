@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
@@ -62,6 +63,8 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
     public final Selection selection;
     public final List<String> protectedLabels;
     public final int radius;
+    /** Internal acquisition binding; public semantic container requests still use their existing selectors. */
+    public final BlockPos supplyPosition;
 
     // 明确物品编号组与物品标签只能二选一；具体搬多少与目标数量也不能同时给，balance 必须给目标数量。
     public SemanticContainerTaskRecord(
@@ -77,6 +80,12 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
             Selection selection,
             List<String> protectedLabels,
             int radius) {
+        this(toolCallId, deadlineGameTime, operation, itemIds, tagId, count, targetCount, blockId, landmarkLabel, selection, protectedLabels, radius, null);
+    }
+
+    private SemanticContainerTaskRecord(String toolCallId, long deadlineGameTime, Operation operation,
+            List<ResourceLocation> itemIds, ResourceLocation tagId, Integer count, Integer targetCount,
+            ResourceLocation blockId, String landmarkLabel, Selection selection, List<String> protectedLabels, int radius, BlockPos supplyPosition) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.operation = operation == null ? Operation.DEPOSIT : operation;
 
@@ -130,7 +139,15 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
         }
         this.protectedLabels = List.copyOf(new ArrayList<>(labels));
         this.radius = Math.clamp(radius, 1, MAX_RADIUS);
+        this.supplyPosition = supplyPosition == null ? null : supplyPosition.immutable();
     }
+
+    public static SemanticContainerTaskRecord withdrawAvailableAt(String callId, long deadline, List<ResourceLocation> items,
+            int finalCount, BlockPos source, ResourceLocation blockId, List<String> protectedLabels) {
+        return new SemanticContainerTaskRecord(callId, deadline, Operation.WITHDRAW, items, null, null, finalCount,
+                blockId, null, Selection.NEAREST, protectedLabels, 1, java.util.Objects.requireNonNull(source));
+    }
+    public boolean storageSupply() { return supplyPosition != null; }
 
     @Override
     public String describe() {

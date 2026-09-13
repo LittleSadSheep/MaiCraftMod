@@ -29,8 +29,8 @@ public final class StockEvidence {
                            Set<ResourceLocation> craftable, long observedGameTick) {
         public Snapshot { stored = Map.copyOf(stored); craftable = Set.copyOf(craftable); }
         public long storedCount(ResourceLocation item) { return stored.getOrDefault(item, 0L); }
-        /** Only AE2 is currently connected to the tool acquisition source. */
-        public boolean supportsToolSupply() { return source == Source.AE2; }
+        /** A source family with a real acquisition adapter; actual location/stock still needs a fresh check. */
+        public boolean supportsToolSupply() { return source == Source.AE2 || source == Source.CONTAINER; }
     }
 
     private static final Cache CACHE = new Cache();
@@ -61,6 +61,7 @@ public final class StockEvidence {
             synchronizedMenu = null;
             synchronizedPlayer = null;
             CreateStockObservation.reset();
+            org.maiwithu.maicraft.core.task.container.ContainerSupplySources.reset();
             return;
         }
         CACHE.latest(player, player.clientLevel, inventory(player), player.level().getGameTime());

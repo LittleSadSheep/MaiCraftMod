@@ -101,6 +101,9 @@ public final class SemanticContainerCompanionTask
     private boolean openRequested;
     private boolean outcomeUncertain;
     private boolean effectsStarted;
+    private boolean satisfiedSettlement;
+    private AbstractContainerMenu ownedMenu;
+    private Map<BlockPos, BlockEntity> supplyIdentities = Map.of();
     private String stableFingerprint;
     private List<PlannedMove> plan = List.of();
     private int planIndex;
@@ -132,6 +135,10 @@ public final class SemanticContainerCompanionTask
 
     @Override protected TaskState onTick() {
         if (activeChild != null) return tickChild();
+        if (satisfiedSettlement && phase != Phase.CLEANUP && phase != Phase.COMPLETE) {
+            stopNav(); goalSatisfied = goalSatisfied();
+            phase = openedMenu || openRequested ? Phase.CLEANUP : Phase.COMPLETE;
+        }
         if (phase == Phase.COMPLETE) {
             if (failureMessage != null) {
                 fail(failureMessage, failureType);
@@ -190,16 +197,22 @@ public final class SemanticContainerCompanionTask
                     + "selection=nearest or narrow the block type or landmark.", FailureType.UNKNOWN);
         }
         target = candidates.getFirst();
+        if (r.storageSupply()) {
+            Map<BlockPos, BlockEntity> identities = new LinkedHashMap<>();
+            ContainerSupplySources.footprint(player.level(), target.position()).forEach(at -> identities.put(at, player.level().getBlockEntity(at)));
+            supplyIdentities = Map.copyOf(identities);
+        }
         containerKind = target.blockId().toString();
         if (otherPlayerNearTarget()) {
             return failFinal("other_player_near_container", "Another player is close enough to be "
                     + "using or changing the selected container.", FailureType.ENTITY_BLOCKED);
         }
-        phase = Phase.APPROACH;
+        phase = r.storageSupply() ? Phase.OPEN : Phase.APPROACH;
         return TaskState.RUNNING;
     }
 
     private BlockPos selectionCenter() {
+        if (r.storageSupply()) return r.supplyPosition;
         if (r.landmarkLabel == null) return player.blockPosition();
         IntentRuntime.Landmark landmark = IntentRuntime.get().landmark(r.landmarkLabel);
         if (landmark == null) {
@@ -224,6 +237,11 @@ public final class SemanticContainerCompanionTask
     // 只扫描已加载区块里的容器方块实体，不读未加载区域。
     // 保护和去重都以单个方块位置为单位，没有把一个大箱子的两半当成同一容器（A50／A52）。
     private List<Candidate> loadedCandidates(BlockPos center) {
+        if (r.storageSupply()) {
+            if (!ContainerSupplySources.allowed(player, center, r.protectedLabels)) return List.of();
+            ResourceLocation id = BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(center).getBlock());
+            return r.blockId != null && !r.blockId.equals(id) ? List.of() : List.of(new Candidate(center, id, false));
+        }
         List<Candidate> result = new ArrayList<>();
         ClientLevel level = player.clientLevel;
         int chunkRadius = (r.radius + 15) / 16;
@@ -329,6 +347,13 @@ public final class SemanticContainerCompanionTask
                 "Another player is close enough to be using the selected container.",
                 FailureType.ENTITY_BLOCKED);
         openRequested = true;
+        if (r.storageSupply()) {
+            var request = new org.maiwithu.maicraft.core.integration.machine.MachineMenu.OpenRequest(
+                    player.level().dimension().location().toString(), target.position(), 0,
+                    org.maiwithu.maicraft.core.integration.machine.MachineSurvey.fingerprint(player, target.position(), 0), target.position());
+            return start(new org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTaskRecord(
+                    childId("open-storage"), childDeadline(30L * 20L), request), Purpose.OPEN);
+        }
         return start(new InteractAtTaskRecord(childId("open"), childDeadline(30L * 20L),
                 MouseButton.RIGHT, target.position(), 0, null), Purpose.OPEN);
     }
@@ -336,10 +361,16 @@ public final class SemanticContainerCompanionTask
     // 等右键带来的菜单真正出现并显示，要求鼠标上没有残留物品，再记录玩家侧、容器侧和整份菜单状态。
     private TaskState waitMenu() {
         if (player.containerMenu != player.inventoryMenu) {
+            if (ownedMenu != null && ownedMenu != player.containerMenu) return menuLost("A different menu replaced the container opened by this task.");
             openedMenu = true;
             var context = ClientRuntime.requireContext(player);
             if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
             AbstractContainerMenu menu = player.containerMenu;
+            if (r.storageSupply() && !org.maiwithu.maicraft.core.inventory.StockEvidence.isContainerSynchronized(player, menu)) {
+                if (player.level().getGameTime() - waitMenuSince > MENU_WAIT_TICKS)
+                    return failFinal("container_contents_unconfirmed", "The visible storage menu did not receive native item synchronization.", FailureType.TARGET_LOST);
+                return TaskState.RUNNING;
+            }
             if (!menu.getCarried().isEmpty()) {
                 outcomeUncertain = true;
                 return failFinal("menu_cursor_not_empty", "The newly opened menu already carries "
@@ -351,6 +382,7 @@ public final class SemanticContainerCompanionTask
             MenuView classified = classify(menu);
             if (classified == null) return TaskState.RUNNING;
             view = classified;
+            ownedMenu = menu;
             expectedContainerId = menu.containerId;
             expectedMenuClass = menu.getClass();
             stableFingerprint = fingerprint(menu);
@@ -358,6 +390,7 @@ public final class SemanticContainerCompanionTask
             initialContainerCount = count(view.containerSlots());
             lastPlayerCount = initialPlayerCount;
             lastContainerCount = initialContainerCount;
+            ContainerSupplySources.rememberVisible(player, target.position(), menu, view.containerSlots());
             phase = Phase.PLAN;
             return TaskState.RUNNING;
         }
@@ -444,7 +477,7 @@ public final class SemanticContainerCompanionTask
         plannedAmount = requestedAmount(playerCount, containerCount, direction);
         if (plannedAmount < 0) return TaskState.RUNNING;
         if (plannedAmount == 0) {
-            goalSatisfied = true;
+            goalSatisfied = goalSatisfied();
             phase = Phase.CLEANUP;
             return TaskState.RUNNING;
         }
@@ -475,6 +508,7 @@ public final class SemanticContainerCompanionTask
     // balance 把背包调到 target_count；普通存取若给 target_count，则只补足目的侧的差额。
     // 给 count 就搬指定数量；两者都省略时搬源侧全部匹配物品。
     private int requestedAmount(int playerCount, int containerCount, Direction selectedDirection) {
+        if (r.storageSupply()) return Math.min(containerCount, Math.max(0, r.targetCount - playerCount));
         if (r.operation == SemanticContainerTaskRecord.Operation.BALANCE) {
             return Math.abs(playerCount - r.targetCount);
         }
@@ -591,7 +625,7 @@ public final class SemanticContainerCompanionTask
     private TaskState transfer() {
         if (movedCount >= plannedAmount) {
             goalSatisfied = goalSatisfied();
-            if (!goalSatisfied) {
+            if (!goalSatisfied && !r.storageSupply()) {
                 outcomeUncertain = true;
                 return failFinal("aggregate_goal_not_satisfied", "All planned receipts completed, "
                         + "but the aggregate semantic inventory goal is not true.",
@@ -617,6 +651,12 @@ public final class SemanticContainerCompanionTask
             return failFinal("menu_changed_externally", "The container or main inventory changed "
                     + "between verified moves. MaiCraft paused instead of using a stale plan.",
                     FailureType.TARGET_LOST);
+        }
+        // QUICK_MOVE owns its destination order. Only settled, conserved moves may replace the old simulation with live slot allocation.
+        if (movedCount > 0) {
+            Planning remaining = buildPlan(direction, plannedAmount - movedCount);
+            if (!remaining.success()) return failFinal(remaining.failureCode(), remaining.failureMessage(), remaining.failureType());
+            plan = remaining.moves(); planIndex = 0;
         }
         pendingMove = plan.get(planIndex);
         beforePlayerCount = count(view.playerSlots());
@@ -652,12 +692,6 @@ public final class SemanticContainerCompanionTask
         if (playerDelta != expectedPlayerDelta
                 || containerDelta != -expectedPlayerDelta
                 || playerItemDelta != expectedPlayerDelta) {
-        // QUICK_MOVE owns its destination order. Only settled, conserved moves may replace the old simulation with live slot allocation.
-        if (movedCount > 0) {
-            Planning remaining = buildPlan(direction, plannedAmount - movedCount);
-            if (!remaining.success()) return failFinal(remaining.failureCode(), remaining.failureMessage(), remaining.failureType());
-            plan = remaining.moves(); planIndex = 0;
-        }
             outcomeUncertain = true;
             return failFinal("transfer_delta_diverged", "The real menu did not show equal and "
                     + "opposite container/main-inventory deltas for the confirmed semantic item. "
@@ -669,6 +703,7 @@ public final class SemanticContainerCompanionTask
         lastPlayerCount = afterPlayer;
         lastContainerCount = afterContainer;
         stableFingerprint = fingerprint(player.containerMenu);
+        ContainerSupplySources.rememberVisible(player, target.position(), player.containerMenu, view.containerSlots());
         pendingMove = null;
         planIndex++;
         r.extendDeadlineTo(player.level().getGameTime() + TRANSFER_PROGRESS_LEASE_TICKS);
@@ -697,6 +732,10 @@ public final class SemanticContainerCompanionTask
             if (!player.inventoryMenu.getCarried().isEmpty()) outcomeUncertain = true;
             phase = Phase.COMPLETE;
             return TaskState.RUNNING;
+        }
+        if (ownedMenu != null && player.containerMenu != ownedMenu) {
+            openedMenu = false; openRequested = false;
+            return failFinal("container_menu_replaced", "A different menu appeared during container cleanup; it was left open.", FailureType.TARGET_LOST);
         }
         return start(new CloseMenuTaskRecord(
                 childId("close"), childDeadline(30L * 20L)), Purpose.CLOSE);
@@ -748,6 +787,7 @@ public final class SemanticContainerCompanionTask
         return switch (purpose) {
             case OPEN -> {
                 waitMenuSince = player.level().getGameTime();
+                if (player.containerMenu != player.inventoryMenu) { ownedMenu = player.containerMenu; openedMenu = true; }
                 phase = Phase.WAIT_MENU;
                 yield TaskState.RUNNING;
             }
@@ -788,10 +828,11 @@ public final class SemanticContainerCompanionTask
                 && player.containerMenu.getClass() == expectedMenuClass;
     }
 
-    // 当前代码把任何新出现的外部菜单也标成“本任务打开”，会进入关闭流程；这是 A51 的归属问题。
+    // 更换后的菜单不属于本任务，保留它并报告已开始的转移是否不确定。
     private TaskState menuLost(String message) {
         outcomeUncertain |= effectsStarted;
-        openedMenu = player.containerMenu != player.inventoryMenu;
+        openedMenu = ownedMenu != null && player.containerMenu == ownedMenu;
+        if (!openedMenu) openRequested = false;
         return failFinal("container_menu_lost", message, FailureType.TARGET_LOST);
     }
 
@@ -814,6 +855,12 @@ public final class SemanticContainerCompanionTask
 
     private boolean targetStillValid() {
         if (target == null || !player.level().isLoaded(target.position())) return false;
+        if (r.storageSupply()) {
+            if (!ContainerSupplySources.allowed(player, target.position(), r.protectedLabels)) return false;
+            var footprint = ContainerSupplySources.footprint(player.level(), target.position());
+            if (!supplyIdentities.keySet().equals(Set.copyOf(footprint)) || supplyIdentities.entrySet().stream()
+                    .anyMatch(entry -> player.level().getBlockEntity(entry.getKey()) != entry.getValue())) return false;
+        }
         BlockEntity entity = player.level().getBlockEntity(target.position());
         if (!(entity instanceof Container)) return false;
         var state = player.level().getBlockState(target.position());
@@ -925,7 +972,8 @@ public final class SemanticContainerCompanionTask
             activeRecord = null;
             activePurpose = null;
         }
-        if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
+        if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu
+                && (ownedMenu == null || player.containerMenu == ownedMenu)) {
             try {
                 var context = ClientRuntime.requireContext(player);
                 context.menus().closeForTaskBoundary(context, 40, "semantic container task ended");
@@ -950,9 +998,12 @@ public final class SemanticContainerCompanionTask
         data.put("goal_satisfied", goalSatisfied);
         data.put("outcome_partial", movedCount > 0 && !goalSatisfied);
         data.put("outcome_uncertain", outcomeUncertain);
+        data.put("effects_started", effectsStarted);
+        if (r.storageSupply()) data.put("bounded_storage_withdrawal", true);
         if (r.count != null) data.put("requested_count", r.count);
         if (r.targetCount != null) data.put("target_count", r.targetCount);
         if (failureCode != null) {
+            data.put("failure_code", failureCode);
             data.put("decision", Map.of("required", true, "reason_code", failureCode,
                     "recovery_options", recoveryOptions(failureCode, movedCount > 0)));
         }
@@ -998,6 +1049,12 @@ public final class SemanticContainerCompanionTask
                 + (containerKind == null ? "the selected container" : containerKind)
                 + " and closed its native menu";
     }
+
+    @Override public boolean mustSettleBeforeSatisfiedCancellation() {
+        return openedMenu || openRequested && player.containerMenu != player.inventoryMenu
+                || activeChild != null && activeChild.mustSettleBeforeSatisfiedCancellation();
+    }
+    @Override public void requestSatisfiedSettlement() { satisfiedSettlement = true; }
 
     @Override protected String timeoutMessage() {
         return "container management stopped making verified progress after " + movedCount

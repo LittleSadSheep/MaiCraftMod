@@ -38,6 +38,8 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
+import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
+import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
@@ -111,6 +113,8 @@ public final class SemanticAcquireCompanionTask
         boolean toolPrerequisite;
         boolean efficientBatchStarted;
         boolean effectsObserved;
+        final Set<BlockPos> visitedContainers = new LinkedHashSet<>();
+        int containerAttempts;
         boolean decisionRequired;
         ResourceLocation preferredTradeOutput;
         int lastObservedCount = -1;
@@ -370,17 +374,28 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptStorage(Need need) {
-        // 库存来源目前走 AE2；只申请还缺的数量，是否允许网络合成则读取最外层的来源许可中有没有 CRAFT。
+        int missing = missing(need);
+        if (missing <= 0 || !takePlannerStep()) return TaskState.RUNNING;
+        if (need.containerAttempts < ContainerSupplySources.MAX_ATTEMPTS) {
+            var ordinary = ContainerSupplySources.candidates(player, player.blockPosition(), r.searchRadius,
+                    need.itemIds, need.visitedContainers, r.protectedLabels);
+            if (!ordinary.isEmpty()) {
+                var source = ordinary.getFirst(); need.visitedContainers.addAll(source.footprint()); need.containerAttempts++;
+                need.attempted(SemanticAcquireTaskRecord.Source.STORAGE);
+                var record = SemanticContainerTaskRecord.withdrawAvailableAt(childId("container-stock"),
+                        player.level().getGameTime() + STORAGE_TICKS, need.itemIds, need.requiredFinalCount,
+                        source.position(), source.blockId(), r.protectedLabels);
+                return startChild(need, SemanticAcquireTaskRecord.Source.STORAGE, record, "withdraw available missing materials through one visible ordinary container");
+            }
+        }
+        // Ordinary containers and the existing AE2 network share STORAGE permission, never mining or hidden inventory writes.
         if (!Ae2ResourceSupply.available()) {
             addIssue("storage", "storage_adapter_unavailable",
-                    "no supported client storage-network adapter is available",
+                    "no further safe ordinary container or supported storage-network adapter is available",
                     Map.of("detail", Ae2ResourceSupply.availabilityDetail()));
             advanceSource(need);
             return TaskState.RUNNING;
         }
-        int missing = missing(need);
-        if (missing <= 0) return TaskState.RUNNING;
-        if (!takePlannerStep()) return TaskState.RUNNING;
         need.attempted(SemanticAcquireTaskRecord.Source.STORAGE);
         Ae2ResourceSupply.Group group = new Ae2ResourceSupply.Group(
                 need.itemIds.getFirst(), need.itemIds, missing,
@@ -1081,7 +1096,11 @@ public final class SemanticAcquireCompanionTask
                     advanceSource(completedNeed);
                 }
             }
-            case STORAGE, MINE -> {
+            case STORAGE -> {
+                if (!(completedRecord instanceof SemanticContainerTaskRecord container && container.storageSupply())
+                        && (progress == 0 || structuredFailure)) advanceSource(completedNeed);
+            }
+            case MINE -> {
                 if (progress == 0 || structuredFailure) {
                     advanceSource(completedNeed);
                 }
