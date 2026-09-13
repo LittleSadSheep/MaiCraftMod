@@ -2,7 +2,6 @@
 package org.maiwithu.maicraft.core.task.build;
 
 import it.unimi.dsi.fastutil.longs.LongSet;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -17,7 +16,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 
-/** Prove a useful final stance in a support-only projection before granting any support placement. */
+/** 逐块证明支撑自身能放下，再证明最终目标；每一步只使用此前支撑前缀和真实地面，不借未来平台。 */
 final class BuildSupportAccess {
     private static final int MAX_VISITED = 512;
     private static final long SLICE_NANOS = 4_000_000;
@@ -28,11 +27,14 @@ final class BuildSupportAccess {
     private final Predicate<BlockPos> allowed;
     private final Vec3 origin;
     private final BuildSupportWorld world;
-    private final BuildSupportWalking walking;
     private final PhysicalObstacleSnapshot physical;
-    private final ArrayDeque<Vec3> frontier = new ArrayDeque<>();
-    private final Set<BlockPos> visited = new HashSet<>();
+    private final LongSet forbidden;
+    private final Map<BlockPos, BlockState> prefix = new LinkedHashMap<>();
+    private final Map<BlockPos, BuildPlacementAccessSearch.Access> supportPlacements = new LinkedHashMap<>();
     private final List<Map<String, Object>> faces = new ArrayList<>();
+    private BuildPlacementAccessSearch search;
+    private Vec3 cursor;
+    private int stepIndex, reachableStances;
     private BuildPlacementGeometry.Gesture witness;
     private boolean initialized, complete;
     private int checkedStances;
@@ -44,11 +46,10 @@ final class BuildSupportAccess {
                        PhysicalObstacleSnapshot physical) {
         this.player = player; this.target = target; this.material = material; this.allowed = allowed; this.physical = physical;
         this.supports = supports.stream().map(BlockPos::immutable).toList(); origin = player.position();
+        this.forbidden = it.unimi.dsi.fastutil.longs.LongSets.unmodifiable(new it.unimi.dsi.fastutil.longs.LongOpenHashSet(forbidden));
         Map<BlockPos, BlockState> added = new LinkedHashMap<>();
         this.supports.forEach(pos -> added.put(pos, material));
         world = new BuildSupportWorld(player.level(), player.level()::isLoaded, added);
-        walking = new BuildSupportWalking(world, player.level()::isLoaded, player.getBbWidth(),
-                Math.max(player.getBbHeight(), player.getDimensions(net.minecraft.world.entity.Pose.STANDING).height()), forbidden, physical);
     }
 
     boolean advance(int budget) {
@@ -56,28 +57,22 @@ final class BuildSupportAccess {
         try {
             for (int work = 0; work < Math.max(0, budget) && !complete && System.nanoTime() < deadline; work++) {
                 if (!initialized) { initialize(); continue; }
-                Vec3 feet = frontier.pollFirst();
-                if (feet == null) { reject(world.sawUnloaded() ? "support_access_unloaded" : "no_verified_post_support_stance"); break; }
-                if (feet.add(0, player.getEyeHeight(), 0).distanceToSqr(Vec3.atCenterOf(target.pos())) <= 36) {
-                    checkedStances++;
-                    witness = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet);
-                    if (witness != null) {
-                        invalidation = currentIssue();
-                        if (invalidation != null) reject("support_access_observation_changed");
-                        else { complete = true; reason = "projected_stance_and_click_face_verified"; }
-                        break;
-                    }
+                if (!search.advance(1)) continue;
+                checkedStances += search.checked(); reachableStances += search.visited();
+                if (!search.accepted()) {
+                    reject(stepIndex < supports.size() ? "support_step_not_placeable:" + search.reason() : "no_verified_post_support_stance:" + search.reason());
+                    break;
                 }
-                for (Direction direction : Direction.Plane.HORIZONTAL) for (int dy : new int[]{0, 1, -1}) {
-                    BlockPos next = BlockPos.containing(feet).relative(direction).offset(0, dy, 0);
-                    if (!within(next) || visited.contains(next)) continue;
-                    Vec3 landing = walking.stance(next);
-                    if (landing == null || !walking.edge(feet, landing)) continue;
-                    BlockPos key = BlockPos.containing(landing);
-                    if (!within(key) || visited.contains(key)) continue;
-                    if (visited.size() >= MAX_VISITED) { reject("support_access_search_budget"); return true; }
-                    visited.add(key); frontier.addLast(landing);
+                if (stepIndex < supports.size()) {
+                    BlockPos support = supports.get(stepIndex++); supportPlacements.put(support, search.access());
+                    cursor = search.access().feet(); prefix.put(support, material);
+                    // 前一步有实际可达放置见证后才让下一步看到它；全链仍共享原来的512个落脚点上限。
+                    if (reachableStances >= MAX_VISITED) { reject("support_access_search_budget"); break; }
+                    startStep(); continue;
                 }
+                witness = search.access().gesture(); invalidation = currentIssue();
+                if (invalidation != null) reject("support_access_observation_changed");
+                else { complete = true; reason = "projected_stance_and_click_face_verified"; }
             }
         } catch (RuntimeException | LinkageError unavailable) { reject("support_access_observation_unavailable"); }
         return complete;
@@ -105,36 +100,43 @@ final class BuildSupportAccess {
         }
         if (world.sawUnloaded()) { reject("support_access_unloaded"); return; }
         if (closed == 6) { reject("target_enclosed_after_supports"); return; }
-        Vec3 start = walking.stance(BlockPos.containing(origin));
-        if (start == null || !within(BlockPos.containing(start)) || !walking.edge(origin, start)) {
-            reject("current_footing_not_connected_after_supports"); return;
-        }
-        visited.add(BlockPos.containing(start)); frontier.add(start);
+        cursor = origin; startStep();
     }
 
-    private boolean within(BlockPos pos) {
-        return Math.abs(pos.getX() - target.pos().getX()) <= 8 && Math.abs(pos.getZ() - target.pos().getZ()) <= 8
-                && pos.getY() >= Math.min(origin.y, target.pos().getY()) - 2
-                && pos.getY() <= Math.max(origin.y, target.pos().getY()) + 2;
+    private void startStep() {
+        var goal = stepIndex < supports.size() ? new BuildTaskRecord.Target(material, material.getBlock().asItem(),
+                supports.get(stepIndex), "temporary support prerequisite", null, null, null).asItemPlace() : target;
+        search = new BuildPlacementAccessSearch(player, goal, world.withProjection(prefix), cursor, forbidden, physical,
+                MAX_VISITED - reachableStances, false);
     }
 
     boolean accepted() { return complete && witness != null; }
     BuildPlacementGeometry.Gesture witness() { return witness; }
+    BuildPlacementAccessSearch.Access placementFor(BlockPos support) { return supportPlacements.get(support); }
+    BuildPlacementAccessSearch.Access targetPlacement() { return accepted() ? search.access() : null; }
     boolean current() { return currentIssue() == null; }
+    // 已按见证走到新站位后只复查环境；有意走动不是旧起点失效，但任何地形或保护变化仍须重新证明。
+    boolean environmentCurrent() { return environmentIssue() == null; }
     String invalidationReason() { String current = currentIssue(); return current == null ? invalidation : current; }
     private String currentIssue() {
+        String environment = environmentIssue();
+        return environment != null ? environment : origin.distanceToSqr(player.position()) > .01 ? "support_access_body_moved" : null;
+    }
+    private String environmentIssue() {
         // 先检查世界和权限，再区分只是身体起点变了；真实环境变化不能伪装成惯性位移而获得重试许可。
         if (!physical.boxes().equals(org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles().boxes())) return "support_access_physical_changed";
         for (BlockPos pos : supports) if (!allowed.test(pos) || !player.level().isLoaded(pos)
                 || !player.level().getBlockState(pos).isAir()) return "support_projection_site_changed";
         if (!world.unchanged()) return "support_access_world_changed";
-        return origin.distanceToSqr(player.position()) > .01 ? "support_access_body_moved" : null;
+        return null;
     }
     private void reject(String value) { complete = true; witness = null; reason = value; }
     Map<String, Object> evidence() {
         var data = new LinkedHashMap<String, Object>(Map.of("reason", reason, "verified", accepted(), "proposed_supports", supports.size(),
-                "checked_stances", checkedStances, "reachable_stances", visited.size(),
+                "checked_stances", checkedStances + (!complete && search != null ? search.checked() : 0),
+                "reachable_stances", reachableStances + (!complete && search != null ? search.visited() : 0),
                 "observed_blocks", world.reads(), "target_faces", List.copyOf(faces)));
+        data.put("verified_support_steps", supportPlacements.size()); data.put("active_support_step", stepIndex);
         if (invalidation != null) data.put("invalidation", invalidation);
         return Map.copyOf(data);
     }
