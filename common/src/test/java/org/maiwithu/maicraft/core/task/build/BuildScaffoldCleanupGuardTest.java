@@ -44,7 +44,8 @@ public final class BuildScaffoldCleanupGuardTest {
             h.position(new Vec3(6.5, 2, 6.5));
             var underfoot = task(h, true, true);
             check(tick(underfoot, "scaffoldBreakTick") == TaskState.RUNNING, "foot support is not dug or immediately failed");
-            check("SCAFFOLD_NAV".equals(field(underfoot, "phase").toString()), "unsafe footing requests a different stance");
+            // 实际已经站在自有柱上时交回回收调度，先证明逐格下撤，不能走普通侧站破坏捷径。
+            check("SCAFFOLD_SELECT".equals(field(underfoot, "phase").toString()), "owned footing returns to the proven descent scheduler");
             check(h.level.getBlockState(TARGET).is(Blocks.COBBLESTONE), "underfoot support remains in the live world");
 
             var vanished = task(h, true, true);

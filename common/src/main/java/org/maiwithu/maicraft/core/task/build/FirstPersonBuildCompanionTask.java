@@ -57,7 +57,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     // 刨坑 -> 出坑 -> 拿材料 -> 建房；每一步都等真实游戏操作确认后，再交给下一步接管角色。
     private enum Phase { PREFLIGHT, EXCAVATE, EXCAVATE_EXIT, SELECT, CLEAR_NAV, CLEAR, CLEAR_RELEASE, PLACE_NAV, WORKSITE, SELECT_ITEM,
-        AIM, WAIT_USE, EDGE_RETURN, SUPPORT_APPROACH, SUPPORT_VERIFY, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, FINAL_STATE, ROUTE_VERIFY }
+        AIM, WAIT_USE, EDGE_RETURN, SUPPORT_APPROACH, SUPPORT_VERIFY, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, SCAFFOLD_DESCENT, SCAFFOLD_ACCESS, FINAL_STATE, ROUTE_VERIFY }
     private record CellPlan(BuildTaskRecord.Target target,
                             List<BuildPlacementGeometry.GeneratedCell> generated) {
         CellPlan { generated = List.copyOf(generated); }
@@ -179,6 +179,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private int scaffoldCleanupPasses, scaffoldPassRemovals, scaffoldConfirmedRemovals;
     private Map<String, Object> lastDeferredScaffold = Map.of();
     private BuildScaffoldCleanup scaffoldCleanup;
+    private BuildScaffoldDescentDrive scaffoldDescent;
+    private final Set<BlockPos> rejectedScaffoldDescents = new HashSet<>();
+    private BuildScaffoldCleanupAccess scaffoldAccess;
+    private final Map<BlockPos, NavGoal> scaffoldAccessGoals = new LinkedHashMap<>();
+    private final Set<BlockPos> attemptedScaffoldAccess = new HashSet<>();
+    private int scaffoldAccessAttempts, cleanupNewSupports;
+    private Map<String, Object> lastScaffoldAccess = Map.of();
     private BlockPos scaffold, siteMin, siteMax, failurePos;
     private String failureCode, note = "all native actions re-verified";
 
@@ -256,7 +263,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.RUNNING;
         if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
             return TaskState.CANCELLED;
-        if (preflightDone) registerProvider();
+        // 高处回收接近使用带禁拆观察的代理，整个跨刻导航期间保持其身份，原生支撑确认仍转回本项目。
+        if (scaffoldAccess != null) BuildPlacementRegistry.register(player, scaffoldAccess.provider());
+        else if (preflightDone) registerProvider();
         drainScaffolds();
         // 一刻内可接着处理不需要等待的阶段；已发点击、正在改创造背包或本刻不能再操作时停下来。
         TaskState result = BuildTickPipeline.advance(() -> phase, () -> {
@@ -313,6 +322,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             case CLEAR_CREATIVE -> clearCreativeTick(); case VERIFY -> verifyTick();
             case SCAFFOLD_SELECT -> scaffoldSelectTick(); case SCAFFOLD_NAV -> scaffoldNavTick();
             case SCAFFOLD_BREAK -> scaffoldBreakTick();
+            case SCAFFOLD_DESCENT -> scaffoldDescentTick();
+            case SCAFFOLD_ACCESS -> scaffoldAccessTick();
             case FINAL_STATE -> finalStateTick();
             case ROUTE_VERIFY -> routeVerifyTick();
         };
@@ -1875,7 +1886,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             // 先找当前位置就能安全拆的自有支撑，避免为远处高柱反复走动，仍在破坏边界重查所有权。
             for (int i = scaffoldAt; i < scaffoldQueue.size(); i++) {
                 BlockPos at = scaffoldQueue.get(i);
-                if (!player.level().isLoaded(at) || !scaffoldMutationAllowed(at, player.level().getBlockState(at))
+                if (onOwnedColumn(at) || !player.level().isLoaded(at) || !scaffoldMutationAllowed(at, player.level().getBlockState(at))
                         || at.distToCenterSqr(player.getEyePosition()) > 36) continue;
                 var ready = new BuildScaffoldCleanup(player, at, forbiddenBodyCells);
                 if (!ready.ready()) continue;
@@ -1883,12 +1894,25 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 scaffoldQueue = List.copyOf(ordered); scaffold = at; scaffoldCleanup = ready;
                 phase = Phase.SCAFFOLD_BREAK; return TaskState.RUNNING;
             }
+            // 身边可安全拆的都先拆完，再按已证明的整柱退路下降一格；保留脚下整柱，不能从中间掏空回程。
+            BlockPos underfoot = player.blockPosition().below();
+            if (player.onGround() && r.scaffoldLedger().contains(underfoot) && !rejectedScaffoldDescents.contains(underfoot)) {
+                scaffold = underfoot;
+                scaffoldDescent = new BuildScaffoldDescentDrive(player, underfoot, r.scaffoldLedger().snapshot(),
+                        at -> player.level().isLoaded(at) && scaffoldMutationAllowed(at, player.level().getBlockState(at)),
+                        forbiddenBodyCells, stanceNavigation.walkingContext(Integer.MIN_VALUE), this::recordScaffoldBreak);
+                phase = Phase.SCAFFOLD_DESCENT; return TaskState.RUNNING;
+            }
+            if (onOwnedColumn(scaffold)) {
+                deferredScaffolds.add(scaffold); scaffoldAt++; continue;
+            }
             scaffoldCleanup = new BuildScaffoldCleanup(player, scaffold, forbiddenBodyCells);
             phase = Phase.SCAFFOLD_NAV; return TaskState.RUNNING;
         }
         if (!deferredScaffolds.isEmpty()) {
             // 只有本轮真实确认拆掉了支撑，才有新的通路证据可重试；整轮无变化就保留剩余账并停止。
             if (scaffoldPassRemovals == 0) {
+                if (beginScaffoldAccess()) return TaskState.RUNNING;
                 failAt(deferredScaffolds.iterator().next(), "No support was removed in the complete cleanup pass; unreachable supports remain tracked",
                         FailureType.NO_PATH, "scaffold_cleanup_no_progress", false); return TaskState.FAILED;
             }
@@ -2015,6 +2039,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 note = "cleanup deferred until another support is removed"; scaffoldAt++;
                 phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
             }
+            scaffoldAccessGoals.put(scaffold.immutable(), cleanupGoal);
             nav = PlayerNav.toGoal(player, () -> cleanupGoal, BuildStanceNavigation.PRECISE_WALK,
                     scaffoldCleanup::ready, stanceNavigation.walkingContext(Integer.MIN_VALUE)).walkingOnly();
         }
@@ -2062,6 +2087,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.TARGET_LOST, "scaffold_cleanup_guard_changed", true);
             return TaskState.FAILED;
         }
+        // 走到站位后也要保留自己脚下的整柱；未发出的破坏交给逐格下撤，已在途回执仍先结算。
+        if (onOwnedColumn(scaffold) && !digger.hasPendingBreak()) {
+            digger.cancel(); phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
+        }
         if (!scaffoldCleanup.ready()) {
             digger.cancel(); scaffoldCleanup.rejectCurrent(); phase = Phase.SCAFFOLD_NAV;
             return TaskState.RUNNING;
@@ -2090,9 +2119,74 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private void confirmedScaffoldBreak() {
         // 仅由原生 BROKE_TARGET 回执进入；看到空气或尝试过一次导航都不能算作开启下一轮的拆除进展。
-        r.scaffoldLedger().cleared(scaffold); r.brokeOne(); renewBuildProgress();
-        scaffoldPassRemovals++; scaffoldConfirmedRemovals++; scaffoldAt++;
+        recordScaffoldBreak(scaffold); scaffoldAt++;
         phase = Phase.SCAFFOLD_SELECT;
+    }
+
+    private void recordScaffoldBreak(BlockPos at) {
+        // 拆柱下降也共用同一份真实破坏账；身体尚在下落时不提前把控制交给下一条导航。
+        r.scaffoldLedger().cleared(at); r.brokeOne(); renewBuildProgress();
+        scaffoldPassRemovals++; scaffoldConfirmedRemovals++; rejectedScaffoldDescents.clear();
+    }
+
+    private boolean onOwnedColumn(BlockPos at) {
+        // 在自己的实心临时柱上时保留整条下撤路径；一般侧站回收只处理其他柱与横向支撑。
+        if (!player.onGround()) return false;
+        BlockPos below = player.blockPosition().below();
+        for (int n = 0; n < 32 && r.scaffoldLedger().contains(below); n++, below = below.below()) if (below.equals(at)) return true;
+        return false;
+    }
+
+    private TaskState scaffoldDescentTick() {
+        var result = scaffoldDescent.tick();
+        if (result == BuildScaffoldDescentDrive.Status.RUNNING) return TaskState.RUNNING;
+        if (result == BuildScaffoldDescentDrive.Status.FAILED) {
+            failAt(scaffold, scaffoldDescent.reason(), FailureType.NO_PATH, "scaffold_descent_failed", true);
+            return TaskState.FAILED;
+        }
+        if (result == BuildScaffoldDescentDrive.Status.UNAVAILABLE) rejectedScaffoldDescents.add(scaffold);
+        else {
+            // 已确认下降后重新查看全部剩余支撑，先回收新高度伸手可及的方块，再考虑下一格下降。
+            scaffoldQueue = r.scaffoldLedger().snapshot().keySet().stream()
+                    .sorted(Comparator.comparingInt((BlockPos at) -> at.getY()).reversed()).toList();
+            scaffoldAt = 0; deferredScaffolds.clear(); scaffoldCleanupPasses++;
+        }
+        scaffoldDescent.stop(); scaffoldDescent = null; phase = Phase.SCAFFOLD_SELECT;
+        return TaskState.RUNNING;
+    }
+
+    private boolean beginScaffoldAccess() {
+        // 现有通路整轮都无效后才补施工接近；每个目标只尝试一次，整项最多四次、额外三十二块支撑。
+        if (scaffoldAccessAttempts >= 4 || cleanupNewSupports >= 32) return false;
+        for (BlockPos at : deferredScaffolds) {
+            if (scaffoldAccessAttempts >= 4) return false;
+            NavGoal goal = scaffoldAccessGoals.get(at);
+            if (goal == null || attemptedScaffoldAccess.contains(at) || !player.level().isLoaded(at)
+                    || !scaffoldMutationAllowed(at, player.level().getBlockState(at))) continue;
+            attemptedScaffoldAccess.add(at); scaffoldAccessAttempts++; scaffold = at;
+            scaffoldCleanup = new BuildScaffoldCleanup(player, at, forbiddenBodyCells);
+            try {
+                scaffoldAccess = new BuildScaffoldCleanupAccess(player, goal, scaffoldCleanup::ready, this, siteMin, siteMax);
+            } catch (IllegalArgumentException unsupported) {
+                lastScaffoldAccess = Map.of("failure", "cleanup_access_scope_unsupported"); continue;
+            }
+            stopNav(); unregisterProvider();
+            BuildPlacementRegistry.register(player, scaffoldAccess.provider());
+            phase = Phase.SCAFFOLD_ACCESS; return true;
+        }
+        return false;
+    }
+
+    private TaskState scaffoldAccessTick() {
+        var result = scaffoldAccess.tick(); r.extendDeadlineTo(scaffoldAccess.deadline() + 100);
+        if (result == BuildScaffoldCleanupAccess.Status.RUNNING) return TaskState.RUNNING;
+        lastScaffoldAccess = scaffoldAccess.evidence();
+        BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); scaffoldAccess = null; drainScaffolds();
+        // 接近中真实搭过的支撑也进入同一回收账；随后只做就地拆除或已证明的逐格下撤，不把搭路当成回收进展。
+        scaffoldQueue = r.scaffoldLedger().snapshot().keySet().stream()
+                .sorted(Comparator.comparingInt((BlockPos at) -> at.getY()).reversed()).toList();
+        scaffoldAt = 0; deferredScaffolds.clear(); scaffoldPassRemovals = 0; scaffoldCleanupPasses++;
+        phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
     }
 
     private NativeConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before, BlockState predicted) {
@@ -2240,6 +2334,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         BuildTaskRecord.Target target = targets.get(placeAt.asLong());
         if (target != null && !BuildCellRules.isAirTarget(target)) return;
         if (!state.isAir() && state.getFluidState().isEmpty()) {
+            if (scaffoldAccess != null && !r.scaffoldLedger().owns(placeAt, state)) cleanupNewSupports++;
             if (!r.scaffoldLedger().owns(placeAt, state)) placementEnvironmentChanged(placeAt);
             r.scaffoldLedger().confirmed(placeAt, state); scaffolds.add(placeAt.immutable());
             renewBuildProgress();
@@ -2264,6 +2359,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     @Override public boolean permitsTemporaryScaffold(BlockPos placeAt) { return scaffoldPermitted(placeAt, null); }
 
     private boolean scaffoldPermitted(BlockPos pos, LongSet additionalProtection) {
+        // 回收接近的垫脚材料有整项上限，不能为了收旧支撑不断造出新的高柱。
+        if (scaffoldAccess != null && cleanupNewSupports >= 32) return false;
         if (!player.level().isLoaded(pos)) return false;
         boolean hard = inheritedProtectedMutationCells.contains(pos.asLong())
                 || forbiddenBodyCells.contains(pos.asLong())
@@ -2345,6 +2442,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (excavating && clearing != null) data.put("excavation_target", clearing.toShortString());
         data.put("creative_materials", creativeMaterials.progress());
         if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
+        if (scaffoldDescent != null) data.put("scaffold_descent", scaffoldDescent.evidence());
+        if (scaffoldAccess != null) data.put("scaffold_access", scaffoldAccess.evidence());
         if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
                 "stance_checks", gestureProgress.stanceChecks(), "face_checks", gestureProgress.probeCount(),
                 "candidates", gestureProgress.gestureCount()));
@@ -2389,6 +2488,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }
+        if (scaffoldDescent != null) scaffoldDescent.stop();
         if (placementAccess != null) {
             if (why == StopReason.PREEMPTED) {
                 placementAccess.pause();
@@ -2406,6 +2507,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 暂停／取消后不再续发旧任务的 Shift；恢复时由新控制租约重新核验身体与锚点。
     }
     @Override protected void cleanup() {
+        if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }
+        if (scaffoldDescent != null) scaffoldDescent.stop();
         if (placementAccess != null) placementAccess.stop();
         foodPreparation.stop(player);
         spoilSupply.cancel(player);
@@ -2448,6 +2551,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("temporary_supports_remaining", r.scaffoldLedger().snapshot().size());
         if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
         data.put("scaffold_cleanup_passes", scaffoldCleanupPasses);
+        data.put("scaffold_access_attempts", scaffoldAccessAttempts);
+        data.put("cleanup_new_supports", cleanupNewSupports);
+        if (scaffoldAccess != null) data.put("scaffold_access", scaffoldAccess.evidence());
+        else if (!lastScaffoldAccess.isEmpty()) data.put("scaffold_access", lastScaffoldAccess);
+        if (scaffoldDescent != null) data.put("scaffold_descent", scaffoldDescent.evidence());
         data.put("scaffold_cleanup_confirmed_removals", scaffoldConfirmedRemovals);
         data.put("scaffold_cleanup_deferred_count", deferredScaffolds.size());
         if (!lastDeferredScaffold.isEmpty()) data.put("last_deferred_scaffold", lastDeferredScaffold);
