@@ -19,6 +19,15 @@ public final class MachineProductionContractTest {
         accepts(MachineAbilityAdapter.BUILD, build);
         build.add("production", manifest()); build.addProperty("allow_use", true);
         accepts(MachineAbilityAdapter.BUILD, build);
+        JsonObject external = build.deepCopy();
+        external.add("blueprint",JsonParser.parseString("""
+                {"schema_version":1,"blocks":[{"offset":[0,0,0],"block_id":"create:shaft","properties":{"axis":"y"}}],
+                 "external_inputs":[{"id":"main_drive","medium":"kinetic","offset":[0,0,0],"face":"up","block_id":"create:shaft"}]}
+                """));
+        rejects(MachineAbilityAdapter.BUILD,external);
+        external.remove("production"); external.remove("allow_use"); accepts(MachineAbilityAdapter.BUILD,external);
+        if (!runtimeCompile(goal(MachineAbilityAdapter.BUILD,external)).parameters().getAsJsonObject("blueprint").has("external_inputs"))
+            throw new AssertionError("Typed utility declarations must survive public compilation");
         JsonObject design = new JsonObject(); design.add("blueprint", build.get("blueprint").deepCopy());
         design.add("production", manifest()); accepts(MachineAbilityAdapter.DESIGN, design);
         Goal reviewed = goal(MachineAbilityAdapter.DESIGN, design);
@@ -112,6 +121,7 @@ public final class MachineProductionContractTest {
         SemanticGoalContract.validate(goal, ABILITIES);
         IntentRuntime.get().compile(goal, 100);
     }
+    private static Goal runtimeCompile(Goal goal) { return IntentRuntime.get().compile(goal,100).goal(); }
     private static void rejects(String ability, JsonObject parameters) {
         try { accepts(ability, parameters); }
         catch (IllegalArgumentException expected) { return; }

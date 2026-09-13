@@ -47,7 +47,7 @@ public final class SemanticAbilityCatalog {
                     "Review a machine layout against installed block/item IDs without construction. Supply exactly one of design, blueprint or blueprint_uri. A semantic design lets MaiCraft arrange components; a blueprint declares the model's exact structure, using the same JSON as exported Ponder chapters. Reports materials and unresolved requirements. expected_output in a semantic design queries synchronized recipes; successful review does not prove construction or production.",
                     targets("landmark", "area"),
                     fields(field("design", "object",
-                            "Shape: {components:[{name,block_id,count,role,module?,module_tier?,module_options?}],connections:[{from,to,medium,purpose}],expected_output?:item_id,style?:string,constraints?:{max_width?,max_depth?,max_height?,terrain_fit?,maintenance_access?,preserve_existing?,throughput?}}. Planning budgets: 1024 component groups, 4096 connections, 32768 physical targets. Modules: create:press_station, create:press_basin_station, create:mixer_station, ae2:storage_cluster, ae2:crafting_cluster, mekanism:induction_matrix. Matrix options: width/height/depth/cell_count/provider_count, tier basic/advanced/elite/ultimate. AE options: storage_tier and storage_cells. Media include kinetic, items, fluids, energy, chemicals and ae_network; unsupported interfaces produce specific compiler issues."),
+                            "Shape: {components:[{name,block_id,count,role,module?,module_tier?,module_options?}],connections:[{from,to,medium,purpose}],expected_output?:item_id,style?:string,constraints?:{max_width?,max_depth?,max_height?,terrain_fit?,maintenance_access?,preserve_existing?,throughput?}}. Planning budgets: 1024 component groups, 4096 connections, 32768 physical targets. Modules: create:press_station, create:press_basin_station, create:mixer_station, ae2:storage_cluster, ae2:crafting_cluster, mekanism:induction_matrix. Matrix options: width/height/depth/cell_count/provider_count, tier basic/advanced/elite/ultimate. AE options: storage_tier and storage_cells. Media include kinetic, items, fluids, energy, chemicals and ae_network; unsupported interfaces produce specific compiler issues. " + utilityInputs(false)),
                             blueprintField(), blueprintUriField(), productionField(),
                             field("snapshot_id", "string", "Optional fresh site/machine observation that grounds site-specific analysis; requires the exact surveyed target label. Blueprint offsets are relative to this anchor.")));
             case MachineAbilityAdapter.BUILD -> contract(
@@ -55,7 +55,7 @@ public final class SemanticAbilityCatalog {
                     targets("landmark", "area"),
                     fields(
                             field("snapshot_id", "string", "Fresh complete inspect_machine receipt identifying the build anchor. The complete construction footprint is subsequently inspected by the native task and is not limited to the anchor survey radius."),
-                            field("design", "object", "Alternative to blueprint/blueprint_uri: same semantic graph as design_machine, with components, connections and optional expected_output, style and constraints."),
+                            field("design", "object", "Alternative to blueprint/blueprint_uri: same semantic graph as design_machine, including external_inputs and supply_preference. " + utilityInputs(false)),
                             blueprintField(), blueprintUriField(), productionField(),
                             field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site."),
                             field("allow_use", "boolean", "Required true with production: authorizes operating the declared machine after construction. Omit when production is absent."),
@@ -90,14 +90,15 @@ public final class SemanticAbilityCatalog {
                     "Modify an existing surveyed machine. apply_blueprint applies explicit desired blocks at anchor-relative offsets and preserves omitted positions; exactly one blueprint or blueprint_uri is required. connect_mechanical_power lets MaiCraft plan a Create rotational route. Success verifies the requested structural change; running and production are checked separately through use abilities.",
                     targets("landmark", "area"),
                     fields(
-                            field("operation", "string", "apply_blueprint or connect_mechanical_power."),
+                            field("operation", "string", "apply_blueprint, connect_mechanical_power or connect_external_input. External utility hookup is a separate task after construction; inspect the machine and choose a remembered city source."),
                             field("snapshot_id", "string", "Fresh complete receipt for the exact destination machine label; consumed before execution. Resurvey before another attempt."),
-                            field("source_label", "string", "connect_mechanical_power only: remembered powered Create source in the same dimension."),
+                            field("source_label", "string", "connect_mechanical_power/connect_external_input: explicit remembered source outlet in the same dimension; existing city supply is preferred."),
+                            field("input_id", "string", "connect_external_input only: exact external input id from perceive(machines). Requires server-assisted native checks; currently vertical Create shaft and FE/Mek cable hookup. Other media reject before mutation."),
                             blueprintField(), blueprintUriField(),
-                            field("material_policy", "string", "apply_blueprint only: ordinary, storage_available or inventory_only."),
+                            field("material_policy", "string", "apply_blueprint/connect_external_input: ordinary, storage_available or inventory_only."),
                             field("replace_existing", "boolean", "apply_blueprint only: allow replacing ordinary obstructing blocks, default false. Declare minecraft:air to request removal at an explicit offset."),
                             field("replace_block_entities", "boolean", "apply_blueprint only: also allow replacing block entities at declared targets, default false; requires replace_existing=true and authorization for those changes."),
-                            field("protected_labels", "array<string>", "apply_blueprint only: remembered areas that modification and material acquisition must preserve."),
+                            field("protected_labels", "array<string>", "apply_blueprint/connect_external_input: remembered areas that modification and material acquisition must preserve."),
                             field("allow_modify", "boolean", "Required true when the player's instructions authorize this change; existing authorization carries through the workflow.")));
             case GeneralAbilityAdapter.FIND_ENTITY -> contract(
                     "Find real entities through loaded client evidence and bounded first-person frontier exploration; MaiCraft owns every route and concrete identity.",
@@ -421,8 +422,20 @@ public final class SemanticAbilityCatalog {
                 + "Without optional server support, use ordinary construction separately; production verification is never silently weakened.");
     }
 
+    private static String utilityInputs(boolean concrete) {
+        return "Fixed machines prefer shared city utility supply. external_inputs:[{id,medium,"
+                + (concrete ? "offset:[x,y,z],face,block_id" : "consumers:[component_name],face?")
+                + ",minimum_rpm?,resource?,reason?}]. Media: kinetic, energy, fluids, chemicals, items. "
+                + "Default one input per medium; at most three per medium with a reason on each, eight total. "
+                + "These are passive physical connection points, not generators. supply_preference defaults to external; "
+                + "onsite requires onsite_reason explaining a deliberate local source. In survival, known creative-only "
+                + "materials require real carried items or installed recipe evidence; that evidence is not a complete acquisition plan. "
+                + "Build external-input machines without production, then inspect and connect_external_input to a source_label; "
+                + "run_production is separate. Read remembered ports from perceive(machines).";
+    }
+
     private static JsonObject blueprintField() {
-        return field("blueprint", "object", "Alternative to design/blueprint_uri (modify: apply_blueprint only). Shape: {schema_version:1,blocks:[{offset:[x,y,z],block_id:'namespace:id',properties?:{property:'value'}}],metadata?:{...},evidence?:{...}}. Integer offsets are relative to the exact surveyed anchor; omitted cells are preserved and minecraft:air declares removal. Evidence may contain observed NBT or animation transforms; it does not configure the built machine. Unsupported desired configuration is rejected, never silently applied. Copy and edit Ponder chapter JSON or author your own layout.");
+        return field("blueprint", "object", "Alternative to design/blueprint_uri (modify: apply_blueprint only). Shape: {schema_version:1,blocks:[{offset:[x,y,z],block_id:'namespace:id',properties?:{property:'value'}}],metadata?:{...},evidence?:{...}}. Integer offsets are relative to the exact surveyed anchor; omitted cells are preserved and minecraft:air declares removal. Evidence may contain observed NBT or animation transforms; it does not configure the built machine. Unsupported desired configuration is rejected, never silently applied. Copy and edit Ponder chapter JSON or author your own layout. " + utilityInputs(true));
     }
 
     private static JsonObject blueprintUriField() {

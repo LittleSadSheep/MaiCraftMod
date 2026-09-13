@@ -131,6 +131,26 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 ## 短时调试与后台观察
 
+固定机器优先使用外部公共设施，并把施工与接线分为两个目标。语义设计可声明：
+
+```json
+{
+  "components": [{"name":"mill","block_id":"create:millstone","count":2,"role":"grinding"}],
+  "connections": [],
+  "external_inputs": [{"id":"main_drive","medium":"kinetic","consumers":["mill"],"minimum_rpm":16}],
+  "supply_preference": "external"
+}
+```
+
+布局器会生成一个真实的被动输入连接器，再在机器内部向两个工序分配动力。具体蓝图的 `external_inputs` 改用 `{id,medium,offset:[x,y,z],face,block_id,minimum_rpm?,resource?,reason?}`，入口必须对应实际蓝图方块、正确轴向与开放接入面。每种介质默认一个输入，确需多个时每个都须说明 `reason`；每种最多三个、整台最多八个。支持声明 `kinetic/energy/fluids/chemicals/items`。自建供能源需要明确的 `supply_preference:"onsite"` 与 `onsite_reason`，设计不会自动添加发电厂。
+
+1. 使用不带 `production` 的 `build_machine` 完成设备；不能把入口声明当成免费能源。
+2. 从 `perceive(view="machines")` 的 `utility_installations` 读取入口 ID，并重新 `inspect_machine`。
+3. 以机器标签为目标，调用 `modify_machine`，参数 `operation:"connect_external_input"`、`snapshot_id`、`input_id`、明确的主城设施 `source_label`、`allow_modify:true`，按需指定 `material_policy`。
+4. 接线结果分别提供 `native_connected`、`source_power_observed`、`destination_power_observed` 和 `power_ready`。之后才执行需要的配置、供料及 `run_production`，或者在下一批前登记 `watch_production`。
+
+当前自动外部接线要求服务端增强，覆盖竖轴 Create 接口和 FE／Mek 电缆；其他已声明介质在修改前返回具体不支持项。新电缆只在本任务安装且身份未变化的接口上配置，不替换主城源设备。历史接口档案没有当前操作权限或持续供能保证。已知创造专用物品在生存设计中需要真实携带或已安装配方产物证据；常规缺料继续走供料流程。
+
 `window_ticks` 是实际产出样本的最小跨度；`max_idle_ticks` 独立限制两次加工之间的间隔，两者都有 72000 tick 上限。调试可以只取少量真实完成样本，正常加工所需时间不必恰好等于最小样本跨度。
 
 机器已有合适输入、连接和配置时，在下一批开始前使用 `operate_machine` 的 `watch_production` 登记后台观察，再通过普通原生操作备料、启动。该操作使用新鲜 `snapshot_id`、同一锚点的 `production` 和 `allow_use: true`，目标数量来自 `production.observation.minimum_output`；`minimum_process_events` 单独指定每个工序所需原生完成次数，默认 1。它先就近验证登记位置，随后不占用身体、不巡检或自行补料。

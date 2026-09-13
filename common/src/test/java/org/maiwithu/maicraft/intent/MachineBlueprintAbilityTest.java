@@ -51,6 +51,21 @@ public final class MachineBlueprintAbilityTest {
         modification.add("blueprint", blueprint());
         check(MachineAbilityAdapter.MODIFY, modification, false);
 
+        JsonObject hookup = parameters(MachineAbilityAdapter.MODIFY);
+        hookup.addProperty("operation","connect_external_input"); hookup.addProperty("source_label","city drive");
+        hookup.addProperty("input_id","main_drive"); hookup.addProperty("material_policy","storage_available");
+        check(MachineAbilityAdapter.MODIFY,hookup,true);
+        hookup.remove("input_id"); check(MachineAbilityAdapter.MODIFY,hookup,false);
+        JsonObject sharedDesign = parameters(MachineAbilityAdapter.DESIGN);
+        sharedDesign.add("design",json("""
+                {"components":[{"name":"mill","block_id":"create:millstone","count":2,"role":"grind"}],"connections":[],
+                 "external_inputs":[{"id":"drive","medium":"kinetic","consumers":["mill"],"face":"up"}]}
+                """));
+        check(MachineAbilityAdapter.DESIGN,sharedDesign,true);
+        var shared = goal(MachineAbilityAdapter.DESIGN,sharedDesign,true);
+        if (!IntentRuntime.get().compile(shared,100).goal().parameters().get("design").equals(sharedDesign.get("design")))
+            throw new AssertionError("Public compilation lost abstract utility-input declarations");
+
         JsonObject build = parameters(MachineAbilityAdapter.BUILD);
         build.add("blueprint", blueprint());
         build.addProperty("replace_block_entities", true);

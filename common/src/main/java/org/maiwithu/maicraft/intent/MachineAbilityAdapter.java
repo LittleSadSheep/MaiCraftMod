@@ -167,13 +167,17 @@ final class MachineAbilityAdapter {
                 if ("connect_mechanical_power".equals(operation)) {
                     only(p, "operation", "snapshot_id", "source_label", "allow_modify");
                     requiredString(p, "source_label", 160);
+                } else if ("connect_external_input".equals(operation)) {
+                    only(p,"operation","snapshot_id","source_label","input_id","allow_modify","material_policy","protected_labels");
+                    requiredString(p,"source_label",160); requiredString(p,"input_id",64);
+                    SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p,"material_policy",64));
                 } else if ("apply_blueprint".equals(operation)) {
                     only(p, "operation", "snapshot_id", "blueprint", "blueprint_uri", "allow_modify",
                             "material_policy", "replace_existing", "replace_block_entities", "protected_labels");
                     validateLayoutSource(p, false);
                     validateConstructionOptions(p);
                 } else {
-                    throw bad("unsupported_machine_modification: choose apply_blueprint or connect_mechanical_power; click scripts are not accepted");
+                    throw bad("unsupported_machine_modification: choose apply_blueprint, connect_mechanical_power or connect_external_input; click scripts are not accepted");
                 }
                 requiredString(p, "snapshot_id", 36);
                 bool(p, "allow_modify", false);
@@ -183,6 +187,7 @@ final class MachineAbilityAdapter {
                 only(p, "snapshot_id", "design", "blueprint", "blueprint_uri", "allow_modify", "material_policy", "replace_existing", "replace_block_entities", "protected_labels", "production", "allow_use");
                 requiredString(p, "snapshot_id", 36);
                 validateLayoutSource(p, true);
+                validateSeparateUtilityConstruction(p);
                 if (p.has("production")) { MachineProductionIntent.validate(p); bool(p, "allow_use", false); }
                 else if (p.has("allow_use")) throw bad("allow_use on build_machine requires an explicit production goal");
                 bool(p, "allow_modify", false);
@@ -339,6 +344,23 @@ final class MachineAbilityAdapter {
         JsonObject p = goal.parameters();
         if (!bool(p, "allow_modify", false)) throw bad("machine_modification_not_authorized: set allow_modify when the player's instructions authorize this change");
         if ("apply_blueprint".equals(p.get("operation").getAsString())) return build(goal, player, runtime);
+        if ("connect_external_input".equals(p.get("operation").getAsString())) {
+            MachineSnapshots.Snapshot snapshot = boundSnapshot(goal,player,runtime);
+            var installation = org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.requireInstallation(player,snapshot.center());
+            String inputId = requiredString(p,"input_id",64), sourceLabel = requiredString(p,"source_label",160);
+            var input = installation.inputs().stream().filter(value -> value.id().equals(inputId)).findFirst()
+                    .orElseThrow(() -> bad("machine_external_input_unknown: " + inputId));
+            BlockPos source = block(resolve(new Goal.SemanticTarget("landmark",sourceLabel,null,null),player,runtime));
+            var request = new org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskRecord.Request(
+                    source,snapshot.center().offset(input.offset()),input.face(),input.blockId(),input.medium(),
+                    input.minimumRpm() == null ? 0 : input.minimumRpm(),0,input.resource());
+            var protections = new java.util.LinkedHashSet<>(goal.inheritedProtectionLabels());
+            if (p.has("protected_labels")) p.getAsJsonArray("protected_labels").forEach(value -> protections.add(value.getAsString()));
+            var task = new org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskRecord(
+                    "machine-utility-"+UUID.randomUUID(),player.level().getGameTime()+15L*60*20,snapshot.dimension(),sourceLabel,inputId,request,
+                    SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p,"material_policy",64)),List.copyOf(protections));
+            MachineSnapshots.consume(snapshot); return new IntentAction.Native(task);
+        }
         // 如果上次留下了可恢复编号，使用它核对原来的连接，避免重复装已经放好的部分；否则需要新观察。
         MachineSnapshots.Snapshot snapshot = continuationToken == null ? boundSnapshot(goal, player, runtime) : null;
         BlockPos destination = snapshot == null ? block(resolve(goal.target(), player, runtime)) : snapshot.center();
@@ -369,6 +391,8 @@ final class MachineAbilityAdapter {
         }
         var layout = compileLayout(p, player);
         if (layout == null) return IntentAction.Pending.INSTANCE;
+        if (p.has("production") && !org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.parse(layout.blueprint()).isEmpty())
+            throw bad("external_utility_connection_is_separate: build without production, connect_external_input, then run_production");
         MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
         if (layout.buildable()) {
             boolean replace = bool(p, "replace_existing", false);
@@ -379,6 +403,8 @@ final class MachineAbilityAdapter {
             BlockPos anchor = design == null ? snapshot.center() : MachineConstructionPlan.floorAnchor(snapshot.center(), layout);
             // 明确蓝图的偏移从观察中心算；自动生成布局则先换算地板锚点，两类输入的定位规则不同。
             var plan = MachineConstructionPlan.compile(anchor, layout, replace, bool(p, "replace_block_entities", false));
+            if (!org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerInstallation(player,snapshot.label(),plan))
+                return IntentAction.Pending.INSTANCE;
             List<String> protectedLabels = p.has("protected_labels")
                     ? java.util.stream.StreamSupport.stream(p.getAsJsonArray("protected_labels").spliterator(), false)
                         .map(com.google.gson.JsonElement::getAsString).toList() : List.of();
@@ -443,11 +469,21 @@ final class MachineAbilityAdapter {
 
     private static SemanticMachineLayout.Result compileLayout(JsonObject p, LocalPlayer player) {
         // 关系图需要计算具体布局；蓝图已经给出每格目标，只需按方块规则解析和检查。
-        if (p.has("design")) return MachineLayoutJobs.poll(player, p.getAsJsonObject("design"));
-        JsonObject blueprint = p.has("blueprint") ? p.getAsJsonObject("blueprint")
-                : PonderBlueprintStore.resolve(requiredString(p, "blueprint_uri", 2048));
-        return MachineConstructionPlan.reviewExplicit(
-                MachineBlueprintDocument.compile(blueprint, MachineConstructionPlan.registry()));
+        SemanticMachineLayout.Result result;
+        if (p.has("design")) result = MachineLayoutJobs.poll(player, p.getAsJsonObject("design"));
+        else {
+            JsonObject blueprint = p.has("blueprint") ? p.getAsJsonObject("blueprint")
+                    : PonderBlueprintStore.resolve(requiredString(p, "blueprint_uri", 2048));
+            result = MachineConstructionPlan.reviewExplicit(MachineBlueprintDocument.compile(blueprint, MachineConstructionPlan.registry()));
+        }
+        return result == null ? null : org.maiwithu.maicraft.core.integration.machine.utility.MachineSurvivalMaterials.requireSurvivalBlueprint(player,result);
+    }
+
+    private static void validateSeparateUtilityConstruction(JsonObject p) {
+        if (!p.has("production")) return;
+        JsonObject shape = p.has("blueprint") ? p.getAsJsonObject("blueprint") : p.has("design") ? p.getAsJsonObject("design") : null;
+        if (shape != null && shape.has("external_inputs") && !shape.getAsJsonArray("external_inputs").isEmpty())
+            throw bad("external_utility_connection_is_separate: build without production, connect_external_input, then run_production");
     }
 
     private static void validateSemanticDesign(JsonObject design) {
