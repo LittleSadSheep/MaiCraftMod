@@ -22,6 +22,8 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest.main(args);
         // 同一个真实半楼梯落脚面必须在建造与寻路里使用相同的起点格，避免反复得到无法起步的路径。
         org.maiwithu.maicraft.core.pathing.baritone.BaritonePlayerFeetTest.main(args);
+        // 跌落路径只查已有缓冲物时先筛选候选，保留真实水面、伤害和碰撞验证。
+        org.maiwithu.maicraft.core.pathing.baritone.landing.ExistingLandingQueryTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.NavigationScaffoldDropGuardTest.main(args);
         org.maiwithu.maicraft.core.task.mine.MiningBatchTest.main(args);
         org.maiwithu.maicraft.core.task.mine.NaturalTreeSourceTest.main(args);

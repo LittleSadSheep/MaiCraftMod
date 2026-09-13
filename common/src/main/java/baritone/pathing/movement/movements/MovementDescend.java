@@ -144,9 +144,9 @@ public class MovementDescend extends Movement {
             // and potentially replace the water we're going to fall into
             return false;
         }
+        // 下落柱的通行检查只利用现场已有缓冲物，准备新放用品的完整证明留给真正的最终落点。
         if (!MovementHelper.canWalkThrough(context, destX, y - 2, destZ, below)
-                && context.landingPlans(new BlockPos(destX, y - 2, destZ)).stream()
-                        .noneMatch(org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan::existing)) {
+                && context.existingLandingPlans(new BlockPos(destX, y - 2, destZ)).isEmpty()) {
             return false;
         }
         double costSoFar = 0;
@@ -162,8 +162,7 @@ public class MovementDescend extends Movement {
             BlockState ontoBlock = context.get(destX, newY, destZ);
             int unprotectedFallHeight = fallHeight - (y - effectiveStartHeight); // equal to fallHeight - y + effectiveFallHeight, which is equal to -newY + effectiveFallHeight, which is equal to effectiveFallHeight - newY
             double tentativeCost = WALK_OFF_BLOCK_COST + FALL_N_BLOCKS_COST[unprotectedFallHeight] + frontBreak + costSoFar;
-            if (reachedMinimum && context.landingPlans(new BlockPos(destX, newY, destZ), effectiveStartHeight - newY).stream()
-                    .anyMatch(org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan::existing)
+            if (reachedMinimum && !context.existingLandingPlans(new BlockPos(destX, newY, destZ), effectiveStartHeight - newY).isEmpty()
                     && MovementHelper.canWalkOn(context, destX, newY - 1, destZ)) {
                 res.x = destX; res.y = newY; res.z = destZ; res.cost = tentativeCost;
                 return true;

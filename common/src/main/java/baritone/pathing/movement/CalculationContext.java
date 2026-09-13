@@ -235,16 +235,37 @@ public class CalculationContext {
     }
 
     public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet) {
+        return landingPlans(feet, false);
+    }
+
+    public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> existingLandingPlans(BlockPos feet) {
+        return landingPlans(feet, true);
+    }
+
+    private List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet, boolean existingOnly) {
         if (!bsi.worldContainsLoadedChunk(feet.getX(), feet.getZ())) return List.of();
-        return landingInventory.automaticCandidates(bsi.access, feet,
-                pos -> isPossiblyProtected(pos.getX(), pos.getY(), pos.getZ()), automaticLandingSupply).stream()
+        // 沿下落柱只寻找已有缓冲物时，先排除新放方案；不为尚未取得的水桶、船等重复检查整套落地碰撞。
+        java.util.function.Predicate<BlockPos> protectedCell = pos -> isPossiblyProtected(pos.getX(), pos.getY(), pos.getZ());
+        var candidates = existingOnly ? landingInventory.plans(bsi.access, feet, protectedCell)
+                : landingInventory.automaticCandidates(bsi.access, feet, protectedCell, automaticLandingSupply);
+        return candidates.stream().filter(plan -> !existingOnly || plan.existing())
                 .filter(plan -> org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistGeometry.safe(
                         bsi.access, pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()), plan,
                         landingInventory.width(), landingInventory.height(), maicraftPolicy.forbiddenBodyCells())).toList();
     }
 
     public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet, int drop) {
-        return landingPlans(feet).stream().filter(plan -> plan.survives(fallDamageBudget, feet.getY() + drop, true))
+        return landingPlansForDrop(landingPlans(feet), feet, drop);
+    }
+
+    public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> existingLandingPlans(BlockPos feet, int drop) {
+        return landingPlansForDrop(existingLandingPlans(feet), feet, drop);
+    }
+
+    private List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlansForDrop(
+            List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> plans, BlockPos feet, int drop) {
+        // 即使复用已有落点的查询入口，每次仍按当前跌落高度核对伤害与操作时间窗，不能把干草当成绝对免伤。
+        return plans.stream().filter(plan -> plan.survives(fallDamageBudget, feet.getY() + drop, true))
                 .filter(plan -> plan.kind()!=org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.BOAT
                     || landingBoats!=null && landingBoats.airborneWindow(drop,fallDamageBudget.gravity(),waterLandingWindow.initialDownwardSpeed()))
                 .filter(plan -> plan.existing()
