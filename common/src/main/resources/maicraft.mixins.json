@@ -21,7 +21,8 @@
     "MouseHandlerControlMixin",
     "ContainerStockSyncMixin",
     "ScreenVisibilityMixin",
-    "InventoryScreenModeMixin"
+    "InventoryScreenModeMixin",
+    "UltimineInputMixin"
   ],
   "server": [],
   "injectors": {
