@@ -48,6 +48,14 @@ public final class BlockDigger {
     private int pendingToolSlot = -1;
     private int minimumToolDurability;
     public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
+    private java.util.function.Predicate<BlockHitResult> preparation = hit -> true;
+    /** Called after native tool/menu/aim settling and before the first break submission. */
+    public void beforeBreak(java.util.function.Predicate<BlockHitResult> gate) {
+        preparation = java.util.Objects.requireNonNull(gate);
+    }
+    public boolean hasPendingBreak() { return receipt != null && !receipt.terminal(); }
+    private boolean preferTopFace;
+    public void preferTopFace(boolean value) { preferTopFace = value; }
     private int blockHitDelay;    // post-break cooldown (survives reset())
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
     private net.minecraft.world.item.ItemStack destroyingItem;
@@ -303,6 +311,7 @@ public final class BlockDigger {
             if (!aimReady(hit.getLocation())) {
                 return DigResult.PROGRESSING;
             }
+            if (!preparation.test(hit)) return DigResult.PROGRESSING;
             receipt = context.actions().startBreaking(context, hit, BREAK_TIMEOUT_TICKS);
             destroyingItem = player.getMainHandItem().copy();
         } else {
@@ -457,6 +466,9 @@ public final class BlockDigger {
                 offsetOn(pos, shape, 0.0, 0.5, 0.5),
                 offsetOn(pos, shape, 1.0, 0.5, 0.5),
         };
+        if (preferTopFace) {
+            Vec3 center = aims[0]; aims[0] = aims[2]; aims[2] = center;
+        }
         for (Vec3 aim : aims) {
             Vec3 dir = aim.subtract(eye);
             if (dir.lengthSqr() < 1.0e-8) continue;

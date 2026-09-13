@@ -18,6 +18,7 @@ final class BuildExcavationTools {
     private final SemanticMaterialSupplyCoordinator supply = new SemanticMaterialSupplyCoordinator();
     private final List<BlockPos> protection;
     private String failure;
+    private final java.util.List<Map<String, Object>> receipts = new java.util.ArrayList<>();
 
     BuildExcavationTools(BuildTaskRecord record) {
         var cells = new java.util.ArrayList<>(record.targets.stream().map(BuildTaskRecord.Target::pos).toList());
@@ -32,6 +33,7 @@ final class BuildExcavationTools {
             var result = NavigationSafetyContext.withProtectedArea(protection, List.of(),
                     () -> supply.tick(player, childRunner));
             record.extendDeadlineTo(supply.childDeadline());
+            if (result.status() != SemanticMaterialSupplyCoordinator.Status.RUNNING) receipts.add(result.receipt());
             if (result.status() == SemanticMaterialSupplyCoordinator.Status.FAILED) failure = result.message();
             return false;
         }
@@ -52,5 +54,6 @@ final class BuildExcavationTools {
     String failure() { return failure; }
     boolean active() { return supply.active(); }
     Map<String, Object> progress() { return supply.active() ? supply.progress() : Map.of(); }
+    List<Map<String, Object>> receipts() { return List.copyOf(receipts); }
     void stop(LocalPlayer player) { supply.cancel(player); }
 }

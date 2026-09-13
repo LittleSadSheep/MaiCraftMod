@@ -23,9 +23,34 @@ final class BuildExcavationFrontier {
     void cleared(BlockPos pos) { pending.remove(pos); rejected.clear(); }
     void reject(BlockPos pos) { rejected.add(pos); }
 
+    static boolean safeDescent(LocalPlayer player, BlockPos target) {
+        if (!target.equals(player.blockPosition().below())) return true;
+        var level = player.level();
+        var landing = target.below();
+        return level.isLoaded(landing) && level.getBlockState(landing).getFluidState().isEmpty()
+                && level.getBlockState(landing).isFaceSturdy(level, landing, net.minecraft.core.Direction.UP);
+    }
+
     BlockPos next(LocalPlayer player) {
         pending.removeIf(pos -> player.level().isLoaded(pos) && player.level().getBlockState(pos).isAir());
+        if (org.maiwithu.maicraft.core.integration.ultimine.UltimineNative.available()
+                && org.maiwithu.maicraft.core.integration.ultimine.UltimineNative.serverAvailable()) {
+            var clusters = clusters(pending, player.blockPosition());
+            BlockPos clustered = select(clusters, rejected, player.blockPosition());
+            if (clustered != null) return clustered;
+        }
         return select(pending, rejected, player.blockPosition());
+    }
+
+    static Set<BlockPos> clusters(Set<BlockPos> pending, BlockPos feet) {
+        int top = pending.stream().mapToInt(BlockPos::getY).max().orElse(Integer.MIN_VALUE);
+        Set<BlockPos> result = new LinkedHashSet<>();
+        for (BlockPos center : pending) {
+            if (center.getY() != top) continue;
+            var square = org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy.square(center, net.minecraft.core.Direction.UP);
+            if (!square.contains(feet.below()) && pending.containsAll(square)) result.add(center);
+        }
+        return result;
     }
 
     static BlockPos select(Set<BlockPos> pending, Set<BlockPos> rejected, BlockPos feet) {
