@@ -16,6 +16,9 @@ final class BuildStanceNavigation {
     // 施工站位、清障和收支撑都是精确挪位：禁用短段疾跑，避免每换一格就开关疾跑。
     // PlayerNav 的 speed 小于一仅传递“不允许疾跑”，不会把原版步行速度再缩小。
     static final double PRECISE_WALK = .8;
+    private static final int MAX_TARGET_ROUTES = 8;
+    private record Attempt(BlockPos stance, int pass) {}
+    private final Set<Attempt> attemptedRoutes = new HashSet<>();
     private final PlayerNav.ContextProvider construction;
     private int pass, floor = Integer.MIN_VALUE;
     private BlockPos target;
@@ -41,14 +44,27 @@ final class BuildStanceNavigation {
     }
     boolean allows(BlockPos stance) { return !unreachable.contains(stance) && (pass != 0 || stance.getY() >= floor); }
     void attempted() { routeAttempts++; attemptedRevision = environmentRevision; }
+    boolean claimRoute(BlockPos stance) {
+        // 同一站位、同一通行规则只试一次；全目标合计八条真实路线，不能为同一空中落点的不同点击取样反复寻路。
+        if (attemptedRoutes.size() >= MAX_TARGET_ROUTES || !attemptedRoutes.add(new Attempt(stance.immutable(), pass))) return false;
+        attempted(); return true;
+    }
+    boolean requiresExistingFooting() { return pass < 2; }
+    boolean existingFooting(net.minecraft.client.player.LocalPlayer player, BlockPos stance) {
+        var corridor = new org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor(player.level(), player.level()::isLoaded,
+                player.getBbWidth(), Math.max(player.getBbHeight(), player.getDimensions(net.minecraft.world.entity.Pose.STANDING).height()),
+                construction.embeddedForbiddenBodyCells(), org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles());
+        var feet = corridor.stance(stance);
+        return feet != null && Math.abs(feet.y - stance.getY()) < 1e-5;
+    }
     void failed(BlockPos stance, String reason) {
         if (attemptedRevision != environmentRevision) return;
         unreachable.add(stance.immutable());
         lastFailure = reason == null ? "navigation failed" : reason.substring(0, Math.min(240, reason.length()));
     }
     void skipped(BlockPos stance) { if (unreachable.contains(stance)) skippedGestures++; }
-    void environmentChanged() { environmentRevision++; unreachable.clear(); lastFailure = ""; }
-    private void clearPass() { environmentChanged(); routeAttempts = 0; skippedGestures = 0; }
+    void environmentChanged() { environmentRevision++; unreachable.clear(); attemptedRoutes.clear(); lastFailure = ""; }
+    private void clearPass() { environmentRevision++; unreachable.clear(); lastFailure = ""; routeAttempts = 0; skippedGestures = 0; }
     boolean nextExistingPass() { if (pass != 0) return false; pass = 1; clearPass(); return true; }
     boolean selectPass(int next) {
         if (next < 0 || next > 2 || next == 2 && !construction.permit().mayAlter()) return false;
@@ -61,7 +77,7 @@ final class BuildStanceNavigation {
         return Map.of("route_attempts", routeAttempts, "failed_stances", unreachable.size(),
                 "duplicate_gestures_skipped", skippedGestures, "last_failure", lastFailure);
     }
-    void reset() { pass = 0; floor = Integer.MIN_VALUE; target = null; clearPass(); }
+    void reset() { pass = 0; floor = Integer.MIN_VALUE; target = null; attemptedRoutes.clear(); clearPass(); }
     void startAt(BlockPos feet) { reset(); floor = feet.getY(); }
 
     private record ExistingFooting(PlayerNav.ContextProvider construction, int minimumFeetY) implements PlayerNav.ContextProvider {
