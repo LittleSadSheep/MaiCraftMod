@@ -13,7 +13,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
 public final class BuildExcavationCargoTest {
-    // 卸下新挖的土石时保留开工物资、建材、食物与工具，分批施工也不能忘记这条底线。
+    // 卸下土石时保留全部剩余建材、一组支撑、食物与工具，分批施工也不能忘记这条底线。
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         try (var h = new InteractionWorldTestHarness()) {
@@ -27,9 +27,10 @@ public final class BuildExcavationCargoTest {
             h.inventory.setItem(3, new ItemStack(Items.COBBLESTONE, 64));
             h.inventory.setItem(4, new ItemStack(Items.COBBLESTONE, 16));
             h.inventory.setItem(5, new ItemStack(Items.DIRT, 32));
+            h.inventory.setItem(6, new ItemStack(Items.COBBLESTONE, 64));
             var result = cargo.unloadable(h.player, Map.of(Items.COBBLESTONE, 96, Items.DIRT, 40));
             check(result.equals(Map.of(ResourceLocation.parse("minecraft:cobblestone"), 48)),
-                    "unloading keeps the original 64, all 96 construction needs, food and tools; insufficient dirt stays");
+                    "存放余料后保留九十六份圆石建材与六十四份支撑，食物工具和不足的泥土建材不动");
             var next = new BuildTaskRecord("next-batch", 1000, List.of(), true);
             record.copyExecutionContextTo(next);
             next.excavationCargo().begin(h.player);
