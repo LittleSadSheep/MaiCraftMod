@@ -38,6 +38,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildTaskSearchBudgetTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementConfirmationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildDoorStateRepairTest.main(args);
+        // 门的原生门轴与两半生成结果要结合作者要求确认，生存模式还须等一件物品实际扣除。
+        org.maiwithu.maicraft.core.task.build.BuildDoorPlacementPredictionTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildFailureEvidenceTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildWorksitePlannerTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildStanceNavigationTest.main(args);
@@ -51,6 +53,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.container.ContainerSplitPlannerTest.main(args);
         org.maiwithu.maicraft.core.task.container.ContainerSplitTransferTest.main(args);
         org.maiwithu.maicraft.core.task.container.ContainerSupplySourcesTest.main(args);
+        // AE 终端共享地标与访问保护，但不能被误当作普通箱子使用虚拟库存槽。
+        org.maiwithu.maicraft.core.task.container.ContainerAccessPolicyTest.main(args);
         org.maiwithu.maicraft.core.task.acquire.OrdinaryStorageAcquireTest.main(args);
         // 出坑后补料应找到较远的已加载仓库，同时保持采矿范围和主人指定的查找距离。
         org.maiwithu.maicraft.core.task.acquire.StorageSupplyRadiusTest.main(args);
@@ -60,7 +64,11 @@ public final class GuiRegressionSuite {
         // 续建先保留建材与垫脚储备，再把普通土石存进有空位的仓库；没有确认回执不能继续取料。
         org.maiwithu.maicraft.core.task.build.BuildExcavationCargoRecoveryTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilBoundaryTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildAeSpoilReceiptTest.main(args);
         org.maiwithu.maicraft.core.task.supply.BuildSupplyCargoDispatchTest.main(args);
+        // 没仓库时区分可延期整理与真正满包；已确认存入不能掩盖之后的放置未知。
+        org.maiwithu.maicraft.core.task.supply.BuildSupplyCargoDeferralTest.main(args);
+        org.maiwithu.maicraft.core.task.supply.BuildSupplyUncertaintyTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildSupplyAccessTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildFoodPreparationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildFoodBoundaryTest.main(args);
@@ -93,6 +101,10 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.integration.ae2.Ae2LandingWaterFallbackTest.main(args);
         org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest.main(args);
         org.maiwithu.maicraft.core.integration.ae2.Ae2FixedTerminalDiscoveryTest.main(args);
+        // 存入经真实玩家槽和可见网络库存双向确认，并遵守终端范围、命名物品和原生界面边界。
+        org.maiwithu.maicraft.core.integration.ae2.Ae2DepositLedgerTest.main(args);
+        org.maiwithu.maicraft.core.integration.ae2.Ae2DepositTransferTest.main(args);
+        org.maiwithu.maicraft.core.integration.ae2.Ae2DepositAccessPolicyTest.main(args);
         VisibleMenuSessionTest.main(args);
         LegacyInventoryBoundaryTest.main(args);
         GuiBoundaryAuditTest.main(args);
