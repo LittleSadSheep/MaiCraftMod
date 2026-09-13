@@ -199,6 +199,17 @@ final class BuildPlacementGeometry {
     static Gesture projectedGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
                                          net.minecraft.world.level.BlockGetter projected,
                                          Predicate<BlockPos> loaded, Vec3 feet) {
+        return projectedGestureFrom(player, target, projected, loaded, feet, false);
+    }
+    static Gesture projectedGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
+                                         net.minecraft.world.level.BlockGetter projected,
+                                         Predicate<BlockPos> loaded, Vec3 feet, boolean forceSneak) {
+        return projectedGestureFrom(player, target, projected, loaded, feet, forceSneak, ignored -> true);
+    }
+    // 站位仍可用时允许换新的点击面内位置，但先排除已经被真实原生确认拒绝的放法。
+    static Gesture projectedGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
+                                         net.minecraft.world.level.BlockGetter projected,
+                                         Predicate<BlockPos> loaded, Vec3 feet, boolean forceSneak, Predicate<Gesture> allowed) {
         if (!(target.item() instanceof BlockItem) || !loaded.test(target.pos())) return null;
         var stage = new BuildPlacementStage(projected, loaded, Map.of(), target, false, true);
         if (!bodyClearFrom(player, target, stage, feet)) return null;
@@ -210,8 +221,16 @@ final class BuildPlacementGeometry {
         for (Direction toward : SUPPORT_ORDER) {
             BlockPos clicked = target.pos().relative(toward);
             if (!stage.support(clicked, toward.getOpposite())) continue;
-            gesturesAt(player, target, stage, clicked, toward.getOpposite(), feet,
-                    false, true, true, ignored -> true, out);
+            if (forceSneak) {
+                // 檐边见证使用真实潜行眼高和原生副操作预测；执行时也必须保持同一潜行姿态。
+                var original = faceProbe(stage, clicked, toward.getOpposite(), false);
+                var probe = new FaceProbe(original.clicked(), original.face(), original.direct(), true, original.shape());
+                for (Vec3 point : facePoints(clicked, probe.shape(), probe.face())) {
+                    var candidate = gestureAtPoint(player, target, stage, probe, feet, point, true, allowed);
+                    if (candidate != null) return candidate;
+                }
+            } else gesturesAt(player, target, stage, clicked, toward.getOpposite(), feet,
+                    false, true, true, allowed, out);
             if (!out.isEmpty()) return out.getFirst();
         }
         return null;
@@ -396,13 +415,13 @@ final class BuildPlacementGeometry {
         Vec3 eye = feet.add(0, player.getEyeHeight(probe.sneak() ? Pose.CROUCHING : Pose.STANDING), 0);
         if (eye.distanceToSqr(point) > REACH * REACH) return null;
         float yaw = AimGeometry.yawTo(eye, point), pitch = AimGeometry.pitchTo(eye, point);
-        Gesture gesture = new Gesture(BlockPos.containing(feet), probe.clicked(), probe.face(), point, yaw, pitch,
-                probe.sneak(), probe.direct() ? "replaceable target face" : "adjacent support face");
-        if (!allowed.test(gesture)) return null;
         if (!stage.rayClear(eye, point, probe.clicked())) return null;
         BlockHitResult hit = probe.shape().clip(eye, point, probe.clicked());
-        if (hit == null || hit.isInside() || hit.getDirection() != probe.face()
-                || hit.getLocation().distanceToSqr(point) > 1.0e-6) return null;
+        if (hit == null || hit.isInside() || hit.getDirection() != probe.face()) return null;
+        // 檐边向下斜点时，面内取样与实际交点的距离会被斜率放大；采用原生首个交点预测放置，不虚构点击位置。
+        Gesture gesture = new Gesture(BlockPos.containing(feet), probe.clicked(), probe.face(), hit.getLocation(), yaw, pitch,
+                probe.sneak(), probe.direct() ? "replaceable target face" : "adjacent support face");
+        if (!allowed.test(gesture)) return null;
         if (stage.projectedSupport()) {
             if (!stage.state(target.pos()).isAir() || !probe.clicked().relative(probe.face()).equals(target.pos())) return null;
             NativePlacement predicted = predictPlacement(player, new ItemStack(target.item()), gesture.syntheticHit(),

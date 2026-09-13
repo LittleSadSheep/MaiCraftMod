@@ -50,10 +50,11 @@ public final class BuildPlacementGestureTest {
 
             h.set(at.below(), Blocks.OAK_SLAB.defaultBlockState());
             var slab = BuildPlacementGeometry.currentGesture(h.player, target, Map.of());
-            check(slab != null && slab.face() == Direction.UP && Math.abs(slab.point().y - .4999) < .00001,
+            // 放置手法现在保留原生交点，半砖顶面必须严格在半格高；准星射线继续穿过交点后核对首次命中。
+            check(slab != null && slab.face() == Direction.UP && Math.abs(slab.point().y - .5) < .00001,
                     "bottom slab support must aim at its actual y=.5 top, not the cell's y=1 boundary");
             var shape = h.level.getBlockState(at.below()).getShape(h.level, at.below());
-            check(shape.clip(standingEye, slab.point(), at.below()).getDirection() == Direction.UP,
+            check(shape.clip(standingEye, standingEye.add(slab.point().subtract(standingEye).normalize().scale(4.5)), at.below()).getDirection() == Direction.UP,
                     "slab gesture must be a real outline ray hit");
 
             var charged = Blocks.RESPAWN_ANCHOR.defaultBlockState().setValue(
