@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 final class KineticNativeView {
     private static final String KINETIC = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
     private static final String ROTATE = "com.simibubi.create.content.kinetics.base.IRotate";
-    record Observation(KineticRouteGeometry.Endpoint endpoint, String blockId, double rpm, boolean powered) {}
+    record Observation(KineticRouteGeometry.Endpoint endpoint, String blockId, double rpm, boolean powered,String networkId) {}
     private KineticNativeView() {}
     static Observation read(Level level, BlockPos at, Direction exactFace, boolean chainInterface) {
         var values = variants(level,at,exactFace,chainInterface);
@@ -37,10 +37,11 @@ final class KineticNativeView {
                     && NativeApi.truth(NativeApi.call(entity,KINETIC,"hasNetwork"))
                     && !NativeApi.truth(NativeApi.call(entity,KINETIC,"isOverStressed"));
             var result = new java.util.ArrayList<Observation>();
-            if (faces.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,axis,faces,family),id,speed,powered));
+            Object network=NativeApi.field(entity,KINETIC,"network");String networkId=network==null?"":network.toString();
+            if (faces.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,axis,faces,family),id,speed,powered,networkId));
             else for (Direction.Axis portAxis : Direction.Axis.values()) {
                 var onAxis = faces.stream().filter(face -> face.getAxis() == portAxis).toList();
-                if (!onAxis.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,portAxis,onAxis,family),id,speed,powered));
+                if (!onAxis.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,portAxis,onAxis,family),id,speed,powered,networkId));
             }
             return java.util.List.copyOf(result);
         } catch (RuntimeException unavailable) { return java.util.List.of(); }
