@@ -337,6 +337,13 @@ final class SemanticBuildSupplyCompanionTask
         }
         Map<ResourceLocation, Integer> excess = BuildExcavationCargo.surplus(player, ledger(true));
         if (excess.isEmpty()) { cargoCheckPending = false; clearCargoDeferral(); return false; }
+        // 背包仍有余量且现有材料能完成剩余施工时，先把楼梯等通路建好；少量余料不能逼角色为清包中断工作。
+        // 真正缺料会顺路先存后取，低于四个空位仍立即整理；完工后的边界会再次处理这份待存余料。
+        if (excess.values().stream().mapToLong(Integer::longValue).sum() < 64
+                && emptySlots() >= 4 && !allMatched() && nextNeed() == null) {
+            cleanupDeferredReason = "finish_carried_construction_before_surplus_trip";
+            cargoCheckPending = false; return false;
+        }
         if (deferredCargoConditions != null) {
             // 只在批次边界复查；一份建材的消耗不会触发重试，空位、整组余料或已观察仓库须有变化。
             boolean changed = cargoDeferrals < 3 && player.level().getGameTime() >= cargoRetryAt

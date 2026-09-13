@@ -41,6 +41,7 @@ public final class BuildSupplyCargoDispatchTest {
             TaskFactory.register(SemanticContainerTaskRecord.class, DepositFixture::new);
             fullResumedInventoryLeavesThePitAndStoresBeforeFetching();
             carriedOnlyDoesNotOpenStorage();
+            carriedWorkPrecedesAnUnnecessarySpoilTrip();
         } finally {
             if (buildBefore == null) runners.remove(BuildTaskRecord.class); else runners.put(BuildTaskRecord.class, buildBefore);
             if (containerBefore == null) runners.remove(SemanticContainerTaskRecord.class); else runners.put(SemanticContainerTaskRecord.class, containerBefore);
@@ -112,6 +113,28 @@ public final class BuildSupplyCargoDispatchTest {
         var record = new SemanticBuildSupplyTaskRecord("resumed-cargo-supply", 1000, plan, policy,
                 policy == SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY ? List.of() : List.of(SemanticAcquireTaskRecord.Source.STORAGE), false, List.of(), false);
         return new SemanticBuildSupplyCompanionTask(h.player, record, (owner, frozen) -> Decision.DISABLED);
+    }
+    private static void carriedWorkPrecedesAnUnnecessarySpoilTrip() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var task = task(h, SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE);
+            // 重放地下室内材料已齐、三十三泥土作支撑、十一圆石待存的状态；空背包不能为了小批余料打断通路施工。
+            h.inventory.setItem(0, new ItemStack(Items.DIRT, 33)); h.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 11));
+            h.inventory.setItem(2, new ItemStack(Items.OAK_PLANKS, 9)); var origin=h.player.position();
+            task.start(h.player); task.tick(h.player);
+            var spoil=(BuildExcavationSpoilSupply)field(task,"spoilSupply").get(task);
+            check(field(task,"activeRecord").get(task) instanceof BuildTaskRecord build && !build.supplyAccessOnly()
+                            && !spoil.active() && !((SemanticMaterialSupplyCoordinator)field(task,"supply").get(task)).active(),
+                    "enough carried materials and spare slots start construction before a small surplus trip");
+            check(Boolean.TRUE.equals(task.resultData().get("cleanup_deferred")) && count(h.player,Items.COBBLESTONE)==11
+                            && h.player.position().equals(origin) && h.blockUses()==0 && h.itemUses()==0,
+                    "deferral retains the real cargo and cannot claim deposited items or move the body");
+            // 模拟施工已确认完成并来到外部地面，再推进真实整理入口，证明延期不会变成永久忘记存放。
+            var plan=(BuildTaskRecord)field(task,"activePlan").get(task);
+            plan.targets.forEach(target->h.set(target.pos(),target.desiredState())); h.position(new Vec3(7.5,1,4.5)); h.nextTick();
+            var prepare=SemanticBuildSupplyCompanionTask.class.getDeclaredMethod("prepareCargo");prepare.setAccessible(true);
+            check((boolean)prepare.invoke(task) && spoil.active(),"the finished-work boundary returns to the deferred surplus");
+            task.result(TaskState.CANCELLED);
+        }
     }
     private static final class DepositFixture implements Task {
         private final LocalPlayer player; private final SemanticContainerTaskRecord record; private int ticks, moved;
