@@ -1171,7 +1171,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState walkToWorksite() {
         var context = ClientRuntime.requireContext(player);
         if (nav != null && worksiteMovement.observe(player.position(), worksite.feet(), context.tickRevision(), nav.executionStep(context.tickRevision()))
-                && nav.isSafeToCancel()) return rejectWorksite("worksite approach revisited known cells without new construction progress");
+                && nav.isSafeToCancel()) return rejectWorksite("worksite approach made no useful movement or confirmed construction progress");
         if (worksite.constructionAccess()) {
             if (nav == null) {
                 BlockPos destination = worksite.stance(); stanceNavigation.attempted();
