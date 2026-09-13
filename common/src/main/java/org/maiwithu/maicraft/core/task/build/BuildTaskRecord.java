@@ -56,6 +56,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private boolean hasExecutionGuards;
     private boolean previewManaged;
     private BuildScaffoldLedger scaffoldLedger = new BuildScaffoldLedger();
+    private BuildExcavationCargo excavationCargo = new BuildExcavationCargo();
+    BuildExcavationCargo excavationCargo() { return excavationCargo; }
     private String projectId;
     private List<String> projectProtectionLabels = List.of();
     private java.util.function.Consumer<BuildTaskRecord> projectCheckpoint = plan -> {};
@@ -97,6 +99,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         destination.projectCheckpoint = projectCheckpoint;
         destination.previewManaged = previewManaged;
         destination.scaffoldLedger = scaffoldLedger;
+        destination.excavationCargo = excavationCargo;
         destination.materialSupplyProtection = materialSupplyProtection;
         destination.toolSupply = toolSupply;
         if (hasExecutionGuards) destination.executionGuards(protectedNavigationCells,
