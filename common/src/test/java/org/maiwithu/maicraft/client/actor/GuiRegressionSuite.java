@@ -48,6 +48,11 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildStanceNavigationTest.main(args);
         // 精确施工挪位保持步行，已证明能连续走通的路段不逐格停开导航。
         org.maiwithu.maicraft.core.task.build.BuildWorksiteRouteTest.main(args);
+        // 檐边末段使用真实潜行姿态与碰撞摩擦，保持部分足底支撑并能原路退回。
+        org.maiwithu.maicraft.core.task.build.BuildEdgeMotionTest.main(args);
+        BuildEdgeMotionNativeTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildEdgeHandoffTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildEavePlacementProofTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildNavigationRetryTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildLayerFrontierTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest.main(args);
@@ -91,6 +96,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.CreativeBuildRetentionTest.main(args);
         CreativeBuildSupplyMenuTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldLedgerTest.main(args);
+        // 重启只恢复本项目记录且现场仍匹配的支撑，不能扫描泥土冒认所有权。
+        org.maiwithu.maicraft.core.task.build.BuildProjectScaffoldPersistenceTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldDropSafetyTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterialsTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupTest.main(args);
