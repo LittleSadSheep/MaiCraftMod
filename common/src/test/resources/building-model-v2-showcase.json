@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "name": "快速图元与可复用窗饰示例",
+  "coordinate_system": "minecraft_y_up",
+  "overlap_policy": "error",
+  "materials": {
+    "Body": {"block_id": "minecraft:stone_bricks"},
+    "Trim": {"block_id": "minecraft:smooth_quartz"},
+    "Roof": {"block_id": "minecraft:blue_concrete"},
+    "Glass": {"block_id": "minecraft:light_blue_stained_glass"},
+    "Accent": {"block_id": "minecraft:gold_block"},
+    "Stair": {"block_id": "minecraft:dark_oak_stairs", "properties": {"facing": "north", "half": "top"}}
+  },
+  "components": {
+    "WindowBay": {
+      "objects": [
+        {"name": "Frame", "type": "MESH", "primitive": "cube", "location": [3.5,3,1], "dimensions": [7,6,2],
+         "material": "Body", "fill": "hollow", "wall_thickness": 1, "open_faces": ["front","back"],
+         "edge_material": "Trim", "edge_materials": {"front+top": "Accent"}},
+        {"name": "Glazing", "type": "MESH", "primitive": "panel", "location": [3.5,3,1.5], "dimensions": [5,4,1], "material": "Glass"},
+        {"name": "Gable", "type": "MESH", "primitive": "triangular_prism", "location": [3.5,8,1], "dimensions": [7,4,2],
+         "material": "Body", "face_materials": {"front": "Roof"}, "edge_material": "Trim"},
+        {"name": "Eave", "type": "MESH", "primitive": "cube", "location": [0.5,5.5,-0.5], "dimensions": [1,1,1],
+         "material": "Stair", "array": {"count": [7,1,1], "step": [1,0,0]}}
+      ]
+    }
+  },
+  "objects": [
+    {"name": "Facade", "type": "INSTANCE", "component": "WindowBay", "location": [0,0,0],
+     "array": {"count": [4,1,1], "step": [9,0,0], "skip": [[1,0,0]]}},
+    {"name": "Corner", "type": "INSTANCE", "component": "WindowBay", "location": [-3,0,0],
+     "rotation_euler": [0,1.5707963267948966,0], "mirror": ["x"], "material_map": {"Roof": "Accent"}},
+    {"name": "Ramp", "type": "MESH", "primitive": "wedge", "location": [4,2,9], "dimensions": [6,4,6],
+     "material": "Body", "face_materials": {"slope": "Roof"}, "edge_material": "Trim"},
+    {"name": "TrianglePrism", "type": "MESH", "primitive": "triangular_prism", "location": [14.5,3,9.5], "dimensions": [7,6,5],
+     "material": "Body", "face_materials": {"front": "Glass", "left_slope": "Roof"}, "edge_material": "Trim"},
+    {"name": "Tetrahedron", "type": "MESH", "primitive": "tetrahedron", "location": [24.5,3,9.5], "dimensions": [7,6,7],
+     "material": "Roof", "face_materials": {"side_0": "Accent"}, "edge_material": "Trim"},
+    {"name": "Pyramid", "type": "MESH", "primitive": "pyramid", "location": [34.5,3.5,9.5], "dimensions": [7,7,7],
+     "material": "Roof", "face_materials": {"front_slope": "Accent"}, "edge_material": "Trim"},
+    {"name": "OpenCylinder", "type": "MESH", "primitive": "cylinder", "segments": 12, "location": [4.5,3.5,19.5], "dimensions": [7,7,7],
+     "material": "Body", "fill": "hollow", "wall_thickness": 1, "open_faces": ["top"],
+     "face_materials": {"side_0": "Glass"}, "edge_material": "Trim", "edge_width": 0.75},
+    {"name": "Cone", "type": "MESH", "primitive": "cone", "segments": 12, "location": [14.5,3.5,19.5], "dimensions": [7,7,7],
+     "material": "Roof", "edge_material": "Trim", "edge_width": 0.5},
+    {"name": "CustomFrustum", "type": "MESH", "primitive": "convex_polyhedron", "location": [24.5,3.5,19.5], "dimensions": [7,7,7],
+     "vertices": [[0,0,0],[1,0,0],[1,0,1],[0,0,1],[0.2,1,0.2],[0.8,1,0.2],[0.8,1,0.8],[0.2,1,0.8]],
+     "faces": [[0,3,2,1],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]],
+     "material": "Body", "face_materials": {"face_1": "Accent"}, "edge_material": "Trim"}
+  ]
+}
