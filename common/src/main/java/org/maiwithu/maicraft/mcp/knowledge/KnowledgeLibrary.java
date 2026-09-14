@@ -32,9 +32,10 @@ public final class KnowledgeLibrary {
 
     public KnowledgeLibrary(Source source) {
         this.source = source;
+        // 按组件或具体图元名称查资料时仍发现同一份建筑说明，不新增会直接操作世界的知识入口。
         builtins = Map.of(INDEX, load("index", "知识索引", "按需发现方块状态、Ponder 教程和实际执行能力。"),
                 GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"),
-                BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格对象建模、开孔、材质、导出、续建，以及机器蓝图。"));
+                BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格建模 v1/v2、组件、阵列、镜像、三角形、斜坡、三棱柱、三角锥、空心、面棱材质、开孔、导出、续建和机器蓝图。"));
     }
     public static KnowledgeLibrary offline() {
         return new KnowledgeLibrary(new Source() {

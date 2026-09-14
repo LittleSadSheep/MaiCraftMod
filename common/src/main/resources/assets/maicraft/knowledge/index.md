@@ -4,7 +4,7 @@
 
 - [已安装 Ponder 的方块与教程目录](maicraft://knowledge/ponder/index)：自动发现模组注册的演示，不限定 Create 或固定方块名单。
 - [如何解释教程与限制](maicraft://knowledge/guide)：区分原始旁白、控制提示、演示坐标和真实运行证据。
-- [统一机器蓝图 JSON](maicraft://knowledge/blueprint)：引用教程结构或自行编辑布局，分别构建、修改、使用。
+- [建筑场景 v1/v2 与统一蓝图 JSON](maicraft://knowledge/blueprint)：组件、阵列、镜像、快速图元、空心与面棱材质，以及教程蓝图的构建、修改、使用。
 - 方块说明：使用 `maicraft://knowledge/block/{namespace}/{path}`，例如 `maicraft://knowledge/block/create/deployer`。页面给出状态属性、普通物品说明、可用的 Create Shift/Ctrl 说明，以及该组件的 Ponder 场景链接。
 
 LLM 可调用 `perceive`，传入 `view="knowledge"`、`focus="物品 ID 或关键词"`，取得简短搜索结果；随后使用返回的 URI 调用 `resources/read`。如果客户端未开放资源读取，也可调用 `perceive(view="knowledge", resource_uri="返回的 URI")`。

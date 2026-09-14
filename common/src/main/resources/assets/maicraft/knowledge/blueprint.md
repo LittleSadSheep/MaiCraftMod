@@ -41,6 +41,7 @@
 | --- | --- | --- |
 | 查看场景 | `{"operation":"get_scene_info","scene_id":"返回的编号","page":0}` | 对象、材质数量，每页 10 个对象及是否还有下一页 |
 | 查看对象 | `{"operation":"get_object_info","scene_id":"返回的编号","object_name":"Wall"}` | 对象变换、尺寸、材质、修改器与包围盒 |
+| 查看组件定义 | `{"operation":"get_component_info","scene_id":"返回的编号","component_name":"Bay"}` | 查看该具名组件的定义；查询不移动角色或开始施工 |
 | 编辑对象 | `{"operation":"update_scene","scene_id":"返回的编号","edits":{"objects":[{"name":"Wall","dimensions":[9,1,4]}]}}` | 新场景编号，原版本保留；未提及对象保持原样 |
 | 换指定材质 | `{"operation":"update_scene","scene_id":"返回的编号","edits":{"materials":{"WallMaterial":{"block_id":"minecraft:stone_bricks"}}}}` | 新版本中的具名材质改变 |
 | 预览 | `{"operation":"preview","scene_id":"返回的编号"}` | 加载区域内只读蓝图，不走路、不取物、不施工 |
@@ -50,12 +51,12 @@
 
 `update_scene.edits.objects` 按名字合并字段；新对象须完整定义；`remove_objects` 删除指定名字。对象引用、最终网格、材料语法全部通过检查才保存新版本。删除建模对象不会自动删除世界里的旧建筑；需要清除的位置应明确设计为空气，或通过墙上的开孔表达。修改场景不会改变已开始施工的项目。
 
-坐标与材料约定：
+v1 坐标与共用验收约定：
 
 - 默认 Blender Z 向上；几何点 `[x,y,z]` 转成 Minecraft `[x,z,-y]`，再加原锚点。方块体积按边界换算，例如 Blender `y=0..1` 对应 MC 方块 `z=-1`。可显式选 `minecraft_y_up`。
 - 一个建模单位等于一个方块。`location` 是几何中心，可为半整数；`dimensions` 是正整数，面必须对齐整数网格。`cube` 可做墙、地板、柱或单方块，`panel` 要求至少一个轴厚度为 1。
-- `rotation_euler` 使用弧度，目前支持绕上轴的 90° 整数倍。其他旋转、曲面及修改器会明确拒绝，不会偷偷取整或忽略。
-- 材质使用完整 `block_id`，可带 `properties`。状态属性中的朝向固定使用 Minecraft 世界轴，不随网格旋转隐式改写。未知材质、非法属性和施工时会被归一化掉的明确状态要求都会报错。
+- v1 的 `rotation_euler` 使用弧度，支持绕上轴的 90° 整数倍；新图元和其他轴的直角旋转采用下面的 v2 场景。非法旋转不会偷偷取整或忽略。
+- 材质使用完整 `block_id`，可带 `properties`。v1 的状态朝向固定使用 Minecraft 世界轴，不随网格旋转隐式改写；v2 默认局部轴规则见下文。未知材质、非法属性和施工时会被归一化掉的明确状态要求都会报错。
 - 对显式建筑模型，`properties` 没有填写的属性不参与验收。例如门不填 `open`，开着或关着都可以；填写 `"open":"false"` 才要求最终关闭。没有额外的重要性字段。
 - 显式属性是最终状态要求。同种方块仅有状态差异时，开工/续建不把它当作需要替换的错误材料，也不补领一件替代材料。新放置仍尽量直接满足结构属性；可手动开关的木门在结构施工和脚手架清理后通过原生交互调整，并等待服务端确认及上下半核验。
 - 目前不会为满足最终状态偷偷拆换已有方块；没有安全原生调整方式的状态差异会报告 `final_state_adjustment_unsupported`。预览里未声明属性显示的是默认状态，不意味着约束实际方块必须保持该默认值。
@@ -63,6 +64,80 @@
 - 多个实体重叠时后面的实体覆盖前面的实体。切割体只从引用它的实体中减去体积；没有其他实体填充的孔洞编译为空气，清除世界已有方块仍需 `replace_existing:true`。
 - 当前单次最多 16,384 个最终目标，并检查对象数、半径和展开工作量。完整建筑可由多个墙板、柱、楼板和细节构成，不需要 LLM 逐格枚举。
 - JSON 保留负相对坐标；原版 NBT 将最小角归零，同时记录 `maicraft_offset`。用传统蓝图导入时，导入锚点应为原锚点加返回的 `minecraft_offset`。
+
+## 建模 v2：组件、阵列、镜像和快速图元
+
+在 `scene.schema_version` 明确写 `2` 才采用新语义。保存的仍是带层级、名字和组件引用的作者模型；预览、导出和施工共用展开后的体素蓝图，不会把展开结果覆盖组件定义。v1 场景继续按原规则读取。
+
+下面把一个有开口、描边的空心单元定义为组件，生成三个阵列位置并跳过中间位置。`components` 中未被根 `objects` 引用的定义不会自行建造。
+
+```json
+{
+  "schema_version": 2,
+  "coordinate_system": "minecraft_y_up",
+  "block_state_axes": "local",
+  "overlap_policy": "error",
+  "materials": {
+    "Body": {"block_id":"minecraft:stone_bricks"},
+    "Trim": {"block_id":"minecraft:smooth_quartz"},
+    "Accent": {"block_id":"minecraft:polished_andesite"}
+  },
+  "components": {
+    "Bay": {"objects":[
+      {"name":"Shell","type":"MESH","primitive":"cube",
+       "location":[2.5,1.5,2.5],"dimensions":[5,3,5],"material":"Body",
+       "fill":"hollow","wall_thickness":1,"open_faces":["front"],
+       "face_materials":{"back":"Accent"},"edge_material":"Trim","edge_width":1}
+    ]}
+  },
+  "objects": [
+    {"name":"Arcade","type":"INSTANCE","component":"Bay","location":[0,0,0],
+     "mirror":["x"],"material_map":{"Body":"Accent"},
+     "array":{"count":[3,1,1],"step":[7,0,0],"skip":[[1,0,0]]}}
+  ]
+}
+```
+
+- `MESH.location` 是几何中心，`INSTANCE.location` 是组件局部原点。实例只声明 `component`、变换、`material_map`、`array` 和修改器，不接受 `dimensions`、`primitive` 或面/棱涂装字段；这些属于组件内的网格节点。
+- 网格和实例均可使用 `array={count:[nx,ny,nz],step:[dx,dy,dz],skip:[[i,j,k],...]}`。步距沿节点局部轴，随后整体应用旋转与镜像；`skip` 跳过整份复制，用来留门洞或通道，不是额外清障指令。
+- v2 允许各轴的 90° 整数倍弧度旋转。`mirror:["x"]` 表示反射源坐标轴。Blender 的位置、尺寸、旋转和镜像先转为 Minecraft Y-up 再组合；图元面名统一按局部 Minecraft 轴解释，`front=-Z`、`back=+Z`。
+- 组合后的名义包围盒边界须对齐整数方块格；不对齐时明确拒绝，不通过四舍五入加厚。v2 对象和组件名称不得包含 `/`、`[`、`]`，这些符号用于生成路径；旧 v1 名称的普通编辑仍按旧规则处理。
+- `block_state_axes` 默认 `local`，有方向的方块状态随模型变换；场景或单个节点可明确设为 `minecraft_world`，保留世界朝向。无法表达的变换（如需要竖直楼梯）会拒绝，不创造不存在的状态。材质映射从子实例向外层依次应用；同一组件可用不同映射生成不同配色。
+- 快速图元包括 `cube`、`panel`、`triangle`、`wedge`、`triangular_prism`、`tetrahedron`（别名 `triangular_pyramid`）、`pyramid`、`prism`、`cylinder`、`cone`、`convex_polyhedron`。几何按方块中心采样，薄面用 `dimensions` 明确厚度；结果仍是普通方块体素，不会生成任意斜面形状的新 Minecraft 方块。
+- 棱柱、圆柱和圆锥可用 `segments`（3..32）；凸多面体使用归一化盒内 `0..1` 的 `vertices` 和顶点索引数组 `faces`，顶点与面分别最多 64，顶点也遵循场景坐标系。网格必须闭合、凸、非退化，每个几何面用一个平面多边形表达；共面细分、冗余共线角及凹面会拒绝。面与棱的有效名字以该图元检查结果为准，未知名字会拒绝。
+- `fill` 为 `solid` 或 `hollow`；空心的 `wall_thickness` 默认 1，`open_faces` 只适用于空心。棱涂装覆盖面涂装，面涂装覆盖整体 `material`，棱宽由 `edge_width` 控制。多个棱覆盖同一格时，先选距离最近的棱；同距时特定 `edge_materials` 优先于默认 `edge_material`，再按棱 ID 排序，不让远处指定棱压过近处默认棱。
+- `BOOLEAN/DIFFERENCE` 引用同一对象列表中的节点。组件里的切割引用按每个实例隔离；切割节点不独立建造，也不能再引用其他切割器。空腔和被切掉的位置产生 AIR，外轮廓以外不产生清障目标。
+- `overlap_policy` 默认为 `last_wins`；`error` 拒绝异材质实体重叠，相同最终材质仍可重叠。引用环、未知组件/材质、无效变换及展开数量或体素工作超预算都在施工前拒绝。
+
+`get_scene_info` 分页返回源节点和组件摘要；`get_object_info` 的 `expanded_paths` 每页最多 64 个，带 `page` 与 `has_more`，可继续查询真实场景的生成路径。生成路径只读，应编辑其源对象或组件。详细网格查询返回 `surface_faces` / `surface_edges`，分别包含可绑定的 ID、局部法线/面距及棱端点；原始凸面索引 `faces` 保持不变。这些面棱属于布尔切割前的原始图元，新切割面不会自动获得独立的材质 ID。
+
+`get_component_info` 返回原 `definition` 和组件局部展开样本 `local_expanded_paths`；这些局部样本不能直接用作场景对象查询。组件须经实例平移才对齐格网时，仍返回定义，并在 `local_geometry_unavailable` 说明局部原点样本为何不可用。
+
+旧场景升级和组件编辑仍使用 `update_scene`，例如：
+
+```json
+{
+  "operation":"update_scene",
+  "scene_id":"原场景编号",
+  "edits": {
+    "schema_version":2,
+    "components": {
+      "Column": {"objects":[
+        {"name":"Shaft","type":"MESH","primitive":"cube",
+         "location":[0.5,1.5,0.5],"dimensions":[1,3,1],"material":"Body"}
+      ]}
+    },
+    "objects":[{"name":"Columns","type":"INSTANCE","component":"Column",
+                "location":[0,0,0],"array":{"count":[4,1,1],"step":[3,0,0]}}]
+  }
+}
+```
+
+`edits.schema_version:2` 是显式升级，不接受降级；已有 v2 的普通编辑可省略它。根节点仍按名字局部合并，但 `components` 按名字整条替换定义，未点名的组件不动；`remove_components:["Unused"]` 删除定义。仍被引用的组件不能直接删掉，可在同一次编辑中删除或改向引用它的根节点。删除和替换同一个名字、嵌套未知字段或合并后引用无效都会拒绝，不会留下半份新版本。
+
+升级时旧节点会明确保留 `block_state_axes:"minecraft_world"`，防止原先只转布局的木纹或楼梯突然转向；本次新增的组件仍采用 v2 默认局部轴。需要改变旧节点时显式编辑该节点的轴设置。`edits` 也可修改场景的 `block_state_axes` 和 `overlap_policy`。
+
+模型编辑只改变新场景版本，不改变已冻结施工单。采用修订须另走 `revise_project`，并满足它的同一目标范围、直接父子版本和空闲施工条件；组件扩展改变目标范围时不能假装沿用旧项目。
 
 也可以直接在 `build` 参数里提供下方统一格式的 `blueprint`，自由指定每个方块；它与 `scene`、`scene_id` 三选一。此路径同样不调用旧模板。建模和导出不证明建筑已经建成，最终进度与验收仍由施工任务报告。
 
