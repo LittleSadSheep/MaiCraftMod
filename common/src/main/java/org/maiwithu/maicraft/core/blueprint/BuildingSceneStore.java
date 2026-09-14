@@ -155,6 +155,24 @@ public final class BuildingSceneStore {
     public static JsonObject applyPatch(JsonObject original, JsonObject patch) {
         validateEdits(patch);
         JsonObject scene = original.deepCopy();
+        // 用户明确选择 v2 后才启用组件/阵列语义，旧场景和已开始施工的版本都不在这里改写。
+        if (patch.has("schema_version") && !BuildingModelSchema.applies(original)) {
+            // 旧对象的材质原本按世界轴解释，升级时逐个保留；本次新加的组件仍可采用v2本地朝向。
+            for (var value : scene.getAsJsonArray("objects")) value.getAsJsonObject().addProperty("block_state_axes", "minecraft_world");
+        }
+        if (patch.has("schema_version")) scene.add("schema_version", patch.get("schema_version").deepCopy());
+        for (String setting : Set.of("block_state_axes", "overlap_policy")) if (patch.has(setting)) scene.add(setting, patch.get(setting).deepCopy());
+        if (patch.has("components") || patch.has("remove_components")) {
+            JsonObject components = scene.has("components") ? object(scene.get("components"), "components") : new JsonObject();
+            if (patch.has("remove_components")) for (var value : fieldArray(patch, "remove_components")) {
+                String name = value.getAsString();
+                if (components.remove(name) == null) throw bad("remove_components contains an unknown component: " + name);
+            }
+            // 一条组件定义含有自己的节点与切割引用，按名字整条替换，不能把旧节点悄悄拼进新版组件。
+            if (patch.has("components")) patch.getAsJsonObject("components").entrySet().forEach(entry ->
+                    components.add(entry.getKey(), entry.getValue().deepCopy()));
+            scene.add("components", components);
+        }
         var objects = new LinkedHashMap<String, JsonObject>();
         for (JsonElement element : scene.getAsJsonArray("objects")) {
             JsonObject object = element.getAsJsonObject(); objects.put(fieldString(object, "name"), object);
@@ -195,38 +213,34 @@ public final class BuildingSceneStore {
 
     // 编辑可只提供一部分对象字段；先查这一批字段合法，合并后再检查完整对象和引用是否齐全。
     public static void validateEdits(JsonObject patch) {
-        if (patch == null || patch.isEmpty() || !Set.of("objects", "materials", "remove_objects").containsAll(patch.keySet()))
-            throw new IllegalArgumentException("scene edit accepts objects, materials and remove_objects only");
+        if (patch == null || patch.isEmpty() || !Set.of("schema_version", "objects", "materials", "remove_objects", "components", "remove_components", "block_state_axes", "overlap_policy").containsAll(patch.keySet()))
+            throw new IllegalArgumentException("scene edit accepts version/settings, objects, materials and component definitions/removals only");
         var budget = MachinePlanningBudget.current();
+        if (patch.has("schema_version")) integer(patch.get("schema_version"), 2, 2, "edits.schema_version");
+        BuildingModelSchema.choice(patch, "block_state_axes", Set.of("local", "minecraft_world"));
+        BuildingModelSchema.choice(patch, "overlap_policy", Set.of("last_wins", "error"));
+        Set<String> components = new LinkedHashSet<>();
+        if (patch.has("remove_components")) for (var entry : array(patch.get("remove_components"), 0, budget.maxComponents(), "remove_components")) {
+            if (!components.add(string(entry, 64, "removed component name"))) throw bad("duplicate removed component name");
+        }
+        if (patch.has("components")) {
+            JsonObject definitions = object(patch.get("components"), "component edits");
+            if (definitions.size() > budget.maxComponents()) throw bad("too many component edits");
+            for (var entry : definitions.entrySet()) {
+                if (entry.getKey().isBlank() || entry.getKey().length() > 64) throw bad("invalid component name");
+                if (!components.add(entry.getKey())) throw bad("component cannot be removed and replaced in one edit");
+                BuildingModelSchema.validateComponent(object(entry.getValue(), "component"));
+            }
+        }
         Set<String> names = new LinkedHashSet<>();
         if (patch.has("remove_objects")) for (var entry : array(patch.get("remove_objects"), 0, budget.maxComponents(), "remove_objects")) {
             if (!names.add(string(entry, 64, "removed object name"))) throw bad("duplicate removed object name");
         }
         if (patch.has("objects")) for (var entry : array(patch.get("objects"), 0, budget.maxComponents(), "objects")) {
             JsonObject object = object(entry, "object edit");
-            keys(object, Set.of("name", "type", "primitive", "role", "location", "dimensions", "rotation_euler", "material", "modifiers"), "object edit");
+            // 公开编辑和完整模型共用节点字段规则；阵列、面材质及组件内嵌节点的未知字段须在开工前拒绝。
+            BuildingModelSchema.validateNodePatch(object);
             if (!names.add(string(object.get("name"), 64, "object.name"))) throw bad("object cannot be edited twice or removed and edited");
-            if (object.has("type") && !Set.of("MESH", "cube", "panel").contains(string(object.get("type"), 16, "type")))
-                throw bad("object type must be MESH, cube or panel");
-            if (object.has("primitive") && !Set.of("cube", "panel").contains(string(object.get("primitive"), 16, "primitive")))
-                throw bad("primitive must be cube or panel");
-            if (object.has("role") && !Set.of("solid", "cutter").contains(string(object.get("role"), 16, "role")))
-                throw bad("role must be solid or cutter");
-            if (object.has("material")) string(object.get("material"), 64, "material");
-            for (String field : Set.of("location", "dimensions", "rotation_euler")) if (object.has(field)) {
-                for (var coordinate : array(object.get(field), 3, 3, field)) {
-                    if (field.equals("dimensions")) integer(coordinate, 1, budget.maxRadius() * 2 + 1, field);
-                    else if (coordinate == null || !coordinate.isJsonPrimitive() || !coordinate.getAsJsonPrimitive().isNumber()
-                            || !Double.isFinite(coordinate.getAsDouble())) throw bad(field + " requires finite numeric coordinates");
-                }
-            }
-            if (object.has("modifiers")) for (var modifier : array(object.get("modifiers"), 0, budget.maxConnections(), "modifiers")) {
-                JsonObject cut = object(modifier, "modifier"); keys(cut, Set.of("type", "operation", "object"), "modifier");
-                if (!string(cut.get("type"), 16, "modifier.type").equals("BOOLEAN")
-                        || !string(cut.get("operation"), 16, "modifier.operation").equals("DIFFERENCE"))
-                    throw bad("only BOOLEAN DIFFERENCE modifiers are supported");
-                string(cut.get("object"), 64, "modifier.object");
-            }
         }
         if (patch.has("materials")) {
             JsonObject materials = object(patch.get("materials"), "materials");

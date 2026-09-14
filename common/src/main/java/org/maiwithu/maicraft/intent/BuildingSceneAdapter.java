@@ -58,11 +58,18 @@ final class BuildingSceneAdapter {
                 var requested = SemanticBuildPlanner.investigationAnchor(goal, player, runtime);
                 if (!anchor.equals(requested)) throw new IllegalArgumentException("scene_id retains its original anchor; omit target to reuse it");
             }
+            // 查看定义时读取原场景中的具名组件，保留固定锚点，角色不走路、不取料或放置。
+            if (op.equals("get_component_info")) {
+                Map<String, Object> description = metadata(entry);
+                description.putAll(jsonMap(org.maiwithu.maicraft.core.blueprint.BuildingModelInspection.componentInfo(
+                        entry.scene(), p.get("component_name").getAsString(), p.has("page") ? p.get("page").getAsInt() : 0)));
+                return new IntentAction.Report(TaskResult.ok("Building component inspected; no construction was started", description), null);
+            }
             if (op.equals("get_scene_info") || op.equals("get_object_info")) {
                 Map<String, Object> description = metadata(entry);
                 description.putAll(jsonMap(op.equals("get_scene_info")
                         ? org.maiwithu.maicraft.core.blueprint.BuildingSceneInspection.sceneInfo(entry.scene(), p.has("page") ? p.get("page").getAsInt() : 0)
-                        : org.maiwithu.maicraft.core.blueprint.BuildingSceneInspection.objectInfo(entry.scene(), p.get("object_name").getAsString())));
+                        : org.maiwithu.maicraft.core.blueprint.BuildingSceneInspection.objectInfo(entry.scene(), p.get("object_name").getAsString(), p.has("page") ? p.get("page").getAsInt() : 0)));
                 return new IntentAction.Report(TaskResult.ok("Building model inspected; no construction was started", description), null);
             }
             JsonObject source = op.equals("update_scene")
@@ -112,8 +119,8 @@ final class BuildingSceneAdapter {
         if (op.equals("preview")) {
             Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
             targets.forEach(target -> {
-                // 这里的 hasChunkAt 在原版客户端不能证明模型位置已加载；高度检查仍独立生效。
-                if (!player.level().hasChunkAt(target.pos()) || player.level().isOutsideBuildHeight(target.pos()))
+                // 预览不主动加载远处建筑；必须使用客户端实际已加载检查，不能以区块坐标存在冒充地形已到达。
+                if (!player.level().isLoaded(target.pos()) || player.level().isOutsideBuildHeight(target.pos()))
                     throw new IllegalArgumentException("Preview requires all model cells within loaded buildable terrain");
                 cells.put(target.pos(), target.desiredState());
             });

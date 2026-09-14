@@ -11,9 +11,9 @@ import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
  */
 final class BuildingSceneContract {
     static final Set<String> OPERATIONS = Set.of("create_scene", "update_scene", "get_scene_info",
-            "get_object_info", "export_scene", "preview", "revise_project", "build");
+            "get_object_info", "get_component_info", "export_scene", "preview", "revise_project", "build");
     private static final Set<String> FIELDS = Set.of("operation", "scene", "scene_id", "blueprint",
-            "edits", "object_name", "format", "page", "replace_existing", "material_policy", "protected_labels", "project_id");
+            "edits", "object_name", "component_name", "format", "page", "replace_existing", "material_policy", "protected_labels", "project_id");
 
     private BuildingSceneContract() {}
 
@@ -49,7 +49,7 @@ final class BuildingSceneContract {
         if (p.has("scene")) BuildingSceneCompiler.validateWire(object(p, "scene"));
         if (p.has("blueprint")) MachineBlueprintDocument.validateWire(object(p, "blueprint"));
         if (p.has("scene_id")) java.util.UUID.fromString(string(p, "scene_id"));
-        if (Set.of("update_scene", "get_scene_info", "get_object_info", "export_scene", "revise_project").contains(op)
+        if (Set.of("update_scene", "get_scene_info", "get_object_info", "get_component_info", "export_scene", "revise_project").contains(op)
                 && !p.has("scene_id")) throw new IllegalArgumentException(op + " needs scene_id");
         // 采用新场景修订必须明确指向旧项目，且不夹带新的取材、地点或替换权限；普通续建仍只读取冻结目标。
         if (op.equals("revise_project")) {
@@ -62,15 +62,18 @@ final class BuildingSceneContract {
         else if (p.has("edits")) throw new IllegalArgumentException("edits is only used by update_scene");
         if ("get_object_info".equals(op)) string(p, "object_name");
         else if (p.has("object_name")) throw new IllegalArgumentException("object_name is only used by get_object_info");
+        // 组件定义按保存的名字单独查询，不能把实例路径当定义名，也不因此启动预览或施工。
+        if ("get_component_info".equals(op)) string(p, "component_name");
+        else if (p.has("component_name")) throw new IllegalArgumentException("component_name is only used by get_component_info");
         if (p.has("format") && (!"export_scene".equals(op) || !Set.of("json", "nbt").contains(string(p, "format"))))
             throw new IllegalArgumentException("export_scene format must be json or nbt");
-        // 页码仅用于场景列表，范围为 0..1024；当前还要求小数表示的 scale 不大于零，所以写 1.0 也会被拒绝。
+        // 场景按源对象分页，对象/组件按展开路径分页，避免大阵列后面的实例只能靠作者猜名字。
         if (p.has("page")) {
-            if (!"get_scene_info".equals(op) || !p.get("page").isJsonPrimitive()
+            if (!Set.of("get_scene_info", "get_object_info", "get_component_info").contains(op) || !p.get("page").isJsonPrimitive()
                     || !p.getAsJsonPrimitive("page").isNumber() || p.get("page").getAsBigDecimal().scale() > 0
                     || p.get("page").getAsBigDecimal().signum() < 0
                     || p.get("page").getAsBigDecimal().compareTo(java.math.BigDecimal.valueOf(1024)) > 0)
-                throw new IllegalArgumentException("get_scene_info page must be an integer from 0 to 1024");
+                throw new IllegalArgumentException("model query page must be an integer from 0 to 1024");
         }
         if (p.has("replace_existing") && (!p.get("replace_existing").isJsonPrimitive()
                 || !p.getAsJsonPrimitive("replace_existing").isBoolean()))
@@ -81,10 +84,7 @@ final class BuildingSceneContract {
     }
 
     static void validateEdits(JsonObject edits) {
-        for (String key : edits.keySet()) if (!Set.of("objects", "materials", "remove_objects").contains(key))
-            throw new IllegalArgumentException("Unknown scene edit: " + key);
-        if (edits.isEmpty()) throw new IllegalArgumentException("edits must change objects or materials");
-        // 编辑时可以只给变化字段；完整对象和对象之间的引用要等与原版本合并后再检查。
+        // 公共编辑与保存使用同一套 v1/v2 字段校验；完整合并并编译成功后才发布不可变的新版本。
         org.maiwithu.maicraft.core.blueprint.BuildingSceneStore.validateEdits(edits);
     }
 
