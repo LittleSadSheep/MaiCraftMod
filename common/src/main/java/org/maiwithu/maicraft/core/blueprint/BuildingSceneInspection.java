@@ -17,6 +17,8 @@ public final class BuildingSceneInspection {
 
     // 先检查整个模型结构，再按每页十个对象返回；超过末页时返回空列表，而不是访问越界。
     public static JsonObject sceneInfo(JsonObject scene, int page) {
+        // 新场景先显示可编辑的源组件和实例，再按需要查看展开路径；旧盒子模型保持原查询格式。
+        if (BuildingModelSchema.applies(scene)) return BuildingModelInspection.sceneInfo(scene, page);
         BuildingSceneCompiler.validateWire(scene);
         if (page < 0) throw bad("scene page must be nonnegative");
         JsonArray objects = scene.getAsJsonArray("objects");
@@ -37,12 +39,20 @@ public final class BuildingSceneInspection {
     }
 
     public static JsonObject objectInfo(JsonObject scene, String name) {
+        if (BuildingModelSchema.applies(scene)) return BuildingModelInspection.objectInfo(scene, name);
         BuildingSceneCompiler.validateWire(scene);
         for (var element : scene.getAsJsonArray("objects")) {
             JsonObject object = element.getAsJsonObject();
             if (object.get("name").getAsString().equals(name)) return describe(scene, object, cutters(scene));
         }
         throw bad("Object not found: " + name);
+    }
+
+    public static JsonObject objectInfo(JsonObject scene, String name, int page) {
+        // v2的大阵列可分页列出所有生成路径；旧模型没有实例分页，原来的单对象读取保持不变。
+        if (BuildingModelSchema.applies(scene)) return BuildingModelInspection.objectInfo(scene, name, page);
+        if (page != 0) throw bad("expanded object pagination requires scene v2");
+        return objectInfo(scene, name);
     }
 
     // 补齐默认旋转、单位缩放和材料列表，标出对象是否只作开孔用途；范围是做布尔开孔之前的原始盒子范围。
