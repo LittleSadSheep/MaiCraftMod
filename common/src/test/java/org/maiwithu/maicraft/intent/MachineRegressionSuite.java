@@ -38,6 +38,21 @@ public final class MachineRegressionSuite {
         BuildingStatePolicyTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingSceneCompilerTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingSceneInspectionTest.main(args);
+        // 快速图元、组件复制和原生状态变换先独立验证，再从公共建模入口检查保存与查询。
+        org.maiwithu.maicraft.core.blueprint.BuildingModelShapeTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BuildingConvexMeshTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BuildingModelBlockStatesTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BuildingModelSurfaceTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BuildingModelCompositionTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BuildingModelGuardTest.main(args);
+        org.maiwithu.maicraft.core.blueprint.BuildingModelInspectionTest.main(args);
+        try { org.maiwithu.maicraft.core.blueprint.BuildingModelShowcaseTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("quick model showcase compilation", failure); }
+        try { org.maiwithu.maicraft.core.blueprint.BuildingSceneV2StoreTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("component scene revision regression", failure); }
+        org.maiwithu.maicraft.mcp.BuildingModelV2PublicTest.main(args);
+        try { BuildingModelV2RuntimeTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("quick model public preview and build regression", failure); }
         org.maiwithu.maicraft.mcp.BuildingModelPublicTest.main(args);
         try { org.maiwithu.maicraft.core.blueprint.BuildingSceneStoreTest.main(args); }
         catch (Exception failure) { throw new AssertionError("building scene revision regression", failure); }
