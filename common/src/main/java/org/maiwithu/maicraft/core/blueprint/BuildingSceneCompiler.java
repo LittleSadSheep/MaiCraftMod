@@ -28,7 +28,10 @@ public final class BuildingSceneCompiler {
     /**
      * 只检查对象、材料、引用和工作量范围，不把每个盒子展开成方块。
      */
-    public static void validateWire(JsonObject scene) { parse(scene); }
+    public static void validateWire(JsonObject scene) {
+        // 老模型保持原来的盒子与世界材质朝向；显式v2才启用组件和快速几何，避免旧庄园读回来变形。
+        if (BuildingModelSchema.applies(scene)) BuildingModelCompiler.validateWire(scene); else parse(scene);
+    }
 
     /**
      * 默认使用 Blender 的 z 向上坐标，转成游戏坐标 [x,z,-y]；也可明确使用游戏的 y 向上坐标。
@@ -36,6 +39,7 @@ public final class BuildingSceneCompiler {
      * 孔内没有其他对象时保存为空气目标，未被任何对象涉及的位置则不进入施工单。材料朝向属性仍按游戏世界轴解释。
      */
     public static JsonObject compile(JsonObject scene) {
+        if (BuildingModelSchema.applies(scene)) return BuildingModelCompiler.compile(scene);
         Model model = parse(scene);
         Map<String, JsonObject> materials = model.materials;
         Map<String, Mesh> meshes = model.meshes;
