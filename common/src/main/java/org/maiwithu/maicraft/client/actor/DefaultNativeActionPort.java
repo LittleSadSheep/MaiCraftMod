@@ -7,6 +7,7 @@ import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 
@@ -208,8 +209,12 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             LocalPlayerContext context, int slot, int timeoutTicks) {
         // 本地切换选中槽并发包通知服务器；随后比较的 selected 字段就是这个本地值。
         DefaultLocalPlayerContext current = requireSubmission(context);
-        if (slot < 0 || slot >= 9) {
-            throw new IllegalArgumentException("hotbar slot must be between 0 and 8");
+        // 选中上限问原版自己：服务端 handleSetCarriedItem 也按 Inventory.getSelectionSize() 校验；
+        // 扩展快捷栏模组（如 HotBaaaar）会把它抬到 9 以上，未装时恒为 9，与原校验一致。
+        int selectionLimit = Inventory.getSelectionSize();
+        if (slot < 0 || slot >= selectionLimit) {
+            throw new IllegalArgumentException(
+                    "hotbar slot must be between 0 and " + (selectionLimit - 1));
         }
         requireIdle();
         current.claimMutation();

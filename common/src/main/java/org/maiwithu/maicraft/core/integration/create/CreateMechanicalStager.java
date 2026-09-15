@@ -251,7 +251,9 @@ final class CreateMechanicalStager {
 
     private static int chooseSafeHotbar(LocalPlayer player) {
         int selected = player.getInventory().selected;
-        if (safeDisplaced(player.getInventory().getItem(selected))) return selected;
+        // 扩展快捷栏模组（如 HotBaaaar）会把 selected 抬到 9 以上，而临时交换只允许落在原版快捷栏格内；
+        // 手在扩展格上时跳过它，从 0~8 里另找可临时挪动的格子。
+        if (selected >= 0 && selected < 9 && safeDisplaced(player.getInventory().getItem(selected))) return selected;
         for (int slot = 0; slot < 9; slot++) {
             if (safeDisplaced(player.getInventory().getItem(slot))) return slot;
         }

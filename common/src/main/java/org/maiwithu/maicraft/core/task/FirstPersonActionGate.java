@@ -38,13 +38,20 @@ public final class FirstPersonActionGate {
     // 持续推进同一次物品选择：先确认背包交换，再关界面，最后确认快捷栏选中。
     // 交换后重新查找物品可能得到快捷栏的新编号，所以先把旧交换结算，再检查编号是否真的变了。
     public Status select(LocalPlayer player, int inventorySlot) {
+        return select(ClientRuntime.requireContext(player), player, inventorySlot);
+    }
+
+    /**
+     * 带调用方自己持有的操作入口推进同一次选择；复合调用方和回归测试可用同一套流程注入替身入口。
+     * 入口必须仍属于该玩家，否则各步会如实返回 RUNNING 或 FAILED。
+     */
+    public Status select(LocalPlayerContext context, LocalPlayer player, int inventorySlot) {
         owner = player;
         // A confirmed main-inventory -> hotbar swap necessarily changes where a caller that
         // rediscovers the item will find it (source S becomes hotbar H). Settle that transaction
         // before validating/comparing the freshly discovered slot; otherwise a correct S -> H
         // transition is misreported as "selection target changed" while its receipt is pending.
         if (staging != null) {
-            LocalPlayerContext context = ClientRuntime.requireContext(player);
             staging = context.menus().poll(context, staging);
             if (!staging.terminal()) return Status.RUNNING;
             if (staging.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
@@ -70,7 +77,6 @@ public final class FirstPersonActionGate {
             return Status.FAILED;
         }
         if (requestedInventorySlot == -1) requestedInventorySlot = inventorySlot;
-        LocalPlayerContext context = ClientRuntime.requireContext(player);
         // 已选好后仍要保证界面允许世界操作；ready 记的是选择已完成，没有重新核对该格后来是否换了物品。
         if (ready) return menuSession.worldReady(context) ? Status.READY : Status.RUNNING;
 
@@ -99,8 +105,10 @@ public final class FirstPersonActionGate {
             return Status.RUNNING;
         }
 
+        // 背包里的物品换到“当前手上那格”；扩展快捷栏模组（如 HotBaaaar）会把 selected 抬到 9 以上，
+        // 而原版 SWAP 交换只认 0~8，先折回原版范围再发起交换，否则自卫选武会在收尾阶段崩溃。
         selectedHotbarSlot = inventorySlot < 9
-                ? inventorySlot : player.getInventory().selected;
+                ? inventorySlot : org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(player.getInventory().selected);
         if (inventorySlot >= 9) {
             if (!menuSession.inventoryReady(context)) return Status.RUNNING;
             pendingSwap = new ConfirmedSwap(inventorySlot, selectedHotbarSlot,

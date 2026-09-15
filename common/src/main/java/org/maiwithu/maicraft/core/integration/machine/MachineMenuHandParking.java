@@ -34,7 +34,9 @@ public final class MachineMenuHandParking {
             for (int slot = 9; slot < Math.min(36, player.getInventory().items.size()); slot++)
                 if (player.getInventory().getItem(slot).isEmpty()) { source = slot; break; }
             if (source < 0) return failed("machine_menu_empty_hand_required");
-            hotbar = player.getInventory().selected; before = player.getInventory().getItem(hotbar).copy(); inventory = player.inventoryMenu;
+            // 扩展快捷栏模组（如 HotBaaaar）会把 selected 抬到 9 以上；停车只处理原版快捷栏那格，
+            // 手停在扩展格上时下面一行的核对会如实报告选择已变化并停下，而不是拿越界格号去交换。
+            hotbar = org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(player.getInventory().selected); before = player.getInventory().getItem(hotbar).copy(); inventory = player.inventoryMenu;
         }
         if (inventory != player.inventoryMenu || player.getInventory().selected != hotbar) return failed("machine_menu_hand_selection_changed");
         if (swap != null && !swapped) {

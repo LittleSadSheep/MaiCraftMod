@@ -24,7 +24,9 @@ final class ElevatorRemoteStaging {
     boolean ready(LocalPlayerContext ctx, int slot, ElevatorActions actions) {
         if (source == -1) {
             source = slot; originalSelected = ctx.player().getInventory().selected;
-            hotbar = slot < 9 ? slot : originalSelected;
+            // 控制器在背包里时换到“当前手上那格”；扩展快捷栏模组可能让 selected 越出 0~8，
+            // 原版 SWAP 交换只认 0~8，先折回原版范围再交换。
+            hotbar = slot < 9 ? slot : org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(originalSelected);
             sourceBefore = ctx.player().getInventory().getItem(source).copy();
             hotbarBefore = ctx.player().getInventory().getItem(hotbar).copy();
         }

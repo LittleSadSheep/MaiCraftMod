@@ -25,6 +25,7 @@ public final class MachineMenuHandParkingTest {
         fullHotbarParksItsExactStackAndWaitsForClose();
         fullInventoryAndForeignContentsStayUntouched();
         replacementScreenIsNeverClosed();
+        extendedHotbarSelectionStopsWithoutClicking();
     }
     private static void fullHotbarParksItsExactStackAndWaitsForClose() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
@@ -69,6 +70,16 @@ public final class MachineMenuHandParkingTest {
             check(h.step(parking) == MachineMenuHandParking.Status.FAILED && parking.uncertain(), "replacement after a submitted swap stays explicit");
             parking.cleanup(world.player);
             check(world.h.minecraft.screen == foreign && h.closes == 0, "cleanup closes only the exact inventory surface this preparation opened");
+        }
+    }
+    // 扩展快捷栏模组（如 HotBaaaar）会把 selected 抬到 9 以上；手停在扩展格时先折回原版格，
+    // 随后的选择核对如实失败停下，而不是拿越界格号发起交换把任务打崩。
+    private static void extendedHotbarSelectionStopsWithoutClicking() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            Harness h = new Harness(world); world.inventory.selected = 15;
+            var parking = new MachineMenuHandParking();
+            check(h.step(parking) == MachineMenuHandParking.Status.FAILED && h.swaps == 0 && h.opens == 0,
+                    "an extended hotbar selection fails the hand invariant before any inventory click");
         }
     }
     private static final class Harness {

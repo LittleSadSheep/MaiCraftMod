@@ -367,8 +367,10 @@ public final class BlockDigger {
             toolSelectReceipt = context.actions().selectHotbar(
                     context, bestSlot, TOOL_TIMEOUT_TICKS);
         } else if (bestSlot >= 9 && bestSlot < 36) {
+            // 工具在背包里时换到“当前手上那格”；扩展快捷栏模组可能让 selected 越出 0~8，
+            // 原版 SWAP 交换只认 0~8，先折回原版范围再交换。
             toolStageReceipt = context.menus().swapInventoryToHotbar(
-                    context, bestSlot, selected, TOOL_TIMEOUT_TICKS);
+                    context, bestSlot, org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(selected), TOOL_TIMEOUT_TICKS);
         }
     }
     /**

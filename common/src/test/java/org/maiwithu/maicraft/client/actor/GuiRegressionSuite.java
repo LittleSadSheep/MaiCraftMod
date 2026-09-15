@@ -95,6 +95,7 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.supply.MaterialSupplyReturnPolicyTest.main(args);
         org.maiwithu.maicraft.core.task.supply.BuildSupplyHandoffTest.main(args);
         org.maiwithu.maicraft.client.actor.MachineMenuHandParkingTest.main(args);
+        org.maiwithu.maicraft.client.actor.FirstPersonGateExtendedHotbarTest.main(args);
         org.maiwithu.maicraft.client.actor.ItemUseTimingTest.main(args);
         org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest.main(args);
         org.maiwithu.maicraft.core.task.container.ObservedContainerStockTest.main(args);
