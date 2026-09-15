@@ -452,7 +452,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             lowerShield();
             return;
         }
-        boolean raised = shieldRaised();
         boolean threatened = false;
         for (var mob : hostiles) {
             if (Menace.tooClose(mob, player)) {
@@ -464,19 +463,19 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             lowerShield();
             return;
         }
-        if (raised || player.isUsingItem()) {
-            return;   // 已经举着,或者手上占着别的东西
-        }
-        ItemStack shield = player.getOffhandItem().is(Items.SHIELD)
-                ? player.getOffhandItem() : ItemStack.EMPTY;
-        if (shield.isEmpty() || player.getCooldowns().isOnCooldown(shield.getItem())) {
-            return;   // 没盾,或者被斧子破了还在冷却 —— 正常跑
-        }
         if (shieldAction == null) {
+            if (player.isUsingItem()) return;   // 手上占着别的东西,不是本任务的持用
+            ItemStack shield = player.getOffhandItem().is(Items.SHIELD)
+                    ? player.getOffhandItem() : ItemStack.EMPTY;
+            if (shield.isEmpty() || player.getCooldowns().isOnCooldown(shield.getItem())) {
+                return;   // 没盾,或者被斧子破了还在冷却 —— 正常跑
+            }
             shieldAction = Interaction.useInAir(
                     player, InteractionHand.OFF_HAND, Interaction.Timing.hold());
         }
-        if (shieldAction.tick() == Interaction.Status.FAILED) shieldAction = null;
+        // 已经举着也要每刻推进同一次持用：使用键租约两刻就过期，不续租时原版 handleKeybinds
+        // 会把盾当成松手放掉，回执从此永远停在 PENDING 并占住端口，后面的近战一次都提交不出去。
+        if (shieldAction.tick() != Interaction.Status.RUNNING) shieldAction = null;
     }
 
     private void lowerShield() {
@@ -494,12 +493,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                     player.getAttackStrengthScale(0.0F))) return true;
         }
         return false;
-    }
-
-    private boolean shieldRaised() {
-        return player.isUsingItem()
-                && player.getUsedItemHand() == InteractionHand.OFF_HAND
-                && player.getUseItem().is(Items.SHIELD);
     }
 
     /**

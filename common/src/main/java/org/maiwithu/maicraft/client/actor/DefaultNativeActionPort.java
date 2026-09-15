@@ -22,6 +22,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     private boolean activeProtocolUsesMenu;
     /** Non-null while an ownerless break must be physically stopped by {@link #advance}. */
     private String pendingBreakCancellationReason;
+    /** Which pending item use is currently observed as no longer held, and since when. */
+    private NativeActionReceipt abandonedItemUse;
+    private long abandonedItemUseSinceTick = -1;
 
     // 持用按键只能绑定仍是本端口当前动作的回执；新动作接管后，旧吃饭任务不能继续按住或松开。
     public boolean ownsItemUse(NativeActionReceipt receipt) {
@@ -415,8 +418,10 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     public NativeActionReceipt poll(LocalPlayerContext context, NativeActionReceipt receipt) {
         // 先核对仍是同一身体和控制版本，再运行只读判断；当前默认累计两刻匹配，不包含服务器预测序号检查。
         context.requireCurrent();
-        requireActive(receipt, receipt.kind());
+        // 已终结的回执是冻结的历史：端口可能已经先一步替它收尾（每刻的 advance），或者有后来者
+        // 合法接管了新动作。迟到的持有者仍要读回自己的最终结果，不能因为端口换了动作就判成内部错误。
         if (receipt.terminal()) return receipt;
+        requireActive(receipt, receipt.kind());
         if (receipt.bodyEpoch() != context.bodyEpoch() ||
                 receipt.controlRevision() != context.controlRevision() ||
                 !context.permitsNativeActions()) {
@@ -509,10 +514,13 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         NativeActionReceipt receipt = active;
         if (receipt == null || receipt.terminal()) {
             pendingBreakCancellationReason = null;
+            abandonedItemUse = null;
+            abandonedItemUseSinceTick = -1;
             return;
         }
         if (pendingBreakCancellationReason == null) {
             poll(context, receipt);
+            retireAbandonedItemUse(context, receipt);
             return;
         }
 
@@ -546,6 +554,35 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                             + "; native mining cancellation could not be confirmed");
         } finally {
             pendingBreakCancellationReason = null;
+        }
+    }
+
+    /**
+     * 持续使用的兜底收尾：使用已经不在手上（被原版松开、手里的东西被换走，或持用它的任务已经结束），
+     * 确认就永远不会再来了。短暂宽限后如实记不确定，别让一个永远 PENDING 的回执把端口卡到 deadline——
+     * 那段时间里下一个任务连第一次点击都提交不了，看上去就是“光瞄准不出手”。
+     * 挖掘和仍然在手上的持用不归这里管：它们得由专门的动作去物理停止。
+     */
+    private void retireAbandonedItemUse(LocalPlayerContext context, NativeActionReceipt receipt) {
+        if (receipt.terminal() || receipt.kind() != NativeActionReceipt.Kind.USE_ITEM
+                || context.player().isUsingItem()) {
+            abandonedItemUse = null;
+            abandonedItemUseSinceTick = -1;
+            return;
+        }
+        // 计数认准这一次持用：换了新回执就重新起算，不能把上一个的等待算到它头上。
+        if (abandonedItemUse != receipt) {
+            abandonedItemUse = receipt;
+            abandonedItemUseSinceTick = context.tickRevision();
+            return;
+        }
+        // 宽限两刻：物品自行结束的那一瞬，扣数／组件证据通常和“不再使用”同刻到达，先让只读观察说话。
+        if (context.tickRevision() - abandonedItemUseSinceTick < 2) return;
+        abandonedItemUse = null;
+        abandonedItemUseSinceTick = -1;
+        if (receipt == active && !receipt.terminal()) {
+            receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
+                    "the held item use ended without native confirmation");
         }
     }
 }
