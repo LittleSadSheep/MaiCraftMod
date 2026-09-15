@@ -23,7 +23,8 @@ public final class RangedShotTest {
         chargedWaitsAndFiresOnce();
         loadsBeforeFiring();
         cancelBow(false); cancelBow(true);
-        System.out.println("RangedShotTest: charged aim, loading, draw timeout and cancellation passed");
+        abortAtSpentMutationBoundary();
+        System.out.println("RangedShotTest: charged aim, loading, draw timeout, cancellation and spent-budget abort passed");
     }
 
     private static void chargedWaitsAndFiresOnce() throws Exception {
@@ -70,6 +71,29 @@ public final class RangedShotTest {
                     "native main-hand cancellation switches away from the charged bow");
             check(f.h.h.connection.packets.stream().anyMatch(p -> p instanceof net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket),
                     "cancellation must reach the server's carried-item path");
+        }
+    }
+
+    private static void abortAtSpentMutationBoundary() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            f.h.inventory.setItem(0, new ItemStack(Items.BOW));
+            f.h.mode.itemUse = p -> p.startUsingItem(InteractionHand.MAIN_HAND);
+            var shot = shot(f.h.player, false);
+            // 拉弓的 useItem 已占用本刻操作名额；同刻任务失败走到 abort 时名额不可用。
+            tick(shot, MISALIGNED);
+            call(shot, "abort");
+            check(!fired(shot) && f.h.mode.releases == 0 && f.h.inventory.selected == 0,
+                    "abort at a spent mutation must neither throw nor release or switch the slot");
+            check(f.h.h.connection.packets.stream().noneMatch(
+                            p -> p instanceof net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket),
+                    "no carried-item packet may be sent when this tick's mutation budget is already spent");
+            // 下一刻名额恢复后仍能完成切槽取消，动作端口不被这次收尾卡死。
+            f.h.nextTick();
+            call(shot, "abort");
+            check(!f.h.player.isUsingItem() && f.h.inventory.selected == 1
+                            && f.h.h.connection.packets.stream().anyMatch(
+                            p -> p instanceof net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket),
+                    "a later abort with a free mutation still cancels through the carried-item path");
         }
     }
 

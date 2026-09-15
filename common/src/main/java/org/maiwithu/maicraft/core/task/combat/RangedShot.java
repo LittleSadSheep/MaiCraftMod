@@ -74,8 +74,14 @@ final class RangedShot {
     // 取消蓄力用切槽；松开弓会真的发射，不能用作取消。已经发出的箭不能撤回。
     void abort() {
         if (receipt != null && receipt.kind() == NativeActionReceipt.Kind.USE_ITEM) {
-            var context = ClientRuntime.requireContext(player);
-            receipt = context.actions().cancelMainHandUse(context, receipt);
+            // 任务收尾可能发生在本刻操作名额已被占用的时刻（例如同刻先举过盾），
+            // 名额不可用或没有进行中的操作入口时先不切槽，把回执留给运行时逐刻收尾，
+            // 避免清理阶段直接把客户端打崩；与 Interaction.stop 的收尾守卫同一套约定。
+            org.maiwithu.maicraft.client.actor.LocalPlayerContext context = ClientRuntime.actor()
+                    .activeContext().filter(c -> c.player() == player).orElse(null);
+            if (context != null && context.mutationAvailable()) {
+                receipt = context.actions().cancelMainHandUse(context, receipt);
+            }
         }
         state = State.MISFIRE;
     }
