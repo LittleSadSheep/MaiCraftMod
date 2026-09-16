@@ -66,6 +66,12 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return onClient(() -> perceiveOnClient(arguments));
     }
     private CompletionStage<JsonElement> observeSurroundings(JsonObject arguments) {
+        // 逐段声明里没要地形缩略图就不必等采样：采样是这次请求最贵的一步（分帧扫半径 128 格、
+        // 向下 256 格），而只要电梯楼层这类窄查询与地形无关，不要就不做，立即返回。
+        // 未声明 sections 时 wants 返回 true，仍然照旧等待采样，既有调用方的行为不变。
+        if (!PerceiveSections.wants(PerceiveSections.requested(arguments), "terrain_overview")) {
+            return onClient(() -> perceiveOnClient(arguments));
+        }
         // 记住这次查看的是哪个玩家，等地形采样准备好后再整理周边信息；中途换玩家就拒绝旧结果。
         var result=new CompletableFuture<JsonElement>();
         onClient(()->{
@@ -187,6 +193,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         LocalPlayer player = minecraft.player;
         intents.bindForRequest(minecraft, player);
         String view = arguments.get("view").getAsString();
+        // 先读出这次的逐段声明（未声明 = 要完整快照）。裁剪只在这里做一次：各分支先把段完整装出来，
+        // 免得每个分支各写一套过滤，也免得将来加段时漏掉某个分支的裁剪。
+        List<String> sections = PerceiveSections.requested(arguments);
         return switch (view) {
             case "situation" -> {
                 JsonObject situation = situation(player);
@@ -214,10 +223,12 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 if ("maicraft:physical_structures".equals(focus) || "maicraft:navigation".equals(focus)
                         || "maicraft:transport".equals(focus))
                     situation.add("physical_structures", PhysicalStructurePerception.observe(player));
-                yield situation;
+                // 段已全部装完（含 focus 追加的诊断段）再裁剪：没点名的段不进响应，点名的段一定在。
+                yield PerceiveSections.select(situation, sections);
             }
-            case "surroundings" -> surroundings(player, nullableString(arguments, "focus"),
-                    arguments.has("limit") ? arguments.get("limit").getAsInt() : 16);
+            // 周边快照先整份装出来（含电梯楼层等段），再按声明裁剪；未声明时原样返回，行为与改动前一致。
+            case "surroundings" -> PerceiveSections.select(surroundings(player, nullableString(arguments, "focus"),
+                    arguments.has("limit") ? arguments.get("limit").getAsInt() : 16), sections);
             case "abilities" -> abilities(nullableString(arguments, "focus"));
             case "tasks" -> {
                 String rawTaskId = nullableString(arguments, "task_id");

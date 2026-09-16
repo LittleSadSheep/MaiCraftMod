@@ -88,13 +88,14 @@ final class PublicToolCatalog {
                               "type":"object",
                               "properties": {
                                 "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"knowledge searches reference metadata or reads resource_uri; it does not authorize actions or prove runtime capabilities. landmarks returns labels, machines lists observations, machine_menu returns native menu evidence."},
-                                "focus":{"type":["string","null"],"maxLength":256,"description":"With knowledge, an item ID or search words; omit when reading resource_uri. Ability filter for abilities. With situation, maicraft:physical_structures observes Sable ships, gaze hits, poses and support surfaces; maicraft:navigation or maicraft:transport also includes actor, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text; view direction and physical structures are also returned."},
+                                "focus":{"type":["string","null"],"maxLength":256,"description":"With knowledge, an item ID or search words; omit when reading resource_uri. Ability filter for abilities. With situation, maicraft:physical_structures observes Sable ships, gaze hits, poses and support surfaces; maicraft:travel or maicraft:elevators adds the elevator floor list; maicraft:navigation or maicraft:transport also includes actor, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text; view direction and physical structures are also returned."},
                                 "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"knowledge only: an exact discovered maicraft://knowledge/... URI. Reads Markdown without loading unrelated documents."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For attention, filter task events while retaining important body events and include authoritative task state. For tasks, read one full task."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: event-driven wait, normally 30000 ms. Returns immediately for completed tasks, pending decisions, pauses, missing tasks or resync; timeout does not cancel the game task."},
                                  "limit":{"type":"integer","minimum":1,"maximum":20,"default":10},
+                                "sections":{"type":"array","maxItems":32,"items":{"type":"string","minLength":1,"maxLength":48},"description":"situation or surroundings only: return just these top-level sections instead of the whole snapshot, so a long observation cannot be truncated before the section you need. Section names are the keys of the full response; an unknown name is rejected. surroundings accepts position, dimension, sky_light, biome, nearby_entities, nearby_signs, sign_observation, local_decision_summary, terrain_overview, elevators, view, physical_structures; situation accepts those plus inventory, equipment, health and the focus diagnostics. terrain_overview is the sampled terrain: a request that does not name it skips the sampling wait, so a narrow request answers immediately. A requested section this request produced nothing for is named in sections_unavailable; an absent section means unknown, not empty."},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
                               "additionalProperties":false
@@ -203,7 +204,8 @@ final class PublicToolCatalog {
 
     private static void validatePerceive(JsonObject value) {
         // 不同查看方式接受不同字段，例如等待时长只属于 Attention，文档地址只属于知识读取。
-        only(value, "view", "focus", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit", "server_id");
+        only(value, "view", "focus", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit",
+                "sections", "server_id");
         defaults(value, "view", "situation", "after_cursor", 0, "wait_ms", 0,
                 "limit", 10, "server_id", "minecraft-server");
         String view = string(value, "view", 1, 32, false);
@@ -232,6 +234,25 @@ final class PublicToolCatalog {
         }
         if (waitMs != 0 && !"attention".equals(view)) {
             throw bad("wait_ms is only supported by the attention view");
+        }
+        if (present(value, PerceiveSections.SECTIONS)) {
+            // 逐段投影只对"段袋"响应成立；段名必须本视图真的会产出，拼错就地拒绝而不是静默返回空。
+            if (!PerceiveSections.supports(view)) {
+                throw bad("sections is only supported by situation and surroundings");
+            }
+            JsonArray sections = array(value, PerceiveSections.SECTIONS, 32);
+            if (sections.isEmpty()) throw bad("sections must name at least one section");
+            Set<String> known = PerceiveSections.known(view);
+            for (JsonElement section : sections) {
+                if (!section.isJsonPrimitive() || !section.getAsJsonPrimitive().isString()) {
+                    throw bad("sections entries must be strings");
+                }
+                String name = section.getAsString();
+                if (name.length() < 1 || name.length() > 48) throw bad("sections entries have an invalid length");
+                if (name.equals(PerceiveSections.UNAVAILABLE) || !known.contains(name)) {
+                    throw bad("unknown " + view + " section: " + name);
+                }
+            }
         }
     }
 

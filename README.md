@@ -82,6 +82,8 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 使用 `elevator_floor="ask"`，或仅指定 `transport_mode="elevator"` 而不提供目的地，会先到电梯附近同步楼层，再返回 `waiting_for_decision`。LLM 用 `task(action="answer")` 的 `retry` 和 `details.parameters` 选择 `elevator_id`、`elevator_floor`。同步楼层是中间步骤，实际乘梯并出梯后才完成移动目标；`needs_sync` 表示信息未知，不代表没有楼层。
 
+`perceive` 的 `situation` 与 `surroundings` 支持用 `sections` 点名所需段，只返回这些顶层段而不再返回整份快照。完整快照可达上万字符，调用方按上下文预算截断时排在后面的段会被整段切掉，读不到的一方会把"没读到"读成"没有"；点名取段是唯一能保证所需段一定读得到的做法。段名就是完整响应里的顶层键，拼错会被拒绝；本次确实没有产出的段在 `sections_unavailable` 里点名。例如 `perceive(view="surroundings", sections=["elevators"])` 只取电梯楼层，且因为没点名 `terrain_overview`，这次请求不等待地形采样、立即返回。未声明 `sections` 时返回完整快照并照旧等待地形采样，行为与之前一致。
+
 `maicraft:travel_dimension` 和 `maicraft:reach_milestone` 可设置 `prepare_portal=true`，在没有观察到有效传送门时准备入口。下界门优先复用完整黑曜石框、补齐标准小门的缺块，或在附近已加载的安全空地新建十块黑曜石框，再使用打火石或已有火焰弹点火。建造和修复还需 `may_alter_terrain=true`；缺料按 `material_policy` 和 `allowed_sources` 获取，临时施工支撑也计入供料需求。
 
 末地入口会复用已加载的完整门框，必要时通过原生末影之眼寻找要塞；核对十二个门框的朝向，只为没有眼的格子补眼。搜索和嵌眼需要 `allow_rare_consumables=true`。准备期间保留 `protected_labels` 和上层区域保护，供料后重新检查现场；点击必须得到原生确认，并观察到完整传送门表面后才继续穿门。不会制造末地门框或末地返回门，受阻和未确认的操作会返回原因。
