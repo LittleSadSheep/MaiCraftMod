@@ -123,6 +123,7 @@ public final class MachineRegressionSuite {
         SemanticInteractionToolTest.main(args);
         org.maiwithu.maicraft.agent.tool.ToolRegistryTest.main(args);
         org.maiwithu.maicraft.mcp.NearbySignPerceptionTest.main(args);
+        org.maiwithu.maicraft.mcp.PerceiveSectionsTest.main(args);
         System.out.println("MachineRegressionSuite: semantic contracts passed");
     }
 
