@@ -13,11 +13,15 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
+import org.maiwithu.maicraft.core.combat.Menace;
+import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
@@ -37,10 +41,14 @@ public final class GameplayAttentionMonitor {
     private static final long CHAT_WINDOW_NANOS = 10_000_000_000L;
     private static final long CHAT_DUPLICATE_NANOS = 5_000_000_000L;
     private static final float HEALTH_EPSILON = 0.001F;
+    // 同一攻击者的连续命中共用一个伤害片段：开始报一次，窗口内只累计不打扰，窗口过后再收尾一次。
+    // 不合并会让连挨三口变成三次上报、三次上层唤醒，而它们说的是同一件事。
+    private static final int DAMAGE_EPISODE_TICKS = 100;
 
     private static final ArrayDeque<Long> recentChatEvents = new ArrayDeque<>();
     private static final LinkedHashMap<String, Long> recentChatFingerprints = new LinkedHashMap<>();
     private static final Map<String, ReflexEpisode> activeReflexes = new HashMap<>();
+    private static final Map<String, DamageEpisode> activeDamage = new HashMap<>();
 
     private static ClientLevel previousLevel;
     private static String previousDimension;
@@ -114,8 +122,12 @@ public final class GameplayAttentionMonitor {
             publish("world.weather_changed", "Weather changed to " + weather, data);
         }
         if (!receivedDamage && effectiveHealth + HEALTH_EPSILON < previousEffectiveHealth) {
-            damaged(player, previousEffectiveHealth, effectiveHealth, null);
+            // 没收到伤害包却掉了血：仍然上报，但证据口径写明是"血量下降"而不是确认的命中。
+            observeHealthDrop(player, previousEffectiveHealth, effectiveHealth);
         }
+
+        // 挨打停下之后及时收尾：没有这一步，汇总要等下一次受击或换怪才发得出来。
+        settleDamageEpisodes(player);
 
         remember(level, dimension, phase, weather, effectiveHealth);
     }
@@ -183,6 +195,8 @@ public final class GameplayAttentionMonitor {
         recentChatEvents.clear();
         recentChatFingerprints.clear();
         activeReflexes.clear();
+        // 换世界/断线时丢掉未收尾的伤害片段：那些命中属于上一个身体与上一个世界。
+        activeDamage.clear();
         suppressedChatMessages = 0;
         if (!preserveDeathRecovery || lifeState == LifeState.ALIVE) {
             lifeState = LifeState.ALIVE;
@@ -333,6 +347,8 @@ public final class GameplayAttentionMonitor {
                 totalItems(inventory), recoverRequested);
         lifeState = LifeState.DEAD_REPORTED;
         activeReflexes.clear();
+        // 死亡时未收尾的伤害片段直接丢弃：死亡本身另发 agent.died，补一条"刚才挨了几下"只会重复。
+        activeDamage.clear();
 
         boolean autoAllowed = autoRequested && nativeRespawnAvailable(player);
         JsonObject data = new JsonObject();
@@ -515,19 +531,63 @@ public final class GameplayAttentionMonitor {
     /** 在调度身体之前消费收到的伤害；玩家袭击不依赖血量包先后顺序，也不读取服务端 AI 字段。 */
     public static boolean observeDamagePackets(LocalPlayer player, float before, float after) {
         var notices = CombatThreats.consumeDamage(player);
-        for (var notice : notices) damaged(player, before, after, notice.attacker());
+        for (var notice : notices) damaged(player, before, after, notice.attacker(), true);
         return !notices.isEmpty();
     }
 
+    /**
+     * 观察到有效血量下降、但没收到伤害包时上报一次。
+     *
+     * <p>与 {@link #observeDamagePackets} 分开命名，是因为两者的证据强度不同：这条只说明"血少了"，
+     * 说不出谁打的，事件里也用 {@code evidence} 写明这一点。黄心到期同样会让有效血量下降，
+     * 所以它不是伤害结算，只是一次需要上层的观察。
+     */
+    public static void observeHealthDrop(LocalPlayer player, float before, float after) {
+        damaged(player, before, after, null, false);
+    }
+
+    // 收尾已经停止的伤害片段：窗口内没有新命中就发一次汇总，让上层知道"刚才一共被打了几下、掉了多少血"。
+    // 由客户端 tick 调用；测试直接驱动本方法，不需要等真实帧。
+    public static synchronized void settleDamageEpisodes(LocalPlayer player) {
+        if (activeDamage.isEmpty() || player == null || player.level() == null) return;
+        long tick = player.level().getGameTime();
+        var iterator = activeDamage.entrySet().iterator();
+        while (iterator.hasNext()) {
+            DamageEpisode episode = iterator.next().getValue();
+            // 换了身体或换了世界就不属于当前这条命：静默丢弃，不给上一个世界补汇总。
+            if (episode.body != player || episode.level != player.level()) {
+                iterator.remove();
+                continue;
+            }
+            if (tick - episode.lastTick <= DAMAGE_EPISODE_TICKS) continue;
+            iterator.remove();
+            publishEpisode(player, episode, "finished", false);
+        }
+    }
+
+    /** 按攻击者归并伤害：玩家袭击立即上报且不合并（它要求上层决策），生物与环境伤害进片段。 */
     private static void damaged(
-            LocalPlayer player, float before, float after, LivingEntity attacker) {
+            LocalPlayer player, float before, float after, LivingEntity attacker, boolean packetEvidence) {
         Player attackingPlayer = attacker instanceof Player value && value != player ? value : null;
+        float delta = Math.max(0F, before - after);
+        boolean fatal = player.getHealth() <= 0.0F;
 
         JsonObject cause = new JsonObject();
         if (attacker != null) {
             cause.addProperty(
                     "causing_entity_type_id",
                     BuiltInRegistries.ENTITY_TYPE.getKey(attacker.getType()).toString());
+            // 距离与目标字段只是补充事实：取不到也不能让整条伤害通知发不出去，写清原因照发。
+            try {
+                cause.addProperty("causing_entity_distance", Math.round(player.distanceTo(attacker) * 10.0) / 10.0);
+                if (attacker instanceof Mob mob) {
+                    // 目标字段只用来描述"它是否正盯着我"，不作为伤害证据（伤害证据只来自伤害包）。
+                    cause.addProperty("causing_entity_alive", !mob.isRemoved() && mob.isAlive());
+                    cause.addProperty("causing_entity_targeting_agent", mob.getTarget() == player);
+                }
+            } catch (RuntimeException unavailable) {
+                cause.addProperty("cause_evidence_unavailable", String.valueOf(unavailable.getMessage()));
+            }
         }
         if (attackingPlayer != null) {
             cause.addProperty("causing_player_name", attackingPlayer.getGameProfile().getName());
@@ -541,29 +601,122 @@ public final class GameplayAttentionMonitor {
             cause.addProperty("requires_llm_decision", true);
         }
 
-        JsonObject data = new JsonObject();
-        data.addProperty("effective_health_before", before);
-        data.addProperty("effective_health_after", after);
-        data.addProperty("fatal", player.getHealth() <= 0.0F);
-        data.add("position", position(player));
-        data.add("cause", cause);
-
         if (attackingPlayer != null && player.getHealth() > 0.0F) {
             TaskRecord active = CompanionTickDispatcher.current();
             if (active instanceof IntentTaskRecord intent
                     && intent.pause(player.level().getGameTime(), "player_attention")) {
-                data.addProperty("paused_task_id", intent.externalId().toString());
+                cause.addProperty("paused_task_id", intent.externalId().toString());
                 IntentRuntime.get().paused(
                         intent,
                         "Another player hit the agent; the task paused for the LLM to interpret a possible stop or follow request.");
             }
         }
 
-        String message = attackingPlayer == null
-                ? "The agent took damage"
-                : attackingPlayer.getGameProfile().getName()
-                        + " hit the agent; a possible stop or follow request must not be guessed automatically.";
-        publish("agent.damaged", message, data);
+        long tick = player.level().getGameTime();
+        if (attackingPlayer != null) {
+            // 玩家袭击：立刻上报，不并入生物伤害片段——它要求上层解释意图，不能被合并掉。
+            DamageEpisode attack = new DamageEpisode(
+                    player, player.level(), tick, attacker, cause, packetEvidence);
+            attack.record(tick, delta, before, after);
+            publishEpisode(player, attack, "started", fatal);
+            return;
+        }
+
+        String key = damageKey(attacker);
+        DamageEpisode episode = activeDamage.get(key);
+        // 换了身体或换了世界，旧片段就不属于这条命：丢弃而不是接着累计（否则新身体会继承上一具身体的伤）。
+        if (episode != null && (episode.body != player || episode.level != player.level())) {
+            activeDamage.remove(key);
+            episode = null;
+        }
+        if (episode != null && tick - episode.lastTick > DAMAGE_EPISODE_TICKS) {
+            activeDamage.remove(key);
+            publishEpisode(player, episode, "finished", false);
+            episode = null;
+        }
+        if (episode == null) {
+            episode = new DamageEpisode(player, player.level(), tick, attacker, cause, packetEvidence);
+            activeDamage.put(key, episode);
+        }
+        boolean first = episode.hits == 0;
+        episode.record(tick, delta, before, after);
+        if (first) {
+            // 只有片段首次命中立即上报；后续同一攻击者的命中只累计，收尾时一次性交代。
+            // 死亡不在这里另开一支：致死那一刻由 agent.died 负责，本条只如实带上 fatal 标记。
+            publishEpisode(player, episode, "started", fatal);
+        }
+    }
+
+    /** 片段的归并键：攻击者种类（换怪就另起一段），环境伤害归到 environment。 */
+    private static String damageKey(LivingEntity attacker) {
+        if (attacker == null) return "environment";
+        return BuiltInRegistries.ENTITY_TYPE.getKey(attacker.getType()).toString();
+    }
+
+    private static void publishEpisode(
+            LocalPlayer player, DamageEpisode episode, String phase, boolean fatal) {
+        JsonObject data = new JsonObject();
+        data.addProperty("phase", phase);
+        // 证据口径必须写在事件里：伤害包确认的命中，与"只看到血量掉了"是两种可信度。
+        data.addProperty("evidence", episode.packetEvidence ? "damage_packet" : "health_drop_without_packet");
+        data.addProperty("effective_health_before", episode.firstBefore);
+        data.addProperty("effective_health_after", episode.lastAfter);
+        // 有效血量含吸收黄心，黄心到期也会让它下降，所以这个差值是"整个片段的掉血"，不是逐次伤害结算值。
+        data.addProperty("effective_health_delta",
+                Math.max(0F, episode.firstBefore - episode.lastAfter));
+        data.addProperty("current_health", player.getHealth());
+        data.addProperty("absorption", player.getAbsorptionAmount());
+        data.addProperty("fatal", fatal);
+        data.add("position", position(player));
+        data.add("cause", episode.cause);
+        data.add("defense", defenseEvidence(player, episode.attacker));
+        JsonObject repeat = new JsonObject();
+        repeat.addProperty("hits", episode.hits);
+        repeat.addProperty("damage_total", episode.damage);
+        repeat.addProperty("last_damage_taken", episode.lastDelta);
+        repeat.addProperty("window_ticks", DAMAGE_EPISODE_TICKS);
+        data.add("repeat", repeat);
+        data.addProperty("contains_internal_target_handles", false);
+        publish("agent.damaged", damageMessage(phase, episode), data);
+    }
+
+    /**
+     * 本能接管状态的证据。
+     *
+     * <p>只报可验证的两件事：自卫链现在会不会接管、这个攻击者是否被判为威胁。
+     * 不写"正在反击"——真的在挥剑、还是在撤退、还是已被打断，这里都没有证据，
+     * 而一句没有证据的"正在反击"会让上层照着一件没发生的事去叙述。
+     */
+    private static JsonObject defenseEvidence(LocalPlayer player, LivingEntity attacker) {
+        JsonObject defense = new JsonObject();
+        defense.addProperty("policy", "instinct");
+        defense.addProperty("evidence", "runtime_self_defense_chain");
+        try {
+            defense.addProperty("would_engage", new MobDefenseChain().canRun(player));
+        } catch (RuntimeException unavailable) {
+            defense.addProperty("would_engage", false);
+            defense.addProperty("reason", String.valueOf(unavailable.getMessage()));
+        }
+        if (attacker != null) {
+            try {
+                defense.addProperty("threat_recognized", Menace.threatens(attacker, player));
+            } catch (RuntimeException unavailable) {
+                defense.addProperty("threat_recognized", false);
+                defense.addProperty("threat_reason", String.valueOf(unavailable.getMessage()));
+            }
+        }
+        return defense;
+    }
+
+    private static String damageMessage(String phase, DamageEpisode episode) {
+        if ("finished".equals(phase)) {
+            return "The agent stopped taking damage; " + episode.hits + " hits in total";
+        }
+        if (episode.attacker instanceof Player attacker) {
+            return attacker.getGameProfile().getName()
+                    + " hit the agent; a possible stop or follow request must not be guessed automatically.";
+        }
+        return "The agent took damage";
     }
 
     private static void remember(ClientLevel level, String dimension, String phase,
@@ -608,6 +761,41 @@ public final class GameplayAttentionMonitor {
 
         private ReflexEpisode(long startedNanos) {
             this.startedNanos = startedNanos;
+        }
+    }
+
+    /** 一次伤害片段的累计：首次与最近一次的读数、命中次数与总掉血；供开始/收尾两次上报共用。 */
+    private static final class DamageEpisode {
+        private final LocalPlayer body;
+        private final Level level;
+        private final LivingEntity attacker;
+        private final JsonObject cause;
+        private final boolean packetEvidence;
+        private long lastTick;
+        private int hits;
+        private float damage;
+        private float lastDelta;
+        private float firstBefore = Float.NaN;
+        private float lastAfter = Float.NaN;
+
+        private DamageEpisode(
+                LocalPlayer body, Level level, long tick, LivingEntity attacker,
+                JsonObject cause, boolean packetEvidence) {
+            this.body = body;
+            this.level = level;
+            this.lastTick = tick;
+            this.attacker = attacker;
+            this.cause = cause;
+            this.packetEvidence = packetEvidence;
+        }
+
+        private void record(long tick, float delta, float before, float after) {
+            if (hits == 0) firstBefore = before;
+            lastTick = tick;
+            hits++;
+            damage += delta;
+            lastDelta = delta;
+            lastAfter = after;
         }
     }
 
