@@ -7,6 +7,7 @@ import java.util.Map;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.protocol.game.ClientboundDamageEventPacket;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.LivingEntity;
@@ -17,7 +18,7 @@ public final class CombatThreats {
     private static final long MEMORY_TICKS = 10L * 20L;
     private record Hit(Mob attacker, long tick) {}
     private static final Map<Integer, Hit> hits = new LinkedHashMap<>();
-    public record DamageNotice(LivingEntity attacker) {}
+    public record DamageNotice(LivingEntity attacker, String damageType) {}
     private static final ArrayDeque<DamageNotice> notices = new ArrayDeque<>();
     private static LocalPlayer body;
     private static ClientLevel level;
@@ -36,7 +37,10 @@ public final class CombatThreats {
             cause = projectile.getOwner();
         }
         if (notices.size() >= 64) notices.removeFirst();
-        notices.addLast(new DamageNotice(cause instanceof LivingEntity living ? living : null));
+        // 伤害类型一并带上（fall / drowning / mob_attack 等）：外部看不懂"谁打的"时，
+        // 至少能说清"是什么伤"，否则摔落与仙人掌只能讲成一句含糊的"受到了伤害"。
+        notices.addLast(new DamageNotice(
+                cause instanceof LivingEntity living ? living : null, safeDamageType(source)));
         if (cause instanceof Mob mob && loadedAlive(mob)) {
             hits.put(mob.getId(), new Hit(mob, level.getGameTime()));
         }
@@ -63,6 +67,16 @@ public final class CombatThreats {
         notices.clear();
         body = null;
         level = null;
+    }
+
+    /** 伤害类型名（`DamageSource.getMsgId()`，如 fall / drowning / mob_attack）；取不到返回空串。 */
+    private static String safeDamageType(DamageSource source) {
+        try {
+            String id = source == null ? null : source.getMsgId();
+            return id == null ? "" : id;
+        } catch (RuntimeException unavailable) {
+            return "";
+        }
     }
 
     /** 伤害通知独立消费，不会消费或延长战斗使用的威胁记忆。 */

@@ -531,7 +531,9 @@ public final class GameplayAttentionMonitor {
     /** 在调度身体之前消费收到的伤害；玩家袭击不依赖血量包先后顺序，也不读取服务端 AI 字段。 */
     public static boolean observeDamagePackets(LocalPlayer player, float before, float after) {
         var notices = CombatThreats.consumeDamage(player);
-        for (var notice : notices) damaged(player, before, after, notice.attacker(), true);
+        for (var notice : notices) {
+            damaged(player, before, after, notice.attacker(), true, notice.damageType());
+        }
         return !notices.isEmpty();
     }
 
@@ -543,7 +545,7 @@ public final class GameplayAttentionMonitor {
      * 所以它不是伤害结算，只是一次需要上层的观察。
      */
     public static void observeHealthDrop(LocalPlayer player, float before, float after) {
-        damaged(player, before, after, null, false);
+        damaged(player, before, after, null, false, "");
     }
 
     // 收尾已经停止的伤害片段：窗口内没有新命中就发一次汇总，让上层知道"刚才一共被打了几下、掉了多少血"。
@@ -567,12 +569,17 @@ public final class GameplayAttentionMonitor {
 
     /** 按攻击者归并伤害：玩家袭击立即上报且不合并（它要求上层决策），生物与环境伤害进片段。 */
     private static void damaged(
-            LocalPlayer player, float before, float after, LivingEntity attacker, boolean packetEvidence) {
+            LocalPlayer player, float before, float after, LivingEntity attacker, boolean packetEvidence,
+            String damageType) {
         Player attackingPlayer = attacker instanceof Player value && value != player ? value : null;
         float delta = Math.max(0F, before - after);
         boolean fatal = player.getHealth() <= 0.0F;
 
         JsonObject cause = new JsonObject();
+        // 伤害类型先写：外部看不懂"谁打的"时（摔落/溺水/仙人掌），至少能看清"是什么伤"。
+        if (damageType != null && !damageType.isEmpty()) {
+            cause.addProperty("damage_type", damageType);
+        }
         if (attacker != null) {
             cause.addProperty(
                     "causing_entity_type_id",
@@ -622,7 +629,7 @@ public final class GameplayAttentionMonitor {
             return;
         }
 
-        String key = damageKey(attacker);
+        String key = damageKey(attacker, damageType);
         DamageEpisode episode = activeDamage.get(key);
         // 换了身体或换了世界，旧片段就不属于这条命：丢弃而不是接着累计（否则新身体会继承上一具身体的伤）。
         if (episode != null && (episode.body != player || episode.level != player.level())) {
@@ -647,10 +654,12 @@ public final class GameplayAttentionMonitor {
         }
     }
 
-    /** 片段的归并键：攻击者种类（换怪就另起一段），环境伤害归到 environment。 */
-    private static String damageKey(LivingEntity attacker) {
-        if (attacker == null) return "environment";
-        return BuiltInRegistries.ENTITY_TYPE.getKey(attacker.getType()).toString();
+    /** 片段的归并键：攻击者种类；没有攻击者时按伤害类型分（摔落与溺水不该并成一段）。 */
+    private static String damageKey(LivingEntity attacker, String damageType) {
+        if (attacker != null) {
+            return BuiltInRegistries.ENTITY_TYPE.getKey(attacker.getType()).toString();
+        }
+        return "environment:" + (damageType == null || damageType.isEmpty() ? "unknown" : damageType);
     }
 
     private static void publishEpisode(

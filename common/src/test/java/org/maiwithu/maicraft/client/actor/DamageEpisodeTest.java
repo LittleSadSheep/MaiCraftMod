@@ -21,7 +21,30 @@ public final class DamageEpisodeTest {
         singleHitCarriesActionableEvidence();
         repeatedHitsCoalesceIntoOneEpisode();
         healthDropWithoutPacketIsLabelled();
+        environmentalDamageNamesItsType();
         System.out.println("DamageEpisodeTest: damage evidence and episode coalescing passed");
+    }
+
+    /** 摔落/溺水这类没有攻击者的伤害：必须带上伤害类型，否则外部只能讲成含糊的"受到了伤害"。 */
+    private static void environmentalDamageNamesItsType() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var signals = new ArrayList<JsonObject>();
+            try (var subscription = IntentRuntime.get()
+                    .subscribeAttention(e -> signals.add(JsonParser.parseString(e.toString()).getAsJsonObject()))) {
+                f.hit(null, null); // 伤害包在，但没有可归因的攻击者
+                check(GameplayAttentionMonitor.observeDamagePackets(f.h.player, 20F, 18F),
+                        "环境伤害同样要上报");
+                JsonObject cause = latestEvent(signals).getAsJsonObject("data").getAsJsonObject("cause");
+                check(cause.has("damage_type") && !cause.get("damage_type").getAsString().isEmpty(),
+                        "没有攻击者时必须给出伤害类型（本夹具的类型为 mob）");
+                check(!cause.has("causing_entity_type_id"), "环境伤害不得编造攻击者");
+                f.h.level.time += 200;
+                GameplayAttentionMonitor.settleDamageEpisodes(f.h.player);
+                JsonObject closing = latestEvent(signals).getAsJsonObject("data");
+                check("finished".equals(closing.get("phase").getAsString()),
+                        "环境伤害片段同样要收尾，上层才能把措辞从「正在」改成「刚才」");
+            }
+        }
     }
 
     private static void singleHitCarriesActionableEvidence() throws Exception {
