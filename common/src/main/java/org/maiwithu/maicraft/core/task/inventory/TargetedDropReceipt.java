@@ -20,6 +20,7 @@ final class TargetedDropReceipt implements NativeConfirmation {
     private final LocalPlayer player;
     private final Object world;
     private final BlockPos receiver;
+    private final TargetedDropRegion region;
     private final ItemStack before, after, kind;
     private final int selected, inventoryBefore, amount;
     private final net.minecraft.world.level.material.FluidState receiverFluid;
@@ -28,11 +29,16 @@ final class TargetedDropReceipt implements NativeConfirmation {
     private List<Received> candidate = List.of();
 
     TargetedDropReceipt(LocalPlayer player, BlockPos receiver, ItemStack selectedStack, int amount) {
+        this(player,receiver,selectedStack,amount,TargetedDropRegion.ofCells(List.of(receiver)));
+    }
+
+    TargetedDropReceipt(LocalPlayer player, BlockPos receiver, ItemStack selectedStack, int amount, TargetedDropRegion region) {
         this.player = player; world = player.level(); this.receiver = receiver;
+        this.region = region;
         before = selectedStack.copy(); after = before.copyWithCount(before.getCount() - amount); kind = before.copyWithCount(1);
         selected = player.getInventory().selected; inventoryBefore = count(player, kind); this.amount = amount;
         receiverFluid = player.level().getFluidState(receiver);
-        for (var observed : ItemEntityReceipts.snapshot(player, TargetedDropGeometry.receiverBox(receiver))) baseline.put(observed.uuid(), observed);
+        for (var observed : ItemEntityReceipts.snapshot(player, region.observationBounds())) baseline.put(observed.uuid(), observed);
         cursor = ItemEntityReceipts.cursor(player);
     }
 
@@ -44,7 +50,9 @@ final class TargetedDropReceipt implements NativeConfirmation {
                 || remaining != inventoryBefore && remaining != inventoryBefore - amount) return Verdict.DIVERGED;
         if (!ItemStack.matches(source, after) || remaining != inventoryBefore - amount) return Verdict.PENDING;
         var received = new ArrayList<Received>(); int credited = 0;
-        for (var observed : ItemEntityReceipts.snapshot(player, TargetedDropGeometry.receiverBox(receiver))) {
+        for (var observed : ItemEntityReceipts.snapshot(player, region.observationBounds())) {
+            // 包围盒只帮助找到候选实体；落点必须逐格属于冻结域，也必须满足原生反应邻域交集。
+            if (!region.contains(observed.position())) continue;
             if (!ItemStack.isSameItemSameComponents(observed.stack(), kind)) continue;
             var previous = baseline.get(observed.uuid());
             if (previous != null && !ItemStack.isSameItemSameComponents(previous.stack(), kind)) return Verdict.DIVERGED;

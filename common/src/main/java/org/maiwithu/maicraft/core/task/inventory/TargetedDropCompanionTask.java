@@ -46,7 +46,7 @@ public final class TargetedDropCompanionTask extends AbstractCompanionTask<Targe
         }
         if (!settled()) { reject("targeted_drop_requires_stationary_support", FailureType.STANCE_DUD); return; }
         if (TargetedDropReceipt.count(player, kind) < r.count) { reject("targeted_drop_exact_material_shortage", FailureType.NO_MATERIAL); return; }
-        aim = TargetedDropGeometry.aim(player, r.receiver).orElse(null);
+        aim = TargetedDropGeometry.aim(player, r.receiver, r.region).orElse(null);
         if (aim == null) reject("targeted_drop_no_clear_native_trajectory", FailureType.OUT_OF_REACH);
     }
 
@@ -79,15 +79,18 @@ public final class TargetedDropCompanionTask extends AbstractCompanionTask<Targe
         ItemStack held = player.getMainHandItem();
         if (!ItemStack.isSameItemSameComponents(kind, held)) return reject("targeted_drop_selected_item_changed", FailureType.TARGET_LOST);
         // 每次新出手前重新试算当前地形，但只通过身体入口平滑转头，不直接写玩家朝向。
-        Vec3 currentAim = TargetedDropGeometry.aim(player, r.receiver).orElse(null);
+        Vec3 currentAim = TargetedDropGeometry.aim(player, r.receiver, r.region).orElse(null);
         if (currentAim == null) return reject("targeted_drop_trajectory_changed", FailureType.OCCLUDED);
         if (currentAim.distanceToSqr(aim) > 0.0025) { aim = currentAim; view.reset(); }
         Vec3 direction = aim.subtract(player.getEyePosition());
         context.body().requestLook((float) Math.toDegrees(Math.atan2(-direction.x, direction.z)),
                 (float) -Math.toDegrees(Math.atan2(direction.y, Math.sqrt(direction.horizontalDistanceSqr()))), context.tickRevision());
         if (!view.ready(player, direction) || !context.mutationAvailable()) return TaskState.RUNNING;
+        // 相机近似对齐后还要按真实朝向复核落点，不能把视角容差变成越出已审查接收域的许可。
+        if (!TargetedDropGeometry.safeActualView(player, r.receiver, r.region)) return TaskState.RUNNING;
+        if (!r.preThrowAllowed()) return reject("targeted_drop_native_input_neighborhood_changed", FailureType.TARGET_LOST);
         int amount = held.getCount() <= r.count - removed ? held.getCount() : 1;
-        evidence = new TargetedDropReceipt(player, r.receiver, held, amount);
+        evidence = new TargetedDropReceipt(player, r.receiver, held, amount, r.region);
         // 来源不足一整堆时每次只丢一件；先进入不可重发状态，再让端口发原生 Q，异常也不能从头重新投料。
         attempts++;
         receipt = context.actions().dropSelected(context, held.copy(), amount == held.getCount(), evidence, 100);
