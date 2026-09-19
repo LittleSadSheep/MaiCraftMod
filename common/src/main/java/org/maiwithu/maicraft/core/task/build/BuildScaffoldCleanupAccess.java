@@ -164,7 +164,6 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
 
     /** 全部已验证候选与起点周围的有限盒；外壳阻止搜索离开观察范围，未知区块不被当作可施工空气。 */
     static final class Scope {
-        private static final int MAX_CELLS = 65_536;
         final Level level;
         final BlockPos min, max;
         final long volume;
@@ -187,7 +186,9 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
             int maxY = Math.min(level.getMaxBuildHeight() - 1, cells.stream().mapToInt(BlockPos::getY).max().orElseThrow() + 4);
             min = new BlockPos(minX, minY, minZ); max = new BlockPos(maxX, maxY, maxZ);
             volume = ((long) maxX - minX + 1) * ((long) maxY - minY + 1) * ((long) maxZ - minZ + 1);
-            if (volume <= 0 || volume > MAX_CELLS || cells.stream().anyMatch(pos -> !inside(pos)))
+            // 大厅清理仍分帧观察完整通行范围；其容量独立于目标数，并明确由客户端配置限制。
+            if (volume <= 0 || volume > org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxCleanupAccessCells()
+                    || cells.stream().anyMatch(pos -> !inside(pos)))
                 throw new IllegalArgumentException("cleanup access requires a bounded loaded local region");
             pending = BlockPos.betweenClosed(min, max).iterator();
         }

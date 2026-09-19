@@ -19,14 +19,13 @@ import java.util.function.Function;
 import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
-import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /**
  * 保存带名字的墙体、开孔盒子等模型对象。每次编辑生成新编号并保留父版本，原版本和原世界锚点不移动。
  */
 public final class BuildingSceneStore {
-    private static final int MAX_BYTES = 4 * 1024 * 1024;
     private final StateIdentity identity;
     private final Path directory;
     private final Function<JsonObject, JsonObject> compiler;
@@ -98,7 +97,8 @@ public final class BuildingSceneStore {
         position.addProperty("dimension", anchor.dimension());
         root.add("anchor", position); root.add("scene", entry.scene());
         byte[] bytes = root.toString().getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > MAX_BYTES) throw new IllegalArgumentException("building scene exceeds the 4 MiB storage budget");
+        // 大场景按建筑配置保存作者模型；超额仍拒绝发布，不让旧的固定四兆门槛盖过用户设置。
+        if (bytes.length > BuildingBudgets.current().maxSceneBytes()) throw new IllegalArgumentException("building scene exceeds the configured storage budget");
         Files.createDirectories(directory);
         Path temporary = Files.createTempFile(directory, ".scene-", ".tmp");
         try {
@@ -117,9 +117,11 @@ public final class BuildingSceneStore {
     // 按当前世界和维度核对文件身份。这里只检查模型结构，不逐格展开；后续预览或施工再编译。
     private Entry loadChecked(String sceneId, String dimension) throws IOException {
         Path file = path(sceneId);
+        // 读取与保存使用同一场景预算，并多读一个字节确认边界，防止大小检查后文件继续增长。
+        int limit = BuildingBudgets.current().maxSceneBytes();
         byte[] bytes;
-        try (var input = Files.newInputStream(file)) { bytes = input.readNBytes(MAX_BYTES + 1); }
-        if (bytes.length > MAX_BYTES) throw new IllegalArgumentException("building scene exceeds the 4 MiB storage budget");
+        try (var input = Files.newInputStream(file)) { bytes = input.readNBytes(Math.addExact(limit, 1)); }
+        if (bytes.length > limit) throw new IllegalArgumentException("building scene exceeds the configured storage budget");
         JsonObject root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonObject();
         if (!root.has("schema_version") || root.get("schema_version").getAsInt() != 1
                 || !identity.key().equals(fieldString(root, "world_key")) || !sceneId.equals(fieldString(root, "scene_id")))
@@ -215,17 +217,18 @@ public final class BuildingSceneStore {
     public static void validateEdits(JsonObject patch) {
         if (patch == null || patch.isEmpty() || !Set.of("schema_version", "objects", "materials", "remove_objects", "components", "remove_components", "block_state_axes", "overlap_policy").containsAll(patch.keySet()))
             throw new IllegalArgumentException("scene edit accepts version/settings, objects, materials and component definitions/removals only");
-        var budget = MachinePlanningBudget.current();
+        // 组件、墙体和材料编辑按建筑对象预算核对，机器规划的上限不能再截断大型房屋模型。
+        var budget = BuildingBudgets.current();
         if (patch.has("schema_version")) integer(patch.get("schema_version"), 2, 2, "edits.schema_version");
         BuildingModelSchema.choice(patch, "block_state_axes", Set.of("local", "minecraft_world"));
         BuildingModelSchema.choice(patch, "overlap_policy", Set.of("last_wins", "error"));
         Set<String> components = new LinkedHashSet<>();
-        if (patch.has("remove_components")) for (var entry : array(patch.get("remove_components"), 0, budget.maxComponents(), "remove_components")) {
+        if (patch.has("remove_components")) for (var entry : array(patch.get("remove_components"), 0, budget.maxObjects(), "remove_components")) {
             if (!components.add(string(entry, 64, "removed component name"))) throw bad("duplicate removed component name");
         }
         if (patch.has("components")) {
             JsonObject definitions = object(patch.get("components"), "component edits");
-            if (definitions.size() > budget.maxComponents()) throw bad("too many component edits");
+            if (definitions.size() > budget.maxObjects()) throw bad("too many component edits");
             for (var entry : definitions.entrySet()) {
                 if (entry.getKey().isBlank() || entry.getKey().length() > 64) throw bad("invalid component name");
                 if (!components.add(entry.getKey())) throw bad("component cannot be removed and replaced in one edit");
@@ -233,10 +236,10 @@ public final class BuildingSceneStore {
             }
         }
         Set<String> names = new LinkedHashSet<>();
-        if (patch.has("remove_objects")) for (var entry : array(patch.get("remove_objects"), 0, budget.maxComponents(), "remove_objects")) {
+        if (patch.has("remove_objects")) for (var entry : array(patch.get("remove_objects"), 0, budget.maxObjects(), "remove_objects")) {
             if (!names.add(string(entry, 64, "removed object name"))) throw bad("duplicate removed object name");
         }
-        if (patch.has("objects")) for (var entry : array(patch.get("objects"), 0, budget.maxComponents(), "objects")) {
+        if (patch.has("objects")) for (var entry : array(patch.get("objects"), 0, budget.maxObjects(), "objects")) {
             JsonObject object = object(entry, "object edit");
             // 公开编辑和完整模型共用节点字段规则；阵列、面材质及组件内嵌节点的未知字段须在开工前拒绝。
             BuildingModelSchema.validateNodePatch(object);
@@ -244,7 +247,7 @@ public final class BuildingSceneStore {
         }
         if (patch.has("materials")) {
             JsonObject materials = object(patch.get("materials"), "materials");
-            if (materials.size() > budget.maxComponents()) throw bad("too many material edits");
+            if (materials.size() > budget.maxObjects()) throw bad("too many material edits");
             for (var entry : materials.entrySet()) {
                 if (entry.getKey().isBlank() || entry.getKey().length() > 64) throw bad("invalid material name");
                 JsonObject material = object(entry.getValue(), "material"); keys(material, Set.of("block_id", "properties"), "material");

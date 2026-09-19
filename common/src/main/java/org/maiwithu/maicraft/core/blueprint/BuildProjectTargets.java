@@ -9,7 +9,7 @@ import java.util.List;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.properties.Property;
-import org.maiwithu.maicraft.core.build.BuildShapes;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 
@@ -21,6 +21,9 @@ public final class BuildProjectTargets {
 
     // 把每格展开成可写入 JSON 的字段，属性名和属性值都使用注册定义中的名字，不保存对象引用。
     public static JsonArray encode(List<BuildTaskRecord.Target> targets) {
+        // 先按本次建筑规模检查，再序列化整份施工单；不能保存超过配置而重启后又读不回的目标集合。
+        if (targets == null || targets.isEmpty() || targets.size() > BuildingBudgets.current().maxTargets())
+            throw new IllegalArgumentException("invalid saved build target count");
         JsonArray result = new JsonArray();
         for (var target : targets) {
             JsonObject row = new JsonObject();
@@ -52,7 +55,8 @@ public final class BuildProjectTargets {
 
     // 先查材料注册名，再复用建造解析。重复坐标、材料与方块不对应、状态被解析器改写时都拒绝恢复。
     public static List<BuildTaskRecord.Target> decode(JsonArray rows) {
-        if (rows == null || rows.isEmpty() || rows.size() > BuildShapes.MAX_TOTAL_CELLS)
+        // 恢复完整施工单沿用当前建筑配置，不再暗中套用旧的一万六千格几何常量。
+        if (rows == null || rows.isEmpty() || rows.size() > BuildingBudgets.current().maxTargets())
             throw new IllegalArgumentException("invalid saved build target count");
         for (var value : rows) {
             ResourceLocation block = ResourceLocation.parse(value.getAsJsonObject().get("block_id").getAsString());

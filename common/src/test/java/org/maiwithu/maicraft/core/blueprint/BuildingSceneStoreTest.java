@@ -75,7 +75,7 @@ public final class BuildingSceneStoreTest {
         rejects(() -> store.updatePrepared(first.sceneId(), "minecraft:the_nether", prepared));
         rejects(() -> new BuildingSceneStore(root, "b".repeat(64)).updatePrepared(first.sceneId(), dimension, prepared));
         // 把测试文件故意加到上限之外，确认读取会拒绝；只影响这个测试创建的临时目录。
-        Files.write(source, new byte[4 * 1024 * 1024 + 1]);
+        Files.write(source, new byte[org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxSceneBytes() + 1]);
         rejects(() -> store.load(first.sceneId(), dimension));
         System.out.println("BuildingSceneStoreTest: immutable world-bound revisions passed");
     }

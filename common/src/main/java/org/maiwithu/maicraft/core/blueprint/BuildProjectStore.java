@@ -18,6 +18,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 
 /**
@@ -25,7 +26,6 @@ import org.maiwithu.maicraft.intent.persistence.StateIdentity;
  * 不保存可信的“已完成百分比”；重新施工时仍要读取世界，判断哪些格子真正完成。
  */
 public final class BuildProjectStore {
-    private static final int MAX_BYTES = 8 * 1024 * 1024;
     private final StateIdentity identity;
 
     public BuildProjectStore(StateIdentity identity) { this.identity = identity; }
@@ -97,7 +97,8 @@ public final class BuildProjectStore {
         frozen.addProperty("broaden_material_families", false);
         frozen.add("project_targets", BuildProjectTargets.encode(targets));
         root.add("arguments", frozen);
-        write(file(id), root, MAX_BYTES);
+        // 冻结目标通常比作者模型大得多，按独立项目预算落盘，避免大建筑能开工却无法续建。
+        write(file(id), root, BuildingBudgets.current().maxProjectBytes());
     }
 
     private static void write(Path file, JsonObject root, int limit) {
@@ -143,9 +144,11 @@ public final class BuildProjectStore {
     private Map<BlockPos, BlockState> readScaffolds(Path sidecar, String id, String dimension) {
         if (Files.notExists(sidecar)) return Map.of();
         try {
+            // 支撑只保存原生已确认的自有记录；调大文件预算不改变身份核验或恢复所有权的条件。
+            int limit = BuildingBudgets.current().maxScaffoldBytes();
             byte[] bytes;
-            try (var input = Files.newInputStream(sidecar)) { bytes = input.readNBytes(1024 * 1024 + 1); }
-            if (bytes.length == 0 || bytes.length > 1024 * 1024) throw new IllegalArgumentException("invalid scaffold ledger size");
+            try (var input = Files.newInputStream(sidecar)) { bytes = input.readNBytes(Math.addExact(limit, 1)); }
+            if (bytes.length == 0 || bytes.length > limit) throw new IllegalArgumentException("invalid scaffold ledger size");
             JsonObject root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonObject();
             if (root.get("version").getAsInt() != 1 || !id.equals(root.get("project_id").getAsString())
                     || !identity.key().equals(root.get("world_key").getAsString()) || !dimension.equals(root.get("dimension").getAsString())
@@ -159,18 +162,20 @@ public final class BuildProjectStore {
         JsonObject root = new JsonObject(); root.addProperty("version", 1); root.addProperty("project_id", id);
         root.addProperty("world_key", identity.key()); root.addProperty("dimension", dimension);
         root.addProperty("evidence", "native_confirmed_scaffold"); root.add("confirmed_scaffolds", BuildProjectScaffolds.encode(scaffolds));
-        write(sidecar, root, 1024 * 1024);
+        write(sidecar, root, BuildingBudgets.current().maxScaffoldBytes());
     }
 
     // 读取后核对版本、项目编号、世界和维度，再检查每格保存状态仍可表达；返回副本，调用方改参数不会改磁盘记录。
     public JsonObject load(String id, String dimension) {
         try {
             Path file = file(id);
+            // 续建与保存使用同一配置；仍读边界外的一个字节，不能让增长文件绕过读取预算。
+            int limit = BuildingBudgets.current().maxProjectBytes();
             long size = Files.size(file);
-            if (size <= 0 || size > MAX_BYTES) throw new IOException("invalid build project size");
+            if (size <= 0 || size > limit) throw new IOException("invalid build project size");
             byte[] bytes;
-            try (var input = Files.newInputStream(file)) { bytes = input.readNBytes(MAX_BYTES + 1); }
-            if (bytes.length > MAX_BYTES) throw new IOException("invalid build project size");
+            try (var input = Files.newInputStream(file)) { bytes = input.readNBytes(Math.addExact(limit, 1)); }
+            if (bytes.length > limit) throw new IOException("invalid build project size");
             JsonObject root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonObject();
             if (root.get("version").getAsInt() != 1 || !id.equals(root.get("project_id").getAsString())
                     || !identity.key().equals(root.get("world_key").getAsString()))

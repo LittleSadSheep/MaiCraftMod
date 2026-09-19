@@ -13,14 +13,15 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /** 仅编码本项目原生确认过的临时支撑；恢复按记录逐格核对，绝不扫描泥土推断所有权。 */
 public final class BuildProjectScaffolds {
-    public static final int MAX_COUNT = 4096;
     private BuildProjectScaffolds() {}
 
     public static JsonArray encode(Map<BlockPos, BlockState> scaffolds) {
-        if (scaffolds.size() > MAX_COUNT) throw new IllegalArgumentException("too many saved project scaffolds");
+        // 支撑账容量跟随配置，允许大型工程续建；这只放宽记录数量，不替角色批准额外搭建动作。
+        if (scaffolds.size() > BuildingBudgets.current().maxScaffolds()) throw new IllegalArgumentException("too many saved project scaffolds");
         JsonArray rows = new JsonArray();
         scaffolds.entrySet().stream().sorted(Map.Entry.comparingByKey(java.util.Comparator.comparingLong(BlockPos::asLong)))
                 .forEach(entry -> {
@@ -35,7 +36,8 @@ public final class BuildProjectScaffolds {
     }
 
     public static Map<BlockPos, BlockState> decode(JsonArray rows) {
-        if (rows == null || rows.size() > MAX_COUNT) throw new IllegalArgumentException("invalid saved project scaffold count");
+        // 恢复时使用相同数量预算，身份、完整状态和重复坐标仍逐条核验。
+        if (rows == null || rows.size() > BuildingBudgets.current().maxScaffolds()) throw new IllegalArgumentException("invalid saved project scaffold count");
         Map<BlockPos, BlockState> result = new LinkedHashMap<>();
         for (var value : rows) {
             JsonObject row = value.getAsJsonObject();
