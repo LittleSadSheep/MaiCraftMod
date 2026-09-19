@@ -42,6 +42,10 @@ final class MachinePlacementRules {
             if (property == null) throw new IllegalArgumentException(blockId + " has no property " + entry.getKey());
             desired = withProperty(desired, property, entry.getValue());
         }
+        // 流动等级是原版运行结果；蓝图只接受可用真实桶安装的源格，普通方块仍按已有规范化规则检查。
+        if (desired.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock) {
+            MachinePlacementItems.fluidBucket(desired); return desired;
+        }
         BlockState normalized = BuildStates.normalize(desired);
         boolean changedExplicitRequest = normalized.getBlock() != block;
         if (!changedExplicitRequest) for (String name : properties.keySet()) {

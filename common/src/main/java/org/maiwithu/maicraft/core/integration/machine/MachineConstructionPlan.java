@@ -32,6 +32,7 @@ public final class MachineConstructionPlan {
     public record Part(BlockPos position, MachineInstallation.PartSpec spec) {}
     private final BlockPos anchor;
     private final List<BuildTaskRecord.Target> blocks;
+    private final List<BuildTaskRecord.Target> fluidTargets;
     private final List<Part> parts;
     private final List<BlockPos> components;
     private final JsonObject report;
@@ -42,6 +43,9 @@ public final class MachineConstructionPlan {
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
             List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities) {
         this.anchor = anchor.immutable(); this.blocks = List.copyOf(blocks); this.parts = List.copyOf(parts);
+        fluidTargets = blocks.stream().filter(MachineConstructionPlan::isFluid)
+                .sorted(java.util.Comparator.comparingInt((BuildTaskRecord.Target target) -> target.pos().getY())
+                        .thenComparingInt(target -> target.pos().getZ()).thenComparingInt(target -> target.pos().getX())).toList();
         this.components = List.copyOf(components); this.report = report.deepCopy(); this.replace = replace;
         this.replaceBlockEntities = replaceBlockEntities;
         Map<BlockPos, BuildTaskRecord.Target> byPosition = new LinkedHashMap<>();
@@ -51,7 +55,7 @@ public final class MachineConstructionPlan {
             var closure = element.getAsJsonObject(); List<BuildTaskRecord.Target> targets = new ArrayList<>();
             for (var at : closure.getAsJsonArray("offsets")) {
                 var target = byPosition.get(offset(anchor, at));
-                if (target == null || target.desiredState().isAir()) throw new IllegalArgumentException("seal does not identify a final solid target");
+                if (target == null || target.desiredState().isAir() || isFluid(target)) throw new IllegalArgumentException("seal does not identify a final solid target");
                 targets.add(target);
             }
             closures.add(new Seal(targets, offset(anchor, closure.get("outside_offset"))));
@@ -84,7 +88,10 @@ public final class MachineConstructionPlan {
         report.add("external_inputs",org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.json(
                 org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.parse(layout.blueprint())));
         try {
-            compile(BlockPos.ZERO, layout, false);
+            var compiled = compile(BlockPos.ZERO, layout, false);
+            // 设计评审同时给出原生安装材料，源流体按真实满桶计费，而不是列出无法拿在手中的液体方块。
+            report.add("native_material_counts", compiled.report.get("native_material_counts").deepCopy());
+            report.addProperty("source_fluid_targets", compiled.fluidTargets().size());
             report.addProperty("native_installation_validated", true);
             report.addProperty("site_and_material_preflight_pending", true);
             return new SemanticMachineLayout.Result(true, layout.blueprint(), report);
@@ -131,6 +138,12 @@ public final class MachineConstructionPlan {
             BlockState state = MachinePlacementRules.resolveState(id, properties);
             Block block = state.getBlock();
             var placementItem = MachinePlacementItems.itemFor(state);
+            if (state.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock) {
+                if (cell.has("nbt") && (!cell.get("nbt").isJsonObject() || !cell.getAsJsonObject("nbt").isEmpty()))
+                    throw new IllegalArgumentException("source fluid placement does not accept copied NBT");
+                // 即使作者省略 level，最终仍必须是源格，不能把后来流进来的同种非源流体算作完成。
+                state.getProperties().forEach(property -> properties.put(property.getName(), state.getValue(property).toString()));
+            }
             // 同一种方块只查一次连带结构规则；这里尚未读现场，因此已有同种机器也要先通过这项安装规则。
             if (effectsChecked.add(block)) MachinePlacementRules.requireModeledEffects(block);
             if (!occupied.add(position)) throw new IllegalArgumentException("overlapping machine targets");
@@ -170,6 +183,16 @@ public final class MachineConstructionPlan {
         // Center cables form supports for peripheral parts and must always be installed first.
         // 先排中心部件，再排装在各面的部件，避免面板先安装时还没有宿主。
         parts.sort(java.util.Comparator.comparing(part -> part.spec().side() != null));
+        Map<String, Integer> nativeMaterials = new LinkedHashMap<>();
+        blocks.values().forEach(target -> { int count = isFluid(target) ? 1 : target.materialCount();
+            if (count > 0) nativeMaterials.merge(BuiltInRegistries.ITEM.getKey(target.item()).toString(), count, Math::addExact); });
+        parts.forEach(part -> nativeMaterials.merge(part.spec().itemId(), 1, Math::addExact));
+        if (report.has("initial_contents")) report.getAsJsonArray("initial_contents").forEach(raw -> {
+            var value = raw.getAsJsonObject(); nativeMaterials.merge(value.get("item_id").getAsString(), value.get("count").getAsInt(), Math::addExact); });
+        JsonObject materialCounts = new JsonObject(); nativeMaterials.forEach(materialCounts::addProperty);
+        report.add("native_material_counts", materialCounts);
+        report.addProperty("source_fluid_targets", blocks.values().stream().filter(MachineConstructionPlan::isFluid).count());
+        report.addProperty("native_material_scope", "full installation upper bound; already matching blocks and source fluids are reused");
         return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace, replaceBlockEntities);
     }
 
@@ -203,18 +226,20 @@ public final class MachineConstructionPlan {
     // 普通施工先保留临时洞口为空，再加入为部件腾位的清空目标；封洞另在角色走到外面之后完成。
     public BuildTaskRecord blockTask(String callId, long deadline, boolean consume, List<BlockPos> partClears, Set<BlockPos> openings) {
         List<BuildTaskRecord.Target> placement = new ArrayList<>();
-        for (var target : blocks) placement.add(openings.contains(target.pos())
+        // 源流体留给封洞后的桶操作，不能变成空气施工目标而把已经正确的水源重新挖掉。
+        for (var target : blocks) if (!isFluid(target)) placement.add(openings.contains(target.pos())
                 ? new BuildTaskRecord.Target(Blocks.AIR.defaultBlockState(), Items.AIR, target.pos(),
                     "temporary machine entrance", null, null, null, false, Set.of(), true)
                 : placementTarget(target));
         for (BlockPos at : partClears) placement.add(new BuildTaskRecord.Target(Blocks.AIR.defaultBlockState(),
-                Items.AIR, at, "native part preparation", null, null, null, false, Set.of(), true));
+                Items.AIR, at, "native installation preparation", null, null, null, false, Set.of(), true));
         BuildTaskRecord task = new BuildTaskRecord(callId, deadline, placement,
                 replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE, replace, consume,
                 consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true);
-        task.materialSupplyProtection(parts.stream().map(Part::position).toList());
-        task.semanticFacts(Map.of("machine_geometry_verified", parts.isEmpty() && openings.isEmpty(), "machine_production_verified", false));
+        var protectedSources = new ArrayList<>(parts.stream().map(Part::position).toList());
+        fluidTargets().forEach(target -> protectedSources.add(target.pos())); task.materialSupplyProtection(protectedSources);
+        task.semanticFacts(Map.of("machine_geometry_verified", parts.isEmpty() && openings.isEmpty() && fluidTargets().isEmpty(), "machine_production_verified", false));
         return task;
     }
 
@@ -235,6 +260,8 @@ public final class MachineConstructionPlan {
     }
     public BlockPos anchor() { return anchor; }
     public List<BuildTaskRecord.Target> blocks() { return blocks; }
+    public List<BuildTaskRecord.Target> fluidTargets() { return fluidTargets; }
+    public static boolean isFluid(BuildTaskRecord.Target target) { return target.desiredState().getBlock() instanceof net.minecraft.world.level.block.LiquidBlock; }
     public List<Part> parts() { return parts; }
     public List<Seal> seals() { return seals; }
     // 找出临时洞口内外要留给身体通行的空气格，供普通施工阶段保护。
@@ -249,6 +276,7 @@ public final class MachineConstructionPlan {
     }
     public List<BlockPos> components() { return components; }
     public boolean replaceExisting() { return replace; }
+    public boolean replaceBlockEntities() { return replaceBlockEntities; }
     public List<BlockPos> positions() {
         Set<BlockPos> positions = new LinkedHashSet<>();
         blocks.forEach(target -> positions.add(target.pos())); parts.forEach(part -> positions.add(part.position()));

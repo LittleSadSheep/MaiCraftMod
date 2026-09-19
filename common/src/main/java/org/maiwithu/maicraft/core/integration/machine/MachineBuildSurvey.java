@@ -23,6 +23,7 @@ final class MachineBuildSurvey {
     private final List<org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target> sealTargets;
     private int boundsIndex, partIndex;
     private int sealIndex;
+    private int fluidIndex;
 
     MachineBuildSurvey(MachineConstructionPlan plan) {
         this.plan = plan; positions = plan.positions();
@@ -39,6 +40,20 @@ final class MachineBuildSurvey {
                 return new Progress(false, null, "The compiled installation crosses the world's build boundary.");
         }
         if (boundsIndex < positions.size()) return new Progress(false, null, null);
+        // 源流体不进入普通方块任务；只把有明确替换许可的普通占用记入准备清空，已有正确源格原样保留。
+        while (fluidIndex < plan.fluidTargets().size() && budget-- > 0) {
+            var target = plan.fluidTargets().get(fluidIndex); BlockPos at = target.pos();
+            if (!world.isLoaded(at)) return new Progress(false, at, null);
+            String issue = org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules.preparationProblem(
+                    world, at, target.desiredState(), plan.replaceExisting(), plan.replaceBlockEntities());
+            if (issue != null) return new Progress(false, null, issue);
+            var actual = world.getBlockState(at);
+            if (!actual.isAir() && actual.getFluidState().isEmpty()) {
+                MachinePlacementRules.requireModeledEffects(actual.getBlock()); clears.add(at);
+            }
+            fluidIndex++;
+        }
+        if (fluidIndex < plan.fluidTargets().size()) return new Progress(false, null, null);
         while (partIndex < plan.parts().size() && budget-- > 0) {
             var part = plan.parts().get(partIndex); BlockPos at = part.position();
             if (!world.isLoaded(at)) return new Progress(false, at, null);

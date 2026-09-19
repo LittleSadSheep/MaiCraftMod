@@ -8,10 +8,13 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.BucketItem;
+import net.minecraft.world.item.MobBucketItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.server.machine.NativeApi;
@@ -26,6 +29,8 @@ public final class MachinePlacementItems {
     }
     public static Item itemFor(BlockState state) {
         if (state.isAir()) return Items.AIR;
+        // 源流体由它自己的原生桶物品安装，不把液体方块的 AIR 物品误当成材料，也不借生物桶生成额外实体。
+        if (state.getBlock() instanceof LiquidBlock) return fluidBucket(state);
         String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
         Map<String, String> properties = state.hasProperty(BlockStateProperties.AXIS)
                 ? Map.of("axis", state.getValue(BlockStateProperties.AXIS).getName()) : Map.of();
@@ -34,6 +39,17 @@ public final class MachinePlacementItems {
         if (!(selected instanceof BlockItem item) || item.getBlock() != state.getBlock())
             throw new IllegalArgumentException("machine_native_placement_item_unavailable: " + blockId + " " + properties);
         return selected;
+    }
+
+    public static BucketItem fluidBucket(BlockState state) {
+        var fluid = state.getFluidState();
+        if (!(state.getBlock() instanceof LiquidBlock) || fluid.isEmpty() || !fluid.isSource()
+                || !fluid.createLegacyBlock().equals(state))
+            throw new IllegalArgumentException("machine_fluid_requires_native_source_state");
+        Item item = fluid.getType().getBucket();
+        if (!(item instanceof BucketItem bucket) || item instanceof MobBucketItem || item == Items.BUCKET)
+            throw new IllegalArgumentException("machine_source_fluid_bucket_unavailable");
+        return bucket;
     }
     /** Mirrors VerticalGearboxItem.updateCustomBlockEntityTag; ordinary GearboxBlock placement always stays Y. */
     public static BlockState projectedFinalState(ItemStack stack, Level level, BlockPos target, Direction candidateHorizontal, BlockState initial) {

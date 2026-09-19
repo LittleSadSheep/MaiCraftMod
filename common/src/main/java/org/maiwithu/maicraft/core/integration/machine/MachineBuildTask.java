@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.WorkProfile;
 import org.maiwithu.maicraft.core.integration.machine.assembly.AePartTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineCommissioning;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineInstallation;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MekanismConfigureTaskRecord;
@@ -37,13 +38,15 @@ import org.maiwithu.maicraft.task.TaskState;
  * 每个阶段把具体动作交给现有任务执行；本类负责先后顺序、等待和最终结果。结构完成后，生产是否成功仍需另外运行观察。
  */
 final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecord> {
-    private enum Phase { SURVEY, BLOCKS, PARTS, SEAL, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
+    private enum Phase { SURVEY, BLOCKS, PARTS, SEAL, FLUID_CHECK, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
     private final Level world;
     private final Map<BlockPos, net.minecraft.world.level.block.state.BlockState> preview;
     private final JsonArray configurations;
     private final List<org.maiwithu.maicraft.client.preview.PreviewPart> previewParts;
     private final List<BlockPos> plannedPositions;
     private final MachineBuildSurvey survey;
+    private final java.util.Set<BlockPos> fluidPositions;
+    private final Map<net.minecraft.world.level.material.Fluid, java.util.Set<BlockPos>> fluidRegions;
     private final JsonArray requirements;
     private final JsonArray initialContents;
     private final JsonArray filters;
@@ -57,6 +60,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private int verifyConfigIndex, requirementIndex;
     private int contentsIndex;
     private int filterIndex;
+    private int fluidCheckIndex, fluidIndex;
     private long commissioningDeadline;
     private boolean acquiringItem;
     private boolean blocksStarted;
@@ -68,6 +72,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         super(player, record); world = player.level(); preview = record.plan.preview();
         plannedPositions = record.plan.positions();
         survey = new MachineBuildSurvey(record.plan);
+        // 同种流体共享冻结区域，后续每格填充复用这份范围，避免大池每次重扫整份计划。
+        fluidPositions = record.plan.fluidTargets().stream().map(org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target::pos)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        fluidRegions = record.plan.fluidTargets().stream().collect(java.util.stream.Collectors.groupingBy(
+                target -> target.desiredState().getFluidState().getType(), java.util.stream.Collectors.mapping(
+                        org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target::pos, java.util.stream.Collectors.toUnmodifiableSet())));
         previewParts = record.plan.parts().stream()
                 .map(part -> new org.maiwithu.maicraft.client.preview.PreviewPart(part.position(), part.spec().itemId(),
                         part.spec().side() == null ? "center" : part.spec().side().getSerializedName())).toList();
@@ -99,6 +109,8 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             case BLOCKS -> buildBlocks();
             case PARTS -> installPart();
             case SEAL -> seal();
+            case FLUID_CHECK -> checkFluids();
+            case FLUIDS -> fillFluid();
             case CONTENTS -> contents();
             case FILTERS -> filters();
             case CONFIGURE -> configure();
@@ -118,13 +130,14 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
 
     // 普通方块只启动一轮子任务，之后继续装部件；生存模式先经过供料，创造模式直接建。
     private TaskState buildBlocks() {
-        if (blocksStarted || r.plan.blocks().isEmpty() && survey.partClears().isEmpty()) { phase = Phase.PARTS; return TaskState.RUNNING; }
+        if (blocksStarted || r.plan.blocks().stream().allMatch(MachineConstructionPlan::isFluid) && survey.partClears().isEmpty()) { phase = Phase.PARTS; return TaskState.RUNNING; }
         blocksStarted = true;
         boolean consume = !WorkProfile.of(player).freeMaterials();
         var plan = r.plan.blockTask(id(), r.getDeadlineGameTime(), consume, survey.partClears(), survey.openings());
         // 这份附加检查只确认世界对象和加载状态，没有保存并逐次比较场地旧方块；它不能代替施工器的替换许可。
         plan.executionGuards(r.plan.constructionAccess(plan), actor -> actor.level() == world,
-                (actor, pos) -> actor.level() == world && actor.level().isLoaded(pos), (actor, pos) -> {});
+                (actor, pos) -> actor.level() == world && actor.level().isLoaded(pos)
+                        && (!fluidPositions.contains(pos) || actor.level().getFluidState(pos).isEmpty()), (actor, pos) -> {});
         if (consume) start(new SemanticBuildSupplyTaskRecord(id(), r.getDeadlineGameTime(), plan,
                 r.materialPolicy, List.of(), false, r.protectedLabels, false));
         else start(plan);
@@ -144,10 +157,42 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
 
     // 临时出入口留到普通结构和部件完成后再封，封口任务负责先走到外面。
     private TaskState seal() {
-        if (sealingStarted || r.plan.seals().isEmpty()) { phase = Phase.CONTENTS; return TaskState.RUNNING; }
+        if (sealingStarted || r.plan.seals().isEmpty()) { phase = Phase.FLUID_CHECK; return TaskState.RUNNING; }
         sealingStarted = true;
         start(new org.maiwithu.maicraft.core.task.build.MachineSealingTaskRecord(id(), r.getDeadlineGameTime(),
                 r.plan.seals(), r.materialPolicy, r.protectedLabels, plannedPositions));
+        return TaskState.RUNNING;
+    }
+
+    // 固体、部件、施工洞口全部完成后，再分帧检查每个待填源格的围挡，避免未封好的池子向保护区或池外漫流。
+    private TaskState checkFluids() {
+        int budget = 64;
+        while (fluidCheckIndex < r.plan.fluidTargets().size() && budget-- > 0) {
+            var target = r.plan.fluidTargets().get(fluidCheckIndex);
+            if (!world.isLoaded(target.pos())) return load(target.pos());
+            String issue = org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules.placementProblem(
+                    world, target.pos(), target.desiredState(), fluidRegion(target.desiredState()));
+            if (issue != null) return failure("machine_fluid_site_blocked", issue);
+            fluidCheckIndex++;
+        }
+        if (fluidCheckIndex >= r.plan.fluidTargets().size()) phase = Phase.FLUIDS;
+        return TaskState.RUNNING;
+    }
+
+    private java.util.Set<BlockPos> fluidRegion(net.minecraft.world.level.block.state.BlockState state) {
+        return fluidRegions.get(state.getFluidState().getType());
+    }
+
+    private TaskState fillFluid() {
+        if (fluidIndex >= r.plan.fluidTargets().size()) { phase = Phase.CONTENTS; return TaskState.RUNNING; }
+        var target = r.plan.fluidTargets().get(fluidIndex);
+        if (!world.isLoaded(target.pos())) return load(target.pos());
+        // 其他源格可能已由原版补成源流体；逐格复读，符合目标就跳过，不能为计数好看再次倒桶。
+        if (org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules.matches(world.getBlockState(target.pos()), target.desiredState())) {
+            fluidIndex++; return TaskState.RUNNING;
+        }
+        if (ensureItem(BuiltInRegistries.ITEM.getKey(target.item()))) start(new FluidPlacementTaskRecord(id(), deadline(),
+                target.pos(), target.desiredState(), fluidRegion(target.desiredState()), java.util.Set.copyOf(plannedPositions)));
         return TaskState.RUNNING;
     }
 
@@ -290,6 +335,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (!acquiringItem && phase == Phase.CONFIGURE) configIndex++;
         if (!acquiringItem && phase == Phase.CONTENTS) contentsIndex++;
         if (!acquiringItem && phase == Phase.FILTERS) filterIndex++;
+        if (!acquiringItem && phase == Phase.FLUIDS) fluidIndex++;
         acquiringItem = false;
         return TaskState.RUNNING;
     }
@@ -318,10 +364,22 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
 
     // 结束时停止尚在运行的子任务、取消供料、释放预览，再清理公共导航状态。
     @Override protected void cleanup() {
-        if (child != null) { child.stop(player, StopReason.REPLACED); child.result(TaskState.CANCELLED); child = null; }
+        if (child != null) {
+            child.stop(player, StopReason.REPLACED);
+            // 外层取消或超时时仍须取回桶等子动作的最终账；不确定的原生副作用不能随子任务引用一起丢掉。
+            TaskResult result = child.result(TaskState.CANCELLED);
+            lastChild = result == null || result.data() == null ? Map.of() : result.data();
+            child = null; childRecord = null;
+        }
         supply.cancel(player); BuildPreviewGate.release(r); super.cleanup();
     }
     @Override protected String successMessage() { return "Declared machine structure constructed and checked; use operate_machine separately to configure and verify operation."; }
+    @Override public Map<String,Object> progress() {
+        // 让上层建造/加工任务透出真正等待的原生阶段，避免站位或瞄准停滞只剩一个笼统的建造中状态。
+        var data=new LinkedHashMap<String,Object>(); data.put("task",name()); data.put("phase",phase.name().toLowerCase(java.util.Locale.ROOT));
+        data.put("verified_source_fluid_targets",fluidIndex); data.put("source_fluid_targets",r.plan.fluidTargets().size());
+        if(child!=null)data.put("native_stage",child.progress()); return Map.copyOf(data);
+    }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>(completion.report());
         data.put("machine_layout", r.plan.report());
@@ -334,7 +392,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         data.put("configured_interfaces", configIndex); data.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
         data.put("initialized_containers", contentsIndex);
         data.put("configured_output_filters", filterIndex);
+        data.put("verified_source_fluid_targets", fluidIndex);
         if (!lastChild.isEmpty()) data.put("last_native_stage", lastChild);
+        // 恢复策略读取任务信封顶层：桶可能已倒出时直接保留不确定与禁重试，不能只藏在原生阶段详情里。
+        if (Boolean.TRUE.equals(lastChild.get("outcome_uncertain"))) {
+            data.put("outcome_uncertain", true); data.put("mechanical_retry_allowed", false);
+        } else if (Boolean.FALSE.equals(lastChild.get("mechanical_retry_allowed"))) data.put("mechanical_retry_allowed", false);
         if (failureCode != null) data.put("failure_code", failureCode);
         return data;
     }
