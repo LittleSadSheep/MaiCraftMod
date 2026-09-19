@@ -105,6 +105,23 @@ tasks.register('largeBuildingRegression', JavaExec) {
 
 tasks.named('check') { dependsOn tasks.named('buildingBudgetRegression'), tasks.named('largeBuildingRegression') }
 
+// 附魔报价、按钮和消费日志单独验证；窗口和真实物品修改只会出现在另行授权的实机验收中。
+tasks.register('enchantRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks visible enchantment transactions, exact costs and durable one-shot submission boundaries.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+    mainClass = 'org.maiwithu.maicraft.intent.EnchantRegressionSuite'
+    maxHeapSize = '768m'
+    timeout = java.time.Duration.ofMinutes(2)
+    def regressionDirectory = layout.buildDirectory.dir('enchant-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
+}
+
+tasks.named('check') { dependsOn tasks.named('enchantRegression') }
+
 // 导航回归入口，限制整组运行时间，检查路径、取消、移动、落地和交通相关行为。
 tasks.register('navigationRegression', JavaExec) {
     group = 'verification'
