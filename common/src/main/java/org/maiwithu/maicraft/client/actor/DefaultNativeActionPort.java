@@ -19,6 +19,29 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     private NativeActionReceipt active;
+
+    @Override public NativeActionReceipt dropSelected(LocalPlayerContext context, ItemStack expectedSelected, boolean fullStack,
+                                                      NativeConfirmation confirmation, int timeoutTicks) {
+        // 原生 Q 使用服务端朝向，先同步已经实际转到的视角，再调用玩家原生投掷；不创建实体或设置其速度。
+        var current = requireSubmission(context); requireIdle();
+        var player = current.player();
+        if (player.containerMenu != player.inventoryMenu || !player.containerMenu.getCarried().isEmpty()
+                || !DefaultBodyControlPort.permitsWorldMovement(current.minecraft().screen) || player.isUsingItem())
+            throw new IllegalStateException("selected-stack drop requires an idle world view and empty cursor");
+        if (player.getInventory().selected < 0 || player.getInventory().selected > 8 || expectedSelected.isEmpty()
+                || !ItemStack.matches(player.getMainHandItem(), expectedSelected))
+            throw new IllegalStateException("selected stack changed before native drop");
+        java.util.Objects.requireNonNull(confirmation, "drop requires exact debit and receiving evidence");
+        current.claimMutation();
+        var receipt = oneShot(NativeActionReceipt.Kind.DROP_SELECTED, current, confirmation, timeoutTicks);
+        try {
+            current.connection().send(new ServerboundMovePlayerPacket.Rot(player.getYRot(), player.getXRot(), player.onGround()));
+            if (!player.drop(fullStack)) receipt.finish(NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED, "native player drop rejected the selected stack");
+        } catch (RuntimeException failure) {
+            receipt.finish(NativeActionReceipt.Status.UNCERTAIN, "native drop entered submission but its outcome is unknown");
+        }
+        return poll(current, receipt);
+    }
     private boolean activeProtocolUsesMenu;
     /** Non-null while an ownerless break must be physically stopped by {@link #advance}. */
     private String pendingBreakCancellationReason;

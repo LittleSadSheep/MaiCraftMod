@@ -44,6 +44,12 @@ public interface NativeActionPort {
 
     NativeActionReceipt selectHotbar(LocalPlayerContext context, int slot, int timeoutTicks);
 
+    /** 原生 Q 投掷只接受出手前完整主手快照；落点与实际扣减由调用方提供的只读回执一起核验。 */
+    default NativeActionReceipt dropSelected(LocalPlayerContext context, ItemStack expectedSelected, boolean fullStack,
+                                             NativeConfirmation confirmation, int timeoutTicks) {
+        throw new UnsupportedOperationException("native selected-stack dropping is unavailable");
+    }
+
     NativeActionReceipt creativeSetSlot(
             LocalPlayerContext context, int inventorySlot, ItemStack expected, int timeoutTicks);
 

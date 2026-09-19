@@ -7,7 +7,7 @@ import net.minecraft.core.Direction;
 
 /** 记住一次游戏操作的等待状态：何时提交、属于哪个玩家版本、等多久、观察到什么才算结束。 */
 public final class NativeActionReceipt {
-    public enum Kind { BREAK_BLOCK, USE_BLOCK, USE_ITEM, RELEASE_ITEM, SELECT_HOTBAR, CREATIVE_SET_SLOT, MOD_PROTOCOL, ATTACK_ENTITY, INTERACT_ENTITY }
+    public enum Kind { BREAK_BLOCK, USE_BLOCK, USE_ITEM, RELEASE_ITEM, SELECT_HOTBAR, DROP_SELECTED, CREATIVE_SET_SLOT, MOD_PROTOCOL, ATTACK_ENTITY, INTERACT_ENTITY }
     public enum Status { PENDING, CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, CANCELLED, DIVERGED, UNCERTAIN }
 
     private final UUID id = UUID.randomUUID();
