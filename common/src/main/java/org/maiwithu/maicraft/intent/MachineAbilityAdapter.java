@@ -95,11 +95,15 @@ final class MachineAbilityAdapter {
                         bool(p, "allow_use", false);
                         MachineProductionIntent.validate(p);
                         if (p.has("material_policy")) SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(requiredString(p, "material_policy", 64));
+                        if (MachineProductionIntent.isNative(p.getAsJsonObject("production")) && p.has("material_policy")
+                                && !"inventory_only".equals(p.get("material_policy").getAsString()))
+                            throw bad("native_process_requires_carried_inputs: acquire_items separately, then use inventory_only");
                         requireMachineTarget(goal);
                     }
                     case "watch_production" -> {
                         only(p,"operation","snapshot_id","production","allow_use","minimum_process_events","idle_ticks","max_duration_ticks");
                         requiredString(p,"snapshot_id",36); MachineProductionIntent.validate(p); bool(p,"allow_use",false);
+                        if (MachineProductionIntent.isNative(p.getAsJsonObject("production"))) throw bad("watch_production supports v1 machine networks only; native processes run in the foreground");
                         watchLimits(p); requireMachineTarget(goal);
                     }
                     case "cancel_watch" -> {
@@ -277,15 +281,14 @@ final class MachineAbilityAdapter {
         if ("run_production".equals(operation)) {
             MachineProductionIntent.requireRuntime(p.getAsJsonObject("production"));
             MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
-            var plan = new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(
-                    snapshot.center(), snapshot.dimension(), p.getAsJsonObject("production"));
-            org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerPlan(player,snapshot.label(),plan);
             var protections = new java.util.LinkedHashSet<>(goal.inheritedProtectionLabels());
             if (p.has("protected_labels")) p.getAsJsonArray("protected_labels").forEach(value -> protections.add(value.getAsString()));
-            var task = new org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord(
-                    callId, player.level().getGameTime() + 45L * 60 * 20, plan, null, List.copyOf(protections),
+            var task = MachineProductionIntent.createTask(callId, player.level().getGameTime() + 45L * 60 * 20,
+                    player, snapshot.center(), snapshot.dimension(), p.getAsJsonObject("production"), null, List.copyOf(protections),
                     p.has("material_policy") ? SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(p.get("material_policy").getAsString())
                             : SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY);
+            if (task instanceof org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord network)
+                org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerPlan(player,snapshot.label(),network.plan);
             MachineSnapshots.consume(snapshot);
             return new IntentAction.Native(task);
         }
@@ -424,10 +427,9 @@ final class MachineAbilityAdapter {
                     snapshot.dimension(), SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(
                             optionalString(p, "material_policy", 64)), protectedLabels);
             org.maiwithu.maicraft.task.TaskRecord execution = task;
-            if (p.has("production")) execution = new org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord(
-                    task.getToolCallId(), deadline,
-                    new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(anchor,
-                            snapshot.dimension(), p.getAsJsonObject("production")), task, protectedLabels);
+            // 网络生产保留旧执行器；原生过程通过同一工厂包装建造顺序，不把v2误交给v1端口网络解析。
+            if (p.has("production")) execution = MachineProductionIntent.createTask(task.getToolCallId(), deadline,
+                    player, anchor, snapshot.dimension(), p.getAsJsonObject("production"), task, protectedLabels, task.materialPolicy);
             if (execution instanceof org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord production)
                 org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerPlan(player,snapshot.label(),production.plan);
             MachineSnapshots.consume(snapshot);

@@ -51,10 +51,13 @@ public final class EnchantIntentTest {
             Goal targeted=goal().withTarget(new Goal.SemanticTarget("coordinates",null,
                     new Goal.WorldPosition(2,1,2,"minecraft:overworld"),null));
             IntentAction action=EnchantAbilityAdapter.adapt(targeted,h.player,runtime);
-            check(action instanceof IntentAction.Tool,"观察到真实台子后才转换为内部任务");
-            var arguments=((IntentAction.Tool)action).arguments();
-            check(arguments.get("x").getAsInt()==2&&arguments.get("offer_tier").getAsInt()==1
-                    &&arguments.get("max_lapis").getAsInt()==1&&!arguments.has("slot"),"固定目标与预算没有改成裸菜单指令");
+            check(action instanceof IntentAction.Native,"观察到真实台子后才转换为统一原生过程任务");
+            var nativeRecord = ((IntentAction.Native) action).record();
+            check(nativeRecord instanceof org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord,
+                    "旧入口必须复用已验收的附魔执行器");
+            var enchant = (org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord) nativeRecord;
+            check(enchant.table.equals(table) && enchant.offerTier == 1 && enchant.maxLapis == 1,
+                    "固定目标与预算没有改成裸菜单指令");
             h.set(table,Blocks.STONE.defaultBlockState());
             check(EnchantAbilityAdapter.adapt(targeted,h.player,runtime) instanceof IntentAction.Report,"台子消失时只返回缺失事实");
             check(h.blockUses()==0&&h.itemUses()==0,"目标适配不能自己点击世界或花掉材料");

@@ -53,8 +53,13 @@ final class EnchantAbilityAdapter {
         }
         if (!player.level().isLoaded(table) || !player.level().getBlockState(table).is(Blocks.ENCHANTING_TABLE))
             return unavailable("The selected position is not an observed loaded enchanting table.");
-        var args = options.executionParameters(); args.addProperty("x",table.getX()); args.addProperty("y",table.getY()); args.addProperty("z",table.getZ());
-        return new IntentAction.Tool("enchant", args.toString());
+        // 旧能力只转换执行请求，保留父Goal原文和旧消费编号；新旧入口共同使用同一附魔机制工厂与已验收执行器。
+        var production = new com.google.gson.JsonObject(); production.addProperty("schema_version", 2);
+        production.addProperty("process", org.maiwithu.maicraft.core.integration.machine.process.MinecraftEnchantProcessAdapter.ID);
+        production.add("parameters", options.executionParameters());
+        return new IntentAction.Native(MachineProductionIntent.createTask("enchant-" + java.util.UUID.randomUUID(),
+                player.level().getGameTime() + 10L * 60 * 20, player, table, player.level().dimension().location().toString(),
+                production, null, java.util.List.of(), org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY));
     }
 
     private static IntentAction unavailable(String detail) {
