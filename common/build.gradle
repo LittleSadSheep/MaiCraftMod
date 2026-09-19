@@ -122,6 +122,23 @@ tasks.register('enchantRegression', JavaExec) {
 
 tasks.named('check') { dependsOn tasks.named('enchantRegression') }
 
+// 用同一组回归检查机器原生过程、旧附魔兼容、真实投料和拾取归因；可选读取已安装AE2包核对实际注入位置。
+tasks.register('nativeProcessRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks shared native machine processes, finite world recipes and attributed player actions.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+    mainClass = 'org.maiwithu.maicraft.intent.NativeProcessRegressionSuite'
+    maxHeapSize = '1g'
+    timeout = java.time.Duration.ofMinutes(3)
+    def regressionDirectory = layout.buildDirectory.dir('native-process-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
+    if (providers.gradleProperty('maicraftAe2Jar').isPresent()) systemProperty 'maicraft.test.ae2Jar', providers.gradleProperty('maicraftAe2Jar').get()
+}
+tasks.named('check') { dependsOn tasks.named('nativeProcessRegression') }
+
 // 导航回归入口，限制整组运行时间，检查路径、取消、移动、落地和交通相关行为。
 tasks.register('navigationRegression', JavaExec) {
     group = 'verification'
