@@ -18,17 +18,44 @@ import net.minecraft.world.level.material.FluidState;
 public final class WorldProcessBatchPlanTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        overlappingIngredients(); finiteBatches(); competitors(); capacity(); componentIdentity();
+        overlappingIngredients(); earlyTriggerRejected(); finiteBatches(); competitors(); capacity(); componentIdentity();
         System.out.println("WorldProcessBatchPlanTest: shared allocation, finite supply, trigger order, competing recipes and capacity passed");
     }
 
     private static void overlappingIngredients() {
+        // 重叠标签的有限库存分配仍有价值；只要早投原料都不匹配触发谓词，就能在保留专用材料后安全地最后投触发物。
         var inventory = empty(); inventory.set(0, new ItemStack(Items.STICK)); inventory.set(1, new ItemStack(Items.OAK_PLANKS));
-        var recipe = recipe("overlap", List.of(Ingredient.of(Items.STICK, Items.OAK_PLANKS), Ingredient.of(Items.STICK)), new ItemStack(Items.BRICK), 0);
+        inventory.set(2, new ItemStack(Items.REDSTONE));
+        var recipe = recipe("overlap", List.of(Ingredient.of(Items.REDSTONE), Ingredient.of(Items.STICK, Items.OAK_PLANKS),
+                Ingredient.of(Items.STICK)), new ItemStack(Items.BRICK), 0);
         var plan = WorldProcessBatchPlan.compile(recipe, inventory, 1, List.of(recipe));
-        check(plan.batch(0).get(0).is(Items.STICK) && plan.batch(0).get(1).is(Items.OAK_PLANKS),
+        check(plan.batch(0).get(0).is(Items.OAK_PLANKS) && plan.batch(0).get(1).is(Items.STICK) && plan.batch(0).getLast().is(Items.REDSTONE),
                 "通用标签不能占走专用输入的唯一材料；触发物按原生规则最后投");
         check(inventory.get(0).getCount() == 1 && inventory.get(1).getCount() == 1, "规划不能改真实背包");
+    }
+
+    private static void earlyTriggerRejected() {
+        // 这份库存虽然完全够配方使用，但木棍也匹配第0项；先入水的木棍能吞掉尚未入水的木板，不能宣称投料回执可闭环。
+        var inventory = empty(); inventory.set(0, new ItemStack(Items.STICK)); inventory.set(1, new ItemStack(Items.OAK_PLANKS));
+        var overlap = recipe("trigger_overlap", List.of(Ingredient.of(Items.STICK, Items.OAK_PLANKS), Ingredient.of(Items.STICK)), new ItemStack(Items.BRICK), 0);
+        check(WorldProcessBatchPlan.matches(overlap.inputs(), inventory), "原料充分匹配与真实投料顺序安全是两个独立条件");
+        rejects(() -> WorldProcessBatchPlan.compile(overlap, inventory, 1, List.of(overlap)), "trigger_order_ambiguous");
+        check(inventory.get(0).getCount() == 1 && inventory.get(1).getCount() == 1, "预检拒绝发生在任何消费前");
+        var repeated = recipe("same_item_twice", List.of(Ingredient.of(Items.BOOK), Ingredient.of(Items.BOOK)), new ItemStack(Items.PAPER), 0);
+        var books = empty(); books.set(0, new ItemStack(Items.BOOK, 2));
+        check(WorldProcessBatchPlan.matches(repeated.inputs(), books), "重复原料仍按真实数量分配，不能把风险误报为缺料");
+        rejects(() -> WorldProcessBatchPlan.compile(repeated, books, 1, List.of(repeated)), "trigger_order_ambiguous");
+
+        // 原料谓词可以有交集，只要本次实际分配不使用交集就可执行；后续批次若需交集材料，也必须在首批前整单拒绝。
+        var alternatives = recipe("safe_selected_overlap", List.of(Ingredient.of(Items.REDSTONE, Items.STICK),
+                Ingredient.of(Items.QUARTZ, Items.STICK)), new ItemStack(Items.GLASS), 0);
+        var selected = empty(); selected.set(0, new ItemStack(Items.REDSTONE, 2)); selected.set(1, new ItemStack(Items.QUARTZ));
+        check(WorldProcessBatchPlan.compile(alternatives, selected, 1, List.of(alternatives)).batch(0).getLast().is(Items.REDSTONE),
+                "按实际已选材料判断触发风险，不笼统拒绝所有重叠谓词");
+        selected.set(2, new ItemStack(Items.STICK));
+        rejects(() -> WorldProcessBatchPlan.compile(alternatives, selected, 2, List.of(alternatives)), "trigger_order_ambiguous");
+        check(selected.get(0).getCount() == 2 && selected.get(1).getCount() == 1 && selected.get(2).getCount() == 1,
+                "不能为了安全首批而先消耗，之后才拒绝危险的第二批");
     }
 
     private static void finiteBatches() {

@@ -8,7 +8,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.maiwithu.maicraft.core.tools.ResourceAllocation;
 
-/** 从真实背包和原生原料谓词编译有限批次；先证明所有材料够用，再按批投料，触发物总在该批最后投入。 */
+/** 从真实背包和原生原料谓词编译有限批次；先证明材料够用且早投物不能触发，再逐批投入最后的触发物。 */
 public final class WorldProcessBatchPlan {
     private final List<List<ItemStack>> batches;
     private WorldProcessBatchPlan(List<List<ItemStack>> batches) { this.batches = batches; }
@@ -24,6 +24,14 @@ public final class WorldProcessBatchPlan {
         long[][] allocation = ResourceAllocation.allocate(supply, demand,
                 (r, i) -> !inventory.get(r).isEmpty() && recipe.inputs().get(i).test(inventory.get(r).copyWithCount(1)));
         if (allocation == null) throw new IllegalArgumentException("world_process_insufficient_exact_inputs");
+        Ingredient trigger = recipe.inputs().get(recipe.triggerInputIndex());
+        // AE2按实体匹配触发谓词，邻近的其他原料无须先入水；只把第0项最后投，不能阻止早投的重叠标签原料提前反应。
+        // 检查整份有限分配后才允许开工，避免第一批已消费、后续批次才发现同类触发物会吞掉尚在飞行的最后一份原料。
+        for (int i = 0; i < demand.length; i++) if (i != recipe.triggerInputIndex())
+            for (int r = 0; r < supply.length; r++)
+                if (allocation[r][i] > 0 && trigger.test(inventory.get(r).copyWithCount(1)))
+                    throw new IllegalArgumentException("world_process_trigger_order_ambiguous: allocated earlier input " + i
+                            + " also matches the trigger ingredient; cannot confirm every input before transformation");
         var batches = new ArrayList<List<ItemStack>>();
         List<ItemStack> simulated = inventory.stream().map(ItemStack::copy).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         for (int batch = 0; batch < count; batch++) {

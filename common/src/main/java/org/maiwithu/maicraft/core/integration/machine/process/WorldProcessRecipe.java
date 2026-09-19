@@ -19,4 +19,7 @@ public interface WorldProcessRecipe {
 
     /** 适配器给出哪一项原料触发加工；执行器据此最后投放该项，避免其他原料尚未送齐就开始反应。 */
     int triggerInputIndex();
+
+    /** 原生机制以触发物底部位置为中心搜集原料的半径；未知时不能假定整个水池里的原料都会参与反应。 */
+    default java.util.OptionalDouble inputSearchRadius() { return java.util.OptionalDouble.empty(); }
 }

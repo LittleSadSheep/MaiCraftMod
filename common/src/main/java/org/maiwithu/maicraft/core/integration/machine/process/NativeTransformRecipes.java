@@ -84,6 +84,8 @@ public final class NativeTransformRecipes {
         public JsonObject describe() { return description.deepCopy(); }
         // AE2 只让匹配第一项原料的掉落物启动流体转化，由通用流程据此安排最后一项投放。
         public int triggerInputIndex() { return 0; }
+        // AE2 的 TransformLogic 按触发物底部坐标各扩一格查询实体；最后投料须与已入池原料的实际碰撞体相交。
+        @Override public java.util.OptionalDouble inputSearchRadius() { return java.util.OptionalDouble.of(1); }
         public boolean isFluid() { return environment.has("type") && "fluid".equals(environment.get("type").getAsString()); }
         public boolean supports(FluidState state) { return isFluid() && state != null && !state.isEmpty() && fluidMatch.test(state); }
 
@@ -97,6 +99,8 @@ public final class NativeTransformRecipes {
             var ops = RegistryOps.create(JsonOps.INSTANCE, registries);
             JsonObject out = new JsonObject(); out.addProperty("recipe_id", id.toString()); out.addProperty("recipe_type", "ae2:transform");
             out.add("environment", environment.deepCopy()); out.addProperty("trigger_input_index", 0);
+            // 场地观察同时说明原料须在触发物附近，不能让调用者把同一大片水域误当成一个无限收料槽。
+            out.addProperty("input_search_radius", inputSearchRadius().orElseThrow());
             JsonArray requirements = new JsonArray();
             for (int index = 0; index < inputs.size(); index++) {
                 Ingredient ingredient = inputs.get(index); JsonObject requirement = new JsonObject();
