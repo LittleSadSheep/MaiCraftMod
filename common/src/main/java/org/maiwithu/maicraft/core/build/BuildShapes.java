@@ -24,10 +24,9 @@ public final class BuildShapes {
     private BuildShapes() {}
 
     /**
-     * 一次普通建造允许的最终格数上限。shapeCells 在全部展开后检查；整次调用还由 BuildTool 再检查。
-     * 这个常量本身不会提前限制枚举次数，也不会自动限制本类所有生成方法。
+     * 一次普通建造允许的最终格数，读取客户端启动配置；形状展开和整次调用使用同一上限。
      */
-    public static final int MAX_TOTAL_CELLS = 16384;
+    public static int maxTotalCells() { return BuildingBudgets.current().maxTargets(); }
 
     /**
      * 把参数展开成不重复的坐标。box 的两个角都包含在内，hollow 只去掉六个面包住的内部。
@@ -38,7 +37,15 @@ public final class BuildShapes {
                                        int x1, int y1, int z1,
                                        Integer x2, Integer y2, Integer z2,
                                        Integer radius, Integer height) {
-        Set<BlockPos> out = new LinkedHashSet<>();
+        int limit = maxTotalCells();
+        // 持续枚举大楼轮廓时就检查新格子数量，不能先分配远超预算的整栋目标再在结尾拒绝。
+        Set<BlockPos> out = new LinkedHashSet<>() {
+            @Override public boolean add(BlockPos cell) {
+                if (size() >= limit && !contains(cell)) throw new IllegalArgumentException(
+                        "shape exceeds " + limit + " cells; configure maxTargets in " + BuildingBudgets.CONFIG_PATH);
+                return super.add(cell);
+            }
+        };
         switch (shape == null ? "" : shape) {
             case "box" -> {
                 int ax = Math.min(x1, req(x2, "x2")), bx = Math.max(x1, x2);
@@ -125,9 +132,9 @@ public final class BuildShapes {
         if (out.isEmpty()) {
             throw new IllegalArgumentException("shape resolved to zero cells");
         }
-        if (out.size() > MAX_TOTAL_CELLS) {
+        if (out.size() > limit) {
             throw new IllegalArgumentException("shape has " + out.size() + " cells, exceeding "
-                    + MAX_TOTAL_CELLS + "; split it into smaller calls");
+                    + limit + "; configure maxTargets in " + BuildingBudgets.CONFIG_PATH);
         }
         return new ArrayList<>(out);
     }

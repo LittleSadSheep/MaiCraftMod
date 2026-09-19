@@ -11,8 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.maiwithu.maicraft.core.build.BuildShapes;
-import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /**
@@ -88,13 +87,14 @@ public final class BuildingSceneCompiler {
         if (scene.has("schema_version")) integer(scene.get("schema_version"), 1, 1, "schema_version");
         String coordinates = scene.has("coordinate_system") ? string(scene.get("coordinate_system"), 32, "coordinate_system") : "blender_z_up";
         if (!coordinates.equals("blender_z_up") && !coordinates.equals("minecraft_y_up")) throw bad("unsupported coordinate_system: " + coordinates);
-        MachinePlanningBudget budget = MachinePlanningBudget.current();
-        int limit = Math.min(BuildShapes.MAX_TOTAL_CELLS, budget.maxTargets());
-        Map<String, JsonObject> materials = materials(object(scene.get("materials"), "materials"), budget.maxComponents());
+        // 旧版作者模型也采用同一建筑配置，升级前后的建筑规模不能因版本不同而被旧机器预算截断。
+        BuildingBudgets budget = BuildingBudgets.current();
+        int limit = budget.maxTargets();
+        Map<String, JsonObject> materials = materials(object(scene.get("materials"), "materials"), budget.maxObjects());
         Map<String, Mesh> meshes = new LinkedHashMap<>();
         Set<String> cutters = new HashSet<>();
         long modifierCount = 0;
-        for (JsonElement entry : array(scene.get("objects"), 1, budget.maxComponents(), "objects")) {
+        for (JsonElement entry : array(scene.get("objects"), 1, budget.maxObjects(), "objects")) {
             JsonObject object = object(entry, "scene object"); keys(object, OBJECT_FIELDS, "scene object");
             String name = string(object.get("name"), 64, "object.name");
             boolean cutter = false;
@@ -133,9 +133,9 @@ public final class BuildingSceneCompiler {
             if (mesh.material == null) throw bad("solid object requires a material: " + mesh.name);
             long volume = mesh.box.volume(), multiplier = Math.max(1, mesh.cuts.size());
             if (volume > limit) throw bad("mesh exceeds the " + limit + " final block budget: " + mesh.name);
-            if (volume > BlueprintFormats.MAX_REGION_VOLUME / multiplier
-                    || (work += volume * multiplier) > BlueprintFormats.MAX_REGION_VOLUME)
-                throw bad("scene exceeds the voxelization work budget");
+            if (volume > budget.maxVoxelWork() / multiplier || work > budget.maxVoxelWork() - volume * multiplier)
+                throw bad("scene exceeds maxVoxelWork=" + budget.maxVoxelWork() + " in " + BuildingBudgets.CONFIG_PATH);
+            work += volume * multiplier;
         }
         if (solidCount == 0) throw bad("scene has no solid objects to compile");
         return new Model(materials, meshes, cutters, coordinates, limit);

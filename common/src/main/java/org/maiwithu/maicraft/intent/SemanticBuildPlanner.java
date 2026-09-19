@@ -42,7 +42,8 @@ import java.util.function.Predicate;
 
 /** 把“在这里建某种房子”变成具体方块方案：先找地块，再选材料、分房间、安排门窗屋顶和通道。 */
 public final class SemanticBuildPlanner {
-    private static final int MAX_CELLS = 16_384;
+    // 自然语言建筑与显式场景读取同一上限，不能把已经允许的大型蓝图判成必须缩小的房屋。
+    private static int maxCells() { return org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxTargets(); }
     private static final int SEARCH_RADIUS = 32;
     private static final int MAX_CANDIDATES = 128;
     private static final int MAX_SLOPE = 6;
@@ -174,9 +175,9 @@ public final class SemanticBuildPlanner {
                     option("replace_goal", "Choose another style, feature set or material policy."),
                     option("skip", "Skip this structure."), option("cancel", "Cancel the task."));
         }
-        if (resolvedCells > MAX_CELLS) return decision(goal,
+        if (resolvedCells > maxCells()) return decision(goal,
                 "The reviewed design resolves to exactly " + resolvedCells
-                        + " cells, above the " + MAX_CELLS + " limit.",
+                        + " cells, above the " + maxCells() + " limit (config/maicraft-building.properties maxTargets).",
                 option("replace_goal", "Choose a smaller footprint, fewer storeys or fewer features."),
                 option("skip", "Skip this structure."), option("cancel", "Cancel the task."));
 
@@ -288,9 +289,9 @@ public final class SemanticBuildPlanner {
             Palette palette = palette(player, preferred, policy);
             JsonArray ops = design(site, size, purpose, features, palette, style, terrain, replace);
             int resolvedCells = BuildTool.resolvedCellCount(ops);
-            if (resolvedCells > MAX_CELLS) return LoadedBuildProbe.invalid(
+            if (resolvedCells > maxCells()) return LoadedBuildProbe.invalid(
                     "semantic_build_cell_limit",
-                    "the reviewed design resolves above the " + MAX_CELLS + " cell limit");
+                    "the reviewed design resolves above the " + maxCells() + " cell limit (config/maicraft-building.properties maxTargets)");
             JsonObject args = new JsonObject();
             args.add("ops", ops);
             args.addProperty("replace_existing", replace);

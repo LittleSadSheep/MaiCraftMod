@@ -6,7 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.HashSet;
 import java.util.Set;
-import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /** 先核对快速图元和组件的作者输入，再展开重复装饰；未知字段不能成为隐藏的游戏操作。 */
@@ -83,7 +83,7 @@ public final class BuildingModelSchema {
         choice(node, "fill", Set.of("solid", "hollow")); choice(node, "block_state_axes", Set.of("local", "minecraft_world"));
         for (String field : Set.of("location", "dimensions", "rotation_euler")) if (node.has(field)) {
             for (JsonElement value : array(node.get(field), 3, 3, field)) {
-                if (field.equals("dimensions")) integer(value, 1, 2 * MachinePlanningBudget.current().maxRadius() + 1, field);
+                if (field.equals("dimensions")) integer(value, 1, 2 * BuildingBudgets.current().maxRadius() + 1, field);
                 else finite(value, field);
             }
         }
@@ -93,7 +93,7 @@ public final class BuildingModelSchema {
         for (String field : Set.of("material", "edge_material")) if (node.has(field)) string(node.get(field), 64, field);
         for (String field : Set.of("wall_thickness", "edge_width")) if (node.has(field)) {
             double value = finite(node.get(field), field);
-            if (value < .5 || value > 2L * MachinePlanningBudget.current().maxRadius() + 1) throw bad(field + " must be at least half a block and remain bounded");
+            if (value < .5 || value > 2L * BuildingBudgets.current().maxRadius() + 1) throw bad(field + " must be at least half a block and remain bounded");
         }
         for (String field : Set.of("face_materials", "edge_materials", "material_map")) if (node.has(field)) namesMap(object(node.get(field), field));
         if (node.has("mirror")) distinctStrings(array(node.get("mirror"), 0, 3, "mirror"), Set.of("x", "y", "z"), "mirror");
@@ -104,7 +104,7 @@ public final class BuildingModelSchema {
         if (node.has("faces")) for (var face : array(node.get("faces"), 4, 64, "faces"))
             for (var index : array(face, 3, 64, "face")) integer(index, 0, 63, "face vertex index");
         if (node.has("array")) validateArray(object(node.get("array"), "array"));
-        if (node.has("modifiers")) for (var value : array(node.get("modifiers"), 0, Math.min(4096, MachinePlanningBudget.current().maxConnections()), "modifiers")) {
+        if (node.has("modifiers")) for (var value : array(node.get("modifiers"), 0, BuildingBudgets.current().maxConnections(), "modifiers")) {
             JsonObject modifier = object(value, "modifier"); keys(modifier, Set.of("type", "operation", "object"), "modifier");
             if (!"BOOLEAN".equals(string(modifier.get("type"), 16, "modifier.type"))
                     || !"DIFFERENCE".equals(string(modifier.get("operation"), 16, "modifier.operation"))) throw bad("only BOOLEAN DIFFERENCE is supported");
@@ -166,7 +166,8 @@ public final class BuildingModelSchema {
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) throw bad(field + " must be numeric");
         double result = value.getAsDouble(); if (!Double.isFinite(result) || Math.abs(result) > 1_000_000_000) throw bad(field + " exceeds finite model coordinates"); return result;
     }
-    static int limit() { return Math.min(4096, MachinePlanningBudget.current().maxComponents()); }
+    // 柱网与幕墙阵列按配置计入作者和展开节点，不能在配置之外另藏一个4096节点上限。
+    static int limit() { return BuildingBudgets.current().maxObjects(); }
     static String name(JsonElement value) { return name(string(value, 64, "object/component name")); }
     static String name(String value) {
         if (value.isBlank() || value.length() > 64 || value.contains("/") || value.contains("[") || value.contains("]"))

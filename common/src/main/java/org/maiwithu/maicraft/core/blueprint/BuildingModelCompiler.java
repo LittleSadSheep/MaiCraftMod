@@ -11,8 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.core.build.BuildShapes;
-import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /** 组件展开 -> 图元和空腔采样 -> 面与棱涂装 -> 切割/重叠结算；生成最终蓝图后才交给原生施工。 */
@@ -36,7 +35,9 @@ public final class BuildingModelCompiler {
             for (var cutter : cutters) cost += cutter.shape().faces().size();
             try { work = Math.addExact(work, Math.multiplyExact(leaf.bounds().volume(), cost)); }
             catch (ArithmeticException exceeded) { throw bad("model voxel work budget overflow"); }
-            if (work > BlueprintFormats.MAX_REGION_VOLUME) throw bad("model exceeds the bounded voxel/face comparison budget");
+            // 大厅空气与复杂屋顶仍计算真实采样工作量，但限额由建筑配置提供，独立于导入区域体积。
+            if (work > BuildingBudgets.current().maxVoxelWork()) throw bad("model exceeds maxVoxelWork="
+                    + BuildingBudgets.current().maxVoxelWork() + " in " + BuildingBudgets.CONFIG_PATH);
             meshes.add(new Raster(leaf, paint, cutters));
         }
         return new Plan(model, List.copyOf(meshes), work);
@@ -44,7 +45,8 @@ public final class BuildingModelCompiler {
 
     public static JsonObject compile(JsonObject scene) {
         Plan plan = prepare(scene); Map<Point, Cell> cells = new LinkedHashMap<>();
-        int limit = Math.min(BuildShapes.MAX_TOTAL_CELLS, MachinePlanningBudget.current().maxTargets());
+        // 整份建筑采用自己的目标预算，不能再被机器规划的较小目标数截断。
+        int limit = BuildingBudgets.current().maxTargets();
         JsonObject air = new JsonObject(); air.addProperty("block_id", "minecraft:air"); air.add("properties", new JsonObject());
         boolean strictOverlap = scene.has("overlap_policy") && scene.get("overlap_policy").getAsString().equals("error");
         var conflicts = new HashSet<Point>(); JsonArray examples = new JsonArray(); long overlapEvents = 0;
@@ -59,7 +61,8 @@ public final class BuildingModelCompiler {
                     boolean cut = false;
                     for (var cutter : mesh.cutters) if (cutter.contains(center)) { cut = true; break; }
                     JsonObject state = cut ? null : mesh.paint.at(local);
-                    if (!cells.containsKey(at) && cells.size() >= limit) throw bad("model exceeds the " + limit + " final block budget");
+                    if (!cells.containsKey(at) && cells.size() >= limit) throw bad("model exceeds the " + limit
+                            + " final block budget; configure maxTargets in " + BuildingBudgets.CONFIG_PATH);
                     // 空心内腔和切割孔只补尚未被别的对象占用的空气；玻璃、框架等独立对象仍可填入。
                     if (state == null) { cells.putIfAbsent(at, new Cell(air, mesh.leaf.name(), true)); continue; }
                     Cell prior = cells.get(at);

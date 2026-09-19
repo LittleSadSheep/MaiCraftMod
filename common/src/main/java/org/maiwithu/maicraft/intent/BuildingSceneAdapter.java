@@ -142,7 +142,8 @@ final class BuildingSceneAdapter {
 
     // 把局部偏移加到固定锚点，生成逐格 set；拒绝实体、部件和非空 NBT 配置，这些另由机器能力处理。
     static JsonObject buildArguments(JsonObject blueprint, Goal.WorldPosition anchor, JsonObject parameters) {
-        org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateWire(blueprint);
+        // 已经编译的大建筑在转换为绝对施工目标时继续使用建筑预算，不退回机器蓝图的默认规模。
+        org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateBuildingWire(blueprint);
         if (blueprint.has("entities") && !blueprint.getAsJsonArray("entities").isEmpty())
             throw new IllegalArgumentException("Building models do not support entity installation");
         JsonArray ops = new JsonArray();
@@ -161,8 +162,10 @@ final class BuildingSceneAdapter {
             op.addProperty("z", Math.addExact(anchor.z(), offset.get(2).getAsInt()));
             op.add("properties", properties.deepCopy()); ops.add(op);
         }
-        if (ops.size() > org.maiwithu.maicraft.core.build.BuildShapes.MAX_TOTAL_CELLS)
-            throw new IllegalArgumentException("Building model exceeds the bounded construction cell budget");
+        if (ops.size() > org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxTargets())
+            throw new IllegalArgumentException("Building model exceeds maxTargets="
+                    + org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxTargets()
+                    + " in config/maicraft-building.properties");
         JsonObject args = new JsonObject(); args.add("ops", ops);
         // 模型保持明确材料与精确状态；允许分批备料，默认不替换已有方块。specified 只固定材质，实际取材按 ordinary 策略执行。
         args.addProperty("exact_states", true);

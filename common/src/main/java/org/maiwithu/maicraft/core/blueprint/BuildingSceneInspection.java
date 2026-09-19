@@ -5,7 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.LinkedHashSet;
 import java.util.Set;
-import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /**
@@ -73,7 +73,8 @@ public final class BuildingSceneInspection {
         result.add("materials", materials);
         if (!result.has("modifiers")) result.add("modifiers", new JsonArray());
         boolean blender = coordinateSystem(scene).equals("blender_z_up");
-        Box bounds = box(object, blender, MachinePlanningBudget.current().maxRadius());
+        // 查看旧版场景仍使用与编译相同的建筑半径，避免大模型保存后反而无法检查对象。
+        Box bounds = box(object, blender, BuildingBudgets.current().maxRadius());
         JsonObject blockBounds = new JsonObject(); blockBounds.add("from", bounds.from().json()); blockBounds.add("to", bounds.to().json());
         result.add("minecraft_block_bounds", blockBounds);
         // 字段沿用 world_bounding_box 这个名字，但八个角仍是场景局部坐标，没有加保存的世界锚点。

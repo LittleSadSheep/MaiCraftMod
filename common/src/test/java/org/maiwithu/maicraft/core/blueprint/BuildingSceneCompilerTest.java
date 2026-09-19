@@ -64,13 +64,26 @@ public final class BuildingSceneCompilerTest {
         rejects(s -> s.getAsJsonArray("objects").remove(1));
         rejects(s -> s.getAsJsonArray("objects").add(s.getAsJsonArray("objects").get(0).deepCopy()));
         rejects(s -> s.getAsJsonArray("objects").get(1).getAsJsonObject().add("modifiers", s.getAsJsonArray("objects").get(0).getAsJsonObject().get("modifiers").deepCopy()));
-        rejects(s -> { JsonObject large = s.getAsJsonArray("objects").get(0).getAsJsonObject(); large.addProperty("primitive", "cube"); large.add("dimensions", JsonParser.parseString("[32,32,32]")); large.add("location", JsonParser.parseString("[16,16,16]")); });
-        rejects(s -> {
-            JsonArray disjoint = new JsonArray();
-            for (int i = 0; i < 3; i++) disjoint.add(mesh("Volume" + i, "wall", "[" + (10 + i * 32) + ",10,10]", "[20,20,20]"));
-            s.add("objects", disjoint); BuildingSceneCompiler.validateWire(s); // Structural checks do not enumerate the union.
-        });
+        rejectsConfiguredExcess();
         System.out.println("BuildingSceneCompilerTest: exact mesh transforms, materials and scoped Boolean cuts passed");
+    }
+
+    private static void rejectsConfiguredExcess() {
+        // 用显式小限额保留单体超量与合并超量检查，正常大工程默认值提高后不再误把合法房屋列为坏输入。
+        try {
+            var directory = java.nio.file.Files.createTempDirectory("v1-scene-budget-");
+            java.nio.file.Files.createDirectories(directory.resolve("config"));
+            java.nio.file.Files.writeString(directory.resolve(org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH), "maxTargets=16384\n");
+            org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory);
+            try {
+                rejects(s -> { JsonObject large = s.getAsJsonArray("objects").get(0).getAsJsonObject(); large.addProperty("primitive", "cube"); large.add("dimensions", JsonParser.parseString("[32,32,32]")); large.add("location", JsonParser.parseString("[16,16,16]")); });
+                rejects(s -> {
+                    JsonArray disjoint = new JsonArray();
+                    for (int i = 0; i < 3; i++) disjoint.add(mesh("Volume" + i, "wall", "[" + (10 + i * 32) + ",10,10]", "[20,20,20]"));
+                    s.add("objects", disjoint); BuildingSceneCompiler.validateWire(s);
+                });
+            } finally { org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory.resolve("restore-defaults")); }
+        } catch (java.io.IOException failure) { throw new AssertionError(failure); }
     }
 
     private static JsonObject scene() {

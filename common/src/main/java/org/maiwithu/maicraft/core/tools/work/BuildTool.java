@@ -101,7 +101,7 @@ public final class BuildTool implements MaiCraftTool {
                 + "block_id `air` CLEARS the cell (drops harvest normally). Liquids are NOT handled: leave "
                 + "water and lava out of the ops — dig the basin and let the player pour it. "
                 + "Compose whole buildings like stacking toy bricks in ONE call, "
-                + "up to 16384 cells — enough for a whole house, so use it. She walks to the site once, then "
+                + "up to " + BuildShapes.maxTotalCells() + " cells under config/maicraft-building.properties maxTargets. She walks to the site once, then "
                 + "works inside it, placing cells in batches "
                 + "from the ground up. MATERIALS: in creative she builds freely. In survival every cell consumes "
                 + "1 matching item and the whole job is refused up front, PLACING NOTHING, if anything is "
@@ -294,9 +294,10 @@ public final class BuildTool implements MaiCraftTool {
         List<BuildTaskRecord.Target> targets = args.has("project_targets")
                 ? org.maiwithu.maicraft.core.blueprint.BuildProjectTargets.decode(args.getAsJsonArray("project_targets"))
                 : resolveTargets(parsed.ops(), Boolean.TRUE.equals(parsed.exact_states()));
-        if (targets.size() > BuildShapes.MAX_TOTAL_CELLS) {
+        // 直接建造和冻结项目恢复都按本次启动的建筑预算接单，不能只给作者模型放宽上限。
+        if (targets.size() > BuildShapes.maxTotalCells()) {
             throw new IllegalArgumentException("this call resolves to " + targets.size()
-                    + " cells, exceeding " + BuildShapes.MAX_TOTAL_CELLS + "; split it into multiple calls");
+                    + " cells, exceeding " + BuildShapes.maxTotalCells() + "; configure maxTargets in config/maicraft-building.properties");
         }
         boolean replaceExisting = parsed.replace_existing() == null || parsed.replace_existing();
         boolean allowPartial = parsed.allow_partial() != null && parsed.allow_partial();
@@ -385,10 +386,10 @@ public final class BuildTool implements MaiCraftTool {
                     : target);
             }
         }
-        // 单指令流:顺序即语义,后写覆盖先写,去重保留最后一笔
-        Map<Long, BuildTaskRecord.Target> byPos = new LinkedHashMap<>();
+        // 同一格后写覆盖先写；大半径设计保留三个完整坐标，不能让相差4096层的目标因压缩坐标重叠而丢失。
+        Map<BlockPos, BuildTaskRecord.Target> byPos = new LinkedHashMap<>();
         for (BuildTaskRecord.Target target : expanded) {
-            byPos.put(target.pos().asLong(), target);
+            byPos.put(target.pos(), target);
         }
         return new ArrayList<>(byPos.values());
     }

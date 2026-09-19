@@ -25,6 +25,12 @@ public final class MachineBlueprintDocument {
 
     public static void validateWire(JsonObject document) { normalized(document); }
 
+    // 建筑和机器共用方块格式，但大型航站楼不能被机器自主规划的32768格或128格半径二次截断。
+    public static void validateBuildingWire(JsonObject document) {
+        var budget = org.maiwithu.maicraft.core.build.BuildingBudgets.current();
+        normalized(document, budget.maxTargets(), budget.maxRadius());
+    }
+
     /** No layout inference: coordinates and explicit state constraints retain the author's meaning. */
     // 先整理统一格式，再查询注册表能力；把不支持的方块、状态、NBT 和实体安装收集成错误列表，最多展示 32 条。
     public static SemanticMachineLayout.Result compile(JsonObject document, SemanticMachineLayout.Registry registry) {
@@ -73,6 +79,12 @@ public final class MachineBlueprintDocument {
 
     // 复制并校验字段，补默认版本与空属性表；总目标数和坐标范围使用可配置的规划预算。
     private static JsonObject normalized(JsonObject document) {
+        var budget = MachinePlanningBudget.current();
+        return normalized(document, budget.maxTargets(), budget.maxRadius());
+    }
+
+    // 由调用能力传入其资源快照；字段、状态、重复坐标和部件占格规则继续共用，放宽建筑不会放宽机器安装语义。
+    private static JsonObject normalized(JsonObject document, int limit, int radius) {
         if (document == null) throw bad("blueprint must be an object");
         keys(document, FIELDS, "blueprint");
         if (document.has("schema_version") && integer(document.get("schema_version"), 1, 1, "schema_version") != 1)
@@ -81,7 +93,6 @@ public final class MachineBlueprintDocument {
             if (document.has(field) && !document.get(field).isJsonObject()) throw bad(field + " must be an object");
         if (!document.has("blocks") || !document.get("blocks").isJsonArray()) throw bad("blueprint.blocks must be an array");
         JsonArray cells = document.getAsJsonArray("blocks");
-        int limit = MachinePlanningBudget.current().maxTargets();
         if (cells.isEmpty() || cells.size() > limit) throw bad("blueprint.blocks must contain 1.." + limit + " targets");
         JsonObject result = new JsonObject(); result.addProperty("schema_version", 1);
         JsonArray blocks = new JsonArray(); result.add("blocks", blocks);
@@ -90,7 +101,7 @@ public final class MachineBlueprintDocument {
             if (!element.isJsonObject()) throw bad("blueprint block must be an object");
             JsonObject cell = element.getAsJsonObject(); boolean part = cell.has("part");
             keys(cell, part ? PART_FIELDS : BLOCK_FIELDS, "blueprint target");
-            JsonArray offset = offset(cell.get("offset")); String position = offset.toString();
+            JsonArray offset = offset(cell.get("offset"), radius); String position = offset.toString();
             JsonObject target = new JsonObject(); target.add("offset", offset);
             // 同一格可以放不同面的部件，但同一面不能重复，部件也不能与普通整格方块目标重叠。
             if (part) {
@@ -133,9 +144,9 @@ public final class MachineBlueprintDocument {
         return result;
     }
 
-    private static JsonArray offset(JsonElement value) {
+    private static JsonArray offset(JsonElement value, int radius) {
         if (value == null || !value.isJsonArray() || value.getAsJsonArray().size() != 3) throw bad("offset must be [dx,dy,dz]");
-        int radius = MachinePlanningBudget.current().maxRadius(); JsonArray result = new JsonArray();
+        JsonArray result = new JsonArray();
         for (JsonElement axis : value.getAsJsonArray()) result.add(integer(axis, -radius, radius, "offset"));
         return result;
     }

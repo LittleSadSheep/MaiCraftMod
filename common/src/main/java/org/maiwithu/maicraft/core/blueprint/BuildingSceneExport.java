@@ -59,7 +59,8 @@ public final class BuildingSceneExport {
 
     // 先验证普通方块蓝图并补齐建造会改变的默认值，再按不同方块状态合并材料表。
     public static CompoundTag structure(JsonObject blueprint) {
-        org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateWire(blueprint);
+        // 导出保留同一份大建筑的目标，不能在NBT路径重新套用机器规划的数量与半径预算。
+        org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateBuildingWire(blueprint);
         blueprint = BuildingSceneBlocks.export(blueprint);
         List<Integer> min = minimum(blueprint);
         int[] size = {1, 1, 1};

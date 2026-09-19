@@ -10,7 +10,16 @@ import static org.maiwithu.maicraft.core.blueprint.BuildingModelTestData.*;
 public final class BuildingModelGuardTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        unusedDefinitionsAreChecked(); loopsAndExpansionAreBounded(); invalidPropertiesDoNotHide(); voxelBudgetsAreBounded();
+        // 越界夹具使用显式的小预算，避免正常航站楼默认值提高后，旧的拒绝测试变成合法大模型。
+        try {
+            var directory = java.nio.file.Files.createTempDirectory("model-guard-budget-");
+            java.nio.file.Files.createDirectories(directory.resolve("config"));
+            java.nio.file.Files.writeString(directory.resolve(org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH),
+                    "maxObjects=1024\nmaxTargets=16384\nmaxVoxelWork=16777216\n");
+            org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory);
+            try { unusedDefinitionsAreChecked(); loopsAndExpansionAreBounded(); invalidPropertiesDoNotHide(); voxelBudgetsAreBounded(); }
+            finally { org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory.resolve("restore-defaults")); }
+        } catch (java.io.IOException failure) { throw new AssertionError(failure); }
         System.out.println("BuildingModelGuardTest: unused definitions, cycles, expansion and voxel budgets passed");
     }
     private static JsonObject base() { return scene(mesh("Base","cube",new double[]{.5,.5,.5},new int[]{1,1,1},"Body")); }
@@ -53,9 +62,9 @@ public final class BuildingModelGuardTest {
         check(BuildingSceneCompiler.compile(scene(shell)).getAsJsonObject("metadata").get("voxel_work").getAsLong() == 125L * 19,
                 "预算包括源包含判定、空腔判定和六面涂装三组比较");
         shell.add("location",json("{\"v\":[48.5,48.5,48.5]}").get("v")); shell.add("dimensions",json("{\"v\":[97,97,97]}").get("v"));
-        rejectsWith(() -> BuildingSceneCompiler.validateWire(scene(shell)), "comparison budget", "大空心模型不能漏计源图元包含检查来绕过预算");
+        rejectsWith(() -> BuildingSceneCompiler.validateWire(scene(shell)), "maxVoxelWork", "大空心模型不能漏计源图元包含检查来绕过预算");
         var expensive = scene(mesh("Huge","cube",new double[]{64,64,64},new int[]{128,128,128},"Body"));
-        rejectsWith(() -> BuildingSceneCompiler.validateWire(expensive), "comparison budget", "包围体积和面比较次数必须在体素循环前限制");
+        rejectsWith(() -> BuildingSceneCompiler.validateWire(expensive), "maxVoxelWork", "包围体积和面比较次数必须在体素循环前限制");
         var tooMany = scene(mesh("Large","cube",new double[]{25,25,25},new int[]{50,50,50},"Body"));
         rejectsWith(() -> BuildingSceneCompiler.compile(tooMany), "final block budget", "工作预算内仍不能输出超量最终方块");
     }

@@ -24,6 +24,9 @@ public final class SemanticAbilityCatalog {
             limits.addProperty("configuration", "Owner-adjustable JVM properties: maicraft.machine.planning.*");
             description.add("planning_budget", limits);
         }
+        // 保存、预览和实际建造都公布当前建筑配置，不把机器规划默认值误当成整座建筑上限。
+        if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability))
+            description.add("planning_budget", org.maiwithu.maicraft.core.build.BuildingBudgetReport.current());
         return description;
     }
 

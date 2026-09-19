@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /** 把现场设计的窗框组件展开成独立实例，保留源路径并隔离每个实例自己的开孔引用。 */
@@ -32,7 +32,8 @@ final class BuildingModelExpansion {
     private final boolean blender;
     private final Map<String, Integer> componentDepths = new HashMap<>();
     private final Map<JsonObject, BuildingModelShape> shapeCache = new java.util.IdentityHashMap<>();
-    private int expandedNodes, expandedCuts, authoredNodes, declaredModifiers;
+    // 用户调高节点与连接预算后，先用长整数累计再比较，不能让大量继承切割引用溢出成负数而获准展开。
+    private long expandedNodes, expandedCuts, authoredNodes, declaredModifiers;
 
     static BuildingModelExpansion expand(JsonObject source) { return new BuildingModelExpansion(source); }
     private BuildingModelExpansion(JsonObject source) {
@@ -138,7 +139,8 @@ final class BuildingModelExpansion {
                 } else {
                     Vec3 dimensions = BuildingModelTransform.dimensions(node, blender);
                     String primitive = node.has("primitive") ? node.get("primitive").getAsString() : node.get("type").getAsString();
-                    Box bounds = transform.bounds(dimensions, MachinePlanningBudget.current().maxRadius());
+                    // 每个组件落到总蓝图后按建筑的实际配置半径校验，保持全局锚点不变。
+                    Box bounds = transform.bounds(dimensions, BuildingBudgets.current().maxRadius());
                     BuildingModelShape shape = shapeCache.computeIfAbsent(node, ignored -> createShape(primitive, node, dimensions));
                     Leaf leaf = new Leaf(path, node, shape, bounds, transform, cuts, inheritedCuts, mappings, axes);
                     expandedCuts += leaf.cuts().size(); if (expandedCuts > connectionLimit()) throw bad("expanded cutter references exceed the modifier budget");
@@ -171,7 +173,7 @@ final class BuildingModelExpansion {
         }
         normalized.add("vertices", vertices); return BuildingModelShape.create(primitive, normalized, dimensions);
     }
-    private static int connectionLimit() { return Math.min(16384, MachinePlanningBudget.current().maxConnections()); }
+    private static int connectionLimit() { return BuildingBudgets.current().maxConnections(); }
     private static String index(int x, int y, int z) { return x + "," + y + "," + z; }
     private static List<String> rawCuts(JsonObject node) {
         if (!node.has("modifiers")) return List.of();

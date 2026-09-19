@@ -47,7 +47,8 @@ final class BuildingSceneContract {
         int sources = (p.has("scene") ? 1 : 0) + (p.has("scene_id") ? 1 : 0) + (p.has("blueprint") ? 1 : 0);
         if (sources != 1) throw new IllegalArgumentException("Supply exactly one of scene, scene_id or blueprint");
         if (p.has("scene")) BuildingSceneCompiler.validateWire(object(p, "scene"));
-        if (p.has("blueprint")) MachineBlueprintDocument.validateWire(object(p, "blueprint"));
+        // 建筑逐格输入与作者模型共用建筑预算，协议预检不得偷偷沿用机器规划的较小上限。
+        if (p.has("blueprint")) MachineBlueprintDocument.validateBuildingWire(object(p, "blueprint"));
         if (p.has("scene_id")) java.util.UUID.fromString(string(p, "scene_id"));
         if (Set.of("update_scene", "get_scene_info", "get_object_info", "get_component_info", "export_scene", "revise_project").contains(op)
                 && !p.has("scene_id")) throw new IllegalArgumentException(op + " needs scene_id");
