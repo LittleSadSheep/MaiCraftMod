@@ -52,8 +52,15 @@ public final class MachineBlueprintDocumentTest {
         check(!MachineConstructionPlan.reviewExplicit(MachineBlueprintDocument.compile(door, registry)).buildable(),
                 "design review rejects undeclared generated half before construction");
         JsonObject water = document("{\"offset\":[0,0,0],\"block_id\":\"minecraft:water\"}");
-        check(!MachineConstructionPlan.reviewExplicit(MachineBlueprintDocument.compile(water, registry)).buildable(),
-                "design review rejects missing native fluid installation adapter");
+        // 源格已有真实桶装配器，设计应列出满桶材料并保留现场检查；流动等级仍不能作为可直接安装的蓝图状态。
+        var waterReview = MachineConstructionPlan.reviewExplicit(MachineBlueprintDocument.compile(water, registry));
+        check(waterReview.buildable() && waterReview.report().get("source_fluid_targets").getAsInt() == 1
+                        && waterReview.report().getAsJsonObject("native_material_counts").get("minecraft:water_bucket").getAsInt() == 1
+                        && waterReview.report().get("site_and_material_preflight_pending").getAsBoolean(),
+                "source fluid review requires a native bucket and later site verification");
+        JsonObject flowing = document("{\"offset\":[0,0,0],\"block_id\":\"minecraft:water\",\"properties\":{\"level\":\"1\"}}");
+        check(!MachineConstructionPlan.reviewExplicit(MachineBlueprintDocument.compile(flowing, registry)).buildable(),
+                "flowing fluid remains an unsupported direct placement state");
         try {
             MachineConstructionPlan.compile(anchor, MachineBlueprintDocument.compile(door, registry), false);
             throw new AssertionError("undeclared generated door half accepted");
