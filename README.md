@@ -129,6 +129,24 @@ Linux 或 macOS 使用：
 
 `perceive(view="abilities")` 返回 `server_assistance`：`ready` 表示已协商，`client_only` 表示客户端模式。具体操作仍需满足模组、权限、距离、材料和原生状态条件；超时或结果未知不会触发重复操作或擅自切换后端重做。
 
+### 建筑规模与资源配置
+
+客户端首次启动会生成 UTF-8 文件 `config/maicraft-building.properties`，包含每个配置项的中文说明。编辑后重启客户端生效；已有文件不会被默认值覆盖。数字无效时仅该项回退到默认值，并在日志及能力预算中说明。
+
+| 配置项 | 默认值 | 含义 |
+| --- | ---: | --- |
+| `maxTargets` | `262144` | 一份建筑的最终目标数，包含明确的空气目标 |
+| `maxObjects` | `8192` | 作者对象、组件及展开节点预算 |
+| `maxRadius` | `512` | 相对锚点的坐标半径，单位为格 |
+| `preview.maxCells` | `262144` | 预览方块和部件总数 |
+| `preview.distance` | `256` | 预览绘制距离，单位为格 |
+| `preview.frameMillis` | `2.0` | 每帧准备和刷新预览的工作预算，毫秒 |
+| `maxProjectBytes` | `134217728` | 冻结施工单文件上限，128 MiB |
+
+配置还包含模型文件、蓝图导入、NBT 解压、采样工作量、临时支撑、MCP 请求及任务记录的容量。完整说明见内置[蓝图文档](common/src/main/resources/assets/maicraft/knowledge/blueprint.md#建筑资源预算配置)。`perceive(view="abilities", focus="maicraft:build")` 的 `planning_budget` 返回本实例实际生效的值；建筑预算与机器自主规划预算分别管理。
+
+默认容量可容纳一个 120×80×18 格、包含全部内部空气的大厅。完整目标仍会展开到内存；提高上限不会自动加载远处区块，也不代表已验证对应规模的帧率或施工速度。每帧预算在工作单元之间检查，不能中断一次原生模型或显卡操作。调低限额使旧任务无法恢复时，旧文件会保留，恢复前拒绝新的持久化执行；提高限额并重启后再恢复原任务。
+
 ### 机器生产目标
 
 在 `build_machine` 中提供 `production` 清单和 `allow_use: true`，可以在同一个任务中完成施工、配置、逐批供料及产出验证。已有机器使用 `operate_machine` 的 `operation: "run_production"`。两者都依赖当前 `inspect_machine` 快照及协商到的服务端能力。
