@@ -18,6 +18,9 @@ public final class NativeProcessRegressionSuite {
         org.maiwithu.maicraft.core.integration.machine.process.WorldProcessFeedRegionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.process.WorldProcessDelayedReactionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.process.WorldProcessSettlementTest.main(args);
+        // 产物到格后等待真实拾取同步，沿用通用收取且只追本批UUID，不能因一帧延迟提前报整批失败。
+        org.maiwithu.maicraft.client.actor.CollectItemsIdentityTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.process.WorldProcessCollectionTest.main(args);
         org.maiwithu.maicraft.client.server.ServerRequestOwnersTest.main(args);
         org.maiwithu.maicraft.client.actor.NativeSelectedDropTest.main(args);
         org.maiwithu.maicraft.client.actor.ItemEntityReceiptsTest.main(args);

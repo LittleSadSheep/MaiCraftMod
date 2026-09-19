@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
@@ -19,6 +18,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.inventory.TargetedDropTaskRecord;
+import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.task.Task;
@@ -50,8 +50,8 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
     private long batchCursor, waitUntil, nextEventRead;
     private String failure;
     private boolean approachDispatched, triggerStepStarted;
-    private BlockPos collectionTarget;
-    private final java.util.Set<BlockPos> collectionAttempts = new java.util.HashSet<>();
+    private boolean collectionStarted;
+    private String collectionDetail;
     private org.maiwithu.maicraft.core.task.build.BuildEdgeMotion alignment;
 
     WorldTransformTask(LocalPlayer player, WorldTransformTaskRecord record) { super(player, record); }
@@ -124,7 +124,7 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         if (!ItemEntityReceipts.snapshot(player, site.region).isEmpty()) throw new IllegalStateException("world_process_receiver_contains_unowned_items");
         batchInputs = plan.batch(batchIndex); WorldProcessBatchPlan.requireSpace(WorldProcessInventory.snapshot(player), batchInputs, recipe.result());
         feedIndex = 0; triggerStepStarted = false;
-        collectionTarget = null; collectionAttempts.clear();
+        collectionStarted = false; collectionDetail = null;
         batchCursor = ItemEntityReceipts.cursor(player);
         inputs = new WorldProcessInputs(player, recipe, inventory, site.region, batchCursor);
         settlement = new WorldProcessSettlement(player, recipe, inventory, batchCursor, events.nativeEvents);
@@ -185,32 +185,15 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         var seen = ItemEntityReceipts.snapshot(player, site.region).stream().filter(drop -> drop.uuid().equals(output.uuid())).findFirst().orElse(null);
         if (seen == null) { phase = Phase.VERIFY_PICKUP; return TaskState.RUNNING; }
         if (!ItemStack.matches(seen.stack(), output.stack())) throw new IllegalStateException("world_process_output_changed");
-        var actualEntity = world.getEntity(seen.entityId());
-        if (actualEntity instanceof ItemEntity item && item.getUUID().equals(output.uuid())
-                && player.getBoundingBox().inflate(1, .5, 1).intersects(item.getBoundingBox())) {
-            ClientRuntime.requireContext(player).body().releaseAll();
-            phase = Phase.VERIFY_PICKUP; return TaskState.RUNNING;
-        }
-        if (collectionTarget != null && !player.isInWater()) {
-            if (!align(collectionTarget)) return TaskState.RUNNING;
-            collectionTarget = null; return TaskState.RUNNING;
-        }
-        collectionTarget = null;
-        BlockPos target = site.collectingStand(player, seen.position());
-        if (NavigationSafetyContext.protectsMutation(target)) throw new IllegalStateException("world_process_collection_area_protected");
-        if (!collectionAttempts.add(target) || collectionAttempts.size() > 4)
-            throw new IllegalStateException("world_process_collection_stands_exhausted");
-        collectionTarget = target;
-        return move(target);
+        if (collectionStarted) { phase = Phase.VERIFY_PICKUP; return TaskState.RUNNING; }
+        collectionStarted = true;
+        // 复用通用拾取的真实接触、同格短靠近与20刻同步窗口，只授权已冻结产物UUID，不重新择格或重投原料。
+        return start(new CollectItemsTaskRecord(id(), deadline(600), java.util.Set.of(output.stack().getItem()), 16,
+                output.stack().getHoverName().getString(), java.util.Set.of(output.uuid())));
     }
 
     private TaskState verifyPickup() {
         if (settlement.collect()) return completeBatch();
-        var output = settlement.output();
-        int amount = settlement.pickupAmount();
-        // 成品漂移或到格后身体还在边缘时，仍按同一UUID复核接近位置，不固定在错误站位盯着等。
-        if (amount == 0 && world.getGameTime() < waitUntil && ItemEntityReceipts.snapshot(player, site.region).stream()
-                .anyMatch(drop -> drop.uuid().equals(output.uuid()))) { phase = Phase.COLLECT; return TaskState.RUNNING; }
         if (world.getGameTime() >= waitUntil) throw new IllegalStateException("world_process_output_pickup_not_verified");
         return TaskState.RUNNING;
     }
@@ -230,10 +213,8 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
     }
 
     private TaskState move(BlockPos at) {
-        boolean shallowCollection = phase == Phase.COLLECT && world.getFluidState(at).is(net.minecraft.tags.FluidTags.WATER);
         return start(new MoveToTaskRecord(id(), deadline(1200), at.getX() + .5, (double) at.getY(), at.getZ() + .5,
-                null, false, false, TransportMode.GROUND, false, !shallowCollection,
-                shallowCollection ? .25 : 0, shallowCollection ? .75 : .1));
+                null, false, false, TransportMode.GROUND, false, true, 0, .1));
     }
     private TaskState start(TaskRecord record) { childRecord = record; child = TaskFactory.create(player, record); return TaskState.RUNNING; }
     private TaskState tickChild() {
@@ -241,8 +222,12 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         r.extendDeadlineTo(childRecord.getDeadlineGameTime()); if (state == null) return TaskState.RUNNING;
         if (state != TaskState.SUCCESS) child.stop(player, Task.StopReason.REPLACED);
         var result = child.result(state); child = null; childRecord = null;
-        // 收取导航在暂停期间超时也不抹掉实际拾取；此分支不适用于仍未确认的投料子任务。
-        if (phase == Phase.COLLECT && settlement.collect()) return completeBatch();
+        if (phase == Phase.COLLECT) {
+            // 子任务成功不代表父任务已收取，失败也可能先于同帧Take/背包同步；先结算，再给既有20刻同步窗口。
+            if (settlement.collect()) return completeBatch();
+            collectionDetail = state.name().toLowerCase(java.util.Locale.ROOT) + ": " + result.message();
+            phase = Phase.VERIFY_PICKUP; waitUntil = deadline(20); return TaskState.RUNNING;
+        }
         if (state != TaskState.SUCCESS && !(phase == Phase.FEED && state == TaskState.TIMEOUT))
             return failed("world_process_native_step_failed: " + result.message(), FailureType.UNKNOWN);
         if (phase == Phase.FEED) {
@@ -288,6 +273,8 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         data.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT)); data.put("batches", List.copyOf(completed));
         data.put("confirmed_input_count", inputs == null ? 0 : inputs.delivered().stream().mapToInt(ItemStack::getCount).sum());
         data.put("trigger_step_started", triggerStepStarted);
+        if (settlement != null && !settlement.outputEvidence().isEmpty()) data.put("pending_output", settlement.outputEvidence());
+        if (collectionDetail != null) data.put("collection_detail", collectionDetail);
         data.put("native_consumption_reserved", r.nativeConsumptionReserved()); data.put("mechanical_retry_allowed", !r.nativeConsumptionReserved());
         data.put("output_collected", phase == Phase.COMPLETE); data.put("outcome_uncertain", r.nativeConsumptionReserved() && phase != Phase.COMPLETE);
         boolean nativeVerified = events != null && events.nativeEvents && phase == Phase.COMPLETE;

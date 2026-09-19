@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.machine.process;
 
 import java.util.List;
+import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.ItemEntityReceipts;
@@ -14,6 +15,7 @@ final class WorldProcessSettlement {
     private final long cursor;
     private final boolean nativeEvents;
     private WorldProcessEventEvidence.Output output;
+    private Map<String, Object> outputEvidence = Map.of();
     private boolean ready, collected;
 
     WorldProcessSettlement(LocalPlayer player, WorldProcessRecipe recipe, WorldProcessInventory inventory,
@@ -24,6 +26,8 @@ final class WorldProcessSettlement {
 
     WorldProcessEventEvidence.Output output() { return output; }
     boolean ready() { return ready; }
+    // 报告只返回确认时冻结的事实，不读取实体、背包或网络回执；失败与暂停也能说明产物已经生成。
+    Map<String, Object> outputEvidence() { return outputEvidence; }
 
     void acceptNative(WorldProcessEventEvidence.Output found) {
         if (!nativeEvents) throw new IllegalStateException("world_process_native_event_mode_missing");
@@ -67,6 +71,7 @@ final class WorldProcessSettlement {
         int amount = pickupAmount();
         // 单独的背包净增、别人的拾取，以及尚未收到的背包同步都不能完成这一批。
         collected = amount == output.stack().getCount() && inventory.collected(output.stack(), amount);
+        if (collected) retainOutputEvidence();
         return collected;
     }
 
@@ -75,5 +80,12 @@ final class WorldProcessSettlement {
             throw new IllegalStateException("world_process_multiple_native_outputs");
         output = new WorldProcessEventEvidence.Output(found.uuid(), found.stack());
         inventory.expectOutput(output.stack());
+        retainOutputEvidence();
+    }
+
+    private void retainOutputEvidence() {
+        outputEvidence = Map.of("entity_uuid", output.uuid().toString(),
+                "item_id", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(output.stack().getItem()).toString(),
+                "count", output.stack().getCount(), "native_recipe_verified", nativeEvents, "collected", collected);
     }
 }
