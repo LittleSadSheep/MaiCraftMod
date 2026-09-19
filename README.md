@@ -23,6 +23,7 @@ MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需
 - **建造与进度目标**：根据用途、尺寸、风格和材料策略生成并执行建筑计划，也可组合多个目标形成连续任务。
 - **战斗与里程碑**：处理防御或明确授权的战斗任务，并支持末影龙、鞘翅等长流程目标。
 - **模组机器**：从组件关系与工艺模块生成 Create、AE2、Mekanism 和混合设备布局，规划输送网络，分批供料施工，安装 AE2 部件与存储盘，配置已支持的 Mek 接口，并核验机器几何及同步运行证据。
+- **统一机器工序**：附魔台和 AE2 世界流体加工复用机器建造与使用入口，按需读取真实菜单报价或原生配方，再完成有限次数的操作与成品回收。
 - **可选服务端生产增强**：读取真实库存、配方和连接，配置受支持的过滤器、接口与 AE2 样板，按实际加工事件分批投料，再验证真实交付与持续产出窗口。
 - **Dev 蓝图预览**：在世界中显示半透明待建结构和差异轮廓，支持逐层查看；确认前归还玩家操控，确认后执行冻结的方案。
 - **只读房屋设计**：`maicraft:design_build` 直接显示蓝图，不移动或施工；普通建造在 Dev 确认之后才开始供料。
@@ -47,7 +48,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 执行后按返回的 `next_attention` 等待，读取响应中的 `task` 和 `wake_reason`，再按新的 `next_attention` 续等。Attention 直接引用任务记录，即使历史事件已被挤出缓存，也能返回仍保留的任务决策和最终结果；无需轮询 `task(get)` 或包装同步执行工具。原生资源订阅可使用 `maicraft://attention`（任务监控）和 `maicraft://chatflow`（收到的游戏内聊天，供专门对话的 Agent 使用），模型唤醒行为由宿主决定。
 
-四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`enchant`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
+四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
 
 每项能力的参数和限制由 `perceive(view="abilities")` 动态公开。AI 客户端应先读取能力契约，再提交目标，而不是猜测方块坐标、物品栏槽位或内部动作。
 
@@ -70,29 +71,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 同一次逻辑发送的网络重试应复用 `request_key`，新的消息使用新的键。结果中的 `delivery_status="submitted_to_client"` 表示已调用原版提交入口，服务器接收和命令执行效果仍需观察 Attention 中的后续消息。提交结果不确定时不会自动重发。
 
-`maicraft:enchant` 在已有原版附魔台为背包中的一件未附魔装备或一本书附魔：走近台子，打开原生界面，精确放入物品和青金石，读取三档真实报价，只选择指定档位一次，核验附魔与消耗，取回成品并关闭界面。支持指定坐标、已记录地标或最近已加载的附魔台；默认搜索半径 32 格，`search_radius` 可设为 1–64。此能力通过客户端的原生操作完成，不依赖服务端安装 MaiCraft。
-
-例如把以下参数交给 `execute`，为一把铁镐选择第一档，最多消耗一级经验和一颗青金石：
-
-```json
-{
-  "goal": {
-    "ability": "maicraft:enchant",
-    "outcome": "为一把铁镐附魔",
-    "parameters": {
-      "item_id": "minecraft:iron_pickaxe",
-      "offer_tier": 1,
-      "max_levels_spent": 1,
-      "max_lapis": 1
-    }
-  },
-  "request_key": "enchant-pickaxe-001"
-}
-```
-
-`offer_tier` 为 1–3，默认 1；两个消耗上限必填，范围为 0–3，零表示不允许该项消耗。报价的等级门槛仍须满足，例如第三档可能需要角色达到 30 级，但一次只扣 3 级。任务不自动获取材料、积攒经验、建台或反复附魔刷新报价，也不能保证未公开的随机词条。书会变成附魔书，背包需要留出成品位置；报价改变、空间或预算不足时会停止并报告原因。
-
-任务进度和结果包含 `quote`、`selected_offer`，确认成功后提供 `actual_levels_spent`、`actual_lapis_spent`、`result_item_id`、`result_enchantments`；`item_return_verified` 和 `gui_closed` 分别说明取回及关界面是否已核验。同一请求的网络重试复用 `request_key`。任务支持暂停、取消和手动接管；进入消费边界后禁止普通自动重试，出现 `outcome_uncertain` 或未确认的收尾时先检查物品与经验，再决定是否另发新任务。
+附魔和世界流体加工通过 `operate_machine` 的 `run_production` 共用入口，完整工序契约从 [按需加工知识](common/src/main/resources/assets/maicraft/knowledge/processes.md) 和 `inspect_machine` 读取，示例见下方“机器生产目标”。旧 `maicraft:enchant` 仍兼容原请求与任务恢复，但不再列入默认能力清单；需要旧契约时可显式读取 `perceive(view="abilities", focus="maicraft:enchant")`。
 
 移动目标还未定位时，可以使用 `maicraft:travel` 的 `semantic_target="platform"` 与 `direction="down"`，让 Mod 边移动边寻找下方平台，无须给坐标。`transport_mode="jetpack"` 保持同一次飞行控制，在平台进入局部观察后转入着陆；`ground` 使用普通步行寻路，`auto` 可选择可用的喷气背包。
 
@@ -173,11 +152,47 @@ Linux 或 macOS 使用：
 
 ### 机器生产目标
 
-在 `build_machine` 中提供 `production` 清单和 `allow_use: true`，可以在同一个任务中完成施工、配置、逐批供料及产出验证。已有机器使用 `operate_machine` 的 `operation: "run_production"`。两者都依赖当前 `inspect_machine` 快照及协商到的服务端能力。
+沿用“生成结构 → 建造机器 → 使用机器”：`design_machine` 设计结构，`build_machine` 施工，已有场地用 `operate_machine` 的 `operation: "run_production"` 执行工序。也可在 `build_machine` 中提供 `production` 与 `allow_use: true`，先完成施工，再运行同一工序。机器蓝图里的源流体最终通过原生桶操作装配，并核验源格与桶的变化。
 
-清单描述源、工序、接口、输送路径、配置与观察窗口；精确格式以能力契约及内置[蓝图说明](common/src/main/resources/assets/maicraft/knowledge/blueprint.md)为准。未安装服务端时，不带 `production` 的普通建造保持可用；需要生产证明的目标会明确说明缺少的能力。
+`production` 支持两个版本。v1 保留源、工序、接口、输送路径、配置与观察窗口，用于机器网络和持续产出验收。v2 用简短的 `{schema_version:2, process, offset?, parameters}` 指定有限原生过程；`process` 是机制，不按每种产物新增能力，`offset` 相对观察或建造锚点。
 
-成功要求真实加工事件、声明的时间跨度和目标物品的原生交付。库存增加、机器旋转或一次接口调用成功都不能单独证明持续生产；有限窗口成功也不保证今后永不断料。
+先用 `inspect_machine` 观察实际目标，取得新鲜 `snapshot_id` 和同一目标标签；`native_processes` 按现场匹配返回机制契约及只读配方观察。完整格式按需读取 `maicraft://knowledge/processes`，也可使用 `perceive(view="knowledge", resource_uri="maicraft://knowledge/processes")`。例如把下列参数交给 `execute`，用已观察的附魔台为一把背包铁镐附魔；尖括号内容须替换为实际观察值：
+
+```json
+{
+  "goal": {
+    "ability": "maicraft:operate_machine",
+    "outcome": "为一把铁镐附魔并取回",
+    "target": {"kind": "landmark", "label": "<观察时使用的场地标签>"},
+    "parameters": {
+      "operation": "run_production",
+      "snapshot_id": "<inspect_machine 返回的 snapshot_id>",
+      "allow_use": true,
+      "material_policy": "inventory_only",
+      "production": {
+        "schema_version": 2,
+        "process": "minecraft:enchanting",
+        "parameters": {"item_id": "minecraft:iron_pickaxe", "offer_tier": 1, "max_levels_spent": 1, "max_lapis": 1}
+      }
+    }
+  },
+  "request_key": "enchant-pickaxe-001"
+}
+```
+
+AE2 世界流体加工沿用同一结构，换成现场流体位置的标签与快照，并使用 `process: "ae2:transform"`、`parameters: {"recipe_id":"<现场返回的配方 ID>","batches":1}`。配方、投入数量和环境条件来自原生观察；附近已有成品不能当成本次产物。
+
+加工使用可完整观察的有界接收区，保留原模组的投掷、漂移和延迟反应。若实际早投材料也能充当触发物，无法保证逐次投料回执，任务会在消费前报告此限制。已确认产物由通用拾取流程按身份收取；拾取或同步中断时，`pending_output` 保留已生成物品的证据。
+
+v2 加工只消费现有主背包原料；直接运行的材料策略仅接受 `inventory_only`。施工材料仍按 `build_machine` 的既有材料策略补给，加工缺料时组合已有 `acquire_items` 流程再运行，不会隐式自动补齐。
+
+附魔过程会打开原生 GUI，读取真实报价，只提交指定档位一次，核验费用与附魔，取回成品并关闭界面。等级门槛与实际扣除等级不同，隐藏随机词条不作保证；报价、预算或空间不满足时停止。结果中的 `item_return_verified`、`gui_closed` 分别说明取回和关闭是否已核验。
+
+同一请求的网络重试复用 `request_key`。过程支持暂停、取消和手动接管；开始持久化消费预约后禁止普通自动重试，刷新快照也不会重置同一消费身份。出现 `outcome_uncertain` 时先检查现场、物品与经验，再决定后续恢复目标。
+
+v1 网络配方、配置、供料与生产证明仍依赖协商到的服务端能力；精确格式见能力契约、[加工知识](common/src/main/resources/assets/maicraft/knowledge/processes.md)与[蓝图说明](common/src/main/resources/assets/maicraft/knowledge/blueprint.md)。未安装服务端时，普通建造与原版附魔等客户端原生过程仍可用；需要服务端证据的目标会明确说明缺少的能力。
+
+v1 成功要求真实加工事件、声明的时间跨度和目标物品的原生交付。世界流体加工的 `native_recipe_verified` 表示原生配方事件已验证；仅观察到产物拾取与背包变化时，`evidence_scope="client_observed_output_and_inventory"`，不宣称原生配方事件已确认。这些有限过程也不证明持续产线；库存增加、机器旋转或一次接口调用成功都不能单独证明持续生产。
 
 ### 机器记忆与后台生产
 
@@ -195,8 +210,8 @@ MaiCraft 会增量记录附近已加载区块里的机器和容器，不为发�
 
 直播和日常使用可采用“短时调试 → 登记后台观察 → 通过真实界面备料/启动 → 去做其他事情”的流程：
 
-- `run_production` 用于需要前台供料和验证的有限样本；样本最小跨度与允许的加工间隔分别配置，无需为了调试刻意跑很长一批。
-- 在下一批开始前，调用 `operate_machine` 的 `watch_production`，提供新鲜 `snapshot_id`、`production` 和 `allow_use: true`。登记时就近核对必要位置，成功只表示监测已登记，随后释放角色。
+- `run_production` 可执行 v1 网络样本或 v2 有限过程；v1 的样本最小跨度与允许的加工间隔分别配置，无需为了调试刻意跑很长一批。
+- 在下一批开始前，调用 `operate_machine` 的 `watch_production`，提供新鲜 `snapshot_id`、v1 `production` 和 `allow_use: true`。登记时就近核对必要位置，成功只表示监测已登记，随后释放角色；v2 过程不支持后台监测。
 - 后台只读原生加工、配送和收货状态，通过 Attention 发出 `machine_production_completed` 或 `machine_production_attention`；不会自行补料、改配置或反复巡视。`cancel_watch` 使用返回的 `job_id` 停止监测，不关闭机器。
 - 监测不强制加载区块，未加载时保持未知；当前监测限于同一玩家连接与维度，重连、换维度或重新进入世界后需重新登记。默认最多一小时，具体额度以能力契约为准。
 
@@ -223,7 +238,7 @@ http://127.0.0.1:8766/mcp
 - 机器编译器支持已建模的组件、工艺模块与接口。未知模组结构或介质会返回具体编译问题；机器摆放、配置、成型和实际产出使用分别可核验的证据。
 - AE2、Create、Mekanism 及其他模组的兼容能力仍在扩展；特殊 GUI、过滤器、侧面配置和动态配方可能无法操作。
 - 目前真实生产事件覆盖 Create 压机、磨粉机、粉碎轮及受支持的 Mek 配方缓存，目标物品交付使用 Mek 原生物流事件。流体、化学品运输、持续化学消耗和复杂多方块工艺不能据此视为已完整验证；具体不支持项会保留在结果中。
-- Fabric 与 NeoForge 构建可以通过自动回归测试，但这不能替代真实客户端、服务器和整合包测试。
+- Fabric、NeoForge、真实服务器与整合包需分别验证；编译和自动回归不能替代真实游玩环境的验收。
 
 ## 开发
 
