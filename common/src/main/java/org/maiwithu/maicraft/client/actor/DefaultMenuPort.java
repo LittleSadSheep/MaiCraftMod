@@ -6,7 +6,7 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 
-/** 实际操作玩家菜单：一次点一个槽位或配方，等结果明确后再接受下一次；也负责任务结束时关好界面。 */
+/** 实际操作玩家菜单：一次点一个槽位、报价按钮或配方，等结果明确后再接受下一次；也负责任务结束时关好界面。 */
 public final class DefaultMenuPort implements MenuPort {
     String diagnosticState() {
         return active == null ? "none" : active.kind() + ":" + active.status()
@@ -141,6 +141,35 @@ public final class DefaultMenuPort implements MenuPort {
         return receipt;
     }
 
+    @Override
+    public MenuReceipt pressButton(LocalPlayerContext context, int button,
+                                    MenuConfirmation confirmation, int timeoutTicks) {
+        // 附魔前先确认控制权、旧事务和已绘制菜单；本刻只占用一次原生操作机会，不能轮询时重复花费材料。
+        DefaultLocalPlayerContext current = requireSubmission(context);
+        requireIdle();
+        requireVisible(current);
+        if (button < 0) throw new IllegalArgumentException("menu button must be nonnegative");
+        if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
+        java.util.Objects.requireNonNull(confirmation, "menu button requires an exact postcondition");
+        AbstractContainerMenu menu = current.player().containerMenu;
+        current.claimMutation();
+        MenuReceipt receipt = create(MenuReceipt.Kind.BUTTON, current, menu, timeoutTicks, false, confirmation);
+        try {
+            // 按1.21.1附魔界面的顺序，先让当前菜单校验报价；客户端拒绝时没有按钮包，不进入等待扣费阶段。
+            if (!menu.clickMenuButton(current.player(), button)) {
+                receipt.finish(MenuReceipt.Status.CONFIRMED_NOT_APPLIED, "the native menu rejected the button before submission");
+                return receipt;
+            }
+            receipt.awaitButtonSynchronization(menu.getStateId());
+            current.gameMode().handleInventoryButtonClick(menu.containerId, button);
+            interactionSubmitted(current);
+        } catch (RuntimeException failure) {
+            // 原生校验或发包途中异常时无法证明是否执行，保留不确定结果供上层收尾，不能自动再点一次。
+            receipt.finish(MenuReceipt.Status.UNCERTAIN, "menu button threw after entering the client transaction path");
+        }
+        return receipt;
+    }
+
     private void advanceClose(DefaultLocalPlayerContext current, MenuReceipt receipt) {
         // 只关当时那一个菜单；等最后操作被显示过并且本刻还有操作机会，再调用原版关闭流程。
         if (current.player().containerMenu != closingMenu) {
@@ -218,7 +247,8 @@ public final class DefaultMenuPort implements MenuPort {
         }
         AbstractContainerMenu menu = context.player().containerMenu;
         boolean containerChanged = menu.containerId != receipt.containerId();
-        boolean stateChanged = !containerChanged && menu.getStateId() != receipt.beforeStateId();
+        // 按钮排除本地报价校验改变的版本；其他菜单事务仍从提交前版本开始等服务端同步。
+        boolean stateChanged = !containerChanged && menu.getStateId() != receipt.synchronizationStateId();
         if (containerChanged && !receipt.allowContainerChange()) {
             receipt.finish(MenuReceipt.Status.UNCERTAIN,
                     "the active container changed before the submitted click was confirmed");
@@ -226,10 +256,8 @@ public final class DefaultMenuPort implements MenuPort {
         }
         MenuConfirmation.Verdict verdict;
         try {
-            // Exact postconditions (notably inventory-to-hotbar swaps) can become observable even
-            // when this client menu's stateId does not advance. Always permit positive evidence to
-            // settle the receipt. Negative/divergent evidence remains gated by an observed menu
-            // synchronization below, so an unchanged pre-state during packet latency is not failure.
+            // 先读取具体物品和成本变化；按钮还必须有新同步，普通槽位沿用原确认规则。
+            // 网络延迟中仍是旧状态时先等待，不能提前认定附魔被拒绝或物品已经丢失。
             verdict = receipt.confirmation().observe(context, receipt);
         } catch (RuntimeException observationFailure) {
             verdict = MenuConfirmation.Verdict.PENDING;
@@ -238,10 +266,11 @@ public final class DefaultMenuPort implements MenuPort {
                 || (containerChanged && receipt.allowContainerChange());
         switch (verdict) {
             case APPLIED -> {
+                // 附魔按钮会真实花费经验和青金石，必须同时收到新菜单版本；不能借用普通槽位的稳定等待退路。
                 if (synchronizationObserved) {
                     receipt.finish(MenuReceipt.Status.CONFIRMED_APPLIED,
                             "the exact synchronized menu postcondition confirmed the transaction");
-                } else if (receipt.appliedStableWithoutRevision(
+                } else if (receipt.kind() != MenuReceipt.Kind.BUTTON && receipt.appliedStableWithoutRevision(
                         context.tickRevision(), unacknowledgedStabilityTicks(context))) {
                     // 没有菜单版本更新时，目前允许本地期望状态稳定一段时间后当作成功，不是收到了专门的服务器确认。
                     // MultiPlayerGameMode applies menu clicks optimistically before the server can

@@ -15,6 +15,12 @@ public interface MenuPort {
     MenuReceipt click(LocalPlayerContext context, int slot, int button, ClickType clickType,
                       MenuConfirmation confirmation, int timeoutTicks);
 
+    /** 附魔等菜单按钮先走原生本地校验，再提交一次；调用方必须提供具体物品和成本变化的确认条件。 */
+    default MenuReceipt pressButton(LocalPlayerContext context, int button,
+                                    MenuConfirmation confirmation, int timeoutTicks) {
+        throw new UnsupportedOperationException("native menu buttons are not supported by this port");
+    }
+
     MenuReceipt swapInventoryToHotbar(
             LocalPlayerContext context,
             int sourceInventorySlot,

@@ -5,7 +5,7 @@ import java.util.UUID;
 
 /** 一次菜单操作的等待记录：保存原菜单编号和版本、期望结果，以及何时算等待超时。 */
 public final class MenuReceipt {
-    public enum Kind { CLICK, SWAP_TO_HOTBAR, PLACE_RECIPE, CLOSE }
+    public enum Kind { CLICK, SWAP_TO_HOTBAR, PLACE_RECIPE, CLOSE, BUTTON }
     public enum Status { PENDING, CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, DIVERGED, UNCERTAIN }
 
     private final UUID id = UUID.randomUUID();
@@ -18,6 +18,7 @@ public final class MenuReceipt {
     private final int beforeStateId;
     private final boolean allowContainerChange;
     private final MenuConfirmation confirmation;
+    private int synchronizationStateId;
     private Status status = Status.PENDING;
     private String detail = "awaiting the server-synchronized menu state";
     /** First tick of an exact positive postcondition not accompanied by menu revision evidence. */
@@ -33,6 +34,7 @@ public final class MenuReceipt {
         this.deadlineTick = Math.addExact(submittedTick, timeoutTicks);
         this.containerId = containerId;
         this.beforeStateId = beforeStateId;
+        this.synchronizationStateId = beforeStateId;
         this.allowContainerChange = allowContainerChange;
         this.confirmation = confirmation;
     }
@@ -51,6 +53,11 @@ public final class MenuReceipt {
 
     boolean allowContainerChange() { return allowContainerChange; }
     MenuConfirmation confirmation() { return confirmation; }
+    int synchronizationStateId() { return synchronizationStateId; }
+    void awaitButtonSynchronization(int clientStateId) {
+        // 本地附魔报价校验不是服务端执行结果；按钮只接受校验完成后到来的新菜单版本。
+        synchronizationStateId = clientStateId;
+    }
     boolean appliedStableWithoutRevision(long tickRevision, int requiredStableTicks) {
         // 没收到新版本但画面已像成功时，从首次匹配开始计时；是否允许靠这种等待推断成功，由菜单端口决定。
         if (unacknowledgedAppliedSince == Long.MIN_VALUE) {
