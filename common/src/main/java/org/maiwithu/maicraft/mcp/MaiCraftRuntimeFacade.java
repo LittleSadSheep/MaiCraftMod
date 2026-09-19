@@ -112,6 +112,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             Minecraft minecraft = requireWorld();
             LocalPlayer player = minecraft.player;
             intents.bindForRequest(minecraft, player);
+            // 旧检查点恢复受阻时先拒绝接单，不能等请求角色接管后才发现新进度无法保存。
+            intents.requireRecoveredState();
             Goal goal;
             UUID planId = null;
             if (arguments.has("plan_id") && !arguments.get("plan_id").isJsonNull()) {

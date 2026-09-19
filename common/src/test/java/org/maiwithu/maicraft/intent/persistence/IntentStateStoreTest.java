@@ -220,17 +220,26 @@ public final class IntentStateStoreTest {
 
     private static void oversizeFilesAndSnapshotsAreRejected(Path directory) throws Exception {
         Files.createDirectories(directory);
+        // 越界回归使用小的显式检查点限额，不随正式大工程默认值申请几百 MiB 的测试字符串或文件。
+        Path config = directory.resolve("limits/config/maicraft-building.properties");
+        Files.createDirectories(config.getParent()); Files.writeString(config, "maxIntentStateBytes=65536\n");
+        org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory.resolve("limits"));
+        try { rejectOversizeAtCurrentBudget(directory); }
+        finally { org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory.resolve("defaults")); }
+    }
+
+    private static void rejectOversizeAtCurrentBudget(Path directory) throws Exception {
         StateIdentity identity = identity(directory, 4);
         Path file = directory.resolve(identity.key() + ".json");
         try (FileChannel output = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
-            output.position(IntentStateStore.MAX_BYTES);
+            output.position(IntentStateStore.maxBytes());
             output.write(ByteBuffer.wrap(new byte[] {1}));
         }
         IntentStateStore store = new IntentStateStore();
-        check(store.load(identity).status() == IntentStateStore.Status.CORRUPT,
-                "oversize state file passed the load boundary");
+        check(store.load(identity).status() == IntentStateStore.Status.OVER_BUDGET && Files.exists(file),
+                "oversize state must remain at its original path while loading is capacity blocked");
         JsonObject huge = root(identity, 1);
-        huge.addProperty("huge", "x".repeat((int) IntentStateStore.MAX_BYTES));
+        huge.addProperty("huge", "x".repeat(IntentStateStore.maxBytes()));
         try {
             store.saveAsync(identity, huge);
             throw new AssertionError("oversize snapshot entered the bounded mailbox");

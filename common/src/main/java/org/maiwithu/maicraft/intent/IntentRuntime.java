@@ -130,6 +130,8 @@ public final class IntentRuntime {
     }
 
     public Plan compile(Goal goal, long gameTime) {
+        // 原检查点尚未恢复时不能登记新计划，否则玩家会得到重连后消失的计划编号。
+        requireRecoveredState();
         validateGoal(goal);
         Plan plan = Plan.compile(goal, gameTime);
         plans.put(plan.id(), plan);
@@ -153,6 +155,8 @@ public final class IntentRuntime {
 
     IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey,
                             java.util.function.Predicate<org.maiwithu.maicraft.client.preview.PreviewSession> publishDesign) {
+        // 先确认旧进度可继续保存，再校验并接单；受阻时不能发布 started、写新文件或把任务交给身体。
+        requireRecoveredState();
         validateGoal(goal);
         if (requestKey != null && !requestKey.isBlank()) {
             // 网络重试可能重复提交同一请求；同一 request_key 复用原记录，避免重复开工。
@@ -233,6 +237,8 @@ public final class IntentRuntime {
 
     public void remember(
             String label, Goal.WorldPosition position, LandmarkAreaRole areaRole) {
+        // 地标同样属于世界检查点，恢复受阻时拒绝新增，避免让玩家误以为位置已经被记住。
+        requireRecoveredState();
         String key = normalizeLabel(label);
         landmarks.put(key, new Landmark(label, position, areaRole));
         trimOldest(landmarks, MAX_LANDMARKS);
@@ -384,12 +390,20 @@ public final class IntentRuntime {
     }
 
     public void requireCurrentBinding(IntentTaskRecord record) {
+        // 旧任务恢复未完成时不能通过继续任务入口重新请求角色动作。
+        requireRecoveredState();
         if (record == null || stateIdentity == null || !bodyAttached
                 || record.bindingKey() == null
                 || !stateIdentity.key().equals(record.bindingKey())) {
             throw new IllegalStateException(
                     "semantic task belongs to another connection or world");
         }
+    }
+
+    /** 仅在准备登记或执行任务时检查恢复状态；世界观察、能力查询和注意事件仍可用于定位问题。 */
+    public void requireRecoveredState() {
+        String problem = stateIdentity == null ? null : stateStore.recoveryProblem(stateIdentity);
+        if (problem != null) throw new IllegalStateException(problem);
     }
 
     public void restoredTaskAttached(IntentTaskRecord record) {
@@ -447,14 +461,15 @@ public final class IntentRuntime {
                     restoredLandmarks++;
                 }
             } catch (RuntimeException invalidModel) {
-                stateStore.quarantine(stateIdentity);
+                // JSON 与世界身份已通过存储层检查；配置收紧或版本不兼容不能把整份旧任务当损坏文件移走。
+                stateStore.preserveUnrestored(stateIdentity);
                 clearSemanticState();
                 restoredTasks = 0;
                 restoredLandmarks = 0;
                 restoredTerminal = 0;
-                status = "corrupt";
+                status = "recovery_blocked";
                 Constants.LOG.warn(
-                        "MaiCraft semantic state model was invalid and quarantined ({})",
+                        "MaiCraft semantic state could not be restored; the checkpoint was preserved ({})",
                         invalidModel.getClass().getSimpleName());
             }
         }
@@ -465,10 +480,17 @@ public final class IntentRuntime {
         data.addProperty("restored_tasks", restoredTasks);
         data.addProperty("restored_terminal_tasks", restoredTerminal);
         data.addProperty("restored_landmarks", restoredLandmarks);
+        // 容量不足和内容无法恢复都明确提示旧文件已保留；查询方不能把零条已加载任务误认成一个新世界。
+        String problem = stateStore.recoveryProblem(stateIdentity);
+        if (problem != null) {
+            data.addProperty("checkpoint_preserved", true);
+            data.addProperty("new_tasks_blocked", true);
+            data.addProperty("configuration", org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH);
+        }
         attention.publish(
                 "state_restored",
                 null,
-                "Restored " + restoredTasks + " semantic task(s) and "
+                problem != null ? problem : "Restored " + restoredTasks + " semantic task(s) and "
                         + restoredLandmarks + " landmark(s); non-terminal work is paused.",
                 data);
     }
@@ -476,6 +498,8 @@ public final class IntentRuntime {
     /** Returns whether a detached in-process checkpoint is available, not a disk durability receipt. */
     private boolean captureCheckpoint(boolean force) {
         if (stateIdentity == null) return false;
+        // 未恢复的旧任务不能被空状态覆盖，也不能把尚未接受的保存冒充为可供死亡或重连使用的交接快照。
+        if (stateStore.recoveryProblem(stateIdentity) != null) return false;
         // Body teardown mutates old task records after the checkpoint. Never replace the
         // detached handoff with those cancellation side effects, including on shutdown.
         if (!bodyAttached) return stateStore.hasSnapshot(stateIdentity);

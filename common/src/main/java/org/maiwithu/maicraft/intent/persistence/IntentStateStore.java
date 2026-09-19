@@ -22,11 +22,13 @@ import org.maiwithu.maicraft.core.Constants;
 /** 把任务进度写进磁盘文件：游戏线程先留一份文本，后台依次写入，避免每次保存都卡住游戏。 */
 public final class IntentStateStore {
     public static final int VERSION = 1;
-    public static final long MAX_BYTES = 4L * 1024L * 1024L;
+    // 保存与恢复每次读取有效启动配置，不能让较早加载的类把大建筑检查点锁死在旧四 MiB 常量。
+    public static int maxBytes() { return org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxIntentStateBytes(); }
     private static final int MAX_RESIDENT_IDENTITIES = 8;
 
     // 同一个世界连续要求保存时，只保留最近那份待写文本，不把每个旧版本都排队写一遍。
     private final Map<StateIdentity, PendingSave> latest = new LinkedHashMap<>();
+    private final Map<StateIdentity, String> recoveryBlocked = new LinkedHashMap<>();
     private final Executor writerExecutor;
     private boolean workerRunning;
 
@@ -43,33 +45,40 @@ public final class IntentStateStore {
         this.writerExecutor = java.util.Objects.requireNonNull(writerExecutor);
     }
 
-    public enum Status { ABSENT, LOADED, CORRUPT }
+    public enum Status { ABSENT, LOADED, CORRUPT, OVER_BUDGET }
     public enum FlushResult { SAVED, FAILED, TIMED_OUT, INTERRUPTED }
 
     public record LoadResult(Status status, JsonObject root) {}
 
-    /** 优先读进程内刚保存的文本，没有才读磁盘；最多读取四 MiB，损坏文件移到旁边保留。 */
+    /** 优先读进程内刚接受的文本，没有才按配置限额读盘；损坏文件移到旁边保留。 */
     public LoadResult load(StateIdentity identity) {
+        int limit = maxBytes();
         String captured;
         synchronized (latest) {
             PendingSave save = latest.get(identity);
             captured = save == null ? null : save.json;
         }
         // 刚重生或重连时，磁盘可能还没写完；同一进程里仍使用已经留下的最新任务进度。
-        if (captured != null) return new LoadResult(Status.LOADED,
-                JsonParser.parseString(captured).getAsJsonObject());
+        if (captured != null) {
+            if (captured.length() > limit || captured.getBytes(StandardCharsets.UTF_8).length > limit) return overBudget(identity);
+            JsonObject root = JsonParser.parseString(captured).getAsJsonObject(); clearRecoveryBlock(identity);
+            return new LoadResult(Status.LOADED, root);
+        }
         Path file = file(identity);
-        if (!Files.exists(file)) return new LoadResult(Status.ABSENT, new JsonObject());
+        if (!Files.exists(file)) { clearRecoveryBlock(identity); return new LoadResult(Status.ABSENT, new JsonObject()); }
         try {
             long bytes = Files.size(file);
-            if (bytes <= 0L || bytes > MAX_BYTES) {
+            // 玩家调低限额不代表旧任务损坏：保留原路径，并阻止未加载的旧进度被空检查点覆盖。
+            if (bytes > limit) return overBudget(identity);
+            if (bytes <= 0L) {
                 throw new IOException("semantic state size is outside bounds");
             }
             byte[] payload;
             try (var input = Files.newInputStream(file)) {
-                payload = input.readNBytes((int) MAX_BYTES + 1);
+                payload = input.readNBytes(limit + 1);
             }
-            if (payload.length == 0 || payload.length > MAX_BYTES) {
+            if (payload.length > limit) return overBudget(identity);
+            if (payload.length == 0) {
                 throw new IOException("semantic state size is outside bounds");
             }
             String json = new String(payload, StandardCharsets.UTF_8);
@@ -81,9 +90,11 @@ public final class IntentStateStore {
                     || !identity.key().equals(root.get("identity_key").getAsString())) {
                 throw new IOException("semantic state identity mismatch");
             }
+            clearRecoveryBlock(identity);
             return new LoadResult(Status.LOADED, root);
         } catch (RuntimeException | IOException invalid) {
             quarantine(file);
+            clearRecoveryBlock(identity);
             Constants.LOG.warn("MaiCraft semantic state was invalid and quarantined ({})",
                     invalid.getClass().getSimpleName());
             return new LoadResult(Status.CORRUPT, new JsonObject());
@@ -92,9 +103,11 @@ public final class IntentStateStore {
 
     /** 先复制成不会再变的文本，马上返回“稍后写完”的凭据；收到返回值不等于磁盘已经保存成功。 */
     public CompletableFuture<Void> saveAsync(StateIdentity identity, JsonObject root) throws IOException {
+        synchronized (latest) { requireRecovered(identity); }
         String json = boundedJson(root);
         PendingSave save = new PendingSave(identity, json);
         synchronized (latest) {
+            requireRecovered(identity);
             if (!latest.containsKey(identity) && latest.size() >= MAX_RESIDENT_IDENTITIES) {
                 // 最多留八个世界的文本；优先移走已成功写盘的旧世界，不能丢掉还没保存成功的那份。
                 var iterator = latest.entrySet().iterator();
@@ -124,6 +137,38 @@ public final class IntentStateStore {
             latest.notifyAll();
         }
         return save.completion;
+    }
+
+    private LoadResult overBudget(StateIdentity identity) {
+        // 调低文件预算时保留原任务，并向接单入口提供可以直接返回给玩家的恢复办法。
+        blockRecovery(identity, "Semantic state recovery is blocked by maxIntentStateBytes in "
+                + org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH
+                + ". The checkpoint is preserved; increase this limit and restart the client to restore it before starting new tasks.");
+        return new LoadResult(Status.OVER_BUDGET, new JsonObject());
+    }
+
+    /** 已读到合法 JSON，但当前模型规则或预算无法恢复时锁住原检查点，不能以空任务覆盖。 */
+    public void preserveUnrestored(StateIdentity identity) {
+        blockRecovery(identity, "Semantic state recovery is blocked by the current configuration or installed version. "
+                + "The checkpoint is preserved; review " + org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH
+                + " and restore compatible settings or version, then restart the client before starting new tasks.");
+    }
+
+    /** 查询恢复原因不触发保存，也不解锁旧任务；运行时据此拒绝无法留下进度的新施工。 */
+    public String recoveryProblem(StateIdentity identity) {
+        synchronized (latest) { return recoveryBlocked.get(identity); }
+    }
+
+    private void blockRecovery(StateIdentity identity, String problem) {
+        synchronized (latest) { recoveryBlocked.put(identity, problem); }
+    }
+    private void clearRecoveryBlock(StateIdentity identity) {
+        synchronized (latest) { recoveryBlocked.remove(identity); }
+    }
+    private void requireRecovered(StateIdentity identity) throws IOException {
+        // 仅提高数字不能解除覆盖保护；先读取并恢复原任务，再让当前身体继续提交新的检查点。
+        String problem = recoveryBlocked.get(identity);
+        if (problem != null) throw new IOException(problem);
     }
 
     /**
@@ -197,8 +242,9 @@ public final class IntentStateStore {
     private static String boundedJson(JsonObject root) throws IOException {
         // 中文在 UTF-8 中可能占多个字节，既检查字符数，也检查实际写入字节数。
         String json = root.toString();
-        if (json.length() > MAX_BYTES || json.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
-            throw new IOException("semantic state exceeds " + MAX_BYTES + " bytes");
+        int limit = maxBytes();
+        if (json.length() > limit || json.getBytes(StandardCharsets.UTF_8).length > limit) {
+            throw new IOException("semantic state exceeds " + limit + " bytes");
         }
         return json;
     }

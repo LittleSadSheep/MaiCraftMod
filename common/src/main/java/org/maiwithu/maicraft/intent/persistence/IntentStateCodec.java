@@ -171,7 +171,7 @@ public final class IntentStateCodec {
                 });
         value.add("internal_positions", internalPositions);
 
-        // 要保护哪些格子也单独保存，恢复后仍可用于导航和施工；文件整体仍受四 MiB 大小限制。
+        // 要保护哪些格子也单独保存，恢复后仍可用于导航和施工；文件整体继续受配置中的检查点字节预算限制。
         JsonArray internalAreaProtections = new JsonArray();
         task.internalAreaProtectionReceipts().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
@@ -562,7 +562,8 @@ public final class IntentStateCodec {
             original.add("inherited_protected_labels", inherited);
         }
         // 蓝图可能有许多方块，不套普通元数据每层二百五十六项的限制，但目标整体仍不能超过文件预算。
-        if (original.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > IntentStateStore.MAX_BYTES)
+        // 请求准入与实际状态文件共用有效预算，避免场景已允许保存，却在语义目标检查时仍被旧常量拒绝。
+        if (original.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > IntentStateStore.maxBytes())
             throw new IllegalArgumentException("semantic goal exceeds checkpoint byte budget; reference a blueprint resource instead");
         return original;
     }
