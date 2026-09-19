@@ -54,7 +54,7 @@ public final class SemanticAbilityCatalog {
                             blueprintField(), blueprintUriField(), productionField(),
                             field("snapshot_id", "string", "Optional fresh site/machine observation that grounds site-specific analysis; requires the exact surveyed target label. Blueprint offsets are relative to this anchor.")));
             case MachineAbilityAdapter.BUILD -> contract(
-                    "Construct a machine at an observed anchor. Supply exactly one of design, blueprint or blueprint_uri. MaiCraft supplies materials, chooses placement order and executes native interactions. Without production, success verifies declared structure and supported configuration. With production and allow_use=true, continue through real input supply, native configuration and a finite observed production-and-delivery run; server assistance is required. Dev mode waits for local preview confirmation before construction. Unsupported structures or configurations report concrete issues.",
+                    "Construct a machine at an observed anchor using design, blueprint or blueprint_uri. MaiCraft supplies construction materials and verifies native placement. With production and allow_use=true, then run the same v1 network or v2 native process; v1 requires server production evidence, v2 uses its mechanism's requirements. Dev mode waits for local preview confirmation.",
                     targets("landmark", "area"),
                     fields(
                             field("snapshot_id", "string", "Fresh complete inspect_machine receipt identifying the build anchor. The complete construction footprint is subsequently inspected by the native task and is not limited to the anchor survey radius."),
@@ -67,17 +67,17 @@ public final class SemanticAbilityCatalog {
                             field("replace_block_entities", "boolean", "Also allow replacing existing block entities at declared targets; requires replace_existing=true and authorization for those changes. Default false."),
                             field("protected_labels", "array<string>", "Remembered areas that construction and material acquisition must preserve.")));
             case MachineAbilityAdapter.OPERATE -> contract(
-                    "Use existing machines through native evidence: open_menu on a surveyed block, perceive(machine_menu), then deposit/withdraw an exact observed entry. Transfers bind a fresh menu receipt, validate native slot rules and verify inventory/cursor effects. set_control observes one exact vanilla lever state. ae2_supply uses an accessible AE2 terminal, including already configured mixed-mod patterns. Success identifies the observed effect; it never invents production or the meaning of undocumented menu controls.",
+                    "Use surveyed machines through native evidence. run_production accepts a v1 production network or a v2 native process; inspect_machine supplies matching mechanism contracts. Existing menu transfers, controls and AE2 supply retain their own evidence requirements. Success reports verified effects.",
                     targets("landmark", "area", "nearest", "coordinates", "prior_result"),
                     fields(
-                            field("operation", "string", "run_production, watch_production, cancel_watch, drive_vehicle, open_menu, close_menu, deposit, withdraw, set_control or ae2_supply. run_production is foreground commissioning/explicit finite acceptance and requires a fresh snapshot, production manifest and allow_use. watch_production registers a server-side read-only monitor BEFORE starting a future batch; its success means monitor registered, not production completed. It releases the body and reports completed/needs_attention through Attention without patrols, automatic refills or forced chunk loads. cancel_watch stops monitoring, not the machines. drive_vehicle drives the observed structure. close_menu/cancel_watch omit target."),
+                            field("operation", "string", "run_production, watch_production, cancel_watch, drive_vehicle, open_menu, close_menu, deposit, withdraw, set_control or ae2_supply. run_production executes v1 networks or finite v2 processes. watch_production registers a v1 server read-only monitor before a future batch; registration is not completion, and it releases the body without refills or forced chunk loads. cancel_watch stops monitoring only. close_menu/cancel_watch omit target."),
                             productionField(),
                             field("job_id", "string", "cancel_watch only: exact job_id from monitor registration or perceive(machines). Monitors belong to the current player connection and dimension; reconnect requires new registration."),
                             field("minimum_process_events", "integer", "watch_production only: required native completions per process, 1-100, default 1. Use a small repeated sample for commissioning; exact requested target output still comes from production.observation.minimum_output."),
                             field("idle_ticks", "integer", "watch_production only: loaded time with no progress before Attention requests inspection; 20..max_duration_ticks, default the smaller of 6000 and max_duration_ticks. Unloaded machines remain unknown and do not accrue inactivity."),
                             field("max_duration_ticks", "integer", "watch_production only: finite monitor duration 20-72000 ticks, default 72000. It does not keep the chunk loaded or survive a connection/world change."),
                             field("protected_labels", "array<string>", "run_production only: remembered areas that navigation and material acquisition must preserve."),
-                            field("material_policy", "string", "run_production only: configuration-tool acquisition, inventory_only by default; storage_available or ordinary must be explicitly chosen. Input supply follows each production source's policy."),
+                            field("material_policy", "string", "run_production: v1 configuration-tool acquisition policy; v2 accepts inventory_only and uses carried inputs. Acquire missing inputs separately. build_machine uses its existing construction supply policy."),
                             field("structure_id", "string", "drive_vehicle only: observed physical-structure UUID. target is the destination. Existing control bindings are preserved; no force/stability model is assumed."),
                             field("allow_use", "boolean", "Required true only when the player's instructions authorize this use of the machine/network; never infer ownership from a label."),
                             field("snapshot_id", "string", "run_production/watch_production/set_control/open_menu: fresh inspect_machine receipt for the exact target label; consumed by operation."),
@@ -427,20 +427,11 @@ public final class SemanticAbilityCatalog {
     }
 
     private static JsonObject productionField() {
-        return field("production", "object", "Optional production manifest: {schema_version:1,"
-                + "nodes:[{id,kind:'source|process|transport|sink',offset:[x,y,z],recipe_id?,batches?,material_policy?}],"
-                + "ports:[{id,node,offset:[x,y,z],face,medium,direction:'input|output'}],"
-                + "links:[{id,from:port_id,to:port_id,medium,resource,amount,path?:[[x,y,z]],configurations?:[id]}],"
-                + "configurations:[{id,node,operation,stage:'configure|start',arguments:{}}],"
-                + "target:{node,medium,resource},observation:{window_ticks,minimum_output,minimum_events,max_idle_ticks}}. "
-                + "window_ticks is the minimum span of real output evidence; max_idle_ticks independently limits gaps (both bounded by 72000). A short commissioning sample may allow normal process latency longer than its minimum span. "
-                + "Offsets share the frozen blueprint/build anchor. Process nodes require an installed recipe and batches; "
-                + "source policy is inventory_only, storage_available or ordinary. Media: items, fluids, chemicals, energy, kinetic. "
-                + "Amounts are finite window budgets, kinetic amount is minimum rpm. Native resource identities returned by adapters retain components. "
-                + "At least two native production events, the declared time span and actual output delivery are required. "
-                + "Design reports unresolved evidence; building with production and operate_machine/run_production execute this complete chain. "
-                + "Without optional server support, use ordinary construction separately; production verification is never silently weakened.");
+        // 默认只指向统一版本契约；每个原生机制的完整参数随知识读取或实际场地观察按需提供。
+        return field("production", "object", "Versioned intent: v1 machine network; v2 finite native process. Read maicraft://knowledge/processes for full formats, then inspect_machine for applicable native contracts. Offsets share the build/survey anchor. run_production executes; watch_production supports v1 only.");
     }
+
+    public static boolean compatibilityAlias(String ability) { return EnchantAbilityAdapter.ABILITY.equals(ability); }
 
     private static String utilityInputs(boolean concrete) {
         return "Fixed machines prefer shared city utility supply. external_inputs:[{id,medium,"

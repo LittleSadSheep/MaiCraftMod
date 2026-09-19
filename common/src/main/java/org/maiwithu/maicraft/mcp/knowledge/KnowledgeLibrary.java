@@ -19,6 +19,7 @@ public final class KnowledgeLibrary {
     public static final String INDEX = "maicraft://knowledge/index";
     public static final String GUIDE = "maicraft://knowledge/guide";
     public static final String BLUEPRINT = "maicraft://knowledge/blueprint";
+    public static final String PROCESSES = "maicraft://knowledge/processes";
     private static final int PAGE_SIZE = 16;
     public interface Source {
         List<KnowledgeDocument.Entry> entries();
@@ -35,7 +36,8 @@ public final class KnowledgeLibrary {
         // 按组件或具体图元名称查资料时仍发现同一份建筑说明，不新增会直接操作世界的知识入口。
         builtins = Map.of(INDEX, load("index", "知识索引", "按需发现方块状态、Ponder 教程和实际执行能力。"),
                 GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"),
-                BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格建模 v1/v2、组件、阵列、镜像、三角形、斜坡、三棱柱、三角锥、空心、面棱材质、开孔、导出、续建和机器蓝图。"));
+                BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格建模 v1/v2、组件、阵列、镜像、三角形、斜坡、三棱柱、三角锥、空心、面棱材质、开孔、导出、续建和机器蓝图。"),
+                PROCESSES, load("processes", "统一机器生产与原生加工", "按需读取生产v1/v2、附魔报价和AE2水中转化机制契约。"));
     }
     public static KnowledgeLibrary offline() {
         return new KnowledgeLibrary(new Source() {
@@ -74,6 +76,13 @@ public final class KnowledgeLibrary {
     public KnowledgeDocument read(String uri) {
         if (uri.length() > 2048) throw new IllegalArgumentException("Resource URI is too long");
         KnowledgeDocument document = builtins.get(uri);
+        if (PROCESSES.equals(uri) && document != null) {
+            // 只有显式读这一页才展开机制参数；这里报告适配器契约，真实配方、菜单和材料仍由现场观察确认。
+            String contracts = new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(
+                    org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry.contracts());
+            return new KnowledgeDocument(document.uri(), document.name(), document.title(), document.description(),
+                    document.text() + "\n## 已注册原生机制契约\n\n```json\n" + contracts + "\n```\n");
+        }
         if (document == null && uri.startsWith(BuildingSceneResources.PREFIX)) document = BuildingSceneResources.read(uri);
         if (document == null) document = source.read(uri);
         if (document == null) throw KnowledgeException.missing(uri);

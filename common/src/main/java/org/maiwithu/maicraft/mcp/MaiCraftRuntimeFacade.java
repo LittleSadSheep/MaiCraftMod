@@ -450,6 +450,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         JsonArray abilities = new JsonArray();
         for (String ability : IntentRuntime.KNOWN_ABILITIES.stream().sorted().toList()) {
             if (focus != null && !focus.equals(ability)) continue;
+            // 旧附魔请求继续有效，但默认能力发现只展示统一机器入口；显式focus仍可读取兼容契约。
+            if (focus == null && SemanticAbilityCatalog.compatibilityAlias(ability)) continue;
             JsonObject item = new JsonObject();
             item.addProperty("ability", ability);
             SemanticAbilityAvailability.describe(item, ability,

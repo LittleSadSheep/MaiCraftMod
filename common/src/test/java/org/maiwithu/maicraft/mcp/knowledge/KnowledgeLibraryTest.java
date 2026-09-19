@@ -35,8 +35,9 @@ public final class KnowledgeLibraryTest {
             if (!page.has("nextCursor")) break;
             list.add("cursor", page.get("nextCursor")); page = library.request(list);
         }
-        check(uris.size() == source.entries().size() + 5 && source.reads == 0
-                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT,
+        // 原生过程知识也只发布元数据，不在默认发现时展开机制契约或读取教程正文。
+        check(uris.size() == source.entries().size() + 6 && source.reads == 0
+                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES,
                         "maicraft://attention", "maicraft://chatflow")),
                 "attention, chatflow, builtins and all extension resources discovered without bodies");
         check(library.read(KnowledgeLibrary.BLUEPRINT).text().contains("schema_version"), "shared blueprint format available on demand");

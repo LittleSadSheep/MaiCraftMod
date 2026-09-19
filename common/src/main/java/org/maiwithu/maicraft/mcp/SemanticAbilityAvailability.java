@@ -40,7 +40,9 @@ final class SemanticAbilityAvailability {
         if (!id.equals("maicraft:build_machine") && !id.equals("maicraft:design_machine")
                 && !id.equals("maicraft:operate_machine")) return;
         JsonObject production = new JsonObject();
-        production.addProperty("when", id.equals("maicraft:operate_machine") ? "operation=run_production" : "production supplied");
+        // 这些服务器依赖属于旧网络生产；原生菜单或水中过程按实际匹配机制单独报告可用性。
+        production.addProperty("when", "production.schema_version=1");
+        production.addProperty("native_process_availability", "inspect_machine supplies matched v2 mechanism contracts and availability");
         JsonArray required = new JsonArray();
         boolean supported = true;
         JsonObject operations = assistance.getAsJsonObject("operations");
