@@ -220,6 +220,15 @@ public final class IntentTaskRecord extends TaskRecord {
         changed();
     }
 
+    boolean updateCurrentParameters(JsonObject parameters) {
+        // 重试的真实预算、配方等先写回当前步骤；保留地标或prior_result原意，临时解析的坐标不能成为新持久目标。
+        Goal current = steps.get(stepIndex);
+        if (current.parameters().equals(parameters)) return false;
+        steps.set(stepIndex, current.withParameters(parameters));
+        changed();
+        return true;
+    }
+
     void replaceCurrent(Goal replacement) {
         // 调用者改变主意：替换还没做成的这一步，已完成的步骤和后续步骤保留。
         if (stepIndex >= steps.size()) {

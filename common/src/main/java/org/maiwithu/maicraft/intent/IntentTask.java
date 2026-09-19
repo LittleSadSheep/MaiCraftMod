@@ -138,10 +138,10 @@ final class IntentTask implements Task {
                 if ("replace_goal".equals(answer.choice())) discardContinuation(currentGoal());
                 return applySemanticAnswer(answer);
             }
-            IntentAction resolved = AbilityAdapter.fromAnswer(
-                    resolvedCurrentGoal(), answer, player, runtime,
-                    continuationFor(currentGoal()), currentFailureResult());
-            return begin(resolved);
+            var refused = persistAnswerParameters(answer);
+            if (refused != null) return requestDecision(refused);
+            // 参数已经成为当前持久步骤，消费屏障与恢复读取同一意图；地点只在创建动作时临时解析。
+            return begin(AbilityAdapter.adapt(resolvedCurrentGoal(), player, runtime, continuationFor(currentGoal())));
         }
 
         // 正在走路就继续走这条路，不能每一刻都重新创建“去目的地”的任务。
@@ -158,6 +158,32 @@ final class IntentTask implements Task {
         Goal semanticGoal = currentGoal();
         return begin(AbilityAdapter.adapt(
                 resolvedCurrentGoal(), player, runtime, continuationFor(semanticGoal)));
+    }
+
+    IntentTaskRecord.DecisionSnapshot persistAnswerParameters(IntentTaskRecord.DecisionAnswer answer) {
+        Goal previous = currentGoal();
+        JsonObject priorFailure = currentFailureResult();
+        // 先看旧回执再接收新参数；不能先改Goal，使不确定消费的失败记录失去匹配后放开普通重试。
+        if ("retry".equals(answer.choice()) && !RecoveryAdvisor.ordinaryRetryAllowed(priorFailure))
+            return RecoveryAdvisor.retryRefused(previous, priorFailure);
+        Goal updated = AbilityAdapter.goalFromAnswer(previous, answer);
+        runtime.validateGoal(updated);
+        if (record.updateCurrentParameters(updated.parameters())) {
+            reconcileContinuation(previous, updated);
+            runtime.semanticPlanChanged(record, currentGoal(), true);
+            invalidateProtectionCache();
+        }
+        return null;
+    }
+
+    private void reconcileContinuation(Goal previous, Goal updated) {
+        UUID continuation = mechanicalContinuations.remove(continuationKey(previous));
+        if (continuation == null) return;
+        JsonObject before = previous.parameters(), after = updated.parameters();
+        before.remove("snapshot_id"); after.remove("snapshot_id");
+        // 只刷新观察时继续原机械施工；材料策略、接口或其他真实参数改变后，旧路线与已确认前缀不能授权新方案。
+        if (before.equals(after)) mechanicalContinuations.put(continuationKey(updated), continuation);
+        else CreateMechanicalPower.discardContinuation(continuation);
     }
 
     private TaskState begin(IntentAction action) {
@@ -251,9 +277,9 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
-            // 附魔消费前必须留有跨重启的一次性边界；同一个语义步骤恢复后不能换编号重花经验。
-            if (nextRecord instanceof org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord enchant)
-                EnchantSubmissionBinding.bind(enchant, record, runtime);
+            // 原生加工消费前统一留下跨重启边界；附魔仍保留旧命名空间，水中转化与包装子任务也不能重复投料。
+            if (nextRecord instanceof org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord consumption)
+                EnchantSubmissionBinding.bind(consumption, record, runtime);
             retainBuildProject(nextRecord);
             // 记住这一步的任务单，创建对应执行代码，只做第一次准备；后续每刻继续同一个对象。
             childRecord = nextRecord;

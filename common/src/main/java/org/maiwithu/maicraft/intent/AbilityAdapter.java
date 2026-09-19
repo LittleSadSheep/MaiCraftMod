@@ -72,29 +72,15 @@ final class AbilityAdapter {
         };
     }
 
-    static IntentAction fromAnswer(Goal goal, IntentTaskRecord.DecisionAnswer answer,
-                                   LocalPlayer player, IntentRuntime runtime) {
-        return fromAnswer(goal, answer, player, runtime, null, null);
-    }
-
-    static IntentAction fromAnswer(
-            Goal goal, IntentTaskRecord.DecisionAnswer answer,
-            LocalPlayer player, IntentRuntime runtime, UUID continuationToken,
-            JsonObject priorFailure) {
-        // 重试前先看上次结果是否允许重复；例如机器可能已经被部分修改，不能不明情况再做一遍。
-        if ("retry".equals(answer.choice())
-                && !RecoveryAdvisor.ordinaryRetryAllowed(priorFailure)) {
-            return new IntentAction.Decision(
-                    RecoveryAdvisor.retryRefused(goal, priorFailure));
-        }
+    static Goal goalFromAnswer(Goal goal, IntentTaskRecord.DecisionAnswer answer) {
+        // 这里只合并调用者认可的语义参数，不解析地点或创建动作；总任务先保存这份目标，再启动实际执行。
         JsonObject details = answer.details();
         JsonObject updates = details.has("parameters") && details.get("parameters").isJsonObject()
                 ? details.getAsJsonObject("parameters")
                 : details;
         JsonObject merged = goal.parameters();
-        // 把答复里新给的参数覆盖到本次执行使用的目标上，再重新选择动作。
         merge(merged, updates);
-        return adapt(goal.withParameters(merged), player, runtime, continuationToken);
+        return goal.withParameters(merged);
     }
 
     private static IntentAction remember(Goal goal, LocalPlayer player, IntentRuntime runtime) {
