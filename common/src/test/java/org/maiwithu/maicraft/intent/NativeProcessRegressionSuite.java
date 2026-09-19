@@ -16,6 +16,7 @@ public final class NativeProcessRegressionSuite {
         // 精确接收格、真实取物邻域和暂停后本人拾取都通过后，才允许继续投料或宣布本批已经收成。
         org.maiwithu.maicraft.core.integration.machine.process.WorldProcessSiteTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.process.WorldProcessFeedRegionTest.main(args);
+        org.maiwithu.maicraft.core.integration.machine.process.WorldProcessDelayedReactionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.process.WorldProcessSettlementTest.main(args);
         org.maiwithu.maicraft.client.server.ServerRequestOwnersTest.main(args);
         org.maiwithu.maicraft.client.actor.NativeSelectedDropTest.main(args);

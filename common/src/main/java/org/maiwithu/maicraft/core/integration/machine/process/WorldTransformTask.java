@@ -134,16 +134,18 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         if (!site.safeWaiting(player)) throw new IllegalStateException("world_process_input_pickup_risk");
         inventory.requireUnchanged(); var present = inputs.requirePresent();
         boolean trigger = feedIndex == batchInputs.size() - 1;
-        var region = WorldProcessFeedRegion.forInput(player, recipe, site.fluids, inputs.entities(), present, trigger);
-        // 真实水流会让原料漂移；在触发项离包前重新证明其落点能接触所有原料，不可达就保留触发物并停止。
-        if (!org.maiwithu.maicraft.core.task.inventory.TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), region))
+        var region = org.maiwithu.maicraft.core.task.inventory.TargetedDropRegion.ofCells(site.fluids);
+        var preference = WorldProcessFeedRegion.forInput(player, recipe, site.fluids, inputs.entities(), present, trigger);
+        // AE2在有效流体累计超过60刻后才尝试反应，期间物品会漂移；朝新鲜交集瞄准，但首次入水只要求完整池域。
+        if (!org.maiwithu.maicraft.core.task.inventory.TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), region, preference))
             throw new IllegalStateException(trigger ? "world_process_trigger_region_unreachable" : "world_process_input_region_unreachable");
         if (!r.prepareNativeConsumptionBoundary()) return TaskState.RUNNING;
         // 整个有限任务只保留一次消费边界；每份原料仍由独立原生投料回执精确确认，轮询不重发Q。
         ItemStack input = batchInputs.get(feedIndex);
         triggerStepStarted |= trigger;
         return start(new TargetedDropTaskRecord(id(), deadline(400), input, input.getCount(), stand.receiver(), region,
-                () -> !trigger || WorldProcessFeedRegion.permitsCurrentThrow(player, recipe, site.fluids, inputs, stand.receiver())));
+                () -> trigger ? WorldProcessFeedRegion.currentAim(player, recipe, site.fluids, inputs) : region,
+                () -> !trigger || WorldProcessFeedRegion.permitsCurrentThrow(player, recipe, site.fluids, inputs)));
     }
 
     private TaskState waitOutput() {
@@ -151,6 +153,9 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         // 最后一份原料消失后允许结算暂停期间的本人拾取，旧投料站位不能否定已发生的加工与收取。
         if (!gone && !site.safeWaiting(player)) throw new IllegalStateException("world_process_input_pickup_risk");
         var drops = ItemEntityReceipts.snapshot(player, site.region);
+        // 最后入池后平滑看回真实物品或接收区，留在原站位观看原生转化；暂停与手动接管不会执行这一刻。
+        var watching = drops.stream().filter(drop -> drop.stack().is(recipe.result().getItem())).findFirst().orElse(drops.isEmpty() ? null : drops.getFirst());
+        org.maiwithu.maicraft.entity.InputDriver.lookAt(player, watching == null ? stand.receiver().getCenter() : watching.position());
         // 反应期间不巡视也不靠近原料；看到成品后才查询原生生产记录，并以相同UUID继续收取。
         boolean candidate = drops.stream().anyMatch(drop -> !inputs.entities().containsKey(drop.uuid()) && drop.stack().is(recipe.result().getItem()));
         if (events.nativeEvents && (candidate || world.getGameTime() >= nextEventRead)) {

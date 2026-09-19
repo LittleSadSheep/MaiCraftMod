@@ -8,7 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-/** 冻结上层实际审查过的接收格；可按已有原料的原生取物邻域再收窄，不能把包围盒里的缺角也当作接收区。 */
+/** 冻结上层实际审查过的格并支持只收窄的约束；硬接收域与瞄准偏好各持一份，包围盒里的缺角始终不是已审查格。 */
 public final class TargetedDropRegion {
     private final List<BlockPos> cells;
     private final AABB bounds;

@@ -90,8 +90,9 @@ public final class TargetedDropEvidenceTest {
             // Unsafe 玩家夹具不会执行原版实体构造，显式给它静止速度，才能测试真实任务的稳定站立门槛。
             ActorControlTestHarness.field(net.minecraft.world.entity.Entity.class,"deltaMovement").set(world.player,Vec3.ZERO);
             world.inventory.setItem(0,new ItemStack(Items.QUARTZ,2));var checks=new java.util.concurrent.atomic.AtomicInteger();
+            var aimReads=new java.util.concurrent.atomic.AtomicInteger();var region=TargetedDropRegion.ofCells(cells);
             var record=new org.maiwithu.maicraft.core.task.inventory.TargetedDropTaskRecord("fresh-input-guard",1000,
-                    world.inventory.getItem(0),1,new BlockPos(5,1,5),TargetedDropRegion.ofCells(cells),()->{checks.incrementAndGet();return false;});
+                    world.inventory.getItem(0),1,new BlockPos(5,1,5),region,()->{aimReads.incrementAndGet();return region;},()->{checks.incrementAndGet();return false;});
             var task=new org.maiwithu.maicraft.core.task.inventory.TargetedDropCompanionTask(world.player,record);task.start(world.player);
             org.maiwithu.maicraft.task.TaskState terminal=org.maiwithu.maicraft.task.TaskState.RUNNING;
             // 夹具只把相机放到请求角度；最终原料位置复核失败后不得出现任何Q包或库存预测扣减。
@@ -101,7 +102,7 @@ public final class TargetedDropEvidenceTest {
                 world.player.setXRot((float)-Math.toDegrees(Math.atan2(direction.y,Math.sqrt(direction.horizontalDistanceSqr()))));
                 terminal=task.tick(world.player);if(!terminal.isTerminal())world.nextTick();
             }
-            check(terminal==org.maiwithu.maicraft.task.TaskState.FAILED&&checks.get()==1&&world.inventory.getItem(0).getCount()==2,
+            check(terminal==org.maiwithu.maicraft.task.TaskState.FAILED&&checks.get()==1&&aimReads.get()>=2&&world.inventory.getItem(0).getCount()==2,
                     "最终原生取物邻域变化必须在消耗触发物之前停止");
             check(world.h.connection.packets.stream().noneMatch(packet->packet instanceof net.minecraft.network.protocol.game.ServerboundPlayerActionPacket action
                     &&(action.getAction()==net.minecraft.network.protocol.game.ServerboundPlayerActionPacket.Action.DROP_ITEM

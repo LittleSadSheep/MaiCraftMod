@@ -46,7 +46,7 @@ public final class TargetedDropCompanionTask extends AbstractCompanionTask<Targe
         }
         if (!settled()) { reject("targeted_drop_requires_stationary_support", FailureType.STANCE_DUD); return; }
         if (TargetedDropReceipt.count(player, kind) < r.count) { reject("targeted_drop_exact_material_shortage", FailureType.NO_MATERIAL); return; }
-        aim = TargetedDropGeometry.aim(player, r.receiver, r.region).orElse(null);
+        aim = TargetedDropGeometry.aim(player, r.receiver, r.region, r.aimRegion()).orElse(null);
         if (aim == null) reject("targeted_drop_no_clear_native_trajectory", FailureType.OUT_OF_REACH);
     }
 
@@ -79,7 +79,7 @@ public final class TargetedDropCompanionTask extends AbstractCompanionTask<Targe
         ItemStack held = player.getMainHandItem();
         if (!ItemStack.isSameItemSameComponents(kind, held)) return reject("targeted_drop_selected_item_changed", FailureType.TARGET_LOST);
         // 每次新出手前重新试算当前地形，但只通过身体入口平滑转头，不直接写玩家朝向。
-        Vec3 currentAim = TargetedDropGeometry.aim(player, r.receiver, r.region).orElse(null);
+        Vec3 currentAim = TargetedDropGeometry.aim(player, r.receiver, r.region, r.aimRegion()).orElse(null);
         if (currentAim == null) return reject("targeted_drop_trajectory_changed", FailureType.OCCLUDED);
         if (currentAim.distanceToSqr(aim) > 0.0025) { aim = currentAim; view.reset(); }
         Vec3 direction = aim.subtract(player.getEyePosition());

@@ -14,7 +14,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-/** 先以原版点射线看见接收面，再以物品宽高核验整段抛物线；落点必须属于冻结的审查格与原生取物邻域。 */
+/** 点射线确认接收面，物品宽高核验抛物线；审查格是落水硬边界，延迟反应的原料邻域只帮助选择瞄准点。 */
 public final class TargetedDropGeometry {
     private TargetedDropGeometry() {}
     public static AABB receiverBox(BlockPos receiver) { return new AABB(receiver).inflate(.35,.1,.35); }
@@ -25,7 +25,10 @@ public final class TargetedDropGeometry {
         return aim(player,receiver,TargetedDropRegion.ofCells(cells));
     }
     public static Optional<Vec3> aim(LocalPlayer player, BlockPos receiver, TargetedDropRegion region) {
-        return aimFrom(player,player.getEyePosition(),receiver,region);
+        return aim(player,receiver,region,region);
+    }
+    public static Optional<Vec3> aim(LocalPlayer player, BlockPos receiver, TargetedDropRegion region, TargetedDropRegion aimRegion) {
+        return aimFrom(player,player.getEyePosition(),receiver,region,aimRegion);
     }
     public static boolean canReach(LocalPlayer player, Vec3 feet, BlockPos receiver) {
         return canReach(player,feet,receiver,TargetedDropRegion.ofCells(List.of(receiver)));
@@ -34,19 +37,24 @@ public final class TargetedDropGeometry {
         return canReach(player,feet,receiver,TargetedDropRegion.ofCells(cells));
     }
     public static boolean canReach(LocalPlayer player, Vec3 feet, BlockPos receiver, TargetedDropRegion region) {
+        return canReach(player,feet,receiver,region,region);
+    }
+    public static boolean canReach(LocalPlayer player, Vec3 feet, BlockPos receiver, TargetedDropRegion region, TargetedDropRegion aimRegion) {
         // 站位预检只试算站立眼高，不移动角色；真正出手还要用实际相机与眼位复核。
-        return aimFrom(player,feet.add(0,player.getEyeHeight(net.minecraft.world.entity.Pose.STANDING),0),receiver,region).isPresent();
+        return aimFrom(player,feet.add(0,player.getEyeHeight(net.minecraft.world.entity.Pose.STANDING),0),receiver,region,aimRegion).isPresent();
     }
 
-    private static Optional<Vec3> aimFrom(LocalPlayer player, Vec3 eye, BlockPos receiver, TargetedDropRegion region) {
+    private static Optional<Vec3> aimFrom(LocalPlayer player, Vec3 eye, BlockPos receiver, TargetedDropRegion region, TargetedDropRegion aimRegion) {
         Level world=player.level(); if(!world.isLoaded(receiver))return Optional.empty();
         FluidState required=world.getFluidState(receiver); Vec3 origin=eye.add(0,-.3F,0);
-        for(BlockPos cell:region.cells()) {
+        // 原生延迟转化会在入水后继续漂移；从新鲜反应区取瞄准偏好，却不要求首次落水就完成原生的邻域匹配。
+        for(BlockPos cell:aimRegion.cells()) {
+            if(!region.cells().contains(cell))continue;
             if(!world.isLoaded(cell))continue;
             FluidState fluid=world.getFluidState(cell);
             if(!required.isEmpty()&&!required.getType().isSame(fluid.getType()))continue;
             double plane=cell.getY()+(fluid.isEmpty()?.1:fluid.getHeight(world,cell));
-            AABB part=region.part(cell);
+            AABB part=aimRegion.part(cell);
             if(part==null||plane<part.minY||plane>=part.maxY||origin.y<=plane+.05)continue;
             Vec3 target=new Vec3((part.minX+part.maxX)/2,plane,(part.minZ+part.maxZ)/2);
             Vec3 horizontal=target.subtract(origin).multiply(1,0,1);double distance=horizontal.length();

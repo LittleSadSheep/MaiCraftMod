@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.actor.ItemEntityReceipts;
 import org.maiwithu.maicraft.client.actor.ItemEntityReceiptsTest;
 
-/** 只读位置与真实实体包围盒夹具验证触发物的原生取物范围；测试不投料，也不移动游戏里的物品。 */
+/** 只读位置与真实实体包围盒夹具验证反应场地和瞄准偏好；有效流体累计超过60刻才原生尝试，首次入水不宣称反应。 */
 public final class WorldProcessFeedRegionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -40,7 +40,7 @@ public final class WorldProcessFeedRegionTest {
             var recipe = recipe(3, OptionalDouble.of(1));
             var region = WorldProcessFeedRegion.forInput(world.player, recipe, cells, owned, observed, true);
             check(region.contains(new Vec3(5.5, 1.2, 5.5)) && !region.contains(new Vec3(7.2, 1.2, 5.5)),
-                    "触发落点必须同时接触两份当前原料，不能把整个相连水池视作同一次取物邻域");
+                    "反应瞄准偏好必须同时覆盖两份当前原料，不能把整个相连水池视作同一次取物邻域");
             rejects(() -> WorldProcessFeedRegion.forInput(world.player, recipe, cells,
                     Map.of(first.getUUID(), 2, second.getUUID(), 1), observed, true), "trigger_inputs_changed");
             // 冻结快照仍在旧位置时移动内存夹具的实际bbox，证明求解读取当前实体，而非相信投料时的旧坐标。
