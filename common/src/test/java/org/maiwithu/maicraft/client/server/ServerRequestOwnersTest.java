@@ -30,7 +30,26 @@ public final class ServerRequestOwnersTest {
         check(h.count("request") == 1 && h.count("cancel") == 1 && sent.snapshot().unresolvedMutation(),
                 "terminal owner retires submitted work without asserting rollback or replaying it");
         selectedOwnerRunsAfterReflexSelection();
+        cleanupReadSurvivesTerminalOwner();
         System.out.println("ServerRequestOwnersTest: passed");
+    }
+
+    private static void cleanupReadSurvivesTerminalOwner() {
+        var h = new ServerRouterTestHarness(true); h.welcome("test.read");
+        var owners = new ServerRequestOwners();
+        TaskRecord owner = new TaskRecord("test", "finished-process", 10) {
+            @Override public String describe() { return "ended production watcher"; }
+        };
+        owner.setState(TaskState.CANCELLED);
+        var owned = h.submit("test.read"); owners.remember(owned.id(), owner.publicId());
+        var body = new com.google.gson.JsonObject(); body.addProperty("release_watch", true);
+        var cleanup = h.router.submit("test.read", body, false); owners.remember(cleanup.id(), null);
+        // 任务结束会回收其普通请求；只读观察释放显式无owner，下一刻仍可发出，不会操作机器或材料。
+        owners.retire(h.router, id -> owner, 2); h.advance(2);
+        check(owned.snapshot().status() == ClientRequestReceipt.Status.CANCELLED
+                        && cleanup.snapshot().status() != ClientRequestReceipt.Status.CANCELLED
+                        && h.count("request") == 1 && h.last("request").getAsJsonObject("body").get("release_watch").getAsBoolean(),
+                "an ownerless observation release survives the finished task's retirement and is dispatched exactly once");
     }
 
     private static void selectedOwnerRunsAfterReflexSelection() {
