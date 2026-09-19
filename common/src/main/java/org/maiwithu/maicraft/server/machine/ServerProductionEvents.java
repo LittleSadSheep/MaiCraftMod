@@ -31,6 +31,13 @@ public final class ServerProductionEvents {
     /** Amounts already describe this actual native operation; operations is metadata, never a multiplier. */
     public static void recordProduction(ServerLevel level, BlockPos producer, String recipeId, JsonArray inputs,
                                         JsonArray outputs, long operations, String nativeCall) {
+        recordProduction(level, producer, recipeId, inputs, outputs, operations, nativeCall, null, null);
+    }
+
+    /** 世界内加工额外保留真实掉落物关联；仍写同一生产日志，生成成功不代表玩家已经拾取。 */
+    public static void recordProduction(ServerLevel level, BlockPos producer, String recipeId, JsonArray inputs,
+                                        JsonArray outputs, long operations, String nativeCall,
+                                        JsonArray consumedEntities, java.util.UUID outputEntity) {
         if (!level.getServer().isSameThread() || producer == null || operations <= 0) return;
         if (!hasPositiveResource(outputs) && !hasPositiveResource(inputs)) return;
         JsonObject event = new JsonObject();
@@ -48,6 +55,8 @@ public final class ServerProductionEvents {
         event.addProperty("provenance", "native_recipe_output");
         event.addProperty("native_call", nativeCall);
         event.addProperty("delivery_confirmed", false);
+        if (consumedEntities != null) event.add("consumed_entities", consumedEntities);
+        if (outputEntity != null) event.addProperty("output_entity_uuid", outputEntity.toString());
         // append validates depth/size and immediately encodes an immutable payload; no recursive pre-copy.
         event.add("outputs", outputs);
         event.add("inputs", inputs);
