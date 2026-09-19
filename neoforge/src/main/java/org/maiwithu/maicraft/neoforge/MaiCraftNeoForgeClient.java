@@ -41,6 +41,8 @@ public final class MaiCraftNeoForgeClient {
     private void onClientSetup(FMLClientSetupEvent event) {
         // 初始化安排到客户端工作队列，先完成注册，再开放 MCP 接单。
         event.enqueueWork(() -> {
+            // 客户端接单前读取本实例的建筑预算，避免工具注册时缓存旧的目标数和请求大小。
+            org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(Minecraft.getInstance().gameDirectory.toPath());
             NeoForgeOptionalServerClient.install();
             MaiCraftCore.init();
             ClientRuntime.start(MaiCraftRuntimeFacade.instance());
