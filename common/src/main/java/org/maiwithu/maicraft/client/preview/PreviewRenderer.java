@@ -22,9 +22,10 @@ import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /**
- * 把预览画在真实世界中。整份计划保留，实际只画相机范围内、距离小于 128 格且处于所选高度的分区。
+ * 把预览画在真实世界中。整份计划保留，实际只画相机范围内、配置距离内且处于所选高度的分区。
  * 每个分区是四格见方的小立方体；整体准备、重建和排序分帧进行，图形缓存不用每帧全部重做。
  */
 public final class PreviewRenderer {
@@ -61,9 +62,10 @@ public final class PreviewRenderer {
         Vec3 position = camera.getPosition();
         Frustum frustum = new Frustum(view, projection);
         frustum.prepare(position.x, position.y, position.z);
+        double distanceSquared = viewDistanceSquared();
         List<PreviewMeshSection> visible = sections.stream().filter(section ->
                 section.bounds.maxY > session.minY() && section.bounds.minY <= session.maxY()
-                && section.bounds.getCenter().distanceToSqr(position) < 128 * 128
+                && section.bounds.getCenter().distanceToSqr(position) < distanceSquared
                 && frustum.isVisible(section.bounds)).sorted(Comparator.comparingDouble(section ->
                 section.bounds.getCenter().distanceToSqr(position))).toList();
         long now = System.currentTimeMillis();
@@ -92,6 +94,11 @@ public final class PreviewRenderer {
         int fallback = visible.stream().mapToInt(section -> section.fallbackModels).sum();
         showStatus(minecraft, session, "可见区块 " + ready + "/" + visible.size()
                 + (fallback == 0 ? "" : " · 特殊模型仅轮廓 " + fallback));
+    }
+
+    // 每帧读取启动配置，扩展显示距离仍不强行加载世界区块；用double平方避免较大合法距离整数溢出。
+    static double viewDistanceSquared() {
+        double distance = BuildingBudgets.current().previewDistance(); return distance * distance;
     }
 
     private static void showStatus(Minecraft minecraft, PreviewSession session, String status) {

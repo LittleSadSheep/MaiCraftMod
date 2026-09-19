@@ -8,13 +8,13 @@ import java.util.List;
 import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /**
  * 保存一份不会被调用方改写的蓝图和部件列表，再另记确认、取消、显示和切层状态；不向世界写方块。
  */
 public final class PreviewSession {
     public enum Decision { WAITING, CONFIRMED, CANCELLED, DISABLED, DESIGN_ONLY }
-    public static final int MAX_CELLS = 65_536;
     private final String owner, dimension, title;
     private final Map<BlockPos, BlockState> cells;
     private final List<PreviewPart> parts;
@@ -33,8 +33,13 @@ public final class PreviewSession {
         this.owner = Objects.requireNonNull(owner);
         this.dimension = Objects.requireNonNull(dimension);
         this.title = Objects.requireNonNull(title);
-        if (owner.isBlank() || cells.isEmpty() && parts.isEmpty() || cells.size() + parts.size() > MAX_CELLS)
-            throw new IllegalArgumentException("preview requires an owner and 1.." + MAX_CELLS + " cells");
+        if (owner.isBlank() || cells.isEmpty() && parts.isEmpty())
+            throw new IllegalArgumentException("preview requires an owner and at least one cell or part");
+        // 新预览取本次启动的预算；方块与AE部件合计，调大文件后仍须重启，不会因此确认施工。
+        int limit = maxCells();
+        if ((long) cells.size() + parts.size() > limit)
+            throw new IllegalArgumentException("preview exceeds preview.maxCells=" + limit + "; configure "
+                    + BuildingBudgets.CONFIG_PATH + " and restart to change this limit");
         // 复制坐标和列表，避免调用方随后移动可变坐标或修改集合时，让已展示的方案跟着变。
         Map<BlockPos, BlockState> frozen = new LinkedHashMap<>();
         cells.forEach((pos, state) -> frozen.put(pos.immutable(), Objects.requireNonNull(state)));
@@ -43,6 +48,7 @@ public final class PreviewSession {
     }
 
     public String owner() { return owner; }
+    public static int maxCells() { return BuildingBudgets.current().maxPreviewCells(); }
     public String dimension() { return dimension; }
     public String title() { return title; }
     public Map<BlockPos, BlockState> cells() { return cells; }
