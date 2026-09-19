@@ -19,6 +19,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 反复寻找匹配的地面物品并走近，让服务器按正常拾取规则把物品放进背包。
@@ -34,6 +35,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     private Phase phase = Phase.SCAN;
     private NativePickupReceipt pickup;
+    private UUID pickupUuid;
     private int contactTicks;
     private int unreachable;
     private int disappearedWithoutReceipt;
@@ -54,6 +56,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         // 每次新任务清空计数和跳过名单；暂停恢复不会自动重新执行这个初始化。
         this.phase = Phase.SCAN;
         this.pickup = null;
+        this.pickupUuid = null;
         this.contactTicks = 0;
         this.unreachable = 0;
         this.disappearedWithoutReceipt = 0;
@@ -103,10 +106,14 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
             // Nothing left within radius. Success at zero remains a valid "nothing here" receipt.
             return TaskState.SUCCESS;
         }
+        if (!r.targetUuids.isEmpty() && !NativePickupReceipt.insideVanillaTouchEnvelope(player, best)
+                && !CollectItemsApproach.safeTarget(player, best.blockPosition())) {
+            fail("the scoped drop has no observed dry or shallow-water footing", FailureType.NO_PATH); return TaskState.FAILED;
+        }
         pickup = NativePickupReceipt.begin(player, best);
+        pickupUuid = best.getUUID();
         contactTicks = 0;
-        nav = PlayerNav.toRevalidating(player, this::targetGoal, WALK_SPEED,
-                this::pickupReceived, PlayerNav.ContextProvider.DEFAULT);
+        nav = approachNavigation();
         phase = Phase.APPROACH;
         return TaskState.RUNNING;
     }
@@ -118,6 +125,13 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
             return TaskState.RUNNING;
         }
 
+        ItemEntity current = pickup.liveEntity(player);
+        // 数字实体ID可能被重用；持续靠近前仍认原UUID和完整物品样式，不把另一堆接成已授权产物。
+        if (!r.targetUuids.isEmpty() && current != null
+                && (!current.getUUID().equals(pickupUuid) || !r.permits(current.getUUID()) || !pickup.sameStackKind(current))) {
+            fail("the tracked drop identity changed before pickup", FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
         NativePickupReceipt.State receiptState = pickup.poll(player, PICKUP_SYNC_TICKS);
         if (receiptState == NativePickupReceipt.State.RECEIVED) {
             r.addCollected(pickup.confirmedUnits(player));
@@ -161,24 +175,26 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
             }
             return TaskState.RUNNING;
         }
+        if (!r.targetUuids.isEmpty() && !CollectItemsApproach.safeTarget(player, live.blockPosition())) {
+            fail("the scoped drop left observed dry or shallow-water footing", FailureType.NO_PATH); return TaskState.FAILED;
+        }
         contactTicks = 0;
 
         // 站在同一格也可能还没碰到小小的掉落物，最后一点距离用普通前进补齐，不能只凭格子相同算成功。
         if (player.blockPosition().equals(live.blockPosition())) {
             stopNav();
-            InputDriver.stepToward(player, live.position(), false);
+            nudge(live);
             return TaskState.RUNNING;
         }
         if (nav == null) {
-            nav = PlayerNav.toRevalidating(player, this::targetGoal, WALK_SPEED,
-                    this::pickupReceived, PlayerNav.ContextProvider.DEFAULT);
+            nav = approachNavigation();
         }
 
         switch (nav.tick()) {
             case RUNNING -> { /* walking to it */ }
             case ARRIVED -> {
                 stopNav();
-                InputDriver.stepToward(player, live.position(), false);
+                nudge(live);
             }
             case FAILED -> {
                 skipped.skip(live);
@@ -192,11 +208,27 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     private GoalCompiler.Compiled targetGoal() {
         ItemEntity live = pickup == null ? null : pickup.liveEntity(player);
-        return live == null ? null : GoalCompiler.standOn(live.blockPosition());
+        return live == null || !r.targetUuids.isEmpty() && (!live.getUUID().equals(pickupUuid) || !r.permits(live.getUUID()))
+                ? null : GoalCompiler.standOn(live.blockPosition());
     }
 
     private boolean pickupReceived() {
         return pickup != null && pickup.received(player);
+    }
+
+    private PlayerNav approachNavigation() {
+        var next = PlayerNav.toRevalidating(player, this::targetGoal, WALK_SPEED,
+                this::pickupReceived, PlayerNav.ContextProvider.DEFAULT);
+        // 内部受限收取只复用现有步行与浅水通行，不为捡一堆已确认物品自动尝试其他交通。
+        return r.targetUuids.isEmpty() ? next : next.walkingOnly();
+    }
+
+    private void nudge(ItemEntity target) {
+        // 到了同一格仍未接触时保留原生短靠近，但受限产物不能绕过保护格或跨入未知深水。
+        if (!r.targetUuids.isEmpty() && !CollectItemsApproach.safeNudge(player, target.position())) {
+            InputDriver.halt(player); fail("the final pickup approach is not safe on the observed footing", FailureType.NO_PATH); return;
+        }
+        InputDriver.stepToward(player, target.position(), false);
     }
 
     /** 两堆物品合并时，旧实体消失不等于被捡走；若已观察到的另一堆数量增加足够，就改为追踪合并后的那堆。 */
@@ -204,7 +236,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         if (pickup == null) return false;
         AABB box = player.getBoundingBox().inflate(r.radius);
         ItemEntity survivor = player.level().getEntitiesOfClass(ItemEntity.class, box,
-                        entity -> !entity.isRemoved() && pickup.sameStackKind(entity))
+                        entity -> !entity.isRemoved() && r.permits(entity.getUUID()) && pickup.sameStackKind(entity))
                 .stream()
                 .filter(entity -> {
                     Integer before = firstObservedEntityCounts.get(entity.getId());
@@ -216,6 +248,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         if (survivor == null) return false;
         firstObservedEntityCounts.put(survivor.getId(), survivor.getItem().getCount());
         pickup = NativePickupReceipt.begin(player, survivor);
+        pickupUuid = survivor.getUUID();
         contactTicks = 0;
         stopNav();
         return true;
@@ -223,6 +256,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     private void finishTarget() {
         pickup = null;
+        pickupUuid = null;
         contactTicks = 0;
         stopNav();
         phase = Phase.SCAN;
@@ -234,11 +268,12 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     }
 
     private ItemEntity nearestItem() {
-        // 每次围绕玩家此刻的位置重新找最近匹配物品；这里没有逐个检查归属，也不限定最初扫描过的身份。
+        // 普通拾取按类型找最近物品；内部已限定身份时先筛UUID，不能因另一堆更近就转移收取目标。
         AABB box = player.getBoundingBox().inflate(r.radius);
         List<ItemEntity> candidates = new ArrayList<>();
         for (Entity e : player.level().getEntities(player, box)) {
             if (!(e instanceof ItemEntity ie) || ie.isRemoved()) continue;
+            if (!r.permits(ie.getUUID())) continue;
             if (!r.filter.isEmpty() && !r.filter.contains(ie.getItem().getItem())) continue;
             firstObservedEntityCounts.putIfAbsent(ie.getId(), ie.getItem().getCount());
             candidates.add(ie);

@@ -4,10 +4,11 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import net.minecraft.world.item.Item;
 
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 拾取任务单：指定哪些物品类型和搜索半径，执行器逐堆走近，交给游戏正常拾取。
- * 空过滤集合表示所有类型；这里没有具体目标名单、归属策略或最多拾取多少件的字段。
+ * 空类型过滤表示所有类型；内部加工收尾还可限制目标UUID，公开工具仍按类型与半径使用。
  */
 public final class CollectItemsTaskRecord extends TaskRecord {
 
@@ -19,17 +20,28 @@ public final class CollectItemsTaskRecord extends TaskRecord {
     public final int radius;
     /** Human-readable label for messages (e.g. "all items" or "diamond"). */
     public final String label;
+    /** 内部任务已证明归属的实体身份；空集合沿用普通拾取的不限身份语义。 */
+    public final Set<UUID> targetUuids;
 
     /** Live progress, updated by the goal as items are absorbed. */
     private int collected = 0;
 
     public CollectItemsTaskRecord(String toolCallId, long deadlineGameTime,
                                   Set<Item> filter, int radius, String label) {
+        this(toolCallId, deadlineGameTime, filter, radius, label, Set.of());
+    }
+
+    // 加工产物按已冻结UUID接近，物品合堆后不能自行把权限扩给未证明的幸存实体。
+    public CollectItemsTaskRecord(String toolCallId, long deadlineGameTime,
+                                  Set<Item> filter, int radius, String label, Set<UUID> targetUuids) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.filter = Set.copyOf(filter);
         this.radius = radius;
         this.label = label;
+        this.targetUuids = Set.copyOf(targetUuids);
     }
+
+    boolean permits(UUID uuid) { return targetUuids.isEmpty() || targetUuids.contains(uuid); }
 
     public int getCollected() {
         return collected;
