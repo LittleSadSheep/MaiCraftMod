@@ -85,6 +85,7 @@ public final class EnchantCompanionTask extends AbstractCompanionTask<EnchantTas
                         yield failIssue("enchantment_opened_menu_already_occupied", FailureType.INTERRUPTED);
                     if (!context.menus().ensureVisible(context)) yield TaskState.RUNNING;
                     // 绑定这一张已可见、两格均为空的原生附魔菜单；后续换菜单或报价都不能沿用旧操作。
+                    org.maiwithu.maicraft.core.integration.machine.MachineMenu.rememberNativeOpened(player, menu, r.table);
                     flow = new EnchantMenuFlow(player, r, menu, inventory, r::prepareNativeConsumptionBoundary);
                     phase = Phase.ENCHANT; yield TaskState.RUNNING;
                 }

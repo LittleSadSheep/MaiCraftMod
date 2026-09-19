@@ -107,6 +107,22 @@ public final class MachineMenu {
                 request.machinePosition(), blockId, ClientRuntime.requireContext(player).bodyEpoch()));
     }
 
+    public static void rememberNativeOpened(LocalPlayer player, AbstractContainerMenu menu, BlockPos position) {
+        // 已有原生工作流确认开出的可见菜单才登记来源；只记观察身份，不补发右键或菜单按钮。
+        var context = ClientRuntime.requireContext(player);
+        if (player.containerMenu != menu || !MenuVisibility.matches(context.minecraft(), menu) || !player.level().isLoaded(position))
+            throw new IllegalStateException("native process menu origin is not currently observed");
+        ORIGINS.put(menu, new Origin(new WeakReference<>(player), player.level().dimension().location().toString(),
+                position.immutable(), BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(position).getBlock()), context.bodyEpoch()));
+    }
+
+    public static boolean openedAt(LocalPlayer player, BlockPos position) {
+        Origin origin = ORIGINS.get(player.containerMenu); var stamp = ClientRuntime.actor().observationStamp(player).orElse(null);
+        return origin != null && stamp != null && origin.player().get() == player && origin.bodyEpoch() == stamp.bodyEpoch()
+                && origin.dimension().equals(player.level().dimension().location().toString()) && origin.position().equals(position)
+                && MenuVisibility.matches(Minecraft.getInstance(), player.containerMenu);
+    }
+
     /**
      * 读取当前菜单和实际携带物品。只有本流程打开、仍可见、鼠标没有拿物品且来源仍有效的菜单才给存取编号。
      * 编号最多保留十六份，约六百次角色更新后过期；报告不解释配方或控制数据的业务含义。
@@ -193,6 +209,9 @@ public final class MachineMenu {
         else if (virtualMenu(menu)) out.addProperty("transfer_unavailable_reason", "virtual storage uses a dedicated integration such as AE2 supply");
         if (visible) org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply.observeOpenWaterInventory(menu)
                 .ifPresent(water -> out.add("ae2_water_inventory", water));
+        // 明确查询菜单时才附来源对应的原生机制与报价；不把另一个台子的菜单套到当前检查对象上。
+        if (visible && validOrigin) out.add("native_processes",
+                org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry.inspect(self, origin.position()));
         return out;
     }
 
