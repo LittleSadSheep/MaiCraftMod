@@ -4,6 +4,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.IntTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,11 +22,12 @@ final class BlueprintFormats {
 
     /**
      * 限制最多枚举多少格，包括空气。Litematic 还会把所有区域的体积相加后应用同一上限。
-     * MAX_CELLS 则另管最终保存多少条非空气格或实体，不能用结果条数代替遍历工作量。
+     * 最终保存的非空气格或实体另按施工条目预算检查，不能用结果条数代替遍历工作量。
      */
-    static final long MAX_REGION_VOLUME = 256L * 256L * 256L;
-    static final int MAX_CELLS = 32768;
-    static final int MAX_PALETTE = 65536;
+    static long maxRegionVolume() { return BuildingBudgets.current().maxImportVolume(); }
+    static int maxCells() { return BuildingBudgets.current().maxTargets(); }
+    // 调色板保留独立可调预算，复杂配色的内存开销不再依靠固定常量约束。
+    static int maxPalette() { return BuildingBudgets.current().maxImportPaletteEntries(); }
 
     // ------------------------------------------------------------------
     // .litematic
@@ -52,8 +54,9 @@ final class BlueprintFormats {
             regionTags.add(region);
             int[] min = regionMin(region);
             int[] abs = regionAbsSize(region);
-            totalVolume += checkedVolume(abs[0], abs[1], abs[2]);
-            if (totalVolume > MAX_REGION_VOLUME) {
+            // 先检查每个区域，再用精确加法累计，调高配置也不能靠整数溢出绕过总扫描量。
+            totalVolume = Math.addExact(totalVolume, checkedVolume(abs[0], abs[1], abs[2]));
+            if (totalVolume > maxRegionVolume()) {
                 throw new IllegalArgumentException("litematic total region volume exceeds the import work budget");
             }
             minX = Math.min(minX, min[0]);
@@ -70,7 +73,7 @@ final class BlueprintFormats {
             // 每个区域的编号从自己的材料表开始；合并后加上此前材料总数，避免编号指向另一区域。
             int paletteBase = palette.size();
             ListTag regionPalette = region.getList("BlockStatePalette", Tag.TAG_COMPOUND);
-            if (regionPalette.isEmpty() || palette.size() + regionPalette.size() > MAX_PALETTE) {
+            if (regionPalette.isEmpty() || (long) palette.size() + regionPalette.size() > maxPalette()) {
                 throw new IllegalArgumentException("litematic palette is empty or exceeds the import memory budget");
             }
             boolean[] isAir = new boolean[regionPalette.size()];
@@ -85,7 +88,8 @@ final class BlueprintFormats {
             int bits = Math.max(2, 32 - Integer.numberOfLeadingZeros(
                     Math.max(1, regionPalette.size() - 1)));
             long volume = checkedVolume(abs[0], abs[1], abs[2]);
-            if (packed.length < (volume * bits + 63) / 64) {
+            // 打包字数仍须真实存在；配置体积再大，也不允许位数乘积溢出后假装数据完整。
+            if (packed.length < Math.addExact(Math.multiplyExact(volume, bits), 63) / 64) {
                 throw new IllegalArgumentException("litematic block-state data is truncated");
             }
             // 方块实体数据(箱子里的东西、告示牌的字、旗帜花纹)按区域内坐标索引,
@@ -234,7 +238,7 @@ final class BlueprintFormats {
             entities.add(entityCell(at.getDouble(0), at.getDouble(1), at.getDouble(2), data));
         }
         CompoundTag paletteMap = blocksHolder.getCompound("Palette");
-        if (paletteMap.isEmpty() || paletteMap.size() > MAX_PALETTE) {
+        if (paletteMap.isEmpty() || paletteMap.size() > maxPalette()) {
             throw new IllegalArgumentException("schem palette is empty or exceeds the import memory budget");
         }
         Map<Integer, CompoundTag> byId = new HashMap<>();
@@ -382,8 +386,9 @@ final class BlueprintFormats {
 
     // 先用除法判断会不会超过体积上限，再做乘法，避免极大尺寸先乘溢出后逃过检查。
     static long checkedVolume(int x, int y, int z) {
-        if (x <= 0 || y <= 0 || z <= 0 || x > MAX_REGION_VOLUME / y
-                || (long) x * y > MAX_REGION_VOLUME / z) {
+        long limit = maxRegionVolume();
+        if (x <= 0 || y <= 0 || z <= 0 || x > limit / y
+                || (long) x * y > limit / z) {
             throw new IllegalArgumentException("blueprint region dimensions are invalid or exceed the import work budget");
         }
         return (long) x * y * z;
@@ -396,8 +401,9 @@ final class BlueprintFormats {
 
     // 在加入下一条之前检查容量，避免已经装入过量格子后才发现超限。
     private static void requireCapacity(ListTag entries) {
-        if (entries.size() >= MAX_CELLS) {
-            throw new IllegalArgumentException("blueprint exceeds the " + MAX_CELLS + " entry import memory budget");
+        int limit = maxCells();
+        if (entries.size() >= limit) {
+            throw new IllegalArgumentException("blueprint exceeds the " + limit + " entry import memory budget");
         }
     }
 

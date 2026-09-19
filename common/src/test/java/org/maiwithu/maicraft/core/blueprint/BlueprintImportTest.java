@@ -33,8 +33,10 @@ public final class BlueprintImportTest {
         expectFailure(() -> BlueprintFormats.fromSchem(schem(1, -1, "minecraft:stone", new byte[]{0})));
 
         CompoundTag regions = new CompoundTag();
-        regions.put("one", region(256, 256, 256));
-        regions.put("two", region(256, 256, 256));
+        // 两区各自都在默认扫描预算内，合计超过当前配置时必须在读取缺失打包数据之前明确拒绝。
+        int half = Math.toIntExact(BlueprintFormats.maxRegionVolume() / 2 + 1);
+        regions.put("one", region(half, 1, 1));
+        regions.put("two", region(half, 1, 1));
         CompoundTag root = new CompoundTag();
         root.put("Regions", regions);
         expectFailure(() -> BlueprintFormats.fromLitematic(root));

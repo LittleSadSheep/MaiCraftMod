@@ -15,14 +15,13 @@ import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /**
  * 从磁盘读取蓝图并检查文件结构。这里只处理文件中的数字和文本，不查询游戏世界或方块注册表。
  * 方块名字是否存在、旋转后应放在哪里，由后续 BlueprintStore.Loader 在客户端线程处理。
  */
 final class BlueprintFiles {
-    static final long MAX_INPUT_BYTES = 16L * 1024 * 1024;
-    static final long MAX_NBT_BYTES = 64L * 1024 * 1024;
     private static final List<String> EXTENSIONS = List.of(".nbt", ".snbt", ".litematic", ".schem");
 
     private BlueprintFiles() {}
@@ -68,12 +67,14 @@ final class BlueprintFiles {
                 BlueprintFormats.checkInterrupted();
                 Path file = resolve(root, name + extension);
                 if (!Files.isRegularFile(file)) continue;
-                if (Files.size(file) > MAX_INPUT_BYTES) throw new IOException("blueprint file exceeds the import byte budget");
+                // 大蓝图按建筑配置允许更大的文件；检查磁盘大小后仍限流读取，防止文件增长或压缩内容超额。
+                var budget = BuildingBudgets.current();
+                if (Files.size(file) > budget.maxImportFileBytes()) throw new IOException("blueprint file exceeds the import byte budget");
                 CompoundTag tag;
-                try (InputStream input = limited(Files.newInputStream(file), MAX_INPUT_BYTES)) {
+                try (InputStream input = limited(Files.newInputStream(file), budget.maxImportFileBytes())) {
                     tag = extension.equals(".snbt")
                             ? NbtUtils.snbtToStructure(new String(input.readAllBytes(), StandardCharsets.UTF_8))
-                            : NbtIo.readCompressed(input, NbtAccounter.create(MAX_NBT_BYTES));
+                            : NbtIo.readCompressed(input, NbtAccounter.create(budget.maxImportNbtBytes()));
                 } catch (RuntimeException | com.mojang.brigadier.exceptions.CommandSyntaxException invalid) {
                     throw new IllegalArgumentException("blueprint " + name + " cannot be parsed: " + invalid.getMessage(), invalid);
                 }
@@ -146,8 +147,9 @@ final class BlueprintFiles {
                 ? tag.getList("palettes", Tag.TAG_LIST).getList(0) : tag.getList("palette", Tag.TAG_COMPOUND);
         ListTag blocks = tag.getList("blocks", Tag.TAG_COMPOUND);
         ListTag entities = tag.getList("entities", Tag.TAG_COMPOUND);
-        if (palette.isEmpty() || palette.size() > BlueprintFormats.MAX_PALETTE
-                || blocks.size() > BlueprintFormats.MAX_CELLS || entities.size() > BlueprintFormats.MAX_CELLS) {
+        // 导入条目与后续施工共用配置规模，不再先被旧的三万格导入门槛截断。
+        if (palette.isEmpty() || palette.size() > BlueprintFormats.maxPalette()
+                || blocks.size() > BlueprintFormats.maxCells() || entities.size() > BlueprintFormats.maxCells()) {
             throw new IllegalArgumentException("blueprint palette or entry count exceeds the import memory budget");
         }
         for (Tag value : blocks) {

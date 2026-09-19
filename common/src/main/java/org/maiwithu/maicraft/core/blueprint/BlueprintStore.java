@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.blueprint;
 
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
@@ -40,14 +41,13 @@ public final class BlueprintStore {
      * 保存展开进度，每次处理一小批；上一批做到哪里，下一次就从哪里继续。
      */
     public static final class Loader {
-        private static final long SLICE_NANOS = 2_000_000L;
-        private static final int ENTRIES_PER_SLICE = 128;
         private final BlockPos anchor;
         private final int quarters, sx, sy, sz;
         private final Rotation rotation;
         private final ListTag paletteTag, blocks, entities;
         private final List<BlockState> palette = new ArrayList<>();
-        private final java.util.LinkedHashMap<Long, BuildTaskRecord.Target> byPos = new java.util.LinkedHashMap<>();
+        // 普通导入目标先保留完整坐标；原生建造高度仍由后续现场检查判断，不能在数据解析时压缩丢格。
+        private final java.util.LinkedHashMap<BlockPos, BuildTaskRecord.Target> byPos = new java.util.LinkedHashMap<>();
         private final java.util.Map<Long, CompoundTag> beData = new java.util.HashMap<>();
         private final java.util.Map<Long, List<BuildTaskRecord.CellNeed>> needs = new java.util.HashMap<>();
         private final List<BuildTaskRecord.EntitySpawn> spawns = new ArrayList<>();
@@ -75,20 +75,22 @@ public final class BlueprintStore {
 
         /**
          * 先展开材料表，再展开格子，最后展开摆设实体。返回 null 表示还没处理完。
-         * 每次最多处理 128 项，并在项目之间检查约 2 毫秒的时间预算；单次模组回调本身不能被这里中途打断。
+         * 每批的条目数和时间来自建筑配置；单次模组回调本身不能被这里中途打断。
          */
         public Loaded tick(LocalPlayerContext context) {
             context.requireCurrent();
             ClientLevel level = context.level();
-            long deadline = System.nanoTime() + SLICE_NANOS;
-            int remaining = ENTRIES_PER_SLICE;
-            while (paletteIndex < paletteTag.size() && remaining-- > 0 && System.nanoTime() < deadline) {
+            // 解析大蓝图仍把身体线程分成短批，先材料再方块再摆设，避免一次展开让直播画面卡住。
+            var budget = BuildingBudgets.current();
+            long started = System.nanoTime(), sliceNanos = Math.max(1L, (long) (budget.importSliceMillis() * 1_000_000));
+            int remaining = budget.importEntriesPerSlice();
+            while (paletteIndex < paletteTag.size() && remaining-- > 0 && System.nanoTime() - started < sliceNanos) {
                 // 方块名交给原版解析；原版对未知名字会返回空气，这里尚未把这种情况单独判为导入失败。
                 palette.add(NbtUtils.readBlockState(level.holderLookup(Registries.BLOCK),
                         paletteTag.getCompound(paletteIndex++)).rotate(rotation));
             }
             if (paletteIndex < paletteTag.size()) return null;
-            while (blockIndex < blocks.size() && remaining-- > 0 && System.nanoTime() < deadline) {
+            while (blockIndex < blocks.size() && remaining-- > 0 && System.nanoTime() - started < sliceNanos) {
                 CompoundTag cell = blocks.getCompound(blockIndex++);
                 ListTag pos = cell.getList("pos", Tag.TAG_INT);
                 int x = pos.getInt(0);
@@ -146,33 +148,24 @@ public final class BlueprintStore {
                     dropped++;
                     continue;
                 }
-                // 同坐标后写覆盖先写:方块实体数据与逐格料单要跟着一起清,否则存活的那一条
-                // 会串上前一条的数据(一块空白告示牌顶着别人的字)
-                beData.remove(world.asLong());
-                needs.remove(world.asLong());
-                byPos.put(world.asLong(), new BuildTaskRecord.Target(state, payItem, world,
-                        state.getBlock().builtInRegistryHolder().key().location().getPath(),
-                        null, null, null));
                 // 方块实体数据只搬装饰性的那部分(告示牌的字、旗帜的花纹);容器内容一律
                 // 不搬——图纸是文件,照搬等于凭空造物品
                 CompoundTag safe = null;
                 if (cell.contains("nbt", Tag.TAG_COMPOUND)) {
                     safe = org.maiwithu.maicraft.core.build.BlueprintSafety
                             .safeBlockEntityData(state, cell.getCompound("nbt"));
-                    if (safe != null) {
-                        beData.put(world.asLong(), safe);
-                    }
                 }
                 // 这一格要几叠料:带花的花盆是盆加花两件,带花纹的旗帜是一叠但要组件一致。
                 // 一格一件是特例而不是通则,这张料单整个盖过默认的"一件本方块的物品"。
                 var cellNeeds = org.maiwithu.maicraft.core.build.BuildStates
                         .cellNeeds(placed, safe, level, world, level.registryAccess());
-                if (!cellNeeds.isEmpty()) {
-                    needs.put(world.asLong(), cellNeeds);
-                }
+                // 先取得这一格可保留的装饰与材料要求，再一并登记；坐标不可表达时整格拒绝，不能串到别层。
+                retainTarget(new BuildTaskRecord.Target(state, payItem, world,
+                        state.getBlock().builtInRegistryHolder().key().location().getPath(),
+                        null, null, null), safe, cellNeeds);
             }
             if (blockIndex < blocks.size()) return null;
-            while (entityIndex < entities.size() && remaining-- > 0 && System.nanoTime() < deadline) {
+            while (entityIndex < entities.size() && remaining-- > 0 && System.nanoTime() - started < sliceNanos) {
                 CompoundTag e = entities.getCompound(entityIndex++);
                 CompoundTag safe = org.maiwithu.maicraft.core.build.BlueprintSafety
                         .safeEntityData(e.getCompound("nbt"), level.registryAccess());
@@ -201,6 +194,21 @@ public final class BlueprintStore {
             if (entityIndex < entities.size()) return null;
             Vec3i size = (quarters % 2 == 0) ? new Vec3i(sx, sy, sz) : new Vec3i(sz, sy, sx);
             return new Loaded(new ArrayList<>(byPos.values()), size, beData, spawns, needs, dropped);
+        }
+
+        private void retainTarget(BuildTaskRecord.Target target, CompoundTag data, List<BuildTaskRecord.CellNeed> cellNeeds) {
+            BlockPos position = target.pos(); long packed = position.asLong();
+            boolean representable = BlockPos.of(packed).equals(position);
+            // 装饰和逐格料单仍交给原生压缩坐标索引；必须能完整还原，才允许替换旧目标及其附带记录。
+            if (!representable && (data != null || !cellNeeds.isEmpty()))
+                throw new IllegalArgumentException("blueprint native block data or material needs cannot represent position " + position);
+            if (representable) {
+                // 同坐标后写覆盖先写；清掉该格旧告示牌文字和材料要求，不触碰压缩编号相同的远处普通目标。
+                beData.remove(packed); needs.remove(packed);
+            }
+            byPos.put(position, target);
+            if (data != null) beData.put(packed, data);
+            if (!cellNeeds.isEmpty()) needs.put(packed, cellNeeds);
         }
     }
 }
