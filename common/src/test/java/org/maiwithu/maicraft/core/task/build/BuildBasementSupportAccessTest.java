@@ -43,8 +43,9 @@ public final class BuildBasementSupportAccessTest {
             check(proof.targetPlacement() != null && proof.targetPlacement().feet().y >= 3.5
                     && proof.witness().clicked().equals(SUPPORT), "最终须返回较高可达阶面，对已证明的支撑放置南向楼梯");
             var projected = new BuildSupportWorld(h.level, h.level::isLoaded, Map.of(SUPPORT, Blocks.DIRT.defaultBlockState()));
+            // 最终见证可能为横梁下的低视线放法；按已验证姿态重新做原生预测，不能改用默认站姿丢失这一证据。
             check(BuildPlacementGeometry.projectedGestureFrom(h.player, target, projected, h.level::isLoaded,
-                    proof.targetPlacement().feet()) != null, "最终姿态必须通过原生楼梯朝向和点击几何，不能只检查空格邻接");
+                    proof.targetPlacement().feet(), proof.witness().sneak()) != null, "最终姿态必须通过原生楼梯朝向和点击几何，不能只检查空格邻接");
             check(((Number) proof.evidence().get("reachable_stances")).intValue() <= 512
                     && ((Number) proof.evidence().get("observed_blocks")).intValue() <= 8192,
                     "加深下降范围仍保留落脚点和世界读取上限");

@@ -45,10 +45,20 @@ public final class BuildRoofStairAccessTest {
             var target = target(); var view = view(h); var search = search(h, target, view); finish(search);
             check(search.accepted(), "the actual existing outside support must yield a bounded native access: " + search.reason());
             var access = search.access();
-            check(access.edge() && access.gesture().sneak() && access.feet().y >= OUTSIDE.y,
-                    "a lower current target may use continuous sneaking without descending off the roof");
+            // 当前脚下是已有整块土支撑，能直接按正确朝向放楼梯时应复用原位；旧测试把所有屋顶放置都强制当成临边。
+            check(access.feet().equals(OUTSIDE) && access.approach().equals(OUTSIDE) && !access.edge(),
+                    "the complete existing outside dirt support permits placement without unnecessary edge motion");
+            var footprint = h.player.getBoundingBox();
+            var support = h.level.getBlockState(new BlockPos(12, 0, 5)).getCollisionShape(h.level, new BlockPos(12, 0, 5)).bounds().move(12, 0, 5);
+            check(support.minX <= footprint.minX && support.maxX >= footprint.maxX && support.minZ <= footprint.minZ
+                            && support.maxZ >= footprint.maxZ && Math.abs(support.maxY - footprint.minY) < 1e-6,
+                    "the retained position has its complete real footprint on the existing support surface");
+            check(access.route().stream().allMatch(feet -> feet.y >= OUTSIDE.y) && access.feet().y >= OUTSIDE.y,
+                    "neither the retained route nor its final stance may descend off the roof");
+            check(access.gesture().sneak() == BuildPlacementInteraction.requiresSneak(h.level.getBlockState(access.gesture().clicked())),
+                    "complete roof support does not add crouching beyond the clicked block's interaction requirement");
             verifyRoute(h, access); verifyNative(h, target, access.feet(), access.gesture());
-            // 搜索可能先找到现有土块上的同高贴边；另外独立证明登上已有楼梯后的上方放法，不虚称搜索一定选了升高。
+            // 普通站位优先不代表丢掉真正的上方临边能力；仍独立验证升高后部分支撑的潜行放法。
             verifyRaisedAlternative(h, target);
             unchanged(h, view);
             System.out.println("actual roof stair access: anchor=" + access.approach() + ", feet=" + access.feet());
@@ -86,8 +96,10 @@ public final class BuildRoofStairAccessTest {
         check(TOP.equals(walking.stance(PREVIOUS.above())) && walking.edge(OUTSIDE, TOP),
                 "the actual stair collision shape supports a one-block rise from the outside dirt");
         check(ground(h).clear(TOP, EDGE), "the entire 0.65-block upper edge retains real stair support");
+        check(!BuildFootprintSupport.complete(h.level, h.level::isLoaded, h.player.getBbWidth(), TOP, EDGE, EDGE),
+                "the upper outward segment is a genuine partially supported edge, unlike the full dirt platform");
         var gesture = BuildPlacementGeometry.projectedGestureFrom(h.player, target, view(h), h.level::isLoaded, EDGE, true);
-        check(gesture != null, "the proposed upper edge must retain a real visible native placement face");
+        check(gesture != null && gesture.sneak(), "the genuine upper edge must retain crouching and a real visible native placement face");
         verifyNative(h, target, EDGE, gesture);
     }
 
@@ -105,7 +117,8 @@ public final class BuildRoofStairAccessTest {
 
     private static void verifyNative(InteractionWorldTestHarness h, BuildTaskRecord.Target target, Vec3 feet,
                                      BuildPlacementGeometry.Gesture gesture) {
-        Vec3 eye = feet.add(0, h.player.getEyeHeight(Pose.CROUCHING), 0);
+        // 原生射线必须使用这份实际候选姿态的眼高，不能用潜行眼高去校验已经证明合法的站立放法。
+        Vec3 eye = feet.add(0, h.player.getEyeHeight(gesture.sneak() ? Pose.CROUCHING : Pose.STANDING), 0);
         Vec3 end = gesture.point().add(gesture.point().subtract(eye).normalize().scale(.01));
         var hit = h.level.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, h.player));
         check(hit.getBlockPos().equals(gesture.clicked()) && hit.getDirection() == gesture.face(),

@@ -30,10 +30,12 @@ final class BuildPlacementAccessDrive {
     private BuildPlacementGeometry.Gesture gesture;
     private PlayerNav nav;
     private BuildEdgeMotion edge, returning, anchorAlignment;
-    private boolean approached, prepared, itemPrepared, required, anchorAligned, paused, resumeFromEdge;
+    private net.minecraft.world.phys.Vec3 alignmentTarget;
+    private boolean approached, prepared, itemPrepared, required, anchorAligned, paused, resumeFromEdge, anchorSneak;
     private int routes;
     private long deadline;
     private String phase = "settling", failure;
+    private String postureReason = "not_evaluated";
     private Status status = Status.RUNNING;
 
     BuildPlacementAccessDrive(LocalPlayer player, BuildTaskRecord.Target target, PlayerNav.ContextProvider context,
@@ -97,14 +99,25 @@ final class BuildPlacementAccessDrive {
             prepared = true;
         }
         if (!itemPrepared) {
-            // 导航进入锚点附近还不够：先用同一原生微动对齐到实地锚点，站稳后才能打开背包换材料。
+            // 普通地面当前已能合法点击就直接复用脚位；只有尚无可用点击或确需退回檐边时才微调到锚点。
+            if (!anchorAligned && usableCurrentStance()) {
+                anchorAligned = true; anchorSneak = false; postureReason = "current_supported_click";
+            }
             if (!anchorAligned) {
-                if (anchorAlignment == null) anchorAlignment = BuildEdgeMotion.alignAt(access.approach(), forbidden(), this::bodyAllowed);
+                if (anchorAlignment == null) {
+                    // 普通安全偏移在已够近时直接微调到可点击位置；较远先回到可寻路锚点，再走既有证明覆盖的短段。
+                    alignmentTarget = !access.edge() && !resumeFromEdge && player.position().distanceToSqr(access.feet()) <= .64
+                            ? access.feet() : access.approach();
+                    anchorAlignment = BuildEdgeMotion.alignAt(alignmentTarget, forbidden(), this::bodyAllowed);
+                }
                 phase = "aligning_safe_anchor";
                 var aligned = anchorAlignment.tick(player);
+                postureReason = anchorAlignment.postureReason();
                 if (aligned == BuildEdgeMotion.Status.FAILED) return fail(anchorAlignment.failure());
                 if (aligned != BuildEdgeMotion.Status.ARRIVED) return Status.RUNNING;
-                anchorAlignment.release(player); anchorAlignment = null; anchorAligned = true; resumeFromEdge = false;
+                anchorSneak = anchorAlignment.requiresSneak();
+                anchorAlignment.release(player); anchorAlignment = null;
+                anchorAligned = access.edge() || alignmentTarget.equals(access.feet()); resumeFromEdge = false;
                 return Status.RUNNING;
             }
             // 在有完整地板的锚点先拿好材料并等必要背包界面关闭，再贴边；避免在檐边为换物品反复松潜行。
@@ -124,8 +137,10 @@ final class BuildPlacementAccessDrive {
         }
         // 到位后再按真实位置和原生潜行眼高找点击，计划中的面不能直接冒充此刻准星能点击的面。
         var live = new BuildSupportWorld(player.level(), player.level()::isLoaded, Map.of());
-        gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, live, player.level()::isLoaded, player.position(), access.edge(), gestureAllowed);
+        gesture = currentGesture(live, access.edge() || anchorSneak);
         if (gesture == null || !allowed.getAsBoolean()) return fail("placement_access_live_click_unavailable");
+        if (gesture.sneak()) postureReason = access.edge() ? "partial_support_edge" : anchorSneak ? "low_clearance_crouch"
+                : BuildPlacementInteraction.requiresSneak(live.getBlockState(gesture.clicked())) ? "right_click_interaction" : "crouching_view_required";
         phase = "ready"; status = Status.READY; hold(); return status;
     }
     Status returnToAnchor() {
@@ -160,6 +175,7 @@ final class BuildPlacementAccessDrive {
         // 暂停不在后台抢输入；恢复时重新取得控制租约、落稳并对齐锚点，不能复用已过期的运动控制器。
         resumeFromEdge |= edge != null || returning != null;
         if (nav != null) { nav.pause(); nav = null; }
+        if (edge != null) edge.stop(player); if (returning != null) returning.stop(player); if (anchorAlignment != null) anchorAlignment.stop(player);
         edge = returning = anchorAlignment = null; prepared = itemPrepared = anchorAligned = false;
         approached = false; settling.reset(); paused = true;
     }
@@ -169,10 +185,22 @@ final class BuildPlacementAccessDrive {
     private Status fail(String reason) { failure = reason; stop(); phase = "failed"; status = required || edge != null ? Status.FAILED : Status.UNAVAILABLE; return status; }
     private LongSet forbidden() { return context.embeddedForbiddenBodyCells(); }
     private boolean bodyAllowed(BlockPos pos) { return !context.embeddedForbiddenBodyCells().contains(pos.asLong()); }
+    private boolean usableCurrentStance() {
+        if (access.edge() || resumeFromEdge || !player.onGround() || !BuildEdgeMotion.canStandAt(player, forbidden(), this::bodyAllowed)) return false;
+        var live = new BuildSupportWorld(player.level(), player.level()::isLoaded, Map.of());
+        return currentGesture(live, false) != null;
+    }
+    private BuildPlacementGeometry.Gesture currentGesture(BuildSupportWorld live, boolean forceSneak) {
+        var candidate = BuildPlacementGeometry.projectedGestureFrom(player, target, live, player.level()::isLoaded, player.position(), forceSneak, gestureAllowed);
+        // 导航或取物后重新证实现场放法；计划中的低视线不能被丢掉，也不能把已经可站立的点击继续强制为潜行。
+        return candidate != null || forceSneak ? candidate
+                : BuildPlacementGeometry.projectedGestureFrom(player, target, live, player.level()::isLoaded, player.position(), true, gestureAllowed);
+    }
     private BuildSupportSettling.Status settle() { return settling.observe(player.position(), player.getDeltaMovement(), player.onGround(),
             !player.isInWater() && !player.isPassenger(), player.level().getGameTime()); }
     Map<String, Object> evidence() {
         var data = new LinkedHashMap<String, Object>(); data.put("phase", phase); data.put("route_attempts", routes);
+        data.put("posture_reason", postureReason); if (access != null) data.put("edge_required", access.edge());
         if (failure != null) data.put("reason", failure);
         if (search != null) { data.put("reachable_stances", search.visited()); data.put("checked_stances", search.checked()); }
         // 锚点未对齐时也公开实际身体与目标的差异，不能只留下笼统的“贴边失败”而丢失半阶高度证据。

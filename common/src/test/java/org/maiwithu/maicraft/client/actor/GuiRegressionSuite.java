@@ -63,6 +63,8 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildBasementSupportAccessTest.main(args);
         // 跨房间时搜索包含真实起点，缺口和保护仍会拒绝，不把超出范围误报成当前一格无路。
         org.maiwithu.maicraft.core.task.build.BuildPlacementAccessBoundsTest.main(args);
+        // 完整平台的普通站位与真正部分支撑的临边分别验收，避免站位偏移把整个施工过程变成潜行。
+        org.maiwithu.maicraft.core.task.build.BuildPlacementStandingAccessTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildNavigationRetryTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildLayerFrontierTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest.main(args);

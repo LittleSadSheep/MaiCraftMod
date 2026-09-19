@@ -28,7 +28,8 @@ final class BuildPlacementAccessSearch {
     private final BuildSupportWorld world;
     private final Vec3 origin;
     private final BuildSupportWalking walking;
-    private final GroundCorridor corridor;
+    private final java.util.function.Supplier<GroundCorridor> corridors;
+    private GroundCorridor corridor;
     private final boolean edgesOnly;
     private final int visitLimit;
     private final int minX, maxX, minZ, maxZ;
@@ -52,7 +53,8 @@ final class BuildPlacementAccessSearch {
         maxZ = Math.max(start.getZ() + ORIGIN_MARGIN, target.pos().getZ() + TARGET_MARGIN);
         double height = Math.max(player.getBbHeight(), player.getDimensions(Pose.STANDING).height());
         walking = new BuildSupportWalking(world, player.level()::isLoaded, player.getBbWidth(), height, forbidden, physical);
-        corridor = new GroundCorridor(world, player.level()::isLoaded, player.getBbWidth(), height, forbidden, physical);
+        corridors = () -> new GroundCorridor(world, player.level()::isLoaded, player.getBbWidth(), height, forbidden, physical);
+        corridor = corridors.get();
     }
 
     boolean advance(int budget) {
@@ -77,15 +79,24 @@ final class BuildPlacementAccessSearch {
                 if (candidateAt <= EDGES.length) {
                     int candidate = candidateAt++;
                     if (node.feet().add(0, player.getEyeHeight(), 0).distanceToSqr(target.pos().getCenter()) > 49) continue;
+                    // 通道预算只覆盖这一站位及它的锚点扫掠；不能让早先候选的重复查询耗尽后来合法站位的证明。
+                    // 整轮仍受512个节点、每刻工作量以及BuildSupportWorld的8192个唯一观察格约束。
+                    corridor = corridors.get();
                     if (candidate == 0) {
-                        if (edgesOnly) continue;
-                        boolean edge = walking.stance(BlockPos.containing(node.feet())) == null;
+                        // 即使这轮允许找檐边，也先复用已经完整受托且能点击的当前位置，不能为了用边缘流程强迫多挪一步。
+                        boolean edge = !BuildFootprintSupport.complete(world, player.level()::isLoaded, player.getBbWidth(),
+                                node.feet(), node.feet(), node.feet());
+                        if (edgesOnly && edge) continue;
                         check(node.feet(), edge);
                     } else {
                         // 只挪现有实地格心到边缘的零点六五格；身体仍与原地板保持真实接触，不假定目标或下一垫块已存在。
                         Direction side = EDGES[candidate - 1]; Vec3 edge = node.feet().add(side.getStepX() * .65, 0, side.getStepZ() * .65);
-                        if (corridor.clear(node.feet(), edge)) check(edge, true);
+                        if (corridor.clear(node.feet(), edge)) {
+                            boolean partial = !BuildFootprintSupport.complete(world, player.level()::isLoaded, player.getBbWidth(), node.feet(), edge, edge);
+                            check(edge, partial);
+                        }
                     }
+                    if (!complete && corridor.exhausted()) fail("placement_access_geometry_budget");
                     continue;
                 }
                 for (Direction side : EDGES) for (int dy : new int[]{0, 1, -1}) {
@@ -105,15 +116,23 @@ final class BuildPlacementAccessSearch {
     }
     private void check(Vec3 feet, boolean edge) {
         checked++;
+        // 普通偏移也保留可寻路的真实节点，避免把半墙旁的连续位置取整后交给一个会撞墙的格心目标。
         Vec3 anchor = edge ? safeAnchor(node.feet()) : node.feet();
         if (anchor == null || edge && (anchor.distanceToSqr(feet) > .7 * .7 || !corridor.clear(anchor, feet))) return;
         var gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet, edge);
+        boolean lowerEye = false;
+        // 完整地面仍可能被横梁挡住站姿射线；先证明普通姿态确实没有原生放法，才在同一安全脚位尝试降低视线。
+        if (gesture == null && !edge) {
+            gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet, true);
+            lowerEye = gesture != null;
+        }
         if (gesture == null) return;
         var route = new ArrayList<Vec3>(); for (Node at = node; at != null; at = at.previous()) route.add(at.feet());
         java.util.Collections.reverse(route);
         if (!route.getLast().equals(anchor)) route.add(anchor);
         access = new Access(anchor, feet, BuildWorksiteRoute.compact(route), gesture, edge);
-        complete = true; reason = edge ? "reachable_crouching_edge_verified" : "reachable_placement_verified";
+        complete = true; reason = edge ? "reachable_crouching_edge_verified"
+                : lowerEye ? "reachable_lower_eye_placement_verified" : "reachable_placement_verified";
     }
     private Vec3 safeAnchor(Vec3 feet) {
         // 即便上一步结束时已在檐边，也保留附近真实格心作为安全退回点，不能把外侧空中格当下一段普通导航的起点。
