@@ -73,6 +73,38 @@ tasks.register('machineRegression', JavaExec) {
 }
 tasks.named('check') { dependsOn tasks.named('machineRegression') }
 
+// 配置验证独立运行，涵盖调低拒绝、提高后接通及旧进度保护；普通游戏实例不会参与测试。
+tasks.register('buildingBudgetRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks configurable building budgets across public contracts, import, preview and persistence.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+    mainClass = 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite'
+    maxHeapSize = '768m'
+    timeout = java.time.Duration.ofMinutes(2)
+    def regressionDirectory = layout.buildDirectory.dir('building-budget-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
+}
+
+// 大厅夹具超过旧数量和文件上限，单独给两GiB堆核对全量往返，不把它塞进普通512MiB测试进程。
+tasks.register('largeBuildingRegression', JavaExec) {
+    group = 'verification'
+    description = 'Checks a 172800-target terminal through compilation, exports, preview data and saved-project recovery.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+    mainClass = 'org.maiwithu.maicraft.intent.LargeBuildingBudgetTest'
+    maxHeapSize = '2g'
+    timeout = java.time.Duration.ofMinutes(3)
+    def regressionDirectory = layout.buildDirectory.dir('large-building-regression')
+    workingDir regressionDirectory.get().asFile
+    doFirst { regressionDirectory.get().asFile.mkdirs() }
+}
+
+tasks.named('check') { dependsOn tasks.named('buildingBudgetRegression'), tasks.named('largeBuildingRegression') }
+
 // 导航回归入口，限制整组运行时间，检查路径、取消、移动、落地和交通相关行为。
 tasks.register('navigationRegression', JavaExec) {
     group = 'verification'
