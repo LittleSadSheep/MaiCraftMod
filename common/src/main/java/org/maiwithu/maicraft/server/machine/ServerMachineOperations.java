@@ -37,6 +37,8 @@ public final class ServerMachineOperations {
         events.addProperty("retained_endpoints_per_connection", ProductionHistoryIndex.ENDPOINTS_PER_OWNER);
         events.addProperty("retained_endpoints_per_level", ProductionHistoryIndex.RETAINED_ENDPOINTS);
         events.addProperty("release_watch_supported", true);
+        // 客户端必须在投料前知道是否有实际安装的原生转化钩子，不能把其他机器的事件能力当作同等证明。
+        events.addProperty("world_transform_events", org.maiwithu.maicraft.server.machine.ae2.TransformProductionCapture.available());
         ServerOperationRegistry.register("machine.production_events", 1, false, events, ServerProductionEvents::inspect);
         JsonObject watch = new JsonObject();
         watch.addProperty("max_authorize_positions", 4); watch.addProperty("background_read_only", true);

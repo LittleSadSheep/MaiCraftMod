@@ -6,6 +6,6 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": ["CreatePressProductionMixin", "MekTransportDeliveryMixin", "MekSorterSourceMixin", "MekItemExtractionMixin",
     "MekMonitorProductionMixin", "MekCachedProductionMixin", "MekOutputProductionMixin", "MekInputProductionMixin",
-    "CreateMillstoneProductionMixin", "CreateCrushingProductionMixin", "Ae2CraftingLifecycleMixin"],
+    "CreateMillstoneProductionMixin", "CreateCrushingProductionMixin", "Ae2CraftingLifecycleMixin", "Ae2TransformProductionMixin"],
   "injectors": {"defaultRequire": 0}
 }
