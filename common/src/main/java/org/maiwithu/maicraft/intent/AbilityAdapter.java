@@ -54,6 +54,7 @@ final class AbilityAdapter {
             case "maicraft:obtain_elytra" -> obtainElytra(goal);
             case "maicraft:craft" -> craft(goal);
             case "maicraft:cook" -> cook(goal);
+            case EnchantAbilityAdapter.ABILITY -> EnchantAbilityAdapter.adapt(goal, player, runtime);
             case "maicraft:trade" -> trade(goal);
             case "maicraft:build" -> build(goal, player, runtime);
             case BuildDesignAdapter.ABILITY -> BuildDesignAdapter.design(goal, player, runtime);

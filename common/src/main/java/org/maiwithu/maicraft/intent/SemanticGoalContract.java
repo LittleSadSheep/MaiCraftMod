@@ -37,6 +37,11 @@ final class SemanticGoalContract {
                 throw violation("invalid_chat_contract", path + ".parameters", ability, invalid.getMessage());
             }
         }
+        // 附魔成本必须在计划阶段明确；菜单按钮与槽位仍由执行器根据真实报价解析。
+        if (EnchantAbilityAdapter.ABILITY.equals(ability)) {
+            try { EnchantAbilityAdapter.validate(goal); }
+            catch (IllegalArgumentException invalid) { throw violation("invalid_enchant_contract", path + ".parameters", ability, invalid.getMessage()); }
+        }
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
             if (BuildingSceneContract.supports(goal)) BuildingSceneContract.validate(goal);
             // 明确采用模型修订另走严格契约；普通续建仍禁止混入新设计或新取材条件。

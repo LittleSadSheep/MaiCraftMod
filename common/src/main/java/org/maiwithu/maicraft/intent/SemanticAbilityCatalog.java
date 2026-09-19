@@ -302,6 +302,18 @@ public final class SemanticAbilityCatalog {
                             field("allowed_sources", "array<string>", "Where MaiCraft may obtain recipe input, fuel and a required workstation; recursive cook edges are removed to prevent cycles."),
                             field("allow_harm", "boolean", "Whether recursively acquiring inputs may harm living entities; default false."),
                             field("protected_labels", "array<string>", "Remembered places or possessions recursive acquisition must not touch.")));
+            // 向模型公开的是单件附魔意图、真实报价档位和成本；具体槽位与按钮由可见的原生界面执行器决定。
+            case EnchantAbilityAdapter.ABILITY -> contract(
+                    "Enchant exactly one carried compatible unenchanted item at an existing loaded vanilla enchanting table. "
+                            + "Uses a visible native GUI, reads all three synchronized offers, submits the requested tier once, verifies actual enchantment and costs, then returns the result and remaining owned lapis. "
+                            + "Books become enchanted books. No table construction, material acquisition, XP farming, reroll or exact hidden-enchantment guarantee. "
+                            + "Requires explicit spend limits; the displayed required XP level differs from levels consumed. A durable reservation blocks automatic repeats after interruption or uncertain results; inspect before requesting a new operation.",
+                    targets("coordinates","landmark","nearest"), fields(
+                            field("item_id","resource_id","Required carried item type; chooses one compatible unenchanted main-inventory item, preserving its other components."),
+                            field("offer_tier","integer","Native offer tier 1..3, default 1; never silently switches to another tier."),
+                            field("max_levels_spent","integer","Required maximum actual player levels consumed, 0..3. This is not the offer's required level, which must also be met."),
+                            field("max_lapis","integer","Required maximum lapis lazuli items consumed, 0..3. Insufficient material or budget stops before submission."),
+                            field("search_radius","integer","Nearest-table search radius in loaded terrain, 1..64 blocks, default 32; exact targets retain their given position.")));
             case "maicraft:trade" -> contract(
                     "Obtain an item from a real loaded merchant. MaiCraft selects the merchant and offer, approaches in first person, performs synchronized payment/result transfers and verifies the final inventory.",
                     targets("nearest", "area", "landmark", "prior_result"),

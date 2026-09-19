@@ -251,6 +251,9 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
+            // 附魔消费前必须留有跨重启的一次性边界；同一个语义步骤恢复后不能换编号重花经验。
+            if (nextRecord instanceof org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord enchant)
+                EnchantSubmissionBinding.bind(enchant, record, runtime);
             retainBuildProject(nextRecord);
             // 记住这一步的任务单，创建对应执行代码，只做第一次准备；后续每刻继续同一个对象。
             childRecord = nextRecord;

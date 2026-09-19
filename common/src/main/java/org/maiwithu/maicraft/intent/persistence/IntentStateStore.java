@@ -4,11 +4,14 @@ package org.maiwithu.maicraft.intent.persistence;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -201,6 +204,13 @@ public final class IntentStateStore {
         synchronized (latest) { return latest.containsKey(identity); }
     }
 
+    /** 消费屏障跟随同世界被合并后的写盘回执；拿到回执仍不代表保存完成，也不触发新写入。 */
+    public CompletableFuture<Void> latestSaveCompletion(StateIdentity identity) {
+        synchronized (latest) {
+            PendingSave save = latest.get(identity); return save == null ? null : save.completion;
+        }
+    }
+
     /** 告诉运行时最近保存有没有失败，由正常保存周期重试，避免后台不断重复写盘报错。 */
     public boolean hasFailedSave(StateIdentity identity) {
         synchronized (latest) {
@@ -250,16 +260,20 @@ public final class IntentStateStore {
     }
 
     private static void write(StateIdentity identity, byte[] payload) throws IOException {
-        // 先写临时文件再替换正式文件，尽量避免留下半个 JSON；完成或失败后清理临时文件。
+        // 先同步临时文件再替换正式检查点；附魔等消费屏障只有在完整任务身份已保存后才能获准继续。
         Files.createDirectories(identity.directory());
         Path destination = file(identity);
         Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
-        Files.write(temporary, payload);
         try {
-            Files.move(temporary, destination,
-                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException unsupported) {
-            Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+            try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+                ByteBuffer bytes = ByteBuffer.wrap(payload); while (bytes.hasRemaining()) channel.write(bytes);
+                channel.force(true);
+            }
+            try { Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
+            catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+            }
         } finally {
             Files.deleteIfExists(temporary);
         }

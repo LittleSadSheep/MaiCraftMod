@@ -113,6 +113,8 @@ public final class MaiCraftCore {
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.inventory.LookupRecipeTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.inventory.CraftTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.SemanticCookTool());
+        // 附魔沿用已有台子和可见菜单，只登记单次有预算的原生消费，不提供裸按钮或经验修改接口。
+        ToolRegistry.register(new org.maiwithu.maicraft.core.task.enchant.EnchantTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.SemanticDimensionTravelTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.SemanticStructureSearchTool());
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.SemanticDragonFightTool());
