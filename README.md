@@ -47,7 +47,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 执行后按返回的 `next_attention` 等待，读取响应中的 `task` 和 `wake_reason`，再按新的 `next_attention` 续等。Attention 直接引用任务记录，即使历史事件已被挤出缓存，也能返回仍保留的任务决策和最终结果；无需轮询 `task(get)` 或包装同步执行工具。原生资源订阅可使用 `maicraft://attention`（任务监控）和 `maicraft://chatflow`（收到的游戏内聊天，供专门对话的 Agent 使用），模型唤醒行为由宿主决定。
 
-四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
+四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`enchant`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
 
 每项能力的参数和限制由 `perceive(view="abilities")` 动态公开。AI 客户端应先读取能力契约，再提交目标，而不是猜测方块坐标、物品栏槽位或内部动作。
 
@@ -69,6 +69,30 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 无需窗口前台或模拟键盘。任务可从失焦产生的不可见暂停画面开始；保留玩家手动打开的暂停菜单、容器和已有聊天草稿。低帧率下输入会变慢，不会一次补打很多字。按 Esc 关闭或手动编辑/切换界面会取消自动发送；任务暂停会释放界面，恢复后继续原草稿。
 
 同一次逻辑发送的网络重试应复用 `request_key`，新的消息使用新的键。结果中的 `delivery_status="submitted_to_client"` 表示已调用原版提交入口，服务器接收和命令执行效果仍需观察 Attention 中的后续消息。提交结果不确定时不会自动重发。
+
+`maicraft:enchant` 在已有原版附魔台为背包中的一件未附魔装备或一本书附魔：走近台子，打开原生界面，精确放入物品和青金石，读取三档真实报价，只选择指定档位一次，核验附魔与消耗，取回成品并关闭界面。支持指定坐标、已记录地标或最近已加载的附魔台；默认搜索半径 32 格，`search_radius` 可设为 1–64。此能力通过客户端的原生操作完成，不依赖服务端安装 MaiCraft。
+
+例如把以下参数交给 `execute`，为一把铁镐选择第一档，最多消耗一级经验和一颗青金石：
+
+```json
+{
+  "goal": {
+    "ability": "maicraft:enchant",
+    "outcome": "为一把铁镐附魔",
+    "parameters": {
+      "item_id": "minecraft:iron_pickaxe",
+      "offer_tier": 1,
+      "max_levels_spent": 1,
+      "max_lapis": 1
+    }
+  },
+  "request_key": "enchant-pickaxe-001"
+}
+```
+
+`offer_tier` 为 1–3，默认 1；两个消耗上限必填，范围为 0–3，零表示不允许该项消耗。报价的等级门槛仍须满足，例如第三档可能需要角色达到 30 级，但一次只扣 3 级。任务不自动获取材料、积攒经验、建台或反复附魔刷新报价，也不能保证未公开的随机词条。书会变成附魔书，背包需要留出成品位置；报价改变、空间或预算不足时会停止并报告原因。
+
+任务进度和结果包含 `quote`、`selected_offer`，确认成功后提供 `actual_levels_spent`、`actual_lapis_spent`、`result_item_id`、`result_enchantments`；`item_return_verified` 和 `gui_closed` 分别说明取回及关界面是否已核验。同一请求的网络重试复用 `request_key`。任务支持暂停、取消和手动接管；进入消费边界后禁止普通自动重试，出现 `outcome_uncertain` 或未确认的收尾时先检查物品与经验，再决定是否另发新任务。
 
 移动目标还未定位时，可以使用 `maicraft:travel` 的 `semantic_target="platform"` 与 `direction="down"`，让 Mod 边移动边寻找下方平台，无须给坐标。`transport_mode="jetpack"` 保持同一次飞行控制，在平台进入局部观察后转入着陆；`ground` 使用普通步行寻路，`auto` 可选择可用的喷气背包。
 
