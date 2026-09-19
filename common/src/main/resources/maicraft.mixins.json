@@ -9,6 +9,7 @@
   ],
   "client": [
     "ClientDamageEventMixin",
+    "ItemEntityReceiptMixin",
     "ClientLevelBlockChangeMixin",
     "BlockUseAcknowledgementMixin",
     "BoatCatchPacketMixin",

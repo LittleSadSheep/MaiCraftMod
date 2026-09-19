@@ -49,6 +49,8 @@ public final class ClientActorBoundary {
         activeContext = null;
 
         LocalPlayer player = minecraft.player;
+        // 掉落与拾取证据只属于当前身体和世界；断线或换维度时不能留给之后的加工任务使用。
+        ItemEntityReceipts.observeWorld(minecraft.level == null ? null : player);
         LocalPlayer previousPlayer = observedPlayer;
         boolean playerChanged = player != previousPlayer;
         boolean ownedAtStart = body.automationOwnsControls();
