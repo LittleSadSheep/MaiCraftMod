@@ -69,7 +69,7 @@ public final class BuildEdgeMotionNativeTest {
             check(interrupted.tick(f.player) == BuildEdgeMotion.Status.FAILED, "removing live support invalidates the running segment");
             f.flush(); check(!moving(f.player), "lost support cannot leave a previous forward command active");
         }
-        halfStepAlignment();
+        halfStepAlignment(); standingAlignmentAndCancellation(); fullFloorLowCeiling();
         System.out.println("BuildEdgeMotionNativeTest: native pose waiting, friction arrival, edge hold and reverse movement passed");
     }
 
@@ -106,6 +106,45 @@ public final class BuildEdgeMotionNativeTest {
             f.h.nextTick();
             check(align.tick(f.player) == BuildEdgeMotion.Status.FAILED, "changed half-step support or body collision must stop alignment");
             f.flush(); check(!moving(f.player) && !f.player.input.jumping, "a rejected alignment leaves no walking or jumping command");
+        }
+    }
+
+    private static void standingAlignmentAndCancellation() throws Exception {
+        try (var f = new Fixture()) {
+            Vec3 target = ANCHOR.add(.65, 0, 0);
+            var align = BuildEdgeMotion.alignAt(target, new LongOpenHashSet(), p -> true);
+            boolean arrived = false, moved = false;
+            // 真实石平台上横挪0.65格仍用站姿，所有位移由原版travel产生，不能用挪了多少格决定潜行。
+            for (int tick = 0; tick < 100; tick++) {
+                var status = align.tick(f.player); check(status != BuildEdgeMotion.Status.FAILED, "standing alignment failed: " + align.evidence());
+                f.flush(); check(!f.player.input.shiftKeyDown && !align.requiresSneak(), "complete floor never requests Shift while aligning");
+                moved |= moving(f.player); f.player.nativePose(); f.player.nativeTravel();
+                if (status == BuildEdgeMotion.Status.ARRIVED) { arrived = true; break; }
+                f.h.nextTick();
+            }
+            check(arrived && moved && f.player.position().distanceTo(target) <= .035
+                            && align.postureReason().equals("full_support_standing"), "native standing motion reaches the precise requested anchor");
+            align.stop(f.player); f.flush(); check(!moving(f.player) && !f.player.input.shiftKeyDown, "stopping releases movement and posture");
+        }
+        try (var f = new Fixture()) {
+            var edge = motion(ANCHOR, EDGE); edge.tick(f.player); f.flush(); check(f.player.input.shiftKeyDown, "a true edge still requests crouching");
+            edge.stop(f.player); f.flush(); check(!f.player.input.shiftKeyDown && !moving(f.player), "cancelling an edge controller stops renewing Shift");
+            f.h.nextTick(); edge.tick(f.player); f.flush(); check(!f.player.input.shiftKeyDown, "a stopped controller cannot regain its old input lease");
+        }
+    }
+
+    private static void fullFloorLowCeiling() throws Exception {
+        try (var f = new Fixture()) {
+            for (int x = 3; x <= 6; x++) for (int z = 7; z <= 8; z++) f.h.set(new BlockPos(x, 2, z),
+                    Blocks.STONE_SLAB.defaultBlockState().setValue(net.minecraft.world.level.block.SlabBlock.TYPE,
+                            net.minecraft.world.level.block.state.properties.SlabType.TOP));
+            var align = BuildEdgeMotion.alignAt(ANCHOR.add(.45, 0, 0), new LongOpenHashSet(), p -> true);
+            align.tick(f.player); f.flush();
+            check(align.requiresSneak() && align.postureReason().equals("low_clearance_crouch") && !moving(f.player),
+                    "a real low ceiling selects crouching and waits for the native pose before moving");
+            f.player.nativePose(); f.player.nativeTravel(); f.h.nextTick();
+            finish(f, align, ANCHOR.add(.45, 0, 0)); align.release(f.player); f.flush();
+            check(!f.player.input.shiftKeyDown, "the completed low-ceiling controller releases its own Shift lease");
         }
     }
 

@@ -22,7 +22,13 @@ final class BuildAnchorStepGeometry {
 
     static boolean safe(LocalPlayer player, Predicate<BlockPos> loaded, LongSet forbidden, Predicate<BlockPos> permitted,
                         PhysicalObstacleSnapshot physical, Vec3 from, Vec3 to, Vec3 drift) {
-        double rise = to.y - from.y, width = player.getBbWidth(), height = player.getBbHeight();
+        return safe(player, loaded, forbidden, permitted, physical, from, to, drift, player.getBbHeight());
+    }
+
+    // 候选姿态只改变只读的碰撞高度；必须先证明站立通道，再决定是否确实需要低顶潜行。
+    static boolean safe(LocalPlayer player, Predicate<BlockPos> loaded, LongSet forbidden, Predicate<BlockPos> permitted,
+                        PhysicalObstacleSnapshot physical, Vec3 from, Vec3 to, Vec3 drift, double height) {
+        double rise = to.y - from.y, width = player.getBbWidth();
         if (rise < -EPS || rise > .5 + EPS || rise > player.maxUpStep() + EPS || from.distanceToSqr(to) > .8 * .8 + EPS) return false;
         var world = new BuildSupportWorld(player.level(), loaded, Map.of());
         if (rise > EPS) {
@@ -55,7 +61,7 @@ final class BuildAnchorStepGeometry {
         if (!covered(terrain, from, to, width) || !covered(terrain, from, raisedDrift, width)
                 || !supported(terrain, drift, width) && !supported(terrain, raisedDrift, width)) return false;
         return rise > EPS || drift.distanceToSqr(from) < EPS * EPS
-                || safe(player, loaded, forbidden, permitted, physical, from, drift, from);
+                || safe(player, loaded, forbidden, permitted, physical, from, drift, from, height);
     }
     private static boolean covered(java.util.List<AABB> terrain, Vec3 from, Vec3 to, double width) {
         // 原生 step 由碰到半阶的水平移动触发；两种实际台面在整段上必须连续覆盖，不能借抬高身体越过空隙。

@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** 已有安全前缀之后的最后小段潜行挪位；不寻路、不改地形、不把连续目标量化成空中格心。 */
+/** 已有安全前缀之后的小段原生挪位：完整支撑优先站立，真实临边或低顶才潜行；不寻路、不改地形或身体位置。 */
 public final class BuildEdgeMotion {
     public enum Status { RUNNING, ARRIVED, FAILED }
     private static final double MAX_SEGMENT = .7, ENTRY_RADIUS = .8, ARRIVAL_RADIUS = .035, STILL_SPEED = .012;
@@ -36,7 +36,8 @@ public final class BuildEdgeMotion {
     private int stableTicks;
     private Status status = Status.RUNNING;
     private String failure = "";
-    private boolean released, observedSneak, alignment;
+    private boolean released, observedSneak, alignment, requestedSneak = true;
+    private String postureReason = "partial_support_edge";
 
     public BuildEdgeMotion(Vec3 approachFeet, Vec3 edgeFeet, LongSet forbidden, Predicate<BlockPos> permittedBody) {
         if (!finite(approachFeet) || !finite(edgeFeet) || Math.abs(approachFeet.y - edgeFeet.y) > 1e-5
@@ -50,6 +51,13 @@ public final class BuildEdgeMotion {
     public static BuildEdgeMotion alignAt(Vec3 anchor, LongSet forbidden, Predicate<BlockPos> permittedBody) {
         var result = new BuildEdgeMotion(anchor, anchor, forbidden, permittedBody);
         result.alignment = true; return result;
+    }
+
+    static boolean canStandAt(LocalPlayer player, LongSet forbidden, Predicate<BlockPos> permittedBody) {
+        // 复用移动原语的完整保护格、原生实体与动态结构检查；只验证，不申请输入或启动一次新的运动。
+        Vec3 at = player.position();
+        return BuildFootprintSupport.complete(player.level(), player.level()::isLoaded, player.getBbWidth(), at, at, at)
+                && alignAt(at, forbidden, permittedBody).safe(player, at, at, at, player.getDimensions(Pose.STANDING).height());
     }
 
     public Status tick(LocalPlayer player) {
@@ -73,11 +81,17 @@ public final class BuildEdgeMotion {
         if (!bounded(observed)) return fail(context, "edge_left_proven_segment");
         if (status != Status.ARRIVED && context.tickRevision() - startedTick > 100) return fail(context, "edge_motion_timeout");
         Vec3 drift = observed.add(velocity.x * 3, 0, velocity.z * 3);
-        // 低天花下先在矮半阶蹲下；姿态尚未兑现时，不拿站立身体去要求高半阶的头顶空间。
-        Vec3 checkedTarget = alignment && !observedSneak ? observed : target;
-        if (!bounded(drift) || !safe(player, observed, checkedTarget, drift)) return fail(context, "edge_support_or_sweep_changed");
-        // 先等原生姿态真的蹲下；停止水平输入靠游戏摩擦自然减速，常规落地重力 vy=-0.0784 不算漂浮。
-        if (!observedSneak || horizontal(velocity) > .08) {
+        // 普通锚点先证明完整脚底和站立净空；确有窄边或低顶才申请潜行，不能把所有精确对齐都变成蹲走。
+        boolean fullSupport = alignment && BuildFootprintSupport.complete(player.level(), player.level()::isLoaded,
+                player.getBbWidth(), observed, target, drift);
+        boolean standingSafe = fullSupport && safe(player, observed, target, drift, player.getDimensions(Pose.STANDING).height());
+        requestedSneak = !standingSafe;
+        postureReason = !alignment || !fullSupport ? "partial_support_edge" : standingSafe ? "full_support_standing" : "low_clearance_crouch";
+        double requiredHeight = player.getDimensions(requestedSneak ? Pose.CROUCHING : Pose.STANDING).height();
+        if (!bounded(drift) || !standingSafe && !safe(player, observed, target, drift, requiredHeight)) return fail(context, "edge_support_or_sweep_changed");
+        // 姿态必须由原生玩家刻兑现后才移动；普通重力 vy=-0.0784 不算漂浮，停止输入仍靠真实摩擦减速。
+        boolean postureReady = requestedSneak ? observedSneak : !player.isShiftKeyDown() && player.getPose() == Pose.STANDING;
+        if (!postureReady || horizontal(velocity) > .08) {
             stableTicks = 0; previous = observed; command(context, Vec3.ZERO, 0); return status;
         }
         if (arrived(observed, target, velocity, previous)) {
@@ -102,14 +116,18 @@ public final class BuildEdgeMotion {
         Vec3 at = player.position(), speed = player.getDeltaMovement();
         Vec3 drift = at.add(speed.x * 3, 0, speed.z * 3);
         if (!player.onGround() || player.isInWater() || player.isPassenger() || !finite(speed)
-                || !bounded(at) || !bounded(drift) || !safe(player, at, at, drift))
+                || !bounded(at) || !bounded(drift) || !safe(player, at, at, drift, player.getBbHeight()))
             fail(context, "edge_hold_support_changed");
         command(context, Vec3.ZERO, 0);
         return status;
     }
     public void stop(LocalPlayer player) {
         LocalPlayerContext context = context(player);
-        if (context != null && owns(context) && !released) fail(context, "edge_motion_stopped");
+        // 主人暂停或取消后本控制器不再续 Shift；运动中的支撑失败仍由 fail 停住，只有任务边界显式释放。
+        if (context != null && owns(context) && !released) {
+            status = Status.FAILED; if (failure.isEmpty()) failure = "edge_motion_stopped";
+            released = true; context.body().applyMovement(BodyControlPort.Movement.STOPPED, context.tickRevision());
+        }
     }
     /** 只有调用方确认离开边缘或脚下已补成可靠平台时才显式放开；此后本对象不再续任何输入。 */
     public void release(LocalPlayer player) {
@@ -119,10 +137,13 @@ public final class BuildEdgeMotion {
         if (status == Status.RUNNING) { status = Status.FAILED; failure = "edge_motion_released"; }
     }
     public String failure() { return failure; }
+    public boolean requiresSneak() { return requestedSneak; }
+    public String postureReason() { return postureReason; }
     public Map<String, Object> evidence() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("state", status.name().toLowerCase(java.util.Locale.ROOT)); out.put("failure", failure);
         out.put("alignment", alignment);
+        out.put("requested_sneak", requestedSneak); out.put("posture_reason", postureReason);
         out.put("approach", coordinates(approach)); out.put("target", coordinates(target));
         if (observed != null) out.put("actual_feet", coordinates(observed));
         out.put("velocity", coordinates(velocity)); out.put("observed_sneak", observedSneak);
@@ -130,9 +151,9 @@ public final class BuildEdgeMotion {
         out.put("released", released); return Map.copyOf(out);
     }
 
-    private boolean safe(LocalPlayer player, Vec3 from, Vec3 to, Vec3 drift) {
+    private boolean safe(LocalPlayer player, Vec3 from, Vec3 to, Vec3 drift, double height) {
         try {
-            var world = player.level(); double width = player.getBbWidth(), height = player.getBbHeight();
+            var world = player.level(); double width = player.getBbWidth();
             if (!dimensions(width, height)) return false;
             var physical = PhysicalObstacleSnapshot.capture(player.clientLevel, from);
             if (!java.util.Set.of("not_installed", "ready", "ready_empty").contains(physical.state())) return false;
@@ -144,7 +165,7 @@ public final class BuildEdgeMotion {
             var dynamic = new PhysicalObstacleSnapshot(boxes, physical.blockReads(), physical.conservativeStructures(), physical.state());
             var hard = new LongOpenHashSet(forbidden); hard.addAll(NavigationSafetyContext.forbiddenBodyCells());
             Predicate<BlockPos> loaded = pos -> world.isLoaded(pos) && world.getWorldBorder().isWithinBounds(pos);
-            if (alignment) return BuildAnchorStepGeometry.safe(player, loaded, hard, permittedBody, dynamic, from, to, drift);
+            if (alignment) return BuildAnchorStepGeometry.safe(player, loaded, hard, permittedBody, dynamic, from, to, drift, height);
             return safeSweep(world, loaded, width, height, hard, permittedBody, dynamic, from, to)
                     && safeSweep(world, loaded, width, height, hard, permittedBody, dynamic, from, drift);
         } catch (RuntimeException | LinkageError unavailable) { return false; }
@@ -165,9 +186,13 @@ public final class BuildEdgeMotion {
                 && horizontal(speed) <= STILL_SPEED && horizontal(at.subtract(previous)) <= STILL_SPEED;
     }
     static BodyControlPort.Movement steering(Vec3 direction, float strength, float yaw) {
+        return steering(direction, strength, yaw, true);
+    }
+    // 普通对齐和临边共用相机相对方向，区别只在本刻已证明需要的姿态，不把后退或斜移改成抢镜头前进。
+    static BodyControlPort.Movement steering(Vec3 direction, float strength, float yaw, boolean sneak) {
         double angle = Math.toRadians(yaw);
         return new BodyControlPort.Movement((float) (-direction.x * Math.sin(angle) + direction.z * Math.cos(angle)) * strength,
-                (float) (direction.x * Math.cos(angle) + direction.z * Math.sin(angle)) * strength, false, true, false);
+                (float) (direction.x * Math.cos(angle) + direction.z * Math.sin(angle)) * strength, false, sneak, false);
     }
     private void command(LocalPlayerContext context, Vec3 direction, float input) {
         commanded = direction; strength = input;
@@ -175,10 +200,10 @@ public final class BuildEdgeMotion {
             context.body().applyMovement(BodyControlPort.Movement.STOPPED, context.tickRevision()); return;
         }
         if (!Float.isFinite(context.player().getYRot())) {
-            context.body().applyMovement(new BodyControlPort.Movement(0, 0, false, true, false), context.tickRevision()); return;
+            context.body().applyMovement(new BodyControlPort.Movement(0, 0, false, requestedSneak, false), context.tickRevision()); return;
         }
         // 随真实平滑相机的 yaw 重算前后／侧移，不抢镜头，也不写入位置或速度来“贴”到目标。
-        context.body().applySteering(yaw -> steering(direction, input, yaw), context.player().getYRot(), context.tickRevision());
+        context.body().applySteering(yaw -> steering(direction, input, yaw, requestedSneak), context.player().getYRot(), context.tickRevision());
     }
     private Status fail(LocalPlayerContext context, String reason) {
         status = Status.FAILED; if (failure.isEmpty()) failure = reason;

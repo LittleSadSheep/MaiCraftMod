@@ -22,7 +22,7 @@ public final class BuildEdgeMotionTest {
     private static final Vec3 ANCHOR = new Vec3(4.5, 76, 8.5), EDGE = new Vec3(4.5, 76, 9.15);
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        partialSupportAndReverse(); unsupportedMiddleAndBodyCollisions(); protectionAndHazards(); steadyGroundAndCameraRelativeInput();
+        partialSupportAndReverse(); unsupportedMiddleAndBodyCollisions(); protectionAndHazards(); steadyGroundAndCameraRelativeInput(); completeFootprints();
         System.out.println("BuildEdgeMotionTest: continuous narrow support, reversed access, collision/protection and native sneaking controls passed");
     }
     private static void partialSupportAndReverse() {
@@ -67,18 +67,31 @@ public final class BuildEdgeMotionTest {
         check(BuildEdgeMotion.arrived(EDGE, EDGE, new Vec3(0, -.0784, 0), EDGE), "normal native gravity while on ground does not prevent a steady arrival");
         check(!BuildEdgeMotion.arrived(EDGE, EDGE, new Vec3(0, -.0784, .04), EDGE), "arriving with horizontal momentum still requires natural braking");
         check(!BuildEdgeMotion.arrived(EDGE, EDGE, Vec3.ZERO, EDGE.add(0, 0, -.03)), "recent actual movement cannot be counted as a settled frame");
-        for (float yaw : new float[]{0, 37, 90, 180, -135}) {
-            var input = BuildEdgeMotion.steering(new Vec3(0, 0, 1), .3f, yaw);
+        for (boolean sneak : new boolean[]{false, true}) for (Vec3 direction : List.of(new Vec3(0, 0, 1), new Vec3(-1, 0, -1).normalize()))
+            for (float yaw : new float[]{0, 37, 90, 180, -135}) {
+            var input = BuildEdgeMotion.steering(direction, .3f, yaw, sneak);
             double angle = Math.toRadians(yaw);
             double x = input.strafe() * Math.cos(angle) - input.forward() * Math.sin(angle);
             double z = input.forward() * Math.cos(angle) + input.strafe() * Math.sin(angle);
-            check(Math.abs(x) < 1e-6 && Math.abs(z - .3) < 1e-6 && input.sneaking() && !input.sprinting() && !input.jumping(),
-                    "camera yaw changes preserve the same slow world-space direction without jumping or sprinting");
+            check(Math.abs(x - direction.x * .3) < 1e-6 && Math.abs(z - direction.z * .3) < 1e-6 && input.sneaking() == sneak && !input.sprinting() && !input.jumping(),
+                    "standing and crouching backward/diagonal movement preserve world direction across camera changes");
         }
         boolean refused = false;
         try { new BuildEdgeMotion(ANCHOR, EDGE.add(0, 0, .1), new LongOpenHashSet(), p -> true); }
         catch (IllegalArgumentException expected) { refused = true; }
         check(refused, "this primitive cannot grow into a longer navigation route");
+    }
+    private static void completeFootprints() {
+        for (var floor : List.of(Blocks.STONE, Blocks.OAK_PLANKS)) {
+            var world = new World(); world.set(4, 75, 8, floor.defaultBlockState());
+            check(!BuildFootprintSupport.complete(world, p -> true, .6, ANCHOR, EDGE, EDGE),
+                    "partial overhang remains a real edge even when the native corridor can retain contact");
+            world.set(4, 75, 9, floor.defaultBlockState());
+            check(BuildFootprintSupport.complete(world, p -> true, .6, ANCHOR, EDGE, EDGE),
+                    "the same 0.65-block offset over complete real floor must not be classified as an edge");
+            check(!BuildFootprintSupport.complete(world, p -> p.getZ() < 9, .6, ANCHOR, EDGE, EDGE),
+                    "unloaded support cannot authorize standing movement");
+        }
     }
     private static boolean clear(World world, Vec3 from, Vec3 to) {
         return BuildEdgeMotion.safeSweep(world, p -> true, .6, 1.5, new LongOpenHashSet(), p -> true, PhysicalObstacleSnapshot.EMPTY, from, to);
