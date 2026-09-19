@@ -21,7 +21,8 @@ public record McpConfig(
         if (port < 0 || port > 65_535) {
             throw new IllegalArgumentException("port must be between 0 and 65535");
         }
-        if (maxRequestBytes < 1_024 || maxRequestBytes > 16 * 1_024 * 1_024) {
+        // 大模型请求按建筑配置定额接收；这里只保留读取器可表达的 int 边界，不再暗中压回十六 MiB。
+        if (maxRequestBytes < 1_024 || maxRequestBytes > Integer.MAX_VALUE - 1) {
             throw new IllegalArgumentException("maxRequestBytes is outside the safe range");
         }
         if (requestTimeout.isNegative() || requestTimeout.isZero()) {
@@ -37,12 +38,12 @@ public record McpConfig(
     }
 
     public static McpConfig local(int port) {
-        // 默认监听 127.0.0.1，不设口令；单个请求最多一 MiB，普通调用等十五秒。
+        // 客户端启动时按同一份建筑配置创建服务；后续只改文件不会改变已运行服务器的请求预算。
         return new McpConfig(
                 "127.0.0.1",
                 port,
                 "",
-                1_048_576,
+                org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxMcpRequestBytes(),
                 Duration.ofSeconds(15)
         );
     }

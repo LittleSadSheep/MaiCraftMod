@@ -704,7 +704,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
         try (InputStream input = exchange.getRequestBody();
              ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(config.maxRequestBytes(), 16_384))) {
             byte[] buffer = new byte[8_192];
-            int total = 0;
+            // 大蓝图请求仍按实际收到的字节累计，使用long避免接近可配置int上限时加法绕回。
+            long total = 0;
             int read;
             while ((read = input.read(buffer)) >= 0) {
                 total += read;
