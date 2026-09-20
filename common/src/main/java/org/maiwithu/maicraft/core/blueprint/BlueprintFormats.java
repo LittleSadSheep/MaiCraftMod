@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import net.minecraft.nbt.DoubleTag;
 
 /**
  * 把 .litematic 和 .schem 转成相同的尺寸、方块材料表、格子列表和实体列表，供蓝图加载器继续处理。
@@ -352,9 +354,9 @@ final class BlueprintFormats {
         }
         CompoundTag out = new CompoundTag();
         ListTag pos = new ListTag();
-        pos.add(net.minecraft.nbt.DoubleTag.valueOf(x));
-        pos.add(net.minecraft.nbt.DoubleTag.valueOf(y));
-        pos.add(net.minecraft.nbt.DoubleTag.valueOf(z));
+        pos.add(DoubleTag.valueOf(x));
+        pos.add(DoubleTag.valueOf(y));
+        pos.add(DoubleTag.valueOf(z));
         out.put("pos", pos);
         ListTag blockPos = new ListTag();
         blockPos.add(IntTag.valueOf((int) Math.floor(x)));
@@ -396,7 +398,7 @@ final class BlueprintFormats {
 
     // 读取任务被取消时，在循环中的检查点抛出取消信号，让后台工作尽快结束。
     static void checkInterrupted() {
-        if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
+        if (Thread.currentThread().isInterrupted()) throw new CancellationException();
     }
 
     // 在加入下一条之前检查容量，避免已经装入过量格子后才发现超限。

@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import java.util.HashSet;
 import java.util.Set;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import java.math.BigDecimal;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /** 先核对快速图元和组件的作者输入，再展开重复装饰；未知字段不能成为隐藏的游戏操作。 */
@@ -24,7 +25,7 @@ public final class BuildingModelSchema {
     public static boolean applies(JsonObject scene) {
         return scene != null && scene.has("schema_version") && scene.get("schema_version").isJsonPrimitive()
                 && scene.getAsJsonPrimitive("schema_version").isNumber()
-                && scene.get("schema_version").getAsBigDecimal().compareTo(java.math.BigDecimal.valueOf(2)) == 0;
+                && scene.get("schema_version").getAsBigDecimal().compareTo(BigDecimal.valueOf(2)) == 0;
     }
 
     static void validate(JsonObject scene) {

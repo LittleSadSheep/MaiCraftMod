@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
+import java.util.concurrent.ExecutionException;
 
 /**
  * 先在后台读文件，再分多次游戏更新把蓝图变成施工目标，最后按请求生成说明或启动建筑任务。
@@ -159,7 +160,7 @@ public final class BlueprintPreparation implements Task {
             }
             return TaskState.RUNNING;
         } catch (Exception failure) {
-            Throwable cause = failure instanceof java.util.concurrent.ExecutionException && failure.getCause() != null
+            Throwable cause = failure instanceof ExecutionException && failure.getCause() != null
                     ? failure.getCause() : failure;
             outcome = TaskResult.fail("blueprint preparation failed: " + cause.getMessage());
             return TaskState.FAILED;

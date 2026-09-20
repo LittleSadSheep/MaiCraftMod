@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import java.util.List;
 
 /** 导出作者模型的完整字段形状；几何相交、原生状态与预算总量仍由 Mod 在保存前实际校验。 */
 final class BuildingModelJsonSchema {
@@ -59,7 +60,7 @@ final class BuildingModelJsonSchema {
         definitions.getAsJsonObject("pattern").addProperty("description","Panel-only binary tile; either digit may start. axes gives column then row in normalized Minecraft-local Y-up axes, also for Blender scenes; the remaining dimension is 1. Equal-width rows repeat from the local minimum corner and follow all transforms. Unmapped 1 keeps painted material; unmapped 0 is a hole. Named 0/1 materials can specify top/bottom slab states.");
         definitions.getAsJsonObject("material").addProperty("description","Exact installed block ID and optional final-state requirements. The Mod checks the real registry before saving/using a scene. Omitted properties are not additional final-state constraints.");
         // 公共字段连同语义说明只发布一次，所有对象通过本地引用复用，避免完整格式因重复正文挤满设计上下文。
-        for (String field : java.util.List.of("location","dimensions","rotation_euler","material","material_map","modifiers","block_state_axes")) {
+        for (String field : List.of("location","dimensions","rotation_euler","material","material_map","modifiers","block_state_axes")) {
             define("field_"+field,nodeProperties.getAsJsonObject(field)); nodeProperties.add(field,ref("field_"+field));
         }
     }
@@ -129,7 +130,7 @@ final class BuildingModelJsonSchema {
         addCondition(mesh,has("pattern"),object(new String[]{},"primitive",constant("panel")));
         addCondition(mesh,has("segments"),object(new String[]{},"primitive",choices(Set.of("prism","cylinder","cone"))));
         // Schema 数组顺序会参与内容指纹，不能让不同 JVM 的 Set 遍历顺序导致重启后凭据无故过期。
-        for (String field : java.util.List.of("vertices","faces")) addCondition(mesh,has(field),object(new String[]{},"primitive",constant("convex_polyhedron")));
+        for (String field : List.of("vertices","faces")) addCondition(mesh,has(field),object(new String[]{},"primitive",constant("convex_polyhedron")));
         addCondition(mesh,object(new String[]{"primitive"},"primitive",constant("convex_polyhedron")),has("vertices","faces"));
     }
     private static void panelConstraint(JsonObject value, String field) {

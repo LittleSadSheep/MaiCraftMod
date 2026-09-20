@@ -16,6 +16,8 @@ import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import java.util.concurrent.CancellationException;
 
 /**
  * 从磁盘读取蓝图并检查文件结构。这里只处理文件中的数字和文本，不查询游戏世界或方块注册表。
@@ -46,7 +48,7 @@ final class BlueprintFiles {
                     try {
                         ListTag size = read(gameDirectory, name).getList("size", Tag.TAG_INT);
                         entry.put("size", size.getInt(0) + "x" + size.getInt(1) + "x" + size.getInt(2));
-                    } catch (java.util.concurrent.CancellationException cancelled) {
+                    } catch (CancellationException cancelled) {
                         throw cancelled;
                     } catch (IOException | IllegalArgumentException invalid) {
                         entry.put("size", "unreadable: " + invalid.getMessage());
@@ -75,7 +77,7 @@ final class BlueprintFiles {
                     tag = extension.equals(".snbt")
                             ? NbtUtils.snbtToStructure(new String(input.readAllBytes(), StandardCharsets.UTF_8))
                             : NbtIo.readCompressed(input, NbtAccounter.create(budget.maxImportNbtBytes()));
-                } catch (RuntimeException | com.mojang.brigadier.exceptions.CommandSyntaxException invalid) {
+                } catch (RuntimeException | CommandSyntaxException invalid) {
                     throw new IllegalArgumentException("blueprint " + name + " cannot be parsed: " + invalid.getMessage(), invalid);
                 }
                 // 把 Litematic 和 Sponge 格式先换成统一的尺寸、材料表和格子列表，后续只处理这一种内部结构。

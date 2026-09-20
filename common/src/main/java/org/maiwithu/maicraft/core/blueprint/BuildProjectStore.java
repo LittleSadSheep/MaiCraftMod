@@ -20,6 +20,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import java.util.HashMap;
+import java.util.stream.Collectors;
 
 /**
  * 把已经决定的建筑位置、材料和施工要求保存到当前世界的文件里，供取消或重启后续建。
@@ -65,9 +67,9 @@ public final class BuildProjectStore {
         if (revisedTargets == null || revisedTargets.isEmpty()) throw new IllegalArgumentException("project revision needs concrete targets");
         // 编码往返先拒绝重复坐标、不可表达状态或材料；暂只准同一完整坐标集合内改方块，不扩缩施工范围。
         var revised = BuildProjectTargets.decode(BuildProjectTargets.encode(List.copyOf(revisedTargets)));
-        Map<BlockPos, BuildTaskRecord.Target> oldAt = new java.util.HashMap<>();
+        Map<BlockPos, BuildTaskRecord.Target> oldAt = new HashMap<>();
         previous.forEach(target -> oldAt.put(target.pos(), target));
-        var nextPositions = revised.stream().map(BuildTaskRecord.Target::pos).collect(java.util.stream.Collectors.toSet());
+        var nextPositions = revised.stream().map(BuildTaskRecord.Target::pos).collect(Collectors.toSet());
         if (previous.size() != revised.size() || !oldAt.keySet().equals(nextPositions))
             throw new IllegalArgumentException("project revision cannot add or remove target coordinates");
         Path sidecar = file(projectId).resolveSibling(projectId + ".scaffolds.json");
@@ -125,7 +127,7 @@ public final class BuildProjectStore {
         String id = plan.projectId(), dimension = level.dimension().location().toString();
         JsonObject arguments = load(id, dimension);
         var storedTargets = BuildProjectTargets.decode(arguments.getAsJsonArray("project_targets"));
-        Map<BlockPos, BuildTaskRecord.Target> frozen = new java.util.HashMap<>();
+        Map<BlockPos, BuildTaskRecord.Target> frozen = new HashMap<>();
         storedTargets.forEach(target -> frozen.put(target.pos(), target));
         // 比较真实坐标、状态和材料，不因旧版最终属性字段的兼容迁移拒绝同一份物理方案。
         if (storedTargets.size() != plan.targets.size() || plan.targets.stream().anyMatch(target -> {

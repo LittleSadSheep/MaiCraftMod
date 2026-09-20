@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import java.util.IdentityHashMap;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /** 把现场设计的窗框组件展开成独立实例，保留源路径并隔离每个实例自己的开孔引用。 */
@@ -31,7 +32,7 @@ final class BuildingModelExpansion {
     private final JsonObject components;
     private final boolean blender;
     private final Map<String, Integer> componentDepths = new HashMap<>();
-    private final Map<JsonObject, BuildingModelShape> shapeCache = new java.util.IdentityHashMap<>();
+    private final Map<JsonObject, BuildingModelShape> shapeCache = new IdentityHashMap<>();
     // 用户调高节点与连接预算后，先用长整数累计再比较，不能让大量继承切割引用溢出成负数而获准展开。
     private long expandedNodes, expandedCuts, authoredNodes, declaredModifiers;
 

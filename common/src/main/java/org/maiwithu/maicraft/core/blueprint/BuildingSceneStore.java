@@ -20,6 +20,7 @@ import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import java.util.Objects;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 
 /**
@@ -61,7 +62,7 @@ public final class BuildingSceneStore {
 
     BuildingSceneStore(StateIdentity identity, Function<JsonObject, JsonObject> compiler) {
         this.identity = identity;
-        this.compiler = java.util.Objects.requireNonNull(compiler);
+        this.compiler = Objects.requireNonNull(compiler);
         directory = identity.directory().resolve("build-scenes").resolve(identity.key());
     }
 

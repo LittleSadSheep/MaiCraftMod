@@ -17,6 +17,12 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import net.minecraft.world.item.Items;
+import org.maiwithu.maicraft.core.build.BlueprintSafety;
+import org.maiwithu.maicraft.core.build.BuildStates;
 
 /**
  * 把已读好的蓝图转换成游戏里的施工目标：查方块、旋转位置、计算材料，并挑出允许保留的装饰数据。
@@ -32,9 +38,9 @@ public final class BlueprintStore {
      * 实体被过滤、重复坐标被覆盖，以及未知名字被读成空气，目前都不会增加 dropped。
      */
     public record Loaded(List<BuildTaskRecord.Target> targets, Vec3i size,
-                         java.util.Map<Long, CompoundTag> blockEntityData,
+                         Map<Long, CompoundTag> blockEntityData,
                          List<BuildTaskRecord.EntitySpawn> entities,
-                         java.util.Map<Long, List<BuildTaskRecord.CellNeed>> cellNeeds,
+                         Map<Long, List<BuildTaskRecord.CellNeed>> cellNeeds,
                          int dropped) {}
 
     /**
@@ -47,9 +53,9 @@ public final class BlueprintStore {
         private final ListTag paletteTag, blocks, entities;
         private final List<BlockState> palette = new ArrayList<>();
         // 普通导入目标先保留完整坐标；原生建造高度仍由后续现场检查判断，不能在数据解析时压缩丢格。
-        private final java.util.LinkedHashMap<BlockPos, BuildTaskRecord.Target> byPos = new java.util.LinkedHashMap<>();
-        private final java.util.Map<Long, CompoundTag> beData = new java.util.HashMap<>();
-        private final java.util.Map<Long, List<BuildTaskRecord.CellNeed>> needs = new java.util.HashMap<>();
+        private final LinkedHashMap<BlockPos, BuildTaskRecord.Target> byPos = new LinkedHashMap<>();
+        private final Map<Long, CompoundTag> beData = new HashMap<>();
+        private final Map<Long, List<BuildTaskRecord.CellNeed>> needs = new HashMap<>();
         private final List<BuildTaskRecord.EntitySpawn> spawns = new ArrayList<>();
         private int paletteIndex, blockIndex, entityIndex, dropped;
 
@@ -105,14 +111,14 @@ public final class BlueprintStore {
                 }
                 BlockState state = palette.get(paletteIndex);
                 // 能不能建走同一个判据(工具入口那边拿它当拒绝理由,这边拿它当跳过条件)
-                if (org.maiwithu.maicraft.core.build.BuildStates.unbuildableReason(state) != null) {
+                if (BuildStates.unbuildableReason(state) != null) {
                     dropped++;
                     continue;
                 }
                 // 双格方块的次半不进目标集:主半的 setPlacedBy 自己会造它。不剔的话床头
                 // 可能先于床脚落位,而床的那一步会往<b>目标集之外</b>再写一块床头——一件料
                 // 换三块床方块,且可能覆写掉已砌好的内墙,来回重建死转。这不算掉格。
-                if (org.maiwithu.maicraft.core.build.BuildStates.isSecondaryHalf(state)) {
+                if (BuildStates.isSecondaryHalf(state)) {
                     continue;
                 }
                 int rx;
@@ -135,16 +141,16 @@ public final class BlueprintStore {
                 // 而且是<b>问方块自己</b>(中键取方块那条路),不查写死的表:小麦答种子、
                 // 洞穴藤蔓答发光浆果、竹笋答竹子、连枝的瓜藤答瓜种。此前这里靠一张十三行
                 // 的对照表,每行都是被咬过一次才补上的,而且只认原版——模组的作物一个都不认。
-                BlockState placed = org.maiwithu.maicraft.core.build.BuildStates.normalize(state);
+                BlockState placed = BuildStates.normalize(state);
                 BlockPos world = new BlockPos(Math.addExact(anchor.getX(), rx),
                         Math.addExact(anchor.getY(), y), Math.addExact(anchor.getZ(), rz));
                 // 探针给<b>这一格自己的坐标</b>,不是锚点。给锚点的话所有格共用同一个探针点,
                 // 而方块自述里有几种会去读那一格的方块实体——续建时锚点格本身就立着图纸放的
                 // 东西,一面红旗就能把整张图纸的记账物品带偏。(带方块实体的方块已经在
                 // materialItem 里整体不问了,这里是第二道:探针点本来就该是本格。)
-                var payItem = org.maiwithu.maicraft.core.build.BuildStates
+                var payItem = BuildStates
                         .materialItem(placed, level, world);
-                if (payItem == net.minecraft.world.item.Items.AIR && !placed.isAir()) {
+                if (payItem == Items.AIR && !placed.isAir()) {
                     dropped++;
                     continue;
                 }
@@ -152,12 +158,12 @@ public final class BlueprintStore {
                 // 不搬——图纸是文件,照搬等于凭空造物品
                 CompoundTag safe = null;
                 if (cell.contains("nbt", Tag.TAG_COMPOUND)) {
-                    safe = org.maiwithu.maicraft.core.build.BlueprintSafety
+                    safe = BlueprintSafety
                             .safeBlockEntityData(state, cell.getCompound("nbt"));
                 }
                 // 这一格要几叠料:带花的花盆是盆加花两件,带花纹的旗帜是一叠但要组件一致。
                 // 一格一件是特例而不是通则,这张料单整个盖过默认的"一件本方块的物品"。
-                var cellNeeds = org.maiwithu.maicraft.core.build.BuildStates
+                var cellNeeds = BuildStates
                         .cellNeeds(placed, safe, level, world, level.registryAccess());
                 // 先取得这一格可保留的装饰与材料要求，再一并登记；坐标不可表达时整格拒绝，不能串到别层。
                 retainTarget(new BuildTaskRecord.Target(state, payItem, world,
@@ -167,7 +173,7 @@ public final class BlueprintStore {
             if (blockIndex < blocks.size()) return null;
             while (entityIndex < entities.size() && remaining-- > 0 && System.nanoTime() - started < sliceNanos) {
                 CompoundTag e = entities.getCompound(entityIndex++);
-                CompoundTag safe = org.maiwithu.maicraft.core.build.BlueprintSafety
+                CompoundTag safe = BlueprintSafety
                         .safeEntityData(e.getCompound("nbt"), level.registryAccess());
                 if (safe == null) {
                     continue;

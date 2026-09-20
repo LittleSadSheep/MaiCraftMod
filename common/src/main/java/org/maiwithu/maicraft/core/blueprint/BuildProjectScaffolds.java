@@ -14,6 +14,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import java.util.Comparator;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** 仅编码本项目原生确认过的临时支撑；恢复按记录逐格核对，绝不扫描泥土推断所有权。 */
 public final class BuildProjectScaffolds {
@@ -23,7 +26,7 @@ public final class BuildProjectScaffolds {
         // 支撑账容量跟随配置，允许大型工程续建；这只放宽记录数量，不替角色批准额外搭建动作。
         if (scaffolds.size() > BuildingBudgets.current().maxScaffolds()) throw new IllegalArgumentException("too many saved project scaffolds");
         JsonArray rows = new JsonArray();
-        scaffolds.entrySet().stream().sorted(Map.Entry.comparingByKey(java.util.Comparator.comparingLong(BlockPos::asLong)))
+        scaffolds.entrySet().stream().sorted(Map.Entry.comparingByKey(Comparator.comparingLong(BlockPos::asLong)))
                 .forEach(entry -> {
                     BlockPos at = entry.getKey(); BlockState state = entry.getValue(); requireState(state);
                     JsonObject row = new JsonObject(); row.addProperty("x", at.getX()); row.addProperty("y", at.getY()); row.addProperty("z", at.getZ());
@@ -41,7 +44,7 @@ public final class BuildProjectScaffolds {
         Map<BlockPos, BlockState> result = new LinkedHashMap<>();
         for (var value : rows) {
             JsonObject row = value.getAsJsonObject();
-            if (!row.keySet().equals(java.util.Set.of("x", "y", "z", "block_id", "properties")))
+            if (!row.keySet().equals(Set.of("x", "y", "z", "block_id", "properties")))
                 throw new IllegalArgumentException("invalid saved scaffold fields");
             BlockPos at = new BlockPos(coordinate(row, "x"), coordinate(row, "y"), coordinate(row, "z"));
             ResourceLocation id = ResourceLocation.parse(row.get("block_id").getAsString());
@@ -63,7 +66,7 @@ public final class BuildProjectScaffolds {
     /** 先完成全部检查再交回可恢复清单；遇到未知或替换方块时不返回半份账，也不写空账覆盖证据。 */
     public static Map<BlockPos, BlockState> observed(Map<BlockPos, BlockState> saved, Level level, List<BuildTaskRecord.Target> targets) {
         var permanent = targets.stream().filter(target -> !target.desiredState().isAir()).map(BuildTaskRecord.Target::pos)
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
         Map<BlockPos, BlockState> result = new LinkedHashMap<>();
         for (var entry : saved.entrySet()) {
             BlockPos at = entry.getKey();

@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
+import java.util.Set;
 
 /**
  * 保存和恢复逐格施工要求：方块、物品、绝对坐标、状态、方向提示和精确验收选项。空气保留为明确清空目标。
@@ -84,13 +85,13 @@ public final class BuildProjectTargets {
             // 普通解析完成后，再恢复原来明确要求精确比较的属性及物品放置模式，避免续建时验收标准变宽。
             LinkedHashSet<String> exact = new LinkedHashSet<>();
             row.getAsJsonArray("exact_properties").forEach(value -> exact.add(value.getAsString()));
-            java.util.Set<String> finalProperties = null;
+            Set<String> finalProperties = null;
             if (row.has("final_properties")) {
                 var names = new LinkedHashSet<String>(); row.getAsJsonArray("final_properties").forEach(value -> names.add(value.getAsString()));
                 finalProperties = names;
             } else if (row.get("strict_identity").getAsBoolean()) {
                 // 旧工程没有分开保存最终属性时，把原来明确指定的属性迁移为最终要求；不把这些要求丢掉，也不在施工前强制替换。
-                finalProperties = java.util.Set.copyOf(exact);
+                finalProperties = Set.copyOf(exact);
             }
             result.add(new BuildTaskRecord.Target(target.desiredState(), BuiltInRegistries.ITEM.get(item),
                     target.pos(), target.label(), target.facing(), target.axis(), target.topHalf(),

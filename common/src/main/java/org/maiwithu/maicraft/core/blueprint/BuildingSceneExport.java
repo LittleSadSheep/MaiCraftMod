@@ -15,6 +15,10 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.SharedConstants;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
+import java.util.UUID;
+import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 
 /**
  * 把模型导出为可重复使用的 JSON 或原版 NBT。JSON 保留负偏移；NBT 的坐标先平移到最小角为零，并另记原偏移。
@@ -28,7 +32,7 @@ public final class BuildingSceneExport {
 
     // 使用模型编号命名文件，重复导出同编号和格式会替换旧文件；先写临时文件，成功后才移到正式路径。
     public static Path write(Path directory, String id, JsonObject blueprint, String format) {
-        java.util.UUID.fromString(id);
+        UUID.fromString(id);
         if (!format.equals("json") && !format.equals("nbt")) throw new IllegalArgumentException("Export format must be json or nbt");
         Path target = directory.resolve("maicraft-scene-" + id + "." + format);
         try {
@@ -37,10 +41,10 @@ public final class BuildingSceneExport {
             try {
                 if (format.equals("json")) Files.writeString(temporary, BuildingSceneBlocks.export(blueprint).toString());
                 else NbtIo.writeCompressed(structure(blueprint), temporary);
-                try { Files.move(temporary, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
-                catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-                    Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                try { Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING); }
+                catch (AtomicMoveNotSupportedException unsupported) {
+                    Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
                 }
             } finally { Files.deleteIfExists(temporary); }
             return target;
@@ -60,7 +64,7 @@ public final class BuildingSceneExport {
     // 先验证普通方块蓝图并补齐建造会改变的默认值，再按不同方块状态合并材料表。
     public static CompoundTag structure(JsonObject blueprint) {
         // 导出保留同一份大建筑的目标，不能在NBT路径重新套用机器规划的数量与半径预算。
-        org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateBuildingWire(blueprint);
+        MachineBlueprintDocument.validateBuildingWire(blueprint);
         blueprint = BuildingSceneBlocks.export(blueprint);
         List<Integer> min = minimum(blueprint);
         int[] size = {1, 1, 1};
