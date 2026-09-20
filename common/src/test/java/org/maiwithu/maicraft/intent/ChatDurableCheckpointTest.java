@@ -61,6 +61,7 @@ public final class ChatDurableCheckpointTest {
                     snapshot.steps(), snapshot.stepIndex(), snapshot.completed(), snapshot.internalPositions(),
                     snapshot.internalAreaProtections(), snapshot.attempts(), snapshot.decision(), snapshot.pendingAnswer(),
                     snapshot.terminal(), 100);
+            restored.restoreChatSubmissionTracking(snapshot.chatSubmissionTracked());
             tasks.put(restored.externalId(), restored);
             check(restored.resume(), "恢复后仍需明确继续");
             runtime.restoredTaskAttached(restored);
@@ -77,6 +78,28 @@ public final class ChatDurableCheckpointTest {
                 check(expected.getMessage().contains("chat_submission_already_reserved"), "应由聊天历史明确阻止重发");
             }
             check(world.blockUses() == 0 && world.itemUses() == 0, "持久身份核验不能触发其他游戏操作");
+
+            // 升级前的检查点没有跟踪标记，不能假定旧聊天未发送；重新保存也不能抹掉这种未知。
+            var legacyJson = loaded.root().deepCopy();
+            legacyJson.getAsJsonArray("tasks").get(0).getAsJsonObject().remove("chat_submission_tracked");
+            var old = IntentStateCodec.decode(legacyJson).tasks().getFirst();
+            var legacy = IntentTaskRecord.restored(old.id(), old.planId(), old.goal(), identity.key(), old.steps(),
+                    old.stepIndex(), old.completed(), old.internalPositions(), old.internalAreaProtections(),
+                    old.attempts(), old.decision(), old.pendingAnswer(), old.terminal(), 100);
+            legacy.restoreChatSubmissionTracking(old.chatSubmissionTracked());
+            tasks.put(legacy.externalId(), legacy);
+            legacy.resume();
+            runtime.restoredTaskAttached(legacy);
+            var unknown = new IntentTask(world.player, legacy, runtime);
+            check(unknown.tick(world.player) == TaskState.RUNNING && legacy.decisionSnapshot() != null,
+                    "旧聊天应在创建输入会话前要求核对历史");
+            check(legacy.decisionSnapshot().options().stream().noneMatch(option -> option.choice().equals("retry")),
+                    "未知旧发送不能提供自动重试");
+            check(legacy.decisionSnapshot().context().getAsJsonObject("failure").getAsJsonObject("data")
+                    .get("outcome_uncertain").getAsBoolean(), "旧任务应明确保留未知结果");
+            var resaved = IntentStateCodec.encode(identity.key(), List.of(), List.of(legacy), Map.of(), List.of());
+            check(!IntentStateCodec.decode(resaved).tasks().getFirst().chatSubmissionTracked(),
+                    "另存旧记录不能凭空变成已跟踪的聊天任务");
         }
         System.out.println("ChatDurableCheckpointTest: passed");
     }

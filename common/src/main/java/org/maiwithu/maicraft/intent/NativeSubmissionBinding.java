@@ -18,8 +18,16 @@ final class NativeSubmissionBinding {
 
     static void bind(NativeSubmissionTaskRecord child, IntentTaskRecord parent, IntentRuntime runtime) {
         String namespace = child.submissionNamespace();
+        // 旧版本没有发送标记，无法证明聊天从未发生；必须在打开输入框前报告未知，而不是补写新标记后重发。
+        if (namespace.equals("chat") && !parent.chatSubmissionTracked()) throw new UntrackedChatHistory();
         var journal = new NativeSubmissionJournal(runtime.requiredStateIdentity(), operationId(parent, namespace), namespace);
         child.submissionBarrier(barrier(parent, runtime, namespace, journal::prepare));
+    }
+
+    static final class UntrackedChatHistory extends IllegalStateException {
+        UntrackedChatHistory() {
+            super("This restored task predates durable chat tracking. Inspect chat history and start a new task if another send is intended.");
+        }
     }
 
     static BooleanSupplier barrier(IntentTaskRecord parent, IntentRuntime runtime, String namespace, BooleanSupplier reserve) {

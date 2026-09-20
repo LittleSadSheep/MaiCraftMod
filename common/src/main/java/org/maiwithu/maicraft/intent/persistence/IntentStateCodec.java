@@ -67,7 +67,8 @@ public final class IntentStateCodec {
             List<IntentTaskRecord.AttemptSnapshot> attempts,
             IntentTaskRecord.DecisionSnapshot decision,
             IntentTaskRecord.DecisionAnswer pendingAnswer,
-            IntentTaskRecord.TerminalSnapshot terminal) {}
+            IntentTaskRecord.TerminalSnapshot terminal,
+            boolean chatSubmissionTracked) {}
 
     public record Decoded(
             List<Plan> plans,
@@ -141,6 +142,8 @@ public final class IntentStateCodec {
         // 原始目标和实际步骤都保存：恢复过程中可能插入了“先找材料”等新步骤，不能只保存原始目标。
         JsonObject value = new JsonObject();
         value.addProperty("id", task.externalId().toString());
+        // 明确记录任务是否从一开始就在持久聊天提交规则下运行，保存旧记录时不能凭空补成 true。
+        value.addProperty("chat_submission_tracked", task.chatSubmissionTracked());
         if (task.planId() != null) value.addProperty("plan_id", task.planId().toString());
         value.add("goal", safeGoal(task.goal()));
         JsonArray steps = new JsonArray();
@@ -432,7 +435,8 @@ public final class IntentStateCodec {
                 List.copyOf(completed), Map.copyOf(internalPositions),
                 Map.copyOf(internalAreaProtections),
                 List.copyOf(attempts),
-                decision, answer, terminal);
+                decision, answer, terminal,
+                value.has("chat_submission_tracked") && value.get("chat_submission_tracked").getAsBoolean());
     }
 
     private static JsonArray packedCells(List<Long> cells) {

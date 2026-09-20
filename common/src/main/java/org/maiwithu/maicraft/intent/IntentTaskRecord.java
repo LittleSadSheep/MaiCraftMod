@@ -43,6 +43,7 @@ public final class IntentTaskRecord extends TaskRecord {
     private DecisionAnswer pendingAnswer;
     private TerminalSnapshot terminal;
     private boolean restoredDetached;
+    private boolean chatSubmissionTracked = true;
     private Runnable dirty = () -> {};
     /** 只保存最近一次观察的诊断副本；不持有世界对象，也不把旧进度当成重启后的现场事实。 */
     private JsonObject activeExecution;
@@ -79,6 +80,8 @@ public final class IntentTaskRecord extends TaskRecord {
         // 只恢复目标和已经确认的结果，不恢复旧路线或菜单操作；没做完的任务先暂停，等明确要求继续。
         IntentTaskRecord record = new IntentTaskRecord(
                 externalId, planId, goal, Objects.requireNonNull(bindingKey, "bindingKey"));
+        // 旧检查点不能仅因被新版本读取就升级成有持久发送证据；运行时随后带回文件中的明确标记。
+        record.chatSubmissionTracked = false;
         record.steps.clear();
         record.steps.addAll(steps);
         record.stepIndex = stepIndex;
@@ -148,6 +151,12 @@ public final class IntentTaskRecord extends TaskRecord {
     public boolean paused() { return pause != null; }
     public String bindingKey() { return bindingKey; }
     public boolean restoredDetached() { return restoredDetached; }
+    public boolean chatSubmissionTracked() { return chatSubmissionTracked; }
+
+    void restoreChatSubmissionTracking(boolean tracked) {
+        if (!restoredDetached && terminal == null) throw new IllegalStateException("chat tracking can only be restored with a checkpoint");
+        chatSubmissionTracked = tracked;
+    }
 
     public JsonObject activeExecution() {
         return activeExecution == null ? null : activeExecution.deepCopy();

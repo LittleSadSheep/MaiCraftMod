@@ -502,6 +502,7 @@ public final class IntentRuntime {
                             snapshot.internalAreaProtections(),
                             snapshot.attempts(), snapshot.decision(),
                             snapshot.pendingAnswer(), snapshot.terminal(), gameTime);
+                    record.restoreChatSubmissionTracking(snapshot.chatSubmissionTracked());
                     record.bindDirty(this::markDirty);
                     if (tasks.putIfAbsent(record.externalId(), record) != null) {
                         throw new IllegalArgumentException("duplicate persisted task id");

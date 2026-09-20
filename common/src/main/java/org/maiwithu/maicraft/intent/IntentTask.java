@@ -85,8 +85,12 @@ final class IntentTask implements Task {
             // 这里只处理运行异常；虚拟机级错误不被包装成普通任务失败。
             abandonChildAfterUnexpectedFailure();
             wait = null;
+            // 无持久聊天记录的旧任务只能报告未知；不能把“新会话尚未发送”误当成普通可重试失败。
+            Map<String, Object> evidence = failure instanceof NativeSubmissionBinding.UntrackedChatHistory
+                    ? Map.of("failure_code", "chat_history_untracked", "outcome_uncertain", true, "mechanical_retry_allowed", false)
+                    : Map.of();
             return failStep(TaskState.FAILED,
-                    TaskResult.fail("semantic step failed safely: " + safeMessage(failure)));
+                    TaskResult.fail("semantic step failed safely: " + safeMessage(failure), evidence));
         } finally {
             // 查询和 Attention 使用实际观察到的当前子任务进度。
             // 诊断失败不能打断角色动作，也不能覆盖真正的任务结果。
@@ -800,6 +804,7 @@ final class IntentTask implements Task {
         Task failed = child;
         TaskRecord failedRecord = childRecord;
         if (failed == null) {
+            clearChild();
             releaseBody();
             return;
         }
