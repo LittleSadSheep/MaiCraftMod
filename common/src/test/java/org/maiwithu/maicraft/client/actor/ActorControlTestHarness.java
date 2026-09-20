@@ -9,6 +9,11 @@ import net.minecraft.client.player.Input;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.InventoryMenu;
 import sun.misc.Unsafe;
+import java.util.ArrayList;
+import java.util.List;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.world.InteractionHand;
 
 /**
  * 构造只供控制测试使用的客户端、玩家和操作端口，并手动推进身体控制版本；没有正常启动游戏，未初始化的能力不能直接拿来推断实机行为。
@@ -25,7 +30,7 @@ final class ActorControlTestHarness {
     long tick;
 
     ActorControlTestHarness() throws Exception {
-        connection.packets = new java.util.ArrayList<>();
+        connection.packets = new ArrayList<>();
         minecraft.player = player;
         field(LocalPlayer.class, "connection").set(player, connection);
         field(Minecraft.class, "gameThread").set(minecraft, Thread.currentThread());
@@ -78,11 +83,11 @@ final class ActorControlTestHarness {
         if (!condition) throw new AssertionError(message);
     }
 
-    static final class RecordingConnection extends net.minecraft.client.multiplayer.ClientPacketListener {
-        java.util.List<net.minecraft.network.protocol.Packet<?>> packets;
+    static final class RecordingConnection extends ClientPacketListener {
+        List<Packet<?>> packets;
         boolean failSend;
         private RecordingConnection() { super(null, null, null); }
-        @Override public void send(net.minecraft.network.protocol.Packet<?> packet) {
+        @Override public void send(Packet<?> packet) {
             if (failSend) throw new IllegalStateException("test connection send failed");
             packets.add(packet);
         }
@@ -96,6 +101,6 @@ final class ActorControlTestHarness {
         @Override public void setSprinting(boolean value) { sprinting = value; }
         @Override public boolean isSprinting() { return sprinting; }
         @Override public boolean isSleeping() { return sleeping; }
-        @Override public void swing(net.minecraft.world.InteractionHand hand) { /* no network in this fixture */ }
+        @Override public void swing(InteractionHand hand) { /* no network in this fixture */ }
     }
 }

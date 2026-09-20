@@ -17,6 +17,17 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
+import java.util.Arrays;
+import java.util.IdentityHashMap;
+import java.util.Set;
+import net.minecraft.core.MappedRegistry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 /** Actual Minecraft occlusion/voxel geometry with a frozen blueprint and a changing real-world view. */
 public final class PreviewVisibilityTest {
@@ -90,9 +101,9 @@ public final class PreviewVisibilityTest {
     }
 
     private static void incrementalExterior() {
-        Map<BlockPos, net.minecraft.world.phys.shapes.VoxelShape> shell = new LinkedHashMap<>();
+        Map<BlockPos, VoxelShape> shell = new LinkedHashMap<>();
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) for (int z = 0; z < 3; z++)
-            if (x != 1 || y != 1 || z != 1) shell.put(new BlockPos(x, y, z), net.minecraft.world.phys.shapes.Shapes.block());
+            if (x != 1 || y != 1 || z != 1) shell.put(new BlockPos(x, y, z), Shapes.block());
         for (boolean open : new boolean[]{false, true}) {
             if (open) shell.remove(new BlockPos(1, 1, 0));
             var builder = new PreviewExteriorSpace.Builder(shell);
@@ -155,7 +166,7 @@ public final class PreviewVisibilityTest {
         check(ready.sections().stream().mapToInt(section -> section.cells.size()).sum() == 2
                 && ready.sections().stream().mapToInt(section -> section.parts.size()).sum() == 3,
                 "all planned cells and multipart entries survive grouping");
-        check(ready.centres().equals(java.util.Set.of(low, high)), "only centre parts join the connection set");
+        check(ready.centres().equals(Set.of(low, high)), "only centre parts join the connection set");
         Counter both = new Counter(); cells.keySet().forEach(pos -> ready.outline().emit(pos, BlockPos.ZERO, both));
         check(Math.abs(both.length - 32) < 1e-6, "published geometry retains both separated cross-cell outlines");
 
@@ -170,7 +181,7 @@ public final class PreviewVisibilityTest {
         var slice = sliced.result(); Counter outline = new Counter();
         cells.keySet().forEach(pos -> slice.outline().emit(pos, BlockPos.ZERO, outline));
         check(reads[0] == beforeSlice + 1 && Math.abs(outline.length - 16) < 1e-6
-                        && slice.centres().equals(java.util.Set.of(low)),
+                        && slice.centres().equals(Set.of(low)),
                 "replacement preparation uses only the selected layer for outlines and centre connections");
         check(session.decision() == PreviewSession.Decision.WAITING, "preparation never grants construction approval");
         var cancelled = new PreviewRenderer.Preparation(session, new World());
@@ -204,21 +215,21 @@ public final class PreviewVisibilityTest {
     }
 
     private static BlockState crossCellState(int[] reads) throws Exception {
-        var registry = net.minecraft.core.registries.BuiltInRegistries.BLOCK;
-        var holders = net.minecraft.core.MappedRegistry.class.getDeclaredField("unregisteredIntrusiveHolders");
-        var frozen = net.minecraft.core.MappedRegistry.class.getDeclaredField("frozen");
+        var registry = BuiltInRegistries.BLOCK;
+        var holders = MappedRegistry.class.getDeclaredField("unregisteredIntrusiveHolders");
+        var frozen = MappedRegistry.class.getDeclaredField("frozen");
         holders.setAccessible(true); frozen.setAccessible(true);
         Object priorHolders = holders.get(registry); boolean priorFrozen = frozen.getBoolean(registry);
         // Give this unregistered fixture a private holder, then restore the global registry before testing.
         try {
-            holders.set(registry, new java.util.IdentityHashMap<>()); frozen.setBoolean(registry, false);
-            return new net.minecraft.world.level.block.Block(
-                    net.minecraft.world.level.block.state.BlockBehaviour.Properties.of().dynamicShape()) {
-                @Override public net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state,
-                        net.minecraft.world.level.BlockGetter world, BlockPos pos,
-                        net.minecraft.world.phys.shapes.CollisionContext context) {
+            holders.set(registry, new IdentityHashMap<>()); frozen.setBoolean(registry, false);
+            return new Block(
+                    BlockBehaviour.Properties.of().dynamicShape()) {
+                @Override public VoxelShape getShape(BlockState state,
+                        BlockGetter world, BlockPos pos,
+                        CollisionContext context) {
                     reads[0]++;
-                    return net.minecraft.world.phys.shapes.Shapes.box(0, 0, 0, 2, 1, 1);
+                    return Shapes.box(0, 0, 0, 2, 1, 1);
                 }
             }.defaultBlockState();
         } finally {
@@ -234,7 +245,7 @@ public final class PreviewVisibilityTest {
             if ((vertices & 1) == 1) start = new float[]{x, y, z};
             else {
                 length += Math.sqrt((x-start[0])*(x-start[0]) + (y-start[1])*(y-start[1]) + (z-start[2])*(z-start[2]));
-                segments.add(java.util.Arrays.toString(start) + ":" + java.util.Arrays.toString(new float[]{x,y,z}));
+                segments.add(Arrays.toString(start) + ":" + Arrays.toString(new float[]{x,y,z}));
             }
             return this;
         }

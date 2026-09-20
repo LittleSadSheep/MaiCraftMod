@@ -11,6 +11,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.act.Ballistics;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
 
 /** 通过真实射击状态机和原生动作端口计数，检查发射前瞄准与不射箭的取消。 */
@@ -69,7 +70,7 @@ public final class RangedShotTest {
                     "timeout or interruption must cancel without a release packet or firing another use");
             check(!f.h.player.isUsingItem() && f.h.inventory.selected != 0,
                     "native main-hand cancellation switches away from the charged bow");
-            check(f.h.h.connection.packets.stream().anyMatch(p -> p instanceof net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket),
+            check(f.h.h.connection.packets.stream().anyMatch(p -> p instanceof ServerboundSetCarriedItemPacket),
                     "cancellation must reach the server's carried-item path");
         }
     }
@@ -85,14 +86,14 @@ public final class RangedShotTest {
             check(!fired(shot) && f.h.mode.releases == 0 && f.h.inventory.selected == 0,
                     "abort at a spent mutation must neither throw nor release or switch the slot");
             check(f.h.h.connection.packets.stream().noneMatch(
-                            p -> p instanceof net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket),
+                            p -> p instanceof ServerboundSetCarriedItemPacket),
                     "no carried-item packet may be sent when this tick's mutation budget is already spent");
             // 下一刻名额恢复后仍能完成切槽取消，动作端口不被这次收尾卡死。
             f.h.nextTick();
             call(shot, "abort");
             check(!f.h.player.isUsingItem() && f.h.inventory.selected == 1
                             && f.h.h.connection.packets.stream().anyMatch(
-                            p -> p instanceof net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket),
+                            p -> p instanceof ServerboundSetCarriedItemPacket),
                     "a later abort with a free mutation still cancels through the carried-item path");
         }
     }

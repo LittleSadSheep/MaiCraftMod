@@ -11,6 +11,8 @@ import org.maiwithu.maicraft.core.combat.RetreatProgress;
 import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
 import static org.maiwithu.maicraft.client.actor.MobDefenseDamageTest.invoke;
 
@@ -63,10 +65,10 @@ public final class CombatOutcomeTest {
 
     private static void loadedCrystalReceiptStillWorks(boolean loaded) throws Exception {
         try (var f = new CombatThreatsTest.Fixture()) {
-            var crystal = f.h.h.allocate(net.minecraft.world.entity.boss.enderdragon.EndCrystal.class);
+            var crystal = f.h.h.allocate(EndCrystal.class);
             crystal.setId(13);
             ActorControlTestHarness.field(crystal.getClass(), "position").set(crystal, new Vec3(3, 1, 3));
-            ActorControlTestHarness.field(crystal.getClass(), "blockPosition").set(crystal, new net.minecraft.core.BlockPos(loaded ? 3 : 33, 1, 3));
+            ActorControlTestHarness.field(crystal.getClass(), "blockPosition").set(crystal, new BlockPos(loaded ? 3 : 33, 1, 3));
             f.h.level.entities.put(13, crystal);
             var record = new AttackTaskRecord("crystal", 1000, List.of(13), false, true);
             var task = new AttackCompanionTask(f.h.player, record);

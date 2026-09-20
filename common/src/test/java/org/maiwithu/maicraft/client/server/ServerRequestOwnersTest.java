@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.server;
 
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import com.google.gson.JsonObject;
 import static org.maiwithu.maicraft.client.server.ServerRouterTestHarness.check;
 
 public final class ServerRequestOwnersTest {
@@ -42,7 +43,7 @@ public final class ServerRequestOwnersTest {
         };
         owner.setState(TaskState.CANCELLED);
         var owned = h.submit("test.read"); owners.remember(owned.id(), owner.publicId());
-        var body = new com.google.gson.JsonObject(); body.addProperty("release_watch", true);
+        var body = new JsonObject(); body.addProperty("release_watch", true);
         var cleanup = h.router.submit("test.read", body, false); owners.remember(cleanup.id(), null);
         // 任务结束会回收其普通请求；只读观察释放显式无owner，下一刻仍可发出，不会操作机器或材料。
         owners.retire(h.router, id -> owner, 2); h.advance(2);

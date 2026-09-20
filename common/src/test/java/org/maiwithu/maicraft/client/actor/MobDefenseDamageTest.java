@@ -13,6 +13,8 @@ import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskSelector;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.core.combat.CombatThreats;
 import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
 
 /** 验证伤害事件实际接入自卫、选敌、原生攻击和低血量撤退，而非只测试记录器。 */
@@ -35,8 +37,8 @@ public final class MobDefenseDamageTest {
             var defense = new MobDefenseChain();
             check(!defense.canRun(f.h.player), "nearby hostiles alone do not trigger retaliation");
             Task work = new Task() {
-                public TaskState tick(net.minecraft.client.player.LocalPlayer p) { return TaskState.RUNNING; }
-                public void stop(net.minecraft.client.player.LocalPlayer p, StopReason why) { }
+                public TaskState tick(LocalPlayer p) { return TaskState.RUNNING; }
+                public void stop(LocalPlayer p, StopReason why) { }
                 public String name() { return "ongoing work"; }
             };
             check(TaskSelector.select(List.of(defense), null, work, List.of(), f.h.player) == work,
@@ -165,7 +167,7 @@ public final class MobDefenseDamageTest {
             check(restricted.foes().stream().noneMatch(Battlefield.Foe::authorized)
                     && AttackPlan.decide(restricted, null).foeId() == AttackPlan.NO_FOE,
                     "strict authorization evades an unlisted attacker instead of attacking outside the list");
-            org.maiwithu.maicraft.core.combat.CombatThreats.clear();
+            CombatThreats.clear();
             check(survey(task).byId(original.getId()).authorized() && record.entityIds.equals(List.of(11)),
                     "the original goal becomes attackable again after the ambush is over");
             task.result(TaskState.CANCELLED);

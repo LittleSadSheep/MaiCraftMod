@@ -29,6 +29,11 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.entity.EntityInLevelCallback;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.task.build.BuildEdgeMotion;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.StairBlock;
+import net.minecraft.world.level.block.state.properties.SlabType;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.field;
 
@@ -136,8 +141,8 @@ public final class BuildEdgeMotionNativeTest {
     private static void fullFloorLowCeiling() throws Exception {
         try (var f = new Fixture()) {
             for (int x = 3; x <= 6; x++) for (int z = 7; z <= 8; z++) f.h.set(new BlockPos(x, 2, z),
-                    Blocks.STONE_SLAB.defaultBlockState().setValue(net.minecraft.world.level.block.SlabBlock.TYPE,
-                            net.minecraft.world.level.block.state.properties.SlabType.TOP));
+                    Blocks.STONE_SLAB.defaultBlockState().setValue(SlabBlock.TYPE,
+                            SlabType.TOP));
             var align = BuildEdgeMotion.alignAt(ANCHOR.add(.45, 0, 0), new LongOpenHashSet(), p -> true);
             align.tick(f.player); f.flush();
             check(align.requiresSneak() && align.postureReason().equals("low_clearance_crouch") && !moving(f.player),
@@ -151,10 +156,10 @@ public final class BuildEdgeMotionNativeTest {
     private static Fixture halfStepFixture(Vec3 start) throws Exception {
         var f = new Fixture();
         f.h.set(new BlockPos(4, 1, 6), Blocks.DARK_OAK_STAIRS.defaultBlockState()
-                .setValue(net.minecraft.world.level.block.StairBlock.FACING, net.minecraft.core.Direction.SOUTH));
+                .setValue(StairBlock.FACING, Direction.SOUTH));
         // 高半阶上仅留1.5格潜行净空；从矮半阶起跳会顶头，普通原生踏阶则可通过。
         f.h.set(new BlockPos(4, 3, 6), Blocks.STONE_SLAB.defaultBlockState()
-                .setValue(net.minecraft.world.level.block.SlabBlock.TYPE, net.minecraft.world.level.block.state.properties.SlabType.TOP));
+                .setValue(SlabBlock.TYPE, SlabType.TOP));
         f.h.position(start); f.player.setDeltaMovement(0, -.0784, 0);
         field(Entity.class, "mainSupportingBlockPos").set(f.player, Optional.of(new BlockPos(4, 1, 6)));
         f.h.nextTick(); return f;
@@ -199,7 +204,7 @@ public final class BuildEdgeMotionNativeTest {
             field(SynchedEntityData.class, "entity").set(player.getEntityData(), player);
             field(LocalPlayer.class, "minecraft").set(player, h.h.minecraft);
             // 无头连接也保留原生在线玩家表，让旁观状态与姿态查询按正常的空列表路径运行。
-            field(net.minecraft.client.multiplayer.ClientPacketListener.class, "playerInfoMap").set(player.connection, new HashMap<>());
+            field(ClientPacketListener.class, "playerInfoMap").set(player.connection, new HashMap<>());
             field(Level.class, "isClientSide").setBoolean(h.level, true);
             field(Level.class, "profiler").set(h.level, (Supplier<ProfilerFiller>) () -> InactiveProfiler.INSTANCE);
             field(Entity.class, "type").set(player, EntityType.PLAYER);

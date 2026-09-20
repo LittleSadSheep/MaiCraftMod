@@ -24,17 +24,30 @@ import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.HashMap;
+import java.util.function.Supplier;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
 
 /** 被动实体与背包同步夹具覆盖受限收取；不生成真实物品、不运行导航，也不将子拾取成功当原生加工证明。 */
 public final class CollectItemsIdentityTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         // 无游戏的Bootstrap不会加载原版数据包；只在本回归里补水标签，结束后恢复，避免把浅水误当未知危险流体。
-        var fluids = net.minecraft.core.registries.BuiltInRegistries.FLUID;
-        Map<net.minecraft.tags.TagKey<net.minecraft.world.level.material.Fluid>,List<net.minecraft.core.Holder<net.minecraft.world.level.material.Fluid>>> tags = new java.util.HashMap<>();
+        var fluids = BuiltInRegistries.FLUID;
+        Map<TagKey<Fluid>,List<Holder<Fluid>>> tags = new HashMap<>();
         fluids.getTags().forEach(pair -> tags.put(pair.getFirst(), pair.getSecond().stream().toList()));
-        var previous = new java.util.HashMap<>(tags);
-        tags.put(net.minecraft.tags.FluidTags.WATER,List.of(fluids.wrapAsHolder(net.minecraft.world.level.material.Fluids.WATER),fluids.wrapAsHolder(net.minecraft.world.level.material.Fluids.FLOWING_WATER)));
+        var previous = new HashMap<>(tags);
+        tags.put(FluidTags.WATER,List.of(fluids.wrapAsHolder(Fluids.WATER),fluids.wrapAsHolder(Fluids.FLOWING_WATER)));
         fluids.bindTags(tags);
         try { scopedScanAndMerge(); continuedIdentity(); delayedContactReceipt(); shallowNudgeProtection(); }
         finally { fluids.bindTags(previous); }
@@ -110,8 +123,8 @@ public final class CollectItemsIdentityTest {
             world.position(new Vec3(5.5, 1, 5.5)); var water = new BlockPos(5, 1, 5);
             world.set(water, Blocks.WATER.defaultBlockState());
             Method method = Class.forName("org.maiwithu.maicraft.core.task.collect.CollectItemsApproach")
-                    .getDeclaredMethod("safeNudge", net.minecraft.client.player.LocalPlayer.class, Vec3.class); method.setAccessible(true);
-            java.util.function.Supplier<Boolean> safe = () -> {
+                    .getDeclaredMethod("safeNudge", LocalPlayer.class, Vec3.class); method.setAccessible(true);
+            Supplier<Boolean> safe = () -> {
                 try { return (boolean) method.invoke(null, world.player, new Vec3(5.8, 1.2, 5.5)); }
                 catch (Exception failure) { throw new AssertionError(failure); }
             };
@@ -129,13 +142,13 @@ public final class CollectItemsIdentityTest {
     }
     private static void normalPlayerInfo(InteractionWorldTestHarness world) throws Exception {
         // Unsafe夹具未运行连接构造器；游泳判定会查旁观者资料，空HashMap模拟普通玩家尚无远端资料的正常状态。
-        ActorControlTestHarness.field(net.minecraft.client.multiplayer.ClientPacketListener.class, "playerInfoMap")
-                .set(world.player.connection, new java.util.HashMap<>());
+        ActorControlTestHarness.field(ClientPacketListener.class, "playerInfoMap")
+                .set(world.player.connection, new HashMap<>());
         // 浅水靠近还会读取原版体型、惯性和边界；补齐正常静止站立的构造状态，不用缺失字段绕过真实碰撞验证。
-        ActorControlTestHarness.field(Entity.class, "dimensions").set(world.player, net.minecraft.world.entity.EntityType.PLAYER.getDimensions());
+        ActorControlTestHarness.field(Entity.class, "dimensions").set(world.player, EntityType.PLAYER.getDimensions());
         ActorControlTestHarness.field(Entity.class, "deltaMovement").set(world.player, Vec3.ZERO);
-        ActorControlTestHarness.field(net.minecraft.world.level.Level.class, "worldBorder")
-                .set(world.level, new net.minecraft.world.level.border.WorldBorder());
+        ActorControlTestHarness.field(Level.class, "worldBorder")
+                .set(world.level, new WorldBorder());
     }
     private static ItemEntity item(InteractionWorldTestHarness world, int id, Vec3 position, int count) throws Exception {
         var result = ItemEntityReceiptsTest.item(world, id, position, new ItemStack(Items.BRICK, count));

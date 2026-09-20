@@ -7,6 +7,7 @@ import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.Input;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.InteractionHand;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.field;
 
@@ -79,7 +80,7 @@ public final class ControlProtocolTest {
         h.nextTick(true);
         rejects(() -> h.actions.submitControlProtocol(h.context, "second", () -> submissions[0]++, PENDING, 5),
                 "awaiting confirmation");
-        rejects(() -> h.actions.useItem(h.context, net.minecraft.world.InteractionHand.MAIN_HAND, PENDING, 5),
+        rejects(() -> h.actions.useItem(h.context, InteractionHand.MAIN_HAND, PENDING, 5),
                 "awaiting confirmation");
         check(submissions[0] == 1 && h.context.mutationAvailable(), "active controls occupy the shared native slot");
         h.actions.retireOneShotForTaskBoundary(h.context, pending, "task ended");

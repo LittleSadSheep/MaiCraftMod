@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
+import java.util.function.IntSupplier;
 import static org.maiwithu.maicraft.client.preview.PreviewSectionRefresh.Work.*;
 
 /** Refresh decisions and Minecraft's retained-quad sorting run without an OpenGL context. */
@@ -22,7 +23,7 @@ public final class PreviewRefreshTest {
     private static void sectionRefresh() {
         var first = new PreviewSectionRefresh(); var second = new PreviewSectionRefresh();
         var reads = new AtomicInteger();
-        java.util.function.IntSupplier unchanged = () -> { reads.incrementAndGet(); return 7; };
+        IntSupplier unchanged = () -> { reads.incrementAndGet(); return 7; };
         Vec3 moved = new Vec3(2, 0, 0);
         check(first.required(0, Vec3.ZERO, unchanged) == REBUILD, "new sections require geometry");
         first.rebuilt(7, Vec3.ZERO, 0); second.rebuilt(7, Vec3.ZERO, 500);

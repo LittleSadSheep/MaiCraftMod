@@ -13,6 +13,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.InventoryMenu;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import sun.misc.Unsafe;
+import net.minecraft.client.gui.screens.ChatScreen;
 
 /** Exercises the production visibility state machine without creating a graphics window. */
 public final class MenuVisibilityTest {
@@ -49,8 +50,8 @@ public final class MenuVisibilityTest {
                 memory.allocateInstance(MenuVisibility.PlayerInventoryScreen.class);
         assign(AbstractContainerScreen.class, screen, "menu", inventory);
         check(DefaultBodyControlPort.permitsWorldMovement(null), "world view permits leased movement");
-        var chat = (net.minecraft.client.gui.screens.ChatScreen)
-                memory.allocateInstance(net.minecraft.client.gui.screens.ChatScreen.class);
+        var chat = (ChatScreen)
+                memory.allocateInstance(ChatScreen.class);
         check(DefaultBodyControlPort.permitsWorldMovement(chat), "chat must not silently zero navigation input");
         check(!DefaultBodyControlPort.permitsWorldMovement(screen), "inventory still suppresses world movement");
         VisibleMenuSession worldSession = new VisibleMenuSession();

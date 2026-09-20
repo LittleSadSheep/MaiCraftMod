@@ -34,6 +34,19 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Consumer;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.ai.attributes.AttributeMap;
+import net.minecraft.world.entity.player.Abilities;
+import net.minecraft.world.food.FoodData;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * 在一个已加载区块内提供可修改的方块、背包和原生操作计数，供交互测试复用；越界读取会报错，关闭时恢复之前的全局客户端与控制状态。
@@ -63,9 +76,9 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         ActorControlTestHarness.field(LocalPlayer.class, "clientLevel").set(player, level);
         ActorControlTestHarness.field(Entity.class, "level").set(player, level);
         ActorControlTestHarness.field(Player.class, "inventory").set(player, inventory);
-        ActorControlTestHarness.field(Player.class, "abilities").set(player, new net.minecraft.world.entity.player.Abilities());
+        ActorControlTestHarness.field(Player.class, "abilities").set(player, new Abilities());
         ActorControlTestHarness.field(Player.class, "attributes").set(player,
-                new net.minecraft.world.entity.ai.attributes.AttributeMap(Player.createAttributes().build()));
+                new AttributeMap(Player.createAttributes().build()));
         initializeVitals();
         ActorControlTestHarness.field(Entity.class, "eyeHeight").setFloat(player, 1.62F);
         ActorControlTestHarness.field(Entity.class, "onGround").setBoolean(player, true);
@@ -107,18 +120,18 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
 
     private void initializeVitals() throws Exception {
         // 正常施工会持续观察生命和饥饿；夹具默认健康吃饱，具体饥饿测试再显式改成低值，不能依赖未初始化字段。
-        ActorControlTestHarness.field(Player.class, "foodData").set(player, new net.minecraft.world.food.FoodData());
-        var builder = new net.minecraft.network.syncher.SynchedEntityData.Builder(player);
+        ActorControlTestHarness.field(Player.class, "foodData").set(player, new FoodData());
+        var builder = new SynchedEntityData.Builder(player);
         define(builder, "DATA_SHARED_FLAGS_ID", (byte) 0); define(builder, "DATA_AIR_SUPPLY_ID", 300);
-        define(builder, "DATA_CUSTOM_NAME_VISIBLE", false); define(builder, "DATA_CUSTOM_NAME", java.util.Optional.empty());
+        define(builder, "DATA_CUSTOM_NAME_VISIBLE", false); define(builder, "DATA_CUSTOM_NAME", Optional.empty());
         define(builder, "DATA_SILENT", false); define(builder, "DATA_NO_GRAVITY", false);
-        define(builder, "DATA_POSE", net.minecraft.world.entity.Pose.STANDING); define(builder, "DATA_TICKS_FROZEN", 0);
-        var method = Player.class.getDeclaredMethod("defineSynchedData", net.minecraft.network.syncher.SynchedEntityData.Builder.class);
+        define(builder, "DATA_POSE", Pose.STANDING); define(builder, "DATA_TICKS_FROZEN", 0);
+        var method = Player.class.getDeclaredMethod("defineSynchedData", SynchedEntityData.Builder.class);
         method.setAccessible(true); method.invoke(player, builder);
         ActorControlTestHarness.field(Entity.class, "entityData").set(player, builder.build()); player.setHealth(20);
     }
-    @SuppressWarnings("unchecked") private static <T> void define(net.minecraft.network.syncher.SynchedEntityData.Builder builder, String name, T value) throws Exception {
-        builder.define((net.minecraft.network.syncher.EntityDataAccessor<T>) ActorControlTestHarness.field(Entity.class, name).get(null), value);
+    @SuppressWarnings("unchecked") private static <T> void define(SynchedEntityData.Builder builder, String name, T value) throws Exception {
+        builder.define((EntityDataAccessor<T>) ActorControlTestHarness.field(Entity.class, name).get(null), value);
     }
 
     // 先释放测试按键和索引，再逐项还原原来的全局对象，避免影响后面测试。
@@ -148,20 +161,20 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         }
         @Override public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
         @Override public ClientChunkCache getChunkSource() { searches++; return chunks; }
-        @Override public net.minecraft.world.level.BlockGetter getChunkForCollisions(int x, int z) {
+        @Override public BlockGetter getChunkForCollisions(int x, int z) {
             return x == 0 && z == 0 ? this : null;
         }
         @Override public int getHeight() { return 16; }
         @Override public int getMinBuildHeight() { return 0; }
-        @Override public int getHeight(net.minecraft.world.level.levelgen.Heightmap.Types type, int x, int z) {
+        @Override public int getHeight(Heightmap.Types type, int x, int z) {
             // 模拟真实客户端：服务端不会发来的高度图没有地面数据，不能误用它判断出坑位置。
             if (clientHeightmapsOnly && !type.sendToClient()) return getMinBuildHeight();
             for (int y = 15; y >= 0; y--) if (!getBlockState(new BlockPos(x, y, z)).isAir()) return y + 1;
             return 0;
         }
-        private net.minecraft.world.level.border.WorldBorder testBorder;
-        @Override public net.minecraft.world.level.border.WorldBorder getWorldBorder() {
-            if (testBorder == null) testBorder = new net.minecraft.world.level.border.WorldBorder();
+        private WorldBorder testBorder;
+        @Override public WorldBorder getWorldBorder() {
+            if (testBorder == null) testBorder = new WorldBorder();
             return testBorder;
         }
         @Override public long getGameTime() { return time; }
@@ -172,17 +185,17 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         }
         @Override public <T extends Entity> List<T> getEntities(
                 EntityTypeTest<Entity, T> type, AABB bounds, Predicate<? super T> filter) {
-            return entities.values().stream().map(type::tryCast).filter(java.util.Objects::nonNull)
+            return entities.values().stream().map(type::tryCast).filter(Objects::nonNull)
                     .filter(e -> e.getBoundingBox().intersects(bounds) && filter.test(e)).toList();
         }
     }
 
     private static final class TestChunk extends LevelChunk {
         private TestLevel owner;
-        private TestChunk() { super(null, new net.minecraft.world.level.ChunkPos(0, 0)); }
+        private TestChunk() { super(null, new ChunkPos(0, 0)); }
         @Override public BlockState getBlockState(BlockPos pos) { return owner.getBlockState(pos); }
         @Override public FluidState getFluidState(BlockPos pos) { return owner.getFluidState(pos); }
-        @Override public net.minecraft.world.level.ChunkPos getPos() { return new net.minecraft.world.level.ChunkPos(0, 0); }
+        @Override public ChunkPos getPos() { return new ChunkPos(0, 0); }
     }
 
     private static final class LoadedChunks extends ClientChunkCache {
@@ -198,7 +211,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
 
     static final class UseMode extends MultiPlayerGameMode {
         int items, blocks, attacks, releases;
-        java.util.function.Consumer<Player> itemUse, itemRelease;
+        Consumer<Player> itemUse, itemRelease;
         Runnable beforeBlockUse;
         private UseMode() { super(null, null); }
         @Override public InteractionResult useItem(Player player, InteractionHand hand) {

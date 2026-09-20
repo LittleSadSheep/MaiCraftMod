@@ -18,6 +18,13 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
+import java.util.LinkedHashMap;
+import java.util.Optional;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.damagesource.DamageSources;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.Pose;
 
 /** 使用真实伤害包解析来源，测试替身只提供已加载实体和可控游戏时间。 */
 public final class CombatThreatsTest {
@@ -111,7 +118,7 @@ public final class CombatThreatsTest {
             check(CombatThreats.attackers(f.h.player).isEmpty(), "returning to an old body cannot resurrect hits");
             f.hit(zombie, zombie);
             var otherWorld = f.h.h.allocate(InteractionWorldTestHarness.TestLevel.class);
-            otherWorld.entities = new java.util.LinkedHashMap<>();
+            otherWorld.entities = new LinkedHashMap<>();
             ActorControlTestHarness.field(f.h.player.getClass(), "clientLevel").set(f.h.player, otherWorld);
             check(CombatThreats.attackers(f.h.player).isEmpty(), "world replacement clears the same player's hits");
             ActorControlTestHarness.field(f.h.player.getClass(), "clientLevel").set(f.h.player, f.h.level);
@@ -128,27 +135,27 @@ public final class CombatThreatsTest {
             defineBase(builder, "DATA_SHARED_FLAGS_ID", (byte) 0);
             defineBase(builder, "DATA_AIR_SUPPLY_ID", 300);
             defineBase(builder, "DATA_CUSTOM_NAME_VISIBLE", false);
-            defineBase(builder, "DATA_CUSTOM_NAME", java.util.Optional.empty());
+            defineBase(builder, "DATA_CUSTOM_NAME", Optional.empty());
             defineBase(builder, "DATA_SILENT", false);
             defineBase(builder, "DATA_NO_GRAVITY", false);
-            defineBase(builder, "DATA_POSE", net.minecraft.world.entity.Pose.STANDING);
+            defineBase(builder, "DATA_POSE", Pose.STANDING);
             defineBase(builder, "DATA_TICKS_FROZEN", 0);
             var define = Player.class.getDeclaredMethod("defineSynchedData", SynchedEntityData.Builder.class);
             define.setAccessible(true); define.invoke(h.player, builder);
             ActorControlTestHarness.field(Entity.class, "entityData").set(h.player, builder.build());
             h.player.setId(1); h.player.setHealth(20);
-            var sources = h.h.allocate(net.minecraft.world.damagesource.DamageSources.class);
+            var sources = h.h.allocate(DamageSources.class);
             ActorControlTestHarness.field(sources.getClass(), "generic").set(sources, new DamageSource(DAMAGE));
             ActorControlTestHarness.field(h.level.getClass(), "damageSources").set(h.level, sources);
             ActorControlTestHarness.field(Player.class, "attackStrengthTicker").setInt(h.player, 100);
-            ActorControlTestHarness.field(Entity.class, "random").set(h.player, net.minecraft.util.RandomSource.create(1));
+            ActorControlTestHarness.field(Entity.class, "random").set(h.player, RandomSource.create(1));
             ActorControlTestHarness.field(Entity.class, "dimensions").set(h.player, EntityType.PLAYER.getDimensions());
             CombatThreats.clear();
         }
         TestHostile mob(int id, double x) throws Exception {
             return mob(TestHostile.class, EntityType.ZOMBIE, id, x);
         }
-        <T extends net.minecraft.world.entity.Mob> T mob(Class<T> kind, EntityType<?> type, int id, double x) throws Exception {
+        <T extends Mob> T mob(Class<T> kind, EntityType<?> type, int id, double x) throws Exception {
             var mob = h.h.allocate(kind); mob.setId(id);
             ActorControlTestHarness.field(Entity.class, "type").set(mob, type);
             ActorControlTestHarness.field(Entity.class, "level").set(mob, h.level);
@@ -168,7 +175,7 @@ public final class CombatThreatsTest {
 
     @SuppressWarnings("unchecked")
     private static <T> void defineBase(SynchedEntityData.Builder builder, String name, T value) throws Exception {
-        builder.define((net.minecraft.network.syncher.EntityDataAccessor<T>) ActorControlTestHarness.field(Entity.class, name).get(null), value);
+        builder.define((EntityDataAccessor<T>) ActorControlTestHarness.field(Entity.class, name).get(null), value);
     }
 
     static final class TestHostile extends Zombie {

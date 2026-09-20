@@ -12,6 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.act.Interaction;
+import net.minecraft.util.RandomSource;
 
 /** 真正推进原版面包持用倒计时；屏蔽渲染副作用，不用手动扣食物或计数假动作代替 32 刻过程。 */
 public final class ItemUseTimingTest {
@@ -95,7 +96,7 @@ public final class ItemUseTimingTest {
             ActorControlTestHarness.field(ClientActorBoundary.class, "observedPlayer").set(h.h.actor, player);
             ActorControlTestHarness.field(ClientActorBoundary.class, "observedPlayer").set(h.actor, player);
             ActorControlTestHarness.field(Level.class, "isClientSide").setBoolean(h.level, true);
-            ActorControlTestHarness.field(Entity.class, "random").set(player, net.minecraft.util.RandomSource.create(1));
+            ActorControlTestHarness.field(Entity.class, "random").set(player, RandomSource.create(1));
             h.inventory.setItem(0, new ItemStack(Items.BREAD, 2)); h.inventory.selected = 0;
             player.getFoodData().setFoodLevel(0);
             h.mode.itemUse = p -> p.getMainHandItem().use(h.level, p, InteractionHand.MAIN_HAND);

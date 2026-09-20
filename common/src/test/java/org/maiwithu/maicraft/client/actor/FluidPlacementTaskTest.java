@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTas
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 
 /** 用真实角色动作端口与原版桶射线验证只倒一次，显式延迟服务器确认；不把测试区块变化冒称实机验收。 */
 public final class FluidPlacementTaskTest {
@@ -112,7 +113,7 @@ public final class FluidPlacementTaskTest {
             }
             BlockPos target=new BlockPos(11,1,4); f.position(new Vec3(12.716992959374187,2,7.715705611363118));
             f.inventory.setItem(0,new ItemStack(Items.WATER_BUCKET));
-            check(org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting.visibleBucketHit(f.level,f.player,f.player.getEyePosition(),
+            check(FirstPersonInteractionTargeting.visibleBucketHit(f.level,f.player,f.player.getEyePosition(),
                             target,4.5,Items.WATER_BUCKET)==null,"原中心射线应重现实机超出远墙触及范围的问题");
             var hit=FluidPlacementAim.find(f.level,f.player,f.player.getEyePosition(),target,4.5,Items.WATER_BUCKET);
             check(hit!=null && hit.getBlockPos().relative(hit.getDirection()).equals(target)

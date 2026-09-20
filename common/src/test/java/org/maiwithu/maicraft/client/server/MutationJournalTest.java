@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.server;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import com.google.gson.JsonObject;
 import static org.maiwithu.maicraft.client.server.ClientRequestReceipt.*;
 import static org.maiwithu.maicraft.client.server.ServerRouterTestHarness.check;
 
@@ -31,7 +32,7 @@ public final class MutationJournalTest {
         var request = h.submit("test.write");
         h.advance(1);
         var uncertain = h.reply(request, "succeeded", "applied", "");
-        var business = new com.google.gson.JsonObject();
+        var business = new JsonObject();
         business.addProperty("status", "uncertain");
         uncertain.add("result", business);
         h.router.receive(uncertain, 1);

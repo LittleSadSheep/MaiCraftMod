@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.InteractionHand;
 
 /** Actual native task camera gate and actor USE_ITEM dispatch, with real vanilla block/fluid rays. */
 public final class BucketInteractionRayTest {
@@ -87,9 +88,9 @@ public final class BucketInteractionRayTest {
 
     private static void requiredTypeGuardsSubmission() throws Exception {
         try (var f = world(Items.BUCKET)) {
-            var use = Interaction.useInAir(f.player, net.minecraft.world.InteractionHand.MAIN_HAND, Interaction.Timing.once())
+            var use = Interaction.useInAir(f.player, InteractionHand.MAIN_HAND, Interaction.Timing.once())
                     .requireBlock(WATER, Blocks.WATER);
-            var block = Interaction.useBlock(f.player, WATER, net.minecraft.world.InteractionHand.MAIN_HAND)
+            var block = Interaction.useBlock(f.player, WATER, InteractionHand.MAIN_HAND)
                     .requireBlock(WATER, Blocks.WATER);
             f.set(WATER, Blocks.STONE.defaultBlockState());
             check(use.tick() == Interaction.Status.FAILED && block.tick() == Interaction.Status.FAILED
@@ -100,7 +101,7 @@ public final class BucketInteractionRayTest {
 
     private static void changedTargetAfterUseStillConfirms() throws Exception {
         try (var f = world(Items.BUCKET)) {
-            var use = Interaction.useInAir(f.player, net.minecraft.world.InteractionHand.MAIN_HAND, Interaction.Timing.once())
+            var use = Interaction.useInAir(f.player, InteractionHand.MAIN_HAND, Interaction.Timing.once())
                     .requireBlock(WATER, Blocks.WATER);
             check(use.tick() == Interaction.Status.RUNNING && f.mode.items == 1, "valid input permits native item use");
             f.set(WATER, Blocks.AIR.defaultBlockState());
