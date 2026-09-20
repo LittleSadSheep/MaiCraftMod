@@ -198,6 +198,8 @@ public final class SemanticAcquireCompanionTask
     private final List<Map<String, Object>> attempts = new ArrayList<>();
     private final List<Map<String, Object>> issues = new ArrayList<>();
     private final List<Map<String, Object>> recipeTrace = new ArrayList<>();
+    private final List<Need> processPlanningNeeds = new ArrayList<>();
+    private Map<String, Object> processPlanning = Map.of();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
     private Map<ResourceLocation, List<CraftingRecipe>> structuralCraftRecipes;
     private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> observedStockRecipes = new HashMap<>();
@@ -1603,6 +1605,8 @@ public final class SemanticAcquireCompanionTask
                     "none of the allowed source families could make the final inventory fact true",
                     FailureType.NO_MATERIAL);
         }
+        // 先有界记住普通路线尚不能提供的子材料，再照常试其他未产生副作用的配方；不能让第一条失败叶子劫持全局规划。
+        rememberProcessPlanningNeed(need);
         if (!needs.isEmpty() && needs.peek() == need) needs.pop();
         Need parent = needs.peek();
         if (parent == null) {
@@ -2464,10 +2468,43 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState failAcquisition(String code, String message, FailureType type) {
+        if (("allowed_sources_exhausted".equals(code) || "committed_prerequisite_unmet".equals(code)) && !outcomeUncertain) {
+            // 别的普通路线可能顺手补齐了旧叶子；交接时只保留仍缺少实物的候选，不请外部再做已经够用的材料。
+            processPlanningNeeds.removeIf(need -> missing(need) <= 0);
+            Need blocked = failureNeed != null ? failureNeed : processPlanningNeeds.isEmpty() ? needs.peek() : processPlanningNeeds.getFirst();
+            if (blocked != null && !blocked.decisionRequired && !blocked.stockOnlyTool
+                    && MaterialProcessPlanning.allowsPlanning(r.allowedSources)
+                    && MaterialProcessPlanning.allowsPlanning(blocked.allowedSources)) {
+                // 到这里有限普通来源已经耗尽；仅冻结知识状态和URI交给外部恢复，不默认造机，也不改最终库存目标。
+                failureNeed = blocked;
+                processPlanning = MaterialProcessPlanning.capture(player, r, count(r.itemIds), processPlanningFacts(blocked),
+                        processPlanningNeeds.stream().map(this::processPlanningFacts).toList(), effectsObserved(), code);
+                if ("allowed_sources_exhausted".equals(code)) code = MaterialProcessPlanning.FAILURE_CODE;
+                message += "; inspect the linked recipe knowledge and choose authorized semantic prerequisites, then reassess the unchanged inventory goal";
+            }
+        }
         failureCode = code;
         if (failureNeed == null) failureNeed = needs.peek();
         fail(message, type);
         return TaskState.FAILED;
+    }
+
+    private void rememberProcessPlanningNeed(Need need) {
+        if (need.decisionRequired || need.stockOnlyTool || !MaterialProcessPlanning.allowsPlanning(need.allowedSources)
+                || processPlanningNeeds.size() >= MaterialProcessPlanning.MAX_BLOCKED_NEEDS) return;
+        if (processPlanningNeeds.stream().noneMatch(old -> old.itemIds.equals(need.itemIds) && old.parentRecipeIds.equals(need.parentRecipeIds)))
+            processPlanningNeeds.add(need);
+    }
+
+    private MaterialProcessPlanning.NeedEvidence processPlanningFacts(Need need) {
+        return new MaterialProcessPlanning.NeedEvidence(need.itemIds, need.requiredFinalCount, count(need.itemIds), need.depth,
+                List.copyOf(need.lineageItems), List.copyOf(need.lineageRecipes), List.copyOf(need.parentRecipeIds),
+                List.copyOf(need.committedRecipeIds), need.effectsObserved);
+    }
+
+    private boolean effectsObserved() {
+        return (rootNeed != null && rootNeed.effectsObserved) || (failureNeed != null && failureNeed.effectsObserved)
+                || attempts.stream().anyMatch(attempt -> bool(attempt.get("effects_observed")));
     }
 
     private void addIssue(
@@ -2547,6 +2584,9 @@ public final class SemanticAcquireCompanionTask
     private List<Map<String, Object>> recoveryOptions() {
         // 根据未开放的来源和失败原因给出可选下一步，不在这里自动扩大采矿、交易或伤害许可。
         List<Map<String, Object>> options = new ArrayList<>();
+        if (!processPlanning.isEmpty()) options.add(Map.of("id", MaterialProcessPlanning.KIND,
+                "summary", "Read the bounded recipe knowledge links, inspect reusable equipment, and recover with authorized semantic prerequisites before re-evaluating this inventory goal.",
+                "knowledge_uris", processPlanning.get("knowledge_uris"), "risk", "knowledge_only_until_separately_authorized_actions"));
         Set<SemanticAcquireTaskRecord.Source> allowed = Set.copyOf(r.allowedSources);
         for (SemanticAcquireTaskRecord.Source source : List.of(
                 SemanticAcquireTaskRecord.Source.STORAGE,
@@ -2660,22 +2700,19 @@ public final class SemanticAcquireCompanionTask
         data.put("recipe_trace", List.copyOf(recipeTrace));
         data.put("issues", List.copyOf(issues));
         data.put("outcome_uncertain", outcomeUncertain);
+        if (!processPlanning.isEmpty()) data.put("planning_handoff", processPlanning);
         if (hasIssue("mining_loot_uncollected")) {
             data.put("collection_complete", false);
             data.put("requires_narration", true);
         }
-        boolean effectsObserved =
-                (rootNeed != null && rootNeed.effectsObserved)
-                        || (failureNeed != null && failureNeed.effectsObserved)
-                        || attempts.stream().anyMatch(
-                                attempt -> bool(attempt.get("effects_observed")));
+        boolean effectsObserved = effectsObserved();
         data.put("effects_observed", effectsObserved);
         data.put("partial_effects_observed", observed < r.count && effectsObserved);
         if (failureCode != null) {
             data.put("failure_code", failureCode);
             data.put("requires_decision", true);
             data.put("requires_narration",
-                    failureRequiresNarration(failureCode)
+                    !processPlanning.isEmpty() || failureRequiresNarration(failureCode)
                             || issues.stream().anyMatch(
                                     SemanticAcquireCompanionTask::issueRequiresNarration));
             Need blocked = failureNeed == null ? needs.peek() : failureNeed;
@@ -2766,6 +2803,9 @@ public final class SemanticAcquireCompanionTask
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("task", name());
         data.put("phase", activeChild == null ? "planning_acquisition" : "acquiring");
+        if (!processPlanning.isEmpty()) {
+            data.put("phase", MaterialProcessPlanning.KIND); data.put("planning_handoff", processPlanning);
+        }
         Need need = activeNeed == null ? needs.peek() : activeNeed;
         if (need != null) {
             data.put("required_final_count", need.requiredFinalCount);
