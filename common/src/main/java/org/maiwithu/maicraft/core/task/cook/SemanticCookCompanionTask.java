@@ -86,9 +86,6 @@ public final class SemanticCookCompanionTask
     private enum Purpose { ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION, PLACE_STATION,
         MOVE_STATION, OPEN_STATION, LOAD_INPUT, LOAD_FUEL, TAKE_OUTPUT,
         CLOSE_WAIT, CLEAN_INPUT, CLOSE, ABANDON_CLOSE }
-    private record Candidate(
-            ResourceLocation recipeId, AbstractCookingRecipe recipe, CookingDevice device,
-            Item input, int outputCount) {}
     private record IngredientGroup(List<Item> alternatives, int uses) {}
     private record CraftRoute(
             ResourceLocation recipeId,
@@ -98,14 +95,14 @@ public final class SemanticCookCompanionTask
     private record FuelChoice(
             Item item, int burnTicks, int count, long waste, long acquisitionCost) {}
     private record ResolvedCandidate(
-            Candidate candidate,
+            CookingRecipe candidate,
             FuelChoice fuel,
             long inputCost,
             long stationCost,
             long preparationCost) {}
 
     private Phase phase = Phase.RESOLVE;
-    private Candidate candidate;
+    private CookingRecipe candidate;
     private Item fuel;
     private int fuelBurnTicks;
     private int batchRaw;
@@ -253,7 +250,7 @@ public final class SemanticCookCompanionTask
         if (now >= nextCookCheckTick) return true;
         if (stationPos == null || !companion.level().isLoaded(stationPos)) return false;
         var state = companion.level().getBlockState(stationPos);
-        if (candidate == null || !state.is(candidate.device.block)) return true;
+        if (candidate == null || !state.is(candidate.device().block)) return true;
         // Once the close has had a couple of server ticks to settle, an extinguished loaded
         // furnace is useful early evidence: either the batch completed or it needs attention.
         return now > closedWaitStartedTick + 2L
@@ -265,7 +262,7 @@ public final class SemanticCookCompanionTask
 
     // 先找能产出目标的配方，再估原料、燃料和设备的准备成本，从认为可行的组合里选择一组。
     private TaskState resolve() {
-        List<Candidate> candidates = candidates();
+        List<CookingRecipe> candidates = candidates();
         if (candidates.isEmpty()) {
             return failOrClean("no_cooking_recipe",
                     "No smelting, blasting, smoking or campfire recipe produces " + r.itemId + ".",
@@ -273,7 +270,7 @@ public final class SemanticCookCompanionTask
         }
         // 能识别营火配方，但本版本不执行营火操作；明确要求营火时报告不支持，不改用炉子偷偷替代。
         if (r.preference == SemanticCookTaskRecord.Preference.CAMPFIRE) {
-            boolean available = candidates.stream().anyMatch(c -> c.device == CookingDevice.CAMPFIRE);
+            boolean available = candidates.stream().anyMatch(c -> c.device() == CookingDevice.CAMPFIRE);
             return failOrClean(
                     available ? "campfire_execution_not_supported" : "no_preferred_recipe",
                     available
@@ -282,8 +279,8 @@ public final class SemanticCookCompanionTask
                             : "No campfire recipe produces " + r.itemId + ".",
                     FailureType.UNKNOWN);
         }
-        candidates.removeIf(c -> c.device == CookingDevice.CAMPFIRE || !preferred(c.device)
-                || rejectedDevices.contains(c.device)
+        candidates.removeIf(c -> c.device() == CookingDevice.CAMPFIRE || !preferred(c.device())
+                || rejectedDevices.contains(c.device())
                 || rejectedInputCandidates.contains(candidateKey(c)));
         if (candidates.isEmpty()) {
             return failOrClean("no_preferred_recipe",
@@ -294,13 +291,13 @@ public final class SemanticCookCompanionTask
         nearbyBlockDistances = snapshotNearbyBlocks();
 
         List<ResolvedCandidate> plans = new ArrayList<>();
-        for (Candidate option : candidates) {
+        for (CookingRecipe option : candidates) {
             int raw = rawRemaining(option);
             long inputCost = acquisitionCost(
-                    option.input, raw, Set.of(), 0);
-            boolean ready = stationReady(option.device);
+                    option.input(), raw, Set.of(), 0);
+            boolean ready = stationReady(option.device());
             long stationCost = ready ? 0L : acquisitionCost(
-                    option.device.block.asItem(), 1, Set.of(), 0);
+                    option.device().block.asItem(), 1, Set.of(), 0);
             FuelChoice fuelChoice = chooseFuel(option);
             if (fuelChoice == null) continue;
             long preparationCost = addCost(
@@ -333,8 +330,8 @@ public final class SemanticCookCompanionTask
 
     // 从客户端已收到的配方表读加工结果，展开第一种原料的物品种类；读出异常的配方略过。
     // 这里保存 Item 而非完整 ItemStack，组件敏感的特殊配方需要另查是否能完整表达。
-    private List<Candidate> candidates() {
-        List<Candidate> result = new ArrayList<>();
+    private List<CookingRecipe> candidates() {
+        List<CookingRecipe> result = new ArrayList<>();
         var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
         for (RecipeHolder<?> holder : manager.getRecipes()) {
             try {
@@ -351,7 +348,7 @@ public final class SemanticCookCompanionTask
                 for (ItemStack stack : cooking.getIngredients().getFirst().getItems()) {
                     if (stack != null && !stack.isEmpty()) inputs.add(stack.getItem());
                 }
-                for (Item input : inputs) result.add(new Candidate(
+                for (Item input : inputs) result.add(new CookingRecipe(
                         holder.id(), cooking, device, input, Math.max(1, output.getCount())));
             } catch (RuntimeException brokenRecipe) {
                 Constants.LOG.debug(
@@ -392,7 +389,7 @@ public final class SemanticCookCompanionTask
 
     // 明确列出的燃料优先按许可范围选；没列时只考虑煤、木炭、木材、竹子等这里列出的普通燃料。
     // 主要比较获取成本和烧剩的时间；PRESERVE_RARE 改用固定燃料优先表，不是真正读取物品稀有度。
-    private FuelChoice chooseFuel(Candidate cooking) {
+    private FuelChoice chooseFuel(CookingRecipe cooking) {
         List<Item> choices = new ArrayList<>();
         if (!r.allowedFuelIds.isEmpty()) {
             r.allowedFuelIds.forEach(id -> choices.add(BuiltInRegistries.ITEM.get(id)));
@@ -401,7 +398,7 @@ public final class SemanticCookCompanionTask
                 if (safeDefaultFuel(item)) choices.add(item);
             }
         }
-        int raw = Math.min(rawRemaining(cooking), Math.max(1, 64 / cooking.outputCount));
+        int raw = Math.min(rawRemaining(cooking), Math.max(1, 64 / cooking.outputCount()));
         List<FuelChoice> fuels = choices.stream().distinct()
                 .filter(item -> !rejectedFuelItems.contains(item))
                 .map(item -> fuelChoice(cooking, item, raw))
@@ -444,10 +441,10 @@ public final class SemanticCookCompanionTask
 
     // 按“这一批所需烧制时间 ÷ 单份燃料时间”向上取整。
     // 时间取自选定原生设备，不能把普通熔炉的一份煤时长套在高炉或烟熏炉上。
-    private FuelChoice fuelChoice(Candidate cooking, Item item, int raw) {
-        int burn = cooking.device.burnDuration(new ItemStack(item));
+    private FuelChoice fuelChoice(CookingRecipe cooking, Item item, int raw) {
+        int burn = cooking.device().burnDuration(new ItemStack(item));
         if (burn <= 0) return null;
-        long neededTicks = (long) raw * cooking.recipe.getCookingTime();
+        long neededTicks = (long) raw * cooking.recipe().getCookingTime();
         int needed = ceilDiv(neededTicks, burn);
         long cost = acquisitionCost(item, needed, Set.of(), 0);
         long waste = (long) needed * burn - neededTicks;
@@ -660,7 +657,7 @@ public final class SemanticCookCompanionTask
                         FailureType.TARGET_LOST);
             }
             if (player.level().isLoaded(stationPos)
-                    && !player.level().getBlockState(stationPos).is(candidate.device.block)) {
+                    && !player.level().getBlockState(stationPos).is(candidate.device().block)) {
                 return closeWithoutClaimingContents("station_replaced_while_cooking",
                         "The exact claimed workstation disappeared while its batch was outstanding.",
                         FailureType.TARGET_LOST);
@@ -675,21 +672,21 @@ public final class SemanticCookCompanionTask
             return TaskState.RUNNING;
         }
         int raw = rawRemaining();
-        int maxByOutput = Math.max(1, 64 / candidate.outputCount);
+        int maxByOutput = Math.max(1, 64 / candidate.outputCount());
         int maxByFuel = Math.max(1,
-                (int) Math.min(64L, 64L * fuelBurnTicks / candidate.recipe.getCookingTime()));
+                (int) Math.min(64L, 64L * fuelBurnTicks / candidate.recipe().getCookingTime()));
         batchRaw = Math.min(raw, Math.min(maxByOutput, maxByFuel));
-        batchFuel = ceilDiv((long) batchRaw * candidate.recipe.getCookingTime(), fuelBurnTicks);
+        batchFuel = ceilDiv((long) batchRaw * candidate.recipe().getCookingTime(), fuelBurnTicks);
         // 原料和燃料是同种物品时，实际准备要求两份用途的数量相加。
         // 但前面的估价把同一库存分别算给了原料和燃料，可能选错燃料并误要求补料，见 A61。
-        if (candidate.input == fuel) {
+        if (candidate.input() == fuel) {
             int sharedNeed = batchRaw + batchFuel;
-            if (PlayerInv.buildableCount(player.getInventory(), candidate.input) < sharedNeed) {
-                return acquire(candidate.input, sharedNeed, Purpose.ACQUIRE_INPUT);
+            if (PlayerInv.buildableCount(player.getInventory(), candidate.input()) < sharedNeed) {
+                return acquire(candidate.input(), sharedNeed, Purpose.ACQUIRE_INPUT);
             }
         } else {
-            if (PlayerInv.buildableCount(player.getInventory(), candidate.input) < batchRaw) {
-                return acquire(candidate.input, batchRaw, Purpose.ACQUIRE_INPUT);
+            if (PlayerInv.buildableCount(player.getInventory(), candidate.input()) < batchRaw) {
+                return acquire(candidate.input(), batchRaw, Purpose.ACQUIRE_INPUT);
             }
             if (PlayerInv.buildableCount(player.getInventory(), fuel) < batchFuel) {
                 return acquire(fuel, batchFuel, Purpose.ACQUIRE_FUEL);
@@ -705,14 +702,14 @@ public final class SemanticCookCompanionTask
         // 先选最近的同类设备；只有没找到任何这种方块时才考虑放自己的设备。
         // 当前不先筛空闲状态，选到忙炉后也不试另一台空炉，见 A59。
         if (stationPos == null
-                || !player.level().getBlockState(stationPos).is(candidate.device.block)) {
-            stationPos = nearest(candidate.device.block, 32, 16);
+                || !player.level().getBlockState(stationPos).is(candidate.device().block)) {
+            stationPos = nearest(candidate.device().block, 32, 16);
         }
         if (stationPos == null) {
             if (PlayerInv.buildableCount(
-                    player.getInventory(), candidate.device.block.asItem()) < 1) {
+                    player.getInventory(), candidate.device().block.asItem()) < 1) {
                 return acquire(
-                        candidate.device.block.asItem(), 1, Purpose.ACQUIRE_STATION);
+                        candidate.device().block.asItem(), 1, Purpose.ACQUIRE_STATION);
             }
             BlockPos site = placementSite();
             if (site == null) {
@@ -722,8 +719,8 @@ public final class SemanticCookCompanionTask
             }
             stationPos = site;
             BuildTaskRecord.Target target = new BuildTaskRecord.Target(
-                    candidate.device.block, candidate.device.block.asItem(), site,
-                    BuiltInRegistries.BLOCK.getKey(candidate.device.block).toString(),
+                    candidate.device().block, candidate.device().block.asItem(), site,
+                    BuiltInRegistries.BLOCK.getKey(candidate.device().block).toString(),
                     null, null, null).asItemPlace();
             return start(new BuildTaskRecord(
                     childId("place"), childDeadline(3L * 60L * 20L),
@@ -733,7 +730,7 @@ public final class SemanticCookCompanionTask
             return start(new MoveToTaskRecord(
                     childId("move"), childDeadline(3L * 60L * 20L),
                     null, null, null,
-                    BuiltInRegistries.BLOCK.getKey(candidate.device.block).toString(), false),
+                    BuiltInRegistries.BLOCK.getKey(candidate.device().block).toString(), false),
                     Purpose.MOVE_STATION);
         }
         phase = Phase.OPEN;
@@ -764,7 +761,7 @@ public final class SemanticCookCompanionTask
         // 人工或其他工作正在使用界面时等待；只有从玩家背包返回世界后才开始本次开炉。
         if (player.containerMenu != player.inventoryMenu) return TaskState.RUNNING;
         if (stationPos == null || (player.level().isLoaded(stationPos)
-                && !player.level().getBlockState(stationPos).is(candidate.device.block))) {
+                && !player.level().getBlockState(stationPos).is(candidate.device().block))) {
             if (stationClaimed && ownedInputLoaded > 0) {
                 return closeWithoutClaimingContents("station_replaced_while_cooking",
                         "The exact claimed workstation was removed or replaced before it could be reopened.",
@@ -795,7 +792,7 @@ public final class SemanticCookCompanionTask
         ownedMenu = null;
         return start(new InteractAtTaskRecord(
                 childId("open"), childDeadline(30L * 20L),
-                MouseButton.RIGHT, stationPos, 0, null, null, candidate.device.block), Purpose.OPEN_STATION);
+                MouseButton.RIGHT, stationPos, 0, null, null, candidate.device().block), Purpose.OPEN_STATION);
     }
 
     // 等炉类菜单出现、显示且类型与配方对应；未打开时有限重试，出现错误菜单时只安排关闭并报错。
@@ -877,7 +874,7 @@ public final class SemanticCookCompanionTask
     }
 
     private TaskState loadInput() {
-        return transferTo(candidate.input, batchRaw, 0, Purpose.LOAD_INPUT);
+        return transferTo(candidate.input(), batchRaw, 0, Purpose.LOAD_INPUT);
     }
 
     // 先考虑剩余燃烧时间和燃料格里的存量，再补足本批需要的燃料。
@@ -888,9 +885,9 @@ public final class SemanticCookCompanionTask
         int availableBurn = Math.max(0, data(menu, 0));
         ItemStack fuelSlot = menu.getSlot(1).getItem();
         if (!fuelSlot.isEmpty()) {
-            availableBurn += fuelSlot.getCount() * candidate.device.burnDuration(fuelSlot);
+            availableBurn += fuelSlot.getCount() * candidate.device().burnDuration(fuelSlot);
         }
-        int neededTicks = batchRaw * candidate.recipe.getCookingTime();
+        int neededTicks = batchRaw * candidate.recipe().getCookingTime();
         int toLoad = ceilDiv(
                 Math.max(0L, (long) neededTicks - availableBurn), fuelBurnTicks);
         if (toLoad <= 0) {
@@ -913,7 +910,7 @@ public final class SemanticCookCompanionTask
                     FailureType.UNKNOWN);
         }
         ItemStack input = menu.getSlot(0).getItem();
-        if (!input.isEmpty() && !input.is(candidate.input)) {
+        if (!input.isEmpty() && !input.is(candidate.input())) {
             return closeWithoutClaimingContents("cooking_input_diverged",
                     "The synchronized workstation input changed after MaiCraft loaded the batch.",
                     FailureType.UNKNOWN);
@@ -937,7 +934,7 @@ public final class SemanticCookCompanionTask
             phase = Phase.CLOSE_WAIT;
             return TaskState.RUNNING;
         }
-        long quietLimit = Math.max(200L, candidate.recipe.getCookingTime() + 100L);
+        long quietLimit = Math.max(200L, candidate.recipe().getCookingTime() + 100L);
         if (player.level().getGameTime() - lastCookEvidenceTick <= quietLimit) {
             return TaskState.RUNNING;
         }
@@ -963,7 +960,7 @@ public final class SemanticCookCompanionTask
     // 用菜单里的总耗时、当前进度和剩余原料数估计整批完成时刻，并给后续检查留一点时间。
     private void scheduleClosedCheck(AbstractFurnaceMenu menu) {
         int total = Math.max(1, data(menu, 3) > 0
-                ? data(menu, 3) : candidate.recipe.getCookingTime());
+                ? data(menu, 3) : candidate.recipe().getCookingTime());
         int progress = Math.max(0, Math.min(total - 1, data(menu, 2)));
         int remainingInputs = Math.max(1, menu.getSlot(0).getItem().getCount());
         long remaining = (long) total - progress
@@ -987,7 +984,7 @@ public final class SemanticCookCompanionTask
                     FailureType.TARGET_LOST);
         }
         if (player.level().isLoaded(stationPos)
-                && !player.level().getBlockState(stationPos).is(candidate.device.block)) {
+                && !player.level().getBlockState(stationPos).is(candidate.device().block)) {
             return closeWithoutClaimingContents("station_replaced_while_cooking",
                     "The claimed workstation was removed or replaced while its batch was cooking.",
                     FailureType.TARGET_LOST);
@@ -1017,7 +1014,7 @@ public final class SemanticCookCompanionTask
         if (menu == null || !menuMatches()) return menuLost();
         ItemStack input = menu.getSlot(0).getItem();
         ItemStack result = menu.getSlot(2).getItem();
-        if (!input.isEmpty() && !input.is(candidate.input)) {
+        if (!input.isEmpty() && !input.is(candidate.input())) {
             return closeWithoutClaimingContents("workstation_input_interference",
                     "The claimed workstation now contains another input; MaiCraft left it untouched.",
                     FailureType.UNKNOWN);
@@ -1034,7 +1031,7 @@ public final class SemanticCookCompanionTask
                     FailureType.UNKNOWN);
         }
         int consumed = ownedInputLoaded - currentInput;
-        long expectedProduced = (long) consumed * candidate.outputCount;
+        long expectedProduced = (long) consumed * candidate.outputCount();
         long observedOwned = (long) ownedOutputTaken + result.getCount();
         if (observedOwned != expectedProduced) {
             String relation = observedOwned < expectedProduced
@@ -1165,7 +1162,7 @@ public final class SemanticCookCompanionTask
         }
         if (!cleanupInputExpected.isEmpty()) {
             cleanupInventoryBefore = PlayerInv.buildableCount(
-                    player.getInventory(), candidate.input);
+                    player.getInventory(), candidate.input());
             cleanupTransferCount = cleanupInputExpected.getCount();
             return startTransfer(List.of(
                     new ContainerTransferTaskRecord.Move(
@@ -1189,7 +1186,7 @@ public final class SemanticCookCompanionTask
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null || !menuMatches()) return menuLost();
         int inventoryGain = PlayerInv.buildableCount(
-                player.getInventory(), candidate.input) - cleanupInventoryBefore;
+                player.getInventory(), candidate.input()) - cleanupInventoryBefore;
         if (cleanupTransferCount <= 0 || inventoryGain != cleanupTransferCount
                 || !menu.getSlot(0).getItem().isEmpty()) {
             outcomeUncertain = true;
@@ -1300,7 +1297,7 @@ public final class SemanticCookCompanionTask
                 stationPlaced = true;
                 if (stationPos == null
                         || !player.level().getBlockState(stationPos)
-                                .is(candidate.device.block)) {
+                                .is(candidate.device().block)) {
                     return failOrClean("station_placement_unconfirmed",
                             "The first-person build task did not leave the required workstation.",
                             FailureType.UNKNOWN);
@@ -1312,13 +1309,13 @@ public final class SemanticCookCompanionTask
                 if (openMode == OpenMode.RESUME_BATCH) {
                     if (stationPos == null || !player.level().isLoaded(stationPos)
                             || !player.level().getBlockState(stationPos)
-                                    .is(candidate.device.block)) {
+                                    .is(candidate.device().block)) {
                         return closeWithoutClaimingContents("station_target_lost",
                                 "The exact claimed workstation was not present after returning to it.",
                                 FailureType.TARGET_LOST);
                     }
                 } else {
-                    stationPos = nearest(candidate.device.block, 8, 8);
+                    stationPos = nearest(candidate.device().block, 8, 8);
                 }
                 if (stationPos == null) {
                     return failOrClean("station_target_lost",
@@ -1439,7 +1436,7 @@ public final class SemanticCookCompanionTask
                 || "uncertain".equals(String.valueOf(result.data().get("status")));
     }
 
-    private static String candidateKey(Candidate candidate) {
+    private static String candidateKey(CookingRecipe candidate) {
         return candidate.recipeId() + "|" + candidate.device().name()
                 + "|" + BuiltInRegistries.ITEM.getKey(candidate.input());
     }
@@ -1553,7 +1550,7 @@ public final class SemanticCookCompanionTask
 
     // 类型对应配方，对象对应本次打开；编号可能复用，不能单凭编号或类型继续转移物品。
     private boolean menuMatches() {
-        return ownedMenu != null && player.containerMenu == ownedMenu && candidate.device.matches(ownedMenu);
+        return ownedMenu != null && player.containerMenu == ownedMenu && candidate.device().matches(ownedMenu);
     }
 
     private boolean observingOwnClose() {
@@ -1667,9 +1664,9 @@ public final class SemanticCookCompanionTask
     }
 
     // 用目标缺额除以每份原料产量，向上取整得到至少需要加工多少份；一份原料可能产生多个成品。
-    private int rawRemaining(Candidate cooking) {
+    private int rawRemaining(CookingRecipe cooking) {
         int missing = Math.max(0, r.count - outputCount());
-        return Math.max(1, ceilDiv(missing, cooking.outputCount));
+        return Math.max(1, ceilDiv(missing, cooking.outputCount()));
     }
 
     private int outputCount() {
@@ -1782,10 +1779,10 @@ public final class SemanticCookCompanionTask
                 List.of("minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker"));
         data.put("campfire_execution_supported", false);
         if (candidate != null) {
-            data.put("recipe_id", candidate.recipeId.toString());
-            data.put("device", BuiltInRegistries.BLOCK.getKey(candidate.device.block).toString());
-            data.put("input_item_id", BuiltInRegistries.ITEM.getKey(candidate.input).toString());
-            data.put("recipe_output_count", candidate.outputCount);
+            data.put("recipe_id", candidate.recipeId().toString());
+            data.put("device", BuiltInRegistries.BLOCK.getKey(candidate.device().block).toString());
+            data.put("input_item_id", BuiltInRegistries.ITEM.getKey(candidate.input()).toString());
+            data.put("recipe_output_count", candidate.outputCount());
         }
         if (fuel != null) {
             data.put("fuel_item_id", BuiltInRegistries.ITEM.getKey(fuel).toString());

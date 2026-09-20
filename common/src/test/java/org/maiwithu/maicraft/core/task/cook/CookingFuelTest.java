@@ -2,7 +2,6 @@
 package org.maiwithu.maicraft.core.task.cook;
 
 import java.util.List;
-import java.util.Arrays;
 import net.minecraft.SharedConstants;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
@@ -41,21 +40,13 @@ public final class CookingFuelTest {
 
     private static void verify(SemanticCookCompanionTask task, String deviceName,
                                AbstractCookingRecipe recipe, int expectedDuration) throws Exception {
-        var candidateType = nested("Candidate");
-        var constructor = candidateType.getDeclaredConstructors()[0];
-        constructor.setAccessible(true);
-        Object candidate = constructor.newInstance(id("test_recipe"), recipe,
-                CookingDevice.valueOf(deviceName), recipe.getIngredients().getFirst().getItems()[0].getItem(), 1);
-        var choice = task.getClass().getDeclaredMethod("fuelChoice", candidateType, Item.class, int.class);
+        var candidate = new CookingRecipe(id("test_recipe"), recipe, CookingDevice.valueOf(deviceName),
+                recipe.getIngredients().getFirst().getItems()[0].getItem(), 1);
+        var choice = task.getClass().getDeclaredMethod("fuelChoice", CookingRecipe.class, Item.class, int.class);
         choice.setAccessible(true);
         Object selected = choice.invoke(task, candidate, Items.COAL, 16);
         check((int) component(selected, "burnTicks") == expectedDuration, deviceName + " 没有使用该炉子的燃烧时长");
         check((int) component(selected, "count") == 2, deviceName + " 没有为十六份原料准备两块煤");
-    }
-
-    private static Class<?> nested(String name) {
-        return Arrays.stream(SemanticCookCompanionTask.class.getDeclaredClasses())
-                .filter(type -> type.getSimpleName().equals(name)).findFirst().orElseThrow();
     }
 
     private static Object component(Object target, String name) throws Exception {
