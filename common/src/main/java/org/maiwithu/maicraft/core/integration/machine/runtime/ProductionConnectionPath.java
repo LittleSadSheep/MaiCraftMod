@@ -8,6 +8,7 @@ import java.util.function.Predicate;
 import java.util.function.ToDoubleFunction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import java.util.HashMap;
 
 /** Partition the authored route without shortcuts; a shared edge retains AE2 boundary-node evidence. */
 final class ProductionConnectionPath {
@@ -24,7 +25,7 @@ final class ProductionConnectionPath {
 
     /** Keep room for a nearby standing cell while checking every target's own native read radius. */
     static List<Segment> split(List<BlockPos> path, String medium, ToDoubleFunction<BlockPos> radius) {
-        var observedRadii = new java.util.HashMap<BlockPos, Double>();
+        var observedRadii = new HashMap<BlockPos, Double>();
         return splitServiceable(path, medium, points -> {
             try {
                 return ProductionObservationRange.goalRadius(points,

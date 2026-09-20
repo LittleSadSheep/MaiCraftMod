@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
+import java.util.ArrayList;
 
 /** Immutable compiler hints checked against the resolved source budgets and their immediate recipe consumers. */
 final class ProductionPlanHints {
@@ -24,7 +25,7 @@ final class ProductionPlanHints {
         Map<Key, Long> budgets = new LinkedHashMap<>();
         for (Link link : manifest.links()) {
             String source = ports.get(link.from()).node();
-            outgoing.computeIfAbsent(source, ignored -> new java.util.ArrayList<>()).add(link);
+            outgoing.computeIfAbsent(source, ignored -> new ArrayList<>()).add(link);
             if (!nodes.get(source).kind().equals("source")) continue;
             budgets.merge(new Key(source, link.resource()), link.amount(), link.resource().medium().equals("kinetic") ? Math::max : Math::addExact);
         }

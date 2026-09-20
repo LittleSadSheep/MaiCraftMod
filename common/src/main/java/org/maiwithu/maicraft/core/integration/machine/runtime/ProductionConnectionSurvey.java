@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionManif
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.network.MachineConnectionSystems;
+import java.util.function.ToDoubleFunction;
 
 /** 沿完整声明路径分段观察并保持单个请求在途；发现真实输送设备后才向服务端申请原生连接检查。 */
 public final class ProductionConnectionSurvey {
@@ -32,7 +33,7 @@ public final class ProductionConnectionSurvey {
     private final LongSupplier clock;
     private final Function<BlockPos, String> nativeSystem;
     private final Supplier<Vec3> bodyPosition;
-    private final java.util.function.ToDoubleFunction<BlockPos> observationRadius;
+    private final ToDoubleFunction<BlockPos> observationRadius;
     private Link active;
     private List<BlockPos> path = List.of();
     private List<ProductionConnectionPath.Segment> segments = List.of();
@@ -63,7 +64,7 @@ public final class ProductionConnectionSurvey {
 
     ProductionConnectionSurvey(ProductionRunPlan plan, ProductionWork work, Function<Resource, ProductionEvidence.Binding> bindings,
                                Supplier<String> dimension, LongSupplier clock, Function<BlockPos, String> nativeSystem,
-                               Supplier<Vec3> bodyPosition, java.util.function.ToDoubleFunction<BlockPos> observationRadius) {
+                               Supplier<Vec3> bodyPosition, ToDoubleFunction<BlockPos> observationRadius) {
         this.plan = Objects.requireNonNull(plan); this.work = Objects.requireNonNull(work); this.bindings = Objects.requireNonNull(bindings);
         this.dimension = Objects.requireNonNull(dimension); this.clock = Objects.requireNonNull(clock); this.nativeSystem = Objects.requireNonNull(nativeSystem);
         this.bodyPosition = Objects.requireNonNull(bodyPosition);

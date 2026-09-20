@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.Locale;
 
 /** Measures a finite run of native production events; an inventory increase alone is not production. */
 public final class ProductionEvidenceWindow {
@@ -100,7 +101,7 @@ public final class ProductionEvidenceWindow {
     public Map<String, Object> report(long serverTick) {
         Map<String, Object> result = new LinkedHashMap<>();
         Status status = status(serverTick);
-        result.put("status", status.name().toLowerCase(java.util.Locale.ROOT));
+        result.put("status", status.name().toLowerCase(Locale.ROOT));
         result.put("machine_production_verified", hasVerifiedRun());
         if (verifiedRun != null) result.put("verified_run", verifiedRun);
         result.put("evidence_source", "native_recipe_output_events");

@@ -12,6 +12,8 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionStageReadiness;
+import com.google.gson.JsonParser;
+import java.util.Objects;
 
 /** Frozen authored production intent anchored to the exact reviewed build, never to the player's later position. */
 public final class ProductionRunPlan {
@@ -26,7 +28,7 @@ public final class ProductionRunPlan {
     private volatile Bound bound;
 
     public ProductionRunPlan(BlockPos anchor, String dimension, JsonObject manifest) {
-        this.anchor = anchor.immutable(); this.dimension = java.util.Objects.requireNonNull(dimension);
+        this.anchor = anchor.immutable(); this.dimension = Objects.requireNonNull(dimension);
         this.json = manifest.toString(); this.manifest = ProductionManifest.parse(manifest);
         var nodes = new LinkedHashMap<String, Node>(); this.manifest.nodes().forEach(n -> nodes.put(n.id(), n));
         var ports = new LinkedHashMap<String, Port>(); this.manifest.ports().forEach(p -> ports.put(p.id(), p));
@@ -56,8 +58,8 @@ public final class ProductionRunPlan {
 
     public boolean bound() { return bound != null; }
     public ProductionManifest manifest() { Bound state = bound; return state == null ? manifest : state.manifest(); }
-    public JsonObject json() { Bound state = bound; return com.google.gson.JsonParser.parseString(state == null ? json : state.json()).getAsJsonObject(); }
-    public JsonObject authoredJson() { return com.google.gson.JsonParser.parseString(json).getAsJsonObject(); }
+    public JsonObject json() { Bound state = bound; return JsonParser.parseString(state == null ? json : state.json()).getAsJsonObject(); }
+    public JsonObject authoredJson() { return JsonParser.parseString(json).getAsJsonObject(); }
     public Resource resolvedResource(Resource selector) { Bound state = bound; return state == null ? selector : state.bindings().resolve(selector); }
     public String registryId(Resource selector) { return bindings().registryId(selector); }
     /** Null is reserved for the non-inventory kinetic RPM unit. */
@@ -76,8 +78,8 @@ public final class ProductionRunPlan {
     }
     public String dimension() { return dimension; }
     public BlockPos anchor() { return anchor; }
-    public Node node(String id) { Bound state = bound; return java.util.Objects.requireNonNull((state == null ? nodes : state.nodes()).get(id), "Unknown production node " + id); }
-    public Port port(String id) { return java.util.Objects.requireNonNull(ports.get(id), "Unknown production port " + id); }
+    public Node node(String id) { Bound state = bound; return Objects.requireNonNull((state == null ? nodes : state.nodes()).get(id), "Unknown production node " + id); }
+    public Port port(String id) { return Objects.requireNonNull(ports.get(id), "Unknown production port " + id); }
     public BlockPos at(Point offset) { return new BlockPos(Math.addExact(anchor.getX(), offset.x()),
             Math.addExact(anchor.getY(), offset.y()), Math.addExact(anchor.getZ(), offset.z())); }
     public BlockPos at(Node node) { return at(node.offset()); }

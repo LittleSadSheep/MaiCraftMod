@@ -7,6 +7,7 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.Vec3;
 
 /** A depot or thin pipe need not occupy the block center; aim at actual native outline geometry. */
 public final class ProductionInteractionSight {
@@ -16,8 +17,8 @@ public final class ProductionInteractionSight {
         return aimFrom(level, player, position, player.getEyePosition()) != null;
     }
 
-    public static net.minecraft.world.phys.Vec3 aimFrom(Level level, Player player, BlockPos position,
-                                                      net.minecraft.world.phys.Vec3 eyes) {
+    public static Vec3 aimFrom(Level level, Player player, BlockPos position,
+                                                      Vec3 eyes) {
         if (!level.isLoaded(position)) return null;
         BlockPos eyeBlock = BlockPos.containing(eyes);
         int lowX = Math.min(eyeBlock.getX() >> 4, position.getX() >> 4);

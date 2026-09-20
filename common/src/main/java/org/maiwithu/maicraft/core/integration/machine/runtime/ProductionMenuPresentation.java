@@ -11,13 +11,15 @@ import org.maiwithu.maicraft.core.integration.machine.MachineSurvey;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.core.Direction;
+import net.minecraft.world.Container;
 
 /** Keep the real container visible throughout a native transfer, then close only this task's menu. */
 final class ProductionMenuPresentation {
     private final LocalPlayer player;
     private final ProductionWork work;
     private BlockPos target;
-    private net.minecraft.core.Direction face;
+    private Direction face;
     private AbstractContainerMenu menu;
     private Task opening, closing;
     private long visibleSince, changedAt;
@@ -27,7 +29,7 @@ final class ProductionMenuPresentation {
     boolean open(BlockPos position, boolean required) {
         return open(position,required,null);
     }
-    boolean open(BlockPos position, boolean required, net.minecraft.core.Direction requestedFace) {
+    boolean open(BlockPos position, boolean required, Direction requestedFace) {
         if (target != null && (!target.equals(position) || face != requestedFace)) {
             if (!close()) return false;
         }
@@ -38,7 +40,7 @@ final class ProductionMenuPresentation {
         if (opening == null) {
             var state = player.level().getBlockState(position);
             boolean hasMenu = state.getMenuProvider(player.level(), position) != null
-                    || player.level().getBlockEntity(position) instanceof net.minecraft.world.Container;
+                    || player.level().getBlockEntity(position) instanceof Container;
             if (!required && !hasMenu) return true; // World-facing ports such as a depot have no container screen.
             if (player.containerMenu != player.inventoryMenu || ClientRuntime.requireContext(player).minecraft().screen != null)
                 throw new IllegalStateException("production_menu_busy: preserve the existing screen");

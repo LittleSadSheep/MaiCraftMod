@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
+import java.util.Objects;
+import java.util.UUID;
 
 /** Bounded real-player deposits into authored sources; machines transport all intermediate resources. */
 public final class ProductionInputSupply {
@@ -46,10 +48,10 @@ public final class ProductionInputSupply {
 
     public ProductionInputSupply(LocalPlayer player, TaskRecord owner, ProductionRunPlan plan,
                                  ProductionWork work, List<String> protectedLabels) {
-        this.player = java.util.Objects.requireNonNull(player);
-        this.owner = java.util.Objects.requireNonNull(owner);
-        this.plan = java.util.Objects.requireNonNull(plan);
-        this.work = java.util.Objects.requireNonNull(work);
+        this.player = Objects.requireNonNull(player);
+        this.owner = Objects.requireNonNull(owner);
+        this.plan = Objects.requireNonNull(plan);
+        this.work = Objects.requireNonNull(work);
         this.protectedLabels = protectedLabels == null ? List.of() : List.copyOf(protectedLabels);
         ProductionSupplyBudget.demands(plan.manifest()).forEach((key, amount) -> {
             Port port = plan.manifest().links().stream().filter(link -> {
@@ -195,7 +197,7 @@ public final class ProductionInputSupply {
                     if (moved > 0) {
                         if (!receipt.has("maicraft_request_id")) throw new IllegalStateException("production_input_receipt_id_missing");
                         String requestId = receipt.get("maicraft_request_id").getAsString();
-                        java.util.UUID.fromString(requestId);
+                        UUID.fromString(requestId);
                         work.confirmedSupply(supply.key().source(), selector, requestId, receipt);
                     }
                     status.put(supply.key(), moved == 0 ? "no_change_refill_later" : "confirmed_deposit");

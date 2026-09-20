@@ -10,6 +10,14 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionNativ
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidence.ObservationFreshness;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidence.ObservationKind;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidence.FreshnessStatus;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import org.maiwithu.maicraft.client.server.ServerAssistClient;
+import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence;
 
 /** Resolves native facts incrementally, using the exact anchor and operation receipts of this task. */
 final class ProductionPreparation {
@@ -20,9 +28,9 @@ final class ProductionPreparation {
     private final ProductionNativeEvidence evidence;
     private ProductionReadSchedule reads;
     private final ProductionConnectionSurvey connectionSurvey;
-    private final Map<String, JsonObject> connections = new java.util.LinkedHashMap<>();
-    private final java.util.List<Link> remainingLinks = new java.util.ArrayList<>();
-    private final java.util.Set<String> refreshedLinks = new java.util.HashSet<>();
+    private final Map<String, JsonObject> connections = new LinkedHashMap<>();
+    private final List<Link> remainingLinks = new ArrayList<>();
+    private final Set<String> refreshedLinks = new HashSet<>();
     private Link activeLink;
     private int linkIndex;
     private boolean connectionsStarted;
@@ -39,9 +47,9 @@ final class ProductionPreparation {
         remainingLinks.addAll(plan.manifest().links());
         connectionSurvey = new ProductionConnectionSurvey(player, plan, work, resource -> {
             if (!plan.bound()) return evidence.resolve(resource);
-            return new org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Binding(
-                    new org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Check(
-                            org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Status.VERIFIED,
+            return new ProductionEvidence.Binding(
+                    new ProductionEvidence.Check(
+                            ProductionEvidence.Status.VERIFIED,
                             "frozen_native_identity", "The compiled resource identity remains pinned for this run"),
                     plan.resolvedResource(resource), plan.resourceIdentity(resource));
         });
@@ -65,10 +73,10 @@ final class ProductionPreparation {
         compilation = null; connections.clear(); updateOperations();
     }
     private void updateOperations() {
-        var supported = new java.util.LinkedHashSet<String>();
+        var supported = new LinkedHashSet<String>();
         for (var c : plan.manifest().configurations())
-            if (org.maiwithu.maicraft.client.server.ServerAssistClient.supported(c.operation())
-                    || org.maiwithu.maicraft.client.server.ServerAssistClient.renegotiating(c.operation())) supported.add(c.operation());
+            if (ServerAssistClient.supported(c.operation())
+                    || ServerAssistClient.renegotiating(c.operation())) supported.add(c.operation());
         evidence.supportedOperations(supported);
     }
 
@@ -110,7 +118,7 @@ final class ProductionPreparation {
     }
 
     private boolean bindingsReady() {
-        var verified = org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Status.VERIFIED;
+        var verified = ProductionEvidence.Status.VERIFIED;
         return plan.manifest().nodes().stream().filter(node -> node.kind().equals("process")).allMatch(node -> evidence.bindRecipe(node).check().status() == verified)
                 && plan.manifest().links().stream().allMatch(link -> evidence.resolve(link.resource()).check().status() == verified)
                 && evidence.resolve(plan.manifest().target().resource()).check().status() == verified;
@@ -130,7 +138,7 @@ final class ProductionPreparation {
         if (scheduled) connectionsStarted = false;
         return scheduled;
     }
-    private void noteProgress(java.util.List<ObservationFreshness> before) {
+    private void noteProgress(List<ObservationFreshness> before) {
         int accepted = 0;
         for (var fact : evidence.freshness(player.level().getGameTime())) {
             if (fact.status() != FreshnessStatus.FRESH || fact.tick() == null) continue;
@@ -140,17 +148,17 @@ final class ProductionPreparation {
         acceptedNewFacts += accepted;
         if (accepted > 0) work.extendDeadlineTo(Math.min(stageStarted + MAX_STAGE_TICKS, player.level().getGameTime() + 1_200));
     }
-    org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Check finalVerification() {
+    ProductionEvidence.Check finalVerification() {
         evidence.advance(player.level().getGameTime()); return evidence.finalVerification();
     }
     ProductionDesignCompiler.Compilation compilation() { return compilation; }
     Map<String, Object> report() {
-        var result = new java.util.LinkedHashMap<String, Object>(progress());
+        var result = new LinkedHashMap<String, Object>(progress());
         if (compilation != null) result.put("plan", compilation.report());
         return Map.copyOf(result);
     }
     Map<String, Object> progress() {
-        var result = new java.util.LinkedHashMap<String, Object>(reads.progress());
+        var result = new LinkedHashMap<String, Object>(reads.progress());
         result.put("status", compilation == null ? "observing" : "compiled"); result.put("connections", connections.size());
         result.put("connection_requests_completed", linkIndex); result.put("connection_requests_total", plan.manifest().links().size() + refreshedLinks.size());
         result.put("connection_refreshes_used", refreshedLinks.size()); result.put("accepted_new_facts", acceptedNewFacts);

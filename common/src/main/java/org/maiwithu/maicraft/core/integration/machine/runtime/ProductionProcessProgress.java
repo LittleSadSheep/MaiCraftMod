@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 /** Counts real completed recipe-output events for each declared process, including upstream intermediates. */
 final class ProductionProcessProgress {
@@ -18,7 +19,7 @@ final class ProductionProcessProgress {
     ProductionProcessProgress(ProductionRunPlan plan) {
         plan.manifest().nodes().stream().filter(node -> node.kind().equals("process")).forEach(node -> {
             Process key = new Process(ProductionFlowPaths.key(plan.at(node)), node.recipeId());
-            processes.computeIfAbsent(key, ignored -> new java.util.ArrayList<>()).add(node.id());
+            processes.computeIfAbsent(key, ignored -> new ArrayList<>()).add(node.id());
             counts.put(node.id(), 0L);
         });
     }

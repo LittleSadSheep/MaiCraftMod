@@ -21,6 +21,9 @@ import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.function.BooleanSupplier;
+import org.maiwithu.maicraft.server.machine.ServerAccess;
+import org.maiwithu.maicraft.server.machine.watch.WatchGoal;
 
 /** Authorize known endpoints once, then return the body; server-native observations own future completion. */
 final class MachineWatchTask extends AbstractCompanionTask<MachineWatchTaskRecord> {
@@ -88,22 +91,22 @@ final class MachineWatchTask extends AbstractCompanionTask<MachineWatchTaskRecor
         JsonObject target = new JsonObject(); target.add("identity",binding.identity()); target.addProperty("resource_id",binding.resource().id());
         target.addProperty("minimum_output",r.plan.manifest().observation().minimumOutput()); specification.add("target",target);
         specification.addProperty("idle_ticks",r.idleTicks); specification.addProperty("max_duration_ticks",r.durationTicks);
-        org.maiwithu.maicraft.server.machine.watch.WatchGoal.parse(specification);
+        WatchGoal.parse(specification);
         return specification;
     }
     private static List<List<BlockPos>> groups(JsonObject goal) {
         var positions = new LinkedHashSet<BlockPos>();
         for (var raw : goal.getAsJsonArray("processes")) {
-            var process = raw.getAsJsonObject(); positions.add(org.maiwithu.maicraft.server.machine.ServerAccess.position(process.getAsJsonObject("position")));
-            positions.add(org.maiwithu.maicraft.server.machine.ServerAccess.position(process.getAsJsonObject("output_position")));
+            var process = raw.getAsJsonObject(); positions.add(ServerAccess.position(process.getAsJsonObject("position")));
+            positions.add(ServerAccess.position(process.getAsJsonObject("output_position")));
         }
-        positions.add(org.maiwithu.maicraft.server.machine.ServerAccess.position(goal.getAsJsonObject("sink").getAsJsonObject("position")));
+        positions.add(ServerAccess.position(goal.getAsJsonObject("sink").getAsJsonObject("position")));
         return ProductionOutputMonitor.group(positions);
     }
     private boolean near(List<BlockPos> positions) {
         if (requests.pending()) return true;
         if (!navigating.equals(positions)) { stopNav(); navigating = List.copyOf(positions); }
-        java.util.function.BooleanSupplier ready = () -> positions.stream().allMatch(player.level()::isLoaded)
+        BooleanSupplier ready = () -> positions.stream().allMatch(player.level()::isLoaded)
                 && ProductionObservationRange.ready(player.position(),positions,p -> ProductionObservationRange.radius(player.level(),p));
         if (ready.getAsBoolean()) { stopNav(); return true; }
         if (nav == null) nav = PlayerNav.toGoal(player,() -> NavGoal.near(positions.getFirst(),ProductionObservationRange.goalRadius(positions,p -> ProductionObservationRange.radius(player.level(),p))),

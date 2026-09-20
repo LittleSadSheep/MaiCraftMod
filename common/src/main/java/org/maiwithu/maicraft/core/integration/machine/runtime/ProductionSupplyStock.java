@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeSet;
 import net.minecraft.core.BlockPos;
+import java.util.Set;
 
 /** Allocates one authored sided view; other sides may expose the same physical slots with different indices. */
 final class ProductionSupplyStock {
@@ -65,7 +66,7 @@ final class ProductionSupplyStock {
         long total = 0;
         for (long amount : slots.values()) total = Math.addExact(total, amount);
         String network = aeMembership(selected, side);
-        if (network != null) memberships = new TreeSet<>(java.util.Set.of(network));
+        if (network != null) memberships = new TreeSet<>(Set.of(network));
         if (memberships.size() > 1) throw new IllegalStateException("production_source_ambiguous_membership");
         String owner = memberships.isEmpty() ? "storage:" + storages : "membership:" + memberships.first();
         if (storages.isEmpty() && memberships.isEmpty()) owner = "empty_position:" + position.toShortString();

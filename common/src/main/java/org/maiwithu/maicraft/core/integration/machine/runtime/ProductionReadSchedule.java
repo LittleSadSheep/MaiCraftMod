@@ -14,6 +14,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidence;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidence.ObservationFreshness;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
 
 /** Finite read jobs grouped by position; a chosen request remains frozen until its original receipt settles. */
 final class ProductionReadSchedule {
@@ -50,14 +53,14 @@ final class ProductionReadSchedule {
     }
     private static final class Snapshot {
         final List<String> nodes = new ArrayList<>(), ports = new ArrayList<>();
-        final java.util.Set<String> faces = new LinkedHashSet<>();
+        final Set<String> faces = new LinkedHashSet<>();
     }
     private final List<Read> remaining;
     private int total;
     private final List<Read> all;
     private final ToDoubleFunction<BlockPos> nativeRadius;
     private final Map<Read, List<Read>> batches = new LinkedHashMap<>();
-    private final java.util.Set<String> refreshedFacts = new java.util.HashSet<>();
+    private final Set<String> refreshedFacts = new HashSet<>();
     private Read active;
     private BlockPos lastPosition;
     private boolean pending;
@@ -69,7 +72,7 @@ final class ProductionReadSchedule {
         this(plan, ignored -> ProductionObservationRange.CREATE_RADIUS);
     }
     ProductionReadSchedule(ProductionRunPlan plan, ToDoubleFunction<BlockPos> nativeRadius) {
-        this.nativeRadius = java.util.Objects.requireNonNull(nativeRadius);
+        this.nativeRadius = Objects.requireNonNull(nativeRadius);
         var sites = new LinkedHashMap<BlockPos, Snapshot>();
         for (var node : plan.manifest().nodes()) sites.computeIfAbsent(plan.at(node), ignored -> new Snapshot()).nodes.add(node.id());
         for (var port : plan.manifest().ports()) {

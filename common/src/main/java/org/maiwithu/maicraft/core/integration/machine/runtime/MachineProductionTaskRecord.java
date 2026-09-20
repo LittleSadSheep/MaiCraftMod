@@ -6,6 +6,8 @@ import org.maiwithu.maicraft.core.integration.machine.MachineBuildTaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
+import java.util.Objects;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /** One production goal can include construction, but finishes only after its output observation succeeds. */
 public final class MachineProductionTaskRecord extends TaskRecord implements InternalPositionReceipt {
@@ -13,22 +15,22 @@ public final class MachineProductionTaskRecord extends TaskRecord implements Int
     public final ProductionRunPlan plan;
     public final MachineBuildTaskRecord construction;
     public final List<String> protectedLabels;
-    public final org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy toolPolicy;
+    public final SemanticMaterialSupplyCoordinator.MaterialPolicy toolPolicy;
     private Position verified;
 
     public MachineProductionTaskRecord(String callId, long deadline, ProductionRunPlan plan,
                                        MachineBuildTaskRecord construction, List<String> protectedLabels) {
         this(callId, deadline, plan, construction, protectedLabels, construction == null
-                ? org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY : construction.materialPolicy);
+                ? SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY : construction.materialPolicy);
     }
 
     public MachineProductionTaskRecord(String callId, long deadline, ProductionRunPlan plan,
             MachineBuildTaskRecord construction, List<String> protectedLabels,
-            org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy toolPolicy) {
+            SemanticMaterialSupplyCoordinator.MaterialPolicy toolPolicy) {
         super("run_machine_production", callId, deadline);
-        this.plan = java.util.Objects.requireNonNull(plan); this.construction = construction;
+        this.plan = Objects.requireNonNull(plan); this.construction = construction;
         this.protectedLabels = List.copyOf(protectedLabels);
-        this.toolPolicy = java.util.Objects.requireNonNull(toolPolicy);
+        this.toolPolicy = Objects.requireNonNull(toolPolicy);
         if (construction != null && (!construction.dimension.equals(plan.dimension())
                 || !construction.plan.anchor().equals(plan.anchor())))
             throw new IllegalArgumentException("Production must use the exact frozen construction anchor and dimension");

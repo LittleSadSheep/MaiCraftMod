@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine.runtime;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /** Shared native membership is charged once even when several authored sources are aliases. */
 final class ProductionSupplyAllocations {
@@ -19,7 +20,7 @@ final class ProductionSupplyAllocations {
 
     void charge(ProductionSupplyBudget.Key source, long amount) {
         if (amount < 0) throw new IllegalArgumentException("Cannot return production allocation by a negative charge");
-        var view = java.util.Objects.requireNonNull(sources.get(source), "Source must be observed before allocation");
+        var view = Objects.requireNonNull(sources.get(source), "Source must be observed before allocation");
         charged.merge(view.allocationKey(), amount, Math::addExact);
     }
 

@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
+import java.util.Set;
 
 /** Finite allocation survives refill passes; consumed source stock is never credited again. */
 final class ProductionSupplyBudget {
@@ -44,7 +45,7 @@ final class ProductionSupplyBudget {
         if (!initialized || requested < 1 || requested > Math.min(64, remaining()))
             throw new IllegalStateException("Transfer exceeds the remaining production budget");
         String status = receipt.get("status").getAsString();
-        if (!java.util.Set.of("applied", "partial", "no_change").contains(status)
+        if (!Set.of("applied", "partial", "no_change").contains(status)
                 || !identity.equals(receipt.get("resource_id").getAsString()))
             throw new IllegalStateException("Production transfer identity/status changed; inspect the settled operation");
         int moved = receipt.get("transferred").getAsBigDecimal().intValueExact();

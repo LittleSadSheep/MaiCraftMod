@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Port;
+import java.util.LinkedHashSet;
 
 /** Baselines the world journal before supply, then requires native production and matching native delivery. */
 final class ProductionOutputMonitor {
@@ -24,7 +25,7 @@ final class ProductionOutputMonitor {
     private final List<List<BlockPos>> groups;
     private final Port sink;
     private final Map<String, Set<String>> recipes = new LinkedHashMap<>();
-    private final Set<Integer> requestedWatches = new java.util.LinkedHashSet<>();
+    private final Set<Integer> requestedWatches = new LinkedHashSet<>();
     private ProductionEvidenceWindow window;
     private Map<String, BigDecimal> initialStock, stock;
     private long serverTick, baselineTick, baselineSequence, sinkBaselineTick;
@@ -39,12 +40,12 @@ final class ProductionOutputMonitor {
                 && port.direction().equals("input") && port.medium().equals(plan.manifest().target().resource().medium()))
                 .findFirst().orElseThrow(() -> new IllegalArgumentException("production_sink_has_no_declared_input"));
         processing = new ProductionProcessProgress(plan);
-        Set<BlockPos> positions = new java.util.LinkedHashSet<>(paths.observationPositions());
+        Set<BlockPos> positions = new LinkedHashSet<>(paths.observationPositions());
         plan.manifest().nodes().stream().filter(node -> node.kind().equals("process")).forEach(node -> positions.add(plan.at(node)));
         groups = group(positions); cursor = new ProductionEventCursor(groups.size());
         for (String id : paths.producers) {
             var node = plan.node(id);
-            recipes.computeIfAbsent(ProductionFlowPaths.key(plan.at(node)), ignored -> new java.util.LinkedHashSet<>()).add(node.recipeId());
+            recipes.computeIfAbsent(ProductionFlowPaths.key(plan.at(node)), ignored -> new LinkedHashSet<>()).add(node.recipeId());
         }
         if (recipes.isEmpty()) unknown = "no_native_target_producer_declared";
     }

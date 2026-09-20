@@ -15,14 +15,31 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.BooleanSupplier;
+import net.minecraft.core.Direction;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.integration.machine.assembly.AssemblyInteractionGeometry;
+import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
+import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence;
+import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import org.maiwithu.maicraft.entity.InputDriver;
 
 /** Coordinates native construction, bounded input budgets and production evidence without duplicating their executors. */
 final class MachineProductionTask extends AbstractCompanionTask<MachineProductionTaskRecord> implements ProductionWork {
     @FunctionalInterface interface InteractionNavigation {
-        PlayerNav to(BlockPos stance, java.util.function.BooleanSupplier reached);
+        PlayerNav to(BlockPos stance, BooleanSupplier reached);
     }
     @FunctionalInterface interface ObservationNavigation {
-        PlayerNav to(BlockPos first, int radius, java.util.function.BooleanSupplier reached);
+        PlayerNav to(BlockPos first, int radius, BooleanSupplier reached);
     }
     private enum Phase { CHECK, BUILD, CONFIGURE, PREPARE, BASELINE, SUPPLY, ADMIT_START, START, REFRESH, OBSERVE, FINAL_VERIFY, DONE }
     private final ProductionRequestSlot requests = new ProductionRequestSlot();
@@ -40,15 +57,15 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     private int configuration;
     private boolean configurationRead;
     private BlockPos navigationTarget;
-    private java.util.List<BlockPos> observationTargets = java.util.List.of();
+    private List<BlockPos> observationTargets = List.of();
     private BlockPos interactionStance;
-    private final java.util.Set<Long> rejectedStances = new java.util.HashSet<>();
+    private final Set<Long> rejectedStances = new HashSet<>();
     private String failureCode;
     private Map<String, Object> constructionResult = Map.of();
 
     MachineProductionTask(LocalPlayer player, MachineProductionTaskRecord record) {
         this(player, record, (stance, reached) -> PlayerNav.to(player,
-                () -> org.maiwithu.maicraft.core.pathing.goal.GoalCompiler.standOn(stance), 1.0, reached, PlayerNav.ContextProvider.DEFAULT));
+                () -> GoalCompiler.standOn(stance), 1.0, reached, PlayerNav.ContextProvider.DEFAULT));
     }
 
     MachineProductionTask(LocalPlayer player, MachineProductionTaskRecord record, InteractionNavigation navigation) {
@@ -59,8 +76,8 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     MachineProductionTask(LocalPlayer player, MachineProductionTaskRecord record, InteractionNavigation navigation,
                           ObservationNavigation observationRoutes) {
         super(player, record);
-        interactionNavigation = java.util.Objects.requireNonNull(navigation);
-        observationNavigation = java.util.Objects.requireNonNull(observationRoutes);
+        interactionNavigation = Objects.requireNonNull(navigation);
+        observationNavigation = Objects.requireNonNull(observationRoutes);
         preparation = new ProductionPreparation(player, record.plan, this);
         menuPresentation = new ProductionMenuPresentation(player, this);
         configurationSupply = new ProductionConfigurationSupply(player, record, this);
@@ -75,7 +92,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         try {
             // The construction child owns its target permissions; planned machine cells are not yet protected assets.
             if (phase == Phase.CHECK || phase == Phase.BUILD) return advance();
-            return org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.withPreservedStructures(
+            return NavigationSafetyContext.withPreservedStructures(
                     r.plan.positions(), this::advance);
         } catch (IllegalArgumentException | IllegalStateException unavailable) {
             return failure("production_stage_failed", unavailable.getMessage());
@@ -85,7 +102,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     private TaskState advance() {
         switch (phase) {
             case CHECK -> {
-                for (String capability : java.util.List.of("machine.snapshot", "machine.recipe", "machine.connections",
+                for (String capability : List.of("machine.snapshot", "machine.recipe", "machine.connections",
                         "machine.production_events", "inventory.quote", "inventory.transfer"))
                     if (!ServerAssistClient.supported(capability) && !ServerAssistClient.renegotiating(capability))
                         return failure("production_server_support_required", "Verified production requires " + capability
@@ -173,10 +190,10 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                 if (preparation.tick()) {
                     var finalProof = preparation.finalVerification();
                     if (!preparation.compilation().valid()
-                            || finalProof.status() != org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Status.VERIFIED)
+                            || finalProof.status() != ProductionEvidence.Status.VERIFIED)
                         return failure("production_connection_unverified", finalProof.detail());
                     phase = Phase.DONE; r.verified();
-                    org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.commissioned(player,null,r.plan,output.report());
+                    ClientMachineCatalog.commissioned(player,null,r.plan,output.report());
                     return TaskState.SUCCESS;
                 }
             }
@@ -211,12 +228,12 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             String action = next.arguments().get("action").getAsString();
             if (action.startsWith("mekanism.") && !action.equals("mekanism.connection")
                     || action.startsWith("ae2.")) {
-                net.minecraft.core.Direction side = action.startsWith("ae2.") && next.arguments().has("side")
-                        ? net.minecraft.core.Direction.byName(next.arguments().get("side").getAsString()) : null;
+                Direction side = action.startsWith("ae2.") && next.arguments().has("side")
+                        ? Direction.byName(next.arguments().get("side").getAsString()) : null;
                 if (!menuPresentation.open(r.plan.at(r.plan.node(next.node())), true, side)) return false;
             }
             if (next.arguments().get("action").getAsString().startsWith("create.")) {
-                org.maiwithu.maicraft.entity.InputDriver.sneak(player, true);
+                InputDriver.sneak(player, true);
                 if (!player.isSecondaryUseActive()) return false;
             }
             JsonObject response = request(next.operation(), r.plan.configurationBody(next), true);
@@ -225,7 +242,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             if (!status.equals("applied") && !status.equals("no_change"))
                 throw new IllegalStateException("production_configuration_unconfirmed: " + next.id() + ": " + response);
             preparation.configured(next.id(), response); configuration++; configurationRead = false;
-            org.maiwithu.maicraft.entity.InputDriver.sneak(player, false);
+            InputDriver.sneak(player, false);
             r.extendDeadlineTo(player.level().getGameTime() + 1_200);
             return false;
         }
@@ -243,16 +260,16 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         if (nav != null && interactionStance == null) stopNav();
         if (nav == null) {
             if (interactionStance == null) interactionStance =
-                    org.maiwithu.maicraft.core.integration.machine.assembly.AssemblyInteractionGeometry.nearestStand(
+                    AssemblyInteractionGeometry.nearestStand(
                             player, position, rejectedStances, eyes -> {
-                                var feet = eyes.subtract(0, player.getEyeHeight(net.minecraft.world.entity.Pose.STANDING), 0);
+                                var feet = eyes.subtract(0, player.getEyeHeight(Pose.STANDING), 0);
                                 return feet.distanceToSqr(position.getCenter()) <= 9
                                         ? ProductionInteractionSight.aimFrom(player.level(), player, position, eyes) : null;
-                            }, net.minecraft.world.entity.Pose.STANDING);
+                            }, Pose.STANDING);
             if (interactionStance == null) throw new IllegalArgumentException("production_access_unavailable: no visible reachable interaction stance");
             final BlockPos stance = interactionStance.immutable();
             nav = interactionNavigation.to(stance,
-                    () -> net.minecraft.world.phys.Vec3.atBottomCenterOf(stance).distanceToSqr(player.position()) < .16
+                    () -> Vec3.atBottomCenterOf(stance).distanceToSqr(player.position()) < .16
                             && interactionReady(position));
         }
         var status = nav.tick();
@@ -266,15 +283,15 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     }
 
     @Override public boolean observe(BlockPos position) {
-        return observe(java.util.List.of(position));
+        return observe(List.of(position));
     }
 
-    @Override public boolean observe(java.util.List<BlockPos> requestedPositions) {
+    @Override public boolean observe(List<BlockPos> requestedPositions) {
         if (requests.pending()) return true;
-        var positions = java.util.List.copyOf(requestedPositions);
+        var positions = List.copyOf(requestedPositions);
         if (!positions.equals(observationTargets)) { stopNav(); observationTargets = positions; }
         BlockPos position = positions.getFirst();
-        java.util.function.BooleanSupplier ready = () -> positions.stream().allMatch(player.level()::isLoaded)
+        BooleanSupplier ready = () -> positions.stream().allMatch(player.level()::isLoaded)
                 && ProductionObservationRange.ready(player.position(), positions, target -> ProductionObservationRange.radius(player.level(), target));
         selectNavigationTarget(position);
         if (interactionStance != null) { stopNav(); interactionStance = null; }
@@ -319,10 +336,10 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     @Override public Map<String, Long> processingProgress() { return output == null ? Map.of() : output.processingProgress(); }
     @Override public void extendDeadlineTo(long tick) { r.extendDeadlineTo(tick); }
     @Override public void initialSupply(String source,
-            org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource resource,
+            ProductionManifest.Resource resource,
             long credited, JsonObject snapshot) { preparation.initialSupply(source, resource, credited, snapshot); }
     @Override public void confirmedSupply(String source,
-            org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource resource,
+            ProductionManifest.Resource resource,
             String requestId, JsonObject result) {
         preparation.supplied(source, resource, requestId, result);
         if (result.get("transferred").getAsLong() > 0) watchdog.noteInput(result.get("tick").getAsLong());
@@ -349,7 +366,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         for (JsonObject body : output.releaseBodies()) {
             try { ServerAssistClient.submit("machine.production_events", body, false, null); }
             catch (RuntimeException unavailable) {
-                org.maiwithu.maicraft.core.Constants.LOG.debug("Production watch release deferred to connection cleanup", unavailable);
+                Constants.LOG.debug("Production watch release deferred to connection cleanup", unavailable);
             }
         }
     }
@@ -357,7 +374,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
     /** Live stage/receipt metadata only; native inventories, coordinates and the authored plan remain in their dedicated reports. */
     @Override public Map<String, Object> progress() {
         var result = new LinkedHashMap<String, Object>(super.progress());
-        result.put("task", name()); result.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        result.put("task", name()); result.put("phase", phase.name().toLowerCase(Locale.ROOT));
         result.put("configuration_index", configuration); result.put("configuration_total", r.plan.manifest().configurations().size());
         if (configuration < r.plan.manifest().configurations().size())
             result.put("configuration_id", r.plan.manifest().configurations().get(configuration).id());
@@ -382,14 +399,14 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         }
         result.put("server_request_pending", requests.pending());
         Map<String, Object> report = requests.report(); var request = new LinkedHashMap<String, Object>();
-        for (String key : java.util.List.of("request_id", "operation", "backend", "status", "effect", "code", "server_tick", "outcome_uncertain"))
+        for (String key : List.of("request_id", "operation", "backend", "status", "effect", "code", "server_tick", "outcome_uncertain"))
             if (report.containsKey(key)) request.put(key, report.get(key));
         result.put("server_request", Map.copyOf(request));
         return Map.copyOf(result);
     }
     @Override protected Map<String, Object> resultData() {
         var result = new LinkedHashMap<String, Object>();
-        result.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        result.put("phase", phase.name().toLowerCase(Locale.ROOT));
         result.put("machine_production_verified", phase == Phase.DONE);
         result.put("production_preparation", preparation.report());
         result.put("production_observation", output == null ? Map.of("status", "not_started") : output.report());

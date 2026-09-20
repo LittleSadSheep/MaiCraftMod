@@ -6,16 +6,19 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.UUID;
 
 /** One operation in flight for a production task. A response never authorizes replaying an unknown effect. */
 final class ProductionRequestSlot {
     interface Backend {
         boolean supported(String operation);
         boolean renegotiating(String operation);
-        boolean takeExpiredReadForRefresh(java.util.UUID id);
+        boolean takeExpiredReadForRefresh(UUID id);
         ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating);
-        void query(java.util.UUID id);
-        void cancel(java.util.UUID id);
+        void query(UUID id);
+        void cancel(UUID id);
     }
     private final Backend backend;
     private ClientRequestReceipt receipt;
@@ -29,15 +32,15 @@ final class ProductionRequestSlot {
         this(new Backend() {
             public boolean supported(String operation) { return ServerAssistClient.supported(operation); }
             public boolean renegotiating(String operation) { return ServerAssistClient.renegotiating(operation); }
-            public boolean takeExpiredReadForRefresh(java.util.UUID id) { return ServerAssistClient.takeExpiredReadForRefresh(id); }
+            public boolean takeExpiredReadForRefresh(UUID id) { return ServerAssistClient.takeExpiredReadForRefresh(id); }
             public ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating) {
                 return ServerAssistClient.submit(operation, arguments, mutating);
             }
-            public void query(java.util.UUID id) { ServerAssistClient.query(id); }
-            public void cancel(java.util.UUID id) { ServerAssistClient.cancel(id); }
+            public void query(UUID id) { ServerAssistClient.query(id); }
+            public void cancel(UUID id) { ServerAssistClient.cancel(id); }
         });
     }
-    ProductionRequestSlot(Backend backend) { this.backend = java.util.Objects.requireNonNull(backend); }
+    ProductionRequestSlot(Backend backend) { this.backend = Objects.requireNonNull(backend); }
 
     JsonObject call(String operation, JsonObject arguments, boolean mutating) {
         if (receipt == null) {
@@ -95,9 +98,9 @@ final class ProductionRequestSlot {
         var result = new LinkedHashMap<String, Object>();
         result.put("request_id", state.requestId().toString());
         result.put("operation", state.operationId());
-        result.put("backend", state.backend().name().toLowerCase(java.util.Locale.ROOT));
-        result.put("status", state.status().name().toLowerCase(java.util.Locale.ROOT));
-        result.put("effect", state.effect().name().toLowerCase(java.util.Locale.ROOT));
+        result.put("backend", state.backend().name().toLowerCase(Locale.ROOT));
+        result.put("status", state.status().name().toLowerCase(Locale.ROOT));
+        result.put("effect", state.effect().name().toLowerCase(Locale.ROOT));
         result.put("outcome_uncertain", state.unresolvedMutation());
         result.put("mechanical_retry_allowed", false);
         result.put("server_tick", state.serverTick());
