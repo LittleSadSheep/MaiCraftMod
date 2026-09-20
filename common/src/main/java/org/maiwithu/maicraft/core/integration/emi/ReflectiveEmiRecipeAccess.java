@@ -7,12 +7,13 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import java.util.Objects;
 
 /** EMI是可选知识来源：缺失、尚未完成加载和展示索引无匹配分别报告，不启动插件重载或任何游戏动作。 */
 public final class ReflectiveEmiRecipeAccess implements EmiRecipeAccess {
     private final ClassLoader loader;
     public ReflectiveEmiRecipeAccess() { this(ReflectiveEmiRecipeAccess.class.getClassLoader()); }
-    public ReflectiveEmiRecipeAccess(ClassLoader loader) { this.loader = java.util.Objects.requireNonNull(loader); }
+    public ReflectiveEmiRecipeAccess(ClassLoader loader) { this.loader = Objects.requireNonNull(loader); }
 
     @Override public Query query(LocalPlayer player, ResourceLocation itemId, boolean uses) {
         Class<?> entry;

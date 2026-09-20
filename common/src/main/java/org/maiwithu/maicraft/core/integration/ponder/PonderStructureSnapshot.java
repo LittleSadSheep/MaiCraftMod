@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
+import java.util.TreeMap;
 
 /**
  * 保存一刻演示状态，并把可见、无旋转、整格平移且完全显现的区域转换成方块蓝图；不能处理的变换仍保存在说明数据中。
@@ -15,7 +16,7 @@ import net.minecraft.world.phys.Vec3;
 public record PonderStructureSnapshot(List<Block> blocks, List<Section> sections, JsonArray entities) {
     public record Block(BlockPos position, String id, Map<String, String> properties, String observedNbt) {
         public Block { position = position.immutable(); properties = Map.copyOf(properties); }
-        String geometry() { return id + new java.util.TreeMap<>(properties); }
+        String geometry() { return id + new TreeMap<>(properties); }
     }
     public record Section(String id, List<BlockPos> positions, boolean visible, Vec3 offset, Vec3 rotation,
                           Vec3 pivot, Vec3 stabilizationAnchor, double fade, Vec3 fadeVector) {
@@ -86,7 +87,7 @@ public record PonderStructureSnapshot(List<Block> blocks, List<Section> sections
 
     private static JsonObject blockJson(Block block, BlockPos position, boolean observed) {
         JsonObject result = new JsonObject(); result.add("offset", vector(position)); result.addProperty("block_id", block.id());
-        JsonObject properties = new JsonObject(); new java.util.TreeMap<>(block.properties()).forEach(properties::addProperty);
+        JsonObject properties = new JsonObject(); new TreeMap<>(block.properties()).forEach(properties::addProperty);
         result.add("properties", properties);
         if (observed && block.observedNbt() != null) result.addProperty("observed_nbt", block.observedNbt());
         return result;

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.integration.ponder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
+import java.lang.reflect.InvocationTargetException;
 
 /**
  * 推进一份教程，按作者关键帧或旁白分章，保留章节结束以及结构拆除前的状态；失败时说明不完整，不把已经提取的片段冒充整篇教程。
@@ -78,7 +79,7 @@ public final class PonderReplaySession {
 
     public String status() { return status; }
     private static String reason(Throwable failure) {
-        if (failure instanceof java.lang.reflect.InvocationTargetException invocation && invocation.getCause() != null) failure = invocation.getCause();
+        if (failure instanceof InvocationTargetException invocation && invocation.getCause() != null) failure = invocation.getCause();
         return failure.getClass().getSimpleName() + (failure.getMessage() == null ? "" : ": " + failure.getMessage());
     }
     public int ticks() { return ticks; }

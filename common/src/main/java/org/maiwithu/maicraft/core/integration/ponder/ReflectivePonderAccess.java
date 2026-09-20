@@ -6,6 +6,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 /**
  * 从已安装 Ponder 的注册表发现故事板，通过反射编译指定教程的旁白；旁白使用独立的本地词条收集器，不把作者默认文字写入全局词条。
@@ -103,9 +107,9 @@ public final class ReflectivePonderAccess implements PonderAccess {
         return api.story().getMethod(method).invoke(owner);
     }
     private static String key(String value) {
-        try { return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)), 0, 8); }
-        catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(value.getBytes(StandardCharsets.UTF_8)), 0, 8); }
+        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
     static String reason(Throwable failure) {
         if (failure instanceof InvocationTargetException invocation && invocation.getCause() != null) failure = invocation.getCause();

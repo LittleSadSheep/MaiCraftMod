@@ -9,6 +9,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.state.BlockState;
 
 /** 读取 FTB Ultimine 2101.1.15 的原生状态并复用原生滚轮入口；启用键仍由 FTB 自己的 tick 处理。 */
 public final class UltimineNative {
@@ -29,7 +31,7 @@ public final class UltimineNative {
         } catch (ReflectiveOperationException | RuntimeException unavailable) { return false; }
     }
     public static KeyMapping key() { return (KeyMapping) NativeApi.constant(CLIENT, "keyBindUltimine"); }
-    public static boolean correctTool(LocalPlayer player, BlockPos position, net.minecraft.world.level.block.state.BlockState state) {
+    public static boolean correctTool(LocalPlayer player, BlockPos position, BlockState state) {
         return NativeApi.truth(NativeApi.call(null, "dev.ftb.mods.ftbultimine.utils.PlatformUtil", "playerHasCorrectTool", player, position, state));
     }
     public static boolean pressed() {
@@ -39,9 +41,9 @@ public final class UltimineNative {
         // 客户端能找到模组不代表服务器支持连锁，须以原生通信通道是否可用决定能否启用。
         try {
             return NativeApi.truth(NativeApi.call(null, "dev.architectury.networking.NetworkManager", "canServerReceive",
-                    net.minecraft.resources.ResourceLocation.parse("ftbultimine:key_pressed_packet")))
+                    ResourceLocation.parse("ftbultimine:key_pressed_packet")))
                     && NativeApi.truth(NativeApi.call(null, "dev.architectury.networking.NetworkManager", "canServerReceive",
-                    net.minecraft.resources.ResourceLocation.parse("ftbultimine:mode_changed_packet")));
+                    ResourceLocation.parse("ftbultimine:mode_changed_packet")));
         } catch (RuntimeException unavailable) { return false; }
     }
     public static int shapeCount() { return ((Number) NativeApi.call(NativeApi.constant(SHAPES, "INSTANCE"), SHAPES, "shapeCount")).intValue(); }

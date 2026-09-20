@@ -16,6 +16,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
+import java.lang.reflect.Method;
+import net.minecraft.world.level.ServerLevelAccessor;
 
 /**
  * 为结构提取建立独立的演示世界，放入教程自带结构，再推进真实 Ponder 日程并读取状态；需要客户端世界已经存在。
@@ -23,7 +25,7 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemp
 final class PonderNativeReplay implements PonderReplaySession.Driver {
     private final Object scene;
     private final PonderSnapshotReader reader;
-    private final java.lang.reflect.Method tick, skipping;
+    private final Method tick, skipping;
     private final Class<?> elementType;
     private int elapsed;
 
@@ -37,7 +39,7 @@ final class PonderNativeReplay implements PonderReplaySession.Driver {
             throw new IllegalStateException("Missing, empty or oversized Ponder schematic (maximum 65536 cells)");
         Object nativeWorld = api.level().getConstructor(BlockPos.class, Level.class).newInstance(BlockPos.ZERO, minecraft.level);
         if (!(nativeWorld instanceof Level world) || world == minecraft.level) throw new IllegalStateException("Ponder did not create a separate Level");
-        template.placeInWorld((net.minecraft.world.level.ServerLevelAccessor) world, BlockPos.ZERO, BlockPos.ZERO,
+        template.placeInWorld((ServerLevelAccessor) world, BlockPos.ZERO, BlockPos.ZERO,
                 new StructurePlaceSettings(), world.random, 2);
         api.level().getMethod("createBackup").invoke(world);
         Object localization = api.localization().getConstructor().newInstance();

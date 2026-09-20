@@ -6,6 +6,10 @@ import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.server.packs.resources.ReloadableResourceManager;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * 管理最多八个教程回放，分客户端更新推进；世界、语言、资源或注册故事板变化时清掉旧结果，缓存不足先淘汰已结束的回放。
@@ -35,7 +39,7 @@ public final class PonderReplayRuntime {
     public static synchronized void tick() {
         if (JOBS.values().stream().noneMatch(job -> job.session().status().equals("running"))) return;
         refreshEnvironment(); long deadline = System.nanoTime() + 4_000_000;
-        for (Job job : java.util.List.copyOf(JOBS.values())) {
+        for (Job job : List.copyOf(JOBS.values())) {
             job.session().advance(64, deadline);
             if (System.nanoTime() >= deadline) break;
         }
@@ -47,7 +51,7 @@ public final class PonderReplayRuntime {
         if (minecraft == null) return;
         Object currentResources = minecraft.getResourceManager();
         String currentLanguage = minecraft.getLanguageManager().getSelected();
-        if (resources != currentResources || level != minecraft.level || !java.util.Objects.equals(language, currentLanguage)) {
+        if (resources != currentResources || level != minecraft.level || !Objects.equals(language, currentLanguage)) {
             invalidate();
             if (resources != currentResources && currentResources instanceof ReloadableResourceManager reloadable)
                 reloadable.registerReloadListener((ResourceManagerReloadListener) manager -> invalidate());
@@ -56,7 +60,7 @@ public final class PonderReplayRuntime {
         if (!JOBS.isEmpty() && activeApi != null) {
             try {
                 Object registry = activeApi.index().getMethod("getSceneAccess").invoke(null);
-                var registered = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Object, Boolean>());
+                var registered = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
                 for (Object row : (Iterable<?>) activeApi.sceneAccess().getMethod("getRegisteredEntries").invoke(registry))
                     registered.add(((Map.Entry<?, ?>) row).getValue());
                 if (JOBS.values().stream().anyMatch(job -> !registered.contains(job.entry()))) invalidate();

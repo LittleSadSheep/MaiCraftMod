@@ -12,6 +12,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import java.util.Map;
 
 /**
  * 只负责连锁挖掘的就绪检查和持键：准星命中面 → 原生完整选区 → 持住启用键挖到确认 → 松开。
@@ -131,8 +132,8 @@ public final class UltimineSession implements AutoCloseable {
         } catch (RuntimeException invalid) { return abort("ultimine_inflight_native_state_unavailable"); }
     }
     public Decision keepAlive(LocalPlayerContext context) { return tickInFlight(context); }
-    public java.util.Map<String, Object> holdEvidence() {
-        return java.util.Map.of("held_break_ticks", heldBreakTicks,
+    public Map<String, Object> holdEvidence() {
+        return Map.of("held_break_ticks", heldBreakTicks,
                 "native_pressed_at_last_break_tick", lastNativePressed, "key_down_at_last_break_tick", lastKeyDown,
                 "hit_face", face == null ? "none" : face.getName());
     }

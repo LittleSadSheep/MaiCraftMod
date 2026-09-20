@@ -5,6 +5,8 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import java.nio.charset.StandardCharsets;
+import java.util.function.BiConsumer;
 
 /**
  * 在内存中按内容保存教程结构，最多十六兆字节；读取返回副本，转交建造前还要检查投影完整并且确实有方块。
@@ -13,7 +15,7 @@ public final class PonderBlueprintStore {
     public static final String PREFIX = "maicraft://knowledge/ponder/structure/";
     private static final int MAX_BYTES = 16 * 1024 * 1024;
     private static final Map<String, JsonObject> DOCUMENTS = new LinkedHashMap<>();
-    private record Hooks(Runnable refresh, java.util.function.BiConsumer<String, Integer> reserve) {}
+    private record Hooks(Runnable refresh, BiConsumer<String, Integer> reserve) {}
     private static volatile Hooks hooks = new Hooks(() -> {}, (scene, size) -> {});
     private static int bytes;
     private PonderBlueprintStore() {}
@@ -22,7 +24,7 @@ public final class PonderBlueprintStore {
         String encoded = blueprint.toString();
         String uri = PREFIX + sceneKey + "/" + KnowledgeLibrary.digest(encoded);
         synchronized (PonderBlueprintStore.class) { if (DOCUMENTS.containsKey(uri)) return uri; }
-        int size = encoded.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        int size = encoded.getBytes(StandardCharsets.UTF_8).length;
         if (size > MAX_BYTES) throw new IllegalStateException("One Ponder snapshot exceeds the 16 MiB evidence budget");
         hooks.reserve().accept(sceneKey, size);
         synchronized (PonderBlueprintStore.class) {
@@ -53,7 +55,7 @@ public final class PonderBlueprintStore {
     }
 
     public static synchronized void clear() { DOCUMENTS.clear(); bytes = 0; }
-    static void configure(Runnable environmentRefresh, java.util.function.BiConsumer<String, Integer> reserve) {
+    static void configure(Runnable environmentRefresh, BiConsumer<String, Integer> reserve) {
         hooks = new Hooks(environmentRefresh, reserve);
     }
     static synchronized boolean fits(int size) { return size >= 0 && size <= MAX_BYTES && bytes <= MAX_BYTES - size; }
@@ -62,7 +64,7 @@ public final class PonderBlueprintStore {
         while (iterator.hasNext()) {
             var document = iterator.next();
             if (!document.getKey().startsWith(PREFIX + sceneKey + "/")) continue;
-            bytes -= document.getValue().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length; iterator.remove();
+            bytes -= document.getValue().toString().getBytes(StandardCharsets.UTF_8).length; iterator.remove();
         }
     }
 }

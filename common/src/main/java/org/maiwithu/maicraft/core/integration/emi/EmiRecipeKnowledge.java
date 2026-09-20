@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
+import java.util.Objects;
 
 /** 按物品读取EMI来源或用途知识；展示证据不授权普通合成、机器操作或配方填充。 */
 public final class EmiRecipeKnowledge {
@@ -13,7 +14,7 @@ public final class EmiRecipeKnowledge {
     static final int MAX_RECIPE_BYTES = 65_536, MAX_PAGE_BYTES = 262_144;
     private final EmiRecipeAccess access;
 
-    public EmiRecipeKnowledge(EmiRecipeAccess access) { this.access = java.util.Objects.requireNonNull(access); }
+    public EmiRecipeKnowledge(EmiRecipeAccess access) { this.access = Objects.requireNonNull(access); }
 
     /** 调用方在当前客户端游戏线程读取；此入口不打开EMI界面、不调用addWidgets或craftRecipe。 */
     public static JsonObject inspect(LocalPlayer player, ResourceLocation itemId, boolean uses, int offset, int limit) {
