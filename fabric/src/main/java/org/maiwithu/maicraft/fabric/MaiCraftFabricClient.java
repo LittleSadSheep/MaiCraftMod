@@ -8,7 +8,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
+import org.maiwithu.maicraft.client.chat.ChatMonitor;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.client.preview.PreviewCommands;
 import org.maiwithu.maicraft.client.preview.PreviewController;
@@ -42,12 +42,14 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) ->
                 ScreenEvents.afterRender(screen).register((rendered, graphics, mouseX, mouseY, delta) ->
                         MenuVisibility.rendered(rendered)));
-        // 聊天消息保留发送者身份；游戏提示按系统文字交给注意事件系统，这里没有单独使用动作栏 overlay 标志。
-        ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receivedAt) ->
-                GameplayAttentionMonitor.chat(
-                        sender.getName(), sender.getId(), message.getString(), false));
+        // 聊天区消息进入独立聊天流，保留发送者；动作栏提示不混入玩家对话。
+        ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receivedAt) -> {
+            // Fabric 允许资料或签名消息缺失；有签名身份时仍保留它，不能因未同步名字而丢掉整条聊天。
+            var senderId = sender != null ? sender.getId() : signedMessage == null ? null : signedMessage.sender();
+            ChatMonitor.player(sender == null ? null : sender.getName(), senderId, message.getString());
+        });
         ClientReceiveMessageEvents.GAME.register((message, overlay) ->
-                GameplayAttentionMonitor.chat(null, null, message.getString(), true));
+                ChatMonitor.system(message.getString(), overlay));
         // 注册本地 maicraft 状态与预览命令，不向服务器登记同名管理员命令。
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
                 dispatcher.register(PreviewCommands.attach(ClientCommandManager.literal("maicraft")

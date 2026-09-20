@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.client.runtime;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,27 +26,21 @@ import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.client.chat.ChatMonitor;
 
 /**
- * 把天气、时间、受伤和死亡变化整理成 Attention 事件；聊天区消息单独送进 ChatFlow。
+ * 把天气、时间、受伤和死亡变化整理成 Attention 事件；聊天观察由独立的 ChatMonitor 处理。
  * 除观察外，这个类也负责暂停被玩家攻击的任务、保存死亡进度和请求原版重生，
  * 所以改这里可能同时影响通知和角色行为。
  * 另一个玩家的攻击只被解释成需要确认意图的信号，不自动决定还击或跟随。
  */
 public final class GameplayAttentionMonitor {
 
-    private static final int MAX_CHAT_CHARS = 512;
-    private static final int MAX_CHAT_EVENTS_PER_WINDOW = 8;
-    private static final int MAX_CHAT_FINGERPRINTS = 64;
-    private static final long CHAT_WINDOW_NANOS = 10_000_000_000L;
-    private static final long CHAT_DUPLICATE_NANOS = 5_000_000_000L;
     private static final float HEALTH_EPSILON = 0.001F;
     // 同一攻击者的连续命中共用一个伤害片段：开始报一次，窗口内只累计不打扰，窗口过后再收尾一次。
     // 不合并会让连挨三口变成三次上报、三次上层唤醒，而它们说的是同一件事。
     private static final int DAMAGE_EPISODE_TICKS = 100;
 
-    private static final ArrayDeque<Long> recentChatEvents = new ArrayDeque<>();
-    private static final LinkedHashMap<String, Long> recentChatFingerprints = new LinkedHashMap<>();
     private static final Map<String, ReflexEpisode> activeReflexes = new HashMap<>();
     private static final Map<String, DamageEpisode> activeDamage = new HashMap<>();
 
@@ -56,7 +49,6 @@ public final class GameplayAttentionMonitor {
     private static String previousTimePhase;
     private static String previousWeather;
     private static float previousEffectiveHealth = Float.NaN;
-    private static int suppressedChatMessages;
     private static LifeState lifeState = LifeState.ALIVE;
     private static DeathSnapshot lastDeath;
 
@@ -133,55 +125,6 @@ public final class GameplayAttentionMonitor {
         remember(level, dimension, phase, weather, effectiveHealth);
     }
 
-    /**
-     * 加载器把收到的聊天转成纯文本交进来。最长保留 512 字符，十秒最多八条，同来源和内容五秒内去重。
-     * 正文标记为外部不可信文本；被压掉的数量附在下一条真正发出的事件上。
-     * 这些消息进独立的 ChatFlow 供主播 Agent 订阅，不进任务 Attention 流。
-     */
-    public static synchronized void chat(
-            String senderName, UUID senderId, String message, boolean system) {
-        if (message == null) return;
-        String text = message.strip();
-        if (text.isEmpty()) return;
-        if (text.length() > MAX_CHAT_CHARS) text = text.substring(0, MAX_CHAT_CHARS);
-
-        long now = System.nanoTime();
-        while (!recentChatEvents.isEmpty()
-                && now - recentChatEvents.peekFirst() >= CHAT_WINDOW_NANOS) {
-            recentChatEvents.removeFirst();
-        }
-        recentChatFingerprints.entrySet().removeIf(
-                entry -> now - entry.getValue() >= CHAT_DUPLICATE_NANOS);
-        String safeSender = safeText(senderName, 64);
-        String fingerprint = system + "\n" + safeSender + "\n" + text;
-        if (recentChatEvents.size() >= MAX_CHAT_EVENTS_PER_WINDOW
-                || recentChatFingerprints.containsKey(fingerprint)) {
-            suppressedChatMessages++;
-            return;
-        }
-        recentChatEvents.addLast(now);
-        recentChatFingerprints.put(fingerprint, now);
-        while (recentChatFingerprints.size() > MAX_CHAT_FINGERPRINTS) {
-            recentChatFingerprints.remove(recentChatFingerprints.keySet().iterator().next());
-        }
-
-        JsonObject data = new JsonObject();
-        if (!safeSender.isEmpty()) data.addProperty("sender_name", safeSender);
-        data.addProperty("message", text);
-        data.addProperty("system", system);
-        data.addProperty("untrusted_external_text", true);
-        if (suppressedChatMessages > 0) {
-            data.addProperty("suppressed_similar_or_rate_limited_messages", suppressedChatMessages);
-            suppressedChatMessages = 0;
-        }
-        IntentRuntime.get().chatEvent(
-                system ? "game.message_received" : "player.chat_received",
-                system
-                        ? "Received an untrusted external game message."
-                        : "Received untrusted external player chat.",
-                data);
-    }
-
     public static synchronized void reset() {
         reset(false);
     }
@@ -193,12 +136,10 @@ public final class GameplayAttentionMonitor {
         previousTimePhase = null;
         previousWeather = null;
         previousEffectiveHealth = Float.NaN;
-        recentChatEvents.clear();
-        recentChatFingerprints.clear();
+        ChatMonitor.reset();
         activeReflexes.clear();
         // 换世界/断线时丢掉未收尾的伤害片段：那些命中属于上一个身体与上一个世界。
         activeDamage.clear();
-        suppressedChatMessages = 0;
         if (!preserveDeathRecovery || lifeState == LifeState.ALIVE) {
             lifeState = LifeState.ALIVE;
             lastDeath = null;

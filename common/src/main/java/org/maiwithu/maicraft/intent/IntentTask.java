@@ -268,9 +268,9 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
-            // 原生加工消费前统一留下跨重启边界；附魔仍保留旧命名空间，水中转化与包装子任务也不能重复投料。
-            if (nextRecord instanceof NativeSubmissionTaskRecord consumption)
-                NativeSubmissionBinding.bind(consumption, record, runtime);
+            // 单次提交先绑定父任务的持久身份，附魔、投料和聊天都不能因重启后新建子任务而重复执行。
+            if (nextRecord instanceof NativeSubmissionTaskRecord submission)
+                NativeSubmissionBinding.bind(submission, record, runtime);
             retainBuildProject(nextRecord);
             // 记住这一步的任务单，创建对应执行代码，只做第一次准备；后续每刻继续同一个对象。
             childRecord = nextRecord;

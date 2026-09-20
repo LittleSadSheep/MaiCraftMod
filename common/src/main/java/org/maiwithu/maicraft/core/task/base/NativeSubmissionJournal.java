@@ -24,7 +24,7 @@ public class NativeSubmissionJournal {
     // 所有原生机制共用有界写入线程；队列满时停止，不在游戏线程同步磁盘。
     private static final Executor WRITER = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(32), task -> {
-                Thread thread = new Thread(task, "maicraft-native-consumption-journal"); thread.setDaemon(true); return thread;
+                Thread thread = new Thread(task, "maicraft-native-submission-journal"); thread.setDaemon(true); return thread;
             }, new ThreadPoolExecutor.AbortPolicy());
     @FunctionalInterface public interface MarkerWriter { void write(Path file, byte[] contents) throws IOException; }
     private final UUID operationId;
@@ -43,7 +43,7 @@ public class NativeSubmissionJournal {
     }
     protected NativeSubmissionJournal(StateIdentity identity, UUID operationId, String namespace, Executor executor, MarkerWriter writer) {
         Objects.requireNonNull(identity, "world identity"); this.operationId = Objects.requireNonNull(operationId, "operation id");
-        if (namespace == null || !namespace.matches("[a-z][a-z0-9-]{0,63}")) throw new IllegalArgumentException("invalid native consumption namespace");
+        if (namespace == null || !namespace.matches("[a-z][a-z0-9-]{0,63}")) throw new IllegalArgumentException("invalid native submission namespace");
         this.executor = Objects.requireNonNull(executor, "executor"); this.writer = Objects.requireNonNull(writer, "writer");
         // enchant命名空间继续使用原文件路径与诊断前缀，旧版未完成的附魔不会因入口统一而获得第二次消费。
         file = identity.directory().resolve(namespace + "-submissions").resolve(identity.key()).resolve(operationId + ".json");

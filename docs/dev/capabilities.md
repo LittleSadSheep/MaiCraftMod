@@ -21,7 +21,7 @@
 | `sequence` | 依次做一组目标 | `Goal.executableSteps` → `IntentTask` | 完成重构；[编排与恢复规则](sequences.md) |
 | `remember_place` | 记住地点或区域 | `AbilityAdapter.remember` → `IntentRuntime.remember` | 入口核对 |
 | `wait_for_condition` | 等一段时间、天亮或身体条件 | `WaitAbilityAdapter` → `IntentTask.tickWait` | 完成重构；[实现与回归](waiting.md) |
-| `chat` | 在真实聊天框输入并提交 | `ChatAbilityAdapter` → `ChatTask` | 入口核对 |
+| `chat` | 在真实聊天框输入并提交 | `ChatAbilityAdapter` → `ChatTask` | 完成重构；[发送与恢复规则](chat.md) |
 | `travel` | 去指定地点或已观察到的位置 | `AbilityAdapter.travel` | 入口核对 |
 | `travel_dimension` | 准备并通过传送门换维度 | `AbilityAdapter.travelDimension` | 入口核对 |
 | `find_structure` | 找到游戏中的结构 | `AbilityAdapter.findStructure` | 入口核对 |

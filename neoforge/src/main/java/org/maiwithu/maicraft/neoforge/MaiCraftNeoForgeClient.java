@@ -13,7 +13,7 @@ import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
+import org.maiwithu.maicraft.client.chat.ChatMonitor;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.client.preview.PreviewCommands;
 import org.maiwithu.maicraft.client.preview.PreviewController;
@@ -58,21 +58,25 @@ public final class MaiCraftNeoForgeClient {
         PreviewController.tick(Minecraft.getInstance());
     }
 
-    // Mod screens may override renderWithTooltip without calling Screen's implementation.
+    // 模组界面可能覆盖绘制入口而不调用原版实现，因此通过加载器事件登记真实可见帧。
     private void onScreenRendered(ScreenEvent.Render.Post event) {
         MenuVisibility.rendered(event.getScreen());
     }
 
     // 系统提示没有发送者；普通消息尽量从当前连接查玩家名字，查不到时保留 UUID 和文字。
     private void onChatReceived(ClientChatReceivedEvent event) {
-        var senderId = event.isSystem() ? null : event.getSender();
+        if (event.isSystem()) {
+            ChatMonitor.system(event.getMessage().getString(),
+                    event instanceof ClientChatReceivedEvent.System system && system.isOverlay());
+            return;
+        }
+        var senderId = event.getSender();
         String senderName = null;
         if (senderId != null && Minecraft.getInstance().getConnection() != null) {
             var info = Minecraft.getInstance().getConnection().getPlayerInfo(senderId);
             senderName = info == null ? null : info.getProfile().getName();
         }
-        GameplayAttentionMonitor.chat(
-                senderName, senderId, event.getMessage().getString(), event.isSystem());
+        ChatMonitor.player(senderName, senderId, event.getMessage().getString());
     }
 
     // 本地命令只显示状态、处理预览，执行逻辑仍由公共 PreviewCommands 提供。
