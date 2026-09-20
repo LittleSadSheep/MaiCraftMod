@@ -465,6 +465,19 @@ public final class IntentRuntime {
         markDirty();
     }
 
+    /** 玩家不想继续恢复的旧任务时，直接结算记录，不能为取消而启动它或替换当前身体任务。 */
+    public void cancelRestored(IntentTaskRecord record, long gameTime) {
+        requireCurrentBinding(record);
+        if (tasks.get(record.externalId()) != record || !record.restoredDetached()
+                || record.getState().isTerminal()) {
+            throw new IllegalStateException("task is not an unfinished detached restoration");
+        }
+        // 保留已完成步骤和失败证据，只结束后续工作；终态仍走普通通知与检查点保存路径。
+        TaskResult result = TaskResult.cancelled("semantic task cancelled before resuming");
+        record.terminal(TaskState.CANCELLED, result, gameTime);
+        terminal(record, TaskState.CANCELLED, result);
+    }
+
     private void restoreBound(long gameTime) {
         IntentStateStore.LoadResult loaded = stateStore.load(stateIdentity);
         int restoredTasks = 0;

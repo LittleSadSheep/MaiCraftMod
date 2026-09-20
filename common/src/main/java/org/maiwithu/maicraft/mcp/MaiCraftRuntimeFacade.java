@@ -143,15 +143,17 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             }
             String requestKey = nullableString(arguments, "request_key");
             UUID selectedPlanId = planId;
-            IntentTaskRecord record = dispatchExecution(goal, player,
-                    () -> intents.execute(player, goal, selectedPlanId, requestKey));
+            // 网络重试只复用原任务，不能趁玩家已经接手时再次申请控制权；原目标校验仍由 execute 完成。
+            boolean repeatedRequest = intents.taskForRequestKey(requestKey) != null;
+            Supplier<IntentTaskRecord> submit = () -> intents.execute(player, goal, selectedPlanId, requestKey);
+            IntentTaskRecord record = repeatedRequest ? submit.get() : dispatchExecution(goal, player, submit);
             JsonObject result = new JsonObject();
             result.addProperty("task_id", record.externalId().toString());
             result.addProperty("status", publicState(record));
             result.addProperty("accepted", true);
             result.addProperty("outcome", record.goal().outcome());
             if (requestKey != null) result.addProperty("request_key", requestKey);
-            result.addProperty("control_status", IntentRuntime.isReadOnlyDesign(goal)
+            result.addProperty("control_status", repeatedRequest ? "not_requested" : IntentRuntime.isReadOnlyDesign(goal)
                     ? "not_required" : "takeover_requested");
             result.add("next_attention", AttentionSnapshot.continuation(
                     intents.attentionCheckpoint(), record.externalId().toString()));
@@ -163,7 +165,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     static IntentTaskRecord dispatchExecution(Goal goal, LocalPlayer player, Supplier<IntentTaskRecord> execute) {
         if (IntentRuntime.isReadOnlyDesign(goal)) return execute.get();
         ClientActorBoundary.AutomationRequest control = ClientRuntime.requestAutomationControl(player);
-        // 重复 request_key 的查重在 execute.get() 内部发生，因此这一步可能在发现“旧任务已存在”前执行。
+        // 此处只处理新提交；创建任务失败时撤回本次新请求，不能撤销此前已生效的控制权。
         try { return execute.get(); }
         catch (RuntimeException failure) {
             ClientRuntime.rollbackAutomationControl(control);
@@ -327,11 +329,13 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 intents.resumed(record);
             }
             case "cancel" -> {
-                // 当前只会取消仍在调度器里的任务；尚未 resume 的恢复记录在这里会被判为不能取消。
+                // 恢复记录尚未占用身体，只结算它本身；已有身体任务则通过调度器停止实际动作。
                 if (record.getState().isTerminal()) {
                     throw new IllegalStateException("task is already terminal");
                 }
-                if (!CompanionTickDispatcher.cancel(record.publicId())) {
+                if (record.restoredDetached()) {
+                    intents.cancelRestored(record, now);
+                } else if (!CompanionTickDispatcher.cancel(record.publicId())) {
                     throw new IllegalStateException("task is no longer in the active scheduler slot");
                 }
             }
