@@ -23,6 +23,7 @@ public final class CookingOutputReceiptTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         verify(12, false);
         verify(3, true);
+        inputReturnWhileCooking();
         System.out.println("CookingOutputReceiptTest: passed");
     }
 
@@ -71,6 +72,33 @@ public final class CookingOutputReceiptTest {
             return partial ? TaskResult.fail("native inventory capacity exhausted", data) : TaskResult.ok("confirmed output", data);
         }
         @Override public String name() { return "confirmed output transfer"; }
+    }
+
+    private static void inputReturnWhileCooking() throws Exception {
+        try (var world = new CookingTestWorld()) {
+            world.inventory(0, 16, 2);
+            var task = new SemanticCookCompanionTask(world.game.player, world.request(16));
+            task.start(world.game.player); task.tick(world.game.player); task.tick(world.game.player);
+            var values = new SimpleContainerData(4);
+            var contents = new SimpleContainer(3);
+            contents.setItem(0, new ItemStack(Items.RAW_IRON, 16));
+            var menu = new TestMenu(world, contents, values); world.game.player.containerMenu = menu;
+            CookingTestWorld.set(task, "ownedMenu", menu); CookingTestWorld.set(task, "openedMenu", true);
+            CookingTestWorld.set(task, "stationClaimed", true); CookingTestWorld.set(task, "effectsStarted", true);
+            CookingTestWorld.set(task, "batchOutstanding", true); CookingTestWorld.set(task, "ownedInputLoaded", 16);
+            CookingTestWorld.set(task, "cleanupSnapshotReady", true);
+            CookingTestWorld.set(task, "cleanupInputExpected", contents.getItem(0).copy());
+            task.requestSatisfiedSettlement(); CookingTestWorld.phase(task, "CLEANUP");
+            world.inventory(0, 0, 0); task.tick(world.game.player);
+            // 原生退料真正确认前又烧好两份，只退回十四份；两种去向加起来仍是原来的十六份。
+            contents.setItem(0, ItemStack.EMPTY); contents.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
+            world.inventory(0, 14, 0);
+            CookingTestWorld.set(task, "activeChild", new ConfirmedOutput(14, false));
+            task.tick(world.game.player); task.tick(world.game.player); task.tick(world.game.player);
+            check(CookingTestWorld.read(task, "ownedInputReturned").equals(14), "按回执记实际退料十四份");
+            check(CookingTestWorld.read(task, "activePurpose").toString().equals("TAKE_OUTPUT")
+                    && CookingTestWorld.read(task, "failureMessage") == null, "另外两件成品应继续正常收回，不能误判数量被外部改动");
+        }
     }
 
     private static final class TestMenu extends FurnaceMenu implements MenuDataSlotsAccessor {

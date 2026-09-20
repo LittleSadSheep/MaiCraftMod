@@ -8,6 +8,7 @@ import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.AbstractFurnaceMenu;
 import net.minecraft.world.inventory.FurnaceResultSlot;
 import net.minecraft.world.inventory.MerchantResultSlot;
 import net.minecraft.world.inventory.ResultSlot;
@@ -22,11 +23,12 @@ final class QuickMoveEvidence {
     private final int sourceIndex;
     private final ItemStack before;
     private final boolean toPlayer;
-    private final boolean producingSource;
+    private final boolean changingMachineSource;
     private final long inventoryBefore;
     private final long outsideBefore;
     private final int[] inventorySlotsBefore;
     private int moved;
+    private int remaining;
 
     QuickMoveEvidence(LocalPlayer player, AbstractContainerMenu menu, int sourceIndex) {
         this.player = player;
@@ -35,7 +37,8 @@ final class QuickMoveEvidence {
         Slot source = menu.getSlot(sourceIndex);
         before = source.getItem().copy();
         toPlayer = source.container != player.getInventory();
-        producingSource = source instanceof FurnaceResultSlot || source instanceof MerchantResultSlot || source instanceof ResultSlot;
+        changingMachineSource = menu instanceof AbstractFurnaceMenu
+                || source instanceof FurnaceResultSlot || source instanceof MerchantResultSlot || source instanceof ResultSlot;
         inventoryBefore = inventoryCount();
         outsideBefore = outsideCount();
         inventorySlotsBefore = new int[player.getInventory().getContainerSize()];
@@ -64,12 +67,13 @@ final class QuickMoveEvidence {
             }
             if (sourceDebit == gainedElsewhere) {
                 moved = (int) sourceDebit;
+                remaining = source.getCount();
                 return MenuConfirmation.Verdict.APPLIED;
             }
         }
         if (transferred < 0 || transferred > Integer.MAX_VALUE) return MenuConfirmation.Verdict.DIVERGED;
-        if (producingSource && toPlayer) {
-            // 结果格可以补出下一件，甚至在一次交易快速取出中连续产出；以玩家真正增加的同组件物品计数。
+        if (changingMachineSource && toPlayer) {
+            // 炉子可消耗原料、补出成品，交易也可能连续产出；以玩家真正增加的同组件物品计数，父任务再核对工序账。
             if (transferred == 0) return MenuConfirmation.Verdict.PENDING;
         } else {
             long otherDelta = toPlayer ? -sourceDebit : outsideCount() - outsideBefore;
@@ -80,10 +84,12 @@ final class QuickMoveEvidence {
                 return MenuConfirmation.Verdict.PENDING;
         }
         moved = (int) transferred;
+        remaining = source.getCount();
         return MenuConfirmation.Verdict.APPLIED;
     }
 
     int moved() { return moved; }
+    int remaining() { return remaining; }
 
     private long inventoryCount() {
         long total = 0;

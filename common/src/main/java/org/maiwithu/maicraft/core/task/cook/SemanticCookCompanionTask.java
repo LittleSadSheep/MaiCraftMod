@@ -79,6 +79,7 @@ public final class SemanticCookCompanionTask
     private long closedWaitStartedTick;
     // 本批装入多少原料、已经取回多少成品，单独记账；背包目标总数还包含开工前已有的物品。
     private int ownedInputLoaded;
+    private int ownedInputReturned;
     private int ownedOutputTaken;
     private int takeInventoryBefore;
     private int takeSlotCount;
@@ -482,6 +483,7 @@ public final class SemanticCookCompanionTask
         stationClaimed = true;
         // 认领空设备还不等于原料已经入炉，装入量必须等 LOAD_INPUT 的原生搬运回执确认。
         ownedInputLoaded = 0;
+        ownedInputReturned = 0;
         ownedOutputTaken = 0;
         takeInventoryBefore = 0;
         takeSlotCount = 0;
@@ -641,12 +643,12 @@ public final class SemanticCookCompanionTask
                     FailureType.UNKNOWN);
         }
         int currentInput = input.isEmpty() ? 0 : input.getCount();
-        if (currentInput > ownedInputLoaded) {
+        if (currentInput > ownedInputLoaded - ownedInputReturned) {
             return closeWithoutClaimingContents("workstation_input_inserted",
                     "More recipe input appeared than MaiCraft loaded; external automation or a player changed the batch.",
                     FailureType.UNKNOWN);
         }
-        int consumed = ownedInputLoaded - currentInput;
+        int consumed = ownedInputLoaded - ownedInputReturned - currentInput;
         long expectedProduced = (long) consumed * candidate.outputCount();
         long observedOwned = (long) ownedOutputTaken + result.getCount();
         if (observedOwned != expectedProduced) {
@@ -780,7 +782,7 @@ public final class SemanticCookCompanionTask
             cleanupTransferCount = cleanupInputExpected.getCount();
             return startTransfer(List.of(
                     new ContainerTransferTaskRecord.Move(
-                            0, -1, cleanupTransferCount)), Purpose.CLEAN_INPUT);
+                            0, -1, 0)), Purpose.CLEAN_INPUT);
         }
         // 当前没有完整燃料归属账；关过界面后不能排除玩家或漏斗补入同类燃料，因此不猜着取回。
         return start(new CloseMenuTaskRecord(
@@ -793,24 +795,26 @@ public final class SemanticCookCompanionTask
         phase = Phase.CLEANUP;
     }
 
-    // 收回剩余原料后，要看到原料槽清空且主背包准确增加预期数量，才继续收尾。
+    // 按实际退回量核对背包，再回到整炉账；退料期间又烧成的部分仍应作为产物回收，不能算成丢失原料。
     private TaskState verifyCleanupInput() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null || !menuMatches()) return menuLost();
         int inventoryGain = PlayerInv.buildableCount(
                 player.getInventory(), candidate.input()) - cleanupInventoryBefore;
-        if (cleanupTransferCount <= 0 || inventoryGain != cleanupTransferCount
-                || !menu.getSlot(0).getItem().isEmpty()) {
+        if (cleanupTransferCount <= 0 || inventoryGain != cleanupTransferCount) {
             outcomeUncertain = true;
             return closeWithoutClaimingContents("cooking_input_return_unverified",
                     "The input-slot return settled without the exact expected main-inventory "
                             + "gain; MaiCraft stopped before touching any remaining contents.",
                     FailureType.UNKNOWN);
         }
+        ownedInputReturned += cleanupTransferCount;
         cleanupInventoryBefore = 0;
         cleanupTransferCount = 0;
         cleanupInputExpected = ItemStack.EMPTY;
-        phase = Phase.CLEANUP;
+        cleanupSnapshotReady = false;
+        if (failureMessage != null) return closeWithoutClaimingContents(failureCode, failureMessage, failureType);
+        phase = Phase.RECONCILE;
         return TaskState.RUNNING;
     }
 
@@ -829,6 +833,7 @@ public final class SemanticCookCompanionTask
         }
         openMode = OpenMode.NEW_BATCH;
         ownedInputLoaded = 0;
+        ownedInputReturned = 0;
         ownedOutputTaken = 0;
         takeInventoryBefore = 0;
         takeSlotCount = 0;
@@ -875,6 +880,12 @@ public final class SemanticCookCompanionTask
                 rememberFailure("cooking_output_partial", "Only part of the cooked output could be collected; remaining output was left in the workstation.",
                         FailureType.NO_SPACE);
                 phase = Phase.VERIFY_OUTPUT;
+                return TaskState.RUNNING;
+            }
+            if (purpose == Purpose.CLEAN_INPUT && !uncertain(result) && confirmedSingleMove(result) > 0) {
+                cleanupTransferCount = confirmedSingleMove(result);
+                rememberFailure("cooking_input_return_partial", "Only part of the remaining input fit in the player inventory.", FailureType.NO_SPACE);
+                phase = Phase.VERIFY_CLEAN_INPUT;
                 return TaskState.RUNNING;
             }
             if (purpose == Purpose.ABANDON_CLOSE) {
@@ -976,7 +987,10 @@ public final class SemanticCookCompanionTask
                 openMode = OpenMode.RESUME_BATCH;
                 phase = Phase.WAIT_CLOSED;
             }
-            case CLEAN_INPUT -> phase = Phase.VERIFY_CLEAN_INPUT;
+            case CLEAN_INPUT -> {
+                cleanupTransferCount = confirmedSingleMove(result);
+                phase = Phase.VERIFY_CLEAN_INPUT;
+            }
             case CLOSE -> {
                 openedMenu = false;
                 ownedMenu = null;
@@ -1423,6 +1437,7 @@ public final class SemanticCookCompanionTask
         data.put("stopped_because_parent_satisfied", parentSatisfied);
         if (batchOutstanding) {
             data.put("owned_input_loaded", ownedInputLoaded);
+            data.put("owned_input_returned", ownedInputReturned);
             data.put("owned_output_taken", ownedOutputTaken);
         }
         data.put("outcome_uncertain", outcomeUncertain);

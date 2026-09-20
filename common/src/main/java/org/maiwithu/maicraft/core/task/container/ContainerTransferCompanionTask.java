@@ -306,8 +306,9 @@ public final class ContainerTransferCompanionTask
             case QUICK -> {
                 int expected = requested;
                 int actual = quick.moved();
+                int remaining = quick.remaining();
                 completeMove(actual);
-                if (actual < expected) {
+                if (actual < expected && remaining > 0) {
                     pendingFailure = "native quick move transferred " + actual + " of " + expected
                             + " items; the remaining source was left in place";
                     pendingFailureType = FailureType.NO_SPACE;

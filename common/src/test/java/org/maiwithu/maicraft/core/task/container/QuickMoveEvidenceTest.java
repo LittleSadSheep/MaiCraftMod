@@ -68,6 +68,14 @@ public final class QuickMoveEvidenceTest {
             check(evidence.observe() == MenuConfirmation.Verdict.APPLIED && evidence.moved() == 4,
                     "生产结果槽按真实背包增量记账，不能被下一件产出遮住");
             world.inventory.clearContent();
+            slots.setItem(0, new ItemStack(Items.RAW_IRON, 16));
+            var returned = new QuickMoveEvidence(world.player, menu, 0);
+            slots.setItem(0, ItemStack.EMPTY);
+            slots.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
+            world.inventory.setItem(0, new ItemStack(Items.RAW_IRON, 14));
+            check(returned.observe() == MenuConfirmation.Verdict.APPLIED && returned.moved() == 14 && returned.remaining() == 0,
+                    "退料时两份已经烧成，实际返回十四份由父炉次账继续核对");
+            world.inventory.clearContent();
             // 原版换区会先查炉子是否能处理泥土；提供真正的空配方表，不以未初始化客户端代替这项判断。
             var recipes = ClientPacketListener.class.getDeclaredField("recipeManager"); recipes.setAccessible(true);
             recipes.set(world.player.connection, new RecipeManager(RegistryAccess.EMPTY));
