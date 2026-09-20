@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
@@ -29,6 +30,7 @@ public final class AcquireGoalTest {
                 record(arguments(patch));
                 throw new AssertionError("取物入口接受了有歧义的参数: " + patch);
             } catch (IllegalArgumentException expected) { }
+            rejectsGoal(goal(arguments(patch), null));
         }
         for (int count : List.of(1, 256, 257, SemanticAcquireTaskRecord.MAX_FINAL_COUNT)) {
             var request = record(arguments("{\"count\":" + count + ",\"radius\":48,\"allow_harm\":false}"));
@@ -40,6 +42,12 @@ public final class AcquireGoalTest {
         var properties = (Map<?, ?>) new SemanticAcquireTool().parameterSchema().get("properties");
         check(((Map<?, ?>) properties.get("count")).get("maximum").equals(SemanticAcquireTaskRecord.MAX_FINAL_COUNT),
                 "工具发现与实际执行必须使用相同数量上限");
+        for (String kind : List.of("landmark", "area", "prior_result"))
+            rejectsGoal(goal(arguments("{}"), new Goal.SemanticTarget(kind, "营地", null, null)));
+        rejectsGoal(goal(arguments("{}"), new Goal.SemanticTarget("nearest", "营地", null, null)));
+        var nearby = goal(arguments("{}"), new Goal.SemanticTarget("nearest", null, null, null));
+        SemanticGoalContract.validate(nearby, Set.of(AcquireAbilityAdapter.ABILITY));
+        check(AcquireAbilityAdapter.adapt(nearby) instanceof IntentAction.Tool, "当前位置取物仍能建立内部任务");
         System.out.println("AcquireGoalTest: passed");
     }
 
@@ -52,6 +60,18 @@ public final class AcquireGoalTest {
 
     private static SemanticAcquireTaskRecord record(JsonObject arguments) {
         return SemanticAcquireApi.newRecord(new ToolContext("acquire-contract", 0), arguments, null);
+    }
+
+    private static Goal goal(JsonObject arguments, Goal.SemanticTarget target) {
+        return new Goal(AcquireAbilityAdapter.ABILITY, "取到泥土", target,
+                arguments.toString(), "{}", List.of(), List.of());
+    }
+
+    private static void rejectsGoal(Goal goal) {
+        try {
+            SemanticGoalContract.validate(goal, Set.of(AcquireAbilityAdapter.ABILITY));
+            throw new AssertionError("接单前没有拒绝有歧义的取物目标: " + goal);
+        } catch (SemanticContractException expected) { }
     }
 
     private static void check(boolean condition, String message) {

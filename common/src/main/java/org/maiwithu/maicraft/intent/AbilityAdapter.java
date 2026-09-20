@@ -68,7 +68,7 @@ final class AbilityAdapter {
             case "maicraft:light_area" -> lightArea(goal, player, runtime);
             case "maicraft:connect_mechanical_power" ->
                     connectPower(goal, player, runtime, continuationToken);
-            case "maicraft:acquire_items" -> acquire(goal);
+            case AcquireAbilityAdapter.ABILITY -> AcquireAbilityAdapter.adapt(goal);
             case WaitAbilityAdapter.ABILITY -> WaitAbilityAdapter.adapt(goal, player);
             default -> decision(goal,
                     "No semantic adapter is registered for " + goal.ability() + ". Choose explicitly.",
@@ -803,37 +803,6 @@ final class AbilityAdapter {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
         return new IntentAction.Tool("connect_mechanical_power", args.toString());
-    }
-
-    private static IntentAction acquire(Goal goal) {
-        // 可以指定某件物品、一组可替代物品或物品标签；至少要有一种选择方式，否则不知道要取什么。
-        JsonObject parameters = goal.parameters();
-        boolean hasItem = parameters.has("item_id")
-                && parameters.get("item_id").isJsonPrimitive()
-                && !parameters.get("item_id").getAsString().isBlank();
-        boolean hasAlternatives = parameters.has("item_ids")
-                && parameters.get("item_ids").isJsonArray()
-                && !parameters.getAsJsonArray("item_ids").isEmpty();
-        boolean hasTag = parameters.has("item_tag")
-                && parameters.get("item_tag").isJsonPrimitive()
-                && !parameters.get("item_tag").getAsString().isBlank();
-        boolean hasTags = parameters.has("item_tags")
-                && parameters.get("item_tags").isJsonArray()
-                && !parameters.getAsJsonArray("item_tags").isEmpty();
-        if (!hasItem && !hasAlternatives && !hasTag && !hasTags) {
-            return decision(goal, "Acquire items needs an item or semantic item tag selector.",
-                    List.of(option("retry", "Retry with item_id/item_ids or item_tag/item_tags."),
-                            option("cancel", "Cancel the task.")));
-        }
-        JsonObject args = new JsonObject();
-        for (String key : List.of(
-                "item_id", "item_ids", "item_tag", "item_tags", "count",
-                "allowed_sources", "allow_harm",
-                "protected_labels", "radius",
-                "source_hint")) {
-            if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
-        }
-        return new IntentAction.Tool("acquire_items", args.toString());
     }
 
     private static IntentAction.Decision decision(Goal goal, String question,

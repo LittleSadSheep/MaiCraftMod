@@ -63,6 +63,6 @@ plan / execute
 
 [WaitGoalTest](../../common/src/test/java/org/maiwithu/maicraft/intent/WaitGoalTest.java) 检查参数边界、最短时长之前不会提前完成、暂停后继续、昼夜和身体条件变化，以及两步等待各自记录结果。
 
-[WaitCheckpointCompatibilityTest](../../common/src/test/java/org/maiwithu/maicraft/intent/WaitCheckpointCompatibilityTest.java) 走真实检查点读写和恢复入口，检查旧计划、旧请求编号和失败历史仍在，新请求不会绕过校验，旧任务可直接取消。
+[GoalCheckpointCompatibilityTest](../../common/src/test/java/org/maiwithu/maicraft/intent/GoalCheckpointCompatibilityTest.java) 走真实检查点读写和恢复入口，检查旧计划、旧请求编号和失败历史仍在，新请求不会绕过校验，旧任务可直接取消。
 
 这两组测试接入 `:common:attentionRegression`，并随 `:common:check` 运行。

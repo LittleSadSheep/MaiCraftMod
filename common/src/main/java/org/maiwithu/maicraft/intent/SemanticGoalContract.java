@@ -18,7 +18,7 @@ final class SemanticGoalContract {
         validate(goal, knownAbilities, "goal", false);
     }
 
-    /** 旧等待参数曾被宽松接收；保留历史供查询、取消和修订，重新执行时仍须通过当前参数检查。 */
+    /** 旧等待和取物参数曾被宽松接收；保留历史供查询、取消和修订，重新执行仍须通过当前检查。 */
     static void validateRestored(Goal goal, Set<String> knownAbilities) {
         validate(goal, knownAbilities, "goal", true);
     }
@@ -36,7 +36,14 @@ final class SemanticGoalContract {
         validateProtectedLabels(goal.parameters(), path + ".parameters", ability);
         validateObjectKeys(goal.preferences(), SemanticAbilityCatalog.preferenceNames(ability),
                 path + ".preferences", ability, "unknown_preference");
-        validateTarget(goal, path, ability);
+        // 取物数量、来源与地点要求在接单前说明白，不能接管角色后再忽略或改写请求。
+        if (!restoredHistory && AcquireAbilityAdapter.ABILITY.equals(ability)) {
+            try { AcquireAbilityAdapter.validate(goal); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_acquisition_contract", path, ability, invalid.getMessage());
+            }
+        }
+        validateTarget(goal, path, ability, restoredHistory);
         validateConstraints(goal, path, ability);
         if (ChatAbilityAdapter.ABILITY.equals(ability)) {
             try { ChatMessage.parse(goal.parameters()); }
@@ -129,10 +136,13 @@ final class SemanticGoalContract {
         }
     }
 
-    private static void validateTarget(Goal goal, String path, String ability) {
+    private static void validateTarget(Goal goal, String path, String ability, boolean restoredHistory) {
         Goal.SemanticTarget target = goal.target();
         if (target == null) return;
         String kind = target.kind();
+        // 旧版声明支持这些地点却没有执行；保留原请求供审阅，重新启动时由取物适配器明确拒绝。
+        if (restoredHistory && AcquireAbilityAdapter.ABILITY.equals(ability) && kind != null
+                && Set.of("nearest", "area", "landmark", "prior_result").contains(kind)) return;
         if (kind == null || !SemanticAbilityCatalog.targetKinds(ability).contains(kind)) {
             throw violation("unsupported_target_kind", path + ".target.kind", ability,
                     ability + " does not accept target kind '" + kind + "'.");

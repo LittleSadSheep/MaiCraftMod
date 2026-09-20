@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.intent.AttentionFeedTest;
 import org.maiwithu.maicraft.intent.ChatFlowTest;
 import org.maiwithu.maicraft.intent.McpTaskLifecycleTest;
 import org.maiwithu.maicraft.intent.WaitGoalTest;
-import org.maiwithu.maicraft.intent.WaitCheckpointCompatibilityTest;
+import org.maiwithu.maicraft.intent.GoalCheckpointCompatibilityTest;
 import org.maiwithu.maicraft.intent.persistence.CheckpointCapacityTest;
 import org.maiwithu.maicraft.intent.PriorResultResolverTest;
 import org.maiwithu.maicraft.intent.SequenceSkipTest;
@@ -27,7 +27,7 @@ public final class AttentionRegressionSuite {
         // 先等足游戏时间，再根据实际条件完成目标；暂停和顺序执行都要保留这一约定。
         WaitGoalTest.main(args);
         // 新请求收紧参数时，旧等待历史仍须可读、可取消，不能堵住其余能力的检查点。
-        WaitCheckpointCompatibilityTest.main(args);
+        GoalCheckpointCompatibilityTest.main(args);
         // 任务编号和恢复记录必须完整保存，超出容量时让调用者看到明确失败。
         CheckpointCapacityTest.main(args);
         // 后续目标只能引用已确认且可区分的位置，失败和含糊结果不能生成新的移动目的地。

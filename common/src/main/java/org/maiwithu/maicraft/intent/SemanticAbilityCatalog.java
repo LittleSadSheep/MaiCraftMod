@@ -327,15 +327,16 @@ public final class SemanticAbilityCatalog {
                             field("protected_labels", "array<string>", "Remembered places whose merchants must not be selected."),
                             field("radius", "integer", "Bounded loaded-merchant search radius; default 32.")));
             case "maicraft:acquire_items" -> contract(
-                    "Make requested inventory facts true using allowed sources, stopping as soon as they are true.",
-                    targets("nearest", "area", "landmark", "prior_result"),
+                    "Make requested inventory facts true using allowed sources from the player's current location. "
+                            + "To acquire elsewhere, use a sequence with travel first; nearest accepts no label, position or relation.",
+                    targets("nearest"),
                     fields(
                             field("item_id", "resource_id", "One requested item; item_ids may express alternatives."),
                             field("item_ids", "array<resource_id>", "Acceptable alternatives, not an ordered recipe."),
                             field("item_tag", "resource_id", "A semantic item tag such as minecraft:beds or minecraft:planks; the Mod resolves live members."),
                             field("item_tags", "array<resource_id>", "Several semantic item tags combined as acceptable alternatives."),
-                            field("count", "integer", "Required final count."),
-                            field("allowed_sources", "array<string>", "Inventory, nearby, storage, craft, cook, mine, trade or hunt."),
+                            field("count", "integer", "Required final aggregate main-inventory count, from 1 to 2304; default 1."),
+                            field("allowed_sources", "array<string>", "Permitted inventory, nearby, storage, craft, cook, mine, trade or hunt sources. This is not execution order; prerequisites inherit these permissions."),
                             field("allow_harm", "boolean", "Whether acquiring may harm living entities; default false."),
                             field("protected_labels", "array<string>", "Named entities, areas or possessions that must not be touched."),
                             field("radius", "integer", "Optional bounded loaded-world evidence radius."),
