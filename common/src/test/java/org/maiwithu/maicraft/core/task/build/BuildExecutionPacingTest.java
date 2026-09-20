@@ -16,6 +16,8 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /** Bookkeeping may run together, but an unresolved native action must stop the pipeline. */
 public final class BuildExecutionPacingTest {
@@ -25,7 +27,7 @@ public final class BuildExecutionPacingTest {
         var clicks = new AtomicInteger();
         var available = new AtomicBoolean(true);
         var confirmed = new AtomicBoolean(false);
-        java.util.function.Supplier<TaskState> step = () -> {
+        Supplier<TaskState> step = () -> {
             steps.incrementAndGet();
             if (phase.get() < 2) phase.incrementAndGet();
             else if (phase.get() == 2) {
@@ -49,7 +51,7 @@ public final class BuildExecutionPacingTest {
         }, () -> true);
         check(steps.get() == 8, "phase cycling must yield under a bounded tick budget");
 
-        var clock = new java.util.concurrent.atomic.AtomicLong();
+        var clock = new AtomicLong();
         steps.set(0);
         BuildTickPipeline.advance(phase::get, () -> {
             steps.incrementAndGet(); phase.incrementAndGet(); clock.addAndGet(3_000_000);

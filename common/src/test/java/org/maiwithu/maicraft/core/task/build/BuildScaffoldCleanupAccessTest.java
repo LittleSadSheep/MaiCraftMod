@@ -19,6 +19,11 @@ import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
+import com.mojang.authlib.GameProfile;
+import java.util.UUID;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.world.level.GameType;
 
 /** 有限观察、原有保护与只点击不拆的支点例外；这里不模拟已经走到浮空支撑，也不发游戏动作。 */
 public final class BuildScaffoldCleanupAccessTest {
@@ -86,9 +91,9 @@ public final class BuildScaffoldCleanupAccessTest {
     private static void preparationAndDeadline() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             // 原版触及距离会读取玩家缓存的游戏模式，回归显式安装生存信息，不访问不存在的联网连接。
-            var info = new net.minecraft.client.multiplayer.PlayerInfo(new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "cleanup-access"), false);
-            Field cached = net.minecraft.client.player.AbstractClientPlayer.class.getDeclaredField("playerInfo"); cached.setAccessible(true); cached.set(h.player, info);
-            Field mode = net.minecraft.client.multiplayer.PlayerInfo.class.getDeclaredField("gameMode"); mode.setAccessible(true); mode.set(info, net.minecraft.world.level.GameType.SURVIVAL);
+            var info = new PlayerInfo(new GameProfile(UUID.randomUUID(), "cleanup-access"), false);
+            Field cached = AbstractClientPlayer.class.getDeclaredField("playerInfo"); cached.setAccessible(true); cached.set(h.player, info);
+            Field mode = PlayerInfo.class.getDeclaredField("gameMode"); mode.setAccessible(true); mode.set(info, GameType.SURVIVAL);
             h.position(Vec3.atBottomCenterOf(START)); var ready = new AtomicBoolean(false);
             var access = new BuildScaffoldCleanupAccess(h.player, NavGoal.exact(GOAL), ready::get, new Parent());
             check(access.tick() == BuildScaffoldCleanupAccess.Status.RUNNING && !(boolean) access.evidence().get("route_created"),

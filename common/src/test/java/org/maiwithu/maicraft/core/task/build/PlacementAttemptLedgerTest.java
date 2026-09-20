@@ -8,11 +8,13 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
 
 /** 确认真正放不成的站位会有限淘汰；换微小瞄点不重置预算，换位置或真实改变现场才有新机会。 */
 public final class PlacementAttemptLedgerTest {
     public static void main(String[] args) {
-        net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var target = target(new BlockPos(4, 1, 4));
         var other = target(new BlockPos(5, 1, 4));
         BlockPos stance = new BlockPos(3, 1, 4);

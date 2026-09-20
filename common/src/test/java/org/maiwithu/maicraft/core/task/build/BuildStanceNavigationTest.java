@@ -6,6 +6,7 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 
 /**
  * 整组站位先保高度，再试下降；之后才允许施工导航，且保持原任务的保护约束。
@@ -62,11 +63,11 @@ public final class BuildStanceNavigationTest {
         var restricted = new BuildStanceNavigation(PlayerNav.ContextProvider.DEFAULT); restricted.nextExistingPass();
         check(!restricted.allowTerrain(),
                 "the helper cannot grant construction permission its caller did not have");
-        var snapshot = org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy.capture(
+        var snapshot = EmbeddedBaritonePolicy.capture(
                 null, protectedCells, forbiddenCells, 2);
         check(snapshot.forbidsBody(100, 1, 100) && !snapshot.forbidsBody(100, 2, 100),
                 "route workers and execution share the same height floor");
-        check(!org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy.capture(null, null, null)
+        check(!EmbeddedBaritonePolicy.capture(null, null, null)
                 .forbidsBody(100, -60, 100), "other tasks retain unrestricted route heights by default");
         System.out.println("BuildStanceNavigationTest: passed");
     }

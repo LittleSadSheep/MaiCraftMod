@@ -8,10 +8,20 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
+import com.google.gson.JsonParser;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Collections;
+import java.util.TreeMap;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.blueprint.BuildProjectTargets;
 
 public final class BuildRegionsTest {
     public static void main(String[] args) throws Exception {
-        net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var targets = new LinkedHashMap<Long, BuildTaskRecord.Target>();
         for (int x = 0; x <= 6; x++) for (int z = -4; z <= 6; z++) {
             put(targets, x, 0, z); put(targets, x, 5, z);
@@ -31,7 +41,7 @@ public final class BuildRegionsTest {
         check(regions.choose(List.of(main, left, right), regions.region(main)) == regions.region(main),
                 "lower auxiliary columns cannot steal the active body's layer frontier");
         check(regions.choose(List.of(left, right), regions.region(main)) != regions.region(main), "finished bodies release the region lock");
-        var reversed = new ArrayList<>(targets.values()); java.util.Collections.reverse(reversed);
+        var reversed = new ArrayList<>(targets.values()); Collections.reverse(reversed);
         var reordered = new LinkedHashMap<Long, BuildTaskRecord.Target>(); reversed.forEach(t -> reordered.put(t.pos().asLong(), t));
         var restored = new BuildRegions(reordered);
         check(restored.region(main) == regions.region(main) && restored.region(left) == regions.region(left),
@@ -53,8 +63,8 @@ public final class BuildRegionsTest {
         var main = targets.get(BlockPos.asLong(0, 4, 5));
         var left = targets.get(BlockPos.asLong(1, 1, 1));
         var right = targets.get(BlockPos.asLong(5, 1, 1));
-        try (var h = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness()) {
-            h.inventory.setItem(0, new net.minecraft.world.item.ItemStack(Items.STONE, 64));
+        try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(0, new ItemStack(Items.STONE, 64));
             for (var target : targets.values())
                 if (grouping.region(target) == grouping.region(main) && target != main) h.set(target.pos(), target.desiredState());
             var task = new FirstPersonBuildCompanionTask(h.player,
@@ -76,11 +86,11 @@ public final class BuildRegionsTest {
         }
     }
     private static void inspectProject(String path) throws Exception {
-        var json = com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(java.nio.file.Path.of(path))).getAsJsonObject();
-        var rows = org.maiwithu.maicraft.core.blueprint.BuildProjectTargets.decode(json.getAsJsonObject("arguments").getAsJsonArray("project_targets"));
+        var json = JsonParser.parseString(Files.readString(Path.of(path))).getAsJsonObject();
+        var rows = BuildProjectTargets.decode(json.getAsJsonObject("arguments").getAsJsonArray("project_targets"));
         var targets = new LinkedHashMap<Long, BuildTaskRecord.Target>(); rows.forEach(t -> targets.put(t.pos().asLong(), t));
         var regions = new BuildRegions(targets);
-        var counts = new java.util.TreeMap<Integer, Integer>(); rows.forEach(t -> counts.merge(regions.region(t), 1, Integer::sum));
+        var counts = new TreeMap<Integer, Integer>(); rows.forEach(t -> counts.merge(regions.region(t), 1, Integer::sum));
         System.out.println("Saved project region sizes: " + counts);
     }
     private static void put(Map<Long, BuildTaskRecord.Target> targets, int x, int y, int z) {

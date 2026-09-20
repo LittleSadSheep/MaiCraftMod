@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Map;
 
 /** The production failure branch must skip every aim variant at an unreachable stance. */
 public final class BuildNavigationRetryTest {
@@ -45,7 +46,7 @@ public final class BuildNavigationRetryTest {
             BuildPlacementFootingTest.settle(h, task);
             check(invoke(task, "placeNavTick") == TaskState.RUNNING, "failed navigation should move on within the construction task");
             check(!routes.allows(stance), "one failed route must reject all aim variants sharing that stance in the current pass");
-            var diagnostic = (java.util.Map<?, ?>) task.progress().get("construction_navigation");
+            var diagnostic = (Map<?, ?>) task.progress().get("construction_navigation");
             check(diagnostic.get("route_attempts").equals(1) && diagnostic.get("failed_stances").equals(1)
                             && diagnostic.get("target_index").equals(0),
                     "live progress identifies the active target and route failures without reusing historical attempts");

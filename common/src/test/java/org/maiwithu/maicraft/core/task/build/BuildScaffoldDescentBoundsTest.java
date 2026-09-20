@@ -26,6 +26,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import sun.misc.Unsafe;
+import net.minecraft.client.player.AbstractClientPlayer;
 
 /** 原生方块外形构成的高柱夹具：验证三十二格上限、真实下层支撑和柱底地面，整个检查没有角色动作。 */
 public final class BuildScaffoldDescentBoundsTest {
@@ -107,7 +108,7 @@ public final class BuildScaffoldDescentBoundsTest {
             level.loaded = p -> p.getX() >= 0 && p.getX() < 16 && p.getZ() >= 0 && p.getZ() < 16;
             field(Level.class, "dimension").set(level, Level.OVERWORLD); field(Level.class, "isClientSide").setBoolean(level, true);
             // 客户端世界字段定义在父类，测试也按原版玩家继承关系安装真实观察视图。
-            field(Entity.class, "level").set(h.player, level); field(net.minecraft.client.player.AbstractClientPlayer.class, "clientLevel").set(h.player, level); Minecraft.getInstance().level = level;
+            field(Entity.class, "level").set(h.player, level); field(AbstractClientPlayer.class, "clientLevel").set(h.player, level); Minecraft.getInstance().level = level;
             field(Entity.class, "dimensions").set(h.player, EntityDimensions.scalable(.6F, 1.8F));
             for (int y = 1; y <= height; y++) { var pos = new BlockPos(8, y, 8); level.states.put(pos, Blocks.DIRT.defaultBlockState()); owned.put(pos, Blocks.DIRT.defaultBlockState()); }
             top = new BlockPos(8, height, 8); h.position(new Vec3(8.5, height + 1, 8.5)); h.player.setDeltaMovement(new Vec3(0, -.0784, 0));

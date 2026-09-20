@@ -15,6 +15,8 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
 
 /** Real task selection must respect supplied materials and resume retained worksite checks. */
 final class BuildWorksiteSelectionTest {
@@ -93,9 +95,9 @@ final class BuildWorksiteSelectionTest {
 
     private static void layerFrontier() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
-            var dimensions = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions");
+            var dimensions = Entity.class.getDeclaredField("dimensions");
             dimensions.setAccessible(true);
-            dimensions.set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
+            dimensions.set(h.player, EntityDimensions.scalable(.6F, 1.8F));
             h.position(new Vec3(4.5, 1, 8.5));
             h.inventory.setItem(0, new ItemStack(Items.STONE, 64));
             var low = stone(12, 1, 12);

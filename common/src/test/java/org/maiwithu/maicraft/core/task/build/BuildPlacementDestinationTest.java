@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import net.minecraft.client.player.LocalPlayer;
 
 /** The native slab replacement position is part of a placement proof, not just its block state. */
 public final class BuildPlacementDestinationTest {
@@ -76,7 +77,7 @@ public final class BuildPlacementDestinationTest {
             var candleGesture = new BuildPlacementGeometry.Gesture(h.player.blockPosition(), candlePos,
                     Direction.UP, candleHit.getLocation(), 0, 30, false, "aggregation probe");
             var prove = BuildPlacementGeometry.class.getDeclaredMethod("provesGesture",
-                    net.minecraft.client.player.LocalPlayer.class, BuildTaskRecord.Target.class,
+                    LocalPlayer.class, BuildTaskRecord.Target.class,
                     BuildPlacementGeometry.Gesture.class);
             prove.setAccessible(true);
             check(!(Boolean) prove.invoke(null, h.player, anotherCandle, candleGesture),

@@ -16,6 +16,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.task.TaskState;
+import com.mojang.authlib.GameProfile;
+import java.util.UUID;
 
 /** 验证回收队列的有界调度；模拟已确认移除仅用于阶段交接，不宣称测试执行了原生破坏。 */
 public final class BuildScaffoldCleanupScheduleTest {
@@ -78,7 +80,7 @@ public final class BuildScaffoldCleanupScheduleTest {
 
     private static InteractionWorldTestHarness world() throws Exception {
         var h = new InteractionWorldTestHarness(); h.position(new Vec3(3.5, 1, 4.5));
-        var info = new PlayerInfo(new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "cleanup-schedule"), false);
+        var info = new PlayerInfo(new GameProfile(UUID.randomUUID(), "cleanup-schedule"), false);
         field(PlayerInfo.class, "gameMode").set(info, GameType.SURVIVAL);
         field(AbstractClientPlayer.class, "playerInfo").set(h.player, info);
         field(Entity.class, "dimensions").set(h.player, EntityDimensions.scalable(.6F, 1.8F));

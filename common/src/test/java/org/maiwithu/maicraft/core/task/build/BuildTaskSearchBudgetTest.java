@@ -15,6 +15,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
 /** The production task must retain an unfinished search across ticks instead of draining or deferring it. */
 public final class BuildTaskSearchBudgetTest {
@@ -104,8 +107,8 @@ public final class BuildTaskSearchBudgetTest {
             field("gestureSearch").set(task, positive); field("gestureProgress").set(task, positiveDone);
             field("liveGestures").set(task, positive.results()); field("gestureAt").setInt(task, 1);
             var boundGesture = positive.results().getFirst();
-            var boundNavigation = org.maiwithu.maicraft.core.pathing.execute.PlayerNav.toGoal(h.player,
-                    () -> org.maiwithu.maicraft.core.pathing.calc.NavGoal.exact(boundGesture.stance()),
+            var boundNavigation = PlayerNav.toGoal(h.player,
+                    () -> NavGoal.exact(boundGesture.stance()),
                     1, () -> false, task);
             field("gesture").set(task, boundGesture); field("nav").set(task, boundNavigation);
             var routes = (BuildStanceNavigation) field("stanceNavigation").get(task);
@@ -137,8 +140,8 @@ public final class BuildTaskSearchBudgetTest {
     }
     private static void exhaustedEdgeSearch(Object task, BuildTaskRecord.Target target) throws Exception {
         // 本测试从贴边机会已排除后的完整站位枚举开始，专查旧搜索的逐刻预算；真实贴边路径另由外檐回归覆盖。
-        var drive = new BuildPlacementAccessDrive((net.minecraft.client.player.LocalPlayer) field("player").get(task), target,
-                org.maiwithu.maicraft.core.pathing.execute.PlayerNav.ContextProvider.DEFAULT, () -> true,
+        var drive = new BuildPlacementAccessDrive((LocalPlayer) field("player").get(task), target,
+                PlayerNav.ContextProvider.DEFAULT, () -> true,
                 null, () -> BuildPlacementAccessDrive.Status.UNAVAILABLE);
         var status = BuildPlacementAccessDrive.class.getDeclaredField("status"); status.setAccessible(true);
         status.set(drive, BuildPlacementAccessDrive.Status.UNAVAILABLE);

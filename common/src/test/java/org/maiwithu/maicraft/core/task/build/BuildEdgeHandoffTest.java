@@ -17,6 +17,9 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.client.actor.BodyControlPort;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /** 将边缘动作接入真正施工入口，验证旧放法、外界完成、暂停恢复和锚点取物的顺序。 */
 public final class BuildEdgeHandoffTest {
@@ -78,7 +81,7 @@ public final class BuildEdgeHandoffTest {
     }
     private static void footingWaitKeepsEdgeSneakAndPropagatesFailure() throws Exception {
         for (String entry : List.of("selectItemTick", "aimTick", "refreshPlacementFooting")) try (var h = fixture()) {
-            h.inventory.setItem(0, new net.minecraft.world.item.ItemStack(Items.STONE));
+            h.inventory.setItem(0, new ItemStack(Items.STONE));
             var target = target();
             var task = new FirstPersonBuildCompanionTask(h.player,
                     new BuildTaskRecord("edge-footing-wait", 1000, List.of(target), false));
@@ -94,8 +97,8 @@ public final class BuildEdgeHandoffTest {
             for (int tick = 0; tick < 2; tick++) {
                 h.nextTick();
                 check(call.invoke(task) == TaskState.RUNNING, "尚未落稳时保留等待或檐边控制");
-                var body = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(h.player).body();
-                var movement = (org.maiwithu.maicraft.client.actor.BodyControlPort.Movement) field(body, "movement").get(body);
+                var body = ClientRuntime.requireContext(h.player).body();
+                var movement = (BodyControlPort.Movement) field(body, "movement").get(body);
                 check(movement.sneaking() && !movement.jumping() && h.blockUses() == 0,
                         entry + " 等待不能用普通 halt 抹掉檐边 Shift，也不能提前点击");
             }

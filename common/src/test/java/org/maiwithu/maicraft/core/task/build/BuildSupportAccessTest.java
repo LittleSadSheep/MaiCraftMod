@@ -18,6 +18,11 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /** A support is useful only if the projected target retains a reachable, real-shaped click face. */
 public final class BuildSupportAccessTest {
@@ -150,8 +155,8 @@ public final class BuildSupportAccessTest {
     private static InteractionWorldTestHarness world() throws Exception {
         var h = new InteractionWorldTestHarness();
         h.player.setDeltaMovement(Vec3.ZERO);
-        var dimensions = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
-        dimensions.set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
+        var dimensions = Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
+        dimensions.set(h.player, EntityDimensions.scalable(.6F, 1.8F));
         return h;
     }
 
@@ -166,14 +171,14 @@ public final class BuildSupportAccessTest {
             check(BuildPlacementGeometry.projectedGestureFrom(h.player, slab, projected, h.level::isLoaded,
                     h.player.position()) == null, "existing slabs retain native merge destinations in projected checks");
             var north = Blocks.RED_BED.defaultBlockState().setValue(
-                    net.minecraft.world.level.block.state.properties.BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH);
+                    BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH);
             var bed = new BuildTaskRecord.Target(north, Items.RED_BED, new BlockPos(8, 2, 8), "bed", null, null, null);
             var stage = new BuildPlacementStage(projected, h.level::isLoaded, Map.of(), bed, false, true);
-            var method = BuildPlacementGeometry.class.getDeclaredMethod("projectedPlacementClear", net.minecraft.client.player.LocalPlayer.class,
-                    BuildTaskRecord.Target.class, BuildPlacementStage.class, Vec3.class, net.minecraft.world.level.block.state.BlockState.class);
+            var method = BuildPlacementGeometry.class.getDeclaredMethod("projectedPlacementClear", LocalPlayer.class,
+                    BuildTaskRecord.Target.class, BuildPlacementStage.class, Vec3.class, BlockState.class);
             method.setAccessible(true);
             check(!(boolean) method.invoke(null, h.player, bed, stage, h.player.position(), north.setValue(
-                    net.minecraft.world.level.block.state.properties.BlockStateProperties.HORIZONTAL_FACING, Direction.EAST)),
+                    BlockStateProperties.HORIZONTAL_FACING, Direction.EAST)),
                     "a projected bed may not put its generated head outside the declared footprint");
         }
     }

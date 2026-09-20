@@ -16,6 +16,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.ArrayList;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.SlabType;
 
 /** Exercise actual AIM rejection across actor ticks when native ray and synthetic geometry disagree. */
 public final class BuildAimRetryTest {
@@ -63,8 +66,8 @@ public final class BuildAimRetryTest {
             check(attempts.rejectedCount(target) == 0, "finished targets release their history");
 
             var slabState = Blocks.STONE_SLAB.defaultBlockState().setValue(
-                    net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE,
-                    net.minecraft.world.level.block.state.properties.SlabType.DOUBLE);
+                    BlockStateProperties.SLAB_TYPE,
+                    SlabType.DOUBLE);
             var doubleSlab = new BuildTaskRecord.Target(slabState, Items.STONE_SLAB,
                     target.pos(), "finish both uses", null, null, null);
             var other = new BuildTaskRecord.Target(Blocks.STONE, Items.STONE,
@@ -73,7 +76,7 @@ public final class BuildAimRetryTest {
                     new BuildTaskRecord("multi-use", 1000, List.of(doubleSlab, other), false));
             Object active = cell.newInstance(doubleSlab, List.of()), later = cell.newInstance(other, List.of());
             field("cell").set(partial, active);
-            field("queue").set(partial, new java.util.ArrayList<>(List.of(active, later)));
+            field("queue").set(partial, new ArrayList<>(List.of(active, later)));
             field("useCount").setInt(partial, 1);
             h.set(target.pos(), Blocks.STONE_SLAB.defaultBlockState());
             h.position(new Vec3(3.12, 1, 4.8));

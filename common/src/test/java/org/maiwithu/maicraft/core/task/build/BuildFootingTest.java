@@ -12,11 +12,22 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import java.util.ArrayList;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
+import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
+import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 
 public final class BuildFootingTest {
     public static void main(String[] args) throws Exception {
-        net.minecraft.SharedConstants.tryDetectVersion();
-        net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
         turnsAlongExistingWall();
         climbsPermanentStepBeforeOverheadPlacement();
         keepsAdjacentWallWorkAheadOfDistantCorners();
@@ -38,8 +49,8 @@ public final class BuildFootingTest {
             // 检查真实转角和脚下支撑，不能用每格一个节点的旧数量要求阻止连续走完整段墙顶。
             check(site.route().contains(new Vec3(7.5, 3, 3.5)) && site.route().stream().allMatch(p -> p.y >= 3),
                     "the worksite retains the supported wall corner without descending");
-            var corridor = new org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor(h.level, h.level::isLoaded,
-                    .6, 1.8, LongSets.emptySet(), org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY);
+            var corridor = new GroundCorridor(h.level, h.level::isLoaded,
+                    .6, 1.8, LongSets.emptySet(), PhysicalObstacleSnapshot.EMPTY);
             check(!corridor.clear(site.route().getFirst(), site.route().getLast()), "the diagonal shortcut crosses unsupported air");
             for (int at = 1; at < site.route().size(); at++) check(corridor.clear(site.route().get(at - 1), site.route().get(at)),
                     "each retained route segment stays on the actual wall top");
@@ -64,7 +75,7 @@ public final class BuildFootingTest {
             var type = Class.forName(FirstPersonBuildCompanionTask.class.getName() + "$CellPlan");
             var constructor = type.getDeclaredConstructor(BuildTaskRecord.Target.class, List.class); constructor.setAccessible(true);
             Object cell = constructor.newInstance(target, List.of());
-            field("cell").set(task, cell); field("queue").set(task, new java.util.ArrayList<>(List.of(cell)));
+            field("cell").set(task, cell); field("queue").set(task, new ArrayList<>(List.of(cell)));
             // 先站稳才比较登高与原地放置，不能把尚未建立的身体证据当成选站位失败。
             BuildPlacementFootingTest.settle(h, task);
             invoke(task, "placeNavTick");
@@ -86,18 +97,18 @@ public final class BuildFootingTest {
         try (var h = world()) {
             h.position(new Vec3(3.5, 2, 4.5));
             BlockPos lower = new BlockPos(4, 1, 4);
-            var view = new net.minecraft.world.level.BlockGetter() {
-                public net.minecraft.world.level.block.state.BlockState getBlockState(BlockPos pos) {
+            var view = new BlockGetter() {
+                public BlockState getBlockState(BlockPos pos) {
                     return (pos.getY() == 0 || pos.getY() == 1 && !pos.equals(lower)
                             ? Blocks.STONE : Blocks.AIR).defaultBlockState();
                 }
-                public net.minecraft.world.level.material.FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
-                public net.minecraft.world.level.block.entity.BlockEntity getBlockEntity(BlockPos pos) { return null; }
+                public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
+                public BlockEntity getBlockEntity(BlockPos pos) { return null; }
                 public int getHeight() { return 16; }
                 public int getMinBuildHeight() { return 0; }
             };
             var walking = new BuildSupportWalking(view, pos -> true, .6, 1.8, LongSets.emptySet(),
-                    org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY);
+                    PhysicalObstacleSnapshot.EMPTY);
             check(walking.edge(h.player.position(), Vec3.atBottomCenterOf(lower)),
                     "the adjacent one-block descent has an actually clear, supported route");
             var search = new BuildFootingSearch(h.player, List.of(stone(4, 1, 4)), LongSets.emptySet());
@@ -121,8 +132,8 @@ public final class BuildFootingTest {
     }
     private static InteractionWorldTestHarness world() throws Exception {
         var h = new InteractionWorldTestHarness();
-        var dimensions = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
-        dimensions.set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
+        var dimensions = Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
+        dimensions.set(h.player, EntityDimensions.scalable(.6F, 1.8F));
         return h;
     }
     private static BuildTaskRecord.Target stone(int x, int y, int z) {

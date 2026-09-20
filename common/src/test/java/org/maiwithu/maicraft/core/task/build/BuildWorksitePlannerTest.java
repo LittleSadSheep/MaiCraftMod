@@ -16,6 +16,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
 
 /** Native world geometry: coverage, blocked views, exact facing and conservative walking support. */
 public final class BuildWorksitePlannerTest {
@@ -93,9 +95,9 @@ public final class BuildWorksitePlannerTest {
                 LongSets.emptySet(), rejected, (t, g) -> true);
     }
     private static void dimensions(InteractionWorldTestHarness h) throws Exception {
-        var field = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions");
+        var field = Entity.class.getDeclaredField("dimensions");
         field.setAccessible(true);
-        field.set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
+        field.set(h.player, EntityDimensions.scalable(.6F, 1.8F));
     }
     private static BuildWorksitePlanner.Progress finish(BuildWorksitePlanner.Search search) {
         for (int tick = 0; tick < 10_000; tick++) {

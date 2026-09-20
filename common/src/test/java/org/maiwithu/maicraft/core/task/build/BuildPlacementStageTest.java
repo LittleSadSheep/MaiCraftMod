@@ -15,6 +15,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /** An 18-cube machine is assembled from the bottom up; its future roof cannot seal today's workspace. */
 public final class BuildPlacementStageTest {
@@ -62,7 +63,7 @@ public final class BuildPlacementStageTest {
         check(!stage.rayClear(new Vec3(.5, 65.25, .5), new Vec3(3.1, 65.25, .5), clicked),
                 "the same slab still blocks a ray through its solid half");
         world.cells.put(slab, Blocks.OAK_STAIRS.defaultBlockState().setValue(
-                net.minecraft.world.level.block.state.properties.BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH));
+                BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH));
         check(stage.rayClear(new Vec3(.5, 65.75, .25), new Vec3(3.1, 65.75, .25), clicked),
                 "a ray through the low side of stairs is not blocked by the whole cell");
         world.cells.put(slab, Blocks.STONE.defaultBlockState());

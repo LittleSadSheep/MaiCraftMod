@@ -15,6 +15,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import net.minecraft.world.entity.Entity;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
 /** 用真实施工入口复现半空候选被抢用和落地后木桶朝向改变，不能只测镜头角度。 */
 public final class BuildPlacementFootingTest {
@@ -44,7 +46,7 @@ public final class BuildPlacementFootingTest {
             var task = task(h, target);
             // 导航自身的到站条件也不能只认半空跨入目标格，否则会在施工接管前先把登阶输入撤掉。
             var reached = task.getClass().getDeclaredMethod("placementStanceReached", BlockPos.class); reached.setAccessible(true);
-            check(!(boolean) reached.invoke(task, org.maiwithu.maicraft.core.pathing.execute.PlayerNav.playerFeet(h.player)),
+            check(!(boolean) reached.invoke(task, PlayerNav.playerFeet(h.player)),
                     "半空脚格相同仍不能向导航报告已到站");
             var candidate = BuildPlacementGeometry.currentGesture(h.player, target, Map.of());
             check(candidate != null, "纯几何仍能描述腾空时看得见的候选，不添加全局落地限制");
@@ -56,7 +58,7 @@ public final class BuildPlacementFootingTest {
             check(!field(task, "phase").get(task).toString().equals("AIM") && h.blockUses() == 0,
                     "意外进入选物阶段也必须先落地，不能直接转头点击");
             h.position(new Vec3(3.12, 1, 4.8)); grounded(h, true);
-            check((boolean) reached.invoke(task, org.maiwithu.maicraft.core.pathing.execute.PlayerNav.playerFeet(h.player)),
+            check((boolean) reached.invoke(task, PlayerNav.playerFeet(h.player)),
                     "真实落地且脚格相同后允许导航结算到站");
             for (int i = 0; i < 3; i++) { h.nextTick(); invoke(task, "selectItemTick"); }
             check(field(task, "phase").get(task).toString().equals("AIM"), "落稳后从真实脚位重证并进入瞄准");
@@ -89,7 +91,7 @@ public final class BuildPlacementFootingTest {
 
     // 测试角色没有完整游戏物理循环，沿用夹具的实体字段观测方式提供落地样本，避免触发未初始化的支撑查询。
     static void grounded(InteractionWorldTestHarness h, boolean value) throws Exception {
-        var field = net.minecraft.world.entity.Entity.class.getDeclaredField("onGround");
+        var field = Entity.class.getDeclaredField("onGround");
         field.setAccessible(true); field.setBoolean(h.player, value);
     }
 

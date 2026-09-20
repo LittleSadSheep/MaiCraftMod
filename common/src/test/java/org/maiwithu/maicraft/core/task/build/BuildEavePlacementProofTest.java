@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import sun.misc.Unsafe;
+import net.minecraft.core.Direction;
 
 /** 按实机原坐标重建外檐：先证明现有石英顶可直接潜行扩檐，再检查每块垫块只能依赖已成立的前缀。 */
 public final class BuildEavePlacementProofTest {
@@ -57,7 +58,7 @@ public final class BuildEavePlacementProofTest {
             var access = search.access();
             check(access.edge() && access.gesture().sneak() && access.feet().y == 76 && access.feet().z > 9,
                     "the useful stance retains continuous outward position and native crouching eye height");
-            check(access.gesture().clicked().equals(QUARTZ.north()) && access.gesture().face() == net.minecraft.core.Direction.SOUTH,
+            check(access.gesture().clicked().equals(QUARTZ.north()) && access.gesture().face() == Direction.SOUTH,
                     "direct extension clicks the existing north quartz block's actual south face");
             // 除了计划标签，还让原生外形射线验证首先命中该侧面，防止从顶面背后“点穿”同一个支撑方块。
             Vec3 eye = access.feet().add(0, f.h.player.getEyeHeight(Pose.CROUCHING), 0);

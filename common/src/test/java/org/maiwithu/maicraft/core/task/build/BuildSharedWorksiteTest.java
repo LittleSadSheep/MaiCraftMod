@@ -12,13 +12,17 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** Plan access for a wall batch instead of navigating to hundreds of floating stances. */
 public final class BuildSharedWorksiteTest {
     public static void main(String[] args) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
-            var dimensions = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
-            dimensions.set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
+            var dimensions = Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
+            dimensions.set(h.player, EntityDimensions.scalable(.6F, 1.8F));
             h.position(new Vec3(3.5, 1, 8.5));
             var targets = new ArrayList<BuildTaskRecord.Target>();
             for (int z = 6; z <= 10; z++) {
@@ -61,9 +65,9 @@ public final class BuildSharedWorksiteTest {
     }
     private static void boundedRoutesRetainSupportFallback() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
-            var dimensions = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
-            dimensions.set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
-            h.inventory.setItem(0,new net.minecraft.world.item.ItemStack(Items.COBBLESTONE,32));
+            var dimensions = Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
+            dimensions.set(h.player, EntityDimensions.scalable(.6F, 1.8F));
+            h.inventory.setItem(0,new ItemStack(Items.COBBLESTONE,32));
             var target=new BuildTaskRecord.Target(Blocks.STONE,Items.STONE,new BlockPos(8,4,8),"floating course",null,null,null);
             var task=new FirstPersonBuildCompanionTask(h.player,new BuildTaskRecord("support-fallback",1000,List.of(target),false,false));
             var type=Class.forName(FirstPersonBuildCompanionTask.class.getName()+"$CellPlan");
@@ -73,7 +77,7 @@ public final class BuildSharedWorksiteTest {
             var advance=FirstPersonBuildCompanionTask.class.getDeclaredMethod("nextWorksitePass",String.class);advance.setAccessible(true);
             Object state=advance.invoke(task,"bounded shared routes exhausted");
             // 当前身体离浮空工程较远，支撑回退先到施工区域；之后仍须经过独立的完整放置证明。
-            check(state==org.maiwithu.maicraft.task.TaskState.RUNNING&&field(task,"phase").get(task).toString().equals("SUPPORT_APPROACH"),
+            check(state==TaskState.RUNNING&&field(task,"phase").get(task).toString().equals("SUPPORT_APPROACH"),
                     "four failed route attempts retain the support fallback, beginning with its remote approach");
             check(h.blockUses()==0&&h.itemUses()==0,"support fallback must be proved before placing anything");
         }

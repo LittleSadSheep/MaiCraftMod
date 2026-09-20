@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.task.inventory.EatCompanionTask;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 
 /** 吃饭前后只认观察到的扣物与饥饿变化；夹具模拟回执，不把模拟吃饭当作真人持用证据。 */
 public final class BuildFoodPreparationTest {
@@ -108,7 +109,7 @@ public final class BuildFoodPreparationTest {
             for (int i = 0; i < 6; i++) { h.nextTick(); check(!prep.shouldPrepare(h.player), "already-fed moderate injury must not repeatedly consume bread"); }
         }
         try (var h = new InteractionWorldTestHarness()) {
-            h.player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH).setBaseValue(40);
+            h.player.getAttribute(Attributes.MAX_HEALTH).setBaseValue(40);
             h.player.setHealth(30); h.player.getFoodData().setFoodLevel(17);
             var prep = new BuildFoodPreparation((p, r) -> { throw new AssertionError("no food may be invented"); });
             check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED

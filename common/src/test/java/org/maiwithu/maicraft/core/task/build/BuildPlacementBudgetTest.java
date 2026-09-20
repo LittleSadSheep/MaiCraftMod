@@ -12,6 +12,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.world.phys.Vec3;
 
 /** Native placement enumeration yields inside a failed target instead of freezing a whole client tick. */
 public final class BuildPlacementBudgetTest {
@@ -50,11 +52,11 @@ public final class BuildPlacementBudgetTest {
 
             BlockPos stance = pos.west();
             var target = new BuildTaskRecord.Target(Blocks.STONE, Items.STONE, pos, "supported block", null, null, null);
-            h.position(new net.minecraft.world.phys.Vec3(6.5, 1, 8.5));
+            h.position(new Vec3(6.5, 1, 8.5));
             reads = h.level.blockReads;
             var accepted = BuildPlacementGeometry.currentGesture(h.player, target, Map.of());
             int acceptedReads = h.level.blockReads - reads;
-            var deniedPoints = new java.util.concurrent.atomic.AtomicInteger();
+            var deniedPoints = new AtomicInteger();
             reads = h.level.blockReads;
             var denied = BuildPlacementGeometry.currentGesture(h.player, target, Map.of(), g -> {
                 deniedPoints.incrementAndGet(); return false;

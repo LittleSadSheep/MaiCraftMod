@@ -20,6 +20,8 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.blueprint.BuildProjectScaffolds;
 import org.maiwithu.maicraft.core.blueprint.BuildProjectStore;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 /** 用明确模拟的原生确认事件检查磁盘恢复；不依据世界中的其他泥土推断所有权，也不实际执行施工。 */
 public final class BuildProjectScaffoldPersistenceTest {
@@ -74,7 +76,7 @@ public final class BuildProjectScaffoldPersistenceTest {
             check(f.store.load(f.id, DIMENSION).has("project_targets") && !f.store.load(f.id, DIMENSION).has("confirmed_scaffolds"),
                     "普通项目读取仍只返回原施工参数，支撑侧账不会冒充第二份蓝图");
             rejects(() -> f.store.load(f.id + ".scaffolds", DIMENSION));
-            check(Files.exists(f.sidecar()) && java.util.Arrays.equals(frozen, Files.readAllBytes(f.project()))
+            check(Files.exists(f.sidecar()) && Arrays.equals(frozen, Files.readAllBytes(f.project()))
                     && frozenTime.equals(Files.getLastModifiedTime(f.project())), "更新小支撑账不会重写数千格冻结目标文件");
             var restarted = f.plan(); new BuildProjectStore(new StateIdentity(WORLD, f.directory)).bindScaffolds(restarted, h.level);
             check(restarted.scaffoldLedger().snapshot().equals(original.scaffoldLedger().snapshot()), "新存储实例和新任务恢复同样的原生支撑所有权");
@@ -93,18 +95,18 @@ public final class BuildProjectScaffoldPersistenceTest {
             byte[] recorded = Files.readAllBytes(f.sidecar());
             for (BlockState replacement : List.of(Blocks.STONE.defaultBlockState(), Blocks.CHEST.defaultBlockState())) {
                 h.set(SUPPORT, replacement); var restored = f.plan(); rejects(() -> f.store.bindScaffolds(restored, h.level));
-                check(restored.scaffoldLedger().isEmpty() && java.util.Arrays.equals(recorded, Files.readAllBytes(f.sidecar())),
+                check(restored.scaffoldLedger().isEmpty() && Arrays.equals(recorded, Files.readAllBytes(f.sidecar())),
                         "记录位置被替换或变成容器时拒绝恢复，不能把无法核验的账覆盖为空");
             }
             h.set(SUPPORT, LOG);
             for (String key : List.of("world_key", "project_id", "dimension", "evidence")) {
-                JsonObject altered = JsonParser.parseString(new String(recorded, java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+                JsonObject altered = JsonParser.parseString(new String(recorded, StandardCharsets.UTF_8)).getAsJsonObject();
                 altered.addProperty(key, "foreign"); Files.writeString(f.sidecar(), altered.toString());
                 byte[] corrupt = Files.readAllBytes(f.sidecar()); rejects(() -> f.store.bindScaffolds(f.plan(), h.level));
-                check(java.util.Arrays.equals(corrupt, Files.readAllBytes(f.sidecar())), "不同世界、项目、维度或非原生证据不被接纳也不被覆盖");
+                check(Arrays.equals(corrupt, Files.readAllBytes(f.sidecar())), "不同世界、项目、维度或非原生证据不被接纳也不被覆盖");
             }
             // 构造未加载位置，夹具禁止越界读取；恢复应在读取方块之前拒绝，不能强行加载区块。
-            JsonObject unloaded = JsonParser.parseString(new String(recorded, java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+            JsonObject unloaded = JsonParser.parseString(new String(recorded, StandardCharsets.UTF_8)).getAsJsonObject();
             unloaded.getAsJsonArray("confirmed_scaffolds").get(0).getAsJsonObject().addProperty("x", 32);
             Files.writeString(f.sidecar(), unloaded.toString()); rejects(() -> f.store.bindScaffolds(f.plan(), h.level));
             check(Files.readString(f.sidecar()).equals(unloaded.toString()), "未加载记录保留原状，不悄悄当成已移除");

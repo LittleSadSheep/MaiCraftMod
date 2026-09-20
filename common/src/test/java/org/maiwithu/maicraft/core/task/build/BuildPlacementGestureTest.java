@@ -12,15 +12,18 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
+import java.util.Set;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /** Real native outlines and placement states, using an inert client world without a game window. */
 public final class BuildPlacementGestureTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        for (var plain : new net.minecraft.world.level.block.Block[]{Blocks.OAK_LOG, Blocks.OAK_PLANKS, Blocks.STONE})
+        for (var plain : new Block[]{Blocks.OAK_LOG, Blocks.OAK_PLANKS, Blocks.STONE})
             check(!BuildPlacementInteraction.requiresSneak(plain.defaultBlockState()),
                     "ordinary construction blocks must not force a crouch on every click: " + plain);
-        for (var interactive : new net.minecraft.world.level.block.Block[]{Blocks.CRAFTING_TABLE, Blocks.CHEST,
+        for (var interactive : new Block[]{Blocks.CRAFTING_TABLE, Blocks.CHEST,
                 Blocks.OAK_DOOR, Blocks.NOTE_BLOCK})
             check(BuildPlacementInteraction.requiresSneak(interactive.defaultBlockState()),
                     "native interaction overrides must retain secondary use: " + interactive);
@@ -58,9 +61,9 @@ public final class BuildPlacementGestureTest {
                     "slab gesture must be a real outline ray hit");
 
             var charged = Blocks.RESPAWN_ANCHOR.defaultBlockState().setValue(
-                    net.minecraft.world.level.block.state.properties.BlockStateProperties.RESPAWN_ANCHOR_CHARGES, 4);
+                    BlockStateProperties.RESPAWN_ANCHOR_CHARGES, 4);
             var exact = new BuildTaskRecord.Target(charged, Items.RESPAWN_ANCHOR,
-                    at, "exact native state", null, null, null, false, java.util.Set.of("charges"), true);
+                    at, "exact native state", null, null, null, false, Set.of("charges"), true);
             check(BuildPlacementGeometry.currentGesture(h.player, exact, Map.of()) == null,
                     "current-position shortcut must not certify a state a native item use cannot produce");
 

@@ -19,6 +19,12 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.SlabType;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
 /**
  * 检查木门两半的可修复条件、服务器确认、先施工后调整的顺序，以及多次放置不会提前结束；交互使用测试替身，未覆盖原版对副手的真实分发条件。
@@ -160,9 +166,9 @@ public final class BuildDoorStateRepairTest {
         }
         try (var h = new InteractionWorldTestHarness()) {
             pair(h, Blocks.OAK_DOOR.defaultBlockState());
-            var chunk = h.level.getChunkSource().getChunk(0, 0, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false);
-            setField(net.minecraft.world.level.chunk.LevelChunk.class, "level", chunk, h.level);
-            setField(net.minecraft.world.level.chunk.ChunkAccess.class, "levelHeightAccessor", chunk, h.level);
+            var chunk = h.level.getChunkSource().getChunk(0, 0, ChunkStatus.FULL, false);
+            setField(LevelChunk.class, "level", chunk, h.level);
+            setField(ChunkAccess.class, "levelHeightAccessor", chunk, h.level);
             var task = new FirstPersonBuildCompanionTask(h.player, modelRecord(true));
             check(invoke(task, "preflightTick") == TaskState.FAILED
                             && field(task, "failureCode").equals("blocked_site_cells"),
@@ -178,14 +184,14 @@ public final class BuildDoorStateRepairTest {
                 Map.of(DOOR.asLong(), Blocks.AIR.defaultBlockState(), DOOR.above().asLong(), Blocks.AIR.defaultBlockState()), CLOSED);
         check(confirmation.observe(pos -> true, pos -> pos.equals(DOOR) ? CLOSED
                         : CLOSED.setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER), true)
-                        == org.maiwithu.maicraft.client.actor.NativeConfirmation.Verdict.APPLIED,
+                        == NativeConfirmation.Verdict.APPLIED,
                 "normal closed-door placement is acknowledged before an important final OPEN=true adjustment");
     }
 
     private static void activeMultiUsePlacement() throws Exception {
         var bottom = Blocks.OAK_SLAB.defaultBlockState();
-        var full = bottom.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE,
-                net.minecraft.world.level.block.state.properties.SlabType.DOUBLE);
+        var full = bottom.setValue(BlockStateProperties.SLAB_TYPE,
+                SlabType.DOUBLE);
         var target = new BuildTaskRecord.Target(full, Items.OAK_SLAB, DOOR, "double slab", null, null, null,
                 false, Set.of("type"), true, Set.of("type"));
         check(BuildPlacementGeometry.isProgress(target, Blocks.AIR.defaultBlockState(), bottom), "first authored slab half is valid progress");
@@ -202,7 +208,7 @@ public final class BuildDoorStateRepairTest {
             h.set(DOOR, full);
             check((boolean) invoke(task, "currentPlacementComplete"), "completed active quantity may advance");
         }
-        var layers = net.minecraft.world.level.block.state.properties.BlockStateProperties.LAYERS;
+        var layers = BlockStateProperties.LAYERS;
         var snow = new BuildTaskRecord.Target(Blocks.SNOW.defaultBlockState().setValue(layers, 3), Items.SNOW, DOOR,
                 "snow layers", null, null, null, false, Set.of("layers"), true, Set.of("layers"));
         check(BuildPlacementGeometry.isProgress(snow, Blocks.AIR.defaultBlockState(), Blocks.SNOW.defaultBlockState())

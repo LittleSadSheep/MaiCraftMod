@@ -11,6 +11,12 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.task.TaskState;
+import com.mojang.authlib.GameProfile;
+import java.util.UUID;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Pose;
 
 /** Cleanup's ownership and safety gates run before any native dig can be submitted. */
 public final class BuildScaffoldCleanupGuardTest {
@@ -19,13 +25,13 @@ public final class BuildScaffoldCleanupGuardTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         try (var h = new InteractionWorldTestHarness()) {
-            var info = new net.minecraft.client.multiplayer.PlayerInfo(
-                    new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "cleanup-guard"), false);
-            var cachedInfo = net.minecraft.client.player.AbstractClientPlayer.class.getDeclaredField("playerInfo");
+            var info = new PlayerInfo(
+                    new GameProfile(UUID.randomUUID(), "cleanup-guard"), false);
+            var cachedInfo = AbstractClientPlayer.class.getDeclaredField("playerInfo");
             cachedInfo.setAccessible(true); cachedInfo.set(h.player, info);
-            var dimensions = net.minecraft.world.entity.Entity.class.getDeclaredField("dimensions");
+            var dimensions = Entity.class.getDeclaredField("dimensions");
             dimensions.setAccessible(true);
-            dimensions.set(h.player, h.player.getDimensions(net.minecraft.world.entity.Pose.STANDING));
+            dimensions.set(h.player, h.player.getDimensions(Pose.STANDING));
             h.set(TARGET, Blocks.COBBLESTONE.defaultBlockState());
             var unowned = task(h, false, true);
             check(tick(unowned, "scaffoldBreakTick") == TaskState.FAILED, "a bare attempted coordinate grants no ownership");
