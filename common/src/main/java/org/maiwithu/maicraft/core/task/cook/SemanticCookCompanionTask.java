@@ -23,9 +23,13 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.actor.MenuSynchronization;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
@@ -35,7 +39,6 @@ import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.FuelChoice;
 import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.ResolvedCandidate;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.task.menu.CloseMenuTaskRecord;
-import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -51,13 +54,13 @@ public final class SemanticCookCompanionTask
         extends AbstractCompanionTask<SemanticCookTaskRecord> {
     /** 炉子进度确实变化时续上无进展期限，不能让仍在正常加工的多炉目标被最初总时长截断。 */
     private static final long COOK_PROGRESS_LEASE_TICKS = 30L * 20L;
-    private enum Phase { RESOLVE, PREPARE, OPEN, WAIT_MENU, VALIDATE, LOAD_INPUT,
+    private enum Phase { RESOLVE, PREPARE, APPROACH, OPEN, WAIT_MENU, VALIDATE, LOAD_INPUT,
         LOAD_FUEL, CONFIRM_START, CLOSE_WAIT, WAIT_CLOSED, RECONCILE,
         VERIFY_OUTPUT, VERIFY_CLEAN_INPUT, CLEANUP, COMPLETE }
     private enum OpenMode { NEW_BATCH, RESUME_BATCH }
     private enum Purpose { ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION, PLACE_STATION,
-        MOVE_STATION, OPEN_STATION, LOAD_INPUT, LOAD_FUEL, TAKE_OUTPUT,
-        CLOSE_WAIT, CLEAN_INPUT, CLOSE, ABANDON_CLOSE }
+        OPEN_STATION, LOAD_INPUT, LOAD_FUEL, TAKE_OUTPUT,
+        CLOSE_WAIT, CLEAN_INPUT, CLOSE, ABANDON_CLOSE, CLOSE_REJECTED }
     private Phase phase = Phase.RESOLVE;
     private CookingRecipe candidate;
     private Item fuel;
@@ -75,7 +78,6 @@ public final class SemanticCookCompanionTask
     private boolean finishRequested;
     private boolean parentSatisfied;
     private OpenMode openMode = OpenMode.NEW_BATCH;
-    private BlockPos stationReturnStance;
     private long nextCookCheckTick;
     private long closedWaitStartedTick;
     // 本批装入多少原料、已经取回多少成品，单独记账；背包目标总数还包含开工前已有的物品。
@@ -94,6 +96,9 @@ public final class SemanticCookCompanionTask
     private String lastCookEvidence = "";
     private BlockPos openAttemptStation;
     private int openAttempts;
+    private int stationArrivalWait;
+    private final Set<BlockPos> rejectedStations = new LinkedHashSet<>();
+    private final List<Map<String, Object>> stationAttempts = new ArrayList<>();
     private Task activeChild;
     private TaskRecord activeRecord;
     private Purpose activePurpose;
@@ -146,6 +151,7 @@ public final class SemanticCookCompanionTask
         return switch (phase) {
             case RESOLVE -> resolve();
             case PREPARE -> prepare();
+            case APPROACH -> approachStation();
             case OPEN -> openStation();
             case WAIT_MENU -> waitMenu();
             case VALIDATE -> validateMenu();
@@ -181,7 +187,7 @@ public final class SemanticCookCompanionTask
             nextCookCheckTick = player.level().getGameTime();
             return;
         }
-        if (phase == Phase.OPEN || phase == Phase.WAIT_MENU) {
+        if (phase == Phase.OPEN || phase == Phase.WAIT_MENU || phase == Phase.APPROACH) {
             return;
         }
         openMode = OpenMode.RESUME_BATCH;
@@ -320,8 +326,7 @@ public final class SemanticCookCompanionTask
             phase = Phase.VALIDATE;
             return TaskState.RUNNING;
         }
-        // 先选最近的同类设备；只有没找到任何这种方块时才考虑放自己的设备。
-        // 当前不先筛空闲状态，选到忙炉后也不试另一台空炉，见 A59。
+        // 先用尚未试过的同类设备；开菜单确认被占用后排除这一台，不能重复回到同一个忙炉。
         if (stationPos == null
                 || !player.level().getBlockState(stationPos).is(candidate.device().block)) {
             stationPos = nearest(candidate.device().block, 32, 16);
@@ -348,11 +353,8 @@ public final class SemanticCookCompanionTask
                     List.of(target), false, true, false), Purpose.PLACE_STATION);
         }
         if (!withinReach(stationPos)) {
-            return start(new MoveToTaskRecord(
-                    childId("move"), childDeadline(3L * 60L * 20L),
-                    null, null, null,
-                    BuiltInRegistries.BLOCK.getKey(candidate.device().block).toString(), false),
-                    Purpose.MOVE_STATION);
+            phase = Phase.APPROACH;
+            return TaskState.RUNNING;
         }
         phase = Phase.OPEN;
         return TaskState.RUNNING;
@@ -380,6 +382,8 @@ public final class SemanticCookCompanionTask
     private TaskState openStation() {
         // 人工或其他工作正在使用界面时等待；只有从玩家背包返回世界后才开始本次开炉。
         if (player.containerMenu != player.inventoryMenu) return TaskState.RUNNING;
+        if (NavigationSafetyContext.protectsUse(stationPos))
+            return failOrClean("cooking_station_protected", "The selected workstation is protected from use.", FailureType.UNSUPPORTED);
         if (stationPos == null || (player.level().isLoaded(stationPos)
                 && !player.level().getBlockState(stationPos).is(candidate.device().block))) {
             if (stationClaimed && ownedInputLoaded > 0) {
@@ -394,13 +398,7 @@ public final class SemanticCookCompanionTask
             return TaskState.RUNNING;
         }
         if (!withinReach(stationPos)) {
-            if (stationClaimed && ownedInputLoaded > 0) {
-                nextCookCheckTick = player.level().getGameTime();
-                openMode = OpenMode.RESUME_BATCH;
-                phase = Phase.WAIT_CLOSED;
-            } else {
-                phase = Phase.PREPARE;
-            }
+            phase = Phase.APPROACH;
             return TaskState.RUNNING;
         }
         if (!stationPos.equals(openAttemptStation)) {
@@ -413,6 +411,60 @@ public final class SemanticCookCompanionTask
         return start(new InteractAtTaskRecord(
                 childId("open"), childDeadline(30L * 20L),
                 MouseButton.RIGHT, stationPos, 0, null, null, candidate.device().block), Purpose.OPEN_STATION);
+    }
+
+    private TaskState approachStation() {
+        // 对准已经选出的具体炉子寻路，不能按方块类型重新搜索，把刚排除的忙炉又选回来。
+        if (stationPos == null || !player.level().isLoaded(stationPos)
+                || !player.level().getBlockState(stationPos).is(candidate.device().block))
+            return batchOutstanding ? closeWithoutClaimingContents("station_target_lost", "The claimed workstation was lost.", FailureType.TARGET_LOST)
+                    : rejectStation("station_target_lost");
+        if (NavigationSafetyContext.protectsUse(stationPos))
+            return failOrClean("cooking_station_protected", "The selected workstation is protected from use.", FailureType.UNSUPPORTED);
+        if (withinReach(stationPos)) { stopNav(); phase = Phase.OPEN; return TaskState.RUNNING; }
+        if (nav == null) {
+            BlockPos target = stationPos.immutable();
+            nav = PlayerNav.to(player, () -> GoalCompiler.interact(target), 1.0,
+                    () -> withinReach(target), PlayerNav.ContextProvider.DEFAULT);
+        }
+        var state = nav.tick();
+        if (state == PlayerNav.Status.RUNNING) { stationArrivalWait = 0; return TaskState.RUNNING; }
+        if (state == PlayerNav.Status.ARRIVED) {
+            if (withinReach(stationPos)) { stopNav(); phase = Phase.OPEN; return TaskState.RUNNING; }
+            // 导航落点先到、身体落稳稍晚时给几刻余量；仍不能交互才把这次到场记为失败。
+            if (++stationArrivalWait < 10) return TaskState.RUNNING;
+        }
+        stopNav();
+        return batchOutstanding ? closeWithoutClaimingContents("station_unreachable", "Could not return to the exact claimed workstation.", FailureType.NO_PATH)
+                : rejectStation("station_unreachable");
+    }
+
+    private TaskState rejectStation(String reason) {
+        // 尚未投入原料才可以换站；被占用的炉子只关闭自己打开的菜单，不碰其中物品。
+        if (batchOutstanding) return failOrClean(reason, "The claimed workstation cannot be replaced before its batch settles.", FailureType.UNKNOWN);
+        if (stationPos != null && rejectedStations.add(stationPos.immutable())) {
+            if (stationAttempts.size() < 16) stationAttempts.add(Map.of("reason", reason,
+                    "x", stationPos.getX(), "y", stationPos.getY(), "z", stationPos.getZ()));
+        }
+        if (rejectedStations.size() >= 16) return failOrClean("workstation_candidates_exhausted",
+                "The bounded workstation candidates were unavailable; no contents were claimed.", FailureType.NO_PATH);
+        if (openedMenu && ownedMenu == player.containerMenu)
+            return start(new CloseMenuTaskRecord(childId("reject-close"), childDeadline(30L * 20L), ownedMenu), Purpose.CLOSE_REJECTED);
+        resetStationSearch();
+        return TaskState.RUNNING;
+    }
+
+    private void resetStationSearch() {
+        stopNav();
+        stationPos = null;
+        ownedMenu = null;
+        openedMenu = false;
+        openRequested = false;
+        stationClaimed = false;
+        openAttempts = 0;
+        stationArrivalWait = 0;
+        openMode = OpenMode.NEW_BATCH;
+        phase = Phase.PREPARE;
     }
 
     // 等炉类菜单出现、显示且类型与配方对应；未打开时有限重试，出现错误菜单时只安排关闭并报错。
@@ -467,10 +519,7 @@ public final class SemanticCookCompanionTask
         ItemStack result = menu.getSlot(2).getItem();
         if (!stationClaimed && (!input.isEmpty() || !fuelSlot.isEmpty()
                 || !result.isEmpty() || data(menu, 0) > 0 || data(menu, 2) > 0)) {
-            return failOrClean("station_in_use",
-                    "The resolved workstation already contains items or active progress; "
-                            + "MaiCraft will not claim or disturb it automatically.",
-                    FailureType.UNKNOWN);
+            return rejectStation("station_in_use");
         }
         if (stationClaimed && (!input.isEmpty() || !result.isEmpty())) {
             return failOrClean("station_state_diverged",
@@ -549,7 +598,6 @@ public final class SemanticCookCompanionTask
         }
         if (!input.isEmpty() && data(menu, 0) > 0
                 && data(menu, 2) > 0 && data(menu, 3) > 0) {
-            stationReturnStance = player.blockPosition();
             scheduleClosedCheck(menu);
             phase = Phase.CLOSE_WAIT;
             return TaskState.RUNNING;
@@ -590,7 +638,7 @@ public final class SemanticCookCompanionTask
     }
 
     // 没到时间就继续等；玩家此时开着别的菜单也先等待，不去关它。
-    // 需要回炉子时走到之前记住的站位，再打开同一工作站。
+    // 需要回炉子时仍导航到原位置，不能按类型改找另一台工作站。
     private TaskState waitClosed() {
         openedMenu = false;
         if (!closedWaitDue(player)) return TaskState.RUNNING;
@@ -611,16 +659,8 @@ public final class SemanticCookCompanionTask
         }
         openMode = OpenMode.RESUME_BATCH;
         if (!withinReach(stationPos)) {
-            BlockPos stance = stationReturnStance;
-            if (stance == null) {
-                return closeWithoutClaimingContents("station_return_stance_lost",
-                        "No verified first-person stance was retained for the claimed workstation.",
-                        FailureType.TARGET_LOST);
-            }
-            return start(new MoveToTaskRecord(
-                    childId("return"), childDeadline(3L * 60L * 20L),
-                    (double) stance.getX(), (double) stance.getY(), (double) stance.getZ(),
-                    null, false), Purpose.MOVE_STATION);
+            phase = Phase.APPROACH;
+            return TaskState.RUNNING;
         }
         phase = Phase.OPEN;
         return TaskState.RUNNING;
@@ -682,7 +722,6 @@ public final class SemanticCookCompanionTask
             return TaskState.RUNNING;
         }
         if (data(menu, 0) > 0 && data(menu, 3) > 0) {
-            stationReturnStance = player.blockPosition();
             scheduleClosedCheck(menu);
             phase = Phase.CLOSE_WAIT;
             return TaskState.RUNNING;
@@ -895,8 +934,9 @@ public final class SemanticCookCompanionTask
                 phase = Phase.VERIFY_CLEAN_INPUT;
                 return TaskState.RUNNING;
             }
-            if (purpose == Purpose.ABANDON_CLOSE) {
+            if (purpose == Purpose.ABANDON_CLOSE || purpose == Purpose.CLOSE_REJECTED) {
                 outcomeUncertain = true;
+                rememberFailure("station_close_unconfirmed", "The rejected workstation menu could not be closed safely.", FailureType.UNKNOWN);
                 openedMenu = player.containerMenu != player.inventoryMenu;
                 phase = Phase.COMPLETE;
                 return TaskState.RUNNING;
@@ -946,26 +986,6 @@ public final class SemanticCookCompanionTask
                             FailureType.UNKNOWN);
                 }
                 phase = Phase.PREPARE;
-            }
-            // 新批次按设备类型走近后重新找附近设备；恢复旧批次时保留原设备位置，避免把旧产物算到另一台。
-            case MOVE_STATION -> {
-                if (openMode == OpenMode.RESUME_BATCH) {
-                    if (stationPos == null || !player.level().isLoaded(stationPos)
-                            || !player.level().getBlockState(stationPos)
-                                    .is(candidate.device().block)) {
-                        return closeWithoutClaimingContents("station_target_lost",
-                                "The exact claimed workstation was not present after returning to it.",
-                                FailureType.TARGET_LOST);
-                    }
-                } else {
-                    stationPos = nearest(candidate.device().block, 8, 8);
-                }
-                if (stationPos == null) {
-                    return failOrClean("station_target_lost",
-                            "The workstation was not visible after approach completed.",
-                            FailureType.TARGET_LOST);
-                }
-                phase = Phase.OPEN;
             }
             case OPEN_STATION -> {
                 waitMenuSince = player.level().getGameTime();
@@ -1018,6 +1038,7 @@ public final class SemanticCookCompanionTask
                 openRequested = false;
                 phase = Phase.COMPLETE;
             }
+            case CLOSE_REJECTED -> resetStationSearch();
         }
         routeFinishRequest();
         return TaskState.RUNNING;
@@ -1201,7 +1222,6 @@ public final class SemanticCookCompanionTask
             case ACQUIRE_FUEL -> "missing_allowed_fuel";
             case ACQUIRE_STATION -> "missing_workstation";
             case PLACE_STATION -> "station_placement_failed";
-            case MOVE_STATION -> "station_unreachable";
             case OPEN_STATION -> "station_open_failed";
             case CLOSE -> "menu_close_unconfirmed";
             default -> "menu_transaction_unconfirmed";
@@ -1218,8 +1238,6 @@ public final class SemanticCookCompanionTask
                     "Could not obtain the selected cooking workstation from allowed_sources.";
             case PLACE_STATION ->
                     "Could not place the selected workstation through first-person building.";
-            case MOVE_STATION ->
-                    "Could not approach the selected workstation without altering terrain.";
             case OPEN_STATION ->
                     "Could not open the selected workstation through first-person interaction.";
             case CLOSE -> "The workstation menu close was not confirmed.";
@@ -1239,7 +1257,7 @@ public final class SemanticCookCompanionTask
     private boolean observingOwnClose() {
         if (player.containerMenu != player.inventoryMenu) return false;
         return activePurpose == Purpose.CLOSE || activePurpose == Purpose.CLOSE_WAIT
-                || activePurpose == Purpose.ABANDON_CLOSE;
+                || activePurpose == Purpose.ABANDON_CLOSE || activePurpose == Purpose.CLOSE_REJECTED;
     }
 
     private void cancelActiveChild() {
@@ -1287,7 +1305,8 @@ public final class SemanticCookCompanionTask
                 for (int dy = -vertical; dy <= vertical; dy++) {
                     cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
                     if (!player.level().isLoaded(cursor)
-                            || !player.level().getBlockState(cursor).is(block)) continue;
+                            || !player.level().getBlockState(cursor).is(block)
+                            || rejectedStations.contains(cursor) || NavigationSafetyContext.protectsUse(cursor)) continue;
                     double distance = origin.distSqr(cursor);
                     if (distance < bestDistance) {
                         bestDistance = distance;
@@ -1324,6 +1343,7 @@ public final class SemanticCookCompanionTask
     // 要放的位置可替换、不占玩家身体，脚下有可托住的表面；真正放置还交给建造任务检查。
     private boolean validSite(BlockPos cell) {
         if (!player.level().isLoaded(cell)
+                || NavigationSafetyContext.protectsMutation(cell) || NavigationSafetyContext.forbidsBody(cell)
                 || !player.level().getBlockState(cell).canBeReplaced()
                 || player.getBoundingBox().intersects(new AABB(cell))) return false;
         BlockPos support = cell.below();
@@ -1333,7 +1353,11 @@ public final class SemanticCookCompanionTask
     }
 
     private boolean withinReach(BlockPos pos) {
-        return player.distanceToSqr(Vec3.atCenterOf(pos)) <= 4.25D * 4.25D;
+        // 距离近不等于手能碰到：先落稳，再确认目标有真实可见表面，避免隔墙或腾空时提前停导航。
+        return (player.onGround() || player.isInWater() || player.isPassenger())
+                && player.distanceToSqr(Vec3.atCenterOf(pos)) <= 4.25D * 4.25D
+                && FirstPersonInteractionTargeting.visibleBlockHit(player.level(), player,
+                        player.getEyePosition(), pos, 4.25D) != null;
     }
 
     private int rawRemaining() {
@@ -1480,6 +1504,7 @@ public final class SemanticCookCompanionTask
         if (!planningAttempts.isEmpty()) {
             data.put("preparation_plan_failures", List.copyOf(planningAttempts));
         }
+        if (!stationAttempts.isEmpty()) data.put("workstation_attempts", List.copyOf(stationAttempts));
         if (failureCode != null) {
             data.put("decision", Map.of(
                     "required", true,
