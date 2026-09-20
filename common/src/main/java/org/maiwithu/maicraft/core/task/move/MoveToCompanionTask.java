@@ -12,6 +12,23 @@ import net.minecraft.core.BlockPos;
 
 import java.util.HashMap;
 import java.util.Map;
+import it.unimi.dsi.fastutil.longs.LongSets;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.vehicle.Boat;
+import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
+import org.maiwithu.maicraft.core.pathing.execute.BoatNav;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import org.maiwithu.maicraft.core.pathing.moves.Movement;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
+import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
+import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
+import org.maiwithu.maicraft.task.InternalPositionReceipt;
 
 /**
  * 执行一次移动：到坐标附近、准确站到某格、改变高度，或找到某种方块走到旁边。
@@ -52,13 +69,13 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private boolean nearRetried;
     private long landingBaseline = Long.MAX_VALUE;
     private Map<String,Object> landingFacts = Map.of();
-    private final org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode groundFlight=
-            new org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode();
+    private final JetpackGroundMode groundFlight=
+            new JetpackGroundMode();
     /** FIND(就近方块)子系统:扫描/入册/契约/轮换全在组件里,此处只驱动。 */
     private NearestBlockFinder finder;
 
     /** 船腿:开工时坐在船上就先驾船,靠岸(或搁浅)后接步行。null = 没有/已交棒。 */
-    private org.maiwithu.maicraft.core.pathing.execute.BoatNav boatLeg;
+    private BoatNav boatLeg;
 
     public MoveToCompanionTask(LocalPlayer player, MoveToTaskRecord record) {
         super(player, record);
@@ -71,30 +88,30 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     @Override
     protected void onStart() {
         // 已经坐船且目标适合驾船时先走水路；找某种方块则先扫描，其他目标直接准备导航。
-        landingBaseline = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.observation().revision();
+        landingBaseline = LandingAssistPolicy.observation().revision();
         // 载具处置:坐在船上且有明确去处,先驾船——船腿走到离目标最近的水格,
         // 靠岸后接步行(见 tickBoatLeg)。其余情况(矿车没有舵、马的寻路仍按步行
         // 物理算、FIND 要先扫描)直接走步行段;下座驾是步行导航自己的事(PlayerNav)。
         if (player.isPassenger()
-                && (r.transportMode == org.maiwithu.maicraft.core.pathing.transport.TransportMode.AUTO
-                    || r.transportMode == org.maiwithu.maicraft.core.pathing.transport.TransportMode.GROUND)
-                && player.getVehicle() instanceof net.minecraft.world.entity.vehicle.Boat
+                && (r.transportMode == TransportMode.AUTO
+                    || r.transportMode == TransportMode.GROUND)
+                && player.getVehicle() instanceof Boat
                 && (r.kind == MoveToTaskRecord.Kind.BLOCK || r.kind == MoveToTaskRecord.Kind.COLUMN)
                 && !reached()) {
-            boatLeg = new org.maiwithu.maicraft.core.pathing.execute.BoatNav(player, blockTarget);
+            boatLeg = new BoatNav(player, blockTarget);
             long extra = Math.min(MAX_EXTRA_TICKS,
                     600 + (long) (repDistance() * TICKS_PER_BLOCK));
             r.extendDeadlineTo(player.level().getGameTime() + extra);
-            org.maiwithu.maicraft.core.Constants.LOG.info(
+            Constants.LOG.info(
                     "[maicraft-task] goto start kind={} target={},{},{} 驾船先行",
                     r.kind, bx, by, bz);
             return;
         }
         if (r.kind == MoveToTaskRecord.Kind.FIND) {
             // 就近方块:解析 id → 离线扫描附近候选;导航等首批候选到手再建
-            var id = net.minecraft.resources.ResourceLocation.tryParse(r.block);
-            var b = id == null ? null : net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(id);
-            if (b == null || b == net.minecraft.world.level.block.Blocks.AIR) {
+            var id = ResourceLocation.tryParse(r.block);
+            var b = id == null ? null : BuiltInRegistries.BLOCK.get(id);
+            if (b == null || b == Blocks.AIR) {
                 fail("unknown block id '" + r.block
                         + "' — use a namespaced block id like minecraft:crafting_table",
                         FailureType.NO_PATH);
@@ -105,7 +122,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     600 + (long) NearestBlockFinder.BUDGET_BLOCKS * TICKS_PER_BLOCK);
             r.extendDeadlineTo(player.level().getGameTime() + findExtra);
             finder.kickScan();
-            org.maiwithu.maicraft.core.Constants.LOG.info(
+            Constants.LOG.info(
                     "[maicraft-task] goto start kind=FIND block={}", r.block);
             return;
         }
@@ -135,7 +152,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 ? PlayerNav.to(player, this::blockCompiled, WALK_SPEED, this::reached, terrain())
                 : PlayerNav.toGoal(player, this::goal, WALK_SPEED, this::reached, terrain()))
                 .withTransportMode(r.transportMode).withTerrainProbe();
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-task] goto start kind={} target={},{},{} solid={}",
                 r.kind, bx, by, bz,
                 r.kind == MoveToTaskRecord.Kind.BLOCK && targetCellSolid());
@@ -157,9 +174,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     }
 
     /** Exact internal stances and tolerant public destinations keep their own membership. */
-    private org.maiwithu.maicraft.core.pathing.goal.GoalCompiler.Compiled blockCompiled() {
-        return new org.maiwithu.maicraft.core.pathing.goal.GoalCompiler.Compiled(
-                r.coordinateGoal(), it.unimi.dsi.fastutil.longs.LongSets.emptySet());
+    private GoalCompiler.Compiled blockCompiled() {
+        return new GoalCompiler.Compiled(
+                r.coordinateGoal(), LongSets.emptySet());
     }
 
     /** Does a collision shape occupy the target cell (feet can't go there)? */
@@ -171,14 +188,14 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** Slab-aware feet cell — the pathing node, not raw blockPosition (standing on a
      *  bottom slab counts as the cell above it, like the planner sees it). */
     private BlockPos feet() {
-        return org.maiwithu.maicraft.core.pathing.util.BlockHelper.playerFeet(
+        return BlockHelper.playerFeet(
                 player.level(), player.getX(), player.getY(), player.getZ());
     }
 
     /** 到达不能只看脚刚碰到目标格：还要看脚下支撑是否也在目标范围内，避免起跳到最高点就停下导致坠落。 */
     private boolean reached() {
         boolean supportedGoalMembership = inGoalCell(feet())
-                && inGoalCell(org.maiwithu.maicraft.core.pathing.moves.Movement.pathStart(player));
+                && inGoalCell(Movement.pathStart(player));
         // 精确站位还要真的落地；非精确移动允许在水中到达，但不把普通空中经过当作已到达。
         return supportedGoalMembership && (player.onGround() || !r.requiresStrictStance() && player.isInWater());
     }
@@ -198,13 +215,13 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 && !player.isPassenger()
                 && !player.isFallFlying()
                 && !player.isNoGravity()
-                && !player.hasEffect(net.minecraft.world.effect.MobEffects.LEVITATION)
+                && !player.hasEffect(MobEffects.LEVITATION)
                 && !player.isSpectator()
                 && !player.getAbilities().flying;
     }
 
     private boolean strictTargetLandable() {
-        return org.maiwithu.maicraft.core.pathing.util.BlockHelper.isStandable(
+        return BlockHelper.isStandable(
                 player.level(), blockTarget);
     }
 
@@ -230,10 +247,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (boatLeg != null) {
             return tickBoatLeg();
         }
-        if(player.onGround() && !reached() && !org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.occupied()
-                && (r.transportMode==org.maiwithu.maicraft.core.pathing.transport.TransportMode.GROUND
-                    || r.transportMode==org.maiwithu.maicraft.core.pathing.transport.TransportMode.AUTO)) {
-            var context=org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+        if(player.onGround() && !reached() && !TransportRuntime.occupied()
+                && (r.transportMode==TransportMode.GROUND
+                    || r.transportMode==TransportMode.AUTO)) {
+            var context=ClientRuntime.requireContext(player);
             if(!groundFlight.prepare(context)) {
                 context.body().releaseAll();
                 if(groundFlight.failed()) { fail(groundFlight.diagnostics().toString(),FailureType.UNKNOWN); return TaskState.FAILED; }
@@ -278,7 +295,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     if (strictLandingInProgress()) {
                         yield TaskState.RUNNING;
                     }
-                    org.maiwithu.maicraft.core.Constants.LOG.info(
+                    Constants.LOG.info(
                             "[maicraft-task] goto end kind={} result=failed type=NO_PATH"
                                     + " feet={} reason=route ended without the exact grounded stance",
                             r.kind, player.blockPosition().toShortString());
@@ -331,7 +348,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         ? " (also retried accepting anywhere within "
                                 + (int) NEAR_SUCCESS_RADIUS + " blocks — no path either)"
                         : "";
-                org.maiwithu.maicraft.core.Constants.LOG.info(
+                Constants.LOG.info(
                         "[maicraft-task] goto end kind={} result=failed type={} feet={} reason={}",
                         r.kind, nav.failType(), player.blockPosition().toShortString(),
                         nav.failReason());
@@ -354,20 +371,20 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
         }
         var status = boatLeg.tick();
-        if (status == org.maiwithu.maicraft.core.pathing.execute.BoatNav.Status.RUNNING) {
+        if (status == BoatNav.Status.RUNNING) {
             return TaskState.RUNNING;
         }
-        String how = status == org.maiwithu.maicraft.core.pathing.execute.BoatNav.Status.ARRIVED
+        String how = status == BoatNav.Status.ARRIVED
                 ? "靠岸" : boatLeg.failReason();
         boatLeg.stop();
         boatLeg = null;
         if (reached()) {
-            org.maiwithu.maicraft.core.Constants.LOG.info(
+            Constants.LOG.info(
                     "[maicraft-task] 船腿结束({}),目标已在船下 feet={}", how,
                     player.blockPosition().toShortString());
             return successAtBody();
         }
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-task] 船腿结束({}),接步行 feet={}", how,
                 player.blockPosition().toShortString());
         startWalkingNav();
@@ -431,17 +448,17 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         BlockPos body = player.blockPosition();
         // 到达即留痕:最终脚位与请求格同框——"报 exact 成功却站在别处"这类悬案,
         // 下一轮实机的第一现场就在这一行。
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-task] goto end kind={} result=success feet={} requested={}",
                 r.kind, body.toShortString(), blockTarget.toShortString());
-        r.retainVerifiedPosition(new org.maiwithu.maicraft.task.InternalPositionReceipt.Position(
+        r.retainVerifiedPosition(new InternalPositionReceipt.Position(
                 body.getX(), body.getY(), body.getZ(),
                 player.level().dimension().location().toString()));
         return TaskState.SUCCESS;
     }
 
     private void observeLanding() {
-        var observation = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.observation();
+        var observation = LandingAssistPolicy.observation();
         if (observation.revision() > landingBaseline) landingFacts = observation.facts();
     }
 
@@ -564,8 +581,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // 地形封路的验尸自带下一步,不再叠几何建议;策略挡路时出路是授权或垫料,
         // 其余无路才是几何问题:换近一点的路点或扫描。
         String advice = "";
-        if (r.transportMode == org.maiwithu.maicraft.core.pathing.transport.TransportMode.JETPACK
-                || r.transportMode == org.maiwithu.maicraft.core.pathing.transport.TransportMode.ELEVATOR) {
+        if (r.transportMode == TransportMode.JETPACK
+                || r.transportMode == TransportMode.ELEVATOR) {
             advice = " Inspect the reported transport failure and destination support before choosing another transport goal.";
         } else if (nav.failType() == FailureType.TERRAIN_BLOCKED) {
             advice = " This route is only walkable with terrain alteration permitted"

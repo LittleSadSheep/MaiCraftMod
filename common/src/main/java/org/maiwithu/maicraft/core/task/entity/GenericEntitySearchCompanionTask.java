@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.Constants;
 
 /** Loaded evidence first, then bounded first-person frontier travel and another loaded scan. */
 public final class GenericEntitySearchCompanionTask
@@ -211,7 +212,7 @@ public final class GenericEntitySearchCompanionTask
                 .filter(uuid -> !acceptedBefore.contains(uuid))
                 .count();
         if (newlyAccepted > 0) {
-            org.maiwithu.maicraft.core.Constants.LOG.info(
+            Constants.LOG.info(
                     "[maicraft-task] entity search absorbed {} new acceptable loaded observation(s); {}/{} verified",
                     newlyAccepted, observedSafe.size(), r.count);
         }
@@ -566,7 +567,7 @@ public final class GenericEntitySearchCompanionTask
     }
 
     private void logGroundFrontier(String evidence, BlockPos target) {
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-task] entity search ON_GROUND frontier={} target={},{},{}",
                 evidence, target.getX(), target.getY(), target.getZ());
     }

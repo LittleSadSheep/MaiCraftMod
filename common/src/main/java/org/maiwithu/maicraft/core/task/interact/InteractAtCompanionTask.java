@@ -22,6 +22,11 @@ import net.minecraft.world.phys.Vec3;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
+import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 
 /**
  * 在当前位置对准方块、液体或前方按键。先选物品、等镜头真正对准，再按实际射线命中的目标执行。
@@ -37,8 +42,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
      */
 
     private Interaction interaction;
-    private final org.maiwithu.maicraft.core.task.FirstPersonActionGate selection =
-            new org.maiwithu.maicraft.core.task.FirstPersonActionGate();
+    private final FirstPersonActionGate selection =
+            new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private boolean itemSelected;
     /**
@@ -47,7 +52,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private Vec3 aimPoint;
     /** 按键前的世界快照,收尾时对账出"真发生了什么"(见 {@link PressReceipt})。 */
     private PressReceipt receipt;
-    private java.util.List<String> changes = List.of();
+    private List<String> changes = List.of();
     // 下面保存持续按住的结束时间和结果文字；这个类当前没有重新寻路的过程。
     /**
      * 固定时长的按住动作在这个游戏刻松开；-1 表示没有固定结束刻。
@@ -56,7 +61,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private String successMsg = "done";
     // A right-click that activated a real block (a station's GUI): captured so the
     // result can report it and the agent loop can remember it in <known_blocks>.
-    private net.minecraft.core.BlockPos activatedBlock;
+    private BlockPos activatedBlock;
     private String activatedBlockId;
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
@@ -80,7 +85,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     }
 
     @Override
-    protected net.minecraft.core.BlockPos gotoFirstTarget() {
+    protected BlockPos gotoFirstTarget() {
         return r.aim;
     }
 
@@ -100,10 +105,10 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             }
             if (r.item != null && !itemSelected) {
                 var selected = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
-                if (selected == org.maiwithu.maicraft.core.task.FirstPersonActionGate.Status.RUNNING) {
+                if (selected == FirstPersonActionGate.Status.RUNNING) {
                     return TaskState.RUNNING;
                 }
-                if (selected == org.maiwithu.maicraft.core.task.FirstPersonActionGate.Status.FAILED) {
+                if (selected == FirstPersonActionGate.Status.FAILED) {
                     fail("couldn't select the requested item: " + selection.failure(), FailureType.UNKNOWN);
                     return TaskState.FAILED;
                 }
@@ -144,19 +149,19 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             // 桶使用物品自己的源流体/放置面判据，不把水后方的机器当作点击目标。
             if (r.aim != null
                     && (bucket ? !FirstPersonInteractionTargeting.acceptsBucketHit(
-                            player.level(), r.aim, useItem, (net.minecraft.world.phys.BlockHitResult) hit)
+                            player.level(), r.aim, useItem, (BlockHitResult) hit)
                     : FirstPersonInteractionTargeting.blockedByWorld(
                             player.level(), player.getEyePosition(), r.aim,
                             rayEnd, hit))) {
                 String landing;
-                if (hit instanceof net.minecraft.world.phys.BlockHitResult blockedHit
+                if (hit instanceof BlockHitResult blockedHit
                         && hit.getType() == HitResult.Type.BLOCK) {
                     var blocker = blockedHit.getBlockPos();
                     String blockerId = BuiltInRegistries.BLOCK
                             .getKey(player.level().getBlockState(blocker).getBlock()).getPath();
                     landing = blockerId + " at " + blocker.getX() + "," + blocker.getY()
                             + "," + blocker.getZ();
-                } else if (hit instanceof net.minecraft.world.phys.EntityHitResult entityHit) {
+                } else if (hit instanceof EntityHitResult entityHit) {
                     landing = "an entity at " + entityHit.getEntity().blockPosition().toShortString();
                 } else {
                     landing = "empty space before reaching the target";
@@ -170,7 +175,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             // flips a switch, …). Remember the block we touched so <known_blocks> can
             // walk us back to stations we've used, not just ones we placed. The harvest
             // filters to tracked station types; doors/buttons fall away there.
-            if (!bucket && button() == Interaction.Button.USE && hit instanceof net.minecraft.world.phys.BlockHitResult bhr) {
+            if (!bucket && button() == Interaction.Button.USE && hit instanceof BlockHitResult bhr) {
                 activatedBlock = bhr.getBlockPos();
                 activatedBlockId = BuiltInRegistries.BLOCK
                         .getKey(player.level().getBlockState(activatedBlock).getBlock()).getPath();
@@ -178,7 +183,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             receipt = PressReceipt.before(player, r.aim);
             // This is the real LocalPlayer. Preserve vanilla's ordinary fall-through from an
             // unhandled block/entity use to the held item (food, pearls and modded items included).
-            interaction = bucket ? Interaction.useInAir(player, net.minecraft.world.InteractionHand.MAIN_HAND,
+            interaction = bucket ? Interaction.useInAir(player, InteractionHand.MAIN_HAND,
                     r.holdTicks == 0 ? Interaction.Timing.once()
                             : r.holdTicks > 0 ? Interaction.Timing.hold(r.holdTicks) : Interaction.Timing.hold())
                     : Interaction.forHit(player, hit, button(), r.holdTicks, true);

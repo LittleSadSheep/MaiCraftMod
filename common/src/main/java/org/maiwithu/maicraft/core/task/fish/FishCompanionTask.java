@@ -38,6 +38,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Locale;
+import org.maiwithu.maicraft.core.task.base.DropTracker;
 
 /**
  * 按阶段钓鱼：确定站位和水面、拿竿瞄准、抛出、等咬钩、收回并捡战利品，然后再来一竿。
@@ -81,8 +83,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private final Set<BlockPos> rejectedStances = new HashSet<>();
     private final Set<BlockPos> rejectedTargets = new HashSet<>();
     /** 本次收线的战果簿记:先快照现场旧物,差集出的新掉落才算这一竿的。 */
-    private final org.maiwithu.maicraft.core.task.base.DropTracker caught =
-            new org.maiwithu.maicraft.core.task.base.DropTracker();
+    private final DropTracker caught =
+            new DropTracker();
     /** 判定够不着而放弃的战果 id(留在地上,不再追)。 */
     private final Set<Integer> abandonedLoot = new HashSet<>();
 
@@ -295,7 +297,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         rodReceipt = null;
         r.castOnce();
         Constants.LOG.debug("[maicraft-fish] cast={} target={} pitch={}", r.casts(),
-                target.toShortString(), String.format(java.util.Locale.ROOT, "%.1f", pitch));
+                target.toShortString(), String.format(Locale.ROOT, "%.1f", pitch));
         phase = Phase.WAIT;
         phaseTicks = 0;
         return TaskState.RUNNING;

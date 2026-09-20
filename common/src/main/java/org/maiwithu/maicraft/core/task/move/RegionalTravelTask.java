@@ -20,6 +20,8 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Set;
+import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 
 /**
  * 朝指定方向寻找可站立区域：地面移动分段接近候选点，飞行则持续观察并选择着陆点。
@@ -31,7 +33,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
     private MoveToCompanionTask walk;
     private JetpackFlightSession flight;
     private TransportSession.Result flightResult;
-    private final java.util.Set<BlockPos> attempted=new HashSet<>();
+    private final Set<BlockPos> attempted=new HashSet<>();
     private Vec3 lastPosition;
     private int legs;
     private boolean groundExhausted;
@@ -87,7 +89,7 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
             return TaskState.FAILED;
         }
         attempted.add(BlockPos.containing(next)); legs++;
-        BlockPos feet=org.maiwithu.maicraft.core.pathing.util.BlockHelper.playerFeet(player.level(),next.x,next.y,next.z);
+        BlockPos feet=BlockHelper.playerFeet(player.level(),next.x,next.y,next.z);
         var record=new MoveToTaskRecord("regional-leg-"+legs,player.level().getGameTime()+1200,
                 (double)feet.getX(),(double)feet.getY(),(double)feet.getZ(),null,r.mayAlterTerrain,false,TransportMode.GROUND,false,false,1,.5);
         walk=new MoveToCompanionTask(player,record); return TaskState.RUNNING;

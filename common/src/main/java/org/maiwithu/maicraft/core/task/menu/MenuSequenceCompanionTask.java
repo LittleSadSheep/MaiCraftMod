@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.inventory.ClickType;
 
 // 按顺序执行一组菜单点击，每次等结果后再继续。当前生产源码没有直接创建这类记录的调用点，属于保留的低层任务。
 public final class MenuSequenceCompanionTask
@@ -73,7 +74,7 @@ public final class MenuSequenceCompanionTask
                 return TaskState.FAILED;
             }
             if (!menuSession.ready(context)) return TaskState.RUNNING;
-            receipt = context.menus().click(context, rollbackSlot, 0, net.minecraft.world.inventory.ClickType.PICKUP,
+            receipt = context.menus().click(context, rollbackSlot, 0, ClickType.PICKUP,
                     (c, ignored) -> c.player().containerMenu.getCarried().isEmpty()
                             ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
                     20);

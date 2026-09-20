@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 
 /**
  * 移动任务单：给 x/z 就只要求水平位置，给 x/y/z 就再要求高度，只给 y 则改变高度，只给方块名则先找方块。
@@ -102,15 +103,15 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
         return kind == Kind.BLOCK && exact;
     }
 
-    org.maiwithu.maicraft.core.pathing.calc.NavGoal coordinateGoal() {
+    NavGoal coordinateGoal() {
         // 把坐标和误差转换成导航的“哪些位置算到了”；方块搜索先找到真实候选后才有这一目标。
         var target = new BlockPos(x == null ? 0 : (int) Math.floor(x), y == null ? 0 : (int) Math.floor(y),
                 z == null ? 0 : (int) Math.floor(z));
         return switch (kind) {
-            case BLOCK -> exact ? org.maiwithu.maicraft.core.pathing.calc.NavGoal.exact(target)
-                    : org.maiwithu.maicraft.core.pathing.calc.NavGoal.nearGround(target, horizontalRadius, verticalTolerance);
-            case COLUMN -> org.maiwithu.maicraft.core.pathing.calc.NavGoal.column(target.getX(), target.getZ(), horizontalRadius);
-            case YLEVEL -> org.maiwithu.maicraft.core.pathing.calc.NavGoal.yLevel(target.getY());
+            case BLOCK -> exact ? NavGoal.exact(target)
+                    : NavGoal.nearGround(target, horizontalRadius, verticalTolerance);
+            case COLUMN -> NavGoal.column(target.getX(), target.getZ(), horizontalRadius);
+            case YLEVEL -> NavGoal.yLevel(target.getY());
             case FIND -> throw new IllegalStateException("block discovery supplies its own observed goal");
         };
     }

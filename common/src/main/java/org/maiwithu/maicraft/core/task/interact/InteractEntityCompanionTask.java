@@ -20,6 +20,8 @@ import net.minecraft.world.phys.HitResult;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.maiwithu.maicraft.core.act.PressReceipt;
+import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 
 /**
  * 先靠近选定实体，跟随它的位置，等真实准星命中它后再执行左键或右键。
@@ -50,11 +52,11 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
      */
     private String firstNavFailReason;
     private Interaction interaction;
-    private final org.maiwithu.maicraft.core.task.FirstPersonActionGate selection =
-            new org.maiwithu.maicraft.core.task.FirstPersonActionGate();
+    private final FirstPersonActionGate selection =
+            new FirstPersonActionGate();
     private boolean itemSelected;
     /** 按键前的世界快照,收尾时对账出"真发生了什么"。 */
-    private org.maiwithu.maicraft.core.act.PressReceipt receipt;
+    private PressReceipt receipt;
     private List<String> changes = List.of();
     private long holdUntil = -1;
     private boolean acted = false;     // landed at least one press (death then = success, not failure)
@@ -149,16 +151,16 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         if (interaction == null) {
             if (r.item != null && !itemSelected) {
                 var selected = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
-                if (selected == org.maiwithu.maicraft.core.task.FirstPersonActionGate.Status.RUNNING) {
+                if (selected == FirstPersonActionGate.Status.RUNNING) {
                     return TaskState.RUNNING;
                 }
-                if (selected == org.maiwithu.maicraft.core.task.FirstPersonActionGate.Status.FAILED) {
+                if (selected == FirstPersonActionGate.Status.FAILED) {
                     fail("couldn't select the requested item: " + selection.failure(), FailureType.UNKNOWN);
                     return TaskState.FAILED;
                 }
                 itemSelected = true;
             }
-            receipt = org.maiwithu.maicraft.core.act.PressReceipt.before(player, null);
+            receipt = PressReceipt.before(player, null);
             // Real LocalPlayer semantics: when the entity does not consume the interaction,
             // vanilla may continue with the held item.
             interaction = Interaction.forHit(player, hit, button(), r.holdTicks, true);

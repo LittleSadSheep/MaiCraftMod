@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
 
 /**
  * Observe loaded facts, travel to an internal frontier, load more terrain, and repeat until the
@@ -1041,7 +1042,7 @@ public final class SemanticExploreCompanionTask
                 targetKind == null
                         ? "unresolved"
                         : targetKind.frontierSurfacePreference.name()
-                                .toLowerCase(java.util.Locale.ROOT));
+                                .toLowerCase(Locale.ROOT));
         data.put("dry_land_waypoints", dryLandWaypoints);
         data.put("shore_return_waypoints", shoreReturnWaypoints);
         data.put("observed_water_crossing_waypoints", observedWaterCrossingWaypoints);

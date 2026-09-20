@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /**
  * 为“走到某种方块旁边”收集候选目的地，生成接近目标并保护目标不被破坏的导航要求。
@@ -86,7 +87,7 @@ final class NearestBlockFinder {
         // "能不能被处置",与她怎么走过去无关,按可改地形算。
         // 当前在移动候选上检查能否安全挖掉目标；例如“不要挖冰”的规则也会挡住单纯走近冰。
         var ctx = ContextFactory.forExecution(player,
-                org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.TERRAFORM);
+                TerrainPermit.TERRAFORM);
         found.stream()
                 .sorted(Comparator.comparingDouble(BlockScanner.Hit::distance))
                 .map(h -> h.pos().immutable())

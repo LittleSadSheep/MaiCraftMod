@@ -21,6 +21,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
+import java.util.HashSet;
 
 /** Shared, resource-agnostic interpretation of semantic entity relationships. */
 public final class EntitySemanticSafety {
@@ -141,7 +142,7 @@ public final class EntitySemanticSafety {
         BlockPos start = new BlockPos(origin.getX(), y, origin.getZ());
         if (!openBodyCell(level, start)) return ManagedArea.UNKNOWN;
         Deque<BlockPos> queue = new ArrayDeque<>();
-        Set<Long> visited = new java.util.HashSet<>();
+        Set<Long> visited = new HashSet<>();
         queue.add(start);
         visited.add(BlockPos.asLong(start.getX(), 0, start.getZ()));
         while (!queue.isEmpty() && visited.size() <= 512) {

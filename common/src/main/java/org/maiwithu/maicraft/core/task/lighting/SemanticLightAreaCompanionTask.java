@@ -47,6 +47,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
 
 /** Loaded-fact lighting planner with receipt-driven Build and actual light verification. */
 public final class SemanticLightAreaCompanionTask
@@ -153,7 +154,7 @@ public final class SemanticLightAreaCompanionTask
         if (r.style == SemanticLightAreaTaskRecord.Style.WALL
                 || r.style == SemanticLightAreaTaskRecord.Style.HANGING) {
             giveUp("unsupported_lighting_style",
-                    "style=" + r.style.name().toLowerCase(java.util.Locale.ROOT)
+                    "style=" + r.style.name().toLowerCase(Locale.ROOT)
                             + " has no receipt-verifiable placement planner; it was not silently treated as ground lighting",
                     FailureType.UNSUPPORTED,
                     List.of("retry with style=auto or style=ground",
@@ -430,7 +431,7 @@ public final class SemanticLightAreaCompanionTask
         giveUp("no_matching_area_seed",
                 "the semantic landmark's complete currently loaded column component contains no "
                         + "cell matching coverage="
-                        + r.coverage.name().toLowerCase(java.util.Locale.ROOT),
+                        + r.coverage.name().toLowerCase(Locale.ROOT),
                 FailureType.TARGET_LOST,
                 List.of("remember a point inside or immediately beside the intended semantic area",
                         "choose the coverage semantics that define the intended cells",
@@ -1303,7 +1304,7 @@ public final class SemanticLightAreaCompanionTask
 
     private TaskState exhausted(String reason) {
         giveUp("verified_coverage_not_reached", reason + "; actual achieved_coverage="
-                        + String.format(java.util.Locale.ROOT, "%.3f", achievedCoverage),
+                        + String.format(Locale.ROOT, "%.3f", achievedCoverage),
                 FailureType.NO_SUPPORT,
                 List.of("supply a different light source or style",
                         "use a smaller area or lower required coverage",
@@ -1315,7 +1316,7 @@ public final class SemanticLightAreaCompanionTask
         giveUp("placement_budget_reached",
                 "the explicit max_placements=" + r.maxPlacements
                         + " decision boundary was reached at achieved_coverage="
-                        + String.format(java.util.Locale.ROOT, "%.3f", achievedCoverage),
+                        + String.format(Locale.ROOT, "%.3f", achievedCoverage),
                 FailureType.INTERRUPTED,
                 List.of("authorize a larger max_placements budget",
                         "change the light source, style or required coverage",
@@ -1342,9 +1343,9 @@ public final class SemanticLightAreaCompanionTask
                 ? "explicit_player_radius" : "observed_connected_component_closure");
         if (r.hasExplicitRadius()) data.put("radius", r.radius);
         data.put("minimum_light", r.minimumLight);
-        data.put("coverage", r.coverage.name().toLowerCase(java.util.Locale.ROOT));
+        data.put("coverage", r.coverage.name().toLowerCase(Locale.ROOT));
         data.put("placement_preference",
-                r.placementPreference.name().toLowerCase(java.util.Locale.ROOT));
+                r.placementPreference.name().toLowerCase(Locale.ROOT));
         data.put("required_coverage", r.coverage.requiredRatio());
         data.put("achieved_coverage", achievedCoverage);
         data.put("target_cells", targetCells.size());
@@ -1381,7 +1382,7 @@ public final class SemanticLightAreaCompanionTask
         return "semantic area boundary and actual block light verified across "
                 + litCells + "/" + targetCells.size()
                 + " semantic area cells (coverage "
-                + String.format(java.util.Locale.ROOT, "%.1f%%", achievedCoverage * 100.0D) + ")";
+                + String.format(Locale.ROOT, "%.1f%%", achievedCoverage * 100.0D) + ")";
     }
 
     @Override protected String timeoutMessage() {
