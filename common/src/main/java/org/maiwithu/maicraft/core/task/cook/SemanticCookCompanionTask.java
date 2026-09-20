@@ -33,6 +33,8 @@ import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.base.LandmarkProtection;
+import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.FuelChoice;
@@ -126,6 +128,18 @@ public final class SemanticCookCompanionTask
     @Override
     // 先看目标数量是否已够，再继续未结束的子任务。收货和收回剩料正在确认时，不能因背包一时增长就跳过确认。
     protected TaskState onTick() {
+        // 内部直接调用烹饪也要兑现保护标签，不能只在补料子任务或公开意图外壳中才加保护。
+        var protection = LandmarkProtection.resolve(r.protectedLabels, IntentRuntime.get().landmarks(),
+                player.level().dimension().location().toString());
+        if (!protection.problems().isEmpty()) {
+            rememberFailure("unresolved_protected_label", String.join("; ", protection.problems()), FailureType.TARGET_LOST);
+            fail(failureMessage, failureType);
+            return TaskState.FAILED;
+        }
+        return protection.run(this::tickCooking);
+    }
+
+    private TaskState tickCooking() {
         // 跨刻期间换成另一份菜单时先停止旧子任务，不能让同类同编号的新炉子接收旧槽位操作。
         if (openedMenu && ownedMenu != null && player.containerMenu != ownedMenu
                 && !observingOwnClose()) {

@@ -1,4 +1,4 @@
-package org.maiwithu.maicraft.core.task.acquire;
+package org.maiwithu.maicraft.core.task.base;
 
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
@@ -14,11 +14,11 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 
 /**
- * 把取材料时明确指定的地标变成不能修改的格子，并记录找不到的地标名。
+ * 把工作时明确指定的地标变成不能修改或使用的格子，并记录找不到的地标名。
  * 这里只保护地标坐标这一格；建筑的完整保护范围由外层任务另行提供。
  */
-record AcquisitionProtection(LongSet markedCells, List<String> problems) {
-    static AcquisitionProtection resolve(List<String> labels,
+public record LandmarkProtection(LongSet markedCells, List<String> problems) {
+    public static LandmarkProtection resolve(List<String> labels,
                                          Collection<IntentRuntime.Landmark> landmarks,
                                          String dimension) {
         var remembered = new HashMap<String, IntentRuntime.Landmark>();
@@ -36,10 +36,10 @@ record AcquisitionProtection(LongSet markedCells, List<String> problems) {
                 marked.add(BlockPos.asLong(position.x(), position.y(), position.z()));
             }
         }
-        return new AcquisitionProtection(LongSets.unmodifiable(marked), List.copyOf(problems));
+        return new LandmarkProtection(LongSets.unmodifiable(marked), List.copyOf(problems));
     }
 
-    <T> T run(Supplier<T> operation) {
+    public <T> T run(Supplier<T> operation) {
         if (!problems.isEmpty()) throw new IllegalStateException(String.join("; ", problems));
         // 把这些格子并入外层已有的禁止修改范围，供挖掘和寻路共同读取；它们本身不禁止玩家经过。
         return NavigationSafetyContext.withProtectedArea(markedCells, LongSets.emptySet(), operation);

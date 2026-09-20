@@ -42,6 +42,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanner.Frontier;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanner.IngredientNeed;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.base.LandmarkProtection;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
@@ -159,7 +160,7 @@ public final class SemanticAcquireCompanionTask
     @Override
     protected TaskState onTick() {
         // 每刻重新找出点名保护的区域；保护名字无法对应当前世界时先停，不把失效保护当成空范围。
-        AcquisitionProtection protection = AcquisitionProtection.resolve(r.protectedLabels,
+        LandmarkProtection protection = LandmarkProtection.resolve(r.protectedLabels,
                 IntentRuntime.get().landmarks(), player.level().dimension().location().toString());
         if (!protection.problems().isEmpty()) {
             return failAcquisition("unresolved_protected_label",

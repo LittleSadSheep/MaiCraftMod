@@ -7,6 +7,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
+import org.maiwithu.maicraft.core.task.base.LandmarkProtection;
 
 /** Exercises the actual nested mutation/body scope used by mining and its terrain pathfinder. */
 public final class AcquisitionProtectionTest {
@@ -23,7 +24,7 @@ public final class AcquisitionProtectionTest {
     private static void ordinaryMarkersDoNotBanWorldSources() {
         var coast = marker("old coast", 0, 64, 0, DIMENSION);
         var distant = marker("old lookout", 500, 64, 0, DIMENSION);
-        var protection = AcquisitionProtection.resolve(List.of(), List.of(coast, distant), DIMENSION);
+        var protection = LandmarkProtection.resolve(List.of(), List.of(coast, distant), DIMENSION);
         check(protection.problems().isEmpty() && protection.markedCells().isEmpty(),
                 "merely remembering a location inside the 528-block search area blocked mining");
         protection.run(() -> {
@@ -38,7 +39,7 @@ public final class AcquisitionProtectionTest {
         BlockPos nearbyResource = new BlockPos(3, 64, 0);
         BlockPos measuredResource = new BlockPos(5, 64, 0);
         BlockPos forbiddenStance = measuredResource.above();
-        var protection = AcquisitionProtection.resolve(List.of(" BASE ", "remote"),
+        var protection = LandmarkProtection.resolve(List.of(" BASE ", "remote"),
                 List.of(marker("base", 0, 64, 0, DIMENSION),
                         marker("remote", 500, 64, 0, DIMENSION)), DIMENSION);
         var measured = new LongOpenHashSet(new long[] {measuredResource.asLong()});
@@ -64,7 +65,7 @@ public final class AcquisitionProtectionTest {
     }
 
     private static void unresolvedLabelsCannotStartAnEffect() {
-        var protection = AcquisitionProtection.resolve(List.of("missing"), List.of(), DIMENSION);
+        var protection = LandmarkProtection.resolve(List.of("missing"), List.of(), DIMENSION);
         check(protection.problems().equals(List.of("unknown protected label: missing")),
                 "an unresolved explicit protection was silently ignored");
         AtomicBoolean ran = new AtomicBoolean();
@@ -76,7 +77,7 @@ public final class AcquisitionProtectionTest {
     }
 
     private static void otherDimensionsDoNotProtectLocalCoordinates() {
-        var protection = AcquisitionProtection.resolve(List.of("nether base"),
+        var protection = LandmarkProtection.resolve(List.of("nether base"),
                 List.of(marker("nether base", 0, 64, 0, "minecraft:the_nether")), DIMENSION);
         check(protection.problems().isEmpty() && protection.markedCells().isEmpty(),
                 "a known marker in another dimension blocked local acquisition");
