@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
 import org.maiwithu.maicraft.core.task.cook.CookingFuelTest;
 import org.maiwithu.maicraft.core.task.cook.CookingBatchTest;
 import org.maiwithu.maicraft.core.task.cook.CookingStockBudgetTest;
+import org.maiwithu.maicraft.core.task.cook.CookingPreparationEffectsTest;
 import org.maiwithu.maicraft.core.task.cook.CookingQuantityTest;
 import org.maiwithu.maicraft.core.task.cook.CookingMenuCloseTest;
 import org.maiwithu.maicraft.core.task.cook.CookingMenuOwnershipTest;
@@ -259,6 +260,7 @@ public final class GuiRegressionSuite {
         CookingFuelTest.main(args);
         CookingBatchTest.main(args);
         CookingStockBudgetTest.main(args);
+        CookingPreparationEffectsTest.main(args);
         CookingQuantityTest.main(args);
         CookingMenuCloseTest.main(args);
         CookingMenuOwnershipTest.main(args);

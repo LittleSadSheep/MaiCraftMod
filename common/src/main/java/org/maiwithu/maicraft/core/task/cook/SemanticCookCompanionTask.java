@@ -888,11 +888,16 @@ public final class SemanticCookCompanionTask
             return TaskState.RUNNING;
         }
         TaskResult result = activeChild.result(terminal);
+        // 子任务已经无法确认的效果必须传到总加工结果，不能只藏在嵌套失败说明里。
+        outcomeUncertain |= uncertain(result);
         Purpose purpose = activePurpose;
         activeChild = null;
         activeRecord = null;
         activePurpose = null;
-        if (terminal != TaskState.SUCCESS || result == null || !result.success()) {
+        if (terminal != TaskState.SUCCESS || result == null || !result.success() || uncertain(result)) {
+            if (uncertain(result)) rememberFailure("cooking_child_outcome_uncertain",
+                    "A cooking prerequisite or menu operation ended with unconfirmed effects; further work stopped.",
+                    FailureType.UNKNOWN);
             if (purpose == Purpose.ABANDON_CLOSE) {
                 outcomeUncertain = true;
                 openedMenu = player.containerMenu != player.inventoryMenu;
@@ -902,6 +907,8 @@ public final class SemanticCookCompanionTask
             if (purpose == Purpose.ACQUIRE_INPUT || purpose == Purpose.ACQUIRE_FUEL
                     || purpose == Purpose.ACQUIRE_STATION) {
                 prerequisiteFailure = semanticPrerequisiteFailure(result);
+                // 备料失败也可能已经挖过方块或消耗材料；这时不能把它当作免费试错，继续换另一条生产路线。
+                effectsStarted |= prerequisiteEffects(result);
                 if (retryAnotherPreparationPlan(purpose, result)) {
                     return TaskState.RUNNING;
                 }
@@ -927,9 +934,13 @@ public final class SemanticCookCompanionTask
                     childFailureCode(purpose), childFailureMessage(purpose), lastFailure());
         }
         switch (purpose) {
-            case ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION -> phase = Phase.PREPARE;
+            case ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION -> {
+                effectsStarted |= prerequisiteEffects(result);
+                phase = Phase.PREPARE;
+            }
             case PLACE_STATION -> {
                 stationPlaced = true;
+                effectsStarted = true;
                 if (stationPos == null
                         || !player.level().getBlockState(stationPos)
                                 .is(candidate.device().block)) {
@@ -1007,11 +1018,17 @@ public final class SemanticCookCompanionTask
         for (String key : List.of(
                 "failure_type", "failure_code", "requires_decision",
                 "requires_narration", "outcome_uncertain", "status",
-                "recovery_options", "issues")) {
+                "recovery_options", "issues", "effects_observed", "effects_started", "planning_handoff")) {
             Object value = result.data().get(key);
             if (value != null) safe.put(key, value);
         }
         return Map.copyOf(safe);
+    }
+
+    private static boolean prerequisiteEffects(TaskResult result) {
+        return result != null && result.data() != null
+                && (Boolean.TRUE.equals(result.data().get("effects_observed"))
+                    || Boolean.TRUE.equals(result.data().get("effects_started")));
     }
 
     /** A pre-effect prerequisite failure rejects only that finite plan and re-runs cost selection. */
@@ -1065,7 +1082,8 @@ public final class SemanticCookCompanionTask
     }
 
     private static boolean uncertain(TaskResult result) {
-        if (result == null || result.data() == null) return false;
+        if (result == null) return true;
+        if (result.data() == null) return false;
         Object uncertain = result.data().get("outcome_uncertain");
         return Boolean.TRUE.equals(uncertain)
                 || "uncertain".equals(String.valueOf(result.data().get("status")));
