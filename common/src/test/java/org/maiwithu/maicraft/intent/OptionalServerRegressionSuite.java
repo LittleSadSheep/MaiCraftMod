@@ -21,6 +21,8 @@ public final class OptionalServerRegressionSuite {
         org.maiwithu.maicraft.server.inventory.Ae2NativeCraftingCompletionTest.main(args);
         org.maiwithu.maicraft.server.machine.mekanism.MekanismResourceRegressionTest.main(args);
         org.maiwithu.maicraft.server.machine.connectivity.ConnectionInspectionTest.main(args);
+        // 原版漏斗跨模组供料按物品机制检查方向、锁定与精确准入，不再误用 Create 动力边，也不冒充真实流量。
+        org.maiwithu.maicraft.server.machine.connectivity.HopperConnectionInspectionTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.production.ProductionDesignCompilerTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidenceTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.production.ProductionPressInputObstructionTest.main(args);
