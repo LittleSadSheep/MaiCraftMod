@@ -18,6 +18,11 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
+import java.util.EnumSet;
+import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.material.WaterFluid;
+import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 
 /**
  * 描述一项落地办法：用水、蛛网、藤蔓、黏液块、干草或船，放在哪一格、点哪一面，以及是不是利用已有物体。
@@ -43,7 +48,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         public boolean solidSupport() { return this == SLIME || this == HAY; }
         public boolean matches(BlockState state) {
             if (this == BOAT) return false;
-            if (this == WATER) return state.getFluidState().getType() instanceof net.minecraft.world.level.material.WaterFluid;
+            if (this == WATER) return state.getFluidState().getType() instanceof WaterFluid;
             return state.is(block) || this == TWISTING_VINES && state.is(Blocks.TWISTING_VINES_PLANT)
                     || this == WEEPING_VINES && state.is(Blocks.WEEPING_VINES_PLANT);
         }
@@ -72,7 +77,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             this(available, waterAllowed, othersAllowed, ultraWarm, 0.6, 1.8);
         }
         public static InventorySnapshot capture(LocalPlayer player, TerrainPermit permit, boolean ultraWarm) {
-            var kinds = java.util.EnumSet.noneOf(Kind.class);
+            var kinds = EnumSet.noneOf(Kind.class);
             for (Kind kind : Kind.values()) {
                 if (kind==Kind.BOAT) {
                     if (LandingBoatRescue.carried(player)!=null) kinds.add(kind);
@@ -111,7 +116,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
                 if (!available.contains(kind) || !target.canBeReplaced() || protectedCell.test(feet)) continue;
                 if (target.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)) {
                     BlockPos paired = target.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)
-                            == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER ? feet.above() : feet.below();
+                            == DoubleBlockHalf.LOWER ? feet.above() : feet.below();
                     if (view.getBlockState(paired).is(target.getBlock()) && protectedCell.test(paired)) continue;
                 }
                 BlockPos anchor = kind == Kind.WEEPING_VINES ? feet.above() : feet.below();
@@ -191,7 +196,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         }
         if (!view.getBlockState(feet).canBeReplaced()) return false;
         if (kind != Kind.WATER && !kind.solidSupport() && !kind.block.defaultBlockState().is(BlockTags.FALL_DAMAGE_RESETTING)) return false;
-        if (view instanceof net.minecraft.world.level.LevelReader level)
+        if (view instanceof LevelReader level)
             return kind.block.defaultBlockState().canSurvive(level,feet);
         // Vanilla Block.canSurvive is unconditional for web/slime/hay. BushBlock and
         // GrowingPlantBlock use these neighboring-block rules, also available in A* snapshots.
@@ -208,10 +213,10 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         };
     }
 
-    public boolean survives(org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget budget,
+    public boolean survives(FallDamageBudget budget,
                             double playerY, boolean includeAccumulated) {
         return kind != Kind.HAY || budget.survives(Math.max(0, playerY - cell.getY() - 1),
-                org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.of(kind.block.defaultBlockState()), includeAccumulated);
+                FallDamageBudget.Landing.of(kind.block.defaultBlockState()), includeAccumulated);
     }
 
     // 只回收已确认由本次放下、状态仍与记录相同且未被保护的物体，避免收走原有设施或后来改变的方块。

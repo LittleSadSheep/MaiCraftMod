@@ -6,6 +6,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
+import java.util.stream.IntStream;
+import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
+import org.maiwithu.maicraft.client.actor.VanillaHotbar;
 
 /**
  * 把落地用品准备到手里：能用现成手持时直接用，需要取背包物品时先打开自己的库存、移到快捷栏并关好界面。
@@ -28,7 +31,7 @@ public final class LandingPreparation {
     public boolean acceptHeld(LocalPlayerContext context) {
         if (selection != null || swap != null || inventoryTouched || interruptedClose != null || failed) return false;
         if (!context.permitsNativeActions()
-                || !org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen)) return false;
+                || !DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen)) return false;
         if (context.player().getMainHandItem().is(item)) hand = InteractionHand.MAIN_HAND;
         else if (context.player().getOffhandItem().is(item)) hand = InteractionHand.OFF_HAND;
         else return false;
@@ -70,7 +73,7 @@ public final class LandingPreparation {
                     // 落地物在背包里时换到“当前手上那格”；扩展快捷栏模组可能让 selected 越出 0~8，
                     // 原版 SWAP 交换只认 0~8，先折回原版范围再交换。
                     swap = context.menus().swapInventoryToHotbar(context, slot,
-                            org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(context.player().getInventory().selected), 20);
+                            VanillaHotbar.swapTarget(context.player().getInventory().selected), 20);
                     return false;
                 }
                 if (!menus.close(context) || !menus.worldReady(context)) return false;
@@ -101,11 +104,11 @@ public final class LandingPreparation {
         if (remainingTicks <= 3 && !ready) {
             if (inventoryTouched) { closeForFailure(context); return false; }
             boolean quick = context.player().getMainHandItem().is(item) || context.player().getOffhandItem().is(item)
-                    || java.util.stream.IntStream.range(0,9).anyMatch(slot -> context.player().getInventory().getItem(slot).is(item));
+                    || IntStream.range(0,9).anyMatch(slot -> context.player().getInventory().getItem(slot).is(item));
             if (!quick) return fail("carried inventory transfer cannot finish before the landing action window");
         }
         // 当前只要普通背包也有同物品就走完整准备；它会跳过后面的现成手持判断，可能反而重选另一格同物品。
-        if (inventoryTouched || java.util.stream.IntStream.range(9,36).anyMatch(slot ->
+        if (inventoryTouched || IntStream.range(9,36).anyMatch(slot ->
                 context.player().getInventory().getItem(slot).is(item))) return tick(context);
         if (failed) return false;
         try {
@@ -117,7 +120,7 @@ public final class LandingPreparation {
             }
             if (acceptHeld(context)) return true;
             if (!context.permitsNativeActions()
-                    || !org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen))
+                    || !DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen))
                 return fail("emergency item selection lost world control");
             for (int slot = 0; slot < 9; slot++) {
                 if (!context.player().getInventory().getItem(slot).is(item)) continue;

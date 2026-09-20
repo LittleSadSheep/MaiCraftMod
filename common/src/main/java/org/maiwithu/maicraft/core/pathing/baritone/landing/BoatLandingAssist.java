@@ -16,6 +16,14 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import java.util.ArrayList;
+import java.util.List;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
+import org.maiwithu.maicraft.client.actor.BodyControlPort;
 
 /**
  * 按阶段完成落地上船：准备物品、放船、确认看到船、瞄准乘坐、等船与玩家稳定，再用原生潜行下船。
@@ -167,7 +175,7 @@ public final class BoatLandingAssist {
             phase = Phase.DISMOUNT; detail = "boat stable, ride tick reset observed; awaiting native Shift dismount";
             if (!ctx.mutationAvailable()) { phase = Phase.RIDING; return State.RUNNING; }
             receipt = ctx.actions().submitControlProtocol(ctx, "boat landing native Shift dismount", () ->
-                    ctx.body().applyMovement(new org.maiwithu.maicraft.client.actor.BodyControlPort.Movement(0,0,false,true,false),
+                    ctx.body().applyMovement(new BodyControlPort.Movement(0,0,false,true,false),
                             ctx.tickRevision()), live -> !live.player().isPassenger()
                             ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING, 30);
             return State.RUNNING;
@@ -189,10 +197,10 @@ public final class BoatLandingAssist {
         if(ctx.player().onGround()) look(ctx,aim); else down(ctx);
         if (ctx.player().getEyePosition().distanceTo(plan.spawn())>ctx.player().blockInteractionRange()) return State.RUNNING;
         if (!BoatLandingGeometry.placeable(ctx.level(), ctx.level()::isLoaded, ctx.player().getEyePosition(), plan.spawn())) return fail("boat POV placement corridor changed");
-        var hit = ctx.level().clip(new net.minecraft.world.level.ClipContext(ctx.player().getEyePosition(),
+        var hit = ctx.level().clip(new ClipContext(ctx.player().getEyePosition(),
                 ctx.player().getEyePosition().add(ctx.player().getViewVector(1).scale(ctx.player().blockInteractionRange())),
-                net.minecraft.world.level.ClipContext.Block.OUTLINE, net.minecraft.world.level.ClipContext.Fluid.ANY, ctx.player()));
-        if (hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK || hit.getDirection()!=net.minecraft.core.Direction.UP
+                ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, ctx.player()));
+        if (hit.getType() != HitResult.Type.BLOCK || hit.getDirection()!=Direction.UP
                 || !hit.getBlockPos().equals(plan.landing().below()) || Math.abs(hit.getLocation().y-plan.spawn().y)>.01
                 || hit.getLocation().x<plan.landing().getX() || hit.getLocation().x>plan.landing().getX()+1
                 || hit.getLocation().z<plan.landing().getZ() || hit.getLocation().z>plan.landing().getZ()+1) return State.RUNNING;
@@ -212,8 +220,8 @@ public final class BoatLandingAssist {
     }
     // 先确认附近只新出现了一条服务器船实体，允许抓住上船时机；是否属于自己另用物品种类和库存减少证据判断。
     private NativeConfirmation.Verdict observePlacement(LocalPlayerContext ctx) {
-        java.util.List<UUID> candidates = new java.util.ArrayList<>();
-        java.util.List<UUID> matchingItems = new java.util.ArrayList<>();
+        List<UUID> candidates = new ArrayList<>();
+        List<UUID> matchingItems = new ArrayList<>();
         for (Boat boat : ctx.level().getEntitiesOfClass(Boat.class, BoatLandingGeometry.boatBox(plan.spawn()).inflate(0.5))) {
             if (boat.getType() == EntityType.BOAT) {
                 candidates.add(boat.getUUID());
@@ -230,7 +238,7 @@ public final class BoatLandingAssist {
         return NativeConfirmation.Verdict.APPLIED;
     }
     record PlacementEvidence(NativeConfirmation.Verdict verdict, UUID uuid) {}
-    static PlacementEvidence placementEvidence(Set<UUID> before, java.util.List<UUID> matches, int oldCount, int newCount, boolean creative) {
+    static PlacementEvidence placementEvidence(Set<UUID> before, List<UUID> matches, int oldCount, int newCount, boolean creative) {
         var fresh = matches.stream().filter(id -> !before.contains(id)).distinct().toList();
         if (fresh.size() > 1) return new PlacementEvidence(NativeConfirmation.Verdict.DIVERGED, null);
         if (fresh.isEmpty() || !creative && newCount >= oldCount) return new PlacementEvidence(NativeConfirmation.Verdict.PENDING, null);
@@ -254,7 +262,7 @@ public final class BoatLandingAssist {
     }
     private static boolean targeted(LocalPlayerContext ctx, Boat boat) {
         var eye=ctx.player().getEyePosition(); var reach=ctx.player().getViewVector(1).scale(ctx.player().entityInteractionRange());
-        var hit=net.minecraft.world.entity.projectile.ProjectileUtil.getEntityHitResult(ctx.player(),eye,eye.add(reach),
+        var hit=ProjectileUtil.getEntityHitResult(ctx.player(),eye,eye.add(reach),
                 ctx.player().getBoundingBox().expandTowards(reach).inflate(1), entity -> !entity.isSpectator() && entity.isPickable(),reach.lengthSqr());
         return ctx.player().canInteractWithEntity(boat, 0) && hit!=null && hit.getEntity().getUUID().equals(boat.getUUID())
                 && BoatLandingGeometry.visible(ctx.level(), ctx.level()::isLoaded, eye, hit.getLocation());
@@ -313,9 +321,9 @@ public final class BoatLandingAssist {
     public boolean effectsStarted() { return effects; }
     public Vec3 aimPoint() { return aim; }
     public boolean wantsSneak() { return phase == Phase.DISMOUNT; }
-    public org.maiwithu.maicraft.client.actor.BodyControlPort.Movement movementOverride() {
+    public BodyControlPort.Movement movementOverride() {
         if(phase==Phase.MOUNT && mountSubmissions>0 || phase==Phase.RIDING)
-            return org.maiwithu.maicraft.client.actor.BodyControlPort.Movement.STOPPED;
+            return BodyControlPort.Movement.STOPPED;
         return phase == Phase.RECOVER ? recovery.movement() : null;
     }
     public boolean cleanupPending() {
@@ -335,7 +343,7 @@ public final class BoatLandingAssist {
         result.put("phase", phase.name()); result.put("detail", detail); result.put("created_this_session", owned);
         result.put("placement_submissions",placementSubmissions); result.put("mount_submissions",mountSubmissions);
         result.put("placement_tick",placementTick); result.put("spawn_observed_tick",spawnTick); result.put("mount_tick",mountTick);
-        result.put("requested_item",plan.item()==null ? "existing_boat" : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(plan.item()).toString());
+        result.put("requested_item",plan.item()==null ? "existing_boat" : BuiltInRegistries.ITEM.getKey(plan.item()).toString());
         result.put("mount_before_position_packet",mountBeforePositionPacket); result.put("mount_gate",mountGate); result.put("mount_probe",mountProbe);
         result.put("placement_probe",placementProbe);
         result.put("left_in_world", phase == Phase.DONE && (recovery == null || recovery.boatLeft()));

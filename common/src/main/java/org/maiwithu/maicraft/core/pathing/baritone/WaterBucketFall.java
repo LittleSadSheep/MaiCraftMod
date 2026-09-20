@@ -13,6 +13,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.level.material.WaterFluid;
 
 /**
  * 落地放水的规则与瞄准帮助：识别水源和含水方块，找脚下可点击表面，确认一桶水实际会进入哪一格。
@@ -83,7 +84,7 @@ public final class WaterBucketFall {
     }
 
     public static boolean sourceWater(BlockState state) {
-        return state.getFluidState().getType() instanceof net.minecraft.world.level.material.WaterFluid
+        return state.getFluidState().getType() instanceof WaterFluid
                 && state.getFluidState().isSource();
     }
 

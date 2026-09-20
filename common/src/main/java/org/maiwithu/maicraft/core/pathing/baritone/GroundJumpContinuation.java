@@ -2,6 +2,8 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 
 import baritone.api.pathing.movement.IMovement;
 import baritone.api.utils.BetterBlockPos;
+import java.util.List;
+import java.util.Set;
 
 /**
  * 一次已核对的平地跑跳期间，暂时让指定的走路步骤仍按起跳地面高度判断进度，避免刚离地就误认为偏离路线。
@@ -11,11 +13,11 @@ public final class GroundJumpContinuation {
     private double takeoffY;
     private boolean airborne;
     private int ticks;
-    private java.util.Set<IMovement> verified = java.util.Set.of();
+    private Set<IMovement> verified = Set.of();
 
-    public void launch(int floor, double takeoffY, java.util.List<IMovement> runway) {
+    public void launch(int floor, double takeoffY, List<IMovement> runway) {
         this.floor = floor; this.takeoffY = takeoffY; airborne = false; ticks = 0;
-        verified = java.util.Set.copyOf(runway);
+        verified = Set.copyOf(runway);
     }
 
     public void observe(boolean grounded, double y) {

@@ -21,6 +21,12 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.core.task.craft.CraftCompanionTask;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.UUID;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.StackedContents;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
+import org.maiwithu.maicraft.task.Task;
 
 /**
  * 为一次落地上船准备普通船：可以复用观察到的空船、取现有物品，或在还有时间时尝试原地合成，再交给上船控制器。
@@ -104,7 +110,7 @@ final class LandingBoatRescue {
         if (preparation==null) preparation=new LandingPreparation(item);
         boolean prepared=context.player().onGround() ? preparation.tick(context) : preparation.tickEmergency(context,remaining);
         if (!prepared) { failed=preparation.failed(); detail=preparation.diagnostic(); return false; }
-        java.util.UUID existing=null;
+        UUID existing=null;
         for (Boat candidate : context.level().getEntitiesOfClass(Boat.class,BoatLandingGeometry.boatBox(landing.aimPoint()).inflate(.5)))
             if (BoatLandingSnapshot.stationary(candidate) && candidate.getPassengers().isEmpty()
                     && candidate.position().distanceToSqr(landing.aimPoint())<.25) { existing=candidate.getUUID(); break; }
@@ -116,7 +122,7 @@ final class LandingBoatRescue {
     private boolean startCraft(LocalPlayerContext context) {
         craftTried=true;
         if (context.connection()==null) return false;
-        var contents=new net.minecraft.world.entity.player.StackedContents();
+        var contents=new StackedContents();
         context.player().getInventory().fillStackedContents(contents);
         for (var recipe : context.connection().getRecipeManager().getAllRecipesFor(RecipeType.CRAFTING)) {
             var result=recipe.value().getResultItem(context.level().registryAccess());
@@ -125,9 +131,9 @@ final class LandingBoatRescue {
             for (BlockPos cell : BlockPos.betweenClosed(context.player().blockPosition().offset(-4,-3,-4),context.player().blockPosition().offset(4,3,4))) {
                 if (context.level().isLoaded(cell) && context.level().getBlockState(cell).getBlock() instanceof CraftingTableBlock
                         && eye.distanceToSqr(Vec3.atCenterOf(cell))<context.player().blockInteractionRange()*context.player().blockInteractionRange()) {
-                    var hit=context.level().clip(new net.minecraft.world.level.ClipContext(eye,Vec3.atCenterOf(cell),
-                            net.minecraft.world.level.ClipContext.Block.OUTLINE,net.minecraft.world.level.ClipContext.Fluid.NONE,context.player()));
-                    if(hit.getType()!=net.minecraft.world.phys.HitResult.Type.BLOCK || !hit.getBlockPos().equals(cell)) continue;
+                    var hit=context.level().clip(new ClipContext(eye,Vec3.atCenterOf(cell),
+                            ClipContext.Block.OUTLINE,ClipContext.Fluid.NONE,context.player()));
+                    if(hit.getType()!=HitResult.Type.BLOCK || !hit.getBlockPos().equals(cell)) continue;
                     station=cell.immutable(); break;
                 }
             }
@@ -141,7 +147,7 @@ final class LandingBoatRescue {
         if (context.player().onGround() && !departed) return Integer.MAX_VALUE;
         double y=context.player().getY(), v=context.player().getDeltaMovement().y;
         double target=landing.aimPoint().y+context.player().blockInteractionRange()-context.player().getEyeHeight();
-        double gravity=context.player().getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.GRAVITY);
+        double gravity=context.player().getAttributeValue(Attributes.GRAVITY);
         for (int ticks=0;ticks<200;ticks++) { if(y<=target)return ticks; y+=v; v=(v-gravity)*.98; }
         return 200;
     }
@@ -151,7 +157,7 @@ final class LandingBoatRescue {
             closing=context.menus().closeForTaskBoundary(context,20,"landing boat crafting ended");
     }
     private void stopCraft(LocalPlayerContext context) {
-        if(craft!=null) { craft.stop(context.player(),org.maiwithu.maicraft.task.Task.StopReason.REPLACED); craft.result(TaskState.CANCELLED); craft=null; }
+        if(craft!=null) { craft.stop(context.player(),Task.StopReason.REPLACED); craft.result(TaskState.CANCELLED); craft=null; }
         closeMenu(context);
     }
     void stop(LocalPlayerContext context) { stopped=true; cleanup(context); }

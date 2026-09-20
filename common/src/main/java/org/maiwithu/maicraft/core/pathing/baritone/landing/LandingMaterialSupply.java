@@ -12,6 +12,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import java.util.Comparator;
 
 /**
  * 落地用品不足时做一次有时间上限的原地 AE2 取物尝试，并负责关好相关界面。优先水等免伤办法，干草保留为减伤后备。
@@ -49,7 +50,7 @@ public final class LandingMaterialSupply {
     LandingMaterialSupply(List<ResourceLocation> acceptableIds,
             BiFunction<LocalPlayer, Ae2ResourceSupply.Request, Ae2ResourceSupply.Session> begin) {
         accepted = List.copyOf(Objects.requireNonNull(acceptableIds)).stream().distinct()
-                .sorted(java.util.Comparator.comparingInt(id -> id.equals(WATER) ? 0 : id.equals(HAY) ? 2 : 1)).toList();
+                .sorted(Comparator.comparingInt(id -> id.equals(WATER) ? 0 : id.equals(HAY) ? 2 : 1)).toList();
         if (accepted.size() > 256) throw new IllegalArgumentException("too many landing material candidates");
         this.begin = Objects.requireNonNull(begin);
     }

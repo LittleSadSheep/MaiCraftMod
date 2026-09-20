@@ -15,6 +15,7 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
+import java.util.function.Consumer;
 
 /** Continuous-ground acceleration; upstream Parkour and sprint-ascend still own their special moves. */
 public final class TravelJumpPolicy {
@@ -22,7 +23,7 @@ public final class TravelJumpPolicy {
     private TravelJumpPolicy() {}
 
     public static boolean shouldTravelJump(Baritone baritone, List<IMovement> movements,
-                                           int pathPosition, java.util.function.Consumer<List<IMovement>> verifiedRunway) {
+                                           int pathPosition, Consumer<List<IMovement>> verifiedRunway) {
         IPlayerContext ctx = baritone.getPlayerContext();
         var player = ctx.player();
         if (player == null || !player.onGround() || player.isInWater() || player.isPassenger()

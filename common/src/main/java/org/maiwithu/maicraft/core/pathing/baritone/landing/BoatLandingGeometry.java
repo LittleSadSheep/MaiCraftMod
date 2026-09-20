@@ -12,6 +12,11 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.level.block.BaseFireBlock;
+import net.minecraft.world.level.block.CampfireBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.WaterFluid;
+import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
 
 /**
  * 落地上船共用的空间检查：船能放在哪里、身体是否会卡住、视线是否畅通，以及周围哪里可以下船站住。
@@ -41,9 +46,9 @@ final class BoatLandingGeometry {
     }
     private static boolean safeFloor(BlockGetter view, BlockPos pos, double height) {
         var state=view.getBlockState(pos);
-        if(state.getFluidState().getType() instanceof net.minecraft.world.level.material.WaterFluid
+        if(state.getFluidState().getType() instanceof WaterFluid
                 && height>state.getFluidState().getHeight(view,pos)+.0001)
-            state=org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.dryGeometry(state);
+            state=WaterBucketFall.dryGeometry(state);
         return !hazard(state);
     }
     static boolean placeable(BlockGetter view, Predicate<BlockPos> loaded, Vec3 eye, Vec3 spawn) {
@@ -69,12 +74,12 @@ final class BoatLandingGeometry {
         }
         return true;
     }
-    static boolean hazard(net.minecraft.world.level.block.state.BlockState state) {
+    static boolean hazard(BlockState state) {
         return !state.getFluidState().isEmpty() || state.is(Blocks.MAGMA_BLOCK) || state.is(Blocks.CACTUS)
                 || state.is(Blocks.SWEET_BERRY_BUSH) || state.is(Blocks.POINTED_DRIPSTONE)
                 || state.is(Blocks.POWDER_SNOW) || state.is(Blocks.NETHER_PORTAL)
-                || state.getBlock() instanceof net.minecraft.world.level.block.BaseFireBlock
-                || state.getBlock() instanceof net.minecraft.world.level.block.CampfireBlock;
+                || state.getBlock() instanceof BaseFireBlock
+                || state.getBlock() instanceof CampfireBlock;
     }
     static Vec3 dismountOffset(double boatWidth, double riderWidth, float yaw) {
         double distance = (boatWidth * Mth.SQRT_OF_TWO + riderWidth + 1.0E-5F) / 2;

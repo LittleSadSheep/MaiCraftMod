@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import net.minecraft.util.Mth;
 
 /**
  * 可选地回收本次创建的空船：先检查站稳、背包容量和周围安全地面，再攻击船，观察掉落物与库存增加。
@@ -81,7 +82,7 @@ final class BoatLandingRecovery {
         Vec3 delta = destination.subtract(ctx.player().position());
         if (delta.horizontalDistance() > 0.35) {
             double bearing = Math.toDegrees(Math.atan2(delta.z, delta.x))-90;
-            if (Math.abs(net.minecraft.util.Mth.wrapDegrees((float)bearing-ctx.player().getYRot())) < 25) {
+            if (Math.abs(Mth.wrapDegrees((float)bearing-ctx.player().getYRot())) < 25) {
                 movement = new BodyControlPort.Movement(0.35F, 0, false, false, false);
             }
         }

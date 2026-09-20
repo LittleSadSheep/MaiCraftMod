@@ -20,6 +20,14 @@ import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
+import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.IntStream;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.phys.AABB;
+import org.maiwithu.maicraft.client.actor.BodyControlPort;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode;
+import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
 
 /**
  * 执行一次完整落地救援：选办法、补料或准备手持、抓时机只提交一次放置、确认站稳，再尝试回收自己的辅助物。
@@ -27,7 +35,7 @@ import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
  * 失败后也要收尾；落到别处、辅助物被改变或回收后不安全时，会保留物品在现场并如实报告。
  */
 public final class LandingAssistSession {
-    private static final java.util.concurrent.atomic.AtomicLong EPISODES = new java.util.concurrent.atomic.AtomicLong();
+    private static final AtomicLong EPISODES = new AtomicLong();
     private long episode;
     private int placementSubmissions, pickupSubmissions;
     private int landingChanges;
@@ -38,8 +46,8 @@ public final class LandingAssistSession {
     private LandingMaterialSupply materialSupply;
     private boolean materialBound;
     private LandingPreparation preparation;
-    private final org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode groundFlight=
-            new org.maiwithu.maicraft.core.integration.jetpack.JetpackGroundMode();
+    private final JetpackGroundMode groundFlight=
+            new JetpackGroundMode();
     private LandingBoatRescue boat;
     private NativeActionReceipt receipt;
     private NativeActionReceipt stopRelease;
@@ -76,7 +84,7 @@ public final class LandingAssistSession {
     }
     public static LandingAssistSession automatic(List<LandingAssistPlan> candidates, boolean airborne) {
         if (candidates.isEmpty()) throw new IllegalArgumentException("automatic landing needs observed candidates");
-        candidates = candidates.stream().sorted(java.util.Comparator.comparingInt(candidate -> switch(candidate.kind()) {
+        candidates = candidates.stream().sorted(Comparator.comparingInt(candidate -> switch(candidate.kind()) {
             case WATER -> 0; case BOAT -> 1; case HAY -> 3; default -> 2;
         })).toList();
         var session = new LandingAssistSession(candidates.getFirst());
@@ -105,19 +113,19 @@ public final class LandingAssistSession {
                 if (LandingBoatRescue.carried(context.player())!=null) { bindMaterial(candidate); return true; }
                 continue;
             }
-            if (java.util.stream.IntStream.range(0,context.player().getInventory().getContainerSize()).anyMatch(i ->
+            if (IntStream.range(0,context.player().getInventory().getContainerSize()).anyMatch(i ->
                     context.player().getInventory().getItem(i).is(candidate.kind().item)) && materialSupply == null) {
                 bindMaterial(candidate); return true;
             }
         }
         if (materialSupply == null) materialSupply = new LandingMaterialSupply(automaticCandidates.stream().filter(candidate -> !candidate.existing() && candidate.kind()!=LandingAssistPlan.Kind.BOAT)
-                .map(p -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(p.kind().item)).distinct().toList());
+                .map(p -> BuiltInRegistries.ITEM.getKey(p.kind().item)).distinct().toList());
         placementGate = "acquiring_material";
         var supplied = materialSupply.tick(context,remainingActionTicks(context));
         detail = supplied.detail();
         if (supplied.state() == LandingMaterialSupply.State.AVAILABLE) {
             for (var candidate : automaticCandidates) {
-                if (net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(candidate.kind().item).equals(supplied.itemId())) {
+                if (BuiltInRegistries.ITEM.getKey(candidate.kind().item).equals(supplied.itemId())) {
                     bindMaterial(candidate); return true;
                 }
             }
@@ -177,7 +185,7 @@ public final class LandingAssistSession {
         if (!context.level().isLoaded(plan.cell()) || !context.level().isLoaded(plan.clicked())) return false;
         if (!LandingAssistGeometry.safe(context.level(), context.level()::isLoaded, plan,
                 context.player().getBbWidth(), Math.max(1.8, context.player().getBbHeight()),
-                org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) {
+                EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) {
             if (preparation != null) preparation.closeForFailure(context);
             fail("loaded landing body clearance or support changed before departure"); return false;
         }
@@ -228,7 +236,7 @@ public final class LandingAssistSession {
         if (plan.kind() == LandingAssistPlan.Kind.HAY && context.player().onGround()
                 && context.level().getBlockState(plan.cell()).is(Blocks.HAY_BLOCK)
                 && Math.abs(context.player().getBoundingBox().minY - plan.cell().getY() - 1) < 0.01
-                && context.player().getBoundingBox().intersects(new net.minecraft.world.phys.AABB(plan.cell()).inflate(0.001)))
+                && context.player().getBoundingBox().intersects(new AABB(plan.cell()).inflate(0.001)))
             hayContactObserved = true;
         if (!context.permitsNativeActions()) { fail("control authority changed during landing assistance"); return; }
         groundFlight.poll(context);
@@ -420,7 +428,7 @@ public final class LandingAssistSession {
         }
         if (!context.mutationAvailable()) return;
         if (plan.kind() == LandingAssistPlan.Kind.WATER) {
-            if (!org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.canRecover(
+            if (!WaterBucketFall.canRecover(
                     context.level().getBlockState(plan.cell()), placed != null, EmbeddedBaritonePolicy.protects(plan.cell()))) {
                 finish("landed; only the confirmed original source water may be recovered"); return;
             }
@@ -449,7 +457,7 @@ public final class LandingAssistSession {
     }
 
     public Vec3 aimPoint() { return boat!=null ? boat.aimPoint() : placed == null ? plan.aimPoint() : Vec3.atCenterOf(plan.cell()); }
-    public org.maiwithu.maicraft.client.actor.BodyControlPort.Movement movementOverride() { return boat==null ? null : boat.movementOverride(); }
+    public BodyControlPort.Movement movementOverride() { return boat==null ? null : boat.movementOverride(); }
     /** Hold the landing cell against generic water bobbing while its source is being recovered. */
     public boolean holdingForRecovery(LocalPlayerContext context) {
         if(boat!=null) return context.player().isPassenger() || boat.movementOverride()!=null;
@@ -531,8 +539,8 @@ public final class LandingAssistSession {
         if (!rejectedCandidates.isEmpty()) result.put("rejected_candidates",rejectedCandidates);
         result.put("automatic",automaticCandidates != null);
         if (boat!=null) result.put("boat_rescue",boat.diagnostics());
-        if (materialSupply != null) result.put("material_supply",java.util.Map.of("state",materialSupply.result().state().name(),"detail",materialSupply.result().detail()));
-        result.put("landing_feet",java.util.Map.of("x",plan.feet().getX(),"y",plan.feet().getY(),"z",plan.feet().getZ()));
+        if (materialSupply != null) result.put("material_supply",Map.of("state",materialSupply.result().state().name(),"detail",materialSupply.result().detail()));
+        result.put("landing_feet",Map.of("x",plan.feet().getX(),"y",plan.feet().getY(),"z",plan.feet().getZ()));
         result.put("submitted", submitted); result.put("confirmed_own_placement", placed != null);
         result.put("existing_environment", plan.existing()); result.put("complete", complete);
         result.put("failed", failed()); result.put("damage_observed", damageObserved);
@@ -597,13 +605,13 @@ public final class LandingAssistSession {
     }
     private boolean acceptWaterHit(LocalPlayerContext context, BlockHitResult hit) {
         if (hit.getType() != HitResult.Type.BLOCK) return false;
-        var water = org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.waterCell(context.level(),hit,false);
+        var water = WaterBucketFall.waterCell(context.level(),hit,false);
         if (water.equals(plan.cell())) { // Waterlogging accepts every native hit face.
             plan = new LandingAssistPlan(plan.kind(),plan.feet(),water,hit.getBlockPos(),hit.getDirection(),false,hit.getLocation());
             return true;
         }
         var feet = plan.feet();
-        var plantTop = org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.exposedWaterCell(context.level(),feet);
+        var plantTop = WaterBucketFall.exposedWaterCell(context.level(),feet);
         if (water.getX() != feet.getX() || water.getZ() != feet.getZ()
                 || water.getY() < feet.getY()-1 || water.getY() > plantTop.getY()
                 || EmbeddedBaritonePolicy.protects(water)
@@ -619,7 +627,7 @@ public final class LandingAssistSession {
     }
     private void refreshWaterAim(LocalPlayerContext context) {
         if (plan.kind() != LandingAssistPlan.Kind.WATER || plan.existing() || submitted) return;
-        var hit = org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall.floorHit(context.level(),plan.feet(),context.player().getEyePosition());
+        var hit = WaterBucketFall.floorHit(context.level(),plan.feet(),context.player().getEyePosition());
         if (hit != null) acceptWaterHit(context,hit);
     }
     private BlockHitResult trace(LocalPlayerContext c, boolean pickup) {

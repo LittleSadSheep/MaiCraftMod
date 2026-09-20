@@ -10,6 +10,13 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import baritone.pathing.movement.CollisionGeometry;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import net.minecraft.world.phys.AABB;
+import org.maiwithu.maicraft.core.WorkProfile;
+import org.maiwithu.maicraft.core.task.survival.SurvivalDecisions;
 
 /**
  * 意外下落时寻找可救援的落点：先看正下方，再看附近两格内能在剩余时间移到的位置，优先用水。
@@ -19,17 +26,17 @@ public final class EmergencyLanding {
     private EmergencyLanding() {}
     public static boolean triggered(LocalPlayer player) {
         boolean grounded = player.onGround() || player.isInWater() || player.isSwimming() || player.onClimbable();
-        if (grounded || org.maiwithu.maicraft.core.WorkProfile.of(player).fearless()
+        if (grounded || WorkProfile.of(player).fearless()
                 || player.getDeltaMovement().y >= 0) return false;
         // Start acquiring protection on the first descending tick when impact would hurt.
         // Fast descent remains an independent fallback if a synced/modded estimate is stale.
-        if (org.maiwithu.maicraft.core.task.survival.SurvivalDecisions.mlgTriggered(false,
+        if (SurvivalDecisions.mlgTriggered(false,
                 player.getDeltaMovement().y, true)) return true;
         BlockPos ground = groundBelow(player);
         return ground != null && predictedDamage(player, ground) > 0;
     }
     private static float predictedDamage(LocalPlayer player, BlockPos support) {
-        double height = baritone.pathing.movement.CollisionGeometry.supportHeight(player.level(), support);
+        double height = CollisionGeometry.supportHeight(player.level(), support);
         return FallDamageBudget.capture(player).damage(Math.max(0, player.getY() - support.getY() - height),
                 FallDamageBudget.Landing.of(player.level().getBlockState(support)), true);
     }
@@ -71,7 +78,7 @@ public final class EmergencyLanding {
                 ClipContext.Block.COLLIDER,ClipContext.Fluid.NONE,context.player()));
         return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().getX() == column.getX()
                 && hit.getBlockPos().getZ() == column.getZ() && level.isLoaded(hit.getBlockPos())
-                && new net.minecraft.world.phys.AABB(hit.getBlockPos()).inflate(.00001).contains(hit.getLocation())
+                && new AABB(hit.getBlockPos()).inflate(.00001).contains(hit.getLocation())
                 ? hit.getBlockPos().above() : null;
     }
     /** A running fall keeps its already selected support and steering while adopting self-rescue. */
@@ -80,8 +87,8 @@ public final class EmergencyLanding {
         if (!context.level().isLoaded(feet) || !context.level().isLoaded(feet.below())) return null;
         var inventory = LandingAssistPlan.InventorySnapshot.capture(context.player(), TerrainPermit.LANDING_ONLY,
                 context.level().dimensionType().ultraWarm());
-        var candidates = new java.util.ArrayList<LandingAssistPlan>();
-        var rejected = new java.util.LinkedHashMap<String,String>();
+        var candidates = new ArrayList<LandingAssistPlan>();
+        var rejected = new LinkedHashMap<String,String>();
         var player = context.player();
         // A new physical fall gets its own bounded supply attempt; a previous route's failed
         // search must not suppress emergency access after the player's situation changes.
@@ -147,7 +154,7 @@ public final class EmergencyLanding {
             if (!Double.isFinite(drop) || drop < -1.0E-5 || drop > span + 1.0E-5
                     || Math.abs(hit.getLocation().x - from.x) > 1.0E-5
                     || Math.abs(hit.getLocation().z - from.z) > 1.0E-5
-                    || !new net.minecraft.world.phys.AABB(hit.getBlockPos()).inflate(1.0E-5).contains(hit.getLocation()))
+                    || !new AABB(hit.getBlockPos()).inflate(1.0E-5).contains(hit.getLocation()))
                 return unsupportedSupport();
             if (!level.isLoaded(hit.getBlockPos())) return null;
             if (drop < nearest) { nearest = drop; best = hit.getBlockPos(); }
@@ -155,7 +162,7 @@ public final class EmergencyLanding {
         return best;
     }
     private static BlockPos unsupportedSupport() {
-        LandingAssistPolicy.report(java.util.Map.of("phase", "unsupported physical-structure or unverified world-space landing ray",
+        LandingAssistPolicy.report(Map.of("phase", "unsupported physical-structure or unverified world-space landing ray",
                 "support_state", "unsupported", "submitted", false));
         return null;
     }

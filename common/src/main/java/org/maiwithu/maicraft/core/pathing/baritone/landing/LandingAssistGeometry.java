@@ -10,6 +10,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.phys.AABB;
 
 /**
  * 检查某种落地办法放好后，角色身体是否放得下、脚下是否能得到支撑；回收前还要检查拿走辅助物后能否安全站住。
@@ -26,7 +28,7 @@ public final class LandingAssistGeometry {
                                double width, double height, LongSet forbiddenBody) {
         if (plan.kind() == LandingAssistPlan.Kind.BOAT) {
             if (LandingBoatRescue.plan(world,plan.feet(),width,height) == null) return false;
-            var body = new net.minecraft.world.phys.AABB(plan.aimPoint().x-width/2,plan.aimPoint().y+.563,plan.aimPoint().z-width/2,
+            var body = new AABB(plan.aimPoint().x-width/2,plan.aimPoint().y+.563,plan.aimPoint().z-width/2,
                     plan.aimPoint().x+width/2,plan.aimPoint().y+.563+height,plan.aimPoint().z+width/2);
             for (BlockPos cell : BlockPos.betweenClosed(BlockPos.containing(body.minX,body.minY,body.minZ),BlockPos.containing(body.maxX,body.maxY,body.maxZ)))
                 if (!loaded.test(cell) || forbiddenBody.contains(cell.asLong())) return false;
@@ -58,7 +60,7 @@ public final class LandingAssistGeometry {
         if (plan.kind() == LandingAssistPlan.Kind.WATER && plan.cell().getY() < plan.feet().getY()) {
             // Waterlogging is useful only when fluid extends above the native collision floor.
             // A full-height top slab/step with water below the feet cannot reset the falling body.
-            double waterTop = plan.cell().getY() + net.minecraft.world.level.material.Fluids.WATER
+            double waterTop = plan.cell().getY() + Fluids.WATER
                     .getSource(false).getHeight(world,plan.cell());
             return destination.landingPoint().y < waterTop - 1.0E-4;
         }

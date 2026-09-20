@@ -24,6 +24,9 @@ import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.entity.InputDriver;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationStep;
+import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 
 /**
  * 保存一趟导航的任务含义：目标会不会变、到达与失败状态、地形许可、已经做过的改动和最近进展。
@@ -38,7 +41,7 @@ public final class EmbeddedBaritoneNavigator {
     private final boolean sprintAllowed;
     private final TerrainBill ledger = new TerrainBill();
     private final EnumMap<PathEvent, Integer> events = new EnumMap<>(PathEvent.class);
-    private final it.unimi.dsi.fastutil.longs.LongOpenHashSet rejectedScaffolds = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+    private final LongOpenHashSet rejectedScaffolds = new LongOpenHashSet();
 
     private GoalCompiler.Compiled compiled;
     private GoalCompiler.CompiledFingerprint compiledFingerprint;
@@ -78,7 +81,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     LongSet protectedMutationCells() {
-        var cells = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(contextProvider.embeddedProtectedMutationCells());
+        var cells = new LongOpenHashSet(contextProvider.embeddedProtectedMutationCells());
         cells.addAll(rejectedScaffolds);
         return cells;
     }
@@ -99,24 +102,24 @@ public final class EmbeddedBaritoneNavigator {
 
     void recordConfirmedBreak(BlockPos pos, BlockState before) {
         ledger.addBreak(pos, before);
-        if (contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider)
-            org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.recordConfirmedScaffoldRemoval(provider, pos);
+        if (contextProvider instanceof BuildPlacementRegistry.Provider provider)
+            BuildPlacementRegistry.recordConfirmedScaffoldRemoval(provider, pos);
     }
 
     void recordConfirmedPlace(BlockPos pos, BlockState placed) {
         ledger.addPlace(pos, placed.getBlock());
-        if (contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider)
-            org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.recordConfirmedScaffold(provider, pos, placed);
+        if (contextProvider instanceof BuildPlacementRegistry.Provider provider)
+            BuildPlacementRegistry.recordConfirmedScaffold(provider, pos, placed);
     }
 
     boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState state) {
-        return contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider
+        return contextProvider instanceof BuildPlacementRegistry.Provider provider
                 && provider.permitsScaffoldSupport(clicked, placeAt, state);
     }
 
     boolean permitsTemporaryScaffold(BlockPos placeAt) {
         return !rejectedScaffolds.contains(placeAt.asLong())
-                && (!(contextProvider instanceof org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.Provider provider)
+                && (!(contextProvider instanceof BuildPlacementRegistry.Provider provider)
                 || provider.permitsTemporaryScaffold(placeAt));
     }
 
@@ -488,7 +491,7 @@ public final class EmbeddedBaritoneNavigator {
         return EmbeddedBaritoneRuntime.planningInFlight(this);
     }
 
-    public org.maiwithu.maicraft.core.pathing.execute.NavigationStep executionStep(long clientRevision) {
+    public NavigationStep executionStep(long clientRevision) {
         return EmbeddedBaritoneRuntime.executionStep(this, clientRevision);
     }
 

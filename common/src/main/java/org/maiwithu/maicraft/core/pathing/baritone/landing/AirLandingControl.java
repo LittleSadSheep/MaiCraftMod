@@ -4,6 +4,8 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
+import baritone.pathing.movement.CollisionGeometry;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 
 /**
  * 根据离落点的距离和当前水平惯性，计算空中往哪个方向推，并估计剩余下落时间内能否移到那里；不直接改变玩家位置。
@@ -24,8 +26,8 @@ public final class AirLandingControl {
     }
     // 最多模拟二百次更新，逐步检查身体碰撞和区块加载；触地时水平误差小于约半格才接受这个候选。
     static boolean reachable(LocalPlayer player, BlockPos feet) {
-        double surface = feet.getY()-1 + baritone.pathing.movement.CollisionGeometry.supportHeight(player.level(),feet.below());
-        double gravity = player.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.GRAVITY);
+        double surface = feet.getY()-1 + CollisionGeometry.supportHeight(player.level(),feet.below());
+        double gravity = player.getAttributeValue(Attributes.GRAVITY);
         if (!Double.isFinite(surface) || gravity <= 0 || player.getY() < surface-.01) return false;
         Vec3 position = player.position(), velocity = player.getDeltaMovement(), target = Vec3.atBottomCenterOf(feet);
         for (int tick=0;tick<200;tick++) {

@@ -30,6 +30,22 @@ import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.entity.InputDriver;
+import baritone.api.utils.input.Input;
+import baritone.pathing.movement.CollisionGeometry;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
+import org.maiwithu.maicraft.core.integration.create.ContraptionObstacles;
+import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.AirLandingControl;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationStep;
+import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
+import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 
 /**
  * 全局只保留一个实际操纵玩家的 Baritone 实例。每次由当前任务提出驱动要求，再在角色更新末尾统一推进导航和输入。
@@ -47,14 +63,14 @@ public final class EmbeddedBaritoneRuntime {
     private static EmbeddedBaritoneNavigator pendingPolicyOwner;
     private static GoalCompiler.Compiled pendingPolicyGoal;
     private static PendingStart pendingStart;
-    private static volatile org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot physicalObstacles =
-            org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY;
+    private static volatile PhysicalObstacleSnapshot physicalObstacles =
+            PhysicalObstacleSnapshot.EMPTY;
     private static long physicalObservationTick = Long.MIN_VALUE;
-    private static net.minecraft.world.phys.Vec3 physicalObservationOrigin;
-    private static org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot sableObstacles=
-            org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY;
+    private static Vec3 physicalObservationOrigin;
+    private static PhysicalObstacleSnapshot sableObstacles=
+            PhysicalObstacleSnapshot.EMPTY;
 
-    public static org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot physicalObstacles() {
+    public static PhysicalObstacleSnapshot physicalObstacles() {
         return physicalObstacles;
     }
 
@@ -63,10 +79,10 @@ public final class EmbeddedBaritoneRuntime {
         long tick = player.level().getGameTime();
         if (physicalObservationOrigin == null || tick < physicalObservationTick
                 || tick - physicalObservationTick >= 5 || physicalObservationOrigin.distanceToSqr(player.position()) >= 16) {
-            sableObstacles = org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.capture(player.clientLevel,player.position());
+            sableObstacles = PhysicalObstacleSnapshot.capture(player.clientLevel,player.position());
             physicalObservationTick=tick; physicalObservationOrigin=player.position();
         }
-        physicalObstacles=sableObstacles.plus(org.maiwithu.maicraft.core.integration.create.ContraptionObstacles.capture(player.clientLevel,player.position()));
+        physicalObstacles=sableObstacles.plus(ContraptionObstacles.capture(player.clientLevel,player.position()));
     }
 
     private record PendingStart(
@@ -86,13 +102,13 @@ public final class EmbeddedBaritoneRuntime {
     private EmbeddedBaritoneRuntime() {}
 
     /** Optional live diagnostics, without bootstrapping an otherwise idle Baritone instance. */
-    public static java.util.Map<String, Object> diagnosticState() {
+    public static Map<String, Object> diagnosticState() {
         requireClientThread();
-        var result = new java.util.LinkedHashMap<String, Object>();
+        var result = new LinkedHashMap<String, Object>();
         result.put("has_owner", owner != null);
         result.put("pending_owner", pendingStart != null);
         result.put("last_drive_tick", lastSwimDriveTick);
-        result.put("physical_obstacles", java.util.Map.of("state", physicalObstacles.state(),
+        result.put("physical_obstacles", Map.of("state", physicalObstacles.state(),
                 "boxes", physicalObstacles.boxes().size(), "block_reads", physicalObstacles.blockReads(),
                 "conservative_structures", physicalObstacles.conservativeStructures(), "game_time", physicalObservationTick));
         if (backend == null) return result;
@@ -111,12 +127,12 @@ public final class EmbeddedBaritoneRuntime {
             result.put("from", movement.getSrc().toShortString());
             result.put("to", movement.getDest().toShortString());
         }
-        result.put("input", backend.getInputOverrideHandler().isInputForcedDown(baritone.api.utils.input.Input.MOVE_FORWARD));
+        result.put("input", backend.getInputOverrideHandler().isInputForcedDown(Input.MOVE_FORWARD));
         return result;
     }
 
     /** The developer overlay observes only the selected executor, never the search worker. */
-    public static org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() {
+    public static NavigationPathSnapshot debugPath() {
         requireClientThread();
         if (owner == null || backend == null || world != Minecraft.getInstance().level) return null;
         var executor = ((PathingBehavior) backend.getPathingBehavior()).getCurrent();
@@ -126,11 +142,11 @@ public final class EmbeddedBaritoneRuntime {
         int cursor = Math.clamp(executor.getPosition(), 0, positions.size() - 1);
         int start = Math.max(0, cursor - 1);
         var points = positions.subList(start, Math.min(positions.size(), start + 512)).stream()
-                .map(pos -> net.minecraft.world.phys.Vec3.atBottomCenterOf(pos).add(0, 0.08, 0)).toList();
-        var destination = net.minecraft.world.phys.Vec3.atBottomCenterOf(positions.getLast()).add(0, 0.08, 0);
-        var next = net.minecraft.world.phys.Vec3.atBottomCenterOf(
+                .map(pos -> Vec3.atBottomCenterOf(pos).add(0, 0.08, 0)).toList();
+        var destination = Vec3.atBottomCenterOf(positions.getLast()).add(0, 0.08, 0);
+        var next = Vec3.atBottomCenterOf(
                 positions.get(Math.min(cursor + 1, positions.size() - 1))).add(0, 0.08, 0);
-        return new org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot(
+        return new NavigationPathSnapshot(
                 points, cursor - start, destination, next);
     }
 
@@ -200,7 +216,7 @@ public final class EmbeddedBaritoneRuntime {
     static EmbeddedBaritoneTerrainProbe.ProbeFuture submitTerrainProbe(
             EmbeddedBaritoneNavigator navigator,
             BlockPos start,
-            org.maiwithu.maicraft.core.pathing.calc.NavGoal goal) {
+            NavGoal goal) {
         requireClientThread();
         if (owner != navigator || backend == null) return null;
         return EmbeddedBaritoneTerrainProbe.submit(
@@ -347,7 +363,7 @@ public final class EmbeddedBaritoneRuntime {
         if (player == null || owner == null || backend == null || world != player.clientLevel
                 || backend.getPlayerContext().player() != player || player.onGround()
                 || player.getDeltaMovement().y >= 0
-                || org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.occupied()) return false;
+                || TransportRuntime.occupied()) return false;
         var executor = backend.getPathingBehavior().getCurrent();
         if (executor == null) return false;
         var movements = executor.getPath().movements();
@@ -355,7 +371,7 @@ public final class EmbeddedBaritoneRuntime {
         if (cursor < 0 || cursor >= movements.size() || movements.get(cursor) instanceof MovementFall) return false;
         var support = movements.get(cursor).getDest().below();
         if (!world.isLoaded(support)) return false;
-        double height = baritone.pathing.movement.CollisionGeometry.supportHeight(world, support);
+        double height = CollisionGeometry.supportHeight(world, support);
         return Double.isFinite(height) && height > 0 && player.getBoundingBox().minY < support.getY() + height - 0.01;
     }
 
@@ -449,7 +465,7 @@ public final class EmbeddedBaritoneRuntime {
     private static EmbeddedBaritoneNavigator lastDrivenOwner;
     private static long lastDrivenRevision = Long.MIN_VALUE;
 
-    static org.maiwithu.maicraft.core.pathing.execute.NavigationStep executionStep(
+    static NavigationStep executionStep(
             EmbeddedBaritoneNavigator navigator, long clientRevision) {
         requireClientThread();
         if (owner != navigator || backend == null || lastDrivenOwner != navigator
@@ -460,7 +476,7 @@ public final class EmbeddedBaritoneRuntime {
         var movements = executor.getPath().movements();
         if (index < 0 || index >= movements.size()) return null;
         var movement = movements.get(index);
-        return new org.maiwithu.maicraft.core.pathing.execute.NavigationStep(movement.getSrc(), movement.getDest());
+        return new NavigationStep(movement.getSrc(), movement.getDest());
     }
 
     /** The driven water route owns normal ascent/refill; the reflex covers idle or suspended bodies. */
@@ -469,7 +485,7 @@ public final class EmbeddedBaritoneRuntime {
                 || backend.getPlayerContext().player() != player
                 || lastSwimDriveTick == Long.MIN_VALUE
                 || player.level().getGameTime() - lastSwimDriveTick > 1
-                || !org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(
+                || !DefaultBodyControlPort.permitsWorldMovement(
                         Minecraft.getInstance().screen)) return false;
         return backend.getPathingBehavior().getCurrent() instanceof PathExecutor executor
                 && executor.submergedWaterManagesAir();
@@ -535,7 +551,7 @@ public final class EmbeddedBaritoneRuntime {
 
     /** Building keeps its permanent materials reserved even if the only spare scaffold is off the hotbar. */
     public static boolean selectBuildScaffold(LocalPlayer player, boolean select) {
-        var choice = org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldChoice(player);
+        var choice = BuildPlacementRegistry.scaffoldChoice(player);
         if (choice == null) return false;
         if (!select) return true;
         if (tickingContext == null || owner == null || ACTIONS.pending()) return false;
@@ -548,8 +564,8 @@ public final class EmbeddedBaritoneRuntime {
     private static boolean prepareBuildScaffold(LocalPlayerContext context, EmbeddedBaritoneNavigator current) {
         if (BUILD_SCAFFOLDS.pending()) return !BUILD_SCAFFOLDS.advance(context, current);
         if (current.permit() != TerrainPermit.TERRAFORM || !context.player().onGround() || ACTIONS.pending()
-                || !org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.hasScaffoldMaterialPolicy()) return false;
-        var choice = org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldChoice(context.player());
+                || !BuildPlacementRegistry.hasScaffoldMaterialPolicy()) return false;
+        var choice = BuildPlacementRegistry.scaffoldChoice(context.player());
         if (choice == null || choice.inventorySlot() < 9) return false;
         // Prepare while grounded, before Baritone can launch a placement-dependent jump.
         return !BUILD_SCAFFOLDS.select(context, current, context.player());
@@ -570,13 +586,13 @@ public final class EmbeddedBaritoneRuntime {
         var currentExecutor = backend.getPathingBehavior().getCurrent();
         PathExecutor executor = currentExecutor instanceof PathExecutor pathExecutor
                 ? pathExecutor : null;
-        float forward = (input.isInputForcedDown(baritone.api.utils.input.Input.MOVE_FORWARD) ? 1F : 0F)
-                - (input.isInputForcedDown(baritone.api.utils.input.Input.MOVE_BACK) ? 1F : 0F);
-        float strafe = (input.isInputForcedDown(baritone.api.utils.input.Input.MOVE_LEFT) ? 1F : 0F)
-                - (input.isInputForcedDown(baritone.api.utils.input.Input.MOVE_RIGHT) ? 1F : 0F);
-        boolean jump = input.isInputForcedDown(baritone.api.utils.input.Input.JUMP);
-        boolean sneak = input.isInputForcedDown(baritone.api.utils.input.Input.SNEAK);
-        boolean sprint = input.isInputForcedDown(baritone.api.utils.input.Input.SPRINT)
+        float forward = (input.isInputForcedDown(Input.MOVE_FORWARD) ? 1F : 0F)
+                - (input.isInputForcedDown(Input.MOVE_BACK) ? 1F : 0F);
+        float strafe = (input.isInputForcedDown(Input.MOVE_LEFT) ? 1F : 0F)
+                - (input.isInputForcedDown(Input.MOVE_RIGHT) ? 1F : 0F);
+        boolean jump = input.isInputForcedDown(Input.JUMP);
+        boolean sneak = input.isInputForcedDown(Input.SNEAK);
+        boolean sprint = input.isInputForcedDown(Input.SPRINT)
                 || (executor != null && executor.isSprinting());
         // The swim phase owns sprinting as well as depth: rising/refilling needs an upright body.
         if (player.isInWater()) {
@@ -612,7 +628,7 @@ public final class EmbeddedBaritoneRuntime {
         // the next player physics/input tick, not only after entering the mount window.
         if(assistedFall!=null && assistedFall.landingBoat()!=null) sneak=assistedFall.landingBoat().wantsSneak();
         else if(tickingContext!=null && assistedFall!=null && assistedFall.landingAssist()!=null
-                && assistedFall.landingAssist().plan().kind()==org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.BOAT)
+                && assistedFall.landingAssist().plan().kind()==LandingAssistPlan.Kind.BOAT)
             sneak=assistedFall.landingAssist().wantsSneak(tickingContext);
         if (landingMovement==null && assistedFall!=null && assistedFall.landingAssist()!=null)
             landingMovement=assistedFall.landingAssist().movementOverride();
@@ -624,7 +640,7 @@ public final class EmbeddedBaritoneRuntime {
                 && !player.onGround() && !player.isPassenger() && landingMovement==null
                 && !assistedFall.landingAssist().holdingForRecovery(tickingContext)) {
             var landing=assistedFall.landingAssist().plan().feet(); final boolean crouch=sneak;
-            tickingContext.body().applySteering(yaw -> org.maiwithu.maicraft.core.pathing.baritone.landing.AirLandingControl
+            tickingContext.body().applySteering(yaw -> AirLandingControl
                     .movement(player,landing,yaw,crouch),player.getYRot(),tickingContext.tickRevision());
             return;
         }
@@ -724,7 +740,7 @@ public final class EmbeddedBaritoneRuntime {
 
     // 把本次许可明确写到 Baritone：能否挖、能否搭路、能否用水桶分别从这份许可决定，不沿用上一次导航的状态。
     static void configureTerrain(Settings settings, TerrainPermit permit) {
-        org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.configure(permit);
+        LandingAssistPolicy.configure(permit);
         settings.allowBreak.value = permit.mayAlter();
         settings.allowBreakAnyway.value = List.of();
         settings.allowPlace.value = permit.mayAlter();
@@ -737,7 +753,7 @@ public final class EmbeddedBaritoneRuntime {
 
     private static void syncWorld(IBaritone baritone, ClientLevel current) {
         if (world == current) return;
-        physicalObstacles = org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY;
+        physicalObstacles = PhysicalObstacleSnapshot.EMPTY;
         physicalObservationOrigin = null;
         baritone.getGameEventHandler().onWorldEvent(
                 new WorldEvent(current, EventState.POST));

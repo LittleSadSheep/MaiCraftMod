@@ -25,6 +25,8 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
+import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 
 /**
  * 把 Baritone 的左键、右键和快捷栏选择请求转成项目统一的原生操作，并跟踪每次操作的观察结果。
@@ -70,7 +72,7 @@ final class EmbeddedBaritoneActionBridge {
             activeFall.tickLandingBoat(context);
             var boat = activeFall.landingBoat();
             input.setInputForceState(Input.SNEAK, boat.wantsSneak());
-            org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(boat.diagnostics());
+            LandingAssistPolicy.report(boat.diagnostics());
             return;
         }
         if (receipt == null && activeFall != null && activeFall.landingAssist() != null) {
@@ -79,7 +81,7 @@ final class EmbeddedBaritoneActionBridge {
             // Placement may need secondary use, but a newly placed slime must release it
             // before the next physical landing, without waiting for the receipt's dwell.
             if (!context.player().onGround()) input.setInputForceState(Input.SNEAK, assist.wantsSneak(context));
-            org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(assist.diagnostics());
+            LandingAssistPolicy.report(assist.diagnostics());
             for (var change : assist.drainChanges()) {
                 navigator.recordConfirmedNativeAction();
                 if (change.before().getBlock() != change.after().getBlock()) {
@@ -288,7 +290,7 @@ final class EmbeddedBaritoneActionBridge {
                 || !BaritoneAPI.getSettings().allowPlace.value) {
             return;
         }
-        if (!org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldUseAllowed(context.player(), held)) return;
+        if (!BuildPlacementRegistry.scaffoldUseAllowed(context.player(), held)) return;
         BlockPos actual = placementCell(clicked, clickedState, hit);
         if (!navigator.permitsTemporaryScaffold(actual)) { navigator.rejectedTemporaryScaffold(actual); return; }
         boolean protectedSupport = EmbeddedBaritonePolicy.protects(clicked);

@@ -13,6 +13,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
+import baritone.pathing.path.PathExecutor;
 
 /**
  * 执行合并后的地面直线：朝终点前进，远时冲刺，接近后停下。真正轮到这一步时，仍反复检查眼前一段路和惯性可能带到的位置。
@@ -94,7 +95,7 @@ public final class MovementGroundStraight extends Movement {
 
     private boolean ownsHop() {
         var executor = baritone.getPathingBehavior().getCurrent();
-        return executor instanceof baritone.pathing.path.PathExecutor path && path.controlsGroundJump(this);
+        return executor instanceof PathExecutor path && path.controlsGroundJump(this);
     }
 
     public Vec3 target() { return target; }

@@ -5,6 +5,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import net.minecraft.client.Minecraft;
 
 /**
  * 在玩家位置包发出前，把一次已登记的落地上船机会交回对应控制器，尽量抓住很短的乘船时机。
@@ -26,7 +27,7 @@ public final class BoatCatchWindow {
         if(controller==null) return;
         var actor=ClientRuntime.actor();
         if(player.get()!=current || !current.isAlive() || !actor.body().automationOwnsControls()) { clear(controller); return; }
-        if(!DefaultBodyControlPort.permitsWorldMovement(net.minecraft.client.Minecraft.getInstance().screen)) return;
+        if(!DefaultBodyControlPort.permitsWorldMovement(Minecraft.getInstance().screen)) return;
         try {
             actor.beginPositionPacketTick().ifPresent(context->{
                 if(context.bodyEpoch()!=epoch || context.controlRevision()!=revision || !context.permitsNativeActions()) clear(controller);
