@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorBridge;
 import org.maiwithu.maicraft.network.ServerOperationException;
+import java.util.Comparator;
 
 /** The local endpoint is already authorized; optional peer reads retain ordinary native access checks. */
 final class CreateChainConveyorObservation {
@@ -21,7 +22,7 @@ final class CreateChainConveyorObservation {
         result.addProperty("connection_count", connections.size()); result.addProperty("truncated", connections.size() > 128);
         result.addProperty("provenance", "Create.ChainConveyorBlockEntity.connections");
         JsonArray links = new JsonArray(); result.add("connections", links);
-        for (BlockPos offset : connections.stream().sorted(java.util.Comparator.comparingLong(BlockPos::asLong)).limit(128).toList()) {
+        for (BlockPos offset : connections.stream().sorted(Comparator.comparingLong(BlockPos::asLong)).limit(128).toList()) {
             BlockPos peer = entity.getBlockPos().offset(offset);
             JsonObject link = new JsonObject(); link.add("offset", point(offset)); link.add("position", point(peer));
             link.addProperty("native_link_registered", true); link.addProperty("chain_cost", ChainConveyorBridge.linkCost(offset));

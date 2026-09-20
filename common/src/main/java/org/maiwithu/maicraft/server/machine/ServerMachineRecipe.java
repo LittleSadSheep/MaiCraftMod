@@ -14,6 +14,9 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.mekanism.MekanismRecipeAccess;
+import java.util.ArrayList;
+import org.maiwithu.maicraft.server.machine.create.CreateGrindingRecipes;
+import org.maiwithu.maicraft.server.machine.create.CreatePressInputInspection;
 
 /** Exact installed recipe data. Equipment compatibility is checked through its native recipe selection. */
 public final class ServerMachineRecipe {
@@ -29,8 +32,8 @@ public final class ServerMachineRecipe {
                 .or(() -> player.serverLevel().getRecipeManager().byKey(id))
                 .orElseThrow(() -> ServerAccess.denied("recipe_missing", "Recipe is absent from the server recipe manager"));
         var recipe = holder.value();
-        if (org.maiwithu.maicraft.server.machine.create.CreateGrindingRecipes.supports(entity))
-            return org.maiwithu.maicraft.server.machine.create.CreateGrindingRecipes.inspect(player, entity, holder, body);
+        if (CreateGrindingRecipes.supports(entity))
+            return CreateGrindingRecipes.inspect(player, entity, holder, body);
         if (NativeApi.is(recipe, "mekanism.api.recipes.MekanismRecipe")) {
             JsonObject mekRecipe = MekanismMachineRecipe.inspect(player, entity, holder, body);
             if (!holder.id().equals(id)) mekRecipe.addProperty("requested_recipe_id", id.toString());
@@ -46,7 +49,7 @@ public final class ServerMachineRecipe {
         result.addProperty("dimension", player.serverLevel().dimension().location().toString());
         result.addProperty("provenance", "server_recipe_manager_and_native_recipe_selection");
         JsonArray inputs = new JsonArray(), outputs = new JsonArray(), conditions = new JsonArray();
-        List<ItemStack> nativeOutputs = new java.util.ArrayList<>();
+        List<ItemStack> nativeOutputs = new ArrayList<>();
         JsonArray power = new JsonArray(), unknown = new JsonArray();
         result.add("inputs", inputs); result.add("outputs", outputs); result.add("conditions", conditions);
         result.add("minimum_power", power); result.add("unknown", unknown);
@@ -112,7 +115,7 @@ public final class ServerMachineRecipe {
                 JsonObject checks = new JsonObject();
                 result.add("condition_checks", checks);
                 if (NativeApi.is(entity, PRESS)) {
-                    result.add("input_obstruction", org.maiwithu.maicraft.server.machine.create.CreatePressInputInspection
+                    result.add("input_obstruction", CreatePressInputInspection
                             .inspect(player, entity, recipe.getIngredients(), nativeOutputs));
                     double speed = ((Number) NativeApi.call(entity, PRESS, "getSpeed")).doubleValue();
                     checks.addProperty("create:nonzero_rotation", speed != 0 ? "verified" : "disabled");

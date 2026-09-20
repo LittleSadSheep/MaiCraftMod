@@ -14,6 +14,8 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.world.item.ItemStack;
+import com.google.gson.JsonPrimitive;
+import java.util.StringJoiner;
 
 /** Counts are excluded; all persisted data components participate in identity. */
 public final class ResourceIdentity {
@@ -53,14 +55,14 @@ public final class ResourceIdentity {
     public static String canonical(JsonElement value) {
         if (value == null || value.isJsonNull()) return "null";
         if (value.isJsonArray()) {
-            java.util.StringJoiner result = new java.util.StringJoiner(",", "[", "]");
+            StringJoiner result = new StringJoiner(",", "[", "]");
             value.getAsJsonArray().forEach(entry -> result.add(canonical(entry)));
             return result.toString();
         }
         if (!value.isJsonObject()) return value.toString();
-        java.util.StringJoiner result = new java.util.StringJoiner(",", "{", "}");
+        StringJoiner result = new StringJoiner(",", "{", "}");
         new TreeMap<>(value.getAsJsonObject().asMap()).forEach((key, entry) ->
-                result.add(new com.google.gson.JsonPrimitive(key) + ":" + canonical(entry)));
+                result.add(new JsonPrimitive(key) + ":" + canonical(entry)));
         return result.toString();
     }
 
@@ -70,7 +72,7 @@ public final class ResourceIdentity {
         result.add("identity", identity);
         result.addProperty("resource_id", key(identity));
         result.addProperty("amount", amount);
-        result.add("capacity", capacity == null ? JsonNull.INSTANCE : new com.google.gson.JsonPrimitive(capacity));
+        result.add("capacity", capacity == null ? JsonNull.INSTANCE : new JsonPrimitive(capacity));
         result.addProperty("unit", unit);
         result.addProperty("storage_id", storage);
         result.addProperty("side", side);

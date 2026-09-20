@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import net.minecraft.client.Minecraft;
 
 /**
  * 供移动算法使用的简短按键接口，例如朝前走、跳一下、看向一个方块。
@@ -83,7 +84,7 @@ public final class InputDriver {
         // cancellation throw and falsely report that its movement effects were uncertain.
         var boundary = ClientRuntime.actor();
         if (boundary.activeContext().isEmpty()) {
-            if (net.minecraft.client.Minecraft.getInstance().player == player
+            if (Minecraft.getInstance().player == player
                     && boundary.body().automationOwnsControls()) {
                 boundary.body().releaseAll();
             }

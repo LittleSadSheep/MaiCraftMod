@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * 为内部工具编写参数格式说明：哪些字段必须填、是文字还是数字、范围多大。
@@ -166,7 +167,7 @@ public final class Schema {
         }
 
         /** 必填的对象列表；每个列表项都按 item 定义的字段和必填要求填写，不允许额外字段。 */
-        public Builder objectArray(String name, String desc, java.util.function.Consumer<Builder> item) {
+        public Builder objectArray(String name, String desc, Consumer<Builder> item) {
             Builder ib = new Builder();
             item.accept(ib);
             Map<String, Object> items = new LinkedHashMap<>();

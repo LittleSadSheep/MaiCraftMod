@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.maiwithu.maicraft.core.Constants;
 
 /**
  * 保留的旧工具调用通道：ship 登记 ToolCall 并切到游戏线程，deliver 按编号交回结果。
@@ -56,7 +57,7 @@ public final class LocalToolDispatcher {
             tool.onGameCall(call.id(), call.args(), player, result -> deliver(call.id(), result));
         } catch (RuntimeException exception) {
             if (!(exception instanceof IllegalArgumentException)) {
-                org.maiwithu.maicraft.core.Constants.LOG.error(
+                Constants.LOG.error(
                         "[maicraft-tool] {} failed (call {})", call.toolName(), call.id(), exception);
             }
             deliver(call.id(), TaskResult.fail("capability failed: " + safeMessage(exception)).toJson());

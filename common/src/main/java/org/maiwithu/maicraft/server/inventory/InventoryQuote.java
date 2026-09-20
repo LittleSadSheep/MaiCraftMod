@@ -7,6 +7,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /** Finds a legal slot through the same sided native simulation used by the eventual transaction. */
 public final class InventoryQuote {
@@ -37,7 +38,7 @@ public final class InventoryQuote {
             ItemStack sample = mode.equals("deposit") ? playerStack : port.stack(slot);
             if (sample.isEmpty()) continue;
             if (body.has("expected_item_id") && !ServerAccess.text(body, "expected_item_id").equals(
-                    net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(sample.getItem()).toString())) continue;
+                    BuiltInRegistries.ITEM.getKey(sample.getItem()).toString())) continue;
             JsonObject resourceIdentity;
             try { resourceIdentity = ResourceIdentity.item(sample, player.registryAccess()); }
             catch (IllegalArgumentException incomplete) { unknownIdentity = true; continue; }

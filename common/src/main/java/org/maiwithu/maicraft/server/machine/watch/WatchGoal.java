@@ -9,6 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
+import java.util.ArrayList;
 
 /** Immutable, finite observation intent. Positions are authorized separately on the actual server player. */
 public record WatchGoal(String dimension, List<Process> processes, BlockPos sink, Direction sinkSide,
@@ -29,7 +30,7 @@ public record WatchGoal(String dimension, List<Process> processes, BlockPos sink
         String dimension = text(goal,"dimension",128);
         var raw = goal.getAsJsonArray("processes");
         if (raw == null || raw.isEmpty() || raw.size() > MAX_PROCESSES) throw invalid("One to eight native processes are required");
-        var processes = new java.util.ArrayList<Process>();
+        var processes = new ArrayList<Process>();
         Set<String> ids = new LinkedHashSet<>(); Set<BlockPos> producers = new LinkedHashSet<>(), outputs = new LinkedHashSet<>();
         for (var value : raw) {
             JsonObject row = value.getAsJsonObject(); keys(row,"id","position","output_position","recipe_id","minimum_events");

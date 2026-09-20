@@ -7,6 +7,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.CompoundContainer;
+import net.minecraft.world.Container;
 
 /** One RPC may operate through its actual open native menu; the scope cannot authorise another machine. */
 public final class ServerMenuAccess {
@@ -45,8 +47,8 @@ public final class ServerMenuAccess {
     private static boolean targets(AbstractContainerMenu menu, BlockEntity entity, JsonObject body) {
         for (var slot : menu.slots) {
             if (slot.container == entity) return true;
-            if (slot.container instanceof net.minecraft.world.CompoundContainer compound
-                    && entity instanceof net.minecraft.world.Container container && compound.contains(container)) return true;
+            if (slot.container instanceof CompoundContainer compound
+                    && entity instanceof Container container && compound.contains(container)) return true;
         }
         if (NativeApi.is(menu, "mekanism.common.inventory.container.tile.MekanismTileContainer"))
             return NativeApi.call(menu, "mekanism.common.inventory.container.tile.MekanismTileContainer", "getTileEntity") == entity;

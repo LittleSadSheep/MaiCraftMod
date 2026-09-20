@@ -14,6 +14,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
+import java.util.UUID;
 
 /** Only native processing hooks append events; RPC clients cannot submit production evidence. */
 public final class ServerProductionEvents {
@@ -37,7 +38,7 @@ public final class ServerProductionEvents {
     /** 世界内加工额外保留真实掉落物关联；仍写同一生产日志，生成成功不代表玩家已经拾取。 */
     public static void recordProduction(ServerLevel level, BlockPos producer, String recipeId, JsonArray inputs,
                                         JsonArray outputs, long operations, String nativeCall,
-                                        JsonArray consumedEntities, java.util.UUID outputEntity) {
+                                        JsonArray consumedEntities, UUID outputEntity) {
         if (!level.getServer().isSameThread() || producer == null || operations <= 0) return;
         if (!hasPositiveResource(outputs) && !hasPositiveResource(inputs)) return;
         JsonObject event = new JsonObject();

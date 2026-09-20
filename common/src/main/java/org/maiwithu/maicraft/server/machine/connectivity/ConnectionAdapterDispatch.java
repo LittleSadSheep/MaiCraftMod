@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.server.machine.connectivity;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import java.util.List;
 
 /** 服务端按当前边的原生输送设备选适配器；端点属于 Create 不代表物品在动力轴里移动。 */
 final class ConnectionAdapterDispatch {
@@ -39,7 +40,7 @@ final class ConnectionAdapterDispatch {
         if (!incoming.equals("mekanism") || !outgoing.equals("mekanism")
                 || !NativeApi.is(entity, "mekanism.common.tile.transmitter.TileEntityTransmitter"))
             return ConnectionEvidence.of("unknown", false, false, "internal_native_edge_projection_unavailable", "native_adapter_boundary");
-        var summary = ConnectionEvidence.summarize(java.util.List.of(left, right));
+        var summary = ConnectionEvidence.summarize(List.of(left, right));
         var result = ConnectionEvidence.of(summary.get("status").getAsString(), summary.get("verified_connection").getAsBoolean(),
                 summary.get("operational").getAsBoolean(), "junction_covered_by_adjacent_native_transmitter_edges",
                 "Mekanism.native_directional_edges_at_shared_path_node");
@@ -50,7 +51,7 @@ final class ConnectionAdapterDispatch {
     static ConnectionEvidence requireTransit(ConnectionEvidence edge, ConnectionEvidence transit) {
         edge.details().add("internal_transit", transit.json());
         if (transit.connected() && transit.operational()) return edge;
-        var summary = ConnectionEvidence.summarize(java.util.List.of(edge, transit));
+        var summary = ConnectionEvidence.summarize(List.of(edge, transit));
         return new ConnectionEvidence(summary.get("status").getAsString(), edge.connected() && transit.connected(),
                 edge.operational() && transit.operational(), transit.reason(), transit.provenance(), edge.details());
     }

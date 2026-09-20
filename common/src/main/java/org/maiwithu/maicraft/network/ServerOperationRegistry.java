@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import net.minecraft.server.level.ServerPlayer;
+import org.maiwithu.maicraft.server.machine.ServerMenuAccess;
 
 /** Common registration point for authoritative modules, independent of either loader. */
 public final class ServerOperationRegistry {
@@ -59,7 +60,7 @@ public final class ServerOperationRegistry {
             if (!policy.test(player, operationId))
                 throw ServerOperationException.notApplied("authorization_denied", "Operation disabled by server policy");
         }
-        return org.maiwithu.maicraft.server.machine.ServerMenuAccess.execute(player, body,
+        return ServerMenuAccess.execute(player, body,
                 () -> Objects.requireNonNull(operation.handler().apply(player, body), "Handler returned no result"));
     }
 }

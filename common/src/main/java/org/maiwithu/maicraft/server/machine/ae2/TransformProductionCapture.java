@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import org.spongepowered.asm.service.MixinService;
 
 /** 观察 AE2 已经完成的真实转化；不改原料、配方选择或实体生成结果，也不接收客户端伪造的生产回执。 */
 public final class TransformProductionCapture {
@@ -28,7 +29,7 @@ public final class TransformProductionCapture {
                 || !NativeApi.present("appeng.recipes.transform.TransformLogic")) return false;
         try {
             // Class.forName(false) 已等待目标类与晚期注入全部定义完成；从 Mixin 创建插件时使用的同一 ClassProvider 读取最终树。
-            var provider = org.spongepowered.asm.service.MixinService.getService().getClassProvider();
+            var provider = MixinService.getService().getClassProvider();
             Class<?> plugin = provider.findClass("org.maiwithu.maicraft.network.OptionalServerMixinPlugin", false);
             boolean installed = Boolean.TRUE.equals(plugin.getMethod("worldTransformEvents").invoke(null));
             Constants.LOG.info("[world-transform] native event hook verified after class definition: {} (plugin loader: {})",

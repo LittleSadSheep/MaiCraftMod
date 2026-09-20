@@ -14,6 +14,12 @@ import net.minecraft.server.level.ServerPlayer;
 import org.maiwithu.maicraft.server.machine.ProductionEventJournal;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.stream.Collectors;
+import org.maiwithu.maicraft.network.ServerOperationRegistry;
 
 /** Connection/level-scoped read leases. Background ticks never transfer items, configure machines or load chunks. */
 public final class MachineWatchService {
@@ -24,7 +30,7 @@ public final class MachineWatchService {
     private static final class Job {
         final UUID id; final ServerPlayer owner; final Object connection; final ServerLevel level; final WatchGoal goal;
         final WatchProgress progress; final long created; final Map<BlockPos,WatchNativeAccess.Endpoint> endpoints = new LinkedHashMap<>();
-        final Map<String,String> recipes = new LinkedHashMap<>(); final Set<String> targetProcesses = new java.util.HashSet<>();
+        final Map<String,String> recipes = new LinkedHashMap<>(); final Set<String> targetProcesses = new HashSet<>();
         ProductionEventJournal journal; Set<String> retained = Set.of(); long armedAt = -1, nextPoll, previousComplete = -1, stoppedAt = -1;
         Job(UUID id, ServerPlayer owner, WatchGoal goal, long tick) {
             this.id = id; this.owner = owner; connection = connection(owner); level = owner.serverLevel(); this.goal = goal;
@@ -68,7 +74,7 @@ public final class MachineWatchService {
         } else if (!job.goal.specification().equals(goal.specification())) throw ServerAccess.denied("watch_conflict","Existing monitor goal is immutable");
         var positions = body.getAsJsonArray("authorize_positions");
         if (positions == null || positions.isEmpty() || positions.size() > 4) throw WatchGoal.invalid("Authorize one to four nearby positions");
-        Set<BlockPos> requested = new java.util.LinkedHashSet<>();
+        Set<BlockPos> requested = new LinkedHashSet<>();
         for (var raw : positions) {
             BlockPos position = ServerAccess.position(raw.getAsJsonObject());
             if (!goal.positions().contains(position) || !requested.add(position)) throw WatchGoal.invalid("Authorization position is not a distinct goal endpoint");
@@ -89,7 +95,7 @@ public final class MachineWatchService {
         while (store.jobs.size() >= MAX_JOBS || store.jobs.values().stream().filter(job -> job.connection == connection).count() >= MAX_JOBS_PER_PLAYER) {
             boolean ownLimit = store.jobs.values().stream().filter(job -> job.connection == connection).count() >= MAX_JOBS_PER_PLAYER;
             Job old = store.jobs.values().stream().filter(job -> job.progress.stopped() && (!ownLimit || job.connection == connection))
-                    .min(java.util.Comparator.comparingLong(job -> job.created)).orElse(null);
+                    .min(Comparator.comparingLong(job -> job.created)).orElse(null);
             if (old == null) throw ServerAccess.denied("watch_limit","Cancel or expire an existing monitor first");
             old.release(); store.jobs.remove(old.id);
         }
@@ -104,7 +110,7 @@ public final class MachineWatchService {
         if (unavailable != null) { unavailable(job,unavailable); return; }
         long stock = WatchNativeAccess.sink(job.owner,job.goal);
         job.journal = ServerProductionEvents.trustedJournal(job.level);
-        Set<String> endpoints = job.goal.positions().stream().map(ServerProductionEvents::key).collect(java.util.stream.Collectors.toSet());
+        Set<String> endpoints = job.goal.positions().stream().map(ServerProductionEvents::key).collect(Collectors.toSet());
         if (!job.journal.retain(job,endpoints)) { job.progress.attention("native_history_retention_limit",true); return; }
         job.retained = endpoints;
         long sequence = job.journal.latestSequence();
@@ -115,7 +121,7 @@ public final class MachineWatchService {
 
     public static void tick(MinecraftServer server) {
         requireThread(server); Store store = SERVERS.get(server); if (store == null || store.jobs.isEmpty()) return;
-        long now = serverTick(server); var jobs = java.util.List.copyOf(store.jobs.values());
+        long now = serverTick(server); var jobs = List.copyOf(store.jobs.values());
         int budget = JOBS_PER_TICK;
         for (int visited = 0; visited < jobs.size() && budget > 0; visited++) {
             Job job = jobs.get(Math.floorMod(store.next++,jobs.size()));
@@ -126,7 +132,7 @@ public final class MachineWatchService {
             }
             if (job.owner.hasDisconnected() || job.connection != connection(job.owner) || job.owner.serverLevel() != job.level
                     || !job.owner.isAlive() || job.owner.isSpectator()) { job.progress.attention("owner_lifecycle_changed",true); job.release(); continue; }
-            if (!org.maiwithu.maicraft.network.ServerOperationRegistry.allowed(job.owner,"machine.watch")) {
+            if (!ServerOperationRegistry.allowed(job.owner,"machine.watch")) {
                 job.progress.attention("server_policy_changed",true); job.release(); continue;
             }
             if (now - (job.armedAt < 0 ? job.created : job.armedAt) > (job.armedAt < 0 ? REGISTRATION_TICKS : job.goal.maximumTicks())) {

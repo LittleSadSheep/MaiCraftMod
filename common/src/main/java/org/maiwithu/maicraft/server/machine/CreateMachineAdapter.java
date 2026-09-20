@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
+import net.minecraft.nbt.CompoundTag;
 
 /** Public Create 6.0.10 APIs: actual rotation state, behaviours and native configuration callbacks. */
 final class CreateMachineAdapter {
@@ -110,7 +111,7 @@ final class CreateMachineAdapter {
             }
             // Native clipboard paste supports ordinary ghost criteria and consumes/returns actual advanced
             // FilterItem material itself. Calling setFilter directly would duplicate a droppable filter item.
-            net.minecraft.nbt.CompoundTag clipboard = new net.minecraft.nbt.CompoundTag();
+            CompoundTag clipboard = new CompoundTag();
             clipboard.put("Filter", sample.saveOptional(player.registryAccess()));
             boolean accepted = NativeApi.truth(NativeApi.call(filter, FILTER, "readFromClipboard",
                     player.registryAccess(), clipboard, player, side, false));

@@ -11,6 +11,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
+import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
 /** Loader-independent dispatch tied to the authenticated packet listener, never a client-supplied UUID. */
 public final class OptionalServerNetwork {
@@ -54,13 +55,13 @@ public final class OptionalServerNetwork {
         var dispatcher = CONNECTIONS.get(player.connection);
         if (dispatcher != null) dispatcher.invalidateWorld();
         ServerProductionEvents.disconnected(player);
-        org.maiwithu.maicraft.server.machine.watch.MachineWatchService.disconnected(player);
+        MachineWatchService.disconnected(player);
     }
 
     public static void disconnected(ServerPlayer player) {
         try {
             ServerProductionEvents.disconnected(player);
-            org.maiwithu.maicraft.server.machine.watch.MachineWatchService.disconnected(player);
+            MachineWatchService.disconnected(player);
         }
         finally { CONNECTIONS.remove(player.connection); }
     }
@@ -71,6 +72,6 @@ public final class OptionalServerNetwork {
                     .map(connection -> connection.player).toList();
         }
         remaining.forEach(OptionalServerNetwork::disconnected);
-        org.maiwithu.maicraft.server.machine.watch.MachineWatchService.stopped(server);
+        MachineWatchService.stopped(server);
     }
 }

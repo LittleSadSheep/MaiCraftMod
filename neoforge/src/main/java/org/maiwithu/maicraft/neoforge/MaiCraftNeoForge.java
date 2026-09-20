@@ -14,6 +14,8 @@ import org.maiwithu.maicraft.network.ClientProtocolBridge;
 import org.maiwithu.maicraft.network.OptionalServerNetwork;
 import org.maiwithu.maicraft.network.OptionalServerPayload;
 import org.maiwithu.maicraft.server.machine.ServerMachineOperations;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
 /** Optional authoritative server entry. No client-only class is referenced by this bootstrap. */
 @Mod(Constants.MOD_ID)
@@ -53,7 +55,7 @@ public final class MaiCraftNeoForge {
     }
 
     private void stopped(ServerStoppedEvent event) { OptionalServerNetwork.stopped(event.getServer()); }
-    private void serverTick(net.neoforged.neoforge.event.tick.ServerTickEvent.Post event) {
-        org.maiwithu.maicraft.server.machine.watch.MachineWatchService.tick(event.getServer());
+    private void serverTick(ServerTickEvent.Post event) {
+        MachineWatchService.tick(event.getServer());
     }
 }

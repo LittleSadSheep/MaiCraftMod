@@ -14,6 +14,8 @@ import org.maiwithu.maicraft.server.inventory.InventoryQuote;
 import org.maiwithu.maicraft.server.inventory.InventoryTransfer;
 import org.maiwithu.maicraft.server.machine.connectivity.ServerConnectionInspection;
 import org.maiwithu.maicraft.server.machine.ae2.Ae2MachineConfiguration;
+import org.maiwithu.maicraft.server.machine.ae2.TransformProductionCapture;
+import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
 /** Common loader bootstrap; each advertised operation has a callable authoritative implementation. */
 public final class ServerMachineOperations {
@@ -38,13 +40,13 @@ public final class ServerMachineOperations {
         events.addProperty("retained_endpoints_per_level", ProductionHistoryIndex.RETAINED_ENDPOINTS);
         events.addProperty("release_watch_supported", true);
         // 客户端必须在投料前知道是否有实际安装的原生转化钩子，不能把其他机器的事件能力当作同等证明。
-        events.addProperty("world_transform_events", org.maiwithu.maicraft.server.machine.ae2.TransformProductionCapture.available());
+        events.addProperty("world_transform_events", TransformProductionCapture.available());
         ServerOperationRegistry.register("machine.production_events", 1, false, events, ServerProductionEvents::inspect);
         JsonObject watch = new JsonObject();
         watch.addProperty("max_authorize_positions", 4); watch.addProperty("background_read_only", true);
         watch.addProperty("registration_requires_nearby_native_access", true);
         ServerOperationRegistry.register("machine.watch", 1, false, watch,
-                org.maiwithu.maicraft.server.machine.watch.MachineWatchService::execute);
+                MachineWatchService::execute);
         ServerOperationRegistry.register("machine.connections", 1, false, observation, ServerConnectionInspection::inspect);
         JsonObject inventory = new JsonObject();
         inventory.addProperty("max_amount", 64);

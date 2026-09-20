@@ -11,6 +11,8 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import org.maiwithu.maicraft.server.machine.SnapshotBudget;
+import java.util.HashSet;
+import java.util.Set;
 
 /** Bounded pages from AE2's actual storage service and crafting CPU status. */
 public final class Ae2NetworkSnapshot {
@@ -45,7 +47,7 @@ public final class Ae2NetworkSnapshot {
         String craftApi = "appeng.api.networking.crafting.ICraftingService";
         String itemFilter = body.has("item_id") ? ServerAccess.text(body, "item_id") : null;
         int inspected = 0;
-        java.util.Set<Object> seen = new java.util.HashSet<>();
+        Set<Object> seen = new HashSet<>();
         boolean nonItemKeys = false;
         for (Object raw : (Iterable<?>) access.cachedInventory()) {
             if (++inspected > 4096) { budget.truncate(); break; }

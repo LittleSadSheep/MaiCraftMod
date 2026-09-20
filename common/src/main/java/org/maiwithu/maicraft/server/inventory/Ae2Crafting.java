@@ -12,6 +12,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
+import java.util.concurrent.TimeUnit;
 
 /** Native AE2 planning and standalone CPU jobs, with player-bound tokens and no submission replay. */
 public final class Ae2Crafting {
@@ -122,7 +123,7 @@ public final class Ae2Crafting {
             try { Ae2CraftingStatus.refresh(job); } catch (RuntimeException ignored) { /* Keep uncertain native effects pinned. */ }
         }
         JOBS.values().removeIf(job -> {
-            boolean old = now - job.createdNanos > java.util.concurrent.TimeUnit.HOURS.toNanos(1);
+            boolean old = now - job.createdNanos > TimeUnit.HOURS.toNanos(1);
             if (!old) return false;
             if (!job.submissionStarted) { job.calculation.cancel(true); return true; }
             boolean remove = job.status.equals("completed") || job.status.equals("cancelled") || job.status.equals("rejected");

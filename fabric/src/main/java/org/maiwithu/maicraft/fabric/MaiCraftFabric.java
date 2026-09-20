@@ -11,6 +11,8 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import org.maiwithu.maicraft.network.OptionalServerNetwork;
 import org.maiwithu.maicraft.network.OptionalServerPayload;
 import org.maiwithu.maicraft.server.machine.ServerMachineOperations;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
 /** Common bootstrap is safe on dedicated servers and does not initialize client automation. */
 public final class MaiCraftFabric implements ModInitializer {
@@ -30,7 +32,7 @@ public final class MaiCraftFabric implements ModInitializer {
         ServerPlayerEvents.AFTER_RESPAWN.register((previous, player, alive) ->
                 OptionalServerNetwork.worldChanged(player));
         ServerLifecycleEvents.SERVER_STOPPED.register(OptionalServerNetwork::stopped);
-        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(
-                org.maiwithu.maicraft.server.machine.watch.MachineWatchService::tick);
+        ServerTickEvents.END_SERVER_TICK.register(
+                MachineWatchService::tick);
     }
 }

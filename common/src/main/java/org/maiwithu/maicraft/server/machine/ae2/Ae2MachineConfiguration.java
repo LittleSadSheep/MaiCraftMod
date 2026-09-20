@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
+import org.maiwithu.maicraft.server.machine.ServerMachineConfiguration;
 
 /** Called only after the common server registry has checked the real player's target interaction. */
 public final class Ae2MachineConfiguration {
@@ -24,7 +25,7 @@ public final class Ae2MachineConfiguration {
         return switch (ServerAccess.text(body, "action")) {
             case "ae2.pattern_install" -> Ae2ConfigurationReading.pattern(player, host, body);
             case "ae2.bus_filter" -> Ae2ConfigurationReading.bus(player, host, body);
-            default -> org.maiwithu.maicraft.server.machine.ServerMachineConfiguration.unknown("unsupported_action");
+            default -> ServerMachineConfiguration.unknown("unsupported_action");
         };
     }
 }

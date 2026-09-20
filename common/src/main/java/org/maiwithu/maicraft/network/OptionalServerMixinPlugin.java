@@ -10,6 +10,8 @@ import org.objectweb.asm.tree.MethodNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 import org.spongepowered.asm.service.MixinService;
+import java.util.ArrayDeque;
+import java.util.HashSet;
 
 /** Inspect optional class resources before native hooks; never define, transform or initialize target classes. */
 public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
@@ -60,7 +62,7 @@ public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
 
     static boolean hasTransformCapture(ClassNode type) {
         // require=0 时未命中的包装方法也可能被复制进目标类；必须证明原生入口确实会走到只读捕获器。
-        var pending = new java.util.ArrayDeque<MethodNode>(); var seen = new java.util.HashSet<String>();
+        var pending = new ArrayDeque<MethodNode>(); var seen = new HashSet<String>();
         type.methods.stream().filter(method -> method.name.equals("tryTransform")).forEach(pending::add);
         while (!pending.isEmpty()) {
             MethodNode method = pending.removeFirst(); if (!seen.add(method.name + method.desc)) continue;

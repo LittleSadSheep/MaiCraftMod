@@ -20,6 +20,9 @@ import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.MaiCraftCore;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
+import net.neoforged.neoforge.client.event.ScreenEvent;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /**
  * NeoForge 的客户端入口，作用与 Fabric 入口相同，只是事件类型和注册方式不同。
@@ -42,7 +45,7 @@ public final class MaiCraftNeoForgeClient {
         // 初始化安排到客户端工作队列，先完成注册，再开放 MCP 接单。
         event.enqueueWork(() -> {
             // 客户端接单前读取本实例的建筑预算，避免工具注册时缓存旧的目标数和请求大小。
-            org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(Minecraft.getInstance().gameDirectory.toPath());
+            BuildingBudgets.initialize(Minecraft.getInstance().gameDirectory.toPath());
             NeoForgeOptionalServerClient.install();
             MaiCraftCore.init();
             ClientRuntime.start(MaiCraftRuntimeFacade.instance());
@@ -56,8 +59,8 @@ public final class MaiCraftNeoForgeClient {
     }
 
     // Mod screens may override renderWithTooltip without calling Screen's implementation.
-    private void onScreenRendered(net.neoforged.neoforge.client.event.ScreenEvent.Render.Post event) {
-        org.maiwithu.maicraft.client.actor.MenuVisibility.rendered(event.getScreen());
+    private void onScreenRendered(ScreenEvent.Render.Post event) {
+        MenuVisibility.rendered(event.getScreen());
     }
 
     // 系统提示没有发送者；普通消息尽量从当前连接查玩家名字，查不到时保留 UUID 和文字。

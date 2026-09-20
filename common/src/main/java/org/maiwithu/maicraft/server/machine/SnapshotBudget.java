@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.server.machine;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import java.nio.charset.StandardCharsets;
 
 /** One response-wide resource page, bounded before adding arbitrary component payloads. */
 public final class SnapshotBudget {
@@ -21,13 +22,13 @@ public final class SnapshotBudget {
         int index = seen++;
         if (index < offset) return;
         if (pageFull) { truncated = true; return; }
-        int size = resource.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        int size = resource.toString().getBytes(StandardCharsets.UTF_8).length;
         if (size > 24_000) {
             // Retain the full identity hash without allowing a component payload to stall every future page.
             resource = resource.deepCopy();
             resource.remove("identity");
             resource.addProperty("identity_details", "omitted_payload_limit");
-            size = resource.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            size = resource.toString().getBytes(StandardCharsets.UTF_8).length;
             truncated = true;
         }
         if (emitted >= limit || bytes + size > 24_000) { truncated = true; pageFull = true; return; }

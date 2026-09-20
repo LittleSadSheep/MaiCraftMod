@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * 根据内部工具名找到执行对象，例如 goto 找到移动工具。通常启动时登记，之后由目标适配和内部调用查找。
@@ -16,8 +17,8 @@ public final class ToolRegistry {
     private ToolRegistry() {}
 
     /** 内部工具名的格式约束，在注册时统一检查。 */
-    private static final java.util.regex.Pattern LEGAL_NAME =
-            java.util.regex.Pattern.compile("[a-zA-Z0-9_-]{1,64}");
+    private static final Pattern LEGAL_NAME =
+            Pattern.compile("[a-zA-Z0-9_-]{1,64}");
 
     /** 注册内部工具，并在启动时检查名称格式和重名，尽早暴露功能接线错误。 */
     public static void register(MaiCraftTool tool) {

@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import java.util.Collection;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import java.util.Locale;
 
 /** Native side configuration and processing state, without mutating recipe caches during observation. */
 final class MekanismMachineAdapter {
@@ -47,7 +48,7 @@ final class MekanismMachineAdapter {
                         JsonObject config = new JsonObject();
                         config.addProperty("transmission", ((Enum<?>) transmission).name());
                         config.addProperty("relative_side", ((Enum<?>) relative).name());
-                        config.addProperty("side", NativeApi.call(relative, RELATIVE, "getDirection", direction).toString().toLowerCase(java.util.Locale.ROOT));
+                        config.addProperty("side", NativeApi.call(relative, RELATIVE, "getDirection", direction).toString().toLowerCase(Locale.ROOT));
                         config.addProperty("data_type", NativeApi.call(info, CONFIG, "getDataType", relative).toString());
                         config.addProperty("enabled", NativeApi.truth(NativeApi.call(info, CONFIG, "isSideEnabled", relative)));
                         config.addProperty("ejecting", NativeApi.truth(NativeApi.call(info, CONFIG, "isEjecting")));

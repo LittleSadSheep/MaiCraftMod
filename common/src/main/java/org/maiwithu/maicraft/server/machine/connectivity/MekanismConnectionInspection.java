@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.maiwithu.maicraft.network.ServerOperationException;
 
 /** Mekanism 10.7: actual transmitter edges and directional, sided acceptor attachments. */
 final class MekanismConnectionInspection {
@@ -111,7 +112,7 @@ final class MekanismConnectionInspection {
             JsonObject sorter = MekSorterConnectionInspection.route(player, positions, entities, transmitters, body);
             if (sorter != null) return sorter;
             return MekItemRouteEvidence.inspect(player, positions, transmitters, body);
-        } catch (org.maiwithu.maicraft.network.ServerOperationException rejected) {
+        } catch (ServerOperationException rejected) {
             throw rejected;
         } catch (NativeApi.Unavailable unavailable) {
             return evidence("unsupported", false, false, "item_route_api_unavailable").json();

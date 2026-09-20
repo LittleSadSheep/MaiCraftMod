@@ -11,6 +11,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import java.util.List;
 
 /** Native state snapshots are observations; neither geometry nor inventory presence proves production. */
 public final class ServerMachineSnapshot {
@@ -32,7 +33,7 @@ public final class ServerMachineSnapshot {
                 if (direction == null) throw ServerAccess.denied("invalid_argument", "Unknown face");
                 faces.add(direction);
             }
-        } else faces.addAll(java.util.List.of(Direction.values()));
+        } else faces.addAll(List.of(Direction.values()));
         JsonObject result = new JsonObject();
         result.addProperty("schema", "maicraft.machine_snapshot.v1");
         result.addProperty("dimension", player.serverLevel().dimension().location().toString());

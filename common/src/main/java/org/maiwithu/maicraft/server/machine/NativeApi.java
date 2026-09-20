@@ -4,12 +4,15 @@ package org.maiwithu.maicraft.server.machine;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Map;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /** Optional, public mod APIs only. Never links a client class or accesses private fields. */
 public final class NativeApi {
-    private static final ClassValue<Map<String, java.util.List<Method>>> METHODS = new ClassValue<>() {
-        @Override protected Map<String, java.util.List<Method>> computeValue(Class<?> type) {
-            return java.util.Arrays.stream(type.getMethods()).collect(java.util.stream.Collectors.groupingBy(Method::getName));
+    private static final ClassValue<Map<String, List<Method>>> METHODS = new ClassValue<>() {
+        @Override protected Map<String, List<Method>> computeValue(Class<?> type) {
+            return Arrays.stream(type.getMethods()).collect(Collectors.groupingBy(Method::getName));
         }
     };
     private static final Map<Class<?>, Class<?>> BOXED = Map.of(
@@ -34,8 +37,8 @@ public final class NativeApi {
     public static Object call(Object target, String api, String method, Object... arguments) {
         Class<?> owner = api == null ? target.getClass() : type(api);
         Method found = null;
-        java.util.List<Method> methods;
-        try { methods = METHODS.get(owner).getOrDefault(method, java.util.List.of()); }
+        List<Method> methods;
+        try { methods = METHODS.get(owner).getOrDefault(method, List.of()); }
         catch (LinkageError unavailable) { throw new Unavailable(owner.getName(), unavailable); }
         for (Method candidate : methods) {
             if (!candidate.getName().equals(method) || candidate.getParameterCount() != arguments.length) continue;
@@ -50,7 +53,7 @@ public final class NativeApi {
             }
             if (matches) {
                 if (found != null && !found.isBridge() && !candidate.isBridge()
-                        && !java.util.Arrays.equals(found.getParameterTypes(), candidate.getParameterTypes())) {
+                        && !Arrays.equals(found.getParameterTypes(), candidate.getParameterTypes())) {
                     throw new Unavailable("Ambiguous API: " + owner.getName() + "." + method, null);
                 }
                 if (found == null || found.isBridge()) found = candidate;

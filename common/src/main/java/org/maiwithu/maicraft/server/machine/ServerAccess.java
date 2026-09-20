@@ -13,6 +13,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.network.ServerOperationException;
+import java.util.Comparator;
+import net.minecraft.world.phys.shapes.CollisionContext;
 
 /** All callers run on the game thread, with loaded chunks and the real player's authority. */
 public final class ServerAccess {
@@ -122,9 +124,9 @@ public final class ServerAccess {
                 if (!level.isLoaded(new BlockPos(x << 4, pos.getY(), z << 4))) throw denied("unloaded", "An interaction ray crosses unloaded chunks");
             }
         }
-        var shape = level.getBlockState(pos).getShape(level, pos, net.minecraft.world.phys.shapes.CollisionContext.of(player));
+        var shape = level.getBlockState(pos).getShape(level, pos, CollisionContext.of(player));
         var candidates = shape.toAabbs().stream().map(box -> box.move(pos).getCenter())
-                .sorted(java.util.Comparator.comparingDouble(eye::distanceToSqr)).limit(32).toList();
+                .sorted(Comparator.comparingDouble(eye::distanceToSqr)).limit(32).toList();
         for (var target : candidates) {
             BlockHitResult hit = level.clip(new ClipContext(eye, target, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
             if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)) return hit;
