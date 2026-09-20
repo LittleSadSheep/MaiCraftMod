@@ -20,17 +20,24 @@ import org.maiwithu.maicraft.client.server.*;
 /** Simulated server observations exercise the real router and task states, not Create's physical APIs. */
 final class UtilityConnectionReplayFixture implements AutoCloseable {
     final InteractionWorldTestHarness world = new InteractionWorldTestHarness();
-    final BlockPos source = new BlockPos(2, 0, 2), target = new BlockPos(4, 0, 2);
+    final BlockPos source = new BlockPos(2, 0, 2), target;
+    final boolean energy;
     final List<JsonObject> sent = new ArrayList<>();
     final ClientRequestRouter router;
     final Field routerField = field(ServerSessionRuntime.class, "router"), installedField = field(ServerSessionRuntime.class, "installed");
     final Object oldRouter = routerField.get(null), oldInstalled = installedField.get(null);
     String targetNetwork = "city-a";
     boolean edgeConnected = true;
+    boolean sourceExports = true;
     int cursor;
     long tick;
 
     UtilityConnectionReplayFixture(boolean enhanced) throws Exception {
+        this(enhanced, false);
+    }
+    UtilityConnectionReplayFixture(boolean enhanced, boolean energy) throws Exception {
+        // 电力夹具让源与输入口直接相邻，仍通过真实请求路由等待模拟服务端的独立连接回执。
+        this.energy = energy; target = energy ? source.east() : new BlockPos(4, 0, 2);
         field(Level.class, "isClientSide").setBoolean(world.level, true);
         Object chunks = field(world.level.getClass(), "chunks").get(world.level), chunk = field(chunks.getClass(), "chunk").get(chunks);
         field(chunk.getClass(), "level").set(chunk, world.level);
@@ -38,7 +45,7 @@ final class UtilityConnectionReplayFixture implements AutoCloseable {
         field(chunk.getClass(), "blockEntities").set(chunk, new java.util.HashMap<>());
         // Native absent-BE lookup consults this queue before deciding that a plain block has no entity.
         field(chunk.getClass(), "pendingBlockEntities").set(chunk, new java.util.HashMap<>());
-        world.set(target.above(), Blocks.STONE.defaultBlockState());
+        if (!energy) world.set(target.above(), Blocks.STONE.defaultBlockState());
         router = new ClientRequestRouter(() -> enhanced, envelope -> { sent.add(envelope.deepCopy()); return true; },
                 () -> {}, Runnable::run, (receipt, send) -> { throw new AssertionError("idempotent utility check must never submit mutations"); });
         router.register(new ClientOperation("machine.snapshot", 1, false, new ClientFallback() {
@@ -76,9 +83,18 @@ final class UtilityConnectionReplayFixture implements AutoCloseable {
                 for (var position : body.getAsJsonArray("positions")) {
                     JsonObject observed = new JsonObject(); observed.add("position", position.deepCopy());
                     observed.addProperty("block_id", "minecraft:stone"); observed.addProperty("provenance", "server_native");
-                    observed.add("native", JsonParser.parseString("{create:{hasNetwork:true,isOverStressed:false,getSpeed:64,shaft_faces:['up','down']}}"));
-                    observed.getAsJsonObject("native").getAsJsonObject("create").addProperty("network_id",
-                            position.equals(UtilityConnectionEvidence.position(source)) ? "city-a" : targetNetwork);
+                    if (energy) {
+                        boolean atSource = position.equals(UtilityConnectionEvidence.position(source));
+                        observed.add("ports", JsonParser.parseString(atSource
+                                ? "[{api:'energy',medium:'energy',status:'observed',side:'east',input:'disabled',output:'" + (sourceExports ? "verified" : "disabled") + "'}]"
+                                : "[{api:'energy',medium:'energy',status:'observed',side:'west',input:'verified',output:'disabled'}]"));
+                        observed.add("resources", JsonParser.parseString("[{identity:{id:'neoforge:energy'},side:'"
+                                + (atSource ? "east" : "west") + "',amount:40}]"));
+                    } else {
+                        observed.add("native", JsonParser.parseString("{create:{hasNetwork:true,isOverStressed:false,getSpeed:64,shaft_faces:['up','down']}}"));
+                        observed.getAsJsonObject("native").getAsJsonObject("create").addProperty("network_id",
+                                position.equals(UtilityConnectionEvidence.position(source)) ? "city-a" : targetNetwork);
+                    }
                     observations.add(observed);
                 }
                 result.add("observations", observations);

@@ -64,7 +64,6 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
         }
         if (r.request.medium().equals("energy") && !r.request.resource().isEmpty()
                 && !r.request.resource().equals("neoforge:energy")) { failure("utility_energy_standard_unsupported"); return; }
-        if (r.request.medium().equals("energy") && !UtilityCableConstruction.available()) { failure("utility_mekanism_cable_unavailable"); return; }
         if (!endpoints.stream().allMatch(world::isLoaded)) { failure("utility_endpoints_must_be_loaded"); return; }
         if (!BuiltInRegistries.BLOCK.getKey(world.getBlockState(r.request.target()).getBlock()).toString().equals(r.request.targetBlockId())) {
             failure("utility_declared_input_changed"); return;
@@ -137,6 +136,8 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
                 return failure("utility_energy_endpoint_direction_changed");
             sourcePowered = storedEnergy(sourceAfter, sourceFace) > 0;
             destinationPowered = storedEnergy(targetAfter, r.request.targetFace()) > 0;
+            // 两端原生连接和最新输入输出面都复核通过后，才确认这次接入完全没有改动现有设备。
+            if (nativeConnected && route != null && route.cables().isEmpty()) noChange = true;
         }
         phase = Phase.DONE; return TaskState.SUCCESS;
     }
@@ -169,6 +170,14 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
             if (!energyFaces(target, false).contains(r.request.targetFace())) return failure("utility_target_face_not_native_energy_input");
             var faces = energyFaces(source, true).stream().filter(face -> storedEnergy(source, face) > 0).toList();
             if (faces.isEmpty()) return failure("utility_source_has_no_powered_native_energy_outlet");
+            // 已安装的电源可能紧贴蓝图的电缆输入点；直接核验这条原生边，不把电源误当成待清空的施工入口。
+            route = UtilityConnectionPlanner.direct(r.request.sourceAnchor(), faces, r.request.target(), r.request.targetFace());
+            if (route != null) {
+                sourceFace = route.sourceFace(); routeReused = true; phase = Phase.CONNECTIONS;
+                return TaskState.RUNNING;
+            }
+            // 只有需要寻找或新铺中间电缆时，才要求当前整合包提供可施工的电缆物品。
+            if (!UtilityCableConstruction.available()) return failure("utility_mekanism_cable_unavailable");
             route = UtilityCableConstruction.existing(player,r.request.sourceAnchor(),faces,r.request.target(),r.request.targetFace());
             if (route != null) {
                 routeReused = true; sourceFace = route.sourceFace();
