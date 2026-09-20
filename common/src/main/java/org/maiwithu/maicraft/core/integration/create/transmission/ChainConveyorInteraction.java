@@ -12,13 +12,15 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.phys.shapes.CollisionContext;
 
 /** Real view samples and existing dry stances, including ground below elevated shaft posts. */
 final class ChainConveyorInteraction {
     private ChainConveyorInteraction() {}
     static Vec3 aim(LocalPlayer player, BlockPos target, Vec3 eye) {
         if (!player.level().isLoaded(target)) return null;
-        var shape = player.level().getBlockState(target).getShape(player.level(), target, net.minecraft.world.phys.shapes.CollisionContext.of(player));
+        var shape = player.level().getBlockState(target).getShape(player.level(), target, CollisionContext.of(player));
         for (var local : shape.toAabbs()) {
             var box = local.move(target); Vec3 center = box.getCenter();
             for (Direction side : Direction.values()) {
@@ -52,7 +54,7 @@ final class ChainConveyorInteraction {
             if (!player.level().isLoaded(feet) || !player.level().isLoaded(feet.above()) || !player.level().isLoaded(feet.below())
                     || NavigationSafetyContext.forbidsBody(feet) || NavigationSafetyContext.forbidsBody(feet.above())
                     || !BlockHelper.isDryStandable(player.level(), feet) || BlockHelper.isHazard(player.level(), feet.below())) continue;
-            Vec3 eye = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(net.minecraft.world.entity.Pose.STANDING), 0);
+            Vec3 eye = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(Pose.STANDING), 0);
             if (aim(player, target, eye) != null) return feet;
         }
         throw new IllegalArgumentException("chain_conveyor_no_visible_native_stance");

@@ -12,6 +12,7 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
+import java.util.Locale;
 
 /** Installed Create 6.0.10 RotationPropagator gear ratios and directional gearbox propagation. */
 final class KineticTransmissionRatios {
@@ -28,7 +29,7 @@ final class KineticTransmissionRatios {
         Map<BlockPos, Node> nodes = new LinkedHashMap<>();
         nodes.put(plan.source().position(), node(plan.source())); nodes.put(plan.target().position(), node(plan.target()));
         for (Placement p : plan.placements()) {
-            Direction.Axis axis = p.properties().containsKey("axis") ? Direction.Axis.valueOf(p.properties().get("axis").toUpperCase(java.util.Locale.ROOT)) : Direction.Axis.Y;
+            Direction.Axis axis = p.properties().containsKey("axis") ? Direction.Axis.valueOf(p.properties().get("axis").toUpperCase(Locale.ROOT)) : Direction.Axis.Y;
             if (axis == null || nodes.putIfAbsent(p.position(), new Node(p.position(), p.blockId().substring(p.blockId().indexOf(':') + 1), axis, p.properties())) != null)
                 return new Result(null, List.of());
         }

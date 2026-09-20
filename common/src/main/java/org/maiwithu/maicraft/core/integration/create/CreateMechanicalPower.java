@@ -11,6 +11,9 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
+import java.util.Map;
+import net.minecraft.client.Minecraft;
+import org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord;
 
 /**
  * 机械动力连接的入口：调用者给出两个语义位置，模块自己找真实接口、调查路线、补料并逐格安装。
@@ -93,9 +96,9 @@ public final class CreateMechanicalPower {
         install();
         Objects.requireNonNull(request, "request");
         if (request.transmission() == Transmission.AUTO && !request.allowFreeReceiver()) {
-            var player = net.minecraft.client.Minecraft.getInstance().player;
+            var player = Minecraft.getInstance().player;
             if (player == null) throw new IllegalArgumentException("mechanical_connection_requires_live_player");
-            if (CreateEconomicEndpointBridge.direct(player.level(), request)) return new org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord(
+            if (CreateEconomicEndpointBridge.direct(player.level(), request)) return new EconomicKineticTaskRecord(
                     callId,deadlineGameTime,player.level().dimension().location().toString(),request.source().name(),
                     request.source().center(),request.source().exactFace(),request.destination().name(),
                     request.destination().center(),request.destination().exactFace(),null,0,64,false,
@@ -156,5 +159,5 @@ public final class CreateMechanicalPower {
             BlockPos destination,
             int requiredChainDrives,
             String routeFingerprint,
-            java.util.Map<String, Object> facts) {}
+            Map<String, Object> facts) {}
 }

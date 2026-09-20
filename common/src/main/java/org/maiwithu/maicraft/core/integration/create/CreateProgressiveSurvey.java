@@ -16,6 +16,9 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import java.util.Collections;
+import net.minecraft.core.Direction;
+import net.minecraft.util.Mth;
 
 /**
  * 分阶段找两端、搜索可能路线、走近逐格核对放置条件，再回起点复查。遇到需要继续探索的端点边界时，把进度交回父任务等待继续选择。
@@ -354,7 +357,7 @@ final class CreateProgressiveSurvey {
 
     private void selectRoute(CreateMechanicalPlanner.TentativeRoute selected) {
         route = selected;
-        surveyed = new ArrayList<>(java.util.Collections.nCopies(route.positions().size(), null));
+        surveyed = new ArrayList<>(Collections.nCopies(route.positions().size(), null));
         routeSet = Set.copyOf(new HashSet<>(route.positions()));
         corridorIndex = route.positions().size() - 1;
         markProgress();
@@ -406,7 +409,7 @@ final class CreateProgressiveSurvey {
         ClientLevel level = context.level();
         BlockPos position = route.positions().get(index);
         BlockPos support = route.supportFor(index);
-        net.minecraft.core.Direction face = CreateMechanicalPlan.between(support, position);
+        Direction face = CreateMechanicalPlan.between(support, position);
         if (face == null || !CreateMechanicalPlanner.isEmptyRouteCell(level, position)) return null;
         BlockPos stand = findStandForRoute(context, position);
         return stand == null ? null
@@ -658,7 +661,7 @@ final class CreateProgressiveSurvey {
         }
 
         private static int MthFloor(double value) {
-            return net.minecraft.util.Mth.floor(value);
+            return Mth.floor(value);
         }
 
         private static double horizontalDistanceSq(BlockPos a, BlockPos b) {

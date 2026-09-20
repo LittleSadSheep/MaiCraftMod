@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.phys.Vec3;
 
 // 先靠近并读取指定电梯楼层；有目标楼层时交给乘梯会话，只有实际乘梯并离开轿厢成功后才记录已到达位置。
 final class ElevatorFloorTask extends AbstractCompanionTask<ElevatorFloorTaskRecord> {
@@ -23,7 +24,7 @@ final class ElevatorFloorTask extends AbstractCompanionTask<ElevatorFloorTaskRec
     private boolean approached,requested;
     private CreateElevatorTravel travel;
     private TransportSession.Result result;
-    private net.minecraft.world.phys.Vec3 lastPosition;
+    private Vec3 lastPosition;
     ElevatorFloorTask(LocalPlayer player,ElevatorFloorTaskRecord record) { super(player,record); }
     protected TaskState onTick() {
         var ctx=ClientRuntime.requireContext(player);

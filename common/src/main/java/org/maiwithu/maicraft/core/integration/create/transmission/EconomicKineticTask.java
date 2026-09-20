@@ -20,6 +20,11 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.LinkedHashSet;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /** Chooses a complete economical transmission, then constructs and checks its real native outcome. */
 final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTaskRecord> {
@@ -29,8 +34,8 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
     private final KineticSupplyProgress materialProgress=new KineticSupplyProgress();
     private final List<KineticRouteGeometry.Plan> candidates=new ArrayList<>();
     private final List<Map<String,Object>> linkEvidence=new ArrayList<>();
-    private final org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator supply=
-            new org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator();
+    private final SemanticMaterialSupplyCoordinator supply=
+            new SemanticMaterialSupplyCoordinator();
     private List<KineticNativeView.Observation> sources=List.of();
     private KineticNativeView.Observation target;
     private KineticSourceDiscovery discovery;
@@ -71,7 +76,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
                 var tick=NavigationSafetyContext.withPreservedStructures(routeProtection,
                         ()->supply.tick(player,this::runChild));
                 r.extendDeadlineTo(supply.childDeadline());
-                if(tick.status()==org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.Status.FAILED)
+                if(tick.status()==SemanticMaterialSupplyCoordinator.Status.FAILED)
                     return failure("kinetic_material_supply_failed: "+tick.message());
                 return TaskState.RUNNING;
             }
@@ -137,11 +142,11 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         candidates.removeIf(plan->sources.stream().filter(source->source.endpoint().position().equals(plan.source().position()))
                 .noneMatch(source->KineticRpmBudget.accepts(plan,source.rpm(),r.minimumRpm,maxRpm)));
         if(candidates.isEmpty())return failure("kinetic_no_supported_economical_geometry");
-        var items=new java.util.LinkedHashSet<String>();candidates.forEach(value->items.addAll(value.bom().keySet()));
+        var items=new LinkedHashSet<String>();candidates.forEach(value->items.addAll(value.bom().keySet()));
         var costs=KineticRecipeSnapshot.capture(player,items);
         var ranked=KineticRouteChoice.rank(candidates,costs);costReport=KineticRouteChoice.report(ranked);
         var chosen=ranked.getFirst();
-        if(r.materialPolicy==org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
+        if(r.materialPolicy==SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                 &&!player.getAbilities().instabuild)
             chosen=ranked.stream().filter(value->value.materials().missingFinalItems().isEmpty()).findFirst().orElse(chosen);
         costReport.add("selected",chosen.json());selected=chosen.plan();sourceEntity=world.getBlockEntity(selected.source().position());
@@ -164,7 +169,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         BlockPos at=selected.source().position();if(serverProof&&!near(at))return TaskState.RUNNING;
         if(serverProof) {
             var row=reads.snapshot(at,r.dimension);if(row==null)return TaskState.RUNNING;
-            String observedId=net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString();
+            String observedId=BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString();
             if(sourceBlockId==null)sourceBlockId=observedId;
             if(!sourceBlockId.equals(KineticNativeReads.text(row,"block_id")))return failure("kinetic_native_source_changed");
             if(!KineticNativeReads.powered(row,0))return failure("kinetic_selected_source_not_powered");
@@ -220,13 +225,13 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         if(selected.bom().containsKey("minecraft:chain"))ChainConveyorInventory.requirePlainChains(player);
         for(var entry:KineticRouteContinuations.remaining(player,selected).entrySet()) {
             int required=player.getAbilities().instabuild?1:entry.getValue();
-            int carried=org.maiwithu.maicraft.core.PlayerInv.buildableCount(player.getInventory(),
-                    net.minecraft.core.registries.BuiltInRegistries.ITEM.get(net.minecraft.resources.ResourceLocation.parse(entry.getKey())));
+            int carried=PlayerInv.buildableCount(player.getInventory(),
+                    BuiltInRegistries.ITEM.get(ResourceLocation.parse(entry.getKey())));
             if(carried>=required)continue;
             if(!materialProgress.begin(player.getInventory()))return failure("kinetic_material_stock_cycle: gather the remaining bill without consuming its other reserved materials");
             supply.begin(player,r.getToolCallId(),r.getDeadlineGameTime(),
-                    new org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.Demand(
-                            List.of(net.minecraft.resources.ResourceLocation.parse(entry.getKey())),required,"complete selected kinetic transmission"),
+                    new SemanticMaterialSupplyCoordinator.Demand(
+                            List.of(ResourceLocation.parse(entry.getKey())),required,"complete selected kinetic transmission"),
                     r.materialPolicy,r.allowedSources,r.allowHarm,r.protectedLabels);
             return TaskState.RUNNING;
         }

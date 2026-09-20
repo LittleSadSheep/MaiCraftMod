@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /** One planning tick's loaded terrain cache; discarded before construction revalidation. */
 final class KineticPlanningTerrain implements KineticRouteGeometry.Terrain {
@@ -26,7 +27,7 @@ final class KineticPlanningTerrain implements KineticRouteGeometry.Terrain {
     public boolean matches(KineticRouteGeometry.Placement placement) {
         if(!loaded(placement.position()))return false;
         var observed=state(placement.position());
-        if(!net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(observed.getBlock()).toString().equals(placement.blockId()))return false;
+        if(!BuiltInRegistries.BLOCK.getKey(observed.getBlock()).toString().equals(placement.blockId()))return false;
         for(var entry:placement.properties().entrySet()) {
             var property=observed.getBlock().getStateDefinition().getProperty(entry.getKey());
             if(property==null||!observed.getValue(property).toString().equalsIgnoreCase(entry.getValue()))return false;

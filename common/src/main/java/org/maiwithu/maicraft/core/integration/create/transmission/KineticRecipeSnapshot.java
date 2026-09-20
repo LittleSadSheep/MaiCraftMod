@@ -25,6 +25,8 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import java.util.stream.StreamSupport;
+import net.minecraft.world.item.Items;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 
 /** One current synchronized recipe/inventory snapshot for all competing BOMs. Never caches across plans or datapack reloads. */
@@ -53,7 +55,7 @@ public final class KineticRecipeSnapshot {
             evidence.addProperty("dimension", context.level().dimension().location().toString());
             for (int slot = 0; slot < Math.min(36, player.getInventory().items.size()); slot++) {
                 ItemStack stack = player.getInventory().getItem(slot);
-                if (!stack.isEmpty() && (!stack.is(net.minecraft.world.item.Items.CHAIN) || stack.getComponentsPatch().isEmpty()))
+                if (!stack.isEmpty() && (!stack.is(Items.CHAIN) || stack.getComponentsPatch().isEmpty()))
                     carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
             }
             for (String id : List.of("minecraft:andesite", "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:copper_ingot"))
@@ -152,7 +154,7 @@ public final class KineticRecipeSnapshot {
     }
     private static boolean simpleIngredient(JsonElement json) {
         if (json.isJsonArray()) return json.getAsJsonArray().size() <= MAX_ALTERNATIVES
-                && !json.getAsJsonArray().isEmpty() && java.util.stream.StreamSupport.stream(json.getAsJsonArray().spliterator(), false)
+                && !json.getAsJsonArray().isEmpty() && StreamSupport.stream(json.getAsJsonArray().spliterator(), false)
                 .allMatch(value -> value.isJsonObject() && simpleIngredient(value));
         if (!json.isJsonObject() || json.getAsJsonObject().size() != 1) return false;
         var object = json.getAsJsonObject(); var value = object.has("item") ? object.get("item") : object.get("tag");

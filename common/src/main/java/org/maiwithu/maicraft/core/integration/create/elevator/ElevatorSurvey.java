@@ -18,6 +18,12 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorBridge.Cabin;
 import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorGeometry.Landing;
+import java.util.LinkedHashMap;
+import java.util.Optional;
+import java.util.function.IntFunction;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
 
 /**
  * 联合检查出发楼层、轿厢支撑、控制器、呼梯输入和目的楼层，组出可执行的乘梯计划。
@@ -31,7 +37,7 @@ final class ElevatorSurvey {
         }
         boolean remote() { return channel >= 0; }
         Map<String, Object> evidence() {
-            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            Map<String, Object> result = new LinkedHashMap<>();
             result.put("source", remote() ? "handheld_linked_controller" : transmitter == null ? "direct_button" : "world_redstone_link_button");
             result.put("position", coordinates(position));
             if (transmitter != null) result.put("transmitter", coordinates(transmitter));
@@ -50,7 +56,7 @@ final class ElevatorSurvey {
     // 这里传入的 hasChunkAt 在原版客户端不能确认区块已加载；相应未知区域判断目前不能依赖它。
     static Plan find(LocalPlayerContext ctx, BlockPos destination, LongSet forbidden, CreateElevatorBridge bridge, Cabin cabin, Map<String, Object> evidence,Integer selectedFloor) {
         evidence.put("cabin_uuid", cabin.entity().getUUID().toString());
-        Map<String, Integer> rejected = new java.util.LinkedHashMap<>();
+        Map<String, Integer> rejected = new LinkedHashMap<>();
         evidence.put("rejected_candidates", rejected);
         if (cabin.floors().isEmpty()) { reject(rejected, "floor_list_missing"); return null; }
         double width = ctx.player().getBbWidth(), height = ctx.player().getBbHeight(), step = ctx.player().maxUpStep();
@@ -63,14 +69,14 @@ final class ElevatorSurvey {
                 "origin_y", cabin.originAt(f.contactY()).y, "source_decks", deckCandidates(geometry.stances, cabin.originAt(f.contactY()).y, player.y),
                 "target_decks", targetDecks(geometry.stances,cabin.originAt(f.contactY()).y,destination))).toList());
         Map<Integer, ElevatorArrivalView> arrivals = new HashMap<>();
-        Map<Integer, Object> doorEvidence = new java.util.LinkedHashMap<>();
+        Map<Integer, Object> doorEvidence = new LinkedHashMap<>();
         evidence.put("floor_doors", doorEvidence);
         if (geometry.stances.isEmpty()) { reject(rejected, "no_supported_body_clearance"); return null; }
         List<Plan> plans = new ArrayList<>();
         var radio = new ElevatorCallLinks(ctx, bridge);
-        Map<Integer, java.util.Optional<CallInput>> callCache = new HashMap<>();
-        java.util.function.IntFunction<CallInput> calls = floor -> callCache.computeIfAbsent(floor,
-                y -> java.util.Optional.ofNullable(callInput(ctx, bridge, cabin, y, radio))).orElse(null);
+        Map<Integer, Optional<CallInput>> callCache = new HashMap<>();
+        IntFunction<CallInput> calls = floor -> callCache.computeIfAbsent(floor,
+                y -> Optional.ofNullable(callInput(ctx, bridge, cabin, y, radio))).orElse(null);
         for (var target : cabin.floors()) {
             if (!cabin.serves(target.contactY()) || selectedFloor!=null && target.contactY()!=selectedFloor) continue;
             Vec3 targetOrigin = cabin.originAt(target.contactY());
@@ -158,10 +164,10 @@ final class ElevatorSurvey {
     }
 
     private static boolean visible(Cabin cabin, BlockPos controller, Vec3 eye, Vec3 dial) {
-        var hit = cabin.view().clip(new net.minecraft.world.level.ClipContext(eye, dial,
-                net.minecraft.world.level.ClipContext.Block.OUTLINE, net.minecraft.world.level.ClipContext.Fluid.NONE,
-                net.minecraft.world.phys.shapes.CollisionContext.empty()));
-        return hit.getType() != net.minecraft.world.phys.HitResult.Type.BLOCK || hit.getBlockPos().equals(controller);
+        var hit = cabin.view().clip(new ClipContext(eye, dial,
+                ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE,
+                CollisionContext.empty()));
+        return hit.getType() != HitResult.Type.BLOCK || hit.getBlockPos().equals(controller);
     }
 
     private static CallInput callInput(LocalPlayerContext ctx, CreateElevatorBridge bridge, Cabin cabin, int floor, ElevatorCallLinks radio) {
@@ -232,10 +238,10 @@ final class ElevatorSurvey {
             if (stance == null) continue;
             Vec3 eye = stance.add(0, ctx.player().getEyeHeight(), 0);
             if (eye.distanceTo(aim) > ctx.player().blockInteractionRange()) continue;
-            var hit = ctx.level().clip(new net.minecraft.world.level.ClipContext(eye, aim,
-                    net.minecraft.world.level.ClipContext.Block.OUTLINE, net.minecraft.world.level.ClipContext.Fluid.NONE,
-                    net.minecraft.world.phys.shapes.CollisionContext.empty()));
-            if (hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK && !hit.getBlockPos().equals(button)) continue;
+            var hit = ctx.level().clip(new ClipContext(eye, aim,
+                    ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE,
+                    CollisionContext.empty()));
+            if (hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(button)) continue;
             double next = stance.distanceToSqr(ctx.player().position());
             if (next < distance) { best = stance; distance = next; }
         }

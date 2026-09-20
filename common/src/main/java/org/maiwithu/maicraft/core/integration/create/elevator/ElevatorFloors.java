@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import net.minecraft.client.player.LocalPlayer;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 
 /**
  * 把当前观察到的楼层整理给用户选择，支持最高层、最低层、上一层、下一层和唯一名称；不把轿厢当前高度冒充玩家所在楼层。
@@ -66,9 +68,9 @@ public final class ElevatorFloors {
      * <p>相对值不泄露绝对坐标（坐标仍留在本系统内），与 {@code location_boundary} 的口径一致。
      */
     public static Map<String,Object> describe(Elevator elevator, Double referenceY) {
-        var rows=new java.util.ArrayList<>(elevator.floors().stream().limit(15).toList());
+        var rows=new ArrayList<>(elevator.floors().stream().limit(15).toList());
         if(elevator.floors().size()>15) rows.add(elevator.floors().getLast());
-        var result=new java.util.LinkedHashMap<String,Object>();
+        var result=new LinkedHashMap<String,Object>();
         result.put("elevator_id",elevator.id().toString());
         result.put("distance",Math.round(elevator.distance()*10)/10D);
         result.put("approach_distance",Math.round(elevator.approachDistance()*10)/10D);
@@ -82,7 +84,7 @@ public final class ElevatorFloors {
     }
 
     private static Map<String,Object> floorRow(Elevator elevator,Floor floor,Double referenceY) {
-        var row=new java.util.LinkedHashMap<String,Object>();
+        var row=new LinkedHashMap<String,Object>();
         row.put("id",floor.id());
         row.put("short_name",floor.shortName());
         row.put("long_name",floor.longName());

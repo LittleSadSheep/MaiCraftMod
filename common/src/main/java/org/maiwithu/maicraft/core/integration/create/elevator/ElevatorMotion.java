@@ -16,6 +16,9 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.entity.InputDriver;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * 固定地面接近轿厢时用步行导航；厢内和门口则按轿厢局部支撑逐小步移动，切换前等旧导航安全让出控制。
@@ -102,13 +105,13 @@ final class ElevatorMotion {
         return Progress.MOVING;
     }
 
-    java.util.Map<String, Object> diagnostics() {
-        var data = new java.util.LinkedHashMap<String, Object>();
+    Map<String, Object> diagnostics() {
+        var data = new LinkedHashMap<String, Object>();
         data.put("last_motion_failure", failure);
         if (lastStepTarget != null) {
             data.put("motion_target", ElevatorInspection.point(lastStepTarget));
             data.put("motion_tick", lastStepTick);
-            data.put("motion_progress", lastStepProgress == null ? "unknown" : lastStepProgress.name().toLowerCase(java.util.Locale.ROOT));
+            data.put("motion_progress", lastStepProgress == null ? "unknown" : lastStepProgress.name().toLowerCase(Locale.ROOT));
         }
         return data;
     }

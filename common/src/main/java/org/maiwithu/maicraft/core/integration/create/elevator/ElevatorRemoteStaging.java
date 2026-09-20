@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
+import org.maiwithu.maicraft.client.actor.VanillaHotbar;
 
 /**
  * 把无线遥控器准备到快捷栏，操作结束后恢复原物品排列和选择；栏位被外部改变时不覆盖冲突内容。
@@ -26,7 +27,7 @@ final class ElevatorRemoteStaging {
             source = slot; originalSelected = ctx.player().getInventory().selected;
             // 控制器在背包里时换到“当前手上那格”；扩展快捷栏模组可能让 selected 越出 0~8，
             // 原版 SWAP 交换只认 0~8，先折回原版范围再交换。
-            hotbar = slot < 9 ? slot : org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(originalSelected);
+            hotbar = slot < 9 ? slot : VanillaHotbar.swapTarget(originalSelected);
             sourceBefore = ctx.player().getInventory().getItem(source).copy();
             hotbarBefore = ctx.player().getInventory().getItem(hotbar).copy();
         }

@@ -7,6 +7,10 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import java.util.Comparator;
+import java.util.List;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.phys.AABB;
 
 /**
  * 整理电梯观察信息，并为通用导航粗筛可能的楼层；粗筛结果只供决定是否继续勘察，不证明已能上梯或下梯。
@@ -35,16 +39,16 @@ final class ElevatorInspection {
                 Vec3 localFeet = cabin.local(player.position());
                 var nearby = cabin.blocks().entrySet().stream()
                         .filter(e -> e.getKey().distToCenterSqr(localFeet) < 4 * 4)
-                        .sorted(java.util.Comparator.comparingDouble(e -> e.getKey().distToCenterSqr(localFeet))).toList();
+                        .sorted(Comparator.comparingDouble(e -> e.getKey().distToCenterSqr(localFeet))).toList();
                 data.put("nearby_cabin_blocks_truncated", nearby.size() > 16);
                 data.put("nearby_cabin_blocks", nearby.stream().limit(16).map(e -> {
                     var state = e.getValue().state();
                     var boxes = state.getCollisionShape(cabin.view(), e.getKey()).toAabbs();
                     return Map.of("local_position", point(Vec3.atLowerCornerOf(e.getKey())),
                             "world_position", point(cabin.global(Vec3.atLowerCornerOf(e.getKey()))),
-                            "block_id", net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
+                            "block_id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
                             "state", state.toString(), "block_local_collision_boxes", boxes.stream().limit(8).map(b ->
-                                    java.util.List.of(b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ)).toList(),
+                                    List.of(b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ)).toList(),
                             "boxes_truncated", boxes.size() > 8);
                 }).toList());
                 data.put("floor_geometry", cabin.floors().stream().map(f -> {
@@ -88,7 +92,7 @@ final class ElevatorInspection {
     static Map<String, Double> point(Vec3 point) { return Map.of("x", point.x, "y", point.y, "z", point.z); }
     static boolean supports(CreateElevatorBridge.Cabin cabin, LocalPlayer player) {
         Vec3 feet = cabin.local(player.position());
-        var supports = new ArrayList<net.minecraft.world.phys.AABB>();
+        var supports = new ArrayList<AABB>();
         for (BlockPos pos : BlockPos.betweenClosed(BlockPos.containing(feet).offset(-1, -1, -1), BlockPos.containing(feet).offset(1, 0, 1))) {
             var block = cabin.blocks().get(pos);
             if (block != null) for (var box : block.state().getCollisionShape(cabin.view(), pos).toAabbs()) supports.add(box.move(pos));

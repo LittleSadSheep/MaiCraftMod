@@ -8,10 +8,13 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import java.util.Objects;
+import java.util.UUID;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
 /** Bounded session-local ownership receipts prevent a partial route from becoming permission to build a detour. */
 final class KineticRouteContinuations {
-    record Entry(Level world,java.util.UUID owner,EconomicKineticTaskRecord request,KineticRouteGeometry.Plan plan,
+    record Entry(Level world,UUID owner,EconomicKineticTaskRecord request,KineticRouteGeometry.Plan plan,
                  JsonObject costs,BlockEntity source,BlockEntity target,long expires) {}
     private static final Map<BlockPos,Entry> ENTRIES=new LinkedHashMap<>();
     private KineticRouteContinuations() {}
@@ -41,7 +44,7 @@ final class KineticRouteContinuations {
         for(var cell:plan.placements()) {
             if(!player.level().isLoaded(cell.position()))throw new IllegalArgumentException("kinetic_route_unloaded_before_supply");
             if(!KineticRouteBuild.matches(player,cell))result.merge(
-                    org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems.itemId(cell.blockId(),cell.properties()),1,Integer::sum);
+                    MachinePlacementItems.itemId(cell.blockId(),cell.properties()),1,Integer::sum);
         }
         for(var link:plan.chainLinks()) {
             if(!player.level().isLoaded(link.from())||!player.level().isLoaded(link.to()))throw new IllegalArgumentException("kinetic_chain_unloaded_before_supply");
@@ -55,8 +58,8 @@ final class KineticRouteContinuations {
         return Map.copyOf(result);
     }
     private static boolean sameRequest(EconomicKineticTaskRecord a,EconomicKineticTaskRecord b) {
-        return java.util.Objects.equals(a.source,b.source)&&a.sourceFace==b.sourceFace&&a.targetFace==b.targetFace
-                &&java.util.Objects.equals(a.targetBlockId,b.targetBlockId)&&a.minimumRpm==b.minimumRpm
+        return Objects.equals(a.source,b.source)&&a.sourceFace==b.sourceFace&&a.targetFace==b.targetFace
+                &&Objects.equals(a.targetBlockId,b.targetBlockId)&&a.minimumRpm==b.minimumRpm
                 &&a.materialPolicy==b.materialPolicy&&a.allowedSources.equals(b.allowedSources)&&a.allowHarm==b.allowHarm
                 &&a.protectedLabels.equals(b.protectedLabels)&&a.dimension.equals(b.dimension)&&a.sourceRadius==b.sourceRadius;
     }

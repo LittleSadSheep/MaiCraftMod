@@ -11,6 +11,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /**
  * 从语义位置向外逐圈读真实动力接口，证明没有更近的合适证据后才交出候选；未知区块要求走近观察，不能直接当作没有机器。
@@ -332,7 +333,7 @@ final class CreateEndpointEvidenceSearch {
             if (kinetic == null || poweredOnly && !kinetic.powered()) return;
             BlockState state = level.getBlockState(position);
             boolean chainLink = economicInterfaces && endpoint.exactFace() == null
-                    && net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals("create:chain_conveyor");
+                    && BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals("create:chain_conveyor");
             for (Direction face : economicInterfaces ? Direction.values() : new Direction[]{Direction.UP, Direction.DOWN}) {
                 if (endpoint.exactFace() != null && face != endpoint.exactFace()) continue;
                 if (!CreateKineticsBridge.hasShaftTowards(level, position, state, face)) continue;

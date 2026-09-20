@@ -41,6 +41,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
+import java.math.BigDecimal;
 
 /**
  * 完成接线全过程：调查、准备一批材料、复查、走到站位、瞄准放一格、确认消耗和状态，再验证目标开始转动并归位物品。
@@ -1312,7 +1313,7 @@ final class CreateMechanicalPowerTask
     }
 
     private static String canonicalSpeed(float speed) {
-        return new java.math.BigDecimal(Float.toString(speed)).stripTrailingZeros().toPlainString();
+        return new BigDecimal(Float.toString(speed)).stripTrailingZeros().toPlainString();
     }
 
     private static FailureType mapFailure(String code) {

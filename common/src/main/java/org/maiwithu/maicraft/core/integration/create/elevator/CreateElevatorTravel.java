@@ -22,6 +22,9 @@ import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorMotion.Pro
 import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorSurvey.Plan;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import org.maiwithu.maicraft.entity.InputDriver;
+import java.util.Locale;
+import java.util.Objects;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 
 /**
  * 执行一次乘梯：找到同时有入口、控制位置和出口的方案，呼梯、进厢、选层、随梯移动，再走到固定地面。
@@ -66,7 +69,7 @@ public final class CreateElevatorTravel implements TransportSession {
         forbidden = LongSets.unmodifiable(new LongOpenHashSet(forbiddenBodyCells));
     }
     public CreateElevatorTravel(UUID cabin,int floor,LongSet forbiddenBodyCells) {
-        destination=null; requestedCabin=java.util.Objects.requireNonNull(cabin); requestedFloor=floor;
+        destination=null; requestedCabin=Objects.requireNonNull(cabin); requestedFloor=floor;
         forbidden=LongSets.unmodifiable(new LongOpenHashSet(forbiddenBodyCells));
     }
     public static Map<String, Object> inspect(LocalPlayer player) { return ElevatorInspection.inspect(player); }
@@ -307,7 +310,7 @@ public final class CreateElevatorTravel implements TransportSession {
     private Result running() { return new Result(State.RUNNING, phase(), pendingFailure == null ? "" : pendingFailure, effects, actions.uncertain); }
     private void setPhase(Phase next) { phase = next; motion.resetLocalPath(); lastProgress = now; }
     // 只把方块位置和状态用于判断是否重建碰撞，楼层展示文字等附加数据不应让走路路线反复失效。
-    static int geometryHash(Map<BlockPos, net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo> blocks) {
+    static int geometryHash(Map<BlockPos, StructureTemplate.StructureBlockInfo> blocks) {
         int hash = blocks.size();
         for (var entry : blocks.entrySet()) hash += entry.getKey().hashCode() ^ System.identityHashCode(entry.getValue().state());
         return hash;
@@ -323,7 +326,7 @@ public final class CreateElevatorTravel implements TransportSession {
         return DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen) || actions.ownsInventory(context);
     }
     @Override public boolean livenessActive() { return terminal == null && (actions.pending() || actions.pendingInventory() || motion.active() || now - lastProgress < 100); }
-    @Override public String phase() { return "elevator_" + phase.name().toLowerCase(java.util.Locale.ROOT); }
+    @Override public String phase() { return "elevator_" + phase.name().toLowerCase(Locale.ROOT); }
     @Override public Map<String, Object> diagnostics() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("phase", phase()); data.put("aboard", aboard); data.put("safe_to_interrupt", safeToInterrupt());

@@ -10,6 +10,9 @@ import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.concurrent.CancellationException;
 
 /** Bounded physical alternatives; selection, materials and native connection verification belong to the caller. */
 public final class KineticRouteGeometry {
@@ -103,13 +106,13 @@ public final class KineticRouteGeometry {
         }
         List<Plan> gears = KineticCogwheelGeometry.candidates(source, target, terrain, limits);
         if (!gears.isEmpty()) {
-            while (candidates.size() > MAX_CANDIDATES - gears.size()) candidates.remove(new java.util.ArrayList<>(candidates.keySet()).getLast());
+            while (candidates.size() > MAX_CANDIDATES - gears.size()) candidates.remove(new ArrayList<>(candidates.keySet()).getLast());
             gears.forEach(plan -> add(candidates, plan));
         }
         return List.copyOf(candidates.values());
     }
     private static List<Direction> faces(Endpoint endpoint) {
-        return endpoint.chainInterface() ? java.util.Collections.singletonList(null) : endpoint.shaftFaces;
+        return endpoint.chainInterface() ? Collections.singletonList(null) : endpoint.shaftFaces;
     }
     private static void add(Map<String, Plan> candidates, Plan plan) {
         if (plan == null || candidates.size() >= MAX_CANDIDATES) return;
@@ -130,7 +133,7 @@ public final class KineticRouteGeometry {
         return null;
     }
     static void checkpoint() {
-        if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("kinetic geometry cancelled");
+        if (Thread.currentThread().isInterrupted()) throw new CancellationException("kinetic geometry cancelled");
     }
     private static JsonArray position(BlockPos at) {
         JsonArray result = new JsonArray(); result.add(at.getX()); result.add(at.getY()); result.add(at.getZ()); return result;

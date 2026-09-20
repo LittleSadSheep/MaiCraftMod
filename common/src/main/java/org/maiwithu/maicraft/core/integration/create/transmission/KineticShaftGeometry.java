@@ -8,6 +8,7 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
+import java.util.Arrays;
 
 /** Orthogonal shaft candidates turn through real gearboxes, whose axis is the unused axis. */
 final class KineticShaftGeometry {
@@ -50,7 +51,7 @@ final class KineticShaftGeometry {
             if (before == null || after == null || before == after.getOpposite()) { work.valid = false; return; }
             if (before.getAxis() == after.getAxis()) work.put(path.get(i), "create:shaft", Map.of("axis", before.getAxis().getName()));
             else {
-                Direction.Axis unused = java.util.Arrays.stream(Direction.Axis.values()).filter(axis -> axis != before.getAxis() && axis != after.getAxis()).findFirst().orElseThrow();
+                Direction.Axis unused = Arrays.stream(Direction.Axis.values()).filter(axis -> axis != before.getAxis() && axis != after.getAxis()).findFirst().orElseThrow();
                 work.put(path.get(i), "create:gearbox", Map.of("axis", unused.getName()));
             }
         }

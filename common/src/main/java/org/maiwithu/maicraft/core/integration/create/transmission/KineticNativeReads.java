@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
+import net.minecraft.core.Direction;
 
 final class KineticNativeReads {
     private ClientRequestReceipt pending;
@@ -34,7 +35,7 @@ final class KineticNativeReads {
         }
         throw new IllegalArgumentException("kinetic_native_endpoint_missing");
     }
-    boolean connectedFace(BlockPos target,net.minecraft.core.Direction face,String dimension) {
+    boolean connectedFace(BlockPos target,Direction face,String dimension) {
         var path=new JsonArray();path.add(position(target.relative(face)));path.add(position(target));
         var request=new JsonObject();request.addProperty("system","create");request.addProperty("medium","kinetic");
         request.add("path",path);request.addProperty("to_face",face.getSerializedName());

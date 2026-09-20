@@ -10,6 +10,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
 /** Keeps material counts tied to actual targets and rejects undeclared kinetic attachments. */
 final class KineticGeometryWork {
@@ -81,7 +82,7 @@ final class KineticGeometryWork {
             }
         }
         Map<String, Integer> materials = new LinkedHashMap<>();
-        blocks.values().forEach(block -> materials.merge(org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems.itemId(block.blockId(), block.properties()), 1, Math::addExact));
+        blocks.values().forEach(block -> materials.merge(MachinePlacementItems.itemId(block.blockId(), block.properties()), 1, Math::addExact));
         links.forEach(link -> materials.merge("minecraft:chain", link.chains(), Math::addExact));
         return new Plan(family, source, sourceFace, target, targetFace, List.copyOf(blocks.values()), links, materials);
     }

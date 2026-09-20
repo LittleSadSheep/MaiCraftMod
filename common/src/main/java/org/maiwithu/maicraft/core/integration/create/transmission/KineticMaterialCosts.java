@@ -7,6 +7,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
+import java.util.Comparator;
 
 /** Relative material value and additional acquisition are separate estimates, never currency or a crafting permission. */
 public final class KineticMaterialCosts {
@@ -41,11 +43,11 @@ public final class KineticMaterialCosts {
             if (recipes.size() > 512 || rawUnitValues.size() > 4096 || carried.size() > 256 || unknownOutputs.size() > 512 || issues.size() > 64) throw bad("snapshot bounds");
             Map<String, List<Recipe>> copy = new LinkedHashMap<>();
             recipes.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
-                identifier(entry.getKey()); var values = entry.getValue().stream().sorted(java.util.Comparator.comparing(Recipe::id)).toList();
+                identifier(entry.getKey()); var values = entry.getValue().stream().sorted(Comparator.comparing(Recipe::id)).toList();
                 if (values.size() > MAX_RECIPES_PER_ITEM || values.stream().anyMatch(recipe -> !recipe.outputId.equals(entry.getKey()))) throw bad("recipe index");
                 copy.put(entry.getKey(), values);
             });
-            recipes = java.util.Collections.unmodifiableMap(copy); rawUnitValues = Map.copyOf(rawUnitValues); carried = Map.copyOf(carried);
+            recipes = Collections.unmodifiableMap(copy); rawUnitValues = Map.copyOf(rawUnitValues); carried = Map.copyOf(carried);
             rawUnitValues.forEach((id, value) -> { identifier(id); if (value == null || !Double.isFinite(value) || value < 1e-9 || value > 1_000_000) throw bad("raw unit value"); });
             carried.forEach((id, count) -> { identifier(id); if (count == null || count < 0 || count > 1_000_000) throw bad("carried count"); });
             unknownOutputs = Set.copyOf(unknownOutputs); issues = List.copyOf(issues); evidence = evidence == null ? new JsonObject() : evidence.deepCopy();

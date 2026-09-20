@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
+import java.util.Comparator;
+import net.minecraft.world.level.Level;
 
 final class ChainConveyorRead {
     private ClientRequestReceipt receipt;
@@ -55,10 +57,10 @@ final class ChainConveyorRead {
         }
         return false;
     }
-    static JsonObject clientSnapshot(net.minecraft.world.level.Level world, BlockPos at) {
+    static JsonObject clientSnapshot(Level world, BlockPos at) {
         JsonObject result = new JsonObject(); result.add("position", point(at)); result.addProperty("provenance", "client_synchronized");
         JsonArray connections = new JsonArray();
-        ChainConveyorBridge.connections(world, at).stream().sorted(java.util.Comparator.comparingLong(BlockPos::asLong))
+        ChainConveyorBridge.connections(world, at).stream().sorted(Comparator.comparingLong(BlockPos::asLong))
                 .limit(128).forEach(offset -> connections.add(point(at.offset(offset))));
         result.add("connections", connections); return result;
     }

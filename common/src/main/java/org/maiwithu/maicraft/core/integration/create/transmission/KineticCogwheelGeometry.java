@@ -9,6 +9,10 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Locale;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
 /** One audited radial gear takeoff, then an ordinary bounded shaft/gearbox or conveyor alternative. */
 final class KineticCogwheelGeometry {
@@ -18,10 +22,10 @@ final class KineticCogwheelGeometry {
         if (!plan.family().startsWith("cog_mesh_")) return true;
         if (plan.placements().isEmpty()) return false;
         Placement p = plan.placements().getFirst(); String family = p.blockId().substring(p.blockId().indexOf(':') + 1);
-        Direction.Axis axis = Direction.Axis.valueOf(p.properties().get("axis").toUpperCase(java.util.Locale.ROOT));
+        Direction.Axis axis = Direction.Axis.valueOf(p.properties().get("axis").toUpperCase(Locale.ROOT));
         if (KineticTransmissionRatios.mesh(plan.source().family(), plan.source().axis(), family, axis, p.position().subtract(plan.source().position())) == 0) return false;
         Map<BlockPos, Placement> remainder = new LinkedHashMap<>(); plan.placements().stream().skip(1).forEach(b -> remainder.put(b.position(), b));
-        List<Direction> exits = java.util.Arrays.stream(Direction.values()).filter(face -> face.getAxis() == axis && remainder.containsKey(p.position().relative(face))).toList();
+        List<Direction> exits = Arrays.stream(Direction.values()).filter(face -> face.getAxis() == axis && remainder.containsKey(p.position().relative(face))).toList();
         if (exits.size() != 1) return false;
         Endpoint virtual = new Endpoint(p.position(), axis, exits, family);
         Plan base = new Plan(plan.family(), virtual, exits.getFirst(), plan.target(), plan.targetFace(), List.copyOf(remainder.values()), plan.chainLinks(), plan.bom());
@@ -33,10 +37,10 @@ final class KineticCogwheelGeometry {
         for (Takeoff gear : takeoffs(source, target)) {
             KineticRouteGeometry.checkpoint();
             if (!clearGear(source, target, gear, terrain, null)) continue;
-            List<Direction> outlets = java.util.Arrays.stream(Direction.values()).filter(face -> face.getAxis() == gear.axis)
+            List<Direction> outlets = Arrays.stream(Direction.values()).filter(face -> face.getAxis() == gear.axis)
                     .sorted(Comparator.comparingInt(face -> gear.at.relative(face).distManhattan(target.position()))).toList();
             Endpoint virtual = new Endpoint(gear.at, gear.axis, outlets, gear.family);
-            List<Direction> targetFaces = target.chainInterface() ? java.util.Collections.singletonList(null) : target.shaftFaces();
+            List<Direction> targetFaces = target.chainInterface() ? Collections.singletonList(null) : target.shaftFaces();
             for (Direction outlet : outlets) for (Direction inlet : targetFaces) {
                 List<Plan> bases = new ArrayList<>();
                 if (inlet != null) {
@@ -50,7 +54,7 @@ final class KineticCogwheelGeometry {
                     if (bucket.size() >= 2 || !clearGear(source, target, gear, terrain, base)) continue;
                     List<Placement> blocks = new ArrayList<>(); blocks.add(new Placement(gear.at, "create:" + gear.family, Map.of("axis", gear.axis.getName()))); blocks.addAll(base.placements());
                     Map<String, Integer> bom = new LinkedHashMap<>(base.bom());
-                    bom.merge(org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems.itemId("create:" + gear.family, Map.of("axis", gear.axis.getName())), 1, Math::addExact);
+                    bom.merge(MachinePlacementItems.itemId("create:" + gear.family, Map.of("axis", gear.axis.getName())), 1, Math::addExact);
                     if (blocks.size() > limits.maxPlacements()) continue;
                     Plan plan = new Plan("cog_mesh_" + gear.kind + '/' + base.family(), source, null, target, base.targetFace(), blocks, base.chainLinks(), bom);
                     if (plan.transmissionRatio() == null || bucket.stream().anyMatch(prior -> prior.bom().equals(plan.bom())

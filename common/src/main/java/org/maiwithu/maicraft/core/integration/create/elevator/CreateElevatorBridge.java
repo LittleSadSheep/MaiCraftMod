@@ -22,6 +22,12 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import java.util.LinkedHashMap;
+import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.phys.AABB;
+import org.maiwithu.maicraft.core.act.Interaction;
 
 /**
  * 集中读取 Create 电梯轿厢、楼层、控制器和红石链路，并调用模组原有的滚动、确认和呼梯协议。
@@ -30,7 +36,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 final class CreateElevatorBridge {
     private static final String ROOT = "com.simibubi.create.content.";
     private record MethodKey(Class<?> owner, String name, List<Class<?>> arguments) {}
-    private static final Map<MethodKey, Method> METHODS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<MethodKey, Method> METHODS = new ConcurrentHashMap<>();
     private final Class<?> entityType = type(ROOT + "contraptions.AbstractContraptionEntity");
     private final Class<?> elevatorType = type(ROOT + "contraptions.elevator.ElevatorContraption");
     private final Class<?> controlsType = type(ROOT + "contraptions.actors.contraptionControls.ContraptionControlsBlock");
@@ -131,8 +137,8 @@ final class CreateElevatorBridge {
         Object controls = value(entity, "doorControls");
         Object mode = controls == null ? null : value(controls, "mode");
         if (mode == null) return new ArrivalDoors("unsynchronized", Map.of());
-        Map<BlockPos, Direction> pairs = new java.util.LinkedHashMap<>();
-        Vec3 center = ((net.minecraft.world.phys.AABB) value(cabin.contraption(), "bounds")).getCenter();
+        Map<BlockPos, Direction> pairs = new LinkedHashMap<>();
+        Vec3 center = ((AABB) value(cabin.contraption(), "bounds")).getCenter();
         for (var entry : cabin.blocks().entrySet()) {
             if (!slidingDoorType.isInstance(entry.getValue().state().getBlock())) continue;
             Object actor = call(cabin.contraption(), "getActorAt", entry.getKey());
@@ -150,12 +156,12 @@ final class CreateElevatorBridge {
         if (ctx.player().isSpectator() || ctx.player().isHandsBusy()) return null;
         Vec3 from = ctx.player().getEyePosition();
         Vec3 end = from.add(ctx.player().getViewVector(1F).scale(ctx.player().blockInteractionRange()));
-        HitResult world = org.maiwithu.maicraft.core.act.Interaction.nativeRaytrace(ctx.player(), ctx.player().blockInteractionRange());
+        HitResult world = Interaction.nativeRaytrace(ctx.player(), ctx.player().blockInteractionRange());
         if (world.getType() != HitResult.Type.MISS) end = world.getLocation();
         BlockHitResult hit = (BlockHitResult) call(handler, "rayTraceContraption", from, end, cabin.entity);
         if (hit == null || !hit.getBlockPos().equals(localPos)) return null;
         double distance = cabin.global(hit.getLocation()).distanceToSqr(from);
-        var bounds = new net.minecraft.world.phys.AABB(from, end).inflate(16);
+        var bounds = new AABB(from, end).inflate(16);
         for (Entity other : ctx.level().entitiesForRendering()) {
             if (other == cabin.entity || !entityType.isInstance(other) || !other.getBoundingBox().intersects(bounds)
                     || call(other, "getContraption") == null) continue;
@@ -246,8 +252,8 @@ final class CreateElevatorBridge {
         List<Map<String, Object>> items = new ArrayList<>();
         for (String half : List.of("getFirst", "getSecond")) {
             ItemStack stack = (ItemStack) call(call(frequency, half), "getStack");
-            var color = stack.get(net.minecraft.core.component.DataComponents.DYED_COLOR);
-            items.add(Map.of("item", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+            var color = stack.get(DataComponents.DYED_COLOR);
+            items.add(Map.of("item", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
                     "dyed_color", color == null ? -1 : color.rgb()));
         }
         return new WorldLink(position.immutable(), behaviour, Boolean.TRUE.equals(call(behaviour, "isListening")),

@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
 
 /** Uses two real held-chain block interactions; the second native action is never replayed. */
 final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLinkTaskRecord> {
@@ -137,7 +138,7 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         int requiredMain = creativeExempt ? 1 : Math.max(1, cost - offhand);
         if (ChainConveyorInventory.mainCount(player) < requiredMain) {
             if (creativeExempt && r.allowedSources.isEmpty() && r.materialPolicy != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY) {
-                creativeSupply = TaskFactory.create(player, new org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord(
+                creativeSupply = TaskFactory.create(player, new CreativeTakeItemsTaskRecord(
                         r.getToolCallId() + "-chain-tool", r.getDeadlineGameTime(), new ItemStack(Items.CHAIN), 1));
                 return TaskState.RUNNING;
             }

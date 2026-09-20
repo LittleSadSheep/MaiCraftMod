@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Comparator;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 
 /** Reuses finite acyclic price proofs by dependency depth instead of recursively revisiting recycling recipes. */
@@ -48,7 +49,7 @@ final class KineticUnitValues {
     }
     int evaluations() { return evaluations; }
     List<Recipe> orderedRecipes(String id) {
-        return snapshot.recipes().getOrDefault(id, List.of()).stream().sorted(java.util.Comparator
+        return snapshot.recipes().getOrDefault(id, List.of()).stream().sorted(Comparator
                 .comparingInt((Recipe recipe) -> { Value value = evaluate(recipe, values); return value == null ? Integer.MAX_VALUE : value.depth(); })
                 .thenComparingDouble(recipe -> { Value value = evaluate(recipe, values); return value == null ? Double.MAX_VALUE : value.value(); })
                 .thenComparing(Recipe::id)).toList();

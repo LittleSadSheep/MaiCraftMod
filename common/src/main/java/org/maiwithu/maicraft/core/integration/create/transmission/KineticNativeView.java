@@ -7,6 +7,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import java.util.List;
 
 /** Loaded synchronized native facts select candidates; server evidence is checked before enhanced work. */
 final class KineticNativeView {
@@ -18,10 +19,10 @@ final class KineticNativeView {
         var values = variants(level,at,exactFace,chainInterface);
         return values.isEmpty() ? null : values.getFirst();
     }
-    static java.util.List<Observation> variants(Level level, BlockPos at, Direction exactFace, boolean chainInterface) {
-        if (!level.isLoaded(at)) return java.util.List.of();
+    static List<Observation> variants(Level level, BlockPos at, Direction exactFace, boolean chainInterface) {
+        if (!level.isLoaded(at)) return List.of();
         var state = level.getBlockState(at); var entity = level.getBlockEntity(at);
-        if (!NativeApi.is(entity,KINETIC) || !NativeApi.is(state.getBlock(),ROTATE)) return java.util.List.of();
+        if (!NativeApi.is(entity,KINETIC) || !NativeApi.is(state.getBlock(),ROTATE)) return List.of();
         try {
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             String family = id.equals("create:chain_conveyor") ? "chain_conveyor" : id.equals("create:large_cogwheel")
@@ -31,20 +32,20 @@ final class KineticNativeView {
             if (!family.equals("chain_conveyor") || !chainInterface || exactFace != null)
                 for (Direction side : Direction.values()) if ((exactFace == null || side == exactFace)
                         && NativeApi.truth(NativeApi.call(state.getBlock(),ROTATE,"hasShaftTowards",level,at,state,side))) faces.add(side);
-            if (faces.isEmpty() && !(family.equals("chain_conveyor") && chainInterface && exactFace == null)) return java.util.List.of();
+            if (faces.isEmpty() && !(family.equals("chain_conveyor") && chainInterface && exactFace == null)) return List.of();
             double speed = ((Number) NativeApi.call(entity,KINETIC,"getSpeed")).doubleValue();
             boolean powered = Double.isFinite(speed) && Math.abs(speed) > .0001
                     && NativeApi.truth(NativeApi.call(entity,KINETIC,"hasNetwork"))
                     && !NativeApi.truth(NativeApi.call(entity,KINETIC,"isOverStressed"));
-            var result = new java.util.ArrayList<Observation>();
+            var result = new ArrayList<Observation>();
             Object network=NativeApi.field(entity,KINETIC,"network");String networkId=network==null?"":network.toString();
             if (faces.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,axis,faces,family),id,speed,powered,networkId));
             else for (Direction.Axis portAxis : Direction.Axis.values()) {
                 var onAxis = faces.stream().filter(face -> face.getAxis() == portAxis).toList();
                 if (!onAxis.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,portAxis,onAxis,family),id,speed,powered,networkId));
             }
-            return java.util.List.copyOf(result);
-        } catch (RuntimeException unavailable) { return java.util.List.of(); }
+            return List.copyOf(result);
+        } catch (RuntimeException unavailable) { return List.of(); }
     }
     static boolean kinetic(Level level,BlockPos at) {
         return level.isLoaded(at) && NativeApi.is(level.getBlockState(at).getBlock(),ROTATE);
