@@ -15,6 +15,7 @@ public final class CloseMenuTaskRecord extends TaskRecord {
         expectedMenu = null;
     }
     public CloseMenuTaskRecord(String callId, long deadline, AbstractContainerMenu expectedMenu) {
+        // 父任务只安排关闭已结清、鼠标为空的界面；若中途又拿起物品，执行器保留界面交回处理。
         super("close_menu", callId, deadline);
         this.expectedMenu = Objects.requireNonNull(expectedMenu, "expectedMenu");
     }

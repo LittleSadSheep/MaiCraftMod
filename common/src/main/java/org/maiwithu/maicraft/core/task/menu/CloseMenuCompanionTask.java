@@ -21,6 +21,10 @@ public final class CloseMenuCompanionTask extends AbstractCompanionTask<CloseMen
                 fail("the requested menu was replaced before closing", FailureType.TARGET_LOST);
                 return TaskState.FAILED;
             }
+            if (r.expectedMenu != null && !r.expectedMenu.getCarried().isEmpty()) {
+                fail("the requested menu still has a carried stack; it was left open", FailureType.UNKNOWN);
+                return TaskState.FAILED;
+            }
             receipt = context.menus().close(context, 20);
             return TaskState.RUNNING;
         }

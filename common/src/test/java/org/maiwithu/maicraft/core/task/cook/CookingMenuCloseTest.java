@@ -7,6 +7,8 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.inventory.FurnaceMenu;
 import net.minecraft.world.inventory.SimpleContainerData;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.task.menu.CloseMenuCompanionTask;
 import org.maiwithu.maicraft.core.task.menu.CloseMenuTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
@@ -27,6 +29,13 @@ public final class CookingMenuCloseTest {
             check(world.game.player.containerMenu == replacement, "拒绝后仍保留新菜单");
             check(((List<?>) CookingTestWorld.read(world.game.player.connection, "packets")).isEmpty(),
                     "绑定检查失败前不能发送关闭包");
+            world.game.player.containerMenu = world.game.player.inventoryMenu;
+            replacement.setCarried(new ItemStack(Items.IRON_INGOT));
+            world.game.player.containerMenu = replacement;
+            var holding = new CloseMenuCompanionTask(world.game.player,
+                    new CloseMenuTaskRecord("holding-output", 100, replacement));
+            check(holding.tick(world.game.player) == TaskState.FAILED
+                    && replacement.getCarried().getCount() == 1, "鼠标还拿着东西时不能靠关菜单处理它");
             world.game.player.containerMenu = world.game.player.inventoryMenu;
             var alreadyClosed = new CloseMenuCompanionTask(world.game.player, new CloseMenuTaskRecord("already-closed", 100, first));
             check(alreadyClosed.tick(world.game.player) == TaskState.SUCCESS, "目标菜单已经关好时不重复发送请求");

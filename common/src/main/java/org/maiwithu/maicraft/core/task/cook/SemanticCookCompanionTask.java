@@ -117,7 +117,9 @@ public final class SemanticCookCompanionTask
     private AbstractFurnaceMenu ownedMenu;
     private boolean openRequested;
     private boolean effectsStarted;
+    private boolean batchOutstanding;
     private boolean finishRequested;
+    private boolean parentSatisfied;
     private boolean replenishAfterClose;
     private OpenMode openMode = OpenMode.NEW_BATCH;
     private BlockPos stationReturnStance;
@@ -1205,6 +1207,8 @@ public final class SemanticCookCompanionTask
 
     // 有失败就以失败结束，目标已够就结束；否则清掉上一批的数量记录并准备下一批，设备位置可继续保留。
     private TaskState finishCleanup() {
+        // 只有正常核对、取回剩料并确认关闭后，才把本批记为结清；取消或丢菜单不能走这一步。
+        batchOutstanding = false;
         if (failureMessage != null) {
             phase = Phase.COMPLETE;
             return TaskState.RUNNING;
@@ -1329,6 +1333,7 @@ public final class SemanticCookCompanionTask
             }
             case LOAD_INPUT -> {
                 effectsStarted = true;
+                batchOutstanding = true;
                 ownedInputLoaded = batchRaw;
                 phase = Phase.LOAD_FUEL;
             }
@@ -1715,6 +1720,13 @@ public final class SemanticCookCompanionTask
         };
     }
 
+    @Override
+    public void requestSatisfiedSettlement() {
+        // 父目标可能由另一种可替代物品满足；这时只收尾当前这炉，不能继续追赶自己的旧成品数量。
+        finishRequested = true;
+        parentSatisfied = true;
+    }
+
     private static int ceilDiv(long numerator, long denominator) {
         if (numerator <= 0L) return 0;
         return (int) Math.min(
@@ -1724,6 +1736,8 @@ public final class SemanticCookCompanionTask
     @Override
     // 任务整体被结束时停止子任务、尝试关闭当前使用过的菜单并停导航；已成功放置的设备和已经发生的加工不会撤销。
     protected void cleanup() {
+        // 关着炉子等待时收到取消，炉内加工仍可能继续；没有待点击的子任务不等于没有未结效果。
+        outcomeUncertain |= batchOutstanding;
         try {
             cancelActiveChild();
         } finally {
@@ -1734,7 +1748,10 @@ public final class SemanticCookCompanionTask
 
     private void closeOwnedMenuAtBoundary() {
         // 只能关闭本次实际绑定的菜单；打开尚未确认或已换成别人的菜单时，保留当前界面。
-        if (ownedMenu != null && player.containerMenu == ownedMenu) {
+        if (ownedMenu != null && player.containerMenu == ownedMenu && !ownedMenu.getCarried().isEmpty()) {
+            // 分堆中断或外来鼠标物品需要保留界面，不能让上层清理覆盖搬运子任务的保留决定。
+            outcomeUncertain = true;
+        } else if (ownedMenu != null && player.containerMenu == ownedMenu) {
             try {
                 var context = ClientRuntime.requireContext(player);
                 context.menus().closeForTaskBoundary(
@@ -1774,6 +1791,14 @@ public final class SemanticCookCompanionTask
             data.put("fuel_item_id", BuiltInRegistries.ITEM.getKey(fuel).toString());
         }
         data.put("station_placed", stationPlaced);
+        // 未确认的搬运可能已生效；历史未知时省略“没有效果”的断言，只保留明确的不确定性。
+        if (effectsStarted || !outcomeUncertain) data.put("effects_started", effectsStarted);
+        data.put("batch_outstanding", batchOutstanding);
+        data.put("stopped_because_parent_satisfied", parentSatisfied);
+        if (batchOutstanding) {
+            data.put("owned_input_loaded", ownedInputLoaded);
+            data.put("owned_output_taken", ownedOutputTaken);
+        }
         data.put("outcome_uncertain", outcomeUncertain);
         if (failedChildStage != null) {
             data.put("failed_child_stage", failedChildStage);
@@ -1802,6 +1827,9 @@ public final class SemanticCookCompanionTask
 
     @Override
     protected String successMessage() {
+        if (parentSatisfied && outputCount() < r.count)
+            return "settled existing cooking work after the parent inventory goal was satisfied; carrying "
+                    + outputCount() + " of the original " + r.count + " " + r.itemId;
         return "cooked " + r.itemId + " until the main inventory held at least "
                 + r.count + " item(s), confirmed by live inventory state";
     }
