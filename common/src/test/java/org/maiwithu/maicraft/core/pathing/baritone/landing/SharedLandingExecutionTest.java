@@ -13,6 +13,26 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
+import baritone.api.pathing.movement.MovementStatus;
+import baritone.api.utils.BetterBlockPos;
+import baritone.api.utils.IPlayerContext;
+import baritone.pathing.movement.Movement;
+import baritone.pathing.movement.MovementState;
+import baritone.pathing.movement.movements.MovementFall;
+import com.google.common.collect.ImmutableList;
+import java.lang.reflect.Proxy;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.vehicle.Boat;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /**
  * 把预先计划、意外下落和已在执行的下落交给同一救援流程，比较放置、确认与回收；还检查现成船优先级、干草减伤及不能转换到世界位置的射线。
@@ -21,9 +41,9 @@ public final class SharedLandingExecutionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var memory = (sun.misc.Unsafe) field(sun.misc.Unsafe.class, "theUnsafe").get(null);
-        var client = (net.minecraft.client.Minecraft) memory.allocateInstance(net.minecraft.client.Minecraft.class);
-        field(net.minecraft.client.Minecraft.class, "gameThread").set(client, Thread.currentThread());
-        var instance = field(net.minecraft.client.Minecraft.class, "instance"); Object previous = instance.get(null);
+        var client = (Minecraft) memory.allocateInstance(Minecraft.class);
+        field(Minecraft.class, "gameThread").set(client, Thread.currentThread());
+        var instance = field(Minecraft.class, "instance"); Object previous = instance.get(null);
         instance.set(null, client);
         try {
             water(false, true); water(true, true); water(true, false); runningFallRescue(); hay(); rejectsPlotStorageRay();
@@ -37,31 +57,31 @@ public final class SharedLandingExecutionTest {
     private static void existingBoatBeforeSupply() throws Exception {
         var f = new WaterLandingReplayTest.Fixture(false);
         f.position(2.5, -0.08, false); f.player.fallDistance = 5;
-        var id = java.util.UUID.randomUUID();
-        field(net.minecraft.world.entity.Entity.class, "uuid").set(f.player, id);
-        var connection = (net.minecraft.client.multiplayer.ClientPacketListener) f.memory.allocateInstance(net.minecraft.client.multiplayer.ClientPacketListener.class);
-        var info = f.memory.allocateInstance(net.minecraft.client.multiplayer.PlayerInfo.class);
-        field(net.minecraft.client.multiplayer.ClientPacketListener.class, "playerInfoMap").set(connection, java.util.Map.of(id, info));
-        var context = (org.maiwithu.maicraft.client.actor.LocalPlayerContext) java.lang.reflect.Proxy.newProxyInstance(
-                org.maiwithu.maicraft.client.actor.LocalPlayerContext.class.getClassLoader(),
-                new Class<?>[]{org.maiwithu.maicraft.client.actor.LocalPlayerContext.class}, (proxy, method, values) ->
+        var id = UUID.randomUUID();
+        field(Entity.class, "uuid").set(f.player, id);
+        var connection = (ClientPacketListener) f.memory.allocateInstance(ClientPacketListener.class);
+        var info = f.memory.allocateInstance(PlayerInfo.class);
+        field(ClientPacketListener.class, "playerInfoMap").set(connection, Map.of(id, info));
+        var context = (LocalPlayerContext) Proxy.newProxyInstance(
+                LocalPlayerContext.class.getClassLoader(),
+                new Class<?>[]{LocalPlayerContext.class}, (proxy, method, values) ->
                         method.getName().equals("connection") ? connection : method.invoke(f.context, values));
-        var boat = (net.minecraft.world.entity.vehicle.Boat) f.memory.allocateInstance(net.minecraft.world.entity.vehicle.Boat.class);
-        field(net.minecraft.world.entity.Entity.class, "type").set(boat, net.minecraft.world.entity.EntityType.BOAT);
-        field(net.minecraft.world.entity.Entity.class, "uuid").set(boat, java.util.UUID.randomUUID());
-        field(net.minecraft.world.entity.Entity.class, "position").set(boat, new net.minecraft.world.phys.Vec3(0.5, 0, 0.5));
-        field(net.minecraft.world.entity.Entity.class, "bb").set(boat, BoatLandingGeometry.boatBox(boat.position()));
-        field(net.minecraft.world.entity.Entity.class, "deltaMovement").set(boat, net.minecraft.world.phys.Vec3.ZERO);
-        field(net.minecraft.world.entity.Entity.class, "passengers").set(boat, com.google.common.collect.ImmutableList.of());
-        field(net.minecraft.world.entity.Entity.class, "onGround").setBoolean(boat, true);
-        f.world.observedEntities = java.util.List.of(boat);
-        var adopt = baritone.pathing.movement.movements.MovementFall.class.getDeclaredMethod("adoptEmergencyLanding",
-                org.maiwithu.maicraft.client.actor.LocalPlayerContext.class); adopt.setAccessible(true);
+        var boat = (Boat) f.memory.allocateInstance(Boat.class);
+        field(Entity.class, "type").set(boat, EntityType.BOAT);
+        field(Entity.class, "uuid").set(boat, UUID.randomUUID());
+        field(Entity.class, "position").set(boat, new Vec3(0.5, 0, 0.5));
+        field(Entity.class, "bb").set(boat, BoatLandingGeometry.boatBox(boat.position()));
+        field(Entity.class, "deltaMovement").set(boat, Vec3.ZERO);
+        field(Entity.class, "passengers").set(boat, ImmutableList.of());
+        field(Entity.class, "onGround").setBoolean(boat, true);
+        f.world.observedEntities = List.of(boat);
+        var adopt = MovementFall.class.getDeclaredMethod("adoptEmergencyLanding",
+                LocalPlayerContext.class); adopt.setAccessible(true);
         for (int mode = 0; mode < 3; mode++) {
             if (mode > 0) f.player.inventory.setItem(0, ItemStack.EMPTY);
-            if (mode == 2) f.world.observedEntities = java.util.List.of();
-            var movement = (baritone.pathing.movement.movements.MovementFall) f.memory.allocateInstance(baritone.pathing.movement.movements.MovementFall.class);
-            field(baritone.pathing.movement.Movement.class, "dest").set(movement, new baritone.api.utils.BetterBlockPos(BlockPos.ZERO));
+            if (mode == 2) f.world.observedEntities = List.of();
+            var movement = (MovementFall) f.memory.allocateInstance(MovementFall.class);
+            field(Movement.class, "dest").set(movement, new BetterBlockPos(BlockPos.ZERO));
             adopt.invoke(movement, context);
             check(mode == 1 ? movement.landingBoat() != null && movement.landingAssist() == null
                             : movement.landingBoat() == null && movement.landingAssist() != null,
@@ -93,13 +113,13 @@ public final class SharedLandingExecutionTest {
         // does not describe the observed descent. Do not alter vanilla's mayfly damage rule.
         f.player.getAbilities().mayfly = true;
         check(EmergencyLanding.triggered(f.player), "survival fast-fall rescue is independent of the damage estimate");
-        var movement = (baritone.pathing.movement.movements.MovementFall) f.memory.allocateInstance(
-                baritone.pathing.movement.movements.MovementFall.class);
-        field(baritone.pathing.movement.Movement.class, "dest").set(movement, new baritone.api.utils.BetterBlockPos(BlockPos.ZERO));
-        field(baritone.pathing.movement.Movement.class, "currentState").set(movement,
-                new baritone.pathing.movement.MovementState().setStatus(baritone.api.pathing.movement.MovementStatus.RUNNING));
-        field(baritone.pathing.movement.Movement.class, "ctx").set(movement, java.lang.reflect.Proxy.newProxyInstance(
-                baritone.api.utils.IPlayerContext.class.getClassLoader(), new Class<?>[]{baritone.api.utils.IPlayerContext.class},
+        var movement = (MovementFall) f.memory.allocateInstance(
+                MovementFall.class);
+        field(Movement.class, "dest").set(movement, new BetterBlockPos(BlockPos.ZERO));
+        field(Movement.class, "currentState").set(movement,
+                new MovementState().setStatus(MovementStatus.RUNNING));
+        field(Movement.class, "ctx").set(movement, Proxy.newProxyInstance(
+                IPlayerContext.class.getClassLoader(), new Class<?>[]{IPlayerContext.class},
                 (proxy, method, args) -> {
                     if (method.getName().equals("player")) return f.player;
                     throw new AssertionError(method.getName());
@@ -107,7 +127,7 @@ public final class SharedLandingExecutionTest {
         check(!movement.safeToCancel() && movement.landingAssist() == null,
                 "ordinary launched fall cannot be suspended for a separate reflex");
         var adopt = movement.getClass().getDeclaredMethod("adoptEmergencyLanding",
-                org.maiwithu.maicraft.client.actor.LocalPlayerContext.class);
+                LocalPlayerContext.class);
         adopt.setAccessible(true); adopt.invoke(movement, f.context);
         var rescue = movement.landingAssist();
         check(rescue != null && rescue.plan().feet().equals(BlockPos.ZERO), "same movement adopts its own destination rescue");
@@ -206,9 +226,9 @@ public final class SharedLandingExecutionTest {
         // Native integrations may return both location and cell in storage space, or retain
         // the world intersection while returning only the storage cell. Neither is usable here.
         var storage = new BlockPos(28_000_000, 70, 28_000_000);
-        for (var location : new net.minecraft.world.phys.Vec3[]{
-                net.minecraft.world.phys.Vec3.atCenterOf(storage), new net.minecraft.world.phys.Vec3(0.5, 0, 0.5)}) {
-            f.world.nativeHit = new net.minecraft.world.phys.BlockHitResult(location, Direction.UP, storage, false);
+        for (var location : new Vec3[]{
+                Vec3.atCenterOf(storage), new Vec3(0.5, 0, 0.5)}) {
+            f.world.nativeHit = new BlockHitResult(location, Direction.UP, storage, false);
             check(EmergencyLanding.find(f.context) == null && f.uses == 0 && f.selections == 0,
                     "plot-storage hits cannot become global landing goals or native item operations");
             check("unsupported".equals(LandingAssistPolicy.diagnosticState().get("support_state")),

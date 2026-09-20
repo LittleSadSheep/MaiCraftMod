@@ -30,6 +30,32 @@ import org.maiwithu.maicraft.client.actor.NativeActionPort;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import sun.misc.Unsafe;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Predicate;
+import net.minecraft.core.Holder;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.stats.Stat;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.damagesource.DamageSources;
+import net.minecraft.world.damagesource.DamageType;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.dimension.DimensionType;
+import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import org.maiwithu.maicraft.client.actor.BodyControlPort;
 
 /**
  * 逐刻给出下落高度，让真实落地会话、确认记录和方块射线一起运行；倒水、背包变化和入水状态由测试控制。覆盖成功、缺证据、旧水、回收后支撑与延迟受伤。
@@ -117,10 +143,10 @@ public final class WaterLandingReplayTest {
     }
     private static void shortFallAim() throws Exception {
         var f=new Fixture(false); f.position(4,0,false); f.player.setYRot(73); f.player.setXRot(0);
-        java.util.List<Float> yaws=new java.util.ArrayList<>(); int[] urgent={0};
-        var body=(org.maiwithu.maicraft.client.actor.BodyControlPort)Proxy.newProxyInstance(
-                org.maiwithu.maicraft.client.actor.BodyControlPort.class.getClassLoader(),
-                new Class<?>[]{org.maiwithu.maicraft.client.actor.BodyControlPort.class},(proxy,method,args)-> {
+        List<Float> yaws=new ArrayList<>(); int[] urgent={0};
+        var body=(BodyControlPort)Proxy.newProxyInstance(
+                BodyControlPort.class.getClassLoader(),
+                new Class<?>[]{BodyControlPort.class},(proxy,method,args)-> {
                     if(method.getName().equals("requestLook") || method.getName().equals("requestImmediateLook")) yaws.add((Float)args[0]);
                     if(method.getName().equals("requestImmediateLook")) {
                         urgent[0]++; f.player.setYRot((Float)args[0]); f.player.setXRot((Float)args[1]);
@@ -172,7 +198,7 @@ public final class WaterLandingReplayTest {
             while (y > 0) {
                 Vec3 eye = new Vec3(0.5, y + 1.62, 0.5);
                 reachable |= scene.clip(new ClipContext(eye, eye.add(0, -4.5, 0), ClipContext.Block.OUTLINE,
-                        ClipContext.Fluid.NONE, net.minecraft.world.phys.shapes.CollisionContext.empty())).getType() == HitResult.Type.BLOCK;
+                        ClipContext.Fluid.NONE, CollisionContext.empty())).getType() == HitResult.Type.BLOCK;
                 y += speed; speed = (speed - 0.08) * (double) 0.98F;
             }
             check(normal.permits(20 + offset / 100.0) && reachable, "admitted fractional phase skipped the bucket reach window");
@@ -189,26 +215,26 @@ public final class WaterLandingReplayTest {
         final LocalPlayerContext context;
         final LandingAssistSession session;
         long time; int uses, selections, bodyWrites; boolean blockEvidence = true, inventoryEvidence = true;
-        org.maiwithu.maicraft.client.actor.BodyControlPort.Movement steering;
+        BodyControlPort.Movement steering;
         Fixture(boolean existing) throws Exception {
             world.scene = new Scene(); world.water = existing;
-            world.dimension = (net.minecraft.world.level.dimension.DimensionType) memory.allocateInstance(net.minecraft.world.level.dimension.DimensionType.class);
+            world.dimension = (DimensionType) memory.allocateInstance(DimensionType.class);
             player.health = 20;
-            player.sources = (net.minecraft.world.damagesource.DamageSources) memory.allocateInstance(net.minecraft.world.damagesource.DamageSources.class);
-            field(net.minecraft.world.damagesource.DamageSources.class, "fall").set(player.sources,
-                    new net.minecraft.world.damagesource.DamageSource(net.minecraft.core.Holder.direct(
-                            new net.minecraft.world.damagesource.DamageType("fall", 0))));
+            player.sources = (DamageSources) memory.allocateInstance(DamageSources.class);
+            field(DamageSources.class, "fall").set(player.sources,
+                    new DamageSource(Holder.direct(
+                            new DamageType("fall", 0))));
             player.inventory = new Inventory(player); player.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET));
             field(LocalPlayer.class, "abilities").set(player, new Abilities());
             field(LocalPlayer.class, "dimensions").set(player, EntityDimensions.scalable(0.6F, 1.8F));
             field(LocalPlayer.class, "eyeHeight").setFloat(player, 1.62F);
             field(LocalPlayer.class, "level").set(player, world);
-            var body = (org.maiwithu.maicraft.client.actor.BodyControlPort) Proxy.newProxyInstance(
-                    org.maiwithu.maicraft.client.actor.BodyControlPort.class.getClassLoader(),
-                    new Class<?>[]{org.maiwithu.maicraft.client.actor.BodyControlPort.class}, (proxy, method, args) -> {
+            var body = (BodyControlPort) Proxy.newProxyInstance(
+                    BodyControlPort.class.getClassLoader(),
+                    new Class<?>[]{BodyControlPort.class}, (proxy, method, args) -> {
                         if (method.getName().equals("requestLook") || method.getName().equals("requestImmediateLook")) { player.setYRot((Float) args[0]); player.setXRot((Float) args[1]); }
                         if (method.getName().equals("applySteering")) {
-                            bodyWrites++; steering = ((org.maiwithu.maicraft.client.actor.BodyControlPort.Steering) args[0]).atYaw((Float) args[1]);
+                            bodyWrites++; steering = ((BodyControlPort.Steering) args[0]).atYaw((Float) args[1]);
                         }
                         return null;
                     });
@@ -263,21 +289,21 @@ public final class WaterLandingReplayTest {
             field(LocalPlayer.class, "blockPosition").set(player, BlockPos.containing(0.5, height, 0.5));
             field(LocalPlayer.class, "deltaMovement").set(player, new Vec3(0, velocity, 0));
             field(LocalPlayer.class, "onGround").setBoolean(player, grounded);
-            field(LocalPlayer.class, "bb").set(player, new net.minecraft.world.phys.AABB(0.2, height, 0.2, 0.8, height + 1.8, 0.8));
+            field(LocalPlayer.class, "bb").set(player, new AABB(0.2, height, 0.2, 0.8, height + 1.8, 0.8));
         }
     }
     static final class TestPlayer extends LocalPlayer {
         public boolean isCreative() { return false; }
         public boolean isSpectator() { return false; }
-        public void awardStat(net.minecraft.stats.Stat<?> stat, int amount) { }
-        public void playSound(net.minecraft.sounds.SoundEvent sound, float volume, float pitch) { }
+        public void awardStat(Stat<?> stat, int amount) { }
+        public void playSound(SoundEvent sound, float volume, float pitch) { }
         public boolean mayUseItemAt(BlockPos pos, Direction face, ItemStack stack) { return true; }
         Inventory inventory; boolean wet; float health, hayMultiplier;
-        net.minecraft.world.damagesource.DamageSources sources;
+        DamageSources sources;
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         public float getHealth() { return health; } public float getAbsorptionAmount() { return 0; }
         public boolean isSwimming() { return false; } public boolean onClimbable() { return false; }
-        public boolean causeFallDamage(float distance, float multiplier, net.minecraft.world.damagesource.DamageSource source) {
+        public boolean causeFallDamage(float distance, float multiplier, DamageSource source) {
             hayMultiplier = multiplier; health -= (float) Math.max(0, Math.ceil((distance - 3) * multiplier)); return true;
         }
         public boolean isInWater() { return wet; } public boolean isDescending() { return false; }
@@ -287,56 +313,56 @@ public final class WaterLandingReplayTest {
         public ItemStack getItemInHand(InteractionHand hand) { return hand == InteractionHand.MAIN_HAND ? getMainHandItem() : getOffhandItem(); }
         public double blockInteractionRange() { return 4.5; }
         public double entityInteractionRange() { return 3; }
-        public net.minecraft.world.entity.EntityType<?> getType() { return net.minecraft.world.entity.EntityType.PLAYER; }
-        public net.minecraft.world.damagesource.DamageSources damageSources() { return sources; }
-        public net.minecraft.world.effect.MobEffectInstance getEffect(net.minecraft.core.Holder<net.minecraft.world.effect.MobEffect> effect) { return null; }
-        public boolean hasEffect(net.minecraft.core.Holder<net.minecraft.world.effect.MobEffect> effect) { return false; }
-        public ItemStack getItemBySlot(net.minecraft.world.entity.EquipmentSlot slot) { return ItemStack.EMPTY; }
-        public double getAttributeValue(net.minecraft.core.Holder<net.minecraft.world.entity.ai.attributes.Attribute> attribute) {
+        public EntityType<?> getType() { return EntityType.PLAYER; }
+        public DamageSources damageSources() { return sources; }
+        public MobEffectInstance getEffect(Holder<MobEffect> effect) { return null; }
+        public boolean hasEffect(Holder<MobEffect> effect) { return false; }
+        public ItemStack getItemBySlot(EquipmentSlot slot) { return ItemStack.EMPTY; }
+        public double getAttributeValue(Holder<Attribute> attribute) {
             var key = attribute.unwrapKey().orElseThrow();
-            if (key.equals(net.minecraft.world.entity.ai.attributes.Attributes.GRAVITY.unwrapKey().orElseThrow())) return 0.08;
-            if (key.equals(net.minecraft.world.entity.ai.attributes.Attributes.SAFE_FALL_DISTANCE.unwrapKey().orElseThrow())) return 3;
-            if (key.equals(net.minecraft.world.entity.ai.attributes.Attributes.FALL_DAMAGE_MULTIPLIER.unwrapKey().orElseThrow())) return 1;
+            if (key.equals(Attributes.GRAVITY.unwrapKey().orElseThrow())) return 0.08;
+            if (key.equals(Attributes.SAFE_FALL_DISTANCE.unwrapKey().orElseThrow())) return 3;
+            if (key.equals(Attributes.FALL_DAMAGE_MULTIPLIER.unwrapKey().orElseThrow())) return 1;
             throw new AssertionError("unexpected attribute " + key);
         }
     }
     static final class FlatLevel extends ClientLevel {
-        public boolean noCollision(net.minecraft.world.entity.Entity entity,net.minecraft.world.phys.AABB body) {
+        public boolean noCollision(Entity entity,AABB body) {
             for(BlockPos pos:BlockPos.betweenClosed(BlockPos.containing(body.minX-1,body.minY-1,body.minZ-1),BlockPos.containing(body.maxX+1,body.maxY+1,body.maxZ+1)))
                 for(var shape:getBlockState(pos).getCollisionShape(this,pos).toAabbs())
                     if(shape.move(pos).intersects(body)) return false;
             return true;
         }
-        public java.util.List<net.minecraft.world.entity.Entity> getEntities(net.minecraft.world.entity.Entity except,
-                net.minecraft.world.phys.AABB box,java.util.function.Predicate<? super net.minecraft.world.entity.Entity> predicate) {
-            return observedEntities==null ? java.util.List.of() : observedEntities.stream().filter(entity->entity!=except)
+        public List<Entity> getEntities(Entity except,
+                AABB box,Predicate<? super Entity> predicate) {
+            return observedEntities==null ? List.of() : observedEntities.stream().filter(entity->entity!=except)
                     .filter(entity->entity.getBoundingBox().intersects(box)).filter(predicate).toList();
         }
-        public boolean mayInteract(net.minecraft.world.entity.player.Player player, BlockPos pos) { return true; }
+        public boolean mayInteract(Player player, BlockPos pos) { return true; }
         public boolean setBlock(BlockPos pos, BlockState state, int flags) { scene.blocks.put(pos.immutable(),state); return true; }
-        public void scheduleTick(BlockPos pos, net.minecraft.world.level.material.Fluid fluid, int delay) { }
-        public void playSound(net.minecraft.world.entity.player.Player player, BlockPos pos, net.minecraft.sounds.SoundEvent sound,
-                net.minecraft.sounds.SoundSource source, float volume, float pitch) { }
-        public void gameEvent(net.minecraft.core.Holder<net.minecraft.world.level.gameevent.GameEvent> event, Vec3 position,
-                net.minecraft.world.level.gameevent.GameEvent.Context context) { }
-        Scene scene; boolean water; BlockHitResult nativeHit; net.minecraft.world.level.dimension.DimensionType dimension;
-        java.util.List<net.minecraft.world.entity.Entity> observedEntities;
+        public void scheduleTick(BlockPos pos, Fluid fluid, int delay) { }
+        public void playSound(Player player, BlockPos pos, SoundEvent sound,
+                SoundSource source, float volume, float pitch) { }
+        public void gameEvent(Holder<GameEvent> event, Vec3 position,
+                GameEvent.Context context) { }
+        Scene scene; boolean water; BlockHitResult nativeHit; DimensionType dimension;
+        List<Entity> observedEntities;
         private FlatLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
         public boolean isLoaded(BlockPos pos) { return true; }
-        public net.minecraft.world.level.dimension.DimensionType dimensionType() { return dimension; }
+        public DimensionType dimensionType() { return dimension; }
         public BlockState getBlockState(BlockPos pos) { scene.water = water; return scene.getBlockState(pos); }
         public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
         public BlockHitResult clip(ClipContext context) { scene.water = water; return nativeHit != null ? nativeHit : scene.clip(context); }
-        public <T extends net.minecraft.world.entity.Entity> java.util.List<T> getEntitiesOfClass(Class<T> type,
-                net.minecraft.world.phys.AABB bounds, java.util.function.Predicate<? super T> predicate) {
-            return observedEntities == null ? java.util.List.of() : observedEntities.stream().filter(type::isInstance)
+        public <T extends Entity> List<T> getEntitiesOfClass(Class<T> type,
+                AABB bounds, Predicate<? super T> predicate) {
+            return observedEntities == null ? List.of() : observedEntities.stream().filter(type::isInstance)
                     .map(type::cast).filter(entity -> entity.getBoundingBox().intersects(bounds)).filter(predicate).toList();
         }
         public int getHeight() { return 384; } public int getMinBuildHeight() { return -64; }
     }
     static final class Scene implements BlockGetter {
         boolean water; BlockState aid;
-        final java.util.Map<BlockPos, BlockState> blocks = new java.util.HashMap<>();
+        final Map<BlockPos, BlockState> blocks = new HashMap<>();
         public BlockState getBlockState(BlockPos pos) {
             if (blocks.containsKey(pos)) return blocks.get(pos);
             if (aid != null && pos.equals(BlockPos.ZERO)) return aid;
