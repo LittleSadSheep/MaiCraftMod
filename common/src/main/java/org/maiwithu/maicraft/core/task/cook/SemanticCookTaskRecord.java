@@ -20,7 +20,8 @@ import org.maiwithu.maicraft.task.TaskRecord;
  */
 public final class SemanticCookTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "cook";
-    public static final int MAX_FINAL_COUNT = 256;
+    // 这是整件取物目标的上限；每炉的装料量由执行器另算，不能把大目标误当成一炉最多做多少。
+    public static final int MAX_FINAL_COUNT = SemanticAcquireTaskRecord.MAX_FINAL_COUNT;
     public static final int MAX_FUEL_ALTERNATIVES = 64;
 
     public enum Preference {
