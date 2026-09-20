@@ -59,8 +59,13 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     public void observeLink(String linkId, JsonObject result) {
         Link link = linkById(linkId); links.remove(linkId);
         attempted.add(new ObservationKey(ObservationKind.LINK,linkId)); invalidatedLinkTicks.remove(linkId);
-        if (sameWorld(result) && number(result,"tick") != null && "maicraft.connection_inspection.v1".equals(text(result,"schema"))) {
-            links.put(link.id(),result.deepCopy()); advance(number(result,"tick"));
+        if (sameWorld(result) && "maicraft.connection_inspection.v1".equals(text(result,"schema"))) {
+            if (number(result,"tick") != null && !Boolean.FALSE.equals(bool(result,"server_tick_available"))) {
+                links.put(link.id(),result.deepCopy()); advance(number(result,"tick"));
+            } else if (!Boolean.TRUE.equals(bool(result,"verified_connection")) && text(result,"reason") != null) {
+                // 客户端尚未发现运输设备时没有原生tick；仅保留失败诊断，不推进服务端时钟，也不给它新鲜证据资格。
+                JsonObject failure = result.deepCopy(); failure.remove("tick"); links.put(link.id(),failure);
+            }
         }
     }
     public void configured(String configurationId, JsonObject result) {
@@ -246,7 +251,12 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     }
     private Check connection(Link link, Port from, Port to, boolean resourceCheck) {
         JsonObject result = links.get(link.id());
-        if (!fresh(result)) return unknown("Read a current native connection path");
+        if (!fresh(result)) {
+            // 明确的调查失败需要处理原因，单纯过期才提示刷新；两种情况都保持 UNKNOWN，不能升级成连通证明。
+            String reason = Boolean.TRUE.equals(bool(result,"verified_connection")) ? null : text(result,"reason");
+            return unknown(reason == null || reason.isBlank() ? "Read a current native connection path"
+                    : "Connection survey: " + reason.substring(0,Math.min(256,reason.length())));
+        }
         if ("unsupported".equals(text(result,"status"))) return new Check(Status.UNSUPPORTED,"native_connection_inspection","Native connection adapter is unsupported");
         if (!Boolean.TRUE.equals(bool(result,"complete")) || !Boolean.TRUE.equals(bool(result,"verified_connection"))
                 || !link.resource().medium().equals(text(result,"medium"))) return unknown("Complete native topology is not verified");

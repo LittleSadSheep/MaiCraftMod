@@ -89,6 +89,7 @@ public final class ProductionNativeEvidenceTest {
         aliasesAndSharedStock();
         semanticPatternConfiguration();
         configurationReadbackAfterLongSupply();
+        connectionSurveyFailureIsNotMistakenForExpiry();
         ProductionEvidenceFreshnessTest.main(args);
         System.out.println("ProductionNativeEvidenceTest: passed");
     }
@@ -138,6 +139,31 @@ public final class ProductionNativeEvidenceTest {
         check(ProductionNativeJson.sameScalar(new com.google.gson.JsonPrimitive(16),new com.google.gson.JsonPrimitive(16.0)), "numeric readback uses numeric equality");
         check(!ProductionNativeJson.sameScalar(new com.google.gson.JsonPrimitive(16),new com.google.gson.JsonPrimitive("16")), "numeric string is not a numeric value");
     }
+    private static void connectionSurveyFailureIsNotMistakenForExpiry() {
+        // 漏斗尚未触发查询时保留明确失败原因；真正的旧回执过期仍要求刷新，不能把诊断当连接事实。
+        JsonObject authored = ProductionNativeFixture.manifest(); var manifest = ProductionManifest.parse(authored);
+        var evidence = ProductionNativeFixture.prepared(authored,1); Link link = manifest.links().getFirst();
+        Port from = port(manifest,link.from()), to = port(manifest,link.to());
+        JsonObject failed = ProductionNativeFixture.connection(link);
+        failed.addProperty("status","unknown"); failed.addProperty("complete",false); failed.addProperty("verified_connection",false);
+        failed.addProperty("tick",0); failed.addProperty("server_tick_available",false);
+        failed.addProperty("reason","production_connection_native_adapter_not_observed"); evidence.observeLink(link.id(),failed);
+        Check diagnostic = evidence.topology(link,from,to);
+        check(diagnostic.status() == Status.UNKNOWN && diagnostic.detail().contains("native_adapter_not_observed"),
+                "a concrete discovery failure must not become a generic refresh request");
+        check(evidence.freshness(100).stream().filter(value -> value.kind() == ProductionNativeEvidence.ObservationKind.LINK
+                && value.id().equals(link.id())).findFirst().orElseThrow().tick() == null, "unavailable server tick must not become native freshness");
+        failed.addProperty("reason","x".repeat(2048)); evidence.observeLink(link.id(),failed);
+        check(evidence.topology(link,from,to).detail().length() <= 275, "retained survey diagnostics must stay bounded");
+        evidence.observeLink(link.id(),ProductionNativeFixture.connection(link));
+        check(evidence.topology(link,from,to).status() == Status.VERIFIED, "a fresh native result replaces the earlier diagnostic");
+        evidence.advance(1401);
+        check(evidence.topology(link,from,to).status() == Status.UNKNOWN
+                && evidence.topology(link,from,to).detail().equals("Read a current native connection path"), "plain expiry keeps the existing refresh instruction");
+        failed.remove("reason"); evidence.observeLink(link.id(),failed);
+        check(evidence.topology(link,from,to).detail().equals("Read a current native connection path"), "absence of a reason retains the original fallback");
+    }
+
     private static JsonObject current(JsonObject value) { value.addProperty("tick",1401); return value; }
     private static Port port(ProductionManifest manifest, String id) { return manifest.ports().stream().filter(p -> p.id().equals(id)).findFirst().orElseThrow(); }
     private static void rejects(Runnable action, String message) { try { action.run(); throw new AssertionError(message); } catch (IllegalArgumentException expected) { } }
