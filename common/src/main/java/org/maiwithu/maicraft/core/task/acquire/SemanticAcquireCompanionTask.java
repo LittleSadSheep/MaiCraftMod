@@ -89,70 +89,6 @@ public final class SemanticAcquireCompanionTask
 
     private enum HuntChildStage { NONE, SEARCH, ATTACK }
 
-    private static final class Need {
-        // 这是一项尚未满足的需求；既可能是最终物品，也可能是为它准备的原料或工具。
-        // 记住已试过的来源和经过哪些配方，避免木板转木头、再转回木板这类循环。
-        final List<ResourceLocation> itemIds;
-        final int requiredFinalCount;
-        final int depth;
-        final Set<ResourceLocation> lineageItems;
-        final Set<String> lineageRecipes;
-        /** Every parent recipe that this one-unit alternative frontier can unlock. */
-        final Set<String> parentRecipeIds;
-        final List<SemanticAcquireTaskRecord.Source> allowedSources;
-        final Set<String> rejectedRecipes = new LinkedHashSet<>();
-        /** Recipes for which one concrete local crafting-surface recovery was already inserted. */
-        final Set<String> surfaceRecoveryRecipes = new LinkedHashSet<>();
-        final Map<SemanticAcquireTaskRecord.Source, Integer> sourceAttempts =
-                new LinkedHashMap<>();
-        final Set<ResourceLocation> rejectedTradeOutputs = new LinkedHashSet<>();
-        final Set<String> exhaustedHuntSearchStates = new LinkedHashSet<>();
-        final Set<SemanticAcquireTaskRecord.Source> exhaustedSources = new LinkedHashSet<>();
-        /** Once prerequisite work starts, execution stays on this recipe identity. */
-        final Set<String> committedRecipeIds = new LinkedHashSet<>();
-        boolean committedRecipeEffectsObserved;
-        List<SemanticAcquireTaskRecord.Source> plannedSourceOrder;
-        int huntSearchAttempts;
-        boolean huntSearchExpandedView;
-        boolean miningToolPrerequisitePushed;
-        int preferredToolTierCap = 3;
-        boolean stockOnlyTool;
-        boolean toolPrerequisite;
-        boolean efficientBatchStarted;
-        boolean effectsObserved;
-        final Set<BlockPos> visitedContainers = new LinkedHashSet<>();
-        int containerAttempts;
-        boolean decisionRequired;
-        ResourceLocation preferredTradeOutput;
-        int lastObservedCount = -1;
-
-        Need(
-                List<ResourceLocation> itemIds,
-                int requiredFinalCount,
-                int depth,
-                Set<ResourceLocation> lineageItems,
-                Set<String> lineageRecipes,
-                Set<String> parentRecipeIds,
-                List<SemanticAcquireTaskRecord.Source> allowedSources) {
-            this.itemIds = List.copyOf(itemIds);
-            this.requiredFinalCount = requiredFinalCount;
-            this.depth = depth;
-            this.lineageItems = Set.copyOf(lineageItems);
-            this.lineageRecipes = Set.copyOf(lineageRecipes);
-            this.parentRecipeIds = parentRecipeIds == null
-                    ? Set.of() : Set.copyOf(parentRecipeIds);
-            this.allowedSources = List.copyOf(allowedSources);
-        }
-
-        int attempts(SemanticAcquireTaskRecord.Source source) {
-            return sourceAttempts.getOrDefault(source, 0);
-        }
-
-        void attempted(SemanticAcquireTaskRecord.Source source) {
-            sourceAttempts.merge(source, 1, Integer::sum);
-        }
-    }
-
     private record CraftCandidate(
             ResourceLocation outputItem,
             String recipeId,
@@ -201,24 +137,24 @@ public final class SemanticAcquireCompanionTask
     }
 
     private final CraftOps craftOps = new CraftOps();
-    private final Deque<Need> needs = new ArrayDeque<>();
+    private final Deque<AcquisitionNeed> needs = new ArrayDeque<>();
     private final List<Map<String, Object>> attempts = new ArrayList<>();
     private final List<Map<String, Object>> issues = new ArrayList<>();
     private final List<Map<String, Object>> recipeTrace = new ArrayList<>();
-    private final List<Need> processPlanningNeeds = new ArrayList<>();
+    private final List<AcquisitionNeed> processPlanningNeeds = new ArrayList<>();
     private Map<String, Object> processPlanning = Map.of();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
     private Map<ResourceLocation, List<CraftingRecipe>> structuralCraftRecipes;
     private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> observedStockRecipes = new HashMap<>();
-    private Need stockHintNeed;
+    private AcquisitionNeed stockHintNeed;
     private long stockHintTick = Long.MIN_VALUE;
     private Map<ResourceLocation, Long> recipeObservedStock = Map.of(), recipeCarriedStock = Map.of();
     private final Map<String, Integer> recipeStockPriorities = new HashMap<>();
     private Map<ResourceLocation, Integer> initialCounts = Map.of();
-    private Need rootNeed;
+    private AcquisitionNeed rootNeed;
     private Task activeChild;
     private TaskRecord activeRecord;
-    private Need activeNeed;
+    private AcquisitionNeed activeNeed;
     private SemanticAcquireTaskRecord.Source activeSource;
     private String activeDetail;
     private int activeBeforeCount;
@@ -231,7 +167,7 @@ public final class SemanticAcquireCompanionTask
     private int childSerial;
     private int plannerStepsThisTick;
     private String failureCode;
-    private Need failureNeed;
+    private AcquisitionNeed failureNeed;
     private DimensionBarrier failureDimension;
     private boolean outcomeUncertain;
 
@@ -244,7 +180,7 @@ public final class SemanticAcquireCompanionTask
     protected void onStart() {
         // 记下起始库存，并把最终需求放到栈顶；以后缺什么先压上去，凑齐后再回到上一层继续。
         initialCounts = counts(r.itemIds);
-        rootNeed = new Need(
+        rootNeed = new AcquisitionNeed(
                 r.itemIds,
                 r.count,
                 0,
@@ -298,7 +234,7 @@ public final class SemanticAcquireCompanionTask
                     FailureType.INTERNAL);
         }
 
-        Need need = needs.peek();
+        AcquisitionNeed need = needs.peek();
         int observedNeedCount = count(need.itemIds);
         if (need.lastObservedCount >= 0 && observedNeedCount > need.lastObservedCount) {
             need.plannedSourceOrder = null;
@@ -307,7 +243,7 @@ public final class SemanticAcquireCompanionTask
         need.lastObservedCount = observedNeedCount;
         if (observedNeedCount >= need.requiredFinalCount) {
             // 例如木棍已经凑够，移走木棍这个小需求，下一刻回到原先要合成的木剑。
-            Need satisfied = needs.pop();
+            AcquisitionNeed satisfied = needs.pop();
             propagateSatisfiedNeed(satisfied);
             renewProgressLease();
             return TaskState.RUNNING;
@@ -340,7 +276,7 @@ public final class SemanticAcquireCompanionTask
         };
     }
 
-    private TaskState observeInventorySource(Need need) {
+    private TaskState observeInventorySource(AcquisitionNeed need) {
         // 当前数量不够已在前面确认过，记录这一事实后尝试下一个允许来源，不重复启动“查库存”任务。
         addIssue("inventory", "inventory_insufficient",
                 "the final inventory fact is not yet true",
@@ -349,7 +285,7 @@ public final class SemanticAcquireCompanionTask
         return TaskState.RUNNING;
     }
 
-    private TaskState attemptNearby(Need need) {
+    private TaskState attemptNearby(AcquisitionNeed need) {
         // 先看附近掉落物的归属；当前只要有一个匹配目标归属不明或受保护，就不启用这次按类型拾取。
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.NEARBY)) {
             return TaskState.RUNNING;
@@ -387,7 +323,7 @@ public final class SemanticAcquireCompanionTask
                 record, "collect loaded unowned drops");
     }
 
-    private TaskState attemptStorage(Need need) {
+    private TaskState attemptStorage(AcquisitionNeed need) {
         int missing = missing(need);
         if (missing <= 0 || !takePlannerStep()) return TaskState.RUNNING;
         if (need.containerAttempts < ContainerSupplySources.MAX_ATTEMPTS) {
@@ -428,7 +364,7 @@ public final class SemanticAcquireCompanionTask
                         + (allowNetworkCrafting ? " with network crafting allowed" : ""));
     }
 
-    private TaskState attemptCraft(Need need) {
+    private TaskState attemptCraft(AcquisitionNeed need) {
         // 对每种可接受成品查配方，优先选择材料和工作台都已经满足、成本较低的方案。
         int deficit = missing(need);
         List<CraftCandidate> candidates = new ArrayList<>();
@@ -577,7 +513,7 @@ public final class SemanticAcquireCompanionTask
         List<SemanticAcquireTaskRecord.Source> childSources = mergedAlternativeFrontier
                 ? prioritizeDirectAlternativeSources(need.allowedSources)
                 : need.allowedSources;
-        Need childNeed = new Need(
+        AcquisitionNeed childNeed = new AcquisitionNeed(
                 ingredient.itemIds(), ingredientFinal, need.depth + 1,
                 lineageItems, lineageRecipes, frontier.recipeIds(), childSources);
         childNeed.lastObservedCount = count(childNeed.itemIds);
@@ -599,7 +535,7 @@ public final class SemanticAcquireCompanionTask
         return TaskState.RUNNING;
     }
 
-    private TaskState attemptMine(Need need) {
+    private TaskState attemptMine(AcquisitionNeed need) {
         // 从物品对应方块或来源提示找可挖目标；先检查工具要求，再让采矿任务去找实际方块并取回掉落物。
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.MINE)) {
             return TaskState.RUNNING;
@@ -657,7 +593,7 @@ public final class SemanticAcquireCompanionTask
             lineage.addAll(toolItems);
             List<SemanticAcquireTaskRecord.Source> toolSources =
                     AcquisitionSources.forTool(need.allowedSources, stockOnlyUpgrade);
-            Need toolNeed = new Need(
+            AcquisitionNeed toolNeed = new AcquisitionNeed(
                     toolItems, count(toolItems) + 1,
                     need.depth + 1, lineage, need.lineageRecipes, Set.of(),
                     toolSources);
@@ -693,7 +629,7 @@ public final class SemanticAcquireCompanionTask
                 record, "mine BlockItem-derived or semantic source blocks");
     }
 
-    private long toolMaterialBudget(Need need, Item item) {
+    private long toolMaterialBudget(AcquisitionNeed need, Item item) {
         // 升级工具前扣掉已经被其他需求预留的铁锭／钻石，避免为了造工具先花掉最终目标要保留的材料。
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
         int reserved = needs.stream().filter(pending -> pending.itemIds.contains(id))
@@ -707,7 +643,7 @@ public final class SemanticAcquireCompanionTask
         return Math.max(0, carried + Math.min(external, Long.MAX_VALUE - carried) - reserved);
     }
 
-    private TaskState attemptCook(Need need) {
+    private TaskState attemptCook(AcquisitionNeed need) {
         // 先挑一个有已知烹饪配方的成品，再交给烹饪任务找原料和燃料；对子来源去掉 COOK，防止自己递归调用自己。
         ResourceLocation output = need.itemIds.stream()
                 .filter(this::hasCookingRecipe)
@@ -749,7 +685,7 @@ public final class SemanticAcquireCompanionTask
         return false;
     }
 
-    private TaskState reviewTrade(Need need) {
+    private TaskState reviewTrade(AcquisitionNeed need) {
         // 逐个尝试可接受输出；一次交易失败或没增加目标数量后记住该输出，避免一直找同一种失败交易。
         if (!takePlannerStep()) return TaskState.RUNNING;
         ResourceLocation output = need.preferredTradeOutput;
@@ -788,7 +724,7 @@ public final class SemanticAcquireCompanionTask
                 "inspect loaded unprotected merchants and execute a synchronized affordable offer");
     }
 
-    private TaskState reviewHunt(Need need) {
+    private TaskState reviewHunt(AcquisitionNeed need) {
         // 狩猎必须允许伤害，并且有“这种生物能提供目标物品”的来源提示；随后才寻找未被保护的实际目标。
         if (!r.allowHarm) {
             SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
@@ -939,10 +875,10 @@ public final class SemanticAcquireCompanionTask
             if (activeChild.mustSettleBeforeSatisfiedCancellation()) {
                 activeChild.requestSatisfiedSettlement();
             } else {
-                Need satisfiedNeed = activeNeed;
+                AcquisitionNeed satisfiedNeed = activeNeed;
                 cancelActiveBecauseSatisfied();
                 if (!needs.isEmpty() && needs.peek() == satisfiedNeed) {
-                    Need satisfied = needs.pop();
+                    AcquisitionNeed satisfied = needs.pop();
                     propagateSatisfiedNeed(satisfied);
                 }
                 return TaskState.RUNNING;
@@ -969,7 +905,7 @@ public final class SemanticAcquireCompanionTask
         activeNeed.lastObservedCount = after;
         recordAttempt(terminal, result, after, progress, false);
 
-        Need completedNeed = activeNeed;
+        AcquisitionNeed completedNeed = activeNeed;
         SemanticAcquireTaskRecord.Source completedSource = activeSource;
         TaskRecord completedRecord = activeRecord;
         HuntChildStage completedHuntStage = activeHuntStage;
@@ -1031,7 +967,7 @@ public final class SemanticAcquireCompanionTask
         if (count(r.itemIds) >= r.count) return TaskState.SUCCESS;
         if (after >= completedNeed.requiredFinalCount) {
             if (!needs.isEmpty() && needs.peek() == completedNeed) {
-                Need satisfied = needs.pop();
+                AcquisitionNeed satisfied = needs.pop();
                 propagateSatisfiedNeed(satisfied);
             }
             renewProgressLease();
@@ -1216,7 +1152,7 @@ public final class SemanticAcquireCompanionTask
                 || activeChild.mustSettleBeforeSatisfiedCancellation()) {
             return null;
         }
-        Need retargetedNeed = activeNeed;
+        AcquisitionNeed retargetedNeed = activeNeed;
         double oldDistance = player.distanceTo(current);
         double newDistance = player.distanceTo(replacement);
         activeChild.stop(player, Task.StopReason.REPLACED);
@@ -1271,7 +1207,7 @@ public final class SemanticAcquireCompanionTask
         markActiveEffectsIfObserved(TaskState.CANCELLED, stopped, progress);
         recordAttempt(TaskState.CANCELLED, stopped, after, progress, false);
 
-        Need interruptedNeed = activeNeed;
+        AcquisitionNeed interruptedNeed = activeNeed;
         UUID interruptedTarget = activeHuntTarget;
         clearActive();
         if (interruptedTarget != null) rejectedHuntTargets.add(interruptedTarget);
@@ -1294,7 +1230,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState finishHuntChild(
-            Need need,
+            AcquisitionNeed need,
             TaskRecord completedRecord,
             HuntChildStage stage,
             UUID targetUuid,
@@ -1397,7 +1333,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private Entity revalidateInternalHuntTarget(
-            Need need, GenericEntitySearchTaskRecord search) {
+            AcquisitionNeed need, GenericEntitySearchTaskRecord search) {
         // 只重新寻找搜索任务确认过的 UUID，并再次核对保护条件，防止旧的运行时数字编号被复用到另一只生物。
         Set<UUID> retained = new LinkedHashSet<>(search.internalVerifiedEntityUuids());
         if (retained.isEmpty()) return null;
@@ -1425,7 +1361,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState startChild(
-            Need need,
+            AcquisitionNeed need,
             SemanticAcquireTaskRecord.Source source,
             TaskRecord record,
             String detail) {
@@ -1443,7 +1379,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState startHuntChild(
-            Need need,
+            AcquisitionNeed need,
             TaskRecord record,
             HuntChildStage stage,
             UUID targetUuid,
@@ -1571,7 +1507,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private String huntSearchState(
-            Need need,
+            AcquisitionNeed need,
             SemanticAcquireTaskRecord.SourceHint hint,
             GenericEntitySearchTaskRecord.Relation relation) {
         BlockPos position = player.blockPosition();
@@ -1591,7 +1527,7 @@ public final class SemanticAcquireCompanionTask
         return value instanceof Number number && number.intValue() > 0;
     }
 
-    private TaskState exhaustNeed(Need need) {
+    private TaskState exhaustNeed(AcquisitionNeed need) {
         // 最终需求所有来源都失败就报告做不到；小需求失败则回到原配方，视是否已经动过东西决定能否换方案。
         if (need.depth == 0) {
             DimensionBarrier barrier = preferredDimensionBarrier();
@@ -1611,7 +1547,7 @@ public final class SemanticAcquireCompanionTask
         // 先有界记住普通路线尚不能提供的子材料，再照常试其他未产生副作用的配方；不能让第一条失败叶子劫持全局规划。
         rememberProcessPlanningNeed(need);
         if (!needs.isEmpty() && needs.peek() == need) needs.pop();
-        Need parent = needs.peek();
+        AcquisitionNeed parent = needs.peek();
         if (parent == null) {
             return failAcquisition(
                     "recursive_need_parent_missing",
@@ -1677,10 +1613,10 @@ public final class SemanticAcquireCompanionTask
         return TaskState.RUNNING;
     }
 
-    private void propagateSatisfiedNeed(Need satisfied) {
+    private void propagateSatisfiedNeed(AcquisitionNeed satisfied) {
         // 原料或工具小需求完成后，把“已经发生过实际操作”的信息传给上一层，避免上层以为还什么都没做。
         if (needs.isEmpty()) return;
-        Need parent = needs.peek();
+        AcquisitionNeed parent = needs.peek();
         parent.effectsObserved |= satisfied.effectsObserved;
         if (satisfied.toolPrerequisite) parent.miningToolPrerequisitePushed = false;
         if (satisfied.effectsObserved && satisfied.parentRecipeIds.stream()
@@ -1750,7 +1686,7 @@ public final class SemanticAcquireCompanionTask
      * adding a workstation must not silently narrow the user's original acquisition policy.
      */
     private boolean pushCraftingSurfacePrerequisite(
-            Need parent, CraftCandidate blockedRecipe) {
+            AcquisitionNeed parent, CraftCandidate blockedRecipe) {
         return pushCraftingSurfacePrerequisite(
                 parent, blockedRecipe.recipeId(), blockedRecipe.outputItem().toString(),
                 blockedRecipe.surfacePrerequisiteItems());
@@ -1762,7 +1698,7 @@ public final class SemanticAcquireCompanionTask
      * recipe untouched so it resumes after the carried surface exists.
      */
     private boolean recoverCraftingSurface(
-            Need parent, CraftTaskRecord craft, TaskResult result) {
+            AcquisitionNeed parent, CraftTaskRecord craft, TaskResult result) {
         // 真正走到工作台发现不能用时，可以先补一个工作台；如果背包已有工作台，问题就不是再取一个能解决的。
         if (result == null || result.data() == null) return false;
         String code = string(result.data().get("failure_code"));
@@ -1786,7 +1722,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private boolean pushCraftingSurfacePrerequisite(
-            Need parent, String blockedRecipeId, String outputItemId,
+            AcquisitionNeed parent, String blockedRecipeId, String outputItemId,
             List<ResourceLocation> candidates) {
         // 工作台只为同一个配方补一次，并继承原来源许可；不要为重复失败的摆台位置不停制造更多工作台。
         List<ResourceLocation> itemIds = candidates.stream()
@@ -1807,7 +1743,7 @@ public final class SemanticAcquireCompanionTask
                 && !parent.committedRecipeIds.contains(blockedRecipeId)) return false;
         if (!parent.surfaceRecoveryRecipes.add(blockedRecipeId)) return false;
         commitRecipe(parent, Set.of(blockedRecipeId));
-        Need prerequisite = new Need(
+        AcquisitionNeed prerequisite = new AcquisitionNeed(
                 itemIds, count(itemIds) + 1, parent.depth + 1,
                 lineageItems, lineageRecipes, Set.of(blockedRecipeId),
                 prerequisiteSources);
@@ -1826,18 +1762,18 @@ public final class SemanticAcquireCompanionTask
         return true;
     }
 
-    private boolean recipeAllowedByCommit(Need need, TaskRecord record) {
+    private boolean recipeAllowedByCommit(AcquisitionNeed need, TaskRecord record) {
         if (need.committedRecipeIds.isEmpty()) return true;
         return record instanceof CraftTaskRecord craft
                 && need.committedRecipeIds.contains(craft.recipeId.toString());
     }
 
-    private static boolean recipeAllowedByCommit(Need need, String recipeId) {
+    private static boolean recipeAllowedByCommit(AcquisitionNeed need, String recipeId) {
         return need.committedRecipeIds.isEmpty()
                 || need.committedRecipeIds.contains(recipeId);
     }
 
-    private static void commitRecipe(Need need, Set<String> recipeIds) {
+    private static void commitRecipe(AcquisitionNeed need, Set<String> recipeIds) {
         if (need.committedRecipeIds.isEmpty()) {
             need.committedRecipeIds.addAll(recipeIds);
             need.committedRecipeEffectsObserved = false;
@@ -1845,7 +1781,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     /** Exclude competing identities so CraftOps can expose the already selected recipe itself. */
-    private Set<String> nonCommittedCraftRecipes(Need need) {
+    private Set<String> nonCommittedCraftRecipes(AcquisitionNeed need) {
         if (need.committedRecipeIds.isEmpty()) return Set.of();
         Set<ResourceLocation> outputs = Set.copyOf(need.itemIds);
         Set<String> excluded = new LinkedHashSet<>();
@@ -1876,7 +1812,7 @@ public final class SemanticAcquireCompanionTask
      * crafting layers stand between each missing group and a non-crafting leaf. Thus direct wool
      * is preferred to wool-plus-dye conversion without encoding any particular item or recipe.
      */
-    private int recursiveCandidateStructureCost(CraftCandidate candidate, Need parent) {
+    private int recursiveCandidateStructureCost(CraftCandidate candidate, AcquisitionNeed parent) {
         // 只估计还需经过几层普通合成，用来给候选排序；没有说世界里一定有那些原材料。
         Object raw = candidate.data().get("ingredients");
         if (!(raw instanceof List<?> values)) return UNREACHABLE_STRUCTURE_COST;
@@ -1907,7 +1843,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     /** Fresh authorized warehouse contents influence preference only; executable crafting still requires carried items. */
-    private int observedStockPriority(CraftCandidate candidate, Need parent) {
+    private int observedStockPriority(CraftCandidate candidate, AcquisitionNeed parent) {
         if (!parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)) return 1;
         long tick = player.level().getGameTime();
         if (stockHintNeed != parent || stockHintTick != tick) {
@@ -2051,7 +1987,7 @@ public final class SemanticAcquireCompanionTask
     private CraftFrontier chooseCraftFrontier(
             CraftCandidate chosen,
             List<CraftCandidate> viableCandidates,
-            Need parent) {
+            AcquisitionNeed parent) {
         // 多个配方若各只差一件，任意拿到其中一种原料就能完成一个配方，可以合成一组替代需求一起寻找。
         // 各差多件时不能这样混，因为从两个配方各凑一半，并不保证任何一个能做。
         IngredientNeed primary = chooseIngredient(chosen, parent);
@@ -2140,7 +2076,7 @@ public final class SemanticAcquireCompanionTask
      * A three-slot stone-material row is one need for three interchangeable materials, not three
      * separate planner branches.
      */
-    private IngredientNeed chooseIngredient(CraftCandidate candidate, Need parent) {
+    private IngredientNeed chooseIngredient(CraftCandidate candidate, AcquisitionNeed parent) {
         // 同样的可替代原料组先合并数量；优先验证最难或需要授权的那组，避免先做一堆配件最后才发现关键原料拿不到。
         Object raw = candidate.data().get("ingredients");
         if (!(raw instanceof List<?> values)) return null;
@@ -2217,7 +2153,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private boolean ingredientRequiresDecision(
-            List<ResourceLocation> itemIds, Need parent) {
+            List<ResourceLocation> itemIds, AcquisitionNeed parent) {
         if (r.allowHarm
                 || !parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT)) {
             return false;
@@ -2227,7 +2163,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private int recursiveIngredientStructureCost(
-            List<ResourceLocation> itemIds, Need parent) {
+            List<ResourceLocation> itemIds, AcquisitionNeed parent) {
         Map<StructureKey, Integer> memo = new HashMap<>();
         int best = UNREACHABLE_STRUCTURE_COST;
         for (ResourceLocation itemId : itemIds) {
@@ -2298,11 +2234,11 @@ public final class SemanticAcquireCompanionTask
         return Map.copyOf(result);
     }
 
-    private int missing(Need need) {
+    private int missing(AcquisitionNeed need) {
         return Math.max(0, need.requiredFinalCount - count(need.itemIds));
     }
 
-    private SemanticAcquireTaskRecord.SourceHint sourceHint(Need need) {
+    private SemanticAcquireTaskRecord.SourceHint sourceHint(AcquisitionNeed need) {
         SemanticAcquireTaskRecord.SourceHint inferred =
                 SemanticSourceKnowledge.infer(need.itemIds);
         return need.depth == 0
@@ -2311,13 +2247,13 @@ public final class SemanticAcquireCompanionTask
     }
 
     /**
-     * {@code allowed_sources} is a permission set. Rank sources once for this Need from live,
+     * {@code allowed_sources} is a permission set. Rank sources once for this AcquisitionNeed from live,
      * side-effect-free readiness facts. Exhausted sources are tracked by identity, so re-ranking
      * after a live fact changes cannot skip or repeat a source by numeric cursor. In particular, a
      * live raw cooking input may outrank recursive crafting, while a
      * hypothetical tool/armour smelt may not outrank an executable ordinary recipe.
      */
-    private List<SemanticAcquireTaskRecord.Source> executionSourceOrder(Need need) {
+    private List<SemanticAcquireTaskRecord.Source> executionSourceOrder(AcquisitionNeed need) {
         // allowed_sources 是允许集合，不保证按填写顺序执行；每项需求根据当前能否直接合成／烹饪等事实重新排序。
         if (need.plannedSourceOrder != null) return need.plannedSourceOrder;
         SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
@@ -2341,7 +2277,7 @@ public final class SemanticAcquireCompanionTask
         return need.plannedSourceOrder;
     }
 
-    private boolean craftExecutableNow(Need need) {
+    private boolean craftExecutableNow(AcquisitionNeed need) {
         // 只做只读规划来判断现在是否能直接合成，用于来源排序，不在这里打开菜单或扣材料。
         Set<String> excluded = new LinkedHashSet<>(need.lineageRecipes);
         excluded.addAll(need.rejectedRecipes);
@@ -2363,7 +2299,7 @@ public final class SemanticAcquireCompanionTask
         return false;
     }
 
-    private boolean cookInputReadyNow(Need need) {
+    private boolean cookInputReadyNow(AcquisitionNeed need) {
         Set<Item> outputs = need.itemIds.stream()
                 .map(BuiltInRegistries.ITEM::get)
                 .collect(Collectors.toSet());
@@ -2398,7 +2334,7 @@ public final class SemanticAcquireCompanionTask
      * A failed gate advances this one source without spending work or constructing a child.
      */
     private boolean sourceDimensionAllowed(
-            Need need, SemanticAcquireTaskRecord.Source source) {
+            AcquisitionNeed need, SemanticAcquireTaskRecord.Source source) {
         // 当前把内置的来源维度当成这一类采集行动的前置条件，检查发生在观察具体矿块／生物之前。
         List<ResourceLocation> allowed = SemanticSourceKnowledge.inferPlan(need.itemIds)
                 .allowedDimensions(source);
@@ -2418,7 +2354,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private void rememberDimensionBarrier(
-            Need need,
+            AcquisitionNeed need,
             List<ResourceLocation> allowed,
             ResourceLocation current) {
         for (int index = 0; index < dimensionBarriers.size(); index++) {
@@ -2458,7 +2394,7 @@ public final class SemanticAcquireCompanionTask
         r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
     }
 
-    private void advanceSource(Need need) {
+    private void advanceSource(AcquisitionNeed need) {
         // 按来源身份记住已用尽的一项，再重新排序剩余来源；不能用旧数组下标猜下一项，因为顺序可能变化。
         List<SemanticAcquireTaskRecord.Source> remaining = executionSourceOrder(need);
         if (!remaining.isEmpty()) need.exhaustedSources.add(remaining.getFirst());
@@ -2474,7 +2410,7 @@ public final class SemanticAcquireCompanionTask
         if (("allowed_sources_exhausted".equals(code) || "committed_prerequisite_unmet".equals(code)) && !outcomeUncertain) {
             // 别的普通路线可能顺手补齐了旧叶子；交接时只保留仍缺少实物的候选，不请外部再做已经够用的材料。
             processPlanningNeeds.removeIf(need -> missing(need) <= 0);
-            Need blocked = failureNeed != null ? failureNeed : processPlanningNeeds.isEmpty() ? needs.peek() : processPlanningNeeds.getFirst();
+            AcquisitionNeed blocked = failureNeed != null ? failureNeed : processPlanningNeeds.isEmpty() ? needs.peek() : processPlanningNeeds.getFirst();
             if (blocked != null && !blocked.decisionRequired && !blocked.stockOnlyTool
                     && MaterialProcessPlanning.allowsPlanning(r.allowedSources)
                     && MaterialProcessPlanning.allowsPlanning(blocked.allowedSources)) {
@@ -2492,14 +2428,14 @@ public final class SemanticAcquireCompanionTask
         return TaskState.FAILED;
     }
 
-    private void rememberProcessPlanningNeed(Need need) {
+    private void rememberProcessPlanningNeed(AcquisitionNeed need) {
         if (need.decisionRequired || need.stockOnlyTool || !MaterialProcessPlanning.allowsPlanning(need.allowedSources)
                 || processPlanningNeeds.size() >= MaterialProcessPlanning.MAX_BLOCKED_NEEDS) return;
         if (processPlanningNeeds.stream().noneMatch(old -> old.itemIds.equals(need.itemIds) && old.parentRecipeIds.equals(need.parentRecipeIds)))
             processPlanningNeeds.add(need);
     }
 
-    private MaterialProcessPlanning.NeedEvidence processPlanningFacts(Need need) {
+    private MaterialProcessPlanning.NeedEvidence processPlanningFacts(AcquisitionNeed need) {
         return new MaterialProcessPlanning.NeedEvidence(need.itemIds, need.requiredFinalCount, count(need.itemIds), need.depth,
                 List.copyOf(need.lineageItems), List.copyOf(need.lineageRecipes), List.copyOf(need.parentRecipeIds),
                 List.copyOf(need.committedRecipeIds), need.effectsObserved);
@@ -2575,7 +2511,7 @@ public final class SemanticAcquireCompanionTask
         }
     }
 
-    private Map<String, Object> needFacts(Need need) {
+    private Map<String, Object> needFacts(AcquisitionNeed need) {
         return Map.of(
                 "item_ids", itemStrings(need.itemIds),
                 "required_final_count", need.requiredFinalCount,
@@ -2718,7 +2654,7 @@ public final class SemanticAcquireCompanionTask
                     !processPlanning.isEmpty() || failureRequiresNarration(failureCode)
                             || issues.stream().anyMatch(
                                     SemanticAcquireCompanionTask::issueRequiresNarration));
-            Need blocked = failureNeed == null ? needs.peek() : failureNeed;
+            AcquisitionNeed blocked = failureNeed == null ? needs.peek() : failureNeed;
             if (blocked != null) {
                 data.put("blocked_need", needFacts(blocked));
                 Set<String> routeIds = !blocked.parentRecipeIds.isEmpty()
@@ -2809,7 +2745,7 @@ public final class SemanticAcquireCompanionTask
         if (!processPlanning.isEmpty()) {
             data.put("phase", MaterialProcessPlanning.KIND); data.put("planning_handoff", processPlanning);
         }
-        Need need = activeNeed == null ? needs.peek() : activeNeed;
+        AcquisitionNeed need = activeNeed == null ? needs.peek() : activeNeed;
         if (need != null) {
             data.put("required_final_count", need.requiredFinalCount);
             if (need.lastObservedCount >= 0) data.put("observed_count", need.lastObservedCount);
