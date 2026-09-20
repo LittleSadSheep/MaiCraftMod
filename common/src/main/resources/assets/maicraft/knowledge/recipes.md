@@ -6,7 +6,9 @@
 
 通过 `perceive(view="knowledge", focus="物品ID或名称")` 发现材料页，或读取 `maicraft://knowledge/recipes/{namespace}/{path}`。默认返回八条来源配方；`direction=input` 查询该物品的用途，`offset` 和 `limit` 控制分页，优先使用返回的 `next_uri`。只展开选中工艺缺少的原料，记录已经走过的物品与配方，遇到循环改选工艺，避免一次展开整个整合包。
 
-`display_recipes` 保留展示 ID、类别与原生 backing 配方 ID 的区别。null 或合成的展示 ID 不能直接充当生产所需的原生 `recipe_id`。`supports_recipe_tree=false` 的展示不适合作为普通定量递归清单。数量、物品组件、返还容器、副产物和概率均须按返回证据解释；期望概率不等于保证产量。EMI 的默认物品查询也不代表已穷尽所有组件变体。
+`display_recipes` 保留展示 ID、类别与原生 backing 配方 ID 的区别。null 或合成的展示 ID 不能直接充当生产所需的原生 `recipe_id`。`supports_recipe_tree=false` 的展示不适合作为普通定量递归清单。数量、物品组件、返还容器与副产物均须按返回证据解释；EMI 的默认物品查询也不代表已穷尽所有组件变体。
+
+`display_chance` 仅是图鉴接口返回的展示值，不能据此计算保底产量：JEI 到 EMI 的桥接可能丢失原模组写在提示中的概率，即使展示值为1也不证明必出。存在原生 backing 时，`backing_recipe.definition` 提供游戏自身配方序列化器读出的有界完整定义，来源为 `installed_native_recipe_serializer`；它可保留原生概率、时间与特殊条件，编码失败或超限则明确为unknown，不截半份。优先依据能解释的原生字段和现场机制证据；未知字段不猜含义，序列化成功也不证明执行语义已经完整适配。期望概率仍不等于保证产量。
 
 EMI 缺失、尚未加载、接口不可读和没有匹配条目是不同状态。没有条目不能断言材料无配方；来源第一页会在必要时附带客户端原生配方表的有限展示证据。模组特有的热量、压力、化学品与操作顺序若未读取到，继续查对应机器的现场证据，不能从空字段猜默认值。
 
@@ -21,5 +23,7 @@ EMI 缺失、尚未加载、接口不可读和没有匹配条目是不同状态�
 ## 接回材料获取目标
 
 `acquire_items` 的普通获取路线无法满足目标时，读取其 `blocked_need`、已有消耗和恢复上下文，再查对应材料页。使用现有 `recover` 与 `details.goal` 提交查找、建造、供料、生产及取回等语义前置目标；多步工作复用 `sequence`。前置步骤完成后，原获取目标重新核对实际库存，不因已提交生产请求而直接成功。
+
+运行器同一时刻只有一个前台任务。原目标正在等待决策时，`perceive` 与知识读取可直接调用；需要执行的 `inspect_machine`、`design_machine` 等前置目标也放进该决策的 `recover`，多个调查合为一个 `sequence`。不要独立 `execute` 另一个目标，否则会取代正在等待的材料任务。每轮恢复后使用当前返回的新决策与新鲜观察编号。
 
 恢复沿用原任务的保护范围、材料权限与有限预算；一次消费结果不确定时先观察核账。重复读知识不会执行配方，重试通信沿用原 `request_key`，不得用换键重复投料。参数与可执行机制通过 `perceive(view="abilities")` 和 [生产契约](maicraft://knowledge/processes) 按需读取，不要把整套资料复制进工具描述。

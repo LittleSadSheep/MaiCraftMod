@@ -16,11 +16,12 @@ final class EmiRecipeReader {
     static final int MAX_ENTRIES = 64, MAX_ALTERNATIVES = 32;
     private final EmiPublicApi api;
     private final Object manager;
+    private final HolderLookup.Provider registries;
     private final EmiStackReader stacks;
     private boolean complete = true;
 
     EmiRecipeReader(EmiPublicApi api, Object manager, HolderLookup.Provider registries) {
-        this.api = api; this.manager = manager; stacks = new EmiStackReader(api, registries);
+        this.api = api; this.manager = manager; this.registries = registries; stacks = new EmiStackReader(api, registries);
     }
 
     JsonObject read(Object recipe) {
@@ -43,6 +44,8 @@ final class EmiRecipeReader {
         ingredients(out, "workstations", values);
         outputs(out, api.list(api.recipe(), recipe, "getOutputs"));
         out.addProperty("details_complete", complete && stacks.complete());
+        out.addProperty("recipe_semantics_complete", false);
+        out.addProperty("display_chance_scope", "EMI presentation values; not native probabilities or guaranteed yields");
         out.addProperty("widget_conditions", "not_read"); out.addProperty("knowledge_only", true);
         out.addProperty("execution_support", "not_inferred_from_emi"); return out;
     }
@@ -58,6 +61,9 @@ final class EmiRecipeReader {
             ResourceLocation serializer = BuiltInRegistries.RECIPE_SERIALIZER.getKey(holder.value().getSerializer());
             if (type == null) { out.add("type", JsonNull.INSTANCE); complete = false; } else out.addProperty("type", type.toString());
             if (serializer == null) { out.add("serializer", JsonNull.INSTANCE); complete = false; } else out.addProperty("serializer", serializer.toString());
+            JsonObject definition = NativeRecipeDefinition.read(holder.value(), registries);
+            for (var entry : definition.entrySet()) out.add(entry.getKey(), entry.getValue());
+            complete &= "available".equals(definition.get("definition_status").getAsString());
         } catch (RuntimeException | LinkageError unreadable) {
             out = new JsonObject(); out.addProperty("status", "unreadable"); complete = false;
         }
@@ -71,7 +77,8 @@ final class EmiRecipeReader {
             row.addProperty("amount", ((Number) api.call(api.ingredient(), ingredient, "getAmount")).longValue());
             float chance = ((Number) api.call(api.ingredient(), ingredient, "getChance")).floatValue();
             if (!Float.isFinite(chance)) throw new IllegalStateException("non-finite EMI ingredient chance");
-            row.addProperty("chance", chance); List<?> alternatives = api.list(api.ingredient(), ingredient, "getEmiStacks");
+            // JEMI可能没有转录原生概率，默认1只代表展示数据；实际概率另读backing定义，不能据此保底备料。
+            row.addProperty("display_chance", chance); List<?> alternatives = api.list(api.ingredient(), ingredient, "getEmiStacks");
             JsonArray options = new JsonArray();
             for (int a = 0; a < Math.min(alternatives.size(), MAX_ALTERNATIVES) && stacks.capacityAvailable(); a++) options.add(stacks.read(alternatives.get(a)));
             row.add("alternatives", options); row.addProperty("alternatives_count", alternatives.size());

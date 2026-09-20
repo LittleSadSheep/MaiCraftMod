@@ -26,7 +26,7 @@ public final class EmiRecipeReaderTest {
     private static final Category CATEGORY = new Category(ResourceLocation.parse("example:machine"), Component.literal("示例工序"));
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        exactMetadata(); displayIdentity(); unknownAndBounds();
+        exactMetadata(); displayIdentity(); unknownAndBounds(); NativeRecipeDefinitionTest.main(args);
         System.out.println("EmiRecipeReaderTest: native references, exact stack metadata and unknown media passed");
     }
 
@@ -35,7 +35,7 @@ public final class EmiRecipeReaderTest {
                 .remove(DataComponents.RARITY).build();
         var input = new ItemView(Items.BOOK, Long.MAX_VALUE - 2, .5f, patch);
         input.remainder = new ItemView(Items.BUCKET, 1, 1, DataComponentPatch.EMPTY);
-        var fluid = new FluidView(81_000, .25f, DataComponentPatch.EMPTY);
+        var fluid = new FluidView(81_000, 1, DataComponentPatch.EMPTY);
         var ingredient = new IngredientView(List.of(input), 3, .75f);
         var workstation = new IngredientView(List.of(new ItemView(Items.CRAFTING_TABLE, 1, 1, DataComponentPatch.EMPTY)), 1, 1);
         var catalyst = new IngredientView(List.of(new ItemView(Items.BLAZE_ROD, 1, 1, DataComponentPatch.EMPTY)), 1, 1);
@@ -47,10 +47,16 @@ public final class EmiRecipeReaderTest {
         check(row.get("display_recipe_id").getAsString().equals("example:display_recipe")
                 && row.getAsJsonObject("backing_recipe").get("id").getAsString().equals("example:native_recipe")
                 && row.getAsJsonObject("backing_recipe").get("type").getAsString().equals("minecraft:crafting"), "展示ID与原生背后配方分别保留");
+        JsonObject backing = row.getAsJsonObject("backing_recipe");
+        check(backing.get("definition_status").getAsString().equals("available")
+                && backing.get("provenance").getAsString().equals("installed_native_recipe_serializer")
+                && backing.getAsJsonObject("definition").get("type").getAsString().equals("minecraft:crafting_shapeless")
+                && backing.getAsJsonObject("definition").getAsJsonObject("result").get("id").getAsString().equals("minecraft:brick")
+                && !row.get("recipe_semantics_complete").getAsBoolean(), "背后配方保留原生完整定义，编码成功不冒充执行语义已验证");
         JsonObject in = row.getAsJsonArray("inputs").get(0).getAsJsonObject();
         JsonObject stack = in.getAsJsonArray("alternatives").get(0).getAsJsonObject();
-        check(in.get("amount").getAsLong() == 3 && in.get("chance").getAsFloat() == .75f
-                && stack.get("amount").getAsLong() == Long.MAX_VALUE - 2 && stack.get("chance").getAsFloat() == .5f,
+        check(in.get("amount").getAsLong() == 3 && in.get("display_chance").getAsFloat() == .75f && !in.has("chance")
+                && stack.get("amount").getAsLong() == Long.MAX_VALUE - 2 && stack.get("display_chance").getAsFloat() == .5f && !stack.has("chance"),
                 "原料需求量与候选堆金额/概率分开，long金额不能被ItemStack的int数量截断");
         check(stack.getAsJsonObject("component_changes").has("!minecraft:rarity")
                 && stack.getAsJsonObject("components").has("minecraft:custom_name")
@@ -60,6 +66,8 @@ public final class EmiRecipeReaderTest {
         JsonObject output = row.getAsJsonArray("outputs").get(0).getAsJsonObject();
         check(output.get("medium").getAsString().equals("fluids") && output.get("amount").getAsLong() == 81_000
                 && output.get("unit").getAsString().equals("emi_native_fluid_units"), "保留EMI原生流体金额而不猜测跨加载器换算");
+        check(output.get("display_chance").getAsFloat() == 1 && !output.has("chance")
+                && row.get("display_chance_scope").getAsString().contains("not native"), "展示默认概率1不能被当成原生保底产量");
         check(row.getAsJsonArray("catalysts").size() == 1 && row.getAsJsonArray("workstations").size() == 1
                 && row.getAsJsonObject("category").get("id").getAsString().equals("example:machine"), "催化剂与分类工作站不塞进普通输入");
     }

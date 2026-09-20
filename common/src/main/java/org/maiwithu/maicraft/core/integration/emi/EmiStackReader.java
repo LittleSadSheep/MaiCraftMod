@@ -16,7 +16,7 @@ import net.minecraft.resources.RegistryOps;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-/** 保留EMI资源的真实数量、概率、组件及返还物；扩展媒体未知时不因它恰好返回某个Item键而冒认为物品。 */
+/** 保留EMI资源的展示数量、展示概率、组件及返还物；扩展媒体未知时不因它恰好返回某个Item键而冒认为物品。 */
 final class EmiStackReader {
     private static final int MAX_STACKS = 512, MAX_COMPONENT_BYTES = 16_384, MAX_REMAINDER_DEPTH = 3;
     private final EmiPublicApi api;
@@ -39,7 +39,8 @@ final class EmiStackReader {
             out.addProperty("amount", ((Number) api.call(api.stack(), value, "getAmount")).longValue());
             float chance = ((Number) api.call(api.stack(), value, "getChance")).floatValue();
             if (!Float.isFinite(chance)) return unavailable("non_finite_stack_chance");
-            out.addProperty("chance", chance); out.addProperty("empty", Boolean.TRUE.equals(api.call(api.stack(), value, "isEmpty")));
+            // 展示堆的默认概率不证明模组原生保底；JEMI未传递的概率不会在知识层被升级为100%产量。
+            out.addProperty("display_chance", chance); out.addProperty("empty", Boolean.TRUE.equals(api.call(api.stack(), value, "isEmpty")));
             out.addProperty("unit", medium.equals("items") ? "items" : medium.equals("fluids") ? "emi_native_fluid_units" : "unknown");
             if (medium.equals("unknown")) { out.addProperty("medium_unresolved", true); complete = false; }
             components(out, value, medium);
