@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
 
 /**
  * 按一次菜单观察完成精确存入或取出：拿起、放入、退回余量、核对背包差额。每次点击都等确认后再继续。
@@ -59,7 +60,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
             var context = ClientRuntime.requireContext(player);
             receipt = context.menus().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
-            nativeStatus = receipt.status().name().toLowerCase(java.util.Locale.ROOT);
+            nativeStatus = receipt.status().name().toLowerCase(Locale.ROOT);
             if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
                 uncertain = true;
                 return failure("machine_transfer_unconfirmed", "The exact native inventory transaction was not confirmed; no click was replayed.", FailureType.UNKNOWN);

@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Cell;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
+import java.util.Comparator;
 
 /**
  * 在 Create 加工设备的物品出口旁放一台 Mekanism 分拣机，并接物流管；分拣机背后取货、朝正面送出。
@@ -22,7 +23,7 @@ final class MachineLayoutItemOutputs {
                         String owner,Bounds bounds,String itemId) {
         if(!work.registry.itemExists(itemId)) { work.fail("output_filter_item_unavailable","Output filter item is not registered: "+itemId);return null; }
         List<Side> candidates=new ArrayList<>(sourceSides);
-        candidates.sort(java.util.Comparator.comparingInt(s->receiver.step(s).distance(target)));
+        candidates.sort(Comparator.comparingInt(s->receiver.step(s).distance(target)));
         for(Side facing:candidates){
             MachineLayoutRouting.checkpoint();Pos at=receiver.step(facing);
             if(!bounds.contains(at)||work.cells.containsKey(at)||work.clearance.contains(at))continue;

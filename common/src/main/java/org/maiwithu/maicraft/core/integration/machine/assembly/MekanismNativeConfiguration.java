@@ -13,6 +13,8 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.world.phys.BlockHitResult;
+import java.util.Arrays;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * 读取 Mekanism 管道、机器接口和感应端口当前的模式，以及再点一次会切到哪个模式。
@@ -41,7 +43,7 @@ public final class MekanismNativeConfiguration {
                 }
                 if (!supported) throw new IllegalArgumentException("transmitter does not carry " + medium);
                 Enum<?> current = (Enum<?>) transmitter.getClass().getMethod("getConnectionTypeRaw", Direction.class).invoke(transmitter, face);
-                List<String> cycle = java.util.Arrays.stream(current.getDeclaringClass().getEnumConstants())
+                List<String> cycle = Arrays.stream(current.getDeclaringClass().getEnumConstants())
                         .map(value -> ((Enum<?>) value).name().toLowerCase(Locale.ROOT)).toList();
                 return new Observation(current.name().toLowerCase(Locale.ROOT), cycle);
             }
@@ -104,7 +106,7 @@ public final class MekanismNativeConfiguration {
         if (!isTransmitter(player.level(), target)) return hit.getDirection() == desiredFace;
         try {
             Object entity = player.level().getBlockEntity(target);
-            Object segment = entity.getClass().getMethod("getSideLookingAt", net.minecraft.world.entity.player.Player.class, Direction.class)
+            Object segment = entity.getClass().getMethod("getSideLookingAt", Player.class, Direction.class)
                     .invoke(entity, player, hit.getDirection());
             return segment == desiredFace;
         } catch (ReflectiveOperationException | RuntimeException failure) { return false; }

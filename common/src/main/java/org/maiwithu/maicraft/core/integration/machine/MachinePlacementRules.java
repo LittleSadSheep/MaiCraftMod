@@ -14,6 +14,7 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.build.BuildStates;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import net.minecraft.world.level.block.LiquidBlock;
 
 /**
  * 校验机器方块能否按现有安装规则表达：解析注册状态、保留明确属性，并核对多格效果。
@@ -43,7 +44,7 @@ final class MachinePlacementRules {
             desired = withProperty(desired, property, entry.getValue());
         }
         // 流动等级是原版运行结果；蓝图只接受可用真实桶安装的源格，普通方块仍按已有规范化规则检查。
-        if (desired.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock) {
+        if (desired.getBlock() instanceof LiquidBlock) {
             MachinePlacementItems.fluidBucket(desired); return desired;
         }
         BlockState normalized = BuildStates.normalize(desired);

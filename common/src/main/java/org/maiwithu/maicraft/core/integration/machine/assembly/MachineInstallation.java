@@ -17,6 +17,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * 当前主要负责 AE2 的电缆和面板：识别物品占哪个槽、预判右键会装到哪里、读取已经装好的部件。
@@ -92,8 +94,8 @@ public final class MachineInstallation {
     public static boolean predicts(LocalPlayer player, PartSpec spec, BlockPos target, BlockHitResult hit) {
         try {
             Class<?> placement = Class.forName("appeng.parts.PartPlacement");
-            Object predicted = placement.getMethod("getPartPlacement", net.minecraft.world.entity.player.Player.class,
-                    Level.class, ItemStack.class, BlockPos.class, Direction.class, net.minecraft.world.phys.Vec3.class)
+            Object predicted = placement.getMethod("getPartPlacement", Player.class,
+                    Level.class, ItemStack.class, BlockPos.class, Direction.class, Vec3.class)
                     .invoke(null, player, player.level(), new ItemStack(spec.item()), hit.getBlockPos(),
                             hit.getDirection(), hit.getLocation());
             if (predicted == null) return false;

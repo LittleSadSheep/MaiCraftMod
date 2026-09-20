@@ -10,6 +10,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineInstallation;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 
 /**
  * 开工前分批检查世界边界、AE2 部件宿主和临时洞口。普通方块的替换与材料检查另交给建筑子任务。
@@ -20,7 +22,7 @@ final class MachineBuildSurvey {
     private final List<BlockPos> positions;
     private final Set<BlockPos> centers = new HashSet<>(), clears = new HashSet<>();
     private final Set<BlockPos> openings = new HashSet<>();
-    private final List<org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target> sealTargets;
+    private final List<BuildTaskRecord.Target> sealTargets;
     private int boundsIndex, partIndex;
     private int sealIndex;
     private int fluidIndex;
@@ -44,7 +46,7 @@ final class MachineBuildSurvey {
         while (fluidIndex < plan.fluidTargets().size() && budget-- > 0) {
             var target = plan.fluidTargets().get(fluidIndex); BlockPos at = target.pos();
             if (!world.isLoaded(at)) return new Progress(false, at, null);
-            String issue = org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules.preparationProblem(
+            String issue = FluidPlacementRules.preparationProblem(
                     world, at, target.desiredState(), plan.replaceExisting(), plan.replaceBlockEntities());
             if (issue != null) return new Progress(false, null, issue);
             var actual = world.getBlockState(at);

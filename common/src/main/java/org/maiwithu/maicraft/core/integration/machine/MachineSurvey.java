@@ -26,6 +26,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
+import org.maiwithu.maicraft.core.integration.machine.control.MachineControlInspection;
 
 /**
  * 读取标记点附近已加载的方块，把布局、状态和部分可观察的模组信息交给上层分析。
@@ -165,7 +166,7 @@ public final class MachineSurvey {
                 "Re-survey before executing a plan and verify its effect afterward.",
                 "A matching structural fingerprint does not validate settings, inventory, ownership or action safety.")) rules.add(rule);
         report.add("analysis_rules", rules);
-        report.add("control_analysis", org.maiwithu.maicraft.core.integration.machine.control.MachineControlInspection
+        report.add("control_analysis", MachineControlInspection
                 .world(self, center, capture.radius).report());
         return report;
     }

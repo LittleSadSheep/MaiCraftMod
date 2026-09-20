@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.function.BooleanSupplier;
 import static org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionEvidence.*;
 
 /** Establishes utility availability; commissioning the machine's recipe remains a separate task. */
@@ -239,7 +240,7 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
     }
     private boolean near(List<BlockPos> positions) {
         if (reads.pending()) return true;
-        java.util.function.BooleanSupplier ready = () -> positions.stream().allMatch(at -> world.isLoaded(at)
+        BooleanSupplier ready = () -> positions.stream().allMatch(at -> world.isLoaded(at)
                 && player.distanceToSqr(at.getCenter()) <= 7.5 * 7.5);
         if (ready.getAsBoolean()) { stopNav(); return true; }
         BlockPos middle = positions.get(positions.size() / 2);

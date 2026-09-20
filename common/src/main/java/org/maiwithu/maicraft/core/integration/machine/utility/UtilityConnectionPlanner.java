@@ -10,6 +10,7 @@ import java.util.PriorityQueue;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import java.util.Collections;
 
 /** Finite loaded-world routing; unknown or occupied cells are never silently cleared. */
 public final class UtilityConnectionPlanner {
@@ -54,7 +55,7 @@ public final class UtilityConnectionPlanner {
                 if (at.equals(end)) {
                     ArrayList<BlockPos> route = new ArrayList<>();
                     for (BlockPos cursor = end; cursor != null; cursor = previous.get(cursor)) route.add(cursor);
-                    java.util.Collections.reverse(route);
+                    Collections.reverse(route);
                     if (route.size() + 2 > MAX_PATH) break;
                     route.addFirst(source); route.add(target);
                     return new Route(face, route);

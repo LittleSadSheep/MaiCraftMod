@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.actor.VanillaHotbar;
 
 /** 快捷栏全满时显示背包，把手持工具原样移到真实空格，腾出空手去开木桶或机器；不丢物品。 */
 public final class MachineMenuHandParking {
@@ -36,7 +37,7 @@ public final class MachineMenuHandParking {
             if (source < 0) return failed("machine_menu_empty_hand_required");
             // 扩展快捷栏模组（如 HotBaaaar）会把 selected 抬到 9 以上；停车只处理原版快捷栏那格，
             // 手停在扩展格上时下面一行的核对会如实报告选择已变化并停下，而不是拿越界格号去交换。
-            hotbar = org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(player.getInventory().selected); before = player.getInventory().getItem(hotbar).copy(); inventory = player.inventoryMenu;
+            hotbar = VanillaHotbar.swapTarget(player.getInventory().selected); before = player.getInventory().getItem(hotbar).copy(); inventory = player.inventoryMenu;
         }
         if (inventory != player.inventoryMenu || player.getInventory().selected != hotbar) return failed("machine_menu_hand_selection_changed");
         if (swap != null && !swapped) {

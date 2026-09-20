@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import java.util.Objects;
 
 /** Read-only retry recognition for one isolated, already constructed basic energy-cable path. */
 public final class UtilityExistingCableRoute {
@@ -32,7 +33,7 @@ public final class UtilityExistingCableRoute {
     public static UtilityConnectionPlanner.Route find(BlockPos source, List<Direction> eligibleSourceFaces,
             BlockPos target, Direction exactTargetFace, WorldView world) {
         if (source == null || target == null || source.equals(target) || exactTargetFace == null
-                || eligibleSourceFaces == null || eligibleSourceFaces.stream().anyMatch(java.util.Objects::isNull) || world == null)
+                || eligibleSourceFaces == null || eligibleSourceFaces.stream().anyMatch(Objects::isNull) || world == null)
             throw rejected("endpoints_required");
         requireLoaded(world, source); requireLoaded(world, target);
         Map<BlockPos, Cell> observations = new HashMap<>();

@@ -28,6 +28,8 @@ import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 
 /** 拿真实满桶 -> 在已有结构内找可达站位 -> 等视线同步 -> 只倒一次 -> 核对服务器源格与桶账。 */
 public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlacementTaskRecord> {
@@ -180,7 +182,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     @Override protected String timeoutMessage() { return "Source-fluid placement timed out while " + stage + "; bucket_submitted=" + submitted; }
     @Override public Map<String, Object> progress() {
         // 只读阶段、距离和门槛，不暴露可重放动作；失败或超时后也保留最后一次等待原因。
-        var data = new java.util.LinkedHashMap<String,Object>(); data.put("task", name()); data.put("phase", stage);
+        var data = new LinkedHashMap<String,Object>(); data.put("task", name()); data.put("phase", stage);
         data.put("waiting_ticks", Math.max(0,world.getGameTime()-waitingSince)); data.put("bucket_selected",selected);
         data.put("selection_pending",selection.pending()); data.put("bucket_submitted",submitted);
         data.put("actual_bucket_ray_available",actualRayAvailable); data.put("body_over_target",bodyOverTarget);
@@ -193,11 +195,11 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
             double alignment=player.getViewVector(1).normalize().dot(direction.normalize());
             data.put("camera_error_degrees",Math.toDegrees(Math.acos(Math.clamp(alignment,-1,1))));
         }
-        if(receipt!=null)data.put("native_receipt",receipt.status().name().toLowerCase(java.util.Locale.ROOT));
+        if(receipt!=null)data.put("native_receipt",receipt.status().name().toLowerCase(Locale.ROOT));
         return Map.copyOf(data);
     }
     @Override protected Map<String, Object> resultData() {
-        var data = new java.util.LinkedHashMap<String,Object>(Map.of("source_fluid_verified", verified || alreadyPresent, "already_present", alreadyPresent,
+        var data = new LinkedHashMap<String,Object>(Map.of("source_fluid_verified", verified || alreadyPresent, "already_present", alreadyPresent,
                 "bucket_submitted", submitted, "native_effect_verified", verified, "outcome_uncertain", submitted && !verified,
                 // 桶已提交却尚未结清时禁止机械重试；已有正确源格可只读复用，不需要重复倒桶。
                 "mechanical_retry_allowed", !submitted || verified, "failure_code", failureCode, "machine_production_verified", false));

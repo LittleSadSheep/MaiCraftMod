@@ -26,6 +26,10 @@ import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Set;
+import net.minecraft.world.entity.Pose;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.core.integration.machine.assembly.AssemblyInteractionGeometry;
 
 /**
  * 从已观察机器走到可交互位置，准备空手、瞄准并只右键一次；菜单真正出现后记录它的机器来源。
@@ -92,9 +96,9 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         }
         if (nav == null) {
             if (r.request.face() != null) {
-                faceStance = org.maiwithu.maicraft.core.integration.machine.assembly.AssemblyInteractionGeometry.nearestStand(player,
-                        r.request.machinePosition(), java.util.Set.of(), eyes -> visibleFrom(eyes) ? aim() : null,
-                        net.minecraft.world.entity.Pose.STANDING);
+                faceStance = AssemblyInteractionGeometry.nearestStand(player,
+                        r.request.machinePosition(), Set.of(), eyes -> visibleFrom(eyes) ? aim() : null,
+                        Pose.STANDING);
                 if (faceStance == null) return failure("machine_menu_face_unreachable", "The requested native part face has no usable stance.", FailureType.OCCLUDED);
             }
             nav = PlayerNav.to(player, () -> r.request.face() == null ? GoalCompiler.interact(r.request.machinePosition()) : GoalCompiler.standOn(faceStance),
@@ -134,7 +138,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         return parkHand(context);
     }
 
-    private TaskState parkHand(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
+    private TaskState parkHand(LocalPlayerContext context) {
         // 空手准备只搬存现有物品；背包也满时明确缺空间，工具不会被删除或扔掉。
         var state = handParking.tick(context);
         if (state == MachineMenuHandParking.Status.FAILED) return failure(handParking.failure(),

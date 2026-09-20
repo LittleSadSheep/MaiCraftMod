@@ -12,6 +12,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
 /**
  * 集中读取和提交 Mekanism 物流分拣机的过滤设置；必须是这台分拣机的真实菜单且界面可见。
@@ -86,7 +87,7 @@ public final class MekanismFilterBridge {
             Class<?> interaction = Class.forName("mekanism.common.network.to_server.PacketGuiInteract$GuiInteraction");
             Object action = interaction.getField("AUTO_EJECT_BUTTON").get(null);
             Object packet = Class.forName("mekanism.common.network.to_server.PacketGuiInteract")
-                    .getConstructor(interaction, net.minecraft.world.level.block.entity.BlockEntity.class).newInstance(action, tile);
+                    .getConstructor(interaction, BlockEntity.class).newInstance(action, tile);
             send(packet);
         } catch (ReflectiveOperationException | LinkageError unavailable) { throw new IllegalArgumentException("native Sorter auto-eject action unavailable", unavailable); }
     }

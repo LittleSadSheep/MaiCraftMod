@@ -12,6 +12,8 @@ import java.lang.ref.WeakReference;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.UUID;
+import com.google.gson.JsonParser;
+import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
 
 /** 暂存玩家刚查看过的机器：保留名字、位置、方块状态和观察编号，后续操作先核对是否仍是那台机器。 */
 public final class MachineSnapshots {
@@ -50,7 +52,7 @@ public final class MachineSnapshots {
                            int radius, long gameTime, String fingerprint, String reportJson) {
         public Snapshot { center = center.immutable(); }
         public JsonObject report() {
-            return com.google.gson.JsonParser.parseString(reportJson).getAsJsonObject();
+            return JsonParser.parseString(reportJson).getAsJsonObject();
         }
     }
 
@@ -90,7 +92,7 @@ public final class MachineSnapshots {
         aeEvidence.addProperty("detail", aeAccess.detail());
         report.add("ae2_access_evidence", aeEvidence);
         // 只为实际匹配的标记位置附机制契约与原生配方观察，不在观察时开菜单、投料或生成设备。
-        report.add("native_processes", org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry.inspect(player, center));
+        report.add("native_processes", NativeProcessRegistry.inspect(player, center));
         String id = UUID.randomUUID().toString();
         // 每次查看都给新编号，最多缓存十六份，正常游戏速度下一份有效约一分钟。
         report.remove("center");

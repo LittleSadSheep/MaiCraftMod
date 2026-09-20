@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
+import java.util.HashMap;
 
 /**
  * 记住每个世界中哪些格子刚收到服务器的方块实体更新。安装前记一次编号，安装后编号变大才说明收到了新消息。
@@ -33,7 +34,7 @@ public final class ServerBlockEntityReceipts {
      * 开始等待某一格的新同步，并暂时保留它的记录；工厂里其他格子更新再多，也不能挤掉这格正在等待的结果。
      */
     public static Watch watch(Level level, BlockPos position) {
-        WATCHED.computeIfAbsent(level, ignored -> new java.util.HashMap<>()).merge(position.asLong(), 1, Integer::sum);
+        WATCHED.computeIfAbsent(level, ignored -> new HashMap<>()).merge(position.asLong(), 1, Integer::sum);
         return new Watch(level, position.immutable(), revision(level, position));
     }
 

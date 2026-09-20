@@ -32,6 +32,21 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluid;
+import org.maiwithu.maicraft.client.preview.PreviewPart;
+import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
+import org.maiwithu.maicraft.core.integration.machine.assembly.MekanismFilterTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.task.build.MachineSealingTaskRecord;
+import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
 
 /**
  * 整套机器装配的流程入口：观察现场、放普通方块、装部件、封洞、放初始物品、设过滤和接口，最后复查。
@@ -40,13 +55,13 @@ import org.maiwithu.maicraft.task.TaskState;
 final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecord> {
     private enum Phase { SURVEY, BLOCKS, PARTS, SEAL, FLUID_CHECK, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
     private final Level world;
-    private final Map<BlockPos, net.minecraft.world.level.block.state.BlockState> preview;
+    private final Map<BlockPos, BlockState> preview;
     private final JsonArray configurations;
-    private final List<org.maiwithu.maicraft.client.preview.PreviewPart> previewParts;
+    private final List<PreviewPart> previewParts;
     private final List<BlockPos> plannedPositions;
     private final MachineBuildSurvey survey;
-    private final java.util.Set<BlockPos> fluidPositions;
-    private final Map<net.minecraft.world.level.material.Fluid, java.util.Set<BlockPos>> fluidRegions;
+    private final Set<BlockPos> fluidPositions;
+    private final Map<Fluid, Set<BlockPos>> fluidRegions;
     private final JsonArray requirements;
     private final JsonArray initialContents;
     private final JsonArray filters;
@@ -73,13 +88,13 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         plannedPositions = record.plan.positions();
         survey = new MachineBuildSurvey(record.plan);
         // 同种流体共享冻结区域，后续每格填充复用这份范围，避免大池每次重扫整份计划。
-        fluidPositions = record.plan.fluidTargets().stream().map(org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target::pos)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        fluidRegions = record.plan.fluidTargets().stream().collect(java.util.stream.Collectors.groupingBy(
-                target -> target.desiredState().getFluidState().getType(), java.util.stream.Collectors.mapping(
-                        org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target::pos, java.util.stream.Collectors.toUnmodifiableSet())));
+        fluidPositions = record.plan.fluidTargets().stream().map(BuildTaskRecord.Target::pos)
+                .collect(Collectors.toUnmodifiableSet());
+        fluidRegions = record.plan.fluidTargets().stream().collect(Collectors.groupingBy(
+                target -> target.desiredState().getFluidState().getType(), Collectors.mapping(
+                        BuildTaskRecord.Target::pos, Collectors.toUnmodifiableSet())));
         previewParts = record.plan.parts().stream()
-                .map(part -> new org.maiwithu.maicraft.client.preview.PreviewPart(part.position(), part.spec().itemId(),
+                .map(part -> new PreviewPart(part.position(), part.spec().itemId(),
                         part.spec().side() == null ? "center" : part.spec().side().getSerializedName())).toList();
         JsonObject report = record.plan.report();
         completion = new MachineBuildCompletion(report.has("explicit_blueprint") && report.get("explicit_blueprint").getAsBoolean());
@@ -96,7 +111,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (decision == Decision.CANCELLED) return TaskState.CANCELLED;
         // 有缺料任务时先把它推进完，取材期间保护机器计划格，避免为了材料拆掉当前机器。
         if (supply.active()) {
-            var tick = org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.withProtectedArea(
+            var tick = NavigationSafetyContext.withProtectedArea(
                     plannedPositions, List.of(), () -> supply.tick(player, this::runChild));
             r.extendDeadlineTo(supply.childDeadline());
             if (tick.status() == SemanticMaterialSupplyCoordinator.Status.FAILED)
@@ -159,7 +174,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private TaskState seal() {
         if (sealingStarted || r.plan.seals().isEmpty()) { phase = Phase.FLUID_CHECK; return TaskState.RUNNING; }
         sealingStarted = true;
-        start(new org.maiwithu.maicraft.core.task.build.MachineSealingTaskRecord(id(), r.getDeadlineGameTime(),
+        start(new MachineSealingTaskRecord(id(), r.getDeadlineGameTime(),
                 r.plan.seals(), r.materialPolicy, r.protectedLabels, plannedPositions));
         return TaskState.RUNNING;
     }
@@ -170,7 +185,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         while (fluidCheckIndex < r.plan.fluidTargets().size() && budget-- > 0) {
             var target = r.plan.fluidTargets().get(fluidCheckIndex);
             if (!world.isLoaded(target.pos())) return load(target.pos());
-            String issue = org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules.placementProblem(
+            String issue = FluidPlacementRules.placementProblem(
                     world, target.pos(), target.desiredState(), fluidRegion(target.desiredState()));
             if (issue != null) return failure("machine_fluid_site_blocked", issue);
             fluidCheckIndex++;
@@ -179,7 +194,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         return TaskState.RUNNING;
     }
 
-    private java.util.Set<BlockPos> fluidRegion(net.minecraft.world.level.block.state.BlockState state) {
+    private Set<BlockPos> fluidRegion(BlockState state) {
         return fluidRegions.get(state.getFluidState().getType());
     }
 
@@ -188,11 +203,11 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         var target = r.plan.fluidTargets().get(fluidIndex);
         if (!world.isLoaded(target.pos())) return load(target.pos());
         // 其他源格可能已由原版补成源流体；逐格复读，符合目标就跳过，不能为计数好看再次倒桶。
-        if (org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules.matches(world.getBlockState(target.pos()), target.desiredState())) {
+        if (FluidPlacementRules.matches(world.getBlockState(target.pos()), target.desiredState())) {
             fluidIndex++; return TaskState.RUNNING;
         }
         if (ensureItem(BuiltInRegistries.ITEM.getKey(target.item()))) start(new FluidPlacementTaskRecord(id(), deadline(),
-                target.pos(), target.desiredState(), fluidRegion(target.desiredState()), java.util.Set.copyOf(plannedPositions)));
+                target.pos(), target.desiredState(), fluidRegion(target.desiredState()), Set.copyOf(plannedPositions)));
         return TaskState.RUNNING;
     }
 
@@ -223,7 +238,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         var filter = filters.get(filterIndex).getAsJsonObject();
         BlockPos at = MachineConstructionPlan.offset(r.plan.anchor(), filter.get("offset"));
         if (!world.isLoaded(at)) return load(at);
-        start(new org.maiwithu.maicraft.core.integration.machine.assembly.MekanismFilterTaskRecord(
+        start(new MekanismFilterTaskRecord(
                 id(), deadline(), at, filter.get("item_id").getAsString()));
         return TaskState.RUNNING;
     }
@@ -234,12 +249,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     // 先数普通背包；缺少时创造模式用原版取物任务，生存模式按声明的来源策略获取。
     private boolean ensureItem(ResourceLocation id, int count) {
         int have = player.getInventory().items.stream().filter(stack -> !stack.isEmpty()
-                && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(id)).mapToInt(net.minecraft.world.item.ItemStack::getCount).sum();
+                && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(id)).mapToInt(ItemStack::getCount).sum();
         if (have >= count) return true;
         if (player.getAbilities().instabuild) {
             acquiringItem = true;
-            start(new org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord(id(), deadline(),
-                    new net.minecraft.world.item.ItemStack(BuiltInRegistries.ITEM.get(id)), count - have));
+            start(new CreativeTakeItemsTaskRecord(id(), deadline(),
+                    new ItemStack(BuiltInRegistries.ITEM.get(id)), count - have));
             return false;
         }
         supply.begin(player, r.getToolCallId(), r.getDeadlineGameTime(),
@@ -360,7 +375,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private long deadline() { return player.level().getGameTime() + 3 * 60 * 20; }
     private String id() { return r.getToolCallId() + "-assembly-" + (++serial); }
     private TaskState failure(String code, String message) { failureCode = code; fail(message, FailureType.UNKNOWN); return TaskState.FAILED; }
-    private void rememberInstallation() { org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.installationBuilt(player,r.plan); }
+    private void rememberInstallation() { ClientMachineCatalog.installationBuilt(player,r.plan); }
 
     // 结束时停止尚在运行的子任务、取消供料、释放预览，再清理公共导航状态。
     @Override protected void cleanup() {
@@ -376,7 +391,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     @Override protected String successMessage() { return "Declared machine structure constructed and checked; use operate_machine separately to configure and verify operation."; }
     @Override public Map<String,Object> progress() {
         // 让上层建造/加工任务透出真正等待的原生阶段，避免站位或瞄准停滞只剩一个笼统的建造中状态。
-        var data=new LinkedHashMap<String,Object>(); data.put("task",name()); data.put("phase",phase.name().toLowerCase(java.util.Locale.ROOT));
+        var data=new LinkedHashMap<String,Object>(); data.put("task",name()); data.put("phase",phase.name().toLowerCase(Locale.ROOT));
         data.put("verified_source_fluid_targets",fluidIndex); data.put("source_fluid_targets",r.plan.fluidTargets().size());
         if(child!=null)data.put("native_stage",child.progress()); return Map.copyOf(data);
     }
@@ -384,12 +399,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         Map<String, Object> data = new LinkedHashMap<>(completion.report());
         data.put("machine_layout", r.plan.report());
         if (!r.plan.utilityInputs().isEmpty()) {
-            data.put("external_inputs",org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.json(r.plan.utilityInputs()));
+            data.put("external_inputs",MachineUtilityInputs.json(r.plan.utilityInputs()));
             data.put("utility_connection_verified",false);
             data.put("next_phase","connect_external_input_then_run_production");
         }
         data.put("commissioning", commissioning); data.put("installed_parts", partIndex);
-        data.put("configured_interfaces", configIndex); data.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        data.put("configured_interfaces", configIndex); data.put("phase", phase.name().toLowerCase(Locale.ROOT));
         data.put("initialized_containers", contentsIndex);
         data.put("configured_output_filters", filterIndex);
         data.put("verified_source_fluid_targets", fluidIndex);

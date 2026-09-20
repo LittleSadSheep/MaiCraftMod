@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.integration.machine.assembly.MekanismMatrixTem
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Cell;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
+import java.util.Locale;
 
 /**
  * 把压机工作站、搅拌工作站、AE2 存储／合成小组、感应矩阵这些组合展开成已有模板。
@@ -146,7 +147,7 @@ final class MachineLayoutModules {
         for (JsonElement e : b.configurations) {
             JsonObject c = e.getAsJsonObject(); Pos p = from(c.getAsJsonArray("offset"));
             b.port("energy", c.get("mode").getAsString().equals("output"), "mekanism:induction_port",
-                    p.x(), p.y(), p.z(), Side.valueOf(c.get("face").getAsString().toUpperCase(java.util.Locale.ROOT)));
+                    p.x(), p.y(), p.z(), Side.valueOf(c.get("face").getAsString().toUpperCase(Locale.ROOT)));
         }
         if (template.has("clearance_cells")) for (JsonElement e : template.getAsJsonArray("clearance_cells")) b.clear.add(from(e.getAsJsonArray()));
         b.commissioning = template.getAsJsonObject("commissioning").deepCopy();

@@ -25,6 +25,13 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.task.TaskFactory;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import net.minecraft.core.Direction;
+import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
+import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
 /**
  * 保存“这个菜单是从哪台机器打开的”，并把某次观察做成只能使用一次的存取依据。
@@ -40,7 +47,7 @@ public final class MachineMenu {
     private MachineMenu() {}
 
     public record OpenRequest(String dimension, BlockPos center, int radius,
-            String structuralFingerprint, BlockPos machinePosition, net.minecraft.core.Direction face) {
+            String structuralFingerprint, BlockPos machinePosition, Direction face) {
         public OpenRequest(String dimension, BlockPos center, int radius, String structuralFingerprint, BlockPos machinePosition) {
             this(dimension,center,radius,structuralFingerprint,machinePosition,null);
         }
@@ -66,7 +73,7 @@ public final class MachineMenu {
         final List<ItemStack> contents;
 
         Inspection(LocalPlayer self, AbstractContainerMenu menu, Origin origin,
-                   org.maiwithu.maicraft.client.actor.ClientActorBoundary.ObservationStamp stamp) {
+                   ClientActorBoundary.ObservationStamp stamp) {
             this.player = new WeakReference<>(self);
             this.menu = new WeakReference<>(menu);
             this.origin = origin;
@@ -164,7 +171,7 @@ public final class MachineMenu {
             entry.add("screen_offset", screen);
             JsonArray acceptable = new JsonArray();
             // These are actual carried candidate stacks, not inferred recipes or arbitrary slot roles.
-            java.util.Set<String> acceptedIds = new java.util.LinkedHashSet<>();
+            Set<String> acceptedIds = new LinkedHashSet<>();
             for (int inventory = 0; inventory < 36 && acceptable.size() < 16; inventory++) {
                 ItemStack candidate = self.getInventory().getItem(inventory);
                 if (candidate.isEmpty()) continue;
@@ -193,7 +200,7 @@ public final class MachineMenu {
                 && menu.slots.size() <= MAX_ENTRIES && !virtualMenu(menu)
                 && self.level().isLoaded(origin.position())
                 && BuiltInRegistries.BLOCK.getKey(self.level().getBlockState(origin.position()).getBlock()).equals(origin.blockId())
-                && !org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.protectsMutation(origin.position());
+                && !NavigationSafetyContext.protectsMutation(origin.position());
         out.addProperty("transfer_receipt_available", canTransfer);
         if (canTransfer) {
             INSPECTIONS.entrySet().removeIf(entry -> entry.getValue().player.get() == null
@@ -207,11 +214,11 @@ public final class MachineMenu {
         if (!visible) out.addProperty("transfer_unavailable_reason", "the machine GUI must be visibly open before inspection can authorize a transfer");
         else if (!validOrigin) out.addProperty("transfer_unavailable_reason", "open this exact machine through the machine menu operation first");
         else if (virtualMenu(menu)) out.addProperty("transfer_unavailable_reason", "virtual storage uses a dedicated integration such as AE2 supply");
-        if (visible) org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply.observeOpenWaterInventory(menu)
+        if (visible) Ae2ResourceSupply.observeOpenWaterInventory(menu)
                 .ifPresent(water -> out.add("ae2_water_inventory", water));
         // 明确查询菜单时才附来源对应的原生机制与报价；不把另一个台子的菜单套到当前检查对象上。
         if (visible && validOrigin) out.add("native_processes",
-                org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry.inspect(self, origin.position()));
+                NativeProcessRegistry.inspect(self, origin.position()));
         return out;
     }
 

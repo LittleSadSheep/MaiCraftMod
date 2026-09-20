@@ -16,6 +16,8 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Cell;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
+import java.util.Collections;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import static org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout.position;
 
 /**
@@ -138,7 +140,7 @@ final class MachineLayoutAeNetworks {
     // 从设备组的水平中心往外找控制器位置，周围要求一块没有占用的维护区；超过搜索预算就报告找不到。
     private static Pos controllerSite(MachineLayoutWork work,Bounds bounds,List<Leaf> leaves){
         int cx=(int)leaves.stream().mapToInt(l->l.position.x()).average().orElse(0),cz=(int)leaves.stream().mapToInt(l->l.position.z()).average().orElse(0);
-        int examined=0,searchBudget=org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget.current().searchVisitedBudget();
+        int examined=0,searchBudget=MachinePlanningBudget.current().searchVisitedBudget();
         for(int radius=0;radius<=SemanticMachineLayout.MAX_RADIUS*2;radius++)for(int x=cx-radius;x<=cx+radius;x++)for(int z=cz-radius;z<=cz+radius;z++){
             MachineLayoutRouting.checkpoint();if(Math.max(Math.abs(x-cx),Math.abs(z-cz))!=radius)continue;
             if(++examined>searchBudget)return null;Pos candidate=new Pos(x,0,z);boolean free=true;
@@ -151,7 +153,7 @@ final class MachineLayoutAeNetworks {
     static List<Pos> connectionPath(MachineLayoutWork work,Pos from,Pos to,String network){
         ArrayDeque<Pos> open=new ArrayDeque<>();Map<Pos,Pos> parent=new LinkedHashMap<>();open.add(from);parent.put(from,null);
         while(!open.isEmpty()){
-            MachineLayoutRouting.checkpoint();Pos at=open.removeFirst();if(at.equals(to)){List<Pos> path=new ArrayList<>();for(Pos p=to;p!=null;p=parent.get(p))path.add(p);java.util.Collections.reverse(path);return path.subList(1,path.size()-1);}
+            MachineLayoutRouting.checkpoint();Pos at=open.removeFirst();if(at.equals(to)){List<Pos> path=new ArrayList<>();for(Pos p=to;p!=null;p=parent.get(p))path.add(p);Collections.reverse(path);return path.subList(1,path.size()-1);}
             Cell source=work.cells.get(at);for(Side side:Side.values()){
                 Pos next=at.step(side);Cell cell=work.cells.get(next);if(parent.containsKey(next)||!member(cell,network,work)||!connectable(source,side)||!connectable(cell,opposite(side)))continue;
                 parent.put(next,at);open.addLast(next);

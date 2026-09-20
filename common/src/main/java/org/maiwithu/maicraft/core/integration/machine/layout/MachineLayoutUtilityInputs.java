@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import java.util.Arrays;
 import static org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout.position;
 
 /** One passive entry feeds its declared internal network; utility production stays outside the machine. */
@@ -31,7 +32,7 @@ final class MachineLayoutUtilityInputs {
                 : connector.equals("minecraft:barrel") ? Map.of("facing", "north") : Map.of();
         work.add(new Cell(port, connector, state, false, "component:" + owner));
         Pos source = port; Cell gearbox = null;
-        List<Side> exits = kinetic ? List.of(opposite(face)) : java.util.Arrays.stream(Side.values()).filter(side -> side != face).toList();
+        List<Side> exits = kinetic ? List.of(opposite(face)) : Arrays.stream(Side.values()).filter(side -> side != face).toList();
         if (kinetic && face.y == 0) {
             source = port.step(opposite(face));
             gearbox = new Cell(source, "create:gearbox", Map.of("axis", face.x != 0 ? "z" : "x"), false, "component:" + owner);
@@ -104,7 +105,7 @@ final class MachineLayoutUtilityInputs {
             MachineLayoutRouting.checkpoint();
             if (!free(work, at)) continue;
             if (kinetic && face.y == 0 && (!bounds.contains(at.step(opposite(face))) || !free(work, at.step(opposite(face)))
-                    || java.util.Arrays.stream(Side.values()).anyMatch(side -> work.cells.containsKey(at.step(opposite(face)).step(side))))) continue;
+                    || Arrays.stream(Side.values()).anyMatch(side -> work.cells.containsKey(at.step(opposite(face)).step(side))))) continue;
             boolean clear = true;
             for (Pos outward = at.step(face); bounds.contains(outward); outward = outward.step(face)) if (work.cells.containsKey(outward)) { clear = false; break; }
             if (clear) return at;

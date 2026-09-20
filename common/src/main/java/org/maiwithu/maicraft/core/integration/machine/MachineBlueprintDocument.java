@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /**
  * 处理当前版本的逐格机器蓝图：普通方块占整格，AE2 部件可以共用宿主的不同安装面。
@@ -27,7 +28,7 @@ public final class MachineBlueprintDocument {
 
     // 建筑和机器共用方块格式，但大型航站楼不能被机器自主规划的32768格或128格半径二次截断。
     public static void validateBuildingWire(JsonObject document) {
-        var budget = org.maiwithu.maicraft.core.build.BuildingBudgets.current();
+        var budget = BuildingBudgets.current();
         normalized(document, budget.maxTargets(), budget.maxRadius());
     }
 

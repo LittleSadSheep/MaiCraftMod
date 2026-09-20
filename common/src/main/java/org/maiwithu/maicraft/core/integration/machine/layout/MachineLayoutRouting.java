@@ -11,6 +11,9 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import java.util.Comparator;
+import java.util.Locale;
+import java.util.concurrent.CancellationException;
 
 /**
  * 在声明的场地范围里给两台设备找管线路径，绕开设备和维护空间；不同资源连接保持分离。
@@ -26,7 +29,7 @@ final class MachineLayoutRouting {
         EAST(1, 0, 0), WEST(-1, 0, 0), SOUTH(0, 0, 1), UP(0, 1, 0), DOWN(0, -1, 0), NORTH(0, 0, -1);
         final int x, y, z;
         Side(int x, int y, int z) { this.x = x; this.y = y; this.z = z; }
-        String label() { return name().toLowerCase(java.util.Locale.ROOT); }
+        String label() { return name().toLowerCase(Locale.ROOT); }
     }
     record Bounds(int minX, int maxX, int minY, int maxY, int minZ, int maxZ) {
         boolean contains(Pos p) {
@@ -46,7 +49,7 @@ final class MachineLayoutRouting {
     private static final int SEARCH_BUDGET = MachinePlanningBudget.current().searchVisitedBudget();
     private MachineLayoutRouting() {}
     static void checkpoint() {
-        if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("machine layout compilation cancelled");
+        if (Thread.currentThread().isInterrupted()) throw new CancellationException("machine layout compilation cancelled");
     }
 
     // 尝试不同的出口和入口组合，优先复用本支路电缆，再优先距离近的组合；所有尝试共用一次搜索预算。
@@ -54,7 +57,7 @@ final class MachineLayoutRouting {
                        String transport, String owner, Map<Pos, Cell> occupied, Set<Pos> clearance, Bounds bounds) {
         List<Candidate> candidates = new ArrayList<>();
         for (Side a : fromSides) for (Side b : toSides) candidates.add(new Candidate(a, b));
-        candidates.sort(java.util.Comparator.<Candidate>comparingInt(c ->
+        candidates.sort(Comparator.<Candidate>comparingInt(c ->
                         -(reusable(occupied.get(from.step(c.from)), transport, owner) ? 1 : 0)
                         -(reusable(occupied.get(to.step(c.to)), transport, owner) ? 1 : 0))
                 .thenComparingInt(c -> from.step(c.from).distance(to.step(c.to))));
@@ -88,7 +91,7 @@ final class MachineLayoutRouting {
     // 记录走到每个格子的最少步数，优先向终点靠近；动力连接还记录传动方向，转向要通过上下换层。
     private static Search search(Pos start, Pos end, Pos from, Pos to, boolean kinetic, String transport, String owner,
                                  Map<Pos, Cell> occupied, Set<Pos> clearance, Bounds bounds, int budget) {
-        PriorityQueue<Frontier> open = new PriorityQueue<>(java.util.Comparator.comparingInt(Frontier::priority)
+        PriorityQueue<Frontier> open = new PriorityQueue<>(Comparator.comparingInt(Frontier::priority)
                 .thenComparingInt(e -> e.node.pos.distance(end)).thenComparingInt(e -> e.node.pos.x)
                 .thenComparingInt(e -> e.node.pos.y).thenComparingInt(e -> e.node.pos.z).thenComparing(e -> e.node.alongX));
         Map<Node, Node> parents = new HashMap<>();
@@ -110,7 +113,7 @@ final class MachineLayoutRouting {
                 return new Search(path, parents.size());
             }
             List<Side> directions = new ArrayList<>(List.of(Side.values()));
-            directions.sort(java.util.Comparator.comparingInt(d -> at.pos.step(d).distance(end)));
+            directions.sort(Comparator.comparingInt(d -> at.pos.step(d).distance(end)));
             for (Side direction : directions) {
                 if (kinetic && direction.y == 0 && (direction.x != 0) != at.alongX) continue;
                 Pos nextPos = at.pos.step(direction);

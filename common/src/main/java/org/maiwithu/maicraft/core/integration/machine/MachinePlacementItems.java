@@ -18,6 +18,7 @@ import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import java.util.HashSet;
 
 /** State-specific native items and audited post-placement state, without synthetic item data or world writes. */
 public final class MachinePlacementItems {
@@ -55,7 +56,7 @@ public final class MachinePlacementItems {
     public static BlockState projectedFinalState(ItemStack stack, Level level, BlockPos target, Direction candidateHorizontal, BlockState initial) {
         if (initial == null || !BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals("create:vertical_gearbox")) return initial;
         if (!BuiltInRegistries.BLOCK.getKey(initial.getBlock()).toString().equals("create:gearbox") || !initial.hasProperty(BlockStateProperties.AXIS)) return null;
-        Set<Direction.Axis> neighbors = new java.util.HashSet<>();
+        Set<Direction.Axis> neighbors = new HashSet<>();
         for (Direction face : Direction.Plane.HORIZONTAL) {
             BlockPos at = target.relative(face); if (!level.isLoaded(at)) return null;
             BlockState state = level.getBlockState(at);

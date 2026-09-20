@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
 
 /**
  * 把已有拉杆设为明确的开或关：先核对观察记录，再走近、空手瞄准，只点一次并等待世界状态确认。
@@ -149,7 +150,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         if (receipt != null) {
             receipt = context.actions().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
-            receiptStatus = receipt.status().name().toLowerCase(java.util.Locale.ROOT);
+            receiptStatus = receipt.status().name().toLowerCase(Locale.ROOT);
             if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
                 outcomeUncertain = true;
                 return failure("machine_empty_hand_unconfirmed", "Empty-hand selection was not confirmed.",
@@ -219,7 +220,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         var context = ClientRuntime.requireContext(player);
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) return TaskState.RUNNING;
-        receiptStatus = receipt.status().name().toLowerCase(java.util.Locale.ROOT);
+        receiptStatus = receipt.status().name().toLowerCase(Locale.ROOT);
         if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
             return failure("machine_control_unconfirmed", "The lever's requested state was not confirmed; no second toggle was attempted.",
                     FailureType.UNKNOWN);
@@ -294,7 +295,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
                 var context = ClientRuntime.requireContext(player);
                 receipt = context.actions().retireOneShotForTaskBoundary(context, receipt,
                         "machine control task ended before confirmation");
-                receiptStatus = receipt.status().name().toLowerCase(java.util.Locale.ROOT);
+                receiptStatus = receipt.status().name().toLowerCase(Locale.ROOT);
             } catch (RuntimeException unavailable) {
                 // 角色或运行环境已更换时由运行层作废旧确认；这里仍保留“结果不确定”，不能声称没点过。
             }

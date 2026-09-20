@@ -23,6 +23,10 @@ import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayo
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.ReplaceMode;
 import org.maiwithu.maicraft.core.task.build.MachineSealingTaskRecord.Seal;
+import com.google.gson.JsonArray;
+import java.util.Comparator;
+import net.minecraft.world.level.block.LiquidBlock;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 
 /**
  * 把机器布局或逐格蓝图变成固定的装配计划：普通方块、AE2 部件、维护通道，以及最后要封闭的施工洞口。
@@ -44,7 +48,7 @@ public final class MachineConstructionPlan {
             List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities) {
         this.anchor = anchor.immutable(); this.blocks = List.copyOf(blocks); this.parts = List.copyOf(parts);
         fluidTargets = blocks.stream().filter(MachineConstructionPlan::isFluid)
-                .sorted(java.util.Comparator.comparingInt((BuildTaskRecord.Target target) -> target.pos().getY())
+                .sorted(Comparator.comparingInt((BuildTaskRecord.Target target) -> target.pos().getY())
                         .thenComparingInt(target -> target.pos().getZ()).thenComparingInt(target -> target.pos().getX())).toList();
         this.components = List.copyOf(components); this.report = report.deepCopy(); this.replace = replace;
         this.replaceBlockEntities = replaceBlockEntities;
@@ -85,8 +89,8 @@ public final class MachineConstructionPlan {
     public static SemanticMachineLayout.Result reviewExplicit(SemanticMachineLayout.Result layout) {
         if (!layout.buildable()) return layout;
         JsonObject report = layout.report().deepCopy();
-        report.add("external_inputs",org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.json(
-                org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.parse(layout.blueprint())));
+        report.add("external_inputs",MachineUtilityInputs.json(
+                MachineUtilityInputs.parse(layout.blueprint())));
         try {
             var compiled = compile(BlockPos.ZERO, layout, false);
             // 设计评审同时给出原生安装材料，源流体按真实满桶计费，而不是列出无法拿在手中的液体方块。
@@ -138,7 +142,7 @@ public final class MachineConstructionPlan {
             BlockState state = MachinePlacementRules.resolveState(id, properties);
             Block block = state.getBlock();
             var placementItem = MachinePlacementItems.itemFor(state);
-            if (state.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock) {
+            if (state.getBlock() instanceof LiquidBlock) {
                 if (cell.has("nbt") && (!cell.get("nbt").isJsonObject() || !cell.getAsJsonObject("nbt").isEmpty()))
                     throw new IllegalArgumentException("source fluid placement does not accept copied NBT");
                 // 即使作者省略 level，最终仍必须是源格，不能把后来流进来的同种非源流体算作完成。
@@ -158,7 +162,7 @@ public final class MachineConstructionPlan {
         if (report.has("configurations") && !report.getAsJsonArray("configurations").isEmpty()) {
             if (!exists("mekanism:configurator", false))
                 throw new IllegalArgumentException("native interface configuration requires an installed Mekanism configurator");
-            var tools = new com.google.gson.JsonArray(); tools.add("mekanism:configurator");
+            var tools = new JsonArray(); tools.add("mekanism:configurator");
             report.add("required_tools", tools);
         }
         // 维护空间会变成明确的空气目标，不能与设备目标重叠；它不是单纯给画面看的标记。
@@ -182,7 +186,7 @@ public final class MachineConstructionPlan {
             throw new IllegalArgumentException("native part host overlaps an ordinary block target");
         // Center cables form supports for peripheral parts and must always be installed first.
         // 先排中心部件，再排装在各面的部件，避免面板先安装时还没有宿主。
-        parts.sort(java.util.Comparator.comparing(part -> part.spec().side() != null));
+        parts.sort(Comparator.comparing(part -> part.spec().side() != null));
         Map<String, Integer> nativeMaterials = new LinkedHashMap<>();
         blocks.values().forEach(target -> { int count = isFluid(target) ? 1 : target.materialCount();
             if (count > 0) nativeMaterials.merge(BuiltInRegistries.ITEM.getKey(target.item()).toString(), count, Math::addExact); });
@@ -261,7 +265,7 @@ public final class MachineConstructionPlan {
     public BlockPos anchor() { return anchor; }
     public List<BuildTaskRecord.Target> blocks() { return blocks; }
     public List<BuildTaskRecord.Target> fluidTargets() { return fluidTargets; }
-    public static boolean isFluid(BuildTaskRecord.Target target) { return target.desiredState().getBlock() instanceof net.minecraft.world.level.block.LiquidBlock; }
+    public static boolean isFluid(BuildTaskRecord.Target target) { return target.desiredState().getBlock() instanceof LiquidBlock; }
     public List<Part> parts() { return parts; }
     public List<Seal> seals() { return seals; }
     // 找出临时洞口内外要留给身体通行的空气格，供普通施工阶段保护。
@@ -283,8 +287,8 @@ public final class MachineConstructionPlan {
         return List.copyOf(positions);
     }
     public JsonObject report() { return report.deepCopy(); }
-    public List<org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.Input> utilityInputs() {
+    public List<MachineUtilityInputs.Input> utilityInputs() {
         if (!report.has("external_inputs")) return List.of();
-        return org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.parseDeclarations(report.getAsJsonArray("external_inputs"));
+        return MachineUtilityInputs.parseDeclarations(report.getAsJsonArray("external_inputs"));
     }
 }
