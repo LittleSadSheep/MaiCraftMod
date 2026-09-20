@@ -894,17 +894,23 @@ public final class SemanticAcquireCompanionTask
                             "ambiguous_merged_drop_count", integer(result.data().get("ambiguous_merged_drop_count"), 0),
                             "inventory_progress", progress, "requires_narration", true));
         }
-        if (completedSource == SemanticAcquireTaskRecord.Source.STORAGE && result != null && result.data() != null) {
+        if (result != null && result.data() != null) {
             boolean uncertain = bool(result.data().get("outcome_uncertain"))
                     || "uncertain".equals(result.data().get("status"));
-            boolean unsettled = terminal != TaskState.SUCCESS && bool(result.data().get("effects_started"));
+            boolean outstandingBatch = bool(result.data().get("batch_outstanding"));
+            boolean storage = completedSource == SemanticAcquireTaskRecord.Source.STORAGE;
+            boolean unsettled = outstandingBatch
+                    || storage && terminal != TaskState.SUCCESS && bool(result.data().get("effects_started"));
             if (uncertain || unsettled) {
-                outcomeUncertain |= uncertain;
+                // 烹饪等来源也可能已经拿到目标物品却留有未结事务；背包达标不能覆盖子任务的未确认效果。
+                outcomeUncertain |= uncertain || outstandingBatch;
                 failureNeed = completedNeed;
-                String code = uncertain ? "storage_effect_uncertain" : "storage_settlement_incomplete";
-                addIssue("storage", code, "storage effects did not settle; carried inventory alone cannot confirm them", result.data());
+                String sourcePrefix = storage ? "storage" : "acquisition";
+                String code = sourcePrefix + (uncertain ? "_effect_uncertain" : "_settlement_incomplete");
+                addIssue(completedSource.name().toLowerCase(Locale.ROOT), code,
+                        "acquisition effects did not settle; carried inventory alone cannot confirm them", result.data());
                 return failAcquisition(code,
-                        "storage may already have changed state, but its transaction did not settle; stop and review before retrying",
+                        "an acquisition source may already have changed state, but its work did not settle; stop and review before retrying",
                         uncertain ? FailureType.UNKNOWN : childFailureType(terminal, result));
             }
         }

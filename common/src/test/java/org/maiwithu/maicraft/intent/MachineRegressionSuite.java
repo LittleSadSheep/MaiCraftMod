@@ -39,7 +39,7 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutModule
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayoutTest;
 import org.maiwithu.maicraft.core.scan.SearchGeometryTest;
 import org.maiwithu.maicraft.core.scan.TargetIndexInvalidationTest;
-import org.maiwithu.maicraft.core.task.acquire.StorageSettlementTest;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionSettlementTest;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparationTest;
 import org.maiwithu.maicraft.core.task.build.BuildExecutionContextTest;
 import org.maiwithu.maicraft.core.task.build.MachineBlueprintGeometryTest;
@@ -129,7 +129,7 @@ public final class MachineRegressionSuite {
         BuildBatchCompletionTest.main(args);
         try { MaterialSupplyReceiptTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
-        try { StorageSettlementTest.main(args); }
+        try { AcquisitionSettlementTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
         try { BuildSupplyPreviewTest.main(args); }
         catch (Exception failure) { throw new AssertionError("preview before material supply", failure); }
