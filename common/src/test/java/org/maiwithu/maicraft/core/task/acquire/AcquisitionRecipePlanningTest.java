@@ -36,6 +36,7 @@ public final class AcquisitionRecipePlanningTest {
             overlappingIngredients(world);
             completeRecoveryCandidates(world);
             finiteMaterialRoutes(world);
+            prerequisiteSelection(world);
             world.inventory.setItem(0, new ItemStack(Items.STICK, 4));
             var alreadyCarried = plan(world);
             check(!alreadyCarried.executable() && alreadyCarried.immediate().success(),
@@ -100,7 +101,7 @@ public final class AcquisitionRecipePlanningTest {
                 List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT));
         var planks = recipe("planks", Items.OAK_PLANKS, Ingredient.of(Items.OAK_LOG));
         install(world, List.of(planks));
-        var planner = new AcquisitionRecipePlanner(world.player);
+        var planner = new AcquisitionRecipePlanner(world.player, false);
         check(planner.ingredientStructureCost(List.of(plank), need) == 1, "原木变木板还需一层合成");
         check(planner.ingredientStructureCost(List.of(plank, BuiltInRegistries.ITEM.getKey(Items.BIRCH_LOG)), need) == 0,
                 "原料可替代时保留较直接的来源，不强制制造另一个变体");
@@ -110,7 +111,7 @@ public final class AcquisitionRecipePlanningTest {
         check(planner.structureCost(candidate, need) == 4, "候选成本同时计算缺料量与原料转换层数");
         // 构造往返配方复现循环：木板依赖原木，原木又依赖木板；两者都没带时不能当作现成来源。
         install(world, List.of(planks, recipe("reverse", Items.OAK_LOG, Ingredient.of(Items.OAK_PLANKS))));
-        planner = new AcquisitionRecipePlanner(world.player);
+        planner = new AcquisitionRecipePlanner(world.player, false);
         check(planner.ingredientStructureCost(List.of(plank), need) == AcquisitionRecipePlanner.UNREACHABLE_STRUCTURE_COST,
                 "循环路线不能排成零成本叶子");
         world.inventory.setItem(0, new ItemStack(Items.OAK_PLANKS));
@@ -123,6 +124,38 @@ public final class AcquisitionRecipePlanningTest {
         set(ClientPacketListener.class, world.player.connection, "recipeManager", manager);
         set(Level.class, world.level, "registryAccess", RegistryAccess.EMPTY);
         world.player.containerMenu = new InventoryMenu(world.inventory, false, world.player);
+    }
+
+    private static void prerequisiteSelection(InteractionWorldTestHarness world) throws Exception {
+        world.inventory.clearContent();
+        install(world, List.of());
+        var stick = BuiltInRegistries.ITEM.getKey(Items.STICK);
+        var plank = BuiltInRegistries.ITEM.getKey(Items.OAK_PLANKS);
+        var coal = BuiltInRegistries.ITEM.getKey(Items.COAL);
+        var wool = BuiltInRegistries.ITEM.getKey(Items.WHITE_WOOL);
+        var need = new AcquisitionNeed(List.of(stick), 4, 0, Set.of(stick), Set.of(), Set.of(),
+                List.of(SemanticAcquireTaskRecord.Source.CRAFT, SemanticAcquireTaskRecord.Source.HUNT));
+        var planner = new AcquisitionRecipePlanner(world.player, false);
+        var onePlank = new CraftRecoveryCandidate.IngredientDemand(List.of(plank), 1, 1);
+        var repeated = candidate(stick, "three_slots", List.of(onePlank, onePlank, onePlank));
+        check(planner.chooseIngredient(repeated, need).missing() == 3, "三个相同配方格应合成一项缺三份的需求");
+        var ancestor = candidate(stick, "cycle", List.of(
+                new CraftRecoveryCandidate.IngredientDemand(List.of(stick), 1, 1),
+                new CraftRecoveryCandidate.IngredientDemand(List.of(coal), 1, 1)));
+        check(planner.chooseIngredient(ancestor, need) == null, "关键材料绕回祖先时不能先去补其他配件");
+        // 羊毛可能需要伤害羊；尚未允许伤害时先暴露这个条件，不能先采煤、最后才发现整件事做不了。
+        var restricted = candidate(stick, "permission", List.of(
+                new CraftRecoveryCandidate.IngredientDemand(List.of(coal), 2, 2),
+                new CraftRecoveryCandidate.IngredientDemand(List.of(wool), 1, 1)));
+        check(planner.chooseIngredient(restricted, need).itemIds().equals(List.of(wool)),
+                "先检查受伤害许可限制的原料");
+    }
+
+    private static CraftRecoveryCandidate candidate(ResourceLocation output, String id,
+                                                     List<CraftRecoveryCandidate.IngredientDemand> ingredients) {
+        int missing = ingredients.stream().mapToInt(CraftRecoveryCandidate.IngredientDemand::missing).sum();
+        return new CraftRecoveryCandidate(output, id, ingredients,
+                new CraftPlanCost(missing, CraftPlanCost.Surface.READY, 0, missing, id), List.of());
     }
 
     private static void set(Class<?> type, Object target, String name, Object value) throws Exception {

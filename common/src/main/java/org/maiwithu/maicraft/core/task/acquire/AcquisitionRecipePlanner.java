@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.acquire;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -27,11 +28,13 @@ final class AcquisitionRecipePlanner {
     private static final int STRUCTURAL_RECIPE_DEPTH = 6;
     static final int UNREACHABLE_STRUCTURE_COST = 1_000_000;
     private final LocalPlayer player;
+    private final boolean allowHarm;
     private Map<ResourceLocation, List<CraftingRecipe>> recipeIndex;
     private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> stockRecipes = new HashMap<>();
 
-    AcquisitionRecipePlanner(LocalPlayer player) {
+    AcquisitionRecipePlanner(LocalPlayer player, boolean allowHarm) {
         this.player = player;
+        this.allowHarm = allowHarm;
     }
 
     List<ObservedRecipeStockCost.Recipe> stockRecipes(ResourceLocation output) {
@@ -173,6 +176,64 @@ final class AcquisitionRecipePlanner {
                     STRUCTURAL_RECIPE_DEPTH));
         }
         return best;
+    }
+
+
+    record IngredientNeed(
+            List<ResourceLocation> itemIds, int missing) {}
+
+    private record RankedIngredient(
+            IngredientNeed ingredient, boolean decisionRequired, int structureCost) {}
+
+    /** 同一替代材料组先合并数量，再挑下一项前置需求；任何必需组绕回祖先都会否决整条路线。 */
+    IngredientNeed chooseIngredient(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
+        // 同样的可替代原料组先合并数量；优先验证最难或需要授权的那组，避免先做一堆配件最后才发现关键原料拿不到。
+        Map<List<ResourceLocation>, Integer> missingByItems = new LinkedHashMap<>();
+        for (var ingredient : candidate.ingredients()) {
+            int missing = ingredient.missing();
+            if (missing <= 0) continue;
+            List<ResourceLocation> ids = ingredient.itemIds().stream()
+                    .filter(id -> !parent.lineageItems.contains(id))
+                    .toList();
+            // 只要一组必需材料绕回祖先，整个配方就不能继续；不能先去做染料，最后才发现染床还得先有床。
+            if (ids.isEmpty()) return null;
+            missingByItems.merge(ids, missing, Integer::sum);
+        }
+        List<IngredientNeed> choices = new ArrayList<>();
+        for (Map.Entry<List<ResourceLocation>, Integer> entry : missingByItems.entrySet()) {
+            choices.add(new IngredientNeed(entry.getKey(), entry.getValue()));
+        }
+        List<RankedIngredient> ranked = new ArrayList<>();
+        for (IngredientNeed choice : choices) {
+            ranked.add(new RankedIngredient(
+                    choice,
+                    ingredientRequiresDecision(choice.itemIds(), parent),
+                    ingredientStructureCost(choice.itemIds(), parent)));
+        }
+        return ranked.stream()
+                // 先验证权限受限、转换层数更深或数量更多的原料，避免先做一堆容易的配件。
+                .sorted(Comparator
+                        .comparing(RankedIngredient::decisionRequired).reversed()
+                        .thenComparing(Comparator.comparingInt(
+                                RankedIngredient::structureCost).reversed())
+                        .thenComparing(Comparator.comparingInt(
+                                (RankedIngredient rankedIngredient) ->
+                                        rankedIngredient.ingredient().missing())
+                                .reversed())
+                        .thenComparing(rankedIngredient -> String.join(",",
+                                rankedIngredient.ingredient().itemIds().stream().map(ResourceLocation::toString).toList())))
+                .map(RankedIngredient::ingredient)
+                .findFirst().orElse(null);
+    }
+
+    private boolean ingredientRequiresDecision(
+            List<ResourceLocation> itemIds, AcquisitionNeed parent) {
+        if (allowHarm
+                || !parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT)) {
+            return false;
+        }
+        SemanticAcquireTaskRecord.SourceHint hint = SemanticSourceKnowledge.infer(itemIds);
+        return !hint.entityTypeIds().isEmpty() && hint.blockRefs().isEmpty();
     }
 
 }

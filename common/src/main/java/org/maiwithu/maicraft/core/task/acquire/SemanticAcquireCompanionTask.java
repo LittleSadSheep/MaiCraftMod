@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanner.IngredientNeed;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
@@ -88,16 +89,10 @@ public final class SemanticAcquireCompanionTask
 
     private record ExecutableCraft(ResourceLocation outputItem, CraftOps.Plan plan) {}
 
-    private record IngredientNeed(
-            List<ResourceLocation> itemIds, int missing) {}
-
     private record CraftFrontier(
             IngredientNeed ingredient,
             Set<String> recipeIds,
             List<ResourceLocation> outputItemIds) {}
-
-    private record RankedIngredient(
-            IngredientNeed ingredient, boolean decisionRequired, int structureCost) {}
 
     private record NearbySurvey(
             int safeCount,
@@ -152,7 +147,7 @@ public final class SemanticAcquireCompanionTask
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
         super(player, record);
-        recipePlanner = new AcquisitionRecipePlanner(player);
+        recipePlanner = new AcquisitionRecipePlanner(player, record.allowHarm);
     }
 
     @Override
@@ -422,7 +417,7 @@ public final class SemanticAcquireCompanionTask
                 // A conversion whose only missing inputs are already members of this need's
                 // ancestry cannot advance the inventory fact. Skip the dominated/cyclical route
                 // as a set instead of reporting every stripped-log/wood recipe one by one.
-                .filter(candidate -> chooseIngredient(candidate, need) != null)
+                .filter(candidate -> recipePlanner.chooseIngredient(candidate, need) != null)
                 .sorted(Comparator
                         .comparingInt((CraftRecoveryCandidate candidate) ->
                                 candidate.cost().surface().ordinal())
@@ -1773,7 +1768,7 @@ public final class SemanticAcquireCompanionTask
             AcquisitionNeed parent) {
         // 多个配方若各只差一件，任意拿到其中一种原料就能完成一个配方，可以合成一组替代需求一起寻找。
         // 各差多件时不能这样混，因为从两个配方各凑一半，并不保证任何一个能做。
-        IngredientNeed primary = chooseIngredient(chosen, parent);
+        IngredientNeed primary = recipePlanner.chooseIngredient(chosen, parent);
         if (primary == null) return null;
 
         LinkedHashSet<ResourceLocation> itemIds = new LinkedHashSet<>(primary.itemIds());
@@ -1789,7 +1784,7 @@ public final class SemanticAcquireCompanionTask
                         || candidate.cost().surface() != chosen.cost().surface()) {
                     continue;
                 }
-                IngredientNeed alternative = chooseIngredient(candidate, parent);
+                IngredientNeed alternative = recipePlanner.chooseIngredient(candidate, parent);
                 if (alternative == null || alternative.missing() != 1) continue;
                 itemIds.addAll(alternative.itemIds());
                 recipeIds.add(candidate.recipeId());
@@ -1846,61 +1841,6 @@ public final class SemanticAcquireCompanionTask
                 || source == SemanticAcquireTaskRecord.Source.NEARBY
                 || source == SemanticAcquireTaskRecord.Source.STORAGE
                 || source == SemanticAcquireTaskRecord.Source.MINE;
-    }
-
-    /**
-     * Collapse repeated recipe slots with the exact same acceptable-item set into one quantity.
-     * A three-slot stone-material row is one need for three interchangeable materials, not three
-     * separate planner branches.
-     */
-    private IngredientNeed chooseIngredient(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
-        // 同样的可替代原料组先合并数量；优先验证最难或需要授权的那组，避免先做一堆配件最后才发现关键原料拿不到。
-        Map<List<ResourceLocation>, Integer> missingByItems = new LinkedHashMap<>();
-        for (var ingredient : candidate.ingredients()) {
-            int missing = ingredient.missing();
-            if (missing <= 0) continue;
-            List<ResourceLocation> ids = ingredient.itemIds().stream()
-                    .filter(id -> !parent.lineageItems.contains(id))
-                    .toList();
-            // 只要一组必需材料绕回祖先，整个配方就不能继续；不能先去做染料，最后才发现染床还得先有床。
-            if (ids.isEmpty()) return null;
-            missingByItems.merge(ids, missing, Integer::sum);
-        }
-        List<IngredientNeed> choices = new ArrayList<>();
-        for (Map.Entry<List<ResourceLocation>, Integer> entry : missingByItems.entrySet()) {
-            choices.add(new IngredientNeed(entry.getKey(), entry.getValue()));
-        }
-        List<RankedIngredient> ranked = new ArrayList<>();
-        for (IngredientNeed choice : choices) {
-            ranked.add(new RankedIngredient(
-                    choice,
-                    ingredientRequiresDecision(choice.itemIds(), parent),
-                    recipePlanner.ingredientStructureCost(choice.itemIds(), parent)));
-        }
-        return ranked.stream()
-                // 先验证权限受限、转换层数更深或数量更多的原料，避免先做一堆容易的配件。
-                .sorted(Comparator
-                        .comparing(RankedIngredient::decisionRequired).reversed()
-                        .thenComparing(Comparator.comparingInt(
-                                RankedIngredient::structureCost).reversed())
-                        .thenComparing(Comparator.comparingInt(
-                                (RankedIngredient rankedIngredient) ->
-                                        rankedIngredient.ingredient().missing())
-                                .reversed())
-                        .thenComparing(rankedIngredient -> String.join(",",
-                                itemStrings(rankedIngredient.ingredient().itemIds()))))
-                .map(RankedIngredient::ingredient)
-                .findFirst().orElse(null);
-    }
-
-    private boolean ingredientRequiresDecision(
-            List<ResourceLocation> itemIds, AcquisitionNeed parent) {
-        if (r.allowHarm
-                || !parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT)) {
-            return false;
-        }
-        SemanticAcquireTaskRecord.SourceHint hint = SemanticSourceKnowledge.infer(itemIds);
-        return !hint.entityTypeIds().isEmpty() && hint.blockRefs().isEmpty();
     }
 
     private NearbySurvey surveyNearby(List<ResourceLocation> ids) {
