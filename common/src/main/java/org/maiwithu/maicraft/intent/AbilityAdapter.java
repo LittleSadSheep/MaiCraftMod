@@ -60,7 +60,7 @@ final class AbilityAdapter {
             case "maicraft:defeat_ender_dragon" -> defeatEnderDragon(goal);
             case "maicraft:obtain_elytra" -> obtainElytra(goal);
             case "maicraft:craft" -> craft(goal);
-            case "maicraft:cook" -> cook(goal);
+            case CookAbilityAdapter.ABILITY -> CookAbilityAdapter.adapt(goal, player);
             case EnchantAbilityAdapter.ABILITY -> EnchantAbilityAdapter.adapt(goal, player, runtime);
             case "maicraft:trade" -> trade(goal);
             case "maicraft:build" -> build(goal, player, runtime);
@@ -594,29 +594,6 @@ final class AbilityAdapter {
         sources.add("craft");
         args.add("allowed_sources", sources);
         return new IntentAction.Tool("acquire_items", args.toString());
-    }
-
-    private static IntentAction cook(Goal goal) {
-        // 烹饪要的成品、总数量、允许的燃料和原料来源传给烹饪任务；炉子菜单怎么操作留给它处理。
-        JsonObject parameters = goal.parameters();
-        String item = itemId(goal, parameters);
-        if (item == null) {
-            return decision(goal, "Cook needs a namespaced item_id.",
-                    List.of(option("retry",
-                                    "Retry with details.parameters.item_id and count."),
-                            option("cancel", "Cancel the task.")));
-        }
-        JsonObject args = new JsonObject();
-        args.addProperty("item_id", item);
-        args.addProperty("count", integer(parameters, "count", 1, 1, 256));
-        for (String key : List.of(
-                "recipe_preference", "allowed_fuels", "allowed_sources",
-                "allow_harm", "protected_labels")) {
-            if (parameters.has(key)) {
-                args.add(key, parameters.get(key).deepCopy());
-            }
-        }
-        return new IntentAction.Tool("cook", args.toString());
     }
 
     private static IntentAction trade(Goal goal) {

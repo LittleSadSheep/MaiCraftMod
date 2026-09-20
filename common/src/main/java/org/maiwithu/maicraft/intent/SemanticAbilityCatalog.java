@@ -294,14 +294,16 @@ public final class SemanticAbilityCatalog {
                             field("item_id", "resource_id", "Requested output."),
                             field("count", "integer", "Requested final inventory count, not number of clicks.")));
             case "maicraft:cook" -> contract(
-                    "Cook an item through an ordinary furnace-family workstation. Recipe, input, fuel quantity, workstation, path and synchronized GUI transactions belong to MaiCraft.",
-                    targets("nearest", "prior_result"),
+                    "Cook an item through an ordinary furnace-family workstation from the current location. "
+                            + "Use a sequence with travel first to cook elsewhere; nearest accepts no qualifiers. "
+                            + "Recipe, input, fuel quantity, workstation, path and synchronized GUI transactions belong to MaiCraft.",
+                    targets("nearest"),
                     fields(
                             field("item_id", "resource_id", "Requested cooked output."),
-                            field("count", "integer", "Required final main-inventory count, not operations."),
+                            field("count", "integer", "Required final main-inventory count from 1 to 2304, not operations; default 1."),
                             field("recipe_preference", "string", "Auto, fastest, preserve_rare, smelting, blasting, smoking or campfire; campfire currently returns a structured unsupported decision."),
                             field("allowed_fuels", "array<resource_id>", "Optional fuel policy; omit for a conservative ordinary-fuel set."),
-                            field("allowed_sources", "array<string>", "Where MaiCraft may obtain recipe input, fuel and a required workstation; recursive cook edges are removed to prevent cycles."),
+                            field("allowed_sources", "array<string>", "Where MaiCraft may obtain recipe input, fuel and a required workstation. The cook source is rejected to prevent recursive cooking."),
                             field("allow_harm", "boolean", "Whether recursively acquiring inputs may harm living entities; default false."),
                             field("protected_labels", "array<string>", "Remembered places or possessions recursive acquisition must not touch.")));
             // 向模型公开的是单件附魔意图、真实报价档位和成本；具体槽位与按钮由可见的原生界面执行器决定。

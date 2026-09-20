@@ -21,6 +21,11 @@ public final class GoalCheckpointCompatibilityTest {
         verify(new Goal("maicraft:acquire_items", "旧版取物地点",
                 new Goal.SemanticTarget("landmark", "营地", null, null),
                 "{\"item_id\":\"minecraft:dirt\"}", "{}", List.of(), List.of()));
+        verify(new Goal("maicraft:cook", "旧版烹饪数量", null,
+                "{\"item_id\":\"minecraft:iron_ingot\",\"count\":1.5}", "{}", List.of(), List.of()));
+        verify(new Goal("maicraft:cook", "旧版烹饪地点",
+                new Goal.SemanticTarget("prior_result", null, null, null),
+                "{\"item_id\":\"minecraft:iron_ingot\"}", "{}", List.of(), List.of()));
         System.out.println("GoalCheckpointCompatibilityTest: passed");
     }
 

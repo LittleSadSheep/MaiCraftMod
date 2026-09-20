@@ -18,7 +18,7 @@ final class SemanticGoalContract {
         validate(goal, knownAbilities, "goal", false);
     }
 
-    /** 旧等待和取物参数曾被宽松接收；保留历史供查询、取消和修订，重新执行仍须通过当前检查。 */
+    /** 旧等待、取物和烹饪参数曾被宽松接收；保留历史供查询、取消和修订，重新执行仍须通过当前检查。 */
     static void validateRestored(Goal goal, Set<String> knownAbilities) {
         validate(goal, knownAbilities, "goal", true);
     }
@@ -41,6 +41,12 @@ final class SemanticGoalContract {
             try { AcquireAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_acquisition_contract", path, ability, invalid.getMessage());
+            }
+        }
+        if (!restoredHistory && CookAbilityAdapter.ABILITY.equals(ability)) {
+            try { CookAbilityAdapter.validate(goal); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_cooking_contract", path, ability, invalid.getMessage());
             }
         }
         validateTarget(goal, path, ability, restoredHistory);
@@ -143,6 +149,8 @@ final class SemanticGoalContract {
         // 旧版声明支持这些地点却没有执行；保留原请求供审阅，重新启动时由取物适配器明确拒绝。
         if (restoredHistory && AcquireAbilityAdapter.ABILITY.equals(ability) && kind != null
                 && Set.of("nearest", "area", "landmark", "prior_result").contains(kind)) return;
+        if (restoredHistory && CookAbilityAdapter.ABILITY.equals(ability) && kind != null
+                && Set.of("nearest", "prior_result").contains(kind)) return;
         if (kind == null || !SemanticAbilityCatalog.targetKinds(ability).contains(kind)) {
             throw violation("unsupported_target_kind", path + ".target.kind", ability,
                     ability + " does not accept target kind '" + kind + "'.");
