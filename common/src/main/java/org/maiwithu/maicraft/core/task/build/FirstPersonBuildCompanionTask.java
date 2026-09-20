@@ -46,6 +46,20 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.function.BiFunction;
+import java.util.function.ToIntFunction;
+import java.util.stream.Collectors;
+import net.minecraft.world.level.block.FallingBlock;
+import org.maiwithu.maicraft.client.preview.PreviewSession;
+import org.maiwithu.maicraft.core.integration.ultimine.UltimineSession;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
+import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
+import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /** 实际施工：先逐格检查，再走到合适位置拿材料、瞄准、放置；最后复查成品并拆掉自己搭的临时支撑。 */
 class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecord>
@@ -76,7 +90,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final Set<BlockPos> excavationAuthority;
     private boolean excavating;
     private final BuildExcavationTools excavationTools;
-    private org.maiwithu.maicraft.core.integration.ultimine.UltimineSession ultimine;
+    private UltimineSession ultimine;
     private boolean ultimineArmed;
     private String ultimineFailure;
     private int ultimineBatches;
@@ -89,7 +103,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BuildExcavationSpoilSupply spoilSupply = new BuildExcavationSpoilSupply();
     private final List<Map<String, Object>> spoilReceipts = new ArrayList<>();
     private final BuildFoodPreparation foodPreparation = new BuildFoodPreparation();
-    private final java.util.function.BiFunction<LocalPlayer, Double, HitResult> placementRay;
+    private final BiFunction<LocalPlayer, Double, HitResult> placementRay;
     private final Map<Long, BuildTaskRecord.Target> targets = new LinkedHashMap<>();
     private final LongOpenHashSet protectedCells = new LongOpenHashSet();
     private final LongOpenHashSet scaffoldAirCells = new LongOpenHashSet();
@@ -198,12 +212,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     FirstPersonBuildCompanionTask(LocalPlayer player, BuildTaskRecord record,
-            java.util.function.BiFunction<LocalPlayer, Double, HitResult> placementRay) {
+            BiFunction<LocalPlayer, Double, HitResult> placementRay) {
         // 保存全部目标并按施工顺序排序，记住不能让导航破坏的格子，以及上一批留下的临时支撑。
         super(player, record);
         this.placementRay = placementRay;
         excavationAuthority = record.targets.stream().map(BuildTaskRecord.Target::pos)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
         rules = new BuildCellRules(player, record);
         inventory = new BuildInventory(player);
         digger = new BlockDigger(player);
@@ -263,9 +277,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     @Override protected TaskState onTick() {
         // Dev 预览还没确认就等待，点取消就结束；确认后才按当前阶段逐步施工。
         var preview = BuildPreviewGate.await(r, r);
-        if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.WAITING)
+        if (preview == PreviewSession.Decision.WAITING)
             return TaskState.RUNNING;
-        if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
+        if (preview == PreviewSession.Decision.CANCELLED)
             return TaskState.CANCELLED;
         // 高处回收接近使用带禁拆观察的代理，整个跨刻导航期间保持其身份，原生支撑确认仍转回本项目。
         if (scaffoldAccess != null) BuildPlacementRegistry.register(player, scaffoldAccess.provider());
@@ -504,7 +518,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (!missing.isEmpty()) note = "partial mode pauses when carried materials run out";
         preflightDone = true; queue = new ArrayList<>(plans); queueAt = 0;
-        queue.sort(java.util.Comparator.comparing(CellPlan::target, BuildLayerFrontier.order(targets)));
+        queue.sort(Comparator.comparing(CellPlan::target, BuildLayerFrontier.order(targets)));
         registerProvider(); phase = Phase.EXCAVATE; return TaskState.RUNNING;
     }
 
@@ -527,7 +541,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (r.excavationCargo().capacityLow(player)) {
             var excess = r.excavationCargo().unloadable(player, scaffoldReservations());
             if (!excess.isEmpty() && r.toolSupply().policy()
-                    != org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY) {
+                    != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY) {
                 TaskState access = leaveExcavationBefore(Phase.EXCAVATE);
                 if (access != null) return access;
                 spoilSupply.begin(player, r.getToolCallId() + "/excavation-spoil", r.getDeadlineGameTime(),
@@ -540,7 +554,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             excavating = false;
             digger.preferTopFace(false);
             if (excavation.remaining() == 0) {
-                if (r.toolSupply().policy() != org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
+                if (r.toolSupply().policy() != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                         && required.entrySet().stream().anyMatch(e -> inventory.mainInventoryCount(e.getKey()) < e.getValue())) {
                     TaskState access = leaveExcavationBefore(Phase.SELECT);
                     if (access != null) return access;
@@ -676,8 +690,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState clearNavTick() {
         if (excavating && !excavationTools.active() && player.level().isLoaded(clearing)
                 && !player.level().getBlockState(clearing).isAir()
-                && r.toolSupply().policy() != org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
-                && org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.excavationTool(
+                && r.toolSupply().policy() != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
+                && WorkToolPreparation.excavationTool(
                         player, player.level().getBlockState(clearing), excavation.remaining()) != null) {
             TaskState access = leaveExcavationBefore(Phase.CLEAR_NAV);
             if (access != null) return access;
@@ -739,8 +753,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             var holding = new LinkedHashMap<>(ultimineEvidence);
             holding.putAll(ultimine.holdEvidence()); holding.put("status", "holding_native_break");
             ultimineEvidence = Map.copyOf(holding);
-            if (decision.status() == org.maiwithu.maicraft.core.integration.ultimine.UltimineSession.Status.ABORT
-                    || decision.status() == org.maiwithu.maicraft.core.integration.ultimine.UltimineSession.Status.BLOCKED) {
+            if (decision.status() == UltimineSession.Status.ABORT
+                    || decision.status() == UltimineSession.Status.BLOCKED) {
                 digger.cancel();
                 failAt(clearing, decision.code(), FailureType.TARGET_LOST, "ultimine_break_interrupted", true);
                 return TaskState.FAILED;
@@ -794,11 +808,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 本批破坏确认后才松开连锁键，再等 FTB 确认松开，避免下一项普通操作误带连锁效果。
         if (ultimine != null) {
             var release = ultimine.finish(ClientRuntime.requireContext(player));
-            if (release.status() == org.maiwithu.maicraft.core.integration.ultimine.UltimineSession.Status.WAITING) {
+            if (release.status() == UltimineSession.Status.WAITING) {
                 phase = Phase.CLEAR_RELEASE; return TaskState.RUNNING;
             }
-            if (release.status() == org.maiwithu.maicraft.core.integration.ultimine.UltimineSession.Status.ABORT
-                    || release.status() == org.maiwithu.maicraft.core.integration.ultimine.UltimineSession.Status.BLOCKED) {
+            if (release.status() == UltimineSession.Status.ABORT
+                    || release.status() == UltimineSession.Status.BLOCKED) {
                 failAt(clearing, release.code(), FailureType.TARGET_LOST, "ultimine_release_interrupted", false);
                 return TaskState.FAILED;
             }
@@ -845,7 +859,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private boolean prepareExcavationBreak(BlockHitResult hit) {
         // 按准星实际命中面使用原生选区；蓝图中已经挖空的格子仍在施工范围内，成品和受保护方块始终排除。
         if (!excavating) return true;
-        if (ultimine == null) ultimine = new org.maiwithu.maicraft.core.integration.ultimine.UltimineSession();
+        if (ultimine == null) ultimine = new UltimineSession();
         var decision = ultimine.prepare(ClientRuntime.requireContext(player), hit, excavationAuthority, at -> {
             var target = targets.get(at.asLong());
             return r.hasExecutionGuards() || target == null || at.equals(player.blockPosition().below())
@@ -853,7 +867,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     || !r.replaceMode.allows(player.level().getBlockState(at), target.desiredState())
                     || !BuildCellRules.isAirTarget(target) && target.constructionMatches(player.level().getBlockState(at));
         });
-        ultimineEvidence = Map.of("status", decision.status().name().toLowerCase(java.util.Locale.ROOT),
+        ultimineEvidence = Map.of("status", decision.status().name().toLowerCase(Locale.ROOT),
                 "reason", decision.code(), "native_selected_cells", decision.completeSelection().size(),
                 "confirmed_native_batches", ultimineBatches);
         return switch (decision.status()) {
@@ -1040,7 +1054,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (!isTemporary(candidate) && onConstructionLayer(candidate) && layerPending(candidate)
                     && (best < 0 || preference.compare(candidate.target(), queue.get(best).target()) < 0)) best = i;
         }
-        if (best >= 0) java.util.Collections.swap(queue, queueAt, best);
+        if (best >= 0) Collections.swap(queue, queueAt, best);
     }
 
     // 先找当前伸手就够得着的待建格，最多验证十六格或约四毫秒；找到就移到队首，减少来回走路。
@@ -1068,7 +1082,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             var available = BuildPlacementGeometry.currentGesture(player, candidate.target(), targets,
                     g -> placementAttempts.allows(candidate.target(), g));
             if (available == null) continue;
-            java.util.Collections.swap(queue, queueAt, i); cell = candidate;
+            Collections.swap(queue, queueAt, i); cell = candidate;
             stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
             placementWalkTarget = approach; stopNav();
             liveGestures = List.of(); gestureSearch = null; gestureProgress = null;
@@ -1101,7 +1115,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private boolean seekRaisedFooting() {
         return supportedCell == null && worksite == null && useCount == 0 && queueAt < queue.size()
-                && !java.util.Objects.equals(lastPlacedTarget, footingSearchAfter) && raisedPermanentFooting();
+                && !Objects.equals(lastPlacedTarget, footingSearchAfter) && raisedPermanentFooting();
     }
 
     // 做完一格后尝试继续利用原站位。现场、材料或剩余任务变了就重新检查，没有可做的格子才放弃该站位。
@@ -1123,7 +1137,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (index >= 0 && readyForWorksite(pending)
                     && BuildPlacementGeometry.liveGestureFrom(player, target, targets, worksite.feet(),
                     g -> placementAttempts.allows(target, g)) != null) {
-                java.util.Collections.swap(queue, queueAt, queueAt + index);
+                Collections.swap(queue, queueAt, queueAt + index);
                 return;
             }
         }
@@ -1155,7 +1169,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             worksiteAttempts++; worksiteMovement.reset();
             BuildTaskRecord.Target first = worksite.placements().getFirst().target();
             for (int i = queueAt; i < queue.size(); i++) if (queue.get(i).target() == first) {
-                java.util.Collections.swap(queue, queueAt, i); cell = queue.get(queueAt); break;
+                Collections.swap(queue, queueAt, i); cell = queue.get(queueAt); break;
             }
             gesture = worksite.placements().getFirst().gesture(); liveGestures = List.of(); gestureAt = 0;
             stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
@@ -1188,9 +1202,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (feet.getY() <= player.level().getMinBuildHeight() || feet.getY() > player.level().getMaxBuildHeight()) return false;
         try {
         var box = player.getBoundingBox();
-        var corridor = new org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor(player.level(), player.level()::isLoaded,
+        var corridor = new GroundCorridor(player.level(), player.level()::isLoaded,
                 box.getXsize(), box.getYsize(), unionForbidden(NavigationSafetyContext.forbiddenBodyCells()),
-                org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles());
+                EmbeddedBaritoneRuntime.physicalObstacles());
         Vec3 standing = corridor.stance(feet);
         return standing != null && Math.abs(standing.y - feet.getY()) < 1e-5
                 || player.level().getBlockState(feet.below()).isAir() && scaffoldPermitted(feet.below(), null);
@@ -1259,7 +1273,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (currentPlacementComplete()) { finishPlaced(); return TaskState.RUNNING; }
         // 原路线刚结束或身体意外腾空时先落稳，不能提前开背包、选物或用潜行截断登阶。
         if (!placementFooting.ready(player)) { placementProofFeet = null; return holdWhileFootingSettles(); }
-        if (!org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime
+        if (!EmbeddedBaritoneRuntime
                 .yieldActiveForExternalAction(player)) return TaskState.RUNNING;
         placementPostureAndMotion();
         if (placementAccess != null && placementAccess.edgeActive()) {
@@ -1328,7 +1342,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         InputDriver.lookAt(player, gesture.point());
         if (player.isShiftKeyDown() != gesture.sneak()) return waitForAim("waiting_for_posture", false);
         HitResult crosshair = placementRay.apply(player, 4.5);
-        aimHit = crosshair.getType().name().toLowerCase(java.util.Locale.ROOT);
+        aimHit = crosshair.getType().name().toLowerCase(Locale.ROOT);
         if (crosshair instanceof BlockHitResult blockHit && crosshair.getType() == HitResult.Type.BLOCK)
             aimHit += ":" + BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(blockHit.getBlockPos()).getBlock());
         if (crosshair.getType() != HitResult.Type.BLOCK || !(crosshair instanceof BlockHitResult hit)
@@ -1607,8 +1621,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     // 按剩余队列记录每种材料下一次使用有多远，并补上世界里又变坏的目标；没有后续用途才能清理。
-    private java.util.function.ToIntFunction<Item> creativeNeeds() {
-        return new java.util.function.ToIntFunction<>() {
+    private ToIntFunction<Item> creativeNeeds() {
+        return new ToIntFunction<>() {
             private Map<Item, Integer> next;
             public int applyAsInt(Item item) {
                 if (next == null) {
@@ -1643,7 +1657,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
         List<CellPlan> pending = BuildTemporarySupportPlan.defer(queue, queueAt, this::layerPending);
         if (!isTemporary(cell) && pending.stream().anyMatch(candidate -> candidate != cell && onConstructionLayer(candidate))) {
-            pending.sort(java.util.Comparator.comparingInt(candidate -> BuildLayerFrontier.layer(candidate.target())));
+            pending.sort(Comparator.comparingInt(candidate -> BuildLayerFrontier.layer(candidate.target())));
             queue = pending;
             queueAt = 0;
             note = "trying other cells in the same structural layer before temporary supports";
@@ -1666,7 +1680,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     // 临时点击支撑最终会拆掉，因此原目标必须本来就能存活，不能靠临时垫块永久托住沙子或悬空装饰。
     private TaskState prepareTemporarySupports() {
         // Supports used only to obtain a click face must not be required for final survival.
-        if (supportedCell != null || isTemporary(cell) || cell.target().block() instanceof net.minecraft.world.level.block.FallingBlock
+        if (supportedCell != null || isTemporary(cell) || cell.target().block() instanceof FallingBlock
                 || !cell.target().desiredState().canSurvive(player.level(), cell.target().pos())) return null;
         scaffoldDropRisk = Map.of();
         List<BlockPos> chain = BuildTemporarySupportPlan.find(player.level(), player.level()::isLoaded,
@@ -1678,7 +1692,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.FAILED;
         }
         Item material = BuildTemporarySupportMaterials.choose(
-                org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials.of(player), scaffoldReservations(),
+                ScaffoldMaterials.of(player), scaffoldReservations(),
                 inventory::mainInventoryCount, chain.size(), player.getAbilities().instabuild && !r.consumeMaterials);
         if (material == null) {
             failAt(cell.target().pos(), "placement needs " + chain.size()
@@ -1752,7 +1766,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             }
             supportAccess = new BuildSupportAccess(player, supportedCell.target(), supportVerificationRemaining, supportMaterial,
                     pos -> scaffoldPermitted(pos, null), unionForbidden(NavigationSafetyContext.forbiddenBodyCells()),
-                    org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles());
+                    EmbeddedBaritoneRuntime.physicalObstacles());
         }
         boolean done = supportAccess.advance(16);
         var evidence = new LinkedHashMap<>(supportAccess.evidence());
@@ -2478,7 +2492,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public Map<String, Object> progress() {
-        Map<String, Object> data = new LinkedHashMap<>(Map.of("task", name(), "phase", phase.name().toLowerCase(java.util.Locale.ROOT),
+        Map<String, Object> data = new LinkedHashMap<>(Map.of("task", name(), "phase", phase.name().toLowerCase(Locale.ROOT),
                 "planned_cells", r.targets.size(), "verified_cells", r.completed(),
                 "requested_blocks", r.targets.size(), "verified_blocks", r.completed(),
                 "placed_blocks", r.placed(), "cleared_blocks", r.broken(),
@@ -2599,7 +2613,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("ultimine_held_break_ticks", ultimineHeldTicks);
         if (!lastUltimineHold.isEmpty()) data.put("last_confirmed_ultimine_hold", lastUltimineHold);
         if (!ultimineEvidence.isEmpty()) data.put("ultimine", ultimineEvidence);
-        data.put("stopped_phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        data.put("stopped_phase", phase.name().toLowerCase(Locale.ROOT));
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
         data.put("construction_access", stanceNavigation.stage());
         data.put("construction_navigation", navigationDiagnostics());

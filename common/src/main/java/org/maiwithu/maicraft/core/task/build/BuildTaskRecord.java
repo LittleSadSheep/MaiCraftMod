@@ -17,6 +17,31 @@ import net.minecraft.world.level.block.state.properties.SlabType;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.SeaPickleBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
+import net.minecraft.world.level.block.TurtleEggBlock;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import org.maiwithu.maicraft.core.build.BlueprintSafety;
+import org.maiwithu.maicraft.core.build.BuildStates;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /** 一份具体施工单：每一格最后要是什么、能否替换原方块、材料要求、保护范围，以及当前完成数量。 */
 public final class BuildTaskRecord extends TaskRecord implements InternalPositionReceipt {
@@ -42,7 +67,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private int broken;
     private int completed;
     private int droppedAtLoad;
-    private Map<Long, java.util.List<CellNeed>> cellNeeds = Map.of();
+    private Map<Long, List<CellNeed>> cellNeeds = Map.of();
     /** 规划器给出的楼层、房间等预期概况；施工通过最终检查后才会把它作为整体验证结果附上。 */
     private Map<String, Object> semanticFacts = Map.of();
     /** 建好后必须能走通的入口、房间和上下楼位置。 */
@@ -50,9 +75,9 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     /** 建造完成后保留的位置，让下一步能引用“刚建好的地方”。 */
     private Position verifiedPosition;
     private List<BlockPos> protectedNavigationCells = List.of();
-    private java.util.function.Predicate<net.minecraft.client.player.LocalPlayer> preflightGuard = player -> true;
-    private java.util.function.BiPredicate<net.minecraft.client.player.LocalPlayer, BlockPos> mutationGuard = (player, pos) -> true;
-    private java.util.function.BiConsumer<net.minecraft.client.player.LocalPlayer, BlockPos> confirmedMutation = (player, pos) -> {};
+    private Predicate<LocalPlayer> preflightGuard = player -> true;
+    private BiPredicate<LocalPlayer, BlockPos> mutationGuard = (player, pos) -> true;
+    private BiConsumer<LocalPlayer, BlockPos> confirmedMutation = (player, pos) -> {};
     private boolean hasExecutionGuards;
     private boolean previewManaged;
     /** 仅供内部补料流程使用：先回到施工区外地面，临时支撑仍留在共享账中，后续正常施工负责清理。 */
@@ -62,12 +87,12 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     BuildExcavationCargo excavationCargo() { return excavationCargo; }
     private String projectId;
     private List<String> projectProtectionLabels = List.of();
-    private java.util.function.Consumer<BuildTaskRecord> projectCheckpoint = plan -> {};
+    private Consumer<BuildTaskRecord> projectCheckpoint = plan -> {};
 
     public String projectId() { return projectId; }
     public List<String> projectProtectionLabels() { return projectProtectionLabels; }
     public void projectProtectionLabels(List<String> labels) { projectProtectionLabels = List.copyOf(labels); }
-    public void project(String id, java.util.function.Consumer<BuildTaskRecord> checkpoint) {
+    public void project(String id, Consumer<BuildTaskRecord> checkpoint) {
         projectId = id;
         projectCheckpoint = Objects.requireNonNull(checkpoint);
     }
@@ -75,17 +100,17 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
     BuildScaffoldLedger scaffoldLedger() { return scaffoldLedger; }
     /** 项目存储完成核验后绑定原生支撑变化回调；每个施工批次继续共享同一本账。 */
-    public void scaffoldPersistence(Map<BlockPos, BlockState> restored, java.util.function.Consumer<Map<BlockPos, BlockState>> checkpoint) {
+    public void scaffoldPersistence(Map<BlockPos, BlockState> restored, Consumer<Map<BlockPos, BlockState>> checkpoint) {
         scaffoldLedger.persistence(restored, checkpoint);
     }
     private List<BlockPos> materialSupplyProtection = List.of();
-    public record ToolSupply(org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy policy,
-            List<org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source> sources,
+    public record ToolSupply(SemanticMaterialSupplyCoordinator.MaterialPolicy policy,
+            List<SemanticAcquireTaskRecord.Source> sources,
             boolean allowHarm, List<String> protectedLabels) {
         public ToolSupply { sources = List.copyOf(sources); protectedLabels = List.copyOf(protectedLabels); }
     }
     private ToolSupply toolSupply = new ToolSupply(
-            org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY,
+            SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY,
             List.of(), false, List.of());
     public ToolSupply toolSupply() { return toolSupply; }
     public void toolSupply(ToolSupply value) { toolSupply = Objects.requireNonNull(value); }
@@ -117,9 +142,9 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
     /** 机器等特定流程可添加“开工前／每次修改前”的最新状态检查；普通建造默认没有这些额外检查。 */
     public void executionGuards(List<BlockPos> protectedCells,
-            java.util.function.Predicate<net.minecraft.client.player.LocalPlayer> beforeStart,
-            java.util.function.BiPredicate<net.minecraft.client.player.LocalPlayer, BlockPos> beforeMutation,
-            java.util.function.BiConsumer<net.minecraft.client.player.LocalPlayer, BlockPos> afterConfirmedMutation) {
+            Predicate<LocalPlayer> beforeStart,
+            BiPredicate<LocalPlayer, BlockPos> beforeMutation,
+            BiConsumer<LocalPlayer, BlockPos> afterConfirmedMutation) {
         this.protectedNavigationCells = protectedCells.stream().map(BlockPos::immutable).toList();
         this.preflightGuard = Objects.requireNonNull(beforeStart, "beforeStart");
         this.mutationGuard = Objects.requireNonNull(beforeMutation, "beforeMutation");
@@ -128,10 +153,10 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     }
 
     List<BlockPos> protectedNavigationCells() { return protectedNavigationCells; }
-    boolean preflightGuardMatches(net.minecraft.client.player.LocalPlayer player) { return preflightGuard.test(player); }
-    boolean mutationGuardMatches(net.minecraft.client.player.LocalPlayer player, BlockPos pos) { return mutationGuard.test(player, pos); }
+    boolean preflightGuardMatches(LocalPlayer player) { return preflightGuard.test(player); }
+    boolean mutationGuardMatches(LocalPlayer player, BlockPos pos) { return mutationGuard.test(player, pos); }
     boolean hasExecutionGuards() { return hasExecutionGuards; }
-    void confirmedMutation(net.minecraft.client.player.LocalPlayer player, BlockPos pos) { confirmedMutation.accept(player, pos); }
+    void confirmedMutation(LocalPlayer player, BlockPos pos) { confirmedMutation.accept(player, pos); }
 
     // 注:曾有 layerHeight(分层施工的层高门)。施工模型改为"低层优先的确定
     // 顺序 + 分遍补漏"之后,层高不再有任何裁决作用,留着就是个调了不起作用
@@ -208,7 +233,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
      */
     private static List<Target> promotePlainCells(List<Target> targets,
                                                   Map<Long, CompoundTag> blockEntityData) {
-        List<Target> out = new java.util.ArrayList<>(targets.size());
+        List<Target> out = new ArrayList<>(targets.size());
         for (Target t : targets) {
             boolean plain = !t.itemPlace()
                     && !t.strictIdentity()
@@ -216,7 +241,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
                     && t.desiredState().getProperties().isEmpty()
                     && !blockEntityData.containsKey(t.pos().asLong())
                     // 花盆物品只会放出空盆，不能因此把“带花的盆”当作同一种单次放置。
-                    && t.item() instanceof net.minecraft.world.item.BlockItem bi
+                    && t.item() instanceof BlockItem bi
                     && bi.getBlock() == t.desiredState().getBlock();
             out.add(plain
                     ? new Target(t.desiredState(), t.item(), t.pos(), t.label(),
@@ -245,20 +270,20 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
      *       少比一个组件就等于把手工活白送。</li>
      * </ul>
      */
-    public record CellNeed(net.minecraft.world.item.ItemStack stack, boolean exact) {
-        public boolean matches(net.minecraft.world.item.ItemStack other) {
+    public record CellNeed(ItemStack stack, boolean exact) {
+        public boolean matches(ItemStack other) {
             return exact
-                    ? net.minecraft.world.item.ItemStack.isSameItemSameComponents(stack, other)
+                    ? ItemStack.isSameItemSameComponents(stack, other)
                     : other.is(stack.getItem());
         }
     }
 
     /** 特殊格子的材料清单，例如带花的盆要盆和花；当前普通施工会要求这类组合效果走专门流程。 */
-    public Map<Long, java.util.List<CellNeed>> cellNeeds() {
+    public Map<Long, List<CellNeed>> cellNeeds() {
         return cellNeeds;
     }
 
-    public void cellNeeds(Map<Long, java.util.List<CellNeed>> needs) {
+    public void cellNeeds(Map<Long, List<CellNeed>> needs) {
         this.cellNeeds = Map.copyOf(needs);
     }
 
@@ -311,7 +336,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
     /** 一只待生成的摆设实体:落位点、图纸旋转、剥干净的 NBT。 */
     public record EntitySpawn(double x, double y, double z,
-                              net.minecraft.world.level.block.Rotation rotation,
+                              Rotation rotation,
                               CompoundTag nbt) {
 
         /**
@@ -325,11 +350,11 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
          */
         public Item item() {
             return switch (nbt.getString("id")) {
-                case "minecraft:item_frame" -> net.minecraft.world.item.Items.ITEM_FRAME;
-                case "minecraft:glow_item_frame" -> net.minecraft.world.item.Items.GLOW_ITEM_FRAME;
-                case "minecraft:armor_stand" -> net.minecraft.world.item.Items.ARMOR_STAND;
-                case "minecraft:painting" -> net.minecraft.world.item.Items.PAINTING;
-                default -> net.minecraft.world.item.Items.AIR;
+                case "minecraft:item_frame" -> Items.ITEM_FRAME;
+                case "minecraft:glow_item_frame" -> Items.GLOW_ITEM_FRAME;
+                case "minecraft:armor_stand" -> Items.ARMOR_STAND;
+                case "minecraft:painting" -> Items.PAINTING;
+                default -> Items.AIR;
             };
         }
 
@@ -339,9 +364,9 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
          * <p>躯壳一件料,身上的东西另算:框白送而框里的剑也白送,那就是凭空造物品;
          * 框收料而框里的剑不给,玩家又会觉得图纸没还原。收什么放什么,账才是平的。
          */
-        public java.util.List<net.minecraft.world.item.ItemStack> payload(
-                net.minecraft.core.HolderLookup.Provider registries) {
-            return org.maiwithu.maicraft.core.build.BlueprintSafety.payloadStacks(nbt, registries);
+        public List<ItemStack> payload(
+                HolderLookup.Provider registries) {
+            return BlueprintSafety.payloadStacks(nbt, registries);
         }
     }
 
@@ -351,21 +376,21 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
      */
     public record Target(BlockState desiredState, Item item, BlockPos pos, String label,
                          Direction facing, Direction.Axis axis, Boolean topHalf,
-                         boolean itemPlace, java.util.Set<String> exactProperties, boolean strictIdentity,
-                         java.util.Set<String> finalProperties) {
+                         boolean itemPlace, Set<String> exactProperties, boolean strictIdentity,
+                         Set<String> finalProperties) {
         public Target(BlockState desiredState, Item item, BlockPos pos, String label,
                       Direction facing, Direction.Axis axis, Boolean topHalf, boolean itemPlace,
-                      java.util.Set<String> exactProperties, boolean strictIdentity) {
+                      Set<String> exactProperties, boolean strictIdentity) {
             this(desiredState, item, pos, label, facing, axis, topHalf, itemPlace, exactProperties, strictIdentity, null);
         }
         public Target(BlockState desiredState, Item item, BlockPos pos, String label,
                       Direction facing, Direction.Axis axis, Boolean topHalf, boolean itemPlace,
-                      java.util.Set<String> exactProperties) {
+                      Set<String> exactProperties) {
             this(desiredState, item, pos, label, facing, axis, topHalf, itemPlace, exactProperties, false);
         }
         public Target(BlockState desiredState, Item item, BlockPos pos, String label,
                       Direction facing, Direction.Axis axis, Boolean topHalf, boolean itemPlace) {
-            this(desiredState, item, pos, label, facing, axis, topHalf, itemPlace, java.util.Set.of());
+            this(desiredState, item, pos, label, facing, axis, topHalf, itemPlace, Set.of());
         }
         public Target(BlockState desiredState, Item item, BlockPos pos, String label,
                       Direction facing, Direction.Axis axis, Boolean topHalf) {
@@ -381,20 +406,20 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         /** 允许按正常物品放置结果处理；要求精确类型、空气、液体或非方块物品时不作这种转换。 */
         public Target asItemPlace() {
             if (strictIdentity || desiredState.isAir()
-                    || desiredState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock
-                    || !(item instanceof net.minecraft.world.item.BlockItem)) {
+                    || desiredState.getBlock() instanceof LiquidBlock
+                    || !(item instanceof BlockItem)) {
                 return this;
             }
             return new Target(desiredState, item, pos, label, facing, axis, topHalf, true, exactProperties, strictIdentity, finalProperties);
         }
 
         public Target {
-            exactProperties = exactProperties == null ? java.util.Set.of() : java.util.Set.copyOf(exactProperties);
+            exactProperties = exactProperties == null ? Set.of() : Set.copyOf(exactProperties);
             // 最终属性集合为空表示只要求方块种类；null 则保留旧入口的比较规则，两者含义不同。
-            finalProperties = finalProperties == null ? null : java.util.Set.copyOf(finalProperties);
+            finalProperties = finalProperties == null ? null : Set.copyOf(finalProperties);
             desiredState = Objects.requireNonNull(desiredState, "desiredState");
             // 目标状态先经过 BuildStates 的统一整理，再检查显式属性是否合法；具体会整理哪些属性要看该类。
-            desiredState = org.maiwithu.maicraft.core.build.BuildStates.normalize(desiredState);
+            desiredState = BuildStates.normalize(desiredState);
             item = Objects.requireNonNull(item, "item");
             pos = Objects.requireNonNull(pos, "pos").immutable();
             for (String property : exactProperties) {
@@ -433,31 +458,31 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
             if (desiredState == null || desiredState.isAir()) {
                 return 0;
             }
-            if (desiredState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock) {
+            if (desiredState.getBlock() instanceof LiquidBlock) {
                 return 0;
             }
             if (desiredState.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
                     && desiredState.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)
-                    == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER) {
+                    == DoubleBlockHalf.UPPER) {
                 return 0;
             }
             if (desiredState.hasProperty(BlockStateProperties.BED_PART)
                     && desiredState.getValue(BlockStateProperties.BED_PART)
-                    == net.minecraft.world.level.block.state.properties.BedPart.HEAD) {
+                    == BedPart.HEAD) {
                 return 0;
             }
             if (desiredState.hasProperty(BlockStateProperties.SLAB_TYPE)
                     && desiredState.getValue(BlockStateProperties.SLAB_TYPE)
-                    == net.minecraft.world.level.block.state.properties.SlabType.DOUBLE) {
+                    == SlabType.DOUBLE) {
                 return 2;
             }
-            if (desiredState.getBlock() instanceof net.minecraft.world.level.block.SnowLayerBlock) {
+            if (desiredState.getBlock() instanceof SnowLayerBlock) {
                 return desiredState.getValue(BlockStateProperties.LAYERS);
             }
-            if (desiredState.getBlock() instanceof net.minecraft.world.level.block.TurtleEggBlock) {
+            if (desiredState.getBlock() instanceof TurtleEggBlock) {
                 return desiredState.getValue(BlockStateProperties.EGGS);
             }
-            if (desiredState.getBlock() instanceof net.minecraft.world.level.block.SeaPickleBlock) {
+            if (desiredState.getBlock() instanceof SeaPickleBlock) {
                 return desiredState.getValue(BlockStateProperties.PICKLES);
             }
             // 一格四根蜡烛就是四根:少收三根等于白送三根
@@ -465,10 +490,10 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
                 return desiredState.getValue(BlockStateProperties.CANDLES);
             }
             // 藤蔓与发光地衣按贴了几个面算:一格贴三面是三份料
-            if (desiredState.is(net.minecraft.world.level.block.Blocks.VINE)
-                    || desiredState.is(net.minecraft.world.level.block.Blocks.GLOW_LICHEN)) {
+            if (desiredState.is(Blocks.VINE)
+                    || desiredState.is(Blocks.GLOW_LICHEN)) {
                 int faces = 0;
-                for (var side : new net.minecraft.world.level.block.state.properties.BooleanProperty[]{
+                for (var side : new BooleanProperty[]{
                         BlockStateProperties.NORTH, BlockStateProperties.EAST,
                         BlockStateProperties.SOUTH, BlockStateProperties.WEST,
                         BlockStateProperties.UP, BlockStateProperties.DOWN}) {
@@ -506,7 +531,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         public boolean acceptsPlacedState(BlockState state) {
             if (finalProperties != null) {
                 var placement = finalProperties.stream().filter(name -> BuildValidity.isPlacementProperty(
-                        desiredState.getBlock().getStateDefinition().getProperty(name))).collect(java.util.stream.Collectors.toSet());
+                        desiredState.getBlock().getStateDefinition().getProperty(name))).collect(Collectors.toSet());
                 return matchesProperties(state, placement);
             }
             return matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true);
@@ -519,7 +544,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
             return finalProperties == null ? matches(state) : state != null && state.getBlock() == desiredState.getBlock();
         }
 
-        private boolean matchesProperties(BlockState state, java.util.Set<String> properties) {
+        private boolean matchesProperties(BlockState state, Set<String> properties) {
             if (state == null || state.getBlock() != desiredState.getBlock()) return false;
             for (String name : properties) {
                 var property = desiredState.getBlock().getStateDefinition().getProperty(name);
