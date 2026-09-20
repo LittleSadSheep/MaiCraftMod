@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.integration.create.CreateTooltipKnowledge;
 import org.maiwithu.maicraft.core.integration.ponder.ReflectivePonderAccess;
+import java.util.Arrays;
 
 /** Client-thread-only registry facts plus automatically discovered Ponder reference documents. */
 public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
@@ -39,14 +40,14 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
             BuiltInRegistries.BLOCK.forEach(block -> {
                 ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
                 var entry = blockEntry(id, block);
-                if (java.util.Arrays.stream(terms).allMatch(entry.searchable()::contains)) entries.add(entry);
+                if (Arrays.stream(terms).allMatch(entry.searchable()::contains)) entries.add(entry);
             });
             // 粉末等没有方块形态的材料也能按名称或ID发现配方入口，搜索时不预读合成树。
             BuiltInRegistries.ITEM.forEach(item -> {
                 ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
                 String name = I18n.get(item.getDescriptionId());
                 String searchable = (id + " " + name).toLowerCase(Locale.ROOT);
-                if (java.util.Arrays.stream(terms).allMatch(searchable::contains)) entries.add(RecipeKnowledgeSource.entry(id, name));
+                if (Arrays.stream(terms).allMatch(searchable::contains)) entries.add(RecipeKnowledgeSource.entry(id, name));
             });
         }
         return entries;

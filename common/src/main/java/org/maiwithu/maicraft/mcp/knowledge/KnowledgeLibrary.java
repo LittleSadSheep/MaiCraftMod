@@ -13,6 +13,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import com.google.gson.GsonBuilder;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
 
 /** Metadata-only discovery, explicit Markdown reads, and a tool fallback for resource-blind hosts. */
 public final class KnowledgeLibrary {
@@ -82,8 +86,8 @@ public final class KnowledgeLibrary {
         if (document == null) document = BuildingModelContractResources.read(uri);
         if (PROCESSES.equals(uri) && document != null) {
             // 只有显式读这一页才展开机制参数；这里报告适配器契约，真实配方、菜单和材料仍由现场观察确认。
-            String contracts = new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(
-                    org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry.contracts());
+            String contracts = new GsonBuilder().setPrettyPrinting().create().toJson(
+                    NativeProcessRegistry.contracts());
             return new KnowledgeDocument(document.uri(), document.name(), document.title(), document.description(),
                     document.text() + "\n## 已注册原生机制契约\n\n```json\n" + contracts + "\n```\n");
         }
@@ -144,7 +148,7 @@ public final class KnowledgeLibrary {
         source.searchCandidates(query).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
         String[] terms = query.isEmpty() ? new String[0] : query.split("\\s+");
         List<KnowledgeDocument.Entry> matches = candidates.values().stream()
-                .filter(entry -> java.util.Arrays.stream(terms).allMatch(entry.searchable()::contains))
+                .filter(entry -> Arrays.stream(terms).allMatch(entry.searchable()::contains))
                 .sorted(Comparator.comparingInt((KnowledgeDocument.Entry entry) -> entry.uri().equals(INDEX) ? 0 : 1)
                         .thenComparing(KnowledgeDocument.Entry::uri)).toList();
         JsonArray hits = new JsonArray(); matches.stream().limit(limit).forEach(entry -> hits.add(entry.metadata()));
@@ -159,7 +163,7 @@ public final class KnowledgeLibrary {
 
     public static String digest(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)), 0, 8); }
-        catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
     private static KnowledgeDocument load(String path, String title, String description) {
         String name = "/assets/maicraft/knowledge/" + path + ".md";

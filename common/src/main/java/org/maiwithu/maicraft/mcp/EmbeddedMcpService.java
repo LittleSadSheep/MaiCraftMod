@@ -43,6 +43,11 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+import java.security.NoSuchAlgorithmException;
+import java.util.concurrent.ExecutionException;
+import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeException;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
 /**
  * 游戏进程里的 MCP 网络服务：接收请求、检查连接和格式，再把实际工作交给 RuntimeFacade。
@@ -206,7 +211,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         } catch (PayloadTooLargeException exception) {
             sendStatusSafely(exchange, 413, exception.getMessage());
         } catch (Exception exception) {
-            org.maiwithu.maicraft.core.Constants.LOG.debug("[maicraft-mcp] Transport request failed", exception);
+            Constants.LOG.debug("[maicraft-mcp] Transport request failed", exception);
             sendStatusSafely(exchange, 500, "Internal MCP transport error");
         }
     }
@@ -286,7 +291,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         } catch (IllegalArgumentException exception) {
             response = error(id, -32602, exception.getMessage());
         } catch (Exception exception) {
-            org.maiwithu.maicraft.core.Constants.LOG.error("[maicraft-mcp] RPC dispatch failed: {}", method, exception);
+            Constants.LOG.error("[maicraft-mcp] RPC dispatch failed: {}", method, exception);
             response = error(id, -32603, "Internal error");
         }
         sendJson(exchange, 200, response, session);
@@ -395,7 +400,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             boolean knowledge = PublicToolCatalog.PERCEIVE.equals(name) && "knowledge".equals(nullableString(arguments, "view"));
             stage = switch (name) {
                 case PublicToolCatalog.PERCEIVE -> knowledge ? runtime.knowledge(
-                        org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary.perceptionRequest(arguments)) : runtime.perceive(arguments);
+                        KnowledgeLibrary.perceptionRequest(arguments)) : runtime.perceive(arguments);
                 case PublicToolCatalog.PLAN -> runtime.plan(arguments);
                 case PublicToolCatalog.EXECUTE -> runtime.execute(arguments);
                 case PublicToolCatalog.TASK -> runtime.task(arguments);
@@ -440,7 +445,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 return semanticContractError(violation, requestKey);
             }
             if (!(failure instanceof IllegalArgumentException || failure instanceof IllegalStateException)) {
-                org.maiwithu.maicraft.core.Constants.LOG.error("[maicraft-mcp] Runtime call failed: {}", name, failure);
+                Constants.LOG.error("[maicraft-mcp] Runtime call failed: {}", name, failure);
             }
             boolean outcomeKnown = !mutatesSemanticState(name, arguments);
             return toolError("runtime_error", message(failure), true,
@@ -519,7 +524,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             throw new RpcException(-32001, "Knowledge request interrupted");
         } catch (Exception failure) {
             Throwable cause = unwrap(failure);
-            if (cause instanceof org.maiwithu.maicraft.mcp.knowledge.KnowledgeException resource)
+            if (cause instanceof KnowledgeException resource)
                 throw new RpcException(resource.code(), resource.getMessage());
             if (cause instanceof IllegalArgumentException) throw new RpcException(-32602, cause.getMessage());
             throw new RpcException(-32603, message(cause));
@@ -885,7 +890,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(material.getBytes(StandardCharsets.UTF_8));
             return "mcp-" + HexFormat.of().formatHex(digest, 0, 16);
-        } catch (java.security.NoSuchAlgorithmException impossible) {
+        } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is unavailable", impossible);
         }
     }
@@ -897,7 +902,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private static Throwable unwrap(Throwable throwable) {
         Throwable current = throwable;
-        while ((current instanceof CompletionException || current instanceof java.util.concurrent.ExecutionException)
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
                 && current.getCause() != null) {
             current = current.getCause();
         }

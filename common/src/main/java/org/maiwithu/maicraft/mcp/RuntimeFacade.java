@@ -5,6 +5,8 @@ import com.google.gson.JsonObject;
 
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
 /**
  * MCP 网络服务通过这个接口调用游戏里的功能，不自己另建一套玩家任务。
@@ -43,8 +45,8 @@ public interface RuntimeFacade {
 
     /** 读取知识文档；默认实现只读离线目录，不要求玩家先进入世界。 */
     default CompletionStage<JsonElement> knowledge(JsonObject arguments) {
-        return java.util.concurrent.CompletableFuture.completedFuture(
-                org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary.offline().request(arguments));
+        return CompletableFuture.completedFuture(
+                KnowledgeLibrary.offline().request(arguments));
     }
 
     /** 登记“有新消息时叫我”的回调；关闭返回对象时只移除这一个订阅者，重复关闭也应安全。 */

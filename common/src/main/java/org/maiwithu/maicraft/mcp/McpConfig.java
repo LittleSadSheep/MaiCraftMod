@@ -4,6 +4,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.Objects;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /** 本地 MCP 服务的监听地址、端口、可选口令、请求大小和等待回复时限。 */
 public record McpConfig(
@@ -43,7 +44,7 @@ public record McpConfig(
                 "127.0.0.1",
                 port,
                 "",
-                org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxMcpRequestBytes(),
+                BuildingBudgets.current().maxMcpRequestBytes(),
                 Duration.ofSeconds(15)
         );
     }

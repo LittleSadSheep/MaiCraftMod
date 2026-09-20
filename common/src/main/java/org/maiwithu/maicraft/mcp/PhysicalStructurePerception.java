@@ -14,6 +14,14 @@ import org.joml.Quaterniond;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge.Structure;
 import org.maiwithu.maicraft.core.integration.physics.StructurePose;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.BiPredicate;
+import java.util.function.BooleanSupplier;
+import net.minecraft.world.phys.AABB;
+import org.maiwithu.maicraft.core.integration.physics.StructurePresentation;
+import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 
 /** Read-only physical-sublevel observation; block storage positions never masquerade as world targets. */
 final class PhysicalStructurePerception {
@@ -62,21 +70,21 @@ final class PhysicalStructurePerception {
         }
         JsonArray structures = new JsonArray();
         boolean detailed = false;
-        var candidates = new java.util.ArrayList<>(frame.structures());
-        java.util.UUID targetId = null;
-        var transport = org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.diagnosticState();
-        if (Boolean.TRUE.equals(transport.get("active")) && transport.get("moving_target") instanceof java.util.Map<?,?> target) {
-            try { targetId = java.util.UUID.fromString(String.valueOf(target.get("structure_id"))); }
+        var candidates = new ArrayList<>(frame.structures());
+        UUID targetId = null;
+        var transport = TransportRuntime.diagnosticState();
+        if (Boolean.TRUE.equals(transport.get("active")) && transport.get("moving_target") instanceof Map<?,?> target) {
+            try { targetId = UUID.fromString(String.valueOf(target.get("structure_id"))); }
             catch (IllegalArgumentException ignored) { }
         }
         if (targetId != null) {
-            java.util.UUID wanted = targetId;
+            UUID wanted = targetId;
             if (candidates.stream().noneMatch(s -> wanted.equals(s.id()))) {
                 Structure active = SableStructureBridge.find(player.clientLevel, wanted);
                 if (active != null) candidates.add(active);
             }
         }
-        var presentation = org.maiwithu.maicraft.core.integration.physics.StructurePresentation.select(
+        var presentation = StructurePresentation.select(
                 candidates, resolution.structureId(), targetId, player.getBoundingBox());
         out.addProperty("small_structures_collapsed", presentation.smallCollapsed());
         out.addProperty("other_details_omitted", presentation.otherOmitted());
@@ -103,7 +111,7 @@ final class PhysicalStructurePerception {
                         JsonObject candidate = element.getAsJsonObject();
                         JsonObject point = candidate.getAsJsonObject("upright_feet_candidate");
                         double x = point.get("x").getAsDouble(), y = point.get("y").getAsDouble(), z = point.get("z").getAsDouble();
-                        var body = new net.minecraft.world.phys.AABB(x - player.getBbWidth() / 2, y, z - player.getBbWidth() / 2,
+                        var body = new AABB(x - player.getBbWidth() / 2, y, z - player.getBbWidth() / 2,
                                 x + player.getBbWidth() / 2, y + player.getBbHeight(), z + player.getBbWidth() / 2);
                         candidate.addProperty("main_world_clearance", mainWorldClearance(body,
                                 player.level()::hasChunksAt, () -> player.level().noCollision(player, body)));
@@ -154,9 +162,9 @@ final class PhysicalStructurePerception {
         return StructurePerceptionJson.state(resolution.state(), resolution.error() == null ? "physical hit identity is unavailable" : resolution.error());
     }
 
-    static String mainWorldClearance(net.minecraft.world.phys.AABB body,
-                                    java.util.function.BiPredicate<BlockPos, BlockPos> loaded,
-                                    java.util.function.BooleanSupplier clear) {
+    static String mainWorldClearance(AABB body,
+                                    BiPredicate<BlockPos, BlockPos> loaded,
+                                    BooleanSupplier clear) {
         // BlockCollisions also visits adjacent origins for shapes protruding across chunk edges.
         var origins = body.inflate(1.0000001);
         if (!loaded.test(BlockPos.containing(origins.minX, origins.minY, origins.minZ),

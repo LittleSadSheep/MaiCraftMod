@@ -33,6 +33,22 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import com.google.gson.Gson;
+import java.util.Comparator;
+import net.minecraft.resources.ResourceLocation;
+import org.maiwithu.maicraft.client.server.ClientMachineWatches;
+import org.maiwithu.maicraft.client.server.ServerAssistClient;
+import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorTravel;
+import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloors;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
+import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
+import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
+import org.maiwithu.maicraft.core.tools.perception.LocalFloorSense;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource;
 
 /** 把 MCP 请求接到当前游戏玩家：读世界、登记目标、控制任务、整理对外回复；不另外运行一套游戏逻辑。 */
 public final class MaiCraftRuntimeFacade implements RuntimeFacade {
@@ -41,8 +57,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     private final IntentRuntime intents;
     private final NavigationOverview navigationOverview=new NavigationOverview();
-    private final org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary knowledge =
-            new org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary(new org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource());
+    private final KnowledgeLibrary knowledge =
+            new KnowledgeLibrary(new MinecraftKnowledgeSource());
 
     private MaiCraftRuntimeFacade() {
         this.intents = IntentRuntime.get();
@@ -57,7 +73,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     public CompletionStage<JsonElement> perceive(JsonObject arguments) {
         // 文档可以离线读，周边地形要分几刻采样，等任务消息则挂起回复；其他查询交给游戏线程当次处理。
         if ("knowledge".equals(arguments.get("view").getAsString())) return knowledge(
-                org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary.perceptionRequest(arguments));
+                KnowledgeLibrary.perceptionRequest(arguments));
         if("surroundings".equals(arguments.get("view").getAsString())) return observeSurroundings(arguments);
         if ("attention".equals(arguments.get("view").getAsString())
                 && arguments.get("wait_ms").getAsInt() > 0) {
@@ -203,24 +219,24 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 JsonObject situation = situation(player);
                 String focus = nullableString(arguments, "focus");
                 if("maicraft:travel".equals(focus) || "maicraft:elevators".equals(focus))
-                    situation.add("elevators",new com.google.gson.Gson().toJsonTree(
-                            org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloors.overview(player)));
+                    situation.add("elevators",new Gson().toJsonTree(
+                            ElevatorFloors.overview(player)));
                 if ("maicraft:navigation".equals(focus) || "maicraft:transport".equals(focus)) {
-                    var gson = new com.google.gson.Gson();
+                    var gson = new Gson();
                     situation.add("actor", gson.toJsonTree(ClientRuntime.actor().diagnosticState()));
                     situation.addProperty("tick_stage", ClientRuntime.lastTickStage());
                     situation.addProperty("controlling_task", CompanionTickDispatcher.controllingTask());
                     situation.add("navigation", gson.toJsonTree(
-                            org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.diagnosticState()));
+                            EmbeddedBaritoneRuntime.diagnosticState()));
                     situation.add("collision_geometry", NearbyCollisionPerception.observe(player));
                     situation.add("transport", gson.toJsonTree(
-                            org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.diagnosticState()));
+                            TransportRuntime.diagnosticState()));
                     situation.add("landing_assist", gson.toJsonTree(
-                            org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.diagnosticState()));
+                            LandingAssistPolicy.diagnosticState()));
                     situation.add("jetpack", gson.toJsonTree(
-                            org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession.inspect(player)));
+                            JetpackFlightSession.inspect(player)));
                     situation.add("elevators", gson.toJsonTree(
-                            org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorTravel.inspect(player)));
+                            CreateElevatorTravel.inspect(player)));
                 }
                 if ("maicraft:physical_structures".equals(focus) || "maicraft:navigation".equals(focus)
                         || "maicraft:transport".equals(focus))
@@ -247,11 +263,11 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             }
             case "landmarks" -> landmarks(player);
             case "machines" -> {
-                var report = org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.view(player, nullableString(arguments,"focus"));
-                report.add("production_watches",org.maiwithu.maicraft.client.server.ClientMachineWatches.view(player));
+                var report = ClientMachineCatalog.view(player, nullableString(arguments,"focus"));
+                report.add("production_watches",ClientMachineWatches.view(player));
                 yield report;
             }
-            case "machine_menu" -> org.maiwithu.maicraft.core.integration.machine.MachineMenu.inspect(player);
+            case "machine_menu" -> MachineMenu.inspect(player);
             default -> throw new IllegalArgumentException("unknown perceive view: " + view);
         };
     }
@@ -412,7 +428,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         JsonArray entities = new JsonArray();
         AABB area = player.getBoundingBox().inflate(16.0);
         List<Entity> nearby = player.level().getEntities(player, area, entity -> true)
-                .stream().sorted(java.util.Comparator.comparingDouble(player::distanceToSqr)).toList();
+                .stream().sorted(Comparator.comparingDouble(player::distanceToSqr)).toList();
         int hostileCount = (int) nearby.stream().filter(entity -> entity instanceof Enemy).count();
         for (Entity entity : nearby.stream().limit(16).toList()) {
             JsonObject item = new JsonObject();
@@ -426,8 +442,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("sign_observation", signs);
         result.add("local_decision_summary", localDecisionSummary(player, hostileCount));
         result.add("terrain_overview",navigationOverview.describe(player));
-        result.add("elevators",new com.google.gson.Gson().toJsonTree(
-                org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloors.overview(player)));
+        result.add("elevators",new Gson().toJsonTree(
+                ElevatorFloors.overview(player)));
         result.add("view", PhysicalStructurePerception.view(player));
         result.add("physical_structures", PhysicalStructurePerception.observe(player));
         return result;
@@ -435,7 +451,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     /** 把脚下附近的可走区域和危险汇总出来，方便调用者判断下一步，不逐格列出全部方块。 */
     private JsonObject localDecisionSummary(LocalPlayer player, int hostileCount) {
-        JsonObject summary = org.maiwithu.maicraft.core.tools.perception.LocalFloorSense.describe(player);
+        JsonObject summary = LocalFloorSense.describe(player);
         if (hostileCount > 0) {
             JsonObject hostile = new JsonObject();
             hostile.addProperty("kind", "hostile_entities");
@@ -446,7 +462,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
     private JsonObject abilities(String focus) {
         // 注册、已实现的后端和当前目标的执行条件分开报告；未知前置条件不能写成可执行。
-        JsonObject serverAssistance = org.maiwithu.maicraft.client.server.ServerAssistClient.capabilityReport();
+        JsonObject serverAssistance = ServerAssistClient.capabilityReport();
         JsonArray abilities = new JsonArray();
         for (String ability : IntentRuntime.KNOWN_ABILITIES.stream().sorted().toList()) {
             if (focus != null && !focus.equals(ability)) continue;
@@ -455,7 +471,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             JsonObject item = new JsonObject();
             item.addProperty("ability", ability);
             SemanticAbilityAvailability.describe(item, ability,
-                    BuiltInRegistries.BLOCK.containsKey(net.minecraft.resources.ResourceLocation.parse("create:shaft")),
+                    BuiltInRegistries.BLOCK.containsKey(ResourceLocation.parse("create:shaft")),
                     Minecraft.getInstance().player != null && Minecraft.getInstance().player.isAlive());
             SemanticAbilityAvailability.production(item, ability, serverAssistance);
             item.addProperty("mode", abilityMode(ability));
