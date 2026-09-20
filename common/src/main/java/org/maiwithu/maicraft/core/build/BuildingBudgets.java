@@ -27,6 +27,8 @@ public final class BuildingBudgets {
         SCENE_BYTES("maxSceneBytes", 8L << 20, Integer.MAX_VALUE - 1L, "可编辑作者模型文件上限，单位：字节"),
         PROJECT_BYTES("maxProjectBytes", 128L << 20, Integer.MAX_VALUE - 1L, "冻结施工单文件上限，单位：字节"),
         SCAFFOLDS("maxScaffolds", 65_536, Integer.MAX_VALUE, "整个工程可记录的临时支撑数，不表示一次会搭建这么多支撑"),
+        // 同一处站位反复点不成时及时换位置；该预算不把起跳、未落地或仍在转头当成真实放置失败。
+        PLACEMENT_STANCE_FAILURES("placement.maxFailuresPerStance", 3, Integer.MAX_VALUE, "同一目标、同一脚下格的真实放置拒绝次数；达到后换站位，现场确认改变才重试"),
         ACCESS_CELLS("maxCleanupAccessCells", 524_288, Integer.MAX_VALUE, "清理脚手架时可分帧观察的通行范围格数，未知区块仍不允许施工"),
         SCAFFOLD_BYTES("maxScaffoldBytes", 8L << 20, Integer.MAX_VALUE - 1L, "原生确认的临时支撑账上限，单位：字节"),
         MCP_BYTES("maxMcpRequestBytes", 64L << 20, Integer.MAX_VALUE - 1L, "本地MCP请求字节上限，至少1024；也影响其他能力请求"),
@@ -114,6 +116,7 @@ public final class BuildingBudgets {
     public int maxSceneBytes() { return values.get(Key.SCENE_BYTES).intValue(); }
     public int maxProjectBytes() { return values.get(Key.PROJECT_BYTES).intValue(); }
     public int maxScaffolds() { return values.get(Key.SCAFFOLDS).intValue(); }
+    public int maxPlacementFailuresPerStance() { return values.get(Key.PLACEMENT_STANCE_FAILURES).intValue(); }
     public int maxCleanupAccessCells() { return values.get(Key.ACCESS_CELLS).intValue(); }
     public int maxScaffoldBytes() { return values.get(Key.SCAFFOLD_BYTES).intValue(); }
     public int maxMcpRequestBytes() { return values.get(Key.MCP_BYTES).intValue(); }
