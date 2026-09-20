@@ -255,16 +255,11 @@ public final class SemanticCookCompanionTask
         List<ResolvedCandidate> plans = new ArrayList<>();
         for (CookingRecipe option : candidates) {
             int raw = rawRemaining(option);
-            long inputCost = recipePlanner.acquisitionCost(option.input(), raw);
-            boolean ready = recipePlanner.stationReady(option.device());
-            long stationCost = ready ? 0L : recipePlanner.acquisitionCost(option.device().block.asItem(), 1);
-            FuelChoice fuelChoice = recipePlanner.chooseFuel(option, rawRemaining(option));
+            FuelChoice fuelChoice = recipePlanner.chooseFuel(option, raw);
             if (fuelChoice == null) continue;
-            long preparationCost = CookingRecipePlanner.addCost(
-                    inputCost, stationCost, fuelChoice.acquisitionCost());
             plans.add(new ResolvedCandidate(
-                    option, fuelChoice, inputCost, stationCost,
-                    preparationCost));
+                    option, fuelChoice, fuelChoice.inputCost(), fuelChoice.stationCost(),
+                    fuelChoice.preparationCost()));
         }
         if (plans.isEmpty()) {
             return failOrClean("no_allowed_fuel",
@@ -318,7 +313,7 @@ public final class SemanticCookCompanionTask
         batchFuel = batch.fuelCount();
         fuelBurnTicks = batch.burnTicks();
         // 原料和燃料是同种物品时，实际准备要求两份用途的数量相加。
-        // 但前面的估价把同一库存分别算给了原料和燃料，可能选错燃料并误要求补料，见 A61。
+        // 估价和实际准备都合计这两份用途，不能让同一份原木同时承担原料和燃料。
         if (candidate.input() == fuel) {
             int sharedNeed = batchRaw + batchFuel;
             if (PlayerInv.buildableCount(player.getInventory(), candidate.input()) < sharedNeed) {

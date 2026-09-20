@@ -45,6 +45,10 @@ final class CookingTestWorld implements AutoCloseable {
                 SemanticCookTaskRecord.Preference.AUTO, List.of(id("coal")), List.of(Source.INVENTORY), false, List.of());
     }
 
+    void recipes(List<RecipeHolder<?>> recipes) {
+        game.player.connection.getRecipeManager().replaceRecipes(recipes);
+    }
+
     void inventory(int output, int raw, int fuel) {
         game.inventory.clearContent();
         int slot = put(0, Items.IRON_INGOT, output);

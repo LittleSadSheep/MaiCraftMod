@@ -7,7 +7,6 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import org.maiwithu.maicraft.core.PlayerInv;
-import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
 import org.maiwithu.maicraft.core.tools.ToolParse;
@@ -59,8 +58,6 @@ final class CookingRecipePlanner {
     }
 
     void observeNearbyBlocks() { nearbyBlockDistances = snapshotNearbyBlocks(); }
-
-    long acquisitionCost(Item item, int count) { return acquisitionCost(item, count, Set.of(), 0); }
 
     List<CraftRoute> routesFor(Item item) {
         if (craftRoutes == null) craftRoutes = indexCraftRoutes();
@@ -133,18 +130,17 @@ final class CookingRecipePlanner {
 
 
     // 先扣除当前背包已有量，再估直接来源或递归合成的成本；递归最多四层，并阻止沿同一路径绕回同一物品。
-    // 这里的估计没有共用一份消耗后的库存，不同需求可能重复计算同一批存货。
+    // 一条方案共用一份临时库存；试别的配方时复制它，选定后才保留该方案的消耗，不写玩家背包。
     private long acquisitionCost(
-            Item item, int required, Set<Item> lineage, int depth) {
+            Item item, int required, Set<Item> lineage, int depth, Map<Item, Long> stock) {
         if (required <= 0) return 0L;
         if (item == null || item == Items.AIR) return UNAVAILABLE_COST;
-        int carried = PlayerInv.buildableCount(player.getInventory(), item);
-        int missing = Math.max(0, required - carried);
+        int missing = required - takeStock(stock, item, required);
         if (missing == 0) return 0L;
 
         long best = directSourceCost(item, missing);
-        if (request.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)
-                && Ae2ResourceSupply.available()) {
+        if (request.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)) {
+            // 普通箱子也能供料；装没装 AE2 不能决定整个仓库来源是否存在。
             best = Math.min(best, addCost(
                     STORAGE_FALLBACK_COST, (long) missing * DIRECT_SOURCE_UNIT_COST));
         }
@@ -158,35 +154,72 @@ final class CookingRecipePlanner {
         if (routes.isEmpty()) return best;
         Set<Item> nextLineage = new LinkedHashSet<>(lineage);
         nextLineage.add(item);
+        Map<Item, Long> bestStock = new HashMap<>(stock);
         for (CraftRoute route : routes) {
+            Map<Item, Long> trial = new HashMap<>(stock);
             int batches = Math.ceilDiv(missing, route.outputCount());
             long routeCost = addCost(
                     (long) batches * CRAFT_ROUTE_COST,
                     route.requiresWorkstation() ? CRAFTING_SURFACE_COST : 0L);
-            for (IngredientGroup group : route.ingredients()) {
+            for (IngredientGroup group : route.ingredients().stream()
+                    .sorted(Comparator.comparingInt(group -> group.alternatives().size())).toList()) {
                 int groupRequired = Math.max(1, batches * group.uses());
-                long alternativeCost = UNAVAILABLE_COST;
-                for (Item alternative : group.alternatives()) {
-                    alternativeCost = Math.min(alternativeCost,
-                            acquisitionCost(
-                                    alternative, groupRequired, nextLineage, depth + 1));
-                }
+                long alternativeCost = groupCost(group.alternatives(), groupRequired, nextLineage, depth + 1, trial);
                 routeCost = addCost(routeCost, alternativeCost);
                 if (routeCost >= UNAVAILABLE_COST) break;
             }
-            best = Math.min(best, routeCost);
+            if (routeCost < best) {
+                best = routeCost;
+                trial.merge(item, (long) batches * route.outputCount() - missing, Long::sum);
+                bestStock = trial;
+            }
         }
+        stock.clear();
+        stock.putAll(bestStock);
         return best;
     }
 
-    // 当前只估采矿、允许伤害时的狩猎和交易；储存来源在外层另算。
-    // 允许列表里的 NEARBY 没有在这份估计里实现，可能在委托真实获取任务前就被判不可行（A58）。
+    private long groupCost(List<Item> alternatives, int required, Set<Item> lineage, int depth, Map<Item, Long> stock) {
+        // 一组可替代材料先合计现货，例如两种木板可以共同填满同一组配方格。
+        int missing = required;
+        for (Item item : alternatives) missing -= takeStock(stock, item, missing);
+        if (missing == 0) return 0;
+        long best = UNAVAILABLE_COST;
+        Map<Item, Long> bestStock = null;
+        for (Item item : alternatives) {
+            Map<Item, Long> trial = new HashMap<>(stock);
+            long cost = acquisitionCost(item, missing, lineage, depth, trial);
+            if (cost < best) { best = cost; bestStock = trial; }
+        }
+        if (bestStock != null) { stock.clear(); stock.putAll(bestStock); }
+        return best;
+    }
+
+    private Map<Item, Long> inventoryStock() {
+        Map<Item, Long> stock = new HashMap<>();
+        for (int slot = 0; slot < Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); slot++) {
+            ItemStack stack = player.getInventory().items.get(slot);
+            if (!stack.isEmpty()) stock.merge(stack.getItem(), (long) stack.getCount(), Long::sum);
+        }
+        return stock;
+    }
+
+    private static int takeStock(Map<Item, Long> stock, Item item, int required) {
+        long carried = stock.getOrDefault(item, 0L);
+        int used = (int) Math.min(required, carried);
+        stock.put(item, carried - used);
+        return used;
+    }
+
+    // 来源线索帮助估价；附近掉落、仓库和交易仍要由真实取物子任务确认，不能仅因没有内置线索就跳过已允许的来源。
     private long directSourceCost(Item item, int missing) {
         ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(item);
         if (itemId == null) return UNAVAILABLE_COST;
         SemanticSourceKnowledge.SourcePlan plan =
                 SemanticSourceKnowledge.inferPlan(List.of(itemId));
         long best = UNAVAILABLE_COST;
+        if (request.allowedSources.contains(SemanticAcquireTaskRecord.Source.NEARBY))
+            best = 100_000L + (long) missing * DIRECT_SOURCE_UNIT_COST;
 
         if (request.allowedSources.contains(SemanticAcquireTaskRecord.Source.MINE)
                 && dimensionAllowed(plan, SemanticAcquireTaskRecord.Source.MINE)) {
@@ -214,8 +247,7 @@ final class CookingRecipePlanner {
                 && !plan.hint().entityTypeIds().isEmpty()) {
             best = Math.min(best, 10_000L + (long) missing * DIRECT_SOURCE_UNIT_COST);
         }
-        if (request.allowedSources.contains(SemanticAcquireTaskRecord.Source.TRADE)
-                && !plan.hint().tradeProfessionIds().isEmpty()) {
+        if (request.allowedSources.contains(SemanticAcquireTaskRecord.Source.TRADE)) {
             best = Math.min(best, 20_000L + (long) missing * DIRECT_SOURCE_UNIT_COST);
         }
         return best;
@@ -240,8 +272,10 @@ final class CookingRecipePlanner {
     }
 
 
-    record FuelChoice(
-            Item item, int burnTicks, int count, long waste, long acquisitionCost) {}
+    record FuelChoice(Item item, int burnTicks, int count, long waste, long acquisitionCost,
+                      long inputCost, long stationCost) {
+        long preparationCost() { return addCost(acquisitionCost, inputCost, stationCost); }
+    }
 
     void rejectFuel(Item item) { rejectedFuelItems.add(item); }
 
@@ -262,7 +296,7 @@ final class CookingRecipePlanner {
                 .filter(Objects::nonNull)
                 .toList();
         Comparator<FuelChoice> economical = Comparator
-                .comparingLong(FuelChoice::acquisitionCost)
+                .comparingLong(FuelChoice::preparationCost)
                 .thenComparingLong(FuelChoice::waste)
                 .thenComparingInt(FuelChoice::count)
                 .thenComparingInt(choice -> fuelPriority(choice.item()))
@@ -270,7 +304,7 @@ final class CookingRecipePlanner {
                         choice.item()).toString());
         if (request.preference == SemanticCookTaskRecord.Preference.PRESERVE_RARE) {
             economical = Comparator
-                    .comparingLong(FuelChoice::acquisitionCost)
+                    .comparingLong(FuelChoice::preparationCost)
                     .thenComparingInt(choice -> fuelPriority(choice.item()))
                     .thenComparingLong(FuelChoice::waste)
                     .thenComparingInt(FuelChoice::count)
@@ -304,9 +338,14 @@ final class CookingRecipePlanner {
         int burn = batch.burnTicks();
         long neededTicks = (long) batch.inputCount() * cooking.recipe().getCookingTime();
         int needed = batch.fuelCount();
-        long cost = acquisitionCost(item, needed);
+        // 同一份原木不能既留作烧木炭的原料，又算成可免费烧掉的燃料；设备备料也参与同一本账。
+        Map<Item, Long> stock = inventoryStock();
+        long stationCost = nearbyBlockDistances.containsKey(cooking.device().block) ? 0L
+                : acquisitionCost(cooking.device().block.asItem(), 1, Set.of(), 0, stock);
+        long inputCost = acquisitionCost(cooking.input(), raw, Set.of(), 0, stock);
+        long cost = acquisitionCost(item, needed, Set.of(), 0, stock);
         long waste = (long) needed * burn - neededTicks;
-        return new FuelChoice(item, burn, needed, waste, cost);
+        return new FuelChoice(item, burn, needed, waste, cost, inputCost, stationCost);
     }
 
 
@@ -399,12 +438,6 @@ final class CookingRecipePlanner {
             }
         }
         return Map.copyOf(distances);
-    }
-
-    boolean stationReady(CookingDevice device) {
-        return nearbyBlockDistances.containsKey(device.block)
-                || PlayerInv.buildableCount(
-                        player.getInventory(), device.block.asItem()) > 0;
     }
 
 }
