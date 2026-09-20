@@ -60,12 +60,10 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.stream.Collectors;
-import net.minecraft.world.item.crafting.ShapedRecipe;
 import org.maiwithu.maicraft.core.Constants;
 
 /**
@@ -136,8 +134,7 @@ public final class SemanticAcquireCompanionTask
     private final List<AcquisitionNeed> processPlanningNeeds = new ArrayList<>();
     private Map<String, Object> processPlanning = Map.of();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
-    private Map<ResourceLocation, List<CraftingRecipe>> structuralCraftRecipes;
-    private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> observedStockRecipes = new HashMap<>();
+    private final AcquisitionRecipePlanner recipePlanner;
     private AcquisitionNeed stockHintNeed;
     private long stockHintTick = Long.MIN_VALUE;
     private Map<ResourceLocation, Long> recipeObservedStock = Map.of(), recipeCarriedStock = Map.of();
@@ -166,6 +163,7 @@ public final class SemanticAcquireCompanionTask
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
         super(player, record);
+        recipePlanner = new AcquisitionRecipePlanner(player);
     }
 
     @Override
@@ -1793,29 +1791,7 @@ public final class SemanticAcquireCompanionTask
                 ingredients.add(new ObservedRecipeStockCost.Need(ingredient.itemIds(), ingredient.required()));
             }
             return ObservedRecipeStockCost.priority(true, recipeObservedStock, recipeCarriedStock, ingredients,
-                    this::observedStockRecipes, parent.lineageItems);
-        });
-    }
-
-    private List<ObservedRecipeStockCost.Recipe> observedStockRecipes(ResourceLocation output) {
-        return observedStockRecipes.computeIfAbsent(output, ignored -> {
-            List<ObservedRecipeStockCost.Recipe> result = new ArrayList<>();
-            for (CraftingRecipe recipe : structuralCraftRecipes().getOrDefault(output, List.of()).stream().limit(64).toList()) {
-                try {
-                    if (recipe.isSpecial() || recipe instanceof ShapedRecipe shaped
-                            && (shaped.getWidth() > 3 || shaped.getHeight() > 3)) continue;
-                    ItemStack stack = RecipeProbe.resultOf(recipe, player.level().registryAccess()); if (stack.isEmpty()) continue;
-                    List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
-                    for (Ingredient ingredient : recipe.getIngredients()) {
-                        if (ingredient == null || ingredient.isEmpty()) continue;
-                        var ids = Arrays.stream(ingredient.getItems()).filter(value -> value != null && !value.isEmpty())
-                                .map(value -> BuiltInRegistries.ITEM.getKey(value.getItem())).distinct().toList();
-                        ingredients.add(new ObservedRecipeStockCost.Need(ids, 1));
-                    }
-                    if (!ingredients.isEmpty() && ingredients.size() <= 9) result.add(new ObservedRecipeStockCost.Recipe(stack.getCount(), ingredients));
-                } catch (RuntimeException unavailable) { /* This hint cannot make an uninspectable recipe usable. */ }
-            }
-            return List.copyOf(result);
+                    recipePlanner::stockRecipes, parent.lineageItems);
         });
     }
 
@@ -1831,7 +1807,7 @@ public final class SemanticAcquireCompanionTask
         }
         Item item = BuiltInRegistries.ITEM.get(itemId);
         if (PlayerInv.buildableCount(player.getInventory(), item) > 0) return 0;
-        List<CraftingRecipe> recipes = structuralCraftRecipes().getOrDefault(
+        List<CraftingRecipe> recipes = recipePlanner.recipes().getOrDefault(
                 itemId, List.of());
         if (recipes.isEmpty()) return 0;
         if (remainingDepth <= 0) return UNREACHABLE_STRUCTURE_COST;
@@ -1869,26 +1845,6 @@ public final class SemanticAcquireCompanionTask
         // not a magically free source.
         memo.put(key, bestRecipe);
         return bestRecipe;
-    }
-
-    private Map<ResourceLocation, List<CraftingRecipe>> structuralCraftRecipes() {
-        // 为本次任务缓存“成品对应哪些配方”的只读索引，供前瞻打分复用，避免每次都重新整理全部配方。
-        if (structuralCraftRecipes != null) return structuralCraftRecipes;
-        Map<ResourceLocation, List<CraftingRecipe>> indexed = new LinkedHashMap<>();
-        for (var holder : ClientRuntime.requireContext(player)
-                .connection().getRecipeManager().getRecipes()) {
-            if (!(holder.value() instanceof CraftingRecipe recipe)) continue;
-            if (!RecipeProbe.usableIngredients(recipe)) continue;
-            ItemStack output = RecipeProbe.resultOf(
-                    recipe, player.level().registryAccess());
-            if (output.isEmpty()) continue;
-            ResourceLocation outputId = BuiltInRegistries.ITEM.getKey(output.getItem());
-            indexed.computeIfAbsent(outputId, ignored -> new ArrayList<>()).add(recipe);
-        }
-        Map<ResourceLocation, List<CraftingRecipe>> frozen = new LinkedHashMap<>();
-        indexed.forEach((id, recipes) -> frozen.put(id, List.copyOf(recipes)));
-        structuralCraftRecipes = Map.copyOf(frozen);
-        return structuralCraftRecipes;
     }
 
     /**
