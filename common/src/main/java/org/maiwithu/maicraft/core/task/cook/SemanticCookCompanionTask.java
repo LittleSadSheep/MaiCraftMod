@@ -16,7 +16,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.inventory.AbstractFurnaceMenu;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -34,19 +33,14 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.MouseButton;
-import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.CraftRoute;
-import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.IngredientGroup;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
-import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.task.menu.CloseMenuTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
-import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
-import org.maiwithu.maicraft.core.tools.ToolParse;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -64,14 +58,6 @@ import org.maiwithu.maicraft.core.Constants;
  */
 public final class SemanticCookCompanionTask
         extends AbstractCompanionTask<SemanticCookTaskRecord> {
-    private static final long UNAVAILABLE_COST = 1_000_000_000_000L;
-    private static final int MAX_ACQUISITION_DEPTH = 4;
-    private static final long DIRECT_SOURCE_UNIT_COST = 1_000L;
-    private static final long OBSERVED_BLOCK_UNIT_COST = 500L;
-    private static final long CRAFT_ROUTE_COST = 250L;
-    private static final long CRAFTING_SURFACE_COST = 500L;
-    private static final long TOOL_PREREQUISITE_COST = 1_500L;
-    private static final long STORAGE_FALLBACK_COST = 50_000L;
     /**
      * Furnace progress is live server evidence, so each observed change renews a
      * no-progress lease instead of spending one fixed wall-clock budget for the
@@ -151,7 +137,7 @@ public final class SemanticCookCompanionTask
 
     public SemanticCookCompanionTask(LocalPlayer player, SemanticCookTaskRecord record) {
         super(player, record);
-        recipePlanner = new CookingRecipePlanner(player);
+        recipePlanner = new CookingRecipePlanner(player, record);
     }
 
     @Override protected void onStart() { initialOutputCount = outputCount(); }
@@ -281,18 +267,17 @@ public final class SemanticCookCompanionTask
                     FailureType.NO_MATERIAL);
         }
         nearbyBlockDistances = snapshotNearbyBlocks();
+        recipePlanner.observeNearbyBlocks(nearbyBlockDistances);
 
         List<ResolvedCandidate> plans = new ArrayList<>();
         for (CookingRecipe option : candidates) {
             int raw = rawRemaining(option);
-            long inputCost = acquisitionCost(
-                    option.input(), raw, Set.of(), 0);
+            long inputCost = recipePlanner.acquisitionCost(option.input(), raw);
             boolean ready = stationReady(option.device());
-            long stationCost = ready ? 0L : acquisitionCost(
-                    option.device().block.asItem(), 1, Set.of(), 0);
+            long stationCost = ready ? 0L : recipePlanner.acquisitionCost(option.device().block.asItem(), 1);
             FuelChoice fuelChoice = chooseFuel(option);
             if (fuelChoice == null) continue;
-            long preparationCost = addCost(
+            long preparationCost = CookingRecipePlanner.addCost(
                     inputCost, stationCost, fuelChoice.acquisitionCost());
             plans.add(new ResolvedCandidate(
                     option, fuelChoice, inputCost, stationCost,
@@ -303,7 +288,7 @@ public final class SemanticCookCompanionTask
                     "No allowed ordinary furnace fuel can be selected.", FailureType.NO_MATERIAL);
         }
         ResolvedCandidate selected = plans.stream()
-                .filter(plan -> plan.preparationCost() < UNAVAILABLE_COST)
+                .filter(plan -> plan.preparationCost() < CookingRecipePlanner.UNAVAILABLE_COST)
                 .min(candidateComparator())
                 .orElse(null);
         if (selected == null) {
@@ -438,111 +423,9 @@ public final class SemanticCookCompanionTask
         if (burn <= 0) return null;
         long neededTicks = (long) raw * cooking.recipe().getCookingTime();
         int needed = ceilDiv(neededTicks, burn);
-        long cost = acquisitionCost(item, needed, Set.of(), 0);
+        long cost = recipePlanner.acquisitionCost(item, needed);
         long waste = (long) needed * burn - neededTicks;
         return new FuelChoice(item, burn, needed, waste, cost);
-    }
-
-    /**
-     * Estimate only routes the semantic acquisition child can actually execute. The result is a
-     * relative preparation cost, not a promise: live child receipts remain authoritative and can
-     * reject a candidate so RESOLVE tries the next finite plan.
-     */
-    // 先扣除当前背包已有量，再估直接来源或递归合成的成本；递归最多四层，并阻止沿同一路径绕回同一物品。
-    // 这里的估计没有共用一份消耗后的库存，不同需求可能重复计算同一批存货。
-    private long acquisitionCost(
-            Item item, int required, Set<Item> lineage, int depth) {
-        if (required <= 0) return 0L;
-        if (item == null || item == Items.AIR) return UNAVAILABLE_COST;
-        int carried = PlayerInv.buildableCount(player.getInventory(), item);
-        int missing = Math.max(0, required - carried);
-        if (missing == 0) return 0L;
-
-        long best = directSourceCost(item, missing);
-        if (r.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)
-                && Ae2ResourceSupply.available()) {
-            best = Math.min(best, addCost(
-                    STORAGE_FALLBACK_COST, (long) missing * DIRECT_SOURCE_UNIT_COST));
-        }
-        if (depth >= MAX_ACQUISITION_DEPTH
-                || !r.allowedSources.contains(SemanticAcquireTaskRecord.Source.CRAFT)
-                || lineage.contains(item)) {
-            return best;
-        }
-
-        List<CraftRoute> routes = recipePlanner.routesFor(item);
-        if (routes.isEmpty()) return best;
-        Set<Item> nextLineage = new LinkedHashSet<>(lineage);
-        nextLineage.add(item);
-        for (CraftRoute route : routes) {
-            int batches = ceilDiv(missing, route.outputCount());
-            long routeCost = addCost(
-                    (long) batches * CRAFT_ROUTE_COST,
-                    route.requiresWorkstation() ? CRAFTING_SURFACE_COST : 0L);
-            for (IngredientGroup group : route.ingredients()) {
-                int groupRequired = Math.max(1, batches * group.uses());
-                long alternativeCost = UNAVAILABLE_COST;
-                for (Item alternative : group.alternatives()) {
-                    alternativeCost = Math.min(alternativeCost,
-                            acquisitionCost(
-                                    alternative, groupRequired, nextLineage, depth + 1));
-                }
-                routeCost = addCost(routeCost, alternativeCost);
-                if (routeCost >= UNAVAILABLE_COST) break;
-            }
-            best = Math.min(best, routeCost);
-        }
-        return best;
-    }
-
-    // 当前只估采矿、允许伤害时的狩猎和交易；储存来源在外层另算。
-    // 允许列表里的 NEARBY 没有在这份估计里实现，可能在委托真实获取任务前就被判不可行（A58）。
-    private long directSourceCost(Item item, int missing) {
-        ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(item);
-        if (itemId == null) return UNAVAILABLE_COST;
-        SemanticSourceKnowledge.SourcePlan plan =
-                SemanticSourceKnowledge.inferPlan(List.of(itemId));
-        long best = UNAVAILABLE_COST;
-
-        if (r.allowedSources.contains(SemanticAcquireTaskRecord.Source.MINE)
-                && dimensionAllowed(plan, SemanticAcquireTaskRecord.Source.MINE)) {
-            Set<Block> sourceBlocks = new LinkedHashSet<>(
-                    ToolParse.parseBlocks(plan.hint().blockRefs()));
-            boolean originalSource = !sourceBlocks.isEmpty();
-            Long observedDistance = item instanceof BlockItem blockItem
-                    && !blockItem.getBlock().defaultBlockState().requiresCorrectToolForDrops()
-                    ? nearbyBlockDistances.get(blockItem.getBlock()) : null;
-            if (item instanceof BlockItem blockItem && observedDistance != null) {
-                sourceBlocks.add(blockItem.getBlock());
-            }
-            if (!sourceBlocks.isEmpty()) {
-                long unit = originalSource
-                        ? DIRECT_SOURCE_UNIT_COST : OBSERVED_BLOCK_UNIT_COST;
-                long tool = SemanticSourceKnowledge.missingTool(player, sourceBlocks) == null
-                        ? 0L : TOOL_PREREQUISITE_COST;
-                long distance = observedDistance == null ? 0L : observedDistance;
-                best = Math.min(best, addCost((long) missing * unit, tool, distance));
-            }
-        }
-        if (r.allowHarm
-                && r.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT)
-                && dimensionAllowed(plan, SemanticAcquireTaskRecord.Source.HUNT)
-                && !plan.hint().entityTypeIds().isEmpty()) {
-            best = Math.min(best, 10_000L + (long) missing * DIRECT_SOURCE_UNIT_COST);
-        }
-        if (r.allowedSources.contains(SemanticAcquireTaskRecord.Source.TRADE)
-                && !plan.hint().tradeProfessionIds().isEmpty()) {
-            best = Math.min(best, 20_000L + (long) missing * DIRECT_SOURCE_UNIT_COST);
-        }
-        return best;
-    }
-
-    private boolean dimensionAllowed(
-            SemanticSourceKnowledge.SourcePlan plan,
-            SemanticAcquireTaskRecord.Source source) {
-        List<ResourceLocation> dimensions = plan.allowedDimensions(source);
-        return dimensions.isEmpty()
-                || dimensions.contains(player.level().dimension().location());
     }
 
     // 一次读取周围已加载的小范围方块，按种类记最近距离，供估价和判断有没有设备；不读取未加载地形。
@@ -568,16 +451,6 @@ public final class SemanticCookCompanionTask
             }
         }
         return Map.copyOf(distances);
-    }
-
-    private static long addCost(long... values) {
-        long total = 0L;
-        for (long value : values) {
-            if (value >= UNAVAILABLE_COST || value < 0L) return UNAVAILABLE_COST;
-            if (total > UNAVAILABLE_COST - value) return UNAVAILABLE_COST;
-            total += value;
-        }
-        return total;
     }
 
     // 还欠上一炉的结果时先回到原设备核对；新批次则根据产物和燃料堆叠上限决定装多少原料。
