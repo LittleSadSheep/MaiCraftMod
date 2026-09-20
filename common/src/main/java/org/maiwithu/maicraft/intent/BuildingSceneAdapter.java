@@ -53,6 +53,8 @@ final class BuildingSceneAdapter {
         if (p.has("scene_id")) {
             store = stores.get();
             entry = store.load(p.get("scene_id").getAsString(), dimension);
+            // 带版本要求时同时检查当前契约和原场景凭据，旧模型仍可读取原文后另行创建已校验版本。
+            org.maiwithu.maicraft.core.blueprint.BuildingModelContract.checkScene(entry,p);
             anchor = entry.anchor();
             if (goal.target() != null) {
                 var requested = BuildingAnchor.resolve(goal, player, runtime);
@@ -183,6 +185,10 @@ final class BuildingSceneAdapter {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("construction_started", false);
         result.put("scene_id", entry.sceneId());
+        if (entry.capabilityRevision() != null) {
+            result.put("capability_revision",entry.capabilityRevision());
+            result.put("design_schema_revision",entry.designSchemaRevision());
+        }
         result.put("scene_uri", org.maiwithu.maicraft.mcp.knowledge.BuildingSceneResources.sceneUri(entry.sceneId()));
         result.put("blueprint_uri", org.maiwithu.maicraft.mcp.knowledge.BuildingSceneResources.blueprintUri(entry.sceneId()));
         if (entry.parentSceneId() != null) result.put("parent_scene_id", entry.parentSceneId());

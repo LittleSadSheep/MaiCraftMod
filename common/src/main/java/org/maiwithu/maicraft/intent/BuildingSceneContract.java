@@ -4,16 +4,17 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonObject;
 import java.util.Set;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelContract;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 
 /**
  * 定义建模操作的输入规则，它们仍属于 build 或 design_build 的模式。design_build 只能查看和准备，不能启动施工。
  */
 final class BuildingSceneContract {
-    static final Set<String> OPERATIONS = Set.of("create_scene", "update_scene", "get_scene_info",
-            "get_object_info", "get_component_info", "export_scene", "preview", "revise_project", "build");
+    static final Set<String> OPERATIONS = BuildingModelContract.OPERATIONS;
     private static final Set<String> FIELDS = Set.of("operation", "scene", "scene_id", "blueprint",
-            "edits", "object_name", "component_name", "format", "page", "replace_existing", "material_policy", "protected_labels", "project_id");
+            "edits", "object_name", "component_name", "format", "page", "replace_existing", "material_policy", "protected_labels", "project_id",
+            BuildingModelContract.EXPECTED_CAPABILITY, BuildingModelContract.EXPECTED_SCHEMA);
 
     private BuildingSceneContract() {}
 
@@ -39,6 +40,8 @@ final class BuildingSceneContract {
         for (String key : p.keySet()) if (!FIELDS.contains(key))
             throw new IllegalArgumentException("Explicit building models do not accept " + key
                     + "; encode geometry and materials in the scene or blueprint.");
+        // 设计 Agent 点名契约版本时先核对，过期请求不能保存新草稿或进入角色施工流程。
+        BuildingModelContract.checkExpected(p);
         String op = operation(goal);
         if (!OPERATIONS.contains(op)) throw new IllegalArgumentException("Unknown build operation: " + op);
         if (BuildDesignAdapter.ABILITY.equals(goal.ability()) && "build".equals(op))
@@ -55,7 +58,8 @@ final class BuildingSceneContract {
         // 采用新场景修订必须明确指向旧项目，且不夹带新的取材、地点或替换权限；普通续建仍只读取冻结目标。
         if (op.equals("revise_project")) {
             java.util.UUID.fromString(string(p, "project_id"));
-            if (goal.target() != null || !Set.of("operation", "scene_id", "project_id").containsAll(p.keySet()))
+            if (goal.target() != null || !Set.of("operation", "scene_id", "project_id",
+                    BuildingModelContract.EXPECTED_CAPABILITY,BuildingModelContract.EXPECTED_SCHEMA).containsAll(p.keySet()))
                 throw new IllegalArgumentException("revise_project keeps the original site and policies; supply only scene_id and project_id");
         } else if (p.has("project_id")) throw new IllegalArgumentException("model operations accept project_id only with revise_project");
         if ("create_scene".equals(op) && !p.has("scene")) throw new IllegalArgumentException("create_scene needs scene");

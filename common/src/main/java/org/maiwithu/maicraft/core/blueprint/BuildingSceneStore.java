@@ -30,8 +30,13 @@ public final class BuildingSceneStore {
     private final Path directory;
     private final Function<JsonObject, JsonObject> compiler;
 
-    public record Entry(String sceneId, JsonObject scene, Goal.WorldPosition anchor, String parentSceneId) {
+    public record Entry(String sceneId, JsonObject scene, Goal.WorldPosition anchor, String parentSceneId,
+                        String capabilityRevision, String designSchemaRevision) {
         public Entry { scene = scene.deepCopy(); }
+        // 旧记录没有版本凭据，仍能读取；只有明确要求版本核对的调用才必须重新校验它。
+        public Entry(String sceneId, JsonObject scene, Goal.WorldPosition anchor, String parentSceneId) {
+            this(sceneId,scene,anchor,parentSceneId,null,null);
+        }
         @Override public JsonObject scene() { return scene.deepCopy(); }
     }
 
@@ -39,8 +44,10 @@ public final class BuildingSceneStore {
     public static final class Prepared {
         private final JsonObject scene;
         private final JsonObject blueprint;
+        private final BuildingModelContract.Snapshot contract;
 
         private Prepared(JsonObject scene, Function<JsonObject, JsonObject> compiler) {
+            contract = BuildingModelContract.current();
             this.scene = scene.deepCopy();
             this.blueprint = compiler.apply(this.scene).deepCopy();
         }
@@ -86,11 +93,18 @@ public final class BuildingSceneStore {
     private Entry saveChecked(Prepared scene, Goal.WorldPosition anchor, String parent) throws IOException {
         if (anchor == null || anchor.dimension() == null || anchor.dimension().isBlank())
             throw new IllegalArgumentException("building scene needs a fixed anchor and dimension");
-        var entry = new Entry(UUID.randomUUID().toString(), scene.scene, anchor, parent);
+        // 保存的凭据属于实际执行编译的那份契约，不能在预算/编译契约变更后给旧编译结果盖上新版本。
+        var current = BuildingModelContract.current();
+        if (!current.revision().equals(scene.contract.revision()) || !current.designSchemaRevision().equals(scene.contract.designSchemaRevision()))
+            throw new IllegalArgumentException("building_contract_changed: recompile the full scene before saving under the current contract");
+        var entry = new Entry(UUID.randomUUID().toString(), scene.scene, anchor, parent,
+                scene.contract.revision(),scene.contract.designSchemaRevision());
         JsonObject root = new JsonObject();
         root.addProperty("schema_version", 1);
         root.addProperty("world_key", identity.key());
         root.addProperty("scene_id", entry.sceneId());
+        root.addProperty("capability_revision",entry.capabilityRevision());
+        root.addProperty("design_schema_revision",entry.designSchemaRevision());
         if (parent != null) root.addProperty("parent_scene_id", parent);
         JsonObject position = new JsonObject();
         position.addProperty("x", anchor.x()); position.addProperty("y", anchor.y()); position.addProperty("z", anchor.z());
@@ -136,7 +150,12 @@ public final class BuildingSceneStore {
         BuildingSceneCompiler.validateWire(scene);
         String parent = root.has("parent_scene_id") ? fieldString(root, "parent_scene_id") : null;
         if (parent != null) path(parent);
-        return new Entry(sceneId, scene, anchor, parent);
+        // 两个凭据必须成对存在；完全缺失才是兼容的旧记录，残缺或被破坏的元数据不能假装已经校验。
+        if (root.has("capability_revision") != root.has("design_schema_revision"))
+            throw new IllegalArgumentException("building scene validation revisions must be present together");
+        String capability = root.has("capability_revision") ? fieldString(root,"capability_revision") : null;
+        String schema = root.has("design_schema_revision") ? fieldString(root,"design_schema_revision") : null;
+        return new Entry(sceneId, scene, anchor, parent,capability,schema);
     }
 
     /**
