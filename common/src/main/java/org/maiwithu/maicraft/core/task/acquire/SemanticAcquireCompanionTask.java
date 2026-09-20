@@ -83,8 +83,6 @@ public final class SemanticAcquireCompanionTask
     private static final long STORAGE_TICKS = 10L * 60L * 20L;
     private static final long HUNT_TICKS = 120L * 20L;
     private static final int HUNT_SEARCH_DISTANCE = 512;
-    private static final int STRUCTURAL_RECIPE_DEPTH = 6;
-    private static final int UNREACHABLE_STRUCTURE_COST = 1_000_000;
 
     private enum HuntChildStage { NONE, SEARCH, ATTACK }
 
@@ -100,15 +98,6 @@ public final class SemanticAcquireCompanionTask
 
     private record RankedIngredient(
             IngredientNeed ingredient, boolean decisionRequired, int structureCost) {}
-
-    private record StructureKey(
-            ResourceLocation itemId,
-            int remainingDepth,
-            Set<ResourceLocation> blocked) {
-        private StructureKey {
-            blocked = Set.copyOf(blocked);
-        }
-    }
 
     private record NearbySurvey(
             int safeCount,
@@ -439,7 +428,7 @@ public final class SemanticAcquireCompanionTask
                                 candidate.cost().surface().ordinal())
                         .thenComparingInt(candidate -> observedStockPriority(candidate, need))
                         .thenComparingInt(candidate ->
-                                recursiveCandidateStructureCost(candidate, need))
+                                recipePlanner.structureCost(candidate, need))
                         .thenComparing(CraftRecoveryCandidate::cost, CraftPlanCost.ORDER))
                 .toList();
         // 还缺原料时，排除循环和已失败配方，再比较所需转换层数与成本，挑一个值得继续补材料的方案。
@@ -1741,33 +1730,6 @@ public final class SemanticAcquireCompanionTask
         return Set.copyOf(excluded);
     }
 
-    /**
-     * Side-effect-free structural lookahead used only as a tie-break between missing-material
-     * candidates. It is not a claim that world resources exist; it measures how many ordinary
-     * crafting layers stand between each missing group and a non-crafting leaf. Thus direct wool
-     * is preferred to wool-plus-dye conversion without encoding any particular item or recipe.
-     */
-    private int recursiveCandidateStructureCost(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
-        // 只估计还需经过几层普通合成，用来给候选排序；没有说世界里一定有那些原材料。
-        Map<StructureKey, Integer> memo = new HashMap<>();
-        int total = 0;
-        for (var ingredient : candidate.ingredients()) {
-            int missing = ingredient.missing();
-            if (missing <= 0) continue;
-            int best = UNREACHABLE_STRUCTURE_COST;
-            for (ResourceLocation id : ingredient.itemIds()) {
-                if (parent.lineageItems.contains(id)) continue;
-                best = Math.min(best, recursiveCraftDepth(
-                        id, parent.lineageItems, new LinkedHashSet<>(), memo,
-                        STRUCTURAL_RECIPE_DEPTH));
-            }
-            if (best >= UNREACHABLE_STRUCTURE_COST) return UNREACHABLE_STRUCTURE_COST;
-            total = Math.min(UNREACHABLE_STRUCTURE_COST,
-                    total + missing * Math.max(1, best + 1));
-        }
-        return total;
-    }
-
     /** Fresh authorized warehouse contents influence preference only; executable crafting still requires carried items. */
     private int observedStockPriority(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
         if (!parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)) return 1;
@@ -1793,58 +1755,6 @@ public final class SemanticAcquireCompanionTask
             return ObservedRecipeStockCost.priority(true, recipeObservedStock, recipeCarriedStock, ingredients,
                     recipePlanner::stockRecipes, parent.lineageItems);
         });
-    }
-
-    private int recursiveCraftDepth(
-            ResourceLocation itemId,
-            Set<ResourceLocation> forbidden,
-            Set<ResourceLocation> visiting,
-            Map<StructureKey, Integer> memo,
-            int remainingDepth) {
-        // 已经带着或没有更上游配方的物品作为边界；遇到循环或超过前瞻深度就认为这条估计不可靠。
-        if (forbidden.contains(itemId) || visiting.contains(itemId)) {
-            return UNREACHABLE_STRUCTURE_COST;
-        }
-        Item item = BuiltInRegistries.ITEM.get(itemId);
-        if (PlayerInv.buildableCount(player.getInventory(), item) > 0) return 0;
-        List<CraftingRecipe> recipes = recipePlanner.recipes().getOrDefault(
-                itemId, List.of());
-        if (recipes.isEmpty()) return 0;
-        if (remainingDepth <= 0) return UNREACHABLE_STRUCTURE_COST;
-        Set<ResourceLocation> blocked = new LinkedHashSet<>(forbidden);
-        blocked.addAll(visiting);
-        StructureKey key = new StructureKey(itemId, remainingDepth, blocked);
-        Integer remembered = memo.get(key);
-        if (remembered != null) return remembered;
-
-        visiting.add(itemId);
-        int bestRecipe = UNREACHABLE_STRUCTURE_COST;
-        for (CraftingRecipe recipe : recipes) {
-            int criticalDepth = 0;
-            boolean valid = true;
-            for (Ingredient ingredient : recipe.getIngredients()) {
-                if (ingredient == null || ingredient.isEmpty()) continue;
-                int ingredientDepth = UNREACHABLE_STRUCTURE_COST;
-                for (ItemStack accepted : ingredient.getItems()) {
-                    if (accepted == null || accepted.isEmpty()) continue;
-                    ResourceLocation acceptedId = BuiltInRegistries.ITEM.getKey(
-                            accepted.getItem());
-                    ingredientDepth = Math.min(ingredientDepth, recursiveCraftDepth(
-                            acceptedId, forbidden, visiting, memo, remainingDepth - 1));
-                }
-                if (ingredientDepth >= UNREACHABLE_STRUCTURE_COST) {
-                    valid = false;
-                    break;
-                }
-                criticalDepth = Math.max(criticalDepth, ingredientDepth);
-            }
-            if (valid) bestRecipe = Math.min(bestRecipe, 1 + criticalDepth);
-        }
-        visiting.remove(itemId);
-        // A real leaf has no crafting recipes. Recipes that all re-enter the lineage are a cycle,
-        // not a magically free source.
-        memo.put(key, bestRecipe);
-        return bestRecipe;
     }
 
     /**
@@ -1965,7 +1875,7 @@ public final class SemanticAcquireCompanionTask
             ranked.add(new RankedIngredient(
                     choice,
                     ingredientRequiresDecision(choice.itemIds(), parent),
-                    recursiveIngredientStructureCost(choice.itemIds(), parent)));
+                    recipePlanner.ingredientStructureCost(choice.itemIds(), parent)));
         }
         return ranked.stream()
                 // 先验证权限受限、转换层数更深或数量更多的原料，避免先做一堆容易的配件。
@@ -1991,19 +1901,6 @@ public final class SemanticAcquireCompanionTask
         }
         SemanticAcquireTaskRecord.SourceHint hint = SemanticSourceKnowledge.infer(itemIds);
         return !hint.entityTypeIds().isEmpty() && hint.blockRefs().isEmpty();
-    }
-
-    private int recursiveIngredientStructureCost(
-            List<ResourceLocation> itemIds, AcquisitionNeed parent) {
-        Map<StructureKey, Integer> memo = new HashMap<>();
-        int best = UNREACHABLE_STRUCTURE_COST;
-        for (ResourceLocation itemId : itemIds) {
-            if (parent.lineageItems.contains(itemId)) continue;
-            best = Math.min(best, recursiveCraftDepth(
-                    itemId, parent.lineageItems, new LinkedHashSet<>(), memo,
-                    STRUCTURAL_RECIPE_DEPTH));
-        }
-        return best;
     }
 
     private NearbySurvey surveyNearby(List<ResourceLocation> ids) {

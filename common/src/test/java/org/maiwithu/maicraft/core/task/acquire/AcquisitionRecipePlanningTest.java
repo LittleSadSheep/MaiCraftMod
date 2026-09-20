@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.acquire;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.NonNullList;
@@ -12,6 +13,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -22,6 +24,8 @@ import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.tools.CraftOps;
+import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
+import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 
 /** 用真实背包分配与原生配方验证：展示可以截短，内部补料必须保留完整候选。 */
 public final class AcquisitionRecipePlanningTest {
@@ -31,6 +35,7 @@ public final class AcquisitionRecipePlanningTest {
         try (var world = new InteractionWorldTestHarness()) {
             overlappingIngredients(world);
             completeRecoveryCandidates(world);
+            finiteMaterialRoutes(world);
             world.inventory.setItem(0, new ItemStack(Items.STICK, 4));
             var alreadyCarried = plan(world);
             check(!alreadyCarried.executable() && alreadyCarried.immediate().success(),
@@ -78,9 +83,38 @@ public final class AcquisitionRecipePlanningTest {
     }
 
     private static RecipeHolder<?> recipe(String id, Ingredient... ingredients) {
+        return recipe(id, Items.STICK, ingredients);
+    }
+
+    private static RecipeHolder<?> recipe(String id, Item output, Ingredient... ingredients) {
         return new RecipeHolder<>(ResourceLocation.fromNamespaceAndPath("test", id),
-                new ShapelessRecipe("", CraftingBookCategory.MISC, new ItemStack(Items.STICK, 4),
+                new ShapelessRecipe("", CraftingBookCategory.MISC, new ItemStack(output, 4),
                         NonNullList.of(Ingredient.EMPTY, ingredients)));
+    }
+
+    private static void finiteMaterialRoutes(InteractionWorldTestHarness world) throws Exception {
+        world.inventory.clearContent();
+        var plank = BuiltInRegistries.ITEM.getKey(Items.OAK_PLANKS);
+        var stick = BuiltInRegistries.ITEM.getKey(Items.STICK);
+        var need = new AcquisitionNeed(List.of(stick), 4, 0, Set.of(stick), Set.of(), Set.of(),
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT));
+        var planks = recipe("planks", Items.OAK_PLANKS, Ingredient.of(Items.OAK_LOG));
+        install(world, List.of(planks));
+        var planner = new AcquisitionRecipePlanner(world.player);
+        check(planner.ingredientStructureCost(List.of(plank), need) == 1, "原木变木板还需一层合成");
+        check(planner.ingredientStructureCost(List.of(plank, BuiltInRegistries.ITEM.getKey(Items.BIRCH_LOG)), need) == 0,
+                "原料可替代时保留较直接的来源，不强制制造另一个变体");
+        var candidate = new CraftRecoveryCandidate(stick, "test:sticks",
+                List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(plank), 2, 2)),
+                new CraftPlanCost(2, CraftPlanCost.Surface.READY, 0, 2, "test:sticks"), List.of());
+        check(planner.structureCost(candidate, need) == 4, "候选成本同时计算缺料量与原料转换层数");
+        // 构造往返配方复现循环：木板依赖原木，原木又依赖木板；两者都没带时不能当作现成来源。
+        install(world, List.of(planks, recipe("reverse", Items.OAK_LOG, Ingredient.of(Items.OAK_PLANKS))));
+        planner = new AcquisitionRecipePlanner(world.player);
+        check(planner.ingredientStructureCost(List.of(plank), need) == AcquisitionRecipePlanner.UNREACHABLE_STRUCTURE_COST,
+                "循环路线不能排成零成本叶子");
+        world.inventory.setItem(0, new ItemStack(Items.OAK_PLANKS));
+        check(planner.ingredientStructureCost(List.of(plank), need) == 0, "已经拿到材料后按现货重新评价");
     }
 
     private static void install(InteractionWorldTestHarness world, List<RecipeHolder<?>> recipes) throws Exception {
