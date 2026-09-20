@@ -29,6 +29,9 @@ import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftingWorkstationCoordinator;
 import org.maiwithu.maicraft.task.TaskResult;
+import java.util.Arrays;
+import java.util.stream.Collectors;
+import org.maiwithu.maicraft.core.Constants;
 
 /** Read-only recipe planning for the receipt-owned crafting task. */
 public final class CraftOps {
@@ -125,7 +128,7 @@ public final class CraftOps {
         Set<Item> targets = outputIds.stream()
                 .filter(BuiltInRegistries.ITEM::containsKey)
                 .map(BuiltInRegistries.ITEM::get)
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
         if (targets.isEmpty()) return false;
         var context = ClientRuntime.requireContext(player);
         for (RecipeHolder<?> holder : context.connection().getRecipeManager().getRecipes()) {
@@ -140,7 +143,7 @@ public final class CraftOps {
                 ItemStack result = RecipeProbe.resultOf(recipe, context.level().registryAccess());
                 if (!result.isEmpty() && targets.contains(result.getItem())) return true;
             } catch (RuntimeException brokenRecipe) {
-                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                Constants.LOG.debug(
                         "[maicraft-craft] skipped unusable workstation probe recipe {}: {}",
                         holder.id(), brokenRecipe.toString());
             }
@@ -221,7 +224,7 @@ public final class CraftOps {
                 candidates.add(candidateFor(
                         recipe, id, outputCount, batches, allocation, self, workstation, deficit));
             } catch (RuntimeException brokenRecipe) {
-                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                Constants.LOG.debug(
                         "[maicraft-craft] skipped unusable recipe {}: {}",
                         holder.id(), brokenRecipe.toString());
             }
@@ -424,7 +427,7 @@ public final class CraftOps {
     }
 
     private static List<String> acceptableItemIds(Ingredient ingredient) {
-        return java.util.Arrays.stream(ingredient.getItems())
+        return Arrays.stream(ingredient.getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .map(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
                 .distinct()
@@ -508,7 +511,7 @@ public final class CraftOps {
 
         private boolean levels(int source, int sink) {
             level = new int[graph.size()];
-            java.util.Arrays.fill(level, -1);
+            Arrays.fill(level, -1);
             ArrayDeque<Integer> queue = new ArrayDeque<>();
             level[source] = 0;
             queue.add(source);

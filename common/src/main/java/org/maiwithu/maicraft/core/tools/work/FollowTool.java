@@ -12,6 +12,7 @@ import com.google.gson.JsonObject;
 
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.UUID;
 
 /**
  * 接收内部跟随请求，立即核对目标已加载，并把它的 UUID 一起存入请求，供以后恢复时检查身份。
@@ -80,9 +81,9 @@ public final class FollowTool implements MaiCraftTool {
                     + " is loaded here — scan_nearby_entities first; runtime ids do not survive reconnects");
             return;
         }
-        java.util.UUID targetUuid = target.getUUID();
+        UUID targetUuid = target.getUUID();
         if (parsed.entity_uuid() != null
-                && !targetUuid.equals(java.util.UUID.fromString(parsed.entity_uuid()))) {
+                && !targetUuid.equals(UUID.fromString(parsed.entity_uuid()))) {
             reply.accept("entity id " + entityId + " now refers to a different entity — scan again");
             return;
         }

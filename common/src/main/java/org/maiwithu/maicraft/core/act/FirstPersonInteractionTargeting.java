@@ -25,6 +25,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.util.Comparator;
 import java.util.Set;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import java.util.ArrayList;
 
 /**
  * 在走过去之前先试算“站在那里能否点到”，相机转到位后再用同一套规则核对。
@@ -187,7 +188,7 @@ public final class FirstPersonInteractionTargeting {
             LocalPlayer player, BlockPos target, double reach, Set<Long> excluded) {
         if (target == null || !player.level().isLoaded(target)) return null;
         BlockPos current = PlayerNav.playerFeet(player);
-        java.util.ArrayList<BlockPos> candidates = new java.util.ArrayList<>();
+        ArrayList<BlockPos> candidates = new ArrayList<>();
         for (int radius = 1; radius <= 3; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {

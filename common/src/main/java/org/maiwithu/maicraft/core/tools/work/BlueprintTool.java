@@ -15,6 +15,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import org.maiwithu.maicraft.core.WorkProfile;
+import org.maiwithu.maicraft.core.blueprint.BlueprintPreparation;
+import org.maiwithu.maicraft.core.task.build.ReplaceMode;
 
 /** 蓝图工具:列出结构文件,或按图整幢施工——一个入口两个动作。 */
 public final class BlueprintTool implements MaiCraftTool {
@@ -78,7 +81,7 @@ public final class BlueprintTool implements MaiCraftTool {
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         if ("list".equals(a.action())) {
-            org.maiwithu.maicraft.core.blueprint.BlueprintPreparation.list(companion, toolCallId, reply);
+            BlueprintPreparation.list(companion, toolCallId, reply);
             return;
         }
         if (!"build".equals(a.action())) {
@@ -91,7 +94,7 @@ public final class BlueprintTool implements MaiCraftTool {
             throw new IllegalArgumentException("build needs anchor x, y, z (minimum corner)");
         }
         int quarters = a.rotation() == null ? 0 : Math.floorMod(a.rotation(), 360) / 90;
-        org.maiwithu.maicraft.core.blueprint.BlueprintPreparation.build(
+        BlueprintPreparation.build(
                 companion, toolCallId, a.file(), new BlockPos(a.x(), a.y(), a.z()), quarters,
                 (player, loaded) -> buildRecord(toolCallId, a.file(), player, loaded), args, reply);
     }
@@ -102,13 +105,13 @@ public final class BlueprintTool implements MaiCraftTool {
             throw new IllegalArgumentException("blueprint " + file + " contains no buildable cells");
         }
         // 材料记账随能力画像(同 build 工具):免耗材想建就建,否则消耗并预检报缺。
-        boolean consume = !org.maiwithu.maicraft.core.WorkProfile.of(companion).freeMaterials();
+        boolean consume = !WorkProfile.of(companion).freeMaterials();
         long timeout = Math.max(MIN_TIMEOUT_TICKS,
                 BuildTool.timeoutTicksFor(loaded.targets().size(), consume));
         // allowPartial:整幢图纸一趟运不完是常态,分段施工 + 精确续建
         BuildTaskRecord record = new BuildTaskRecord(toolCallId,
                 ctx(toolCallId, companion).deadline(timeout), loaded.targets(),
-                org.maiwithu.maicraft.core.task.build.ReplaceMode.REPLACE_EMPTY, true, consume, true,
+                ReplaceMode.REPLACE_EMPTY, true, consume, true,
                 loaded.blockEntityData(), loaded.entities());
         // 加载时掉的格随任务一起交代:掉格必须有账,否则回执会拿剩下的格数当全部
         record.droppedAtLoad(loaded.dropped());

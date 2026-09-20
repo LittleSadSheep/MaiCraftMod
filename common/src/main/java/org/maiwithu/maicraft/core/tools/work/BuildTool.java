@@ -28,6 +28,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.LinkedHashSet;
+import java.util.Optional;
+import java.util.Set;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import org.maiwithu.maicraft.core.WorkProfile;
+import org.maiwithu.maicraft.core.blueprint.BuildProjectStore;
+import org.maiwithu.maicraft.core.blueprint.BuildProjectTargets;
+import org.maiwithu.maicraft.core.task.build.BuildOrder;
+import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
 
 /** Build a bounded set of explicit block cells as one background task. */
 public final class BuildTool implements MaiCraftTool {
@@ -43,7 +55,7 @@ public final class BuildTool implements MaiCraftTool {
      * 这份估值不决定实际放置节奏；实际执行还要逐步完成瞄准、交互和服务器确认。
      */
     public static long timeoutTicksFor(int cellCount, boolean consumeMaterials) {
-        long build = org.maiwithu.maicraft.core.task.build.BuildOrder
+        long build = BuildOrder
                 .estimatedTicks(cellCount, consumeMaterials);
         return Math.max(MIN_TIMEOUT_TICKS,
                 TRAVEL_ALLOWANCE_TICKS + (long) (build * TIMEOUT_SLACK));
@@ -292,7 +304,7 @@ public final class BuildTool implements MaiCraftTool {
             throw new IllegalArgumentException("ops must contain at least one instruction");
         }
         List<BuildTaskRecord.Target> targets = args.has("project_targets")
-                ? org.maiwithu.maicraft.core.blueprint.BuildProjectTargets.decode(args.getAsJsonArray("project_targets"))
+                ? BuildProjectTargets.decode(args.getAsJsonArray("project_targets"))
                 : resolveTargets(parsed.ops(), Boolean.TRUE.equals(parsed.exact_states()));
         // 直接建造和冻结项目恢复都按本次启动的建筑预算接单，不能只给作者模型放宽上限。
         if (targets.size() > BuildShapes.maxTotalCells()) {
@@ -309,7 +321,7 @@ public final class BuildTool implements MaiCraftTool {
                 ? List.of() : List.copyOf(parsed.protected_labels());
         // 材料记账随能力画像:免耗材(创造)想建就建;否则消耗背包,开工前
         // 由任务预检并逐项报缺(见 BuildCompanionTask 的 checkMaterials)。
-        boolean consume = !org.maiwithu.maicraft.core.WorkProfile.of(companion).freeMaterials();
+        boolean consume = !WorkProfile.of(companion).freeMaterials();
         long timeout = timeoutTicksFor(targets.size(), consume);
         BuildTaskRecord plan = new BuildTaskRecord(toolCallId,
                 ctx(toolCallId, companion).deadline(timeout), targets, replaceExisting,
@@ -317,7 +329,7 @@ public final class BuildTool implements MaiCraftTool {
         plan.semanticFacts(parsed.semantic_contract());
         plan.traversabilityContract(parsed.traversability_contract());
         plan.projectProtectionLabels(protectedLabels);
-        org.maiwithu.maicraft.core.blueprint.BuildProjectStore.available().ifPresent(store -> {
+        BuildProjectStore.available().ifPresent(store -> {
             String dimension = companion.level().dimension().location().toString();
             String id = args.has("project_id") ? args.get("project_id").getAsString()
                     : store.save(dimension, args, plan.targets);
@@ -326,11 +338,11 @@ public final class BuildTool implements MaiCraftTool {
             store.bindScaffolds(plan, companion.level());
         });
         if (consume && allowPartial) {
-            org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord
+            SemanticBuildSupplyTaskRecord
                     .ensureRegistered();
             long supplyTimeout = Math.max(timeout, 45L * 60L * 20L);
             setTask(companion,
-                    new org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord(
+                    new SemanticBuildSupplyTaskRecord(
                             toolCallId, ctx(toolCallId, companion).deadline(supplyTimeout), plan,
                             materialPolicy, List.of(), false, protectedLabels,
                             broadenMaterialFamilies),
@@ -372,13 +384,13 @@ public final class BuildTool implements MaiCraftTool {
         List<BuildTaskRecord.Target> expanded = new ArrayList<>();
         for (OpSpec op : ops) {
             // 精确建造只把用户明确写出的属性列为最终要求；单独的朝向、轴向和上下半参数也一并记录。
-            var authored = new java.util.LinkedHashSet<>(op.properties() == null ? java.util.Set.<String>of() : op.properties().keySet());
+            var authored = new LinkedHashSet<>(op.properties() == null ? Set.<String>of() : op.properties().keySet());
             if (op.facing() != null) authored.add("facing");
             if (op.axis() != null) authored.add("axis");
             for (var target : expandOp(op)) {
-                var requested = new java.util.LinkedHashSet<>(authored);
+                var requested = new LinkedHashSet<>(authored);
                 if (op.half() != null) requested.add(target.desiredState().hasProperty(
-                        net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE) ? "type" : "half");
+                        BlockStateProperties.SLAB_TYPE) ? "type" : "half");
                 expanded.add(exactStates
                     ? new BuildTaskRecord.Target(target.desiredState(), target.item(), target.pos(), target.label(),
                             target.facing(), target.axis(), target.topHalf(), false,
@@ -478,7 +490,7 @@ public final class BuildTool implements MaiCraftTool {
         }
         Item item = ToolArgs.parseItem(spec.block_id());
         if (!(item instanceof BlockItem blockItem)
-                || !(blockItem.getBlock() instanceof net.minecraft.world.level.block.DoorBlock door)) {
+                || !(blockItem.getBlock() instanceof DoorBlock door)) {
             throw new IllegalArgumentException(spec.block_id() + " is not a door");
         }
         Direction facing = spec.facing() == null ? Direction.NORTH : Direction.byName(spec.facing());
@@ -489,15 +501,15 @@ public final class BuildTool implements MaiCraftTool {
         String label = spec.block_id().contains(":")
                 ? spec.block_id().split(":", 2)[1] : spec.block_id();
         BlockState base = door.defaultBlockState()
-                .setValue(net.minecraft.world.level.block.DoorBlock.FACING, facing);
+                .setValue(DoorBlock.FACING, facing);
         List<BuildTaskRecord.Target> out = new ArrayList<>(2);
         out.add(new BuildTaskRecord.Target(base.setValue(
-                net.minecraft.world.level.block.DoorBlock.HALF,
-                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER),
+                DoorBlock.HALF,
+                DoubleBlockHalf.LOWER),
                 item, lower, label, null, null, null));
         out.add(new BuildTaskRecord.Target(base.setValue(
-                net.minecraft.world.level.block.DoorBlock.HALF,
-                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER),
+                DoorBlock.HALF,
+                DoubleBlockHalf.UPPER),
                 item, lower.above(), label, null, null, null));
         return out;
     }
@@ -510,7 +522,7 @@ public final class BuildTool implements MaiCraftTool {
         // 了一遍 ToolArgs.parseItem + if(AIR) 的写法,而那个 AIR 分支永远到不了。
         BuildPalette.Entry resolved = BuildPalette.resolve(spec.block_id(), 1);
         Item item = resolved.item();
-        net.minecraft.world.level.block.Block block = resolved.block();
+        Block block = resolved.block();
         BlockPos pos = new BlockPos(spec.x(), spec.y(), spec.z());
         Direction facing = opt(spec.facing()) == null ? null : Direction.byName(opt(spec.facing()));
         if (opt(spec.facing()) != null && facing == null) {
@@ -556,7 +568,7 @@ public final class BuildTool implements MaiCraftTool {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static BlockState setProperty(BlockState state, Property property, String value) {
-        java.util.Optional parsed = property.getValue(value);
+        Optional parsed = property.getValue(value);
         if (parsed.isEmpty()) {
             throw new IllegalArgumentException("invalid value " + value
                     + " for property " + property.getName());

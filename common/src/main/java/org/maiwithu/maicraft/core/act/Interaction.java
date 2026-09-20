@@ -23,6 +23,11 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.LivingEntity;
+import org.maiwithu.maicraft.client.actor.DefaultNativeActionPort;
+import org.maiwithu.maicraft.client.actor.ItemUseInputLease;
+import org.maiwithu.maicraft.core.combat.Swing;
 
 /**
  * 把一次鼠标操作分成几刻完成：先瞄准，再出手，再观察有没有生效。
@@ -256,7 +261,7 @@ public final class Interaction {
     public Status tick() {
         if (receipt == null
                 && (closeReceipt != null || player.containerMenu != player.inventoryMenu
-                || net.minecraft.client.Minecraft.getInstance().screen != null)) {
+                || Minecraft.getInstance().screen != null)) {
             Status menuStatus = awaitWorldInputReady();
             if (menuStatus != null) {
                 return menuStatus;
@@ -348,13 +353,13 @@ public final class Interaction {
                     context, hand, confirmation, timing.hold
                             ? Math.max(CONFIRM_TIMEOUT_TICKS, (int) Math.min(1200L, (long) before.getUseDuration(player) + CONFIRM_TIMEOUT_TICKS))
                             : CONFIRM_TIMEOUT_TICKS);
-            if (timing.hold) org.maiwithu.maicraft.client.actor.ItemUseInputLease.renew(this, context, receipt, hand, heldUseBefore);
+            if (timing.hold) ItemUseInputLease.renew(this, context, receipt, hand, heldUseBefore);
             return Status.RUNNING;
         }
         // 原生 handleKeybinds 每刻会检查是否松手；只为本次回执续持用，不重发 useItem 或修改食物数量。
-        if (timing.hold && !releasing && context.actions() instanceof org.maiwithu.maicraft.client.actor.DefaultNativeActionPort actions
+        if (timing.hold && !releasing && context.actions() instanceof DefaultNativeActionPort actions
                 && actions.ownsItemUse(receipt))
-            org.maiwithu.maicraft.client.actor.ItemUseInputLease.renew(this, context, receipt, hand, heldUseBefore);
+            ItemUseInputLease.renew(this, context, receipt, hand, heldUseBefore);
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) {
             return Status.RUNNING;
@@ -375,16 +380,16 @@ public final class Interaction {
         if (!timing.hold) {
             return Status.DONE;
         }
-        if (player.isUsingItem() && !org.maiwithu.maicraft.client.actor.ItemUseInputLease.owns(this, context, receipt)) {
+        if (player.isUsingItem() && !ItemUseInputLease.owns(this, context, receipt)) {
             failReason = "the held item use no longer belongs to this interaction";
             return Status.FAILED;
         }
         if (!player.isUsingItem()) {
-            org.maiwithu.maicraft.client.actor.ItemUseInputLease.release(this);
+            ItemUseInputLease.release(this);
             return Status.DONE;
         }
         if (timing.maxHold > 0 && ++held >= timing.maxHold) {
-            org.maiwithu.maicraft.client.actor.ItemUseInputLease.release(this);
+            ItemUseInputLease.release(this);
             receipt = context.actions().releaseUsingItem(context, receipt);
             releasing = true;
             return Status.RUNNING;
@@ -448,9 +453,9 @@ public final class Interaction {
                 || entityHit.getEntity() != entity) {
             return false;
         }
-        boolean recovering = entity instanceof net.minecraft.world.entity.LivingEntity living
+        boolean recovering = entity instanceof LivingEntity living
                 && living.hurtTime > 0;
-        if (!org.maiwithu.maicraft.core.combat.Swing.mayStrike(
+        if (!Swing.mayStrike(
                 false, recovering, player.getAttackStrengthScale(0.0f))) {
             return false;
         }
@@ -691,12 +696,12 @@ public final class Interaction {
                 && player.isUsingItem() && !releasing) {
             LocalPlayerContext context = ClientRuntime.actor().activeContext().filter(c -> c.player() == player).orElse(null);
             if (context != null && context.mutationAvailable() && (block != null || entity != null || !timing.hold
-                    || org.maiwithu.maicraft.client.actor.ItemUseInputLease.owns(this, context, receipt))) {
+                    || ItemUseInputLease.owns(this, context, receipt))) {
                 receipt = context.actions().releaseUsingItem(context, receipt);
                 releasing = true;
             }
         }
-        org.maiwithu.maicraft.client.actor.ItemUseInputLease.release(this);
+        ItemUseInputLease.release(this);
         InputDriver.halt(player);
     }
 }

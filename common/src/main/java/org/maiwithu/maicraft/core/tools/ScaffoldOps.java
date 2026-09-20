@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
+import net.minecraft.world.item.BlockItem;
 
 /**
  * 处理垫路材料的读取、增删、替换和清空，更新内存后通知玩家，并返回材料清单和背包里未列入的方块。
@@ -22,7 +24,7 @@ public final class ScaffoldOps {
     private static final int MAX_SUGGESTIONS = 12;
 
     public String apply(String action, List<String> blockIds, LocalPlayer self) {
-        String verb = action == null || action.isBlank() ? "read" : action.trim().toLowerCase(java.util.Locale.ROOT);
+        String verb = action == null || action.isBlank() ? "read" : action.trim().toLowerCase(Locale.ROOT);
         List<String> given = ScaffoldMaterials.normalize(blockIds);
 
         boolean gaveNothing = blockIds == null || blockIds.isEmpty();
@@ -115,7 +117,7 @@ public final class ScaffoldOps {
         var inv = self.getInventory();
         for (int i = 0; i < inv.getContainerSize(); i++) {
             ItemStack stack = inv.getItem(i);
-            if (stack.isEmpty() || !(stack.getItem() instanceof net.minecraft.world.item.BlockItem)) {
+            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem)) {
                 continue;
             }
             String id = ScaffoldMaterials.idOf(stack.getItem());

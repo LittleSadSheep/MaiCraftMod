@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.data;
 import org.maiwithu.maicraft.core.data.ModItemTagData.TagAppenderProvider;
 import org.maiwithu.maicraft.core.init.InitTag;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.tags.BlockTags;
 
 /**
  * 默认方块策略标签的内容清单，本身不修改世界或注册表。
@@ -27,10 +28,10 @@ public final class ModBlockTagData {
     // 这里引用的是其他标签，真正生成或绑定时还需要展开／保留这些引用。
     public static void addBlockTags(TagAppenderProvider<Block> tags) {
         tags.tag(InitTag.DO_NOT_BREAK)
-                .addTag(net.minecraft.tags.BlockTags.BEDS)
-                .addTag(net.minecraft.tags.BlockTags.DOORS)
-                .addTag(net.minecraft.tags.BlockTags.TRAPDOORS)
-                .addTag(net.minecraft.tags.BlockTags.FENCE_GATES);
+                .addTag(BlockTags.BEDS)
+                .addTag(BlockTags.DOORS)
+                .addTag(BlockTags.TRAPDOORS)
+                .addTag(BlockTags.FENCE_GATES);
 
         // 图纸可以把方块实体数据带进世界的那些方块。默认只有牌子和旗帜:牌子上的字是
         // 纯文本(玩家自己写也是白写的),旗帜的花纹是设计的一部分而料按带花纹的那面
@@ -42,7 +43,7 @@ public final class ModBlockTagData {
         // 往这个标签里加容器意味着图纸可以印出里面的东西——那是数据包作者的决定,
         // 但得是知情的决定。
         tags.tag(InitTag.SAFE_BLOCK_ENTITY_DATA)
-                .addTag(net.minecraft.tags.BlockTags.ALL_SIGNS)
-                .addTag(net.minecraft.tags.BlockTags.BANNERS);
+                .addTag(BlockTags.ALL_SIGNS)
+                .addTag(BlockTags.BANNERS);
     }
 }

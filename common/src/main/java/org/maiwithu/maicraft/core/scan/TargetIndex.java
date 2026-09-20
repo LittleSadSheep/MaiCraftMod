@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 缓存当前客户端已加载方块的位置，供采矿等任务反复询问最近目标。
@@ -249,7 +250,7 @@ public final class TargetIndex {
         idx.lastUseTick = tick;
         QueryKey key = new QueryKey(center.immutable(), List.copyOf(targets), want,
                 Math.max(0, maxChunkRadius), excluded.stream().map(BlockPos::immutable)
-                        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+                        .collect(Collectors.toUnmodifiableSet()));
         QueryProgress progress = idx.queries.get(key);
         if (progress != null && progress.complete
                 && (tick < progress.completedTick || tick - progress.completedTick >= COMPLETED_QUERY_TICKS)) {

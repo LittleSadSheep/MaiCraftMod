@@ -20,6 +20,14 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import java.util.Objects;
+import java.util.function.Predicate;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
+import org.maiwithu.maicraft.client.actor.VanillaHotbar;
+import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
+import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 
 /**
  * 把挖一个方块拆成选工具、关背包、瞄准、持续挖、等结果几步。
@@ -36,7 +44,7 @@ public final class BlockDigger {
      *  blockBreakSpeed setting (period = the setting, delay = setting − 1). */
     private static int postBreakDelay() {
         return Math.max(0,
-                org.maiwithu.maicraft.core.pathing.settings.NavSettings.get().blockBreakSpeed - 1);
+                NavSettings.get().blockBreakSpeed - 1);
     }
 
     private final LocalPlayer player;
@@ -48,17 +56,17 @@ public final class BlockDigger {
     private int pendingToolSlot = -1;
     private int minimumToolDurability;
     public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
-    private java.util.function.Predicate<BlockHitResult> preparation = hit -> true;
+    private Predicate<BlockHitResult> preparation = hit -> true;
     /** 工具真正拿好、界面关闭且准星对准后，才检查连锁准备；未通过前不提交第一下破坏。 */
-    public void beforeBreak(java.util.function.Predicate<BlockHitResult> gate) {
-        preparation = java.util.Objects.requireNonNull(gate);
+    public void beforeBreak(Predicate<BlockHitResult> gate) {
+        preparation = Objects.requireNonNull(gate);
     }
     public boolean hasPendingBreak() { return receipt != null && !receipt.terminal(); }
     private boolean preferTopFace;
     public void preferTopFace(boolean value) { preferTopFace = value; }
     private int blockHitDelay;    // post-break cooldown (survives reset())
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
-    private net.minecraft.world.item.ItemStack destroyingItem;
+    private ItemStack destroyingItem;
 
     public BlockDigger(LocalPlayer player) {
         this.player = player;
@@ -299,7 +307,7 @@ public final class BlockDigger {
         }
         // 挖到一半换了手中物品或其附带数据，就取消旧挖掘，以免继续使用旧工具的进度。
         if (receipt != null && !receipt.terminal() && destroyingItem != null
-                && !net.minecraft.world.item.ItemStack.isSameItemSameComponents(
+                && !ItemStack.isSameItemSameComponents(
                         destroyingItem, player.getMainHandItem())) {
             cancel();
             return DigResult.PROGRESSING;
@@ -370,7 +378,7 @@ public final class BlockDigger {
             // 工具在背包里时换到“当前手上那格”；扩展快捷栏模组可能让 selected 越出 0~8，
             // 原版 SWAP 交换只认 0~8，先折回原版范围再交换。
             toolStageReceipt = context.menus().swapInventoryToHotbar(
-                    context, bestSlot, org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(selected), TOOL_TIMEOUT_TICKS);
+                    context, bestSlot, VanillaHotbar.swapTarget(selected), TOOL_TIMEOUT_TICKS);
         }
     }
     /**
@@ -389,8 +397,8 @@ public final class BlockDigger {
         boolean pendingSelection = toolSelectReceipt != null && !toolSelectReceipt.terminal();
         boolean pendingMenu = (toolCloseReceipt != null && !toolCloseReceipt.terminal())
                 || (toolStageReceipt != null && !toolStageReceipt.terminal())
-                || org.maiwithu.maicraft.client.actor.MenuVisibility.inventoryVisible(
-                        net.minecraft.client.Minecraft.getInstance(), player);
+                || MenuVisibility.inventoryVisible(
+                        Minecraft.getInstance(), player);
         LocalPlayerContext context = pendingBreak || pendingSelection || pendingMenu
                 ? ClientRuntime.requireContext(player)
                 : null;
@@ -451,7 +459,7 @@ public final class BlockDigger {
             return null;
         }
         Vec3 eye = player.getEyePosition();
-        double reach = org.maiwithu.maicraft.core.pathing.moves.AimGeometry.blockReachDistance(player);
+        double reach = AimGeometry.blockReachDistance(player);
         BlockState state = level.getBlockState(pos);
         VoxelShape shape = state.getShape(level, pos);
         if (shape.isEmpty()) {
@@ -460,7 +468,7 @@ public final class BlockDigger {
         // Collision-shape centre first (empty collision → whole-cell centre),
         // then the six face centres on the outline shape.
         Vec3[] aims = {
-                org.maiwithu.maicraft.core.pathing.moves.AimGeometry.collisionCenter(level, pos, state),
+                AimGeometry.collisionCenter(level, pos, state),
                 offsetOn(pos, shape, 0.5, 0.0, 0.5),
                 offsetOn(pos, shape, 0.5, 1.0, 0.5),
                 offsetOn(pos, shape, 0.5, 0.5, 0.0),
@@ -499,7 +507,7 @@ public final class BlockDigger {
             return null;
         }
         Vec3 eye = player.getEyePosition();
-        double reach = org.maiwithu.maicraft.core.pathing.moves.AimGeometry.blockReachDistance(player);
+        double reach = AimGeometry.blockReachDistance(player);
         Vec3 center = Vec3.atCenterOf(target);
         Vec3 dir = center.subtract(eye);
         if (dir.lengthSqr() < 1.0e-8) {

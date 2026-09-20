@@ -33,6 +33,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.Arrays;
+import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSource;
 
 /**
  * Query tool implementations — the business half of {@code LookupRecipeTool},
@@ -179,7 +182,7 @@ String item_id,
                     recipes.add(formatSmithing(sm, result));
                 }
             } catch (RuntimeException broken) {
-                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                Constants.LOG.debug(
                         "[maicraft-recipe] 配方 {} 坏了,跳过: {}", holder.id(), broken.toString());
             }
         }
@@ -188,7 +191,7 @@ String item_id,
             // 普通工作台和炉子没查到时，模组机器仍可能加工该材料；交给按需工艺知识，不能误导角色去采矿或交易。
             return TaskResult.ok("No ordinary crafting/cooking recipe was found for " + name
                     + ". This does not prove that no recipe exists; inspect material/process knowledge at "
-                    + org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSource.uri(BuiltInRegistries.ITEM.getKey(target))
+                    + RecipeKnowledgeSource.uri(BuiltInRegistries.ITEM.getKey(target))
                     + " before selecting another acquisition route.").toJson();
         }
         return TaskResult.ok("recipe(s) for " + name + ":\n\n" + String.join("\n\n", recipes) + "\n\n"
@@ -256,7 +259,7 @@ String item_id,
      *  members — so a category ingredient doesn't mislead the model into one specific item.
      *  Package-visible: the craft tool names its material shortfalls with the same vocabulary. */
     static String describeIngredient(Ingredient ing) {
-        List<String> paths = java.util.Arrays.stream(ing.getItems())   // 1.21.1: getItems() -> ItemStack[]
+        List<String> paths = Arrays.stream(ing.getItems())   // 1.21.1: getItems() -> ItemStack[]
                 .map(s -> BuiltInRegistries.ITEM.getKey(s.getItem()).getPath())
                 .distinct()
                 .toList();

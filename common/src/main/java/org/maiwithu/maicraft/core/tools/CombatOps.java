@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 import java.util.List;
+import java.util.Objects;
 
 /** 造 {@code attack} 的任务账本。 */
 public final class CombatOps {
@@ -30,7 +31,7 @@ public final class CombatOps {
     static List<Integer> normalizeEntityIds(List<Integer> entityIds) {
         if (entityIds == null) throw new IllegalArgumentException("entity_ids is required");
         List<Integer> ids = entityIds.stream()
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .distinct()
                 .toList();
         if (ids.isEmpty()) {

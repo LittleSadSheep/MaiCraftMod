@@ -12,6 +12,7 @@ import com.google.gson.JsonObject;
 
 import java.util.Map;
 import java.util.function.Consumer;
+import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
  * 内部钓鱼入口，只接收收获次数并安排持续任务，不在工具入口直接操作鱼钩。
@@ -59,7 +60,7 @@ public final class FishTool implements MaiCraftTool {
         var context = ctx(toolCallId, companion);
         if (parsed == null || parsed.count() == null) {
             // 没给数量 = 常驻:一直钓,不设期限(期限是给"该多久干完"用的,而它没有干完)。
-            setTask(companion, new FishTaskRecord(toolCallId, org.maiwithu.maicraft.task.TaskRecord.NO_DEADLINE, 0), args, reply);
+            setTask(companion, new FishTaskRecord(toolCallId, TaskRecord.NO_DEADLINE, 0), args, reply);
             return;
         }
         int count = Math.clamp(parsed.count(), 1, MAX_COUNT);

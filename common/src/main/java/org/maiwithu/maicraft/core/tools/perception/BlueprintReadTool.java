@@ -21,6 +21,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Consumer;
+import java.util.Iterator;
+import org.maiwithu.maicraft.core.blueprint.BlueprintPreparation;
+import org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView;
 
 /**
  * 读一张图纸:尺寸、用料、按层分布——不动世界一格。
@@ -90,12 +93,12 @@ public final class BlueprintReadTool implements MaiCraftTool {
         boolean anchored = a.x() != null && a.y() != null && a.z() != null;
         BlockPos anchor = anchored ? new BlockPos(a.x(), a.y(), a.z()) : BlockPos.ZERO;
         int quarters = a.rotation() == null ? 0 : Math.floorMod(a.rotation(), 360) / 90;
-        org.maiwithu.maicraft.core.blueprint.BlueprintPreparation.read(
+        BlueprintPreparation.read(
                 companion, toolCallId, a.file(), anchor, quarters,
                 new ReadReport(a), reply);
     }
 
-    private static final class ReadReport implements org.maiwithu.maicraft.core.blueprint.BlueprintPreparation.Report {
+    private static final class ReadReport implements BlueprintPreparation.Report {
         private final Args a;
         private final boolean anchored;
         private final Map<Item, Integer> cost = new LinkedHashMap<>();
@@ -105,9 +108,9 @@ public final class BlueprintReadTool implements MaiCraftTool {
         private final Map<String, Integer> extra = new LinkedHashMap<>();
         private final Map<String, Integer> exact = new LinkedHashMap<>();
         private int placed, clears, unknownSiteCells, baseY;
-        private java.util.Iterator<List<BuildTaskRecord.CellNeed>> needs;
-        private java.util.Iterator<BuildTaskRecord.EntitySpawn> spawns;
-        private java.util.Iterator<BuildTaskRecord.Target> targets;
+        private Iterator<List<BuildTaskRecord.CellNeed>> needs;
+        private Iterator<BuildTaskRecord.EntitySpawn> spawns;
+        private Iterator<BuildTaskRecord.Target> targets;
 
         ReadReport(Args a) {
             this.a = a;
@@ -116,8 +119,8 @@ public final class BlueprintReadTool implements MaiCraftTool {
 
         @Override public TaskResult tick(LocalPlayer companion, BlueprintStore.Loaded loaded) {
             var level = ClientRuntime.requireContext(companion).level();
-            var siteView = (org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView)
-                    org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(level);
+            var siteView = (LoadedOnlyView)
+                    LoadedOnlyView.of(level);
             if (needs == null) {
                 needs = loaded.cellNeeds().values().iterator();
                 spawns = loaded.entities().iterator();

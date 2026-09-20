@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.BiPredicate;
 
 /**
  * 执行一小段实际方块扫描，返回位置、方块状态和距离。
@@ -50,7 +51,7 @@ public final class BlockScanner {
     // 小范围直接逐格找非空气目标，按眼睛到方块中心的距离选；不在这里判断能否走到或视线是否被挡。
     public static BlockPos nearestBlock(Level level, BlockPos base, Vec3 eye,
                                         int hr, int vr, double maxDist,
-                                        java.util.function.BiPredicate<BlockPos, BlockState> match) {
+                                        BiPredicate<BlockPos, BlockState> match) {
         BlockPos best = null;
         double bestD = maxDist * maxDist;
         for (BlockPos p : BlockPos.betweenClosed(base.offset(-hr, -vr, -hr), base.offset(hr, vr, hr))) {

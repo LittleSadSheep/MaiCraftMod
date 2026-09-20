@@ -15,6 +15,7 @@ import net.minecraft.world.entity.monster.Creeper;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.player.LocalPlayer;
 
 /**
  * 估计战斗中应离目标多远，以及玩家是否该撤退。
@@ -98,7 +99,7 @@ public final class Menace {
             return true;
         }
         return foe instanceof Mob mob && (mob.getTarget() == self
-                || self instanceof net.minecraft.client.player.LocalPlayer player
+                || self instanceof LocalPlayer player
                 && CombatThreats.recentlyAttackedBy(player, mob));
     }
 

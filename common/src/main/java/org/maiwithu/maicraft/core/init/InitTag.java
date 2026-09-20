@@ -6,6 +6,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.core.Registry;
+import net.minecraft.resources.ResourceKey;
 
 /**
  * 集中保存本项目几个物品和方块标签的名字，供代码引用。
@@ -72,8 +74,8 @@ public final class InitTag {
      * 模组还会加。标签是 Minecraft 自己表达"一类"的方式,而且整合包能扩。
      */
     // 只把 # 开头的文字解析成标签名；不是给标签填成员，也不会验证这个标签已在当前注册表加载。
-    public static <T> TagKey<T> parseRef(net.minecraft.resources.ResourceKey<
-            ? extends net.minecraft.core.Registry<T>> registry, String raw) {
+    public static <T> TagKey<T> parseRef(ResourceKey<
+            ? extends Registry<T>> registry, String raw) {
         if (raw == null || !raw.startsWith(TAG_PREFIX)) {
             return null;
         }

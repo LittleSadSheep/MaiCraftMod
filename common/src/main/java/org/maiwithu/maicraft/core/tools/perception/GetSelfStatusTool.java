@@ -13,6 +13,7 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.Map;
 import java.util.function.Consumer;
+import org.maiwithu.maicraft.task.reflex.ReflexRegistry;
 
 /**
  * 读取自己的生命、饥饿、位置、装备和水下氧气，回复这一刻看到的状态。
@@ -40,7 +41,7 @@ public final class GetSelfStatusTool implements MaiCraftTool {
                 + "Backpack occupancy covers the main inventory including the hotbar, excluding armor "
                 + "and offhand slots; item contents are not listed. Use inspect_gui when exact slots "
                 + "matter. No arguments.";
-        String overview = org.maiwithu.maicraft.task.reflex.ReflexRegistry.overview();
+        String overview = ReflexRegistry.overview();
         return overview.isEmpty() ? base : base + "\n\n" + overview;
     }
 

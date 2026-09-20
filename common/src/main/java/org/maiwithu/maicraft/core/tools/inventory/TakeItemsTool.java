@@ -15,6 +15,7 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.Map;
 import java.util.function.Consumer;
+import org.maiwithu.maicraft.agent.tool.ToolArgs;
 
 /**
  * 创造模式的内部领取入口，使用真实的创造物品槽位请求取得物品。
@@ -62,7 +63,7 @@ public final class TakeItemsTool implements MaiCraftTool {
         }
         Item item;
         try {
-            item = org.maiwithu.maicraft.agent.tool.ToolArgs.parseItem(
+            item = ToolArgs.parseItem(
                     a == null || a.item_id() == null ? "" : a.item_id());
         } catch (IllegalArgumentException bad) {
             reply.accept(TaskResult.fail("unknown item id: "

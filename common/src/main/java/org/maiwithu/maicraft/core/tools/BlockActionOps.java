@@ -14,6 +14,7 @@ import net.minecraft.world.level.block.Block;
 
 import java.util.List;
 import java.util.Set;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * 把挖矿、原地点击和实体点击的内部参数转换成任务记录。
@@ -85,14 +86,14 @@ String expected_block_id,
         // 例如取水前要求水源还在，完成后再要求变成空气，前后条件各管一件事。
         Block expected = null;
         if (expected_block_id != null) {
-            var id = net.minecraft.resources.ResourceLocation.tryParse(expected_block_id);
+            var id = ResourceLocation.tryParse(expected_block_id);
             if (aim == null || id == null || !BuiltInRegistries.BLOCK.containsKey(id))
                 throw new IllegalArgumentException("expected_block_id needs a valid block and an explicit aim");
             expected = BuiltInRegistries.BLOCK.get(id);
         }
         Block required = null;
         if (required_block_id != null) {
-            var id = net.minecraft.resources.ResourceLocation.tryParse(required_block_id);
+            var id = ResourceLocation.tryParse(required_block_id);
             if (aim == null || id == null || !BuiltInRegistries.BLOCK.containsKey(id))
                 throw new IllegalArgumentException("required_block_id needs a valid block and an explicit aim");
             required = BuiltInRegistries.BLOCK.get(id);

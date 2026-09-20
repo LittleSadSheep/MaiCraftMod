@@ -13,6 +13,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.List;
+import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 
 /**
  * Read-only GUI inspection used by {@code InspectGuiTool}. Mutations are receipt-owned tasks.
@@ -72,7 +73,7 @@ public final class GuiOps {
         // special-casing) — meaning is GUI-specific, the model/skill interprets (e.g. a furnace's are
         // [litTime, litDuration, cookProgress, cookTotal], so cook% = cookProgress/cookTotal).
         String dataLine = "";
-        List<DataSlot> data = ((org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor) (Object) menu).maicraft$dataSlots();
+        List<DataSlot> data = ((MenuDataSlotsAccessor) (Object) menu).maicraft$dataSlots();
         if (!data.isEmpty()) {
             StringBuilder d = new StringBuilder("data values (machine state — progress/fuel/energy/…, "
                     + "meaning is GUI-specific): [");

@@ -16,6 +16,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.integration.create.CreateStockObservation;
+import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 
 /**
  * 记住玩家最近在外部菜单里看到的库存，供取材料时参考。
@@ -61,7 +62,7 @@ public final class StockEvidence {
             synchronizedMenu = null;
             synchronizedPlayer = null;
             CreateStockObservation.reset();
-            org.maiwithu.maicraft.core.task.container.ContainerSupplySources.reset();
+            ContainerSupplySources.reset();
             return;
         }
         CACHE.latest(player, player.clientLevel, inventory(player), player.level().getGameTime());

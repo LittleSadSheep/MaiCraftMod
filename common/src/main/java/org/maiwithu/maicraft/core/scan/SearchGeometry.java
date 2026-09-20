@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import java.util.stream.Collectors;
 
 /**
  * 为附近搜索提供遍历顺序和“外面不可能再有更近结果”的停止依据。
@@ -130,7 +131,7 @@ public final class SearchGeometry {
             this.center = center.immutable();
             this.want = Math.max(1, want);
             this.excluded = excluded.stream().map(BlockPos::immutable)
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                    .collect(Collectors.toUnmodifiableSet());
             this.order = Comparator.comparingDouble((BlockPos pos) -> pos.distSqr(this.center))
                     .thenComparingInt(BlockPos::getY)
                     .thenComparingInt(BlockPos::getX)
