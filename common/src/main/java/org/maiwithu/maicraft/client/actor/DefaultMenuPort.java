@@ -305,12 +305,12 @@ public final class DefaultMenuPort implements MenuPort {
         return receipt;
     }
 
-    /** 根据已知延迟估计无回显时要等多久，但当前最多十个客户端刻；高延迟时可能短于实际往返时间。 */
+    /** 无回显时至少等完已观察到的往返时间和两刻余量，不能在高延迟下把预测画面提前当成成功。 */
     private static int unacknowledgedStabilityTicks(LocalPlayerContext context) {
         var info = context.connection().getPlayerInfo(context.player().getUUID());
         long latencyMillis = info == null ? 0L : Math.max(0, info.getLatency());
-        int roundTripTicks = (int) Math.min(8L, (latencyMillis + 49L) / 50L);
-        return Math.max(3, Math.min(10, roundTripTicks + 2));
+        int roundTripTicks = (int) ((latencyMillis + 49L) / 50L);
+        return Math.max(3, roundTripTicks + 2);
     }
 
     void revokeForBoundary(String reason) {
@@ -345,7 +345,11 @@ public final class DefaultMenuPort implements MenuPort {
     private MenuReceipt create(MenuReceipt.Kind kind, LocalPlayerContext context,
                                AbstractContainerMenu menu, int timeoutTicks,
                                boolean allowContainerChange, MenuConfirmation confirmation) {
-        MenuReceipt receipt = MenuReceipt.forMenu(kind, context, menu, timeoutTicks, allowContainerChange, confirmation);
+        if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
+        // 普通一秒超时不能比已知往返还短；留出首次观察和稳定检查的时间，关闭本地界面则沿用调用方预算。
+        int budget = kind == MenuReceipt.Kind.CLOSE ? timeoutTicks
+                : Math.max(timeoutTicks, unacknowledgedStabilityTicks(context) + 3);
+        MenuReceipt receipt = MenuReceipt.forMenu(kind, context, menu, budget, allowContainerChange, confirmation);
         active = receipt;
         return receipt;
     }

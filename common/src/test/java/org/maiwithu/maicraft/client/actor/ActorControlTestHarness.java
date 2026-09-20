@@ -11,6 +11,7 @@ import net.minecraft.world.inventory.InventoryMenu;
 import sun.misc.Unsafe;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.world.InteractionHand;
@@ -31,6 +32,7 @@ final class ActorControlTestHarness {
 
     ActorControlTestHarness() throws Exception {
         connection.packets = new ArrayList<>();
+        field(ClientPacketListener.class, "playerInfoMap").set(connection, new HashMap<>());
         minecraft.player = player;
         field(LocalPlayer.class, "connection").set(player, connection);
         field(Minecraft.class, "gameThread").set(minecraft, Thread.currentThread());

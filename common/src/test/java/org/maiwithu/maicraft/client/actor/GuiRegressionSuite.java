@@ -130,6 +130,7 @@ public final class GuiRegressionSuite {
         ChatSessionTest.main(args);
         ChatAbilityTest.main(args);
         MenuVisibilityTest.main(args);
+        MenuConfirmationLatencyTest.main(args);
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);
         BlockUseConfirmationTest.main(args);
