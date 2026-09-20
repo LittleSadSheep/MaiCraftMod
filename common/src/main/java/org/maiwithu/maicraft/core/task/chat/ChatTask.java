@@ -19,7 +19,8 @@ public final class ChatTask implements Task {
 
     public ChatTask(LocalPlayer player, ChatTaskRecord record) {
         this.player = player;
-        session = new ChatSession(record.message);
+        // 会话只负责真实输入框，发送许可由已绑定父任务身份的持久屏障决定。
+        session = new ChatSession(record.message, record::prepareSubmission);
     }
 
     @Override public TaskState tick(LocalPlayer companion) {

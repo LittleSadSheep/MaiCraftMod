@@ -110,6 +110,8 @@ public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
         // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。
         TaskSlotFailureTest.main(args);
+        // 聊天在真实发送前必须取得持久许可，重启后的旧编号不能变成第二条消息。
+        ChatSubmissionHistoryTest.main(args);
         ChatTypingTest.main(args);
         ChatSessionTest.main(args);
         ChatAbilityTest.main(args);

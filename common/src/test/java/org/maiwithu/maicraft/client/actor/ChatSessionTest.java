@@ -23,7 +23,7 @@ public final class ChatSessionTest {
         check(!ChatScreenView.mayOpen(invisiblePause, false), "manual pause menu is retained even in background");
         check(!ChatScreenView.mayOpen(h.allocate(ChatScreen.class), false), "never overwrite a human draft");
         View view = new View();
-        ChatSession session = new ChatSession(new ChatMessage("你好", 100), view);
+        ChatSession session = new ChatSession(new ChatMessage("你好", 100), view, () -> true);
         session.tick(h.context, 0);
         check(!h.context.mutationAvailable() && view.text.isEmpty(), "opening claims one mutation and displays empty draft");
         h.nextTick(true); session.tick(h.context, 100_000_000L);
@@ -40,7 +40,7 @@ public final class ChatSessionTest {
 
         for (boolean throwing : new boolean[]{false, true}) {
             view = new View(); view.throwOnSend = throwing;
-            session = new ChatSession(new ChatMessage("x", 50), view);
+            session = new ChatSession(new ChatMessage("x", 50), view, () -> true);
             h.nextTick(true); session.tick(h.context, 0);
             h.nextTick(true); session.tick(h.context, 50_000_000L);
             h.nextTick(true);
@@ -51,7 +51,7 @@ public final class ChatSessionTest {
             check(view.sent == (throwing ? 1 : 0), "lost screen and uncertain dispatch never resend");
             check(session.status() == (throwing ? ChatSession.Status.UNCERTAIN : ChatSession.Status.CANCELLED), "honest terminal evidence");
         }
-        view = new View(); session = new ChatSession(new ChatMessage("x", 50), view);
+        view = new View(); session = new ChatSession(new ChatMessage("x", 50), view, () -> true);
         h.nextTick(false);
         try { session.tick(h.context, 0); throw new AssertionError("human controls accepted"); }
         catch (IllegalStateException expected) { check(!view.active, "no screen opened without authority"); }

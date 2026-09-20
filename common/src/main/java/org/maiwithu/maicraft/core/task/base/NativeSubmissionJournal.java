@@ -47,7 +47,8 @@ public class NativeSubmissionJournal {
         this.executor = Objects.requireNonNull(executor, "executor"); this.writer = Objects.requireNonNull(writer, "writer");
         // enchant命名空间继续使用原文件路径与诊断前缀，旧版未完成的附魔不会因入口统一而获得第二次消费。
         file = identity.directory().resolve(namespace + "-submissions").resolve(identity.key()).resolve(operationId + ".json");
-        failurePrefix = namespace.equals("enchant") ? "enchantment_submission" : "native_consumption";
+        failurePrefix = namespace.equals("enchant") ? "enchantment_submission"
+                : namespace.equals("chat") ? "chat_submission" : "native_consumption";
         contents = ("{\"version\":1,\"world_key\":\"" + identity.key() + "\",\"operation_id\":\"" + operationId
                 + "\",\"status\":\"reserved\"}\n").getBytes(StandardCharsets.UTF_8);
     }

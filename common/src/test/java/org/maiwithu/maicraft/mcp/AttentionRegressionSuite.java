@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.intent.WaitCheckpointCompatibilityTest;
 import org.maiwithu.maicraft.intent.persistence.CheckpointCapacityTest;
 import org.maiwithu.maicraft.intent.PriorResultResolverTest;
 import org.maiwithu.maicraft.intent.SequenceSkipTest;
+import org.maiwithu.maicraft.intent.ChatDurableCheckpointTest;
 
 // 注意事件和等待功能的回归入口；纯事件测试先跑，需要 Minecraft 注册信息的测试在初始化后运行。
 public final class AttentionRegressionSuite {
@@ -32,6 +33,8 @@ public final class AttentionRegressionSuite {
         PriorResultResolverTest.main(args);
         // 明确跳过允许继续清单，但查询、通知和恢复不能把被略过的目标算作实际成功。
         SequenceSkipTest.main(args);
+        // 聊天恢复后必须沿用已经保存的操作身份，不能因新建会话就再次发送。
+        ChatDurableCheckpointTest.main(args);
         AttentionSnapshotTest.main(args);
         AttentionHttpTest.main(args);
     }

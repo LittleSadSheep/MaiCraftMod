@@ -45,7 +45,8 @@ final class NativeSubmissionBinding {
                     // 普通检查点可能合并掉正在等待的旧版本；下一刻跟随替代版本，不把取消当成成功或跳过后来的写入失败。
                     return false;
                 } catch (RuntimeException failure) {
-                    String prefix = namespace.equals("enchant") ? "enchantment_parent_checkpoint_failed" : "native_consumption_parent_checkpoint_failed";
+                    String prefix = namespace.equals("enchant") ? "enchantment_parent_checkpoint_failed"
+                            : namespace.equals("chat") ? "chat_parent_checkpoint_failed" : "native_consumption_parent_checkpoint_failed";
                     failed = new IllegalStateException(prefix + ": do not submit the native operation", failure);
                     throw failed;
                 }

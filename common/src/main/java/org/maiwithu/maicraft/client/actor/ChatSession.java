@@ -5,7 +5,10 @@ import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
 import org.maiwithu.maicraft.client.chat.ChatTyping;
 import java.util.Locale;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 /**
  * 管理一次完整的聊天输入：确认仍由程序控制玩家，打开自己的输入框，逐字写入，再提交一次。
@@ -25,13 +28,21 @@ public final class ChatSession {
 
     private final ChatTyping typing;
     private final View view;
+    private final BooleanSupplier beforeSubmit;
     private Status status = Status.TYPING;
     private String detail = "Typing in the game chat box.";
     private long bodyEpoch = -1;
     private boolean opened;
+    private boolean submissionHistoryUnknown;
 
-    public ChatSession(ChatMessage message) { this(message, new ChatScreenView()); }
-    ChatSession(ChatMessage message, View view) { typing = new ChatTyping(message); this.view = view; }
+    public ChatSession(ChatMessage message, BooleanSupplier beforeSubmit) {
+        this(message, new ChatScreenView(), beforeSubmit);
+    }
+    ChatSession(ChatMessage message, View view, BooleanSupplier beforeSubmit) {
+        typing = new ChatTyping(message);
+        this.view = view;
+        this.beforeSubmit = Objects.requireNonNull(beforeSubmit, "durable chat submission boundary");
+    }
 
     // 每刻先核对玩家、世界和输入框是否仍属于这次任务，再使用本刻的一次操作机会。
     // SUBMITTED 只表示原版客户端已经接收提交，不表示服务器收到或命令执行成功。
@@ -58,6 +69,18 @@ public final class ChatSession {
             return status;
         }
         if (typing.readyToSubmit(now)) {
+            // 草稿完整显示后才预约发送；等待父任务与提交编号落盘期间保留草稿，不提前发消息。
+            try {
+                if (!beforeSubmit.getAsBoolean()) return status;
+            } catch (RuntimeException unavailable) {
+                // 旧编号或无法核对的保存状态都不能放行重发；这份标记本身也不能证明服务器收到过消息。
+                submissionHistoryUnknown = true;
+                status = Status.UNCERTAIN;
+                detail = "Chat submission history could not authorize a new send. Inspect the task and chat history before retrying.";
+                view.close();
+                opened = false;
+                return status;
+            }
             current.claimMutation();
             typing.claimSubmission(now);
             status = Status.UNCERTAIN;
@@ -98,12 +121,17 @@ public final class ChatSession {
     public Status status() { return status; }
     public String detail() { return detail; }
     public Map<String, Object> evidence() {
-        return Map.of("chat_state", status.name().toLowerCase(Locale.ROOT),
+        var result = new LinkedHashMap<String, Object>(Map.of("chat_state", status.name().toLowerCase(Locale.ROOT),
                 "typed_characters", typing.typedCharacters(), "total_characters", typing.totalCharacters(),
-                "submission_attempted", typing.submissionAttempted(), "effects_started", typing.submissionAttempted(),
                 "delivery_status", status == Status.SUBMITTED ? "submitted_to_client"
-                        : typing.submissionAttempted() ? "unknown" : "not_submitted",
+                        : status == Status.UNCERTAIN || typing.submissionAttempted() ? "unknown" : "not_submitted",
                 "outcome_uncertain", status == Status.UNCERTAIN,
-                "mechanical_retry_allowed", status == Status.FAILED && !typing.submissionAttempted());
+                "mechanical_retry_allowed", status == Status.FAILED && !typing.submissionAttempted()));
+        // 重启后的旧预约无法证明上次是否发送，不能用本会话还没调用 submit 冒充整个操作从未发生。
+        if (!submissionHistoryUnknown) {
+            result.put("submission_attempted", typing.submissionAttempted());
+            result.put("effects_started", typing.submissionAttempted());
+        }
+        return Map.copyOf(result);
     }
 }
