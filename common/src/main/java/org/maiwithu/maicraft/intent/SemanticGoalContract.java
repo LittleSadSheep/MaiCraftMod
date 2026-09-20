@@ -44,27 +44,18 @@ final class SemanticGoalContract {
         }
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
             if (BuildingSceneContract.supports(goal)) BuildingSceneContract.validate(goal);
-            // 明确采用模型修订另走严格契约；普通续建仍禁止混入新设计或新取材条件。
-            if (goal.parameters().has("project_id") && !"revise_project".equals(BuildingSceneContract.operation(goal))) {
+            // 普通续建只引用已冻结的蓝图，不能夹带新尺寸、材质或其他设计参数重新生成建筑。
+            else if (goal.parameters().has("project_id")) {
                 java.util.UUID.fromString(BuildingSceneContract.string(goal.parameters(), "project_id"));
                 for (String key : goal.parameters().keySet())
                     if (!Set.of("project_id", "protected_labels").contains(key))
                         throw violation("invalid_build_resume", path + ".parameters", ability,
                                 "project_id resumes frozen geometry and materials; other design parameters are not accepted");
-            }
-            // 建造功能名单在计划阶段就检查；不能先承诺有阳台等功能，施工时再悄悄忽略。
-            var parameters = goal.parameters();
-            if (parameters.has("features")) {
-                var features = parameters.get("features");
-                if (!features.isJsonArray() || features.getAsJsonArray().asList().stream().anyMatch(value ->
-                        !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()
-                                || value.getAsString().isBlank()))
-                    throw violation("invalid_build_features", path + ".parameters.features", ability,
-                            "features must be an array of supported semantic feature names.");
-                var unsupported = new java.util.LinkedHashSet<>(SemanticBuildPlanner.normalizedFeatures(features));
-                unsupported.removeAll(SemanticBuildPlanner.SUPPORTED_FEATURES);
-                if (!unsupported.isEmpty()) throw violation("unsupported_build_features",
-                        path + ".parameters.features", ability, "Unsupported semantic build features: " + unsupported);
+            } else {
+                // 只有自然语言用途不能开工或预览；先让 LLM 明确设计，角色不会自行找地、换料或套用房屋形体。
+                throw violation("missing_build_blueprint", path + ".parameters", ability,
+                        "Building requires scene, scene_id or blueprint; use project_id only to resume a frozen blueprint. "
+                                + "Natural-language outcomes do not generate geometry.");
             }
         }
         if ("maicraft:travel".equals(ability)) {

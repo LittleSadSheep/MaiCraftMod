@@ -2,7 +2,9 @@
 
 ## LLM 自主建模：使用现有 build 能力
 
-`maicraft:build` 接受 LLM 直接设计的具名对象。通过已有 `plan` / `execute` 提交，建模、查询、预览和导出都是此能力的 `operation`，没有新增 MCP tool。原来的自然语言模板建造仍可使用；显式模型不会进入模板选址、尺寸调整或自动换材质流程。
+`maicraft:build` 必须提供 LLM 设计的 `scene`、已保存的 `scene_id` 或逐方块 `blueprint`，三者选一；续建则单独提供引用冻结蓝图的 `project_id`。通过已有 `plan` / `execute` 提交，建模、查询、预览和导出都是此能力的 `operation`，没有新增 MCP tool。自然语言 `outcome` 只描述目标，不生成建筑形体；缺少模型或蓝图会在计划阶段报错。`maicraft:design_build` 遵守相同输入要求，只做只读预览。
+
+旧的模板建造已移除，不再接受 `purpose`、`size`、`style`、`features`、`terrain_fit` 或 `preferred_materials`。房屋尺寸、门窗、屋顶、功能分区与材质都应由 LLM 编入模型或蓝图；Mod 不会自动选址、调整尺寸或替换材质。省略 `operation` 时，`maicraft:build` 默认施工，`maicraft:design_build` 默认预览，仍须提供设计来源。
 
 接口沿用 Blender 的 `MESH` 对象、中心 `location`、`dimensions`、弧度 `rotation_euler`、具名材质和 `BOOLEAN/DIFFERENCE` 修改器。它实现可确定编译的声明式对象子集，不执行 BlenderMCP 的任意 Python / `bpy` 代码，也不宣称兼容任意网格。
 
@@ -178,7 +180,7 @@ v1 坐标与共用验收约定：
 
 模型编辑只改变新场景版本，不改变已冻结施工单。采用修订须另走 `revise_project`，并满足它的同一目标范围、直接父子版本和空闲施工条件；组件扩展改变目标范围时不能假装沿用旧项目。
 
-也可以直接在 `build` 参数里提供下方统一格式的 `blueprint`，自由指定每个方块；它与 `scene`、`scene_id` 三选一。此路径同样不调用旧模板。建模和导出不证明建筑已经建成，最终进度与验收仍由施工任务报告。
+也可以直接在 `build` 参数里提供下方统一格式的 `blueprint`，自由指定每个方块；它与 `scene`、`scene_id` 三选一。建模和导出不证明建筑已经建成，最终进度与验收仍由施工任务报告。
 
 续建保存已经选定的材质与绝对目标位置，不保存需要相信的“已完成百分比”；恢复后以当前世界为准核对。取消、失败和游戏重启后均可通过 `project_id` 重开施工。旧版本从未保存过的施工单无法凭空恢复；不要用新的 `current_place` 规划冒充续建。
 

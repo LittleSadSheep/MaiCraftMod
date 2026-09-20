@@ -84,8 +84,10 @@ public final class BuildProjectContinuationTest {
                 store.load(id, dimension).getAsJsonArray("project_targets")).equals(bound),
                 "supply palette binding lost or failed to update the original project");
 
+        // 取消后只保留冻结施工单与保护范围，不能把初始作者蓝图再次当成新项目提交。
         Goal goal = new Goal("maicraft:build", "resume the same house", null,
-                "{\"size\":\"small\",\"material_policy\":\"available\",\"protected_labels\":[\"garden\"]}",
+                "{\"blueprint\":{\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:birch_planks\"}]},"
+                        + "\"material_policy\":\"specified\",\"protected_labels\":[\"garden\"]}",
                 "{}", List.of(), List.of());
         IntentTaskRecord record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
         record.retainBuildProject(id);
@@ -96,9 +98,10 @@ public final class BuildProjectContinuationTest {
                 .tasks().getFirst();
         check(snapshot.steps().get(1).parameters().get("project_id").getAsString().equals(id),
                 "cancellation, recovery insertion or state persistence discarded the continuation");
-        check(!snapshot.steps().get(1).parameters().has("material_policy")
+        check(!snapshot.steps().get(1).parameters().has("blueprint")
+                        && !snapshot.steps().get(1).parameters().has("material_policy")
                         && snapshot.steps().get(1).parameters().has("protected_labels"),
-                "continuation must keep protection while removing semantic replanning inputs");
+                "continuation must keep protection while removing the initial design and supply inputs");
         // 旧任务已经取消，新任务仍可引用留下的工程编号；取消任务不会删除施工设计。
         check(new BuildProjectStore(new StateIdentity(world, directory)).load(
                 snapshot.steps().get(1).parameters().get("project_id").getAsString(), dimension).has("project_targets"),

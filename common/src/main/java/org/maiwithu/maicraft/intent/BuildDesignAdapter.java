@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.task.TaskResult;
 
-/** 只在世界里展示房屋蓝图：复用建造规划，但不取材料、不走路，也不施工。 */
+/** 展示作者模型或冻结施工单的只读预览；不生成房屋、不取材料、不走路，也不施工。 */
 final class BuildDesignAdapter {
     static final String ABILITY = "maicraft:design_build";
     private BuildDesignAdapter() {}
@@ -24,14 +24,10 @@ final class BuildDesignAdapter {
 
     static IntentAction design(Goal goal, LocalPlayer player, IntentRuntime runtime,
                                 Predicate<PreviewSession> publish) {
-        if (BuildingSceneContract.supports(goal)) return BuildingSceneAdapter.adapt(goal, player, runtime, publish);
-        // 预览规划如果无法完成，直接说明失败；不进入普通任务的“先出去找地”或等待恢复流程。
-        IntentAction compiled = goal.parameters().has("project_id")
-                ? BuildProjectAdapter.plan(goal, player, runtime)
-                : SemanticBuildPlanner.previewPlan(goal, player, runtime);
-        if (compiled instanceof IntentAction.Decision decision) return new IntentAction.Report(TaskResult.fail(
-                decision.snapshot().question(), Map.of("failure_code", "preview_design_unavailable",
-                        "preview_created", false, "construction_started", false)), null);
+        // 新设计必须提供模型或蓝图；只有单独引用 project_id 时才预览已经保存的施工要求。
+        if (!goal.parameters().has("project_id") || BuildingSceneContract.supports(goal))
+            return BuildingSceneAdapter.adapt(goal, player, runtime, publish);
+        IntentAction compiled = BuildProjectAdapter.plan(goal, player, runtime);
         if (!(compiled instanceof IntentAction.Tool tool)) return compiled;
         if (!"build".equals(tool.toolName())) throw new IllegalStateException("preview compiler returned body work");
         var args = tool.arguments();

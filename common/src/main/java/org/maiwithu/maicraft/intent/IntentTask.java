@@ -326,9 +326,9 @@ final class IntentTask implements Task {
     }
 
     private void retainBuildProject(TaskRecord child) {
+        // 施工与供料共用冻结蓝图；只从这两类任务保留工程编号，恢复时不会重新找地或生成建筑。
         var plan = child instanceof org.maiwithu.maicraft.core.task.build.BuildTaskRecord build ? build
                 : child instanceof org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord supply ? supply.plan
-                : child instanceof org.maiwithu.maicraft.core.task.build.BuildSiteInvestigationTaskRecord site ? site.projectPlan()
                 : null;
         if (plan != null && record.retainBuildProject(plan.projectId(), plan.projectProtectionLabels())) {
             invalidateProtectionCache();

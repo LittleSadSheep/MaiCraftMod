@@ -82,11 +82,9 @@ public final class MachineRegressionSuite {
         catch (Exception failure) { throw new AssertionError(failure); }
         try { org.maiwithu.maicraft.core.task.supply.BuildSupplyPreviewTest.main(args); }
         catch (Exception failure) { throw new AssertionError("preview before material supply", failure); }
-        SemanticBuildPlannerTest.main(args);
+        // 作者蓝图预览必须保持只读；模板生成与外出找地已不属于建筑入口。
         try { BuildDesignPreviewTest.main(args); }
         catch (Exception failure) { throw new AssertionError("read-only build preview regression", failure); }
-        try { SemanticBuildSiteTest.main(args); }
-        catch (Exception failure) { throw new AssertionError("loaded build site regression", failure); }
         // 接下来检查内部机器能力参数，包括整数、来源和目标约束；这里没有经过最外层 PublicToolCatalog。
         accepts("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"label\":\"factory\",\"radius\":4}");
         rejects("maicraft:inspect_machine", "{\"kind\":\"current_place\"}", "{\"radius\":4.5}");
