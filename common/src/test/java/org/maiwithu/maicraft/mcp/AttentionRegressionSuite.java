@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.intent.ChatFlowTest;
 import org.maiwithu.maicraft.intent.McpTaskLifecycleTest;
 import org.maiwithu.maicraft.intent.WaitGoalTest;
 import org.maiwithu.maicraft.intent.WaitCheckpointCompatibilityTest;
+import org.maiwithu.maicraft.intent.persistence.CheckpointCapacityTest;
 
 // 注意事件和等待功能的回归入口；纯事件测试先跑，需要 Minecraft 注册信息的测试在初始化后运行。
 public final class AttentionRegressionSuite {
@@ -23,6 +24,8 @@ public final class AttentionRegressionSuite {
         WaitGoalTest.main(args);
         // 新请求收紧参数时，旧等待历史仍须可读、可取消，不能堵住其余能力的检查点。
         WaitCheckpointCompatibilityTest.main(args);
+        // 任务编号和恢复记录必须完整保存，超出容量时让调用者看到明确失败。
+        CheckpointCapacityTest.main(args);
         AttentionSnapshotTest.main(args);
         AttentionHttpTest.main(args);
     }

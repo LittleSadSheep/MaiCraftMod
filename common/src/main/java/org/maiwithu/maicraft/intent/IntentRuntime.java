@@ -46,10 +46,11 @@ import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatal
  */
 public final class IntentRuntime {
 
-    private static final int MAX_PLANS = 128;
-    private static final int MAX_TASKS = 256;
-    private static final int MAX_REQUEST_KEYS = 512;
-    private static final int MAX_LANDMARKS = 256;
+    // 内存接单表与检查点共用容量，不能接到一件保存时会被截掉的任务。
+    private static final int MAX_PLANS = IntentStateCodec.MAX_PLANS;
+    private static final int MAX_TASKS = IntentStateCodec.MAX_TASKS;
+    private static final int MAX_REQUEST_KEYS = IntentStateCodec.MAX_REQUEST_KEYS;
+    private static final int MAX_LANDMARKS = IntentStateCodec.MAX_LANDMARKS;
     private static final int MAX_ATTENTION_ARRAY = 12;
     private static final int MAX_ATTENTION_STRING = 1_024;
     private static final long SAVE_INTERVAL_NANOS = 5_000_000_000L;
@@ -191,6 +192,7 @@ public final class IntentRuntime {
         if (requestKey != null && requestKey.length() > 256) {
             throw new IllegalArgumentException("request_key accepts at most 256 characters");
         }
+        reserveTaskCapacity();
         UUID taskId = UUID.randomUUID();
         IntentTaskRecord record = new IntentTaskRecord(
                 taskId, planId, goal, stateIdentity.key());
@@ -200,7 +202,6 @@ public final class IntentRuntime {
             requestKeys.put(requestKey, taskId);
             trimOldest(requestKeys, MAX_REQUEST_KEYS);
         }
-        trimTasks();
         markDirty();
         publish("started", record, "Started: " + goal.outcome(), new JsonObject());
         if (isReadOnlyDesign(goal)) {
@@ -970,16 +971,18 @@ public final class IntentRuntime {
                 || key.endsWith("_receipts");
     }
 
-    private void trimTasks() {
-        if (tasks.size() <= MAX_TASKS) return;
-        List<UUID> removable = tasks.entrySet().stream()
-                .filter(entry -> entry.getValue().getState().isTerminal())
-                .map(Map.Entry::getKey)
-                .toList();
-        for (UUID id : removable) {
-            if (tasks.size() <= MAX_TASKS) break;
-            tasks.remove(id);
+    private void reserveTaskCapacity() {
+        // 接单前先移走最旧的终态记录；暂停或待决定的旧事仍要保留，不能为了新任务悄悄遗忘。
+        var iterator = tasks.entrySet().iterator();
+        while (tasks.size() >= MAX_TASKS && iterator.hasNext()) {
+            var candidate = iterator.next();
+            if (!candidate.getValue().getState().isTerminal()) continue;
+            UUID id = candidate.getKey();
+            iterator.remove();
             requestKeys.values().removeIf(id::equals);
+        }
+        if (tasks.size() >= MAX_TASKS) {
+            throw new IllegalStateException("Too many unfinished semantic tasks; cancel an unwanted restored task before starting another.");
         }
     }
 

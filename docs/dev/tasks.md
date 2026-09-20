@@ -31,6 +31,8 @@
 
 相同 `request_key` 应拿回原任务，而不是另开一件活。已经完成、正在暂停或正在等待回答的原任务，都不能因为网络重试重新取得玩家控制权。
 
+任务表最多保留 256 条记录。接新目标前可以淘汰最旧的已结束记录；如果全是未完成的任务，就先拒绝接单，直到用户明确取消不再需要的旧事。保存端也会拒绝超量快照，不能只保存前半部分再宣称成功。
+
 ## 每一游戏刻，角色先做什么
 
 [ClientRuntime.tick](../../common/src/main/java/org/maiwithu/maicraft/client/runtime/ClientRuntime.java) 按以下顺序工作：

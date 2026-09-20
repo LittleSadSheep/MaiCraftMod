@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonObject;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ public final class McpTaskLifecycleTest {
         Bootstrap.bootStrap();
         repeatedExecutionLeavesHumanControlAlone();
         restoredCancellationPreservesCurrentWork();
+        fullHistoryRejectsBeforeAcceptingMoreWork();
         System.out.println("McpTaskLifecycleTest: passed");
     }
 
@@ -94,6 +96,53 @@ public final class McpTaskLifecycleTest {
         }
     }
 
+    private static void fullHistoryRejectsBeforeAcceptingMoreWork() throws Exception {
+        try (var f = new Fixture()) {
+            // 旧世界恢复了满额未完成任务时，不能再接一件随后会被检查点截掉的新工作。
+            IntentTaskRecord first = null;
+            for (int i = 0; i < IntentStateCodec.MAX_TASKS; i++) {
+                var record = IntentTaskRecord.restored(UUID.randomUUID(), null, f.goal, f.identity.key(),
+                        List.of(f.goal), 0, List.of(), Map.of(), Map.of(), List.of(), null, null, null, 1);
+                if (first == null) first = record;
+                f.tasks().put(record.externalId(), record);
+            }
+            long cursor = f.runtime.attentionCheckpoint().get("cursor").getAsLong();
+            var request = new JsonObject();
+            request.add("goal", f.goal.toJson());
+            request.addProperty("request_key", "new-at-capacity");
+            try {
+                f.facade.execute(request).toCompletableFuture().join();
+                throw new AssertionError("已经无法完整保存时仍然接收了新任务");
+            } catch (CompletionException expected) {
+                check(expected.getCause() instanceof IllegalStateException, "任务表已满应说明无法接单");
+            }
+            check(f.tasks().size() == IntentStateCodec.MAX_TASKS && f.requestKeys().isEmpty(),
+                    "拒绝接单不能留下新任务或请求编号");
+            check(f.runtime.attentionCheckpoint().get("cursor").getAsLong() == cursor,
+                    "未接收的任务不能发布已经开始的通知");
+            check(!ClientRuntime.actor().automationControlRequested() && CompanionTickDispatcher.current() == null,
+                    "拒绝接单应撤回新接管请求，不占玩家身体");
+
+            // 明确取消一件旧事后，只淘汰这条已结束历史，新任务和它的请求编号必须一起保存。
+            f.runtime.cancelRestored(first, 2);
+            var accepted = f.facade.execute(request).toCompletableFuture().join().getAsJsonObject();
+            UUID id = UUID.fromString(accepted.get("task_id").getAsString());
+            check(f.tasks().size() == IntentStateCodec.MAX_TASKS && f.runtime.task(id) != null,
+                    "空出记录后才能接到一件可保存的新任务");
+            var saved = IntentStateCodec.encode(f.identity.key(), List.of(), f.tasks().values(), f.requestKeys(), List.of());
+            var decoded = IntentStateCodec.decode(saved);
+            check(decoded.tasks().stream().anyMatch(task -> task.id().equals(id))
+                    && id.equals(decoded.requestKeys().get("new-at-capacity")), "检查点不能丢掉刚接受的任务身份");
+            // 即使未来调用者绕过接单检查，编码器也必须拒绝残缺快照，不能静默丢弃最后一条记录。
+            var overflow = new ArrayList<>(f.tasks().values());
+            overflow.add(f.record());
+            try {
+                IntentStateCodec.encode(f.identity.key(), List.of(), overflow, Map.of(), List.of());
+                throw new AssertionError("编码器截断超量任务后仍然返回成功");
+            } catch (IllegalArgumentException expected) { }
+        }
+    }
+
     private static final class Fixture implements AutoCloseable {
         final InteractionWorldTestHarness world = new InteractionWorldTestHarness();
         final Goal goal = new Goal("maicraft:wait_for_condition", "等到条件满足", null,
@@ -120,7 +169,10 @@ public final class McpTaskLifecycleTest {
             facade = facadeConstructor.newInstance();
             field(MaiCraftRuntimeFacade.class, "intents").set(facade, runtime);
             Object body = ClientRuntime.requireContext(world.player).body();
-            field(body.getClass(), "automationRequested").set(body, false);
+            // 通过真实交还流程还原玩家输入，使“失败后撤回新接管请求”与正常游戏中的身体状态一致。
+            var release = body.getClass().getDeclaredMethod("shutdown");
+            release.setAccessible(true);
+            release.invoke(body);
             for (String name : List.of("brain", "boundPlayer", "boundLevel", "expectedHandoff", "pendingHandoff")) {
                 Field slot = field(CompanionTickDispatcher.class, name);
                 dispatcher.put(slot, slot.get(null));

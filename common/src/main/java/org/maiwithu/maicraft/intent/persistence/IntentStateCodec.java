@@ -87,6 +87,7 @@ public final class IntentStateCodec {
             Map<String, UUID> requestKeys,
             Iterable<IntentRuntime.Landmark> landmarks) {
         // 保存文件版本、属于哪个世界、保存时间，再依次写计划、任务、重复请求编号和地标。
+        // 任一记录表超过容量都拒绝整个新快照，不能截掉尾部数据后把不完整进度当作保存成功。
         JsonObject root = new JsonObject();
         root.addProperty("version", IntentStateStore.VERSION);
         root.addProperty("identity_key", identityKey);
@@ -95,7 +96,7 @@ public final class IntentStateCodec {
         JsonArray planArray = new JsonArray();
         int planCount = 0;
         for (Plan plan : plans) {
-            if (planCount++ >= MAX_PLANS) break;
+            if (planCount++ >= MAX_PLANS) throw new IllegalArgumentException("semantic plans exceed checkpoint capacity");
             JsonObject value = new JsonObject();
             value.addProperty("id", plan.id().toString());
             value.add("goal", safeGoal(plan.goal()));
@@ -107,8 +108,7 @@ public final class IntentStateCodec {
         JsonArray taskArray = new JsonArray();
         int taskCount = 0;
         for (IntentTaskRecord task : tasks) {
-            // 当前按传入顺序只保存前 MAX_TASKS 个；运行时需要自己保证重要任务没被排在这个范围外。
-            if (taskCount++ >= MAX_TASKS) break;
+            if (taskCount++ >= MAX_TASKS) throw new IllegalArgumentException("semantic tasks exceed checkpoint capacity");
             taskArray.add(encodeTask(task));
         }
         root.add("tasks", taskArray);
@@ -116,7 +116,7 @@ public final class IntentStateCodec {
         JsonObject keys = new JsonObject();
         int keyCount = 0;
         for (Map.Entry<String, UUID> entry : requestKeys.entrySet()) {
-            if (keyCount++ >= MAX_REQUEST_KEYS) break;
+            if (keyCount++ >= MAX_REQUEST_KEYS) throw new IllegalArgumentException("semantic request keys exceed checkpoint capacity");
             if (entry.getKey() == null || entry.getKey().isBlank()
                     || entry.getKey().length() > 256 || entry.getValue() == null) continue;
             keys.addProperty(entry.getKey(), entry.getValue().toString());
@@ -126,7 +126,7 @@ public final class IntentStateCodec {
         JsonArray landmarkArray = new JsonArray();
         int landmarkCount = 0;
         for (IntentRuntime.Landmark landmark : landmarks) {
-            if (landmarkCount++ >= MAX_LANDMARKS) break;
+            if (landmarkCount++ >= MAX_LANDMARKS) throw new IllegalArgumentException("semantic landmarks exceed checkpoint capacity");
             JsonObject value = new JsonObject();
             value.addProperty("label", bounded(landmark.label()));
             value.add("position", worldPosition(landmark.position()));
@@ -282,7 +282,7 @@ public final class IntentStateCodec {
                 ? root.getAsJsonObject("request_keys") : new JsonObject();
         int keyCount = 0;
         for (Map.Entry<String, JsonElement> entry : keyObject.entrySet()) {
-            if (keyCount++ >= MAX_REQUEST_KEYS) break;
+            if (keyCount++ >= MAX_REQUEST_KEYS) throw new IllegalArgumentException("persisted request keys exceed checkpoint capacity");
             if (entry.getKey().isBlank() || entry.getKey().length() > 256
                     || !entry.getValue().isJsonPrimitive()) continue;
             keys.put(entry.getKey(), UUID.fromString(entry.getValue().getAsString()));
