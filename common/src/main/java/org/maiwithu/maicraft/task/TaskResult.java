@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
 import java.util.Map;
+import java.util.Collection;
 
 /**
  * 一次执行结束后的答复：做成没有、为什么停下、已经发生了什么。
@@ -63,7 +64,7 @@ public record TaskResult(boolean success,
                 if (v instanceof Number n) dataObj.addProperty(e.getKey(), n);
                 else if (v instanceof Boolean b) dataObj.addProperty(e.getKey(), b);
                 // 列表和 Map 保留为 JSON 数组或对象，数字和布尔值也保留类型；其他值转成字符串。
-                else if (v instanceof java.util.Collection<?> || v instanceof Map<?, ?>) {
+                else if (v instanceof Collection<?> || v instanceof Map<?, ?>) {
                     dataObj.add(e.getKey(), GSON.toJsonTree(v));
                 } else if (v != null) dataObj.addProperty(e.getKey(), v.toString());
             }

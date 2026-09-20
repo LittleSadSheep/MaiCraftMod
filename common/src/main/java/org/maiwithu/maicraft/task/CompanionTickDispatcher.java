@@ -14,15 +14,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.maiwithu.maicraft.api.Internal;
 
 /**
- * Client-thread facade for the single local-player task scheduler.
- *
- * <p>The loader calls {@link #tick(LocalPlayer)} once from END_CLIENT_TICK.
- * A player instance or world replacement cancels and cleans the previous body
- * before a new runtime is bound.</p>
+ * 本地玩家任务调度的客户端线程入口，每次 END_CLIENT_TICK 至多推进一个身体使用者。
+ * 玩家或世界实例替换时，先清理旧身体上的任务，再绑定新运行状态。
  */
-@org.maiwithu.maicraft.api.Internal
+@Internal
 public final class CompanionTickDispatcher {
 
     private static final long HANDOFF_LIFETIME_NANOS = 30_000_000_000L;
@@ -37,7 +35,7 @@ public final class CompanionTickDispatcher {
 
     private CompanionTickDispatcher() {}
 
-    /** Advance the single winner for this END_CLIENT_TICK. */
+    /** 推进当前游戏刻获得身体的唯一任务。 */
     public static void tick(LocalPlayer player) {
         requireClientThread();
         if (player == null || player.isRemoved()) {
@@ -51,9 +49,8 @@ public final class CompanionTickDispatcher {
     }
 
     /**
-     * Observe a body/world replacement without advancing timers or either task slot. Control-gated
-     * client ticks use this so lifecycle cleanup and authorised portal handoff still happen while
-     * a human owns the inputs.
+     * 只观察玩家和世界实例是否替换，不推进计时器或任务槽。
+     * 因此玩家自行操控时，仍能清理旧身体并完成已获准的传送门交接。
      */
     public static void observeBody(LocalPlayer player) {
         requireClientThread();
@@ -64,7 +61,7 @@ public final class CompanionTickDispatcher {
         bind(player);
     }
 
-    /** Replace the current task, starting it immediately on this client tick. */
+    /** 替换当前后台任务，并在本次客户端游戏刻立即开始新任务。 */
     public static void submitCurrent(LocalPlayer player, TaskRecord record) {
         requireClientThread();
         bind(player);
@@ -77,7 +74,7 @@ public final class CompanionTickDispatcher {
         brain.submitSync(player, record);
     }
 
-    /** Current background task, or {@code null} when the current slot is idle. */
+    /** 查询当前后台任务；槽位空闲时返回 {@code null}。 */
     public static TaskRecord current() {
         requireClientThread();
         return brain == null ? null : brain.current();
@@ -90,32 +87,32 @@ public final class CompanionTickDispatcher {
 
 
 
-    /** Both occupied slots, sync first and current second. */
+    /** 返回已占用的任务槽，先列同步任务，再列当前后台任务。 */
     public static List<TaskRecord> list() {
         requireClientThread();
         return brain == null ? List.of() : brain.list();
     }
 
-    /** Find an occupied record by its public id (for example {@code t42}). */
+    /** 按公开任务编号（例如 {@code t42}）查找仍占用槽位的记录。 */
     public static TaskRecord find(String publicId) {
         requireClientThread();
         return brain == null ? null : brain.find(publicId);
     }
 
-    /** Cancel a task by public id; blank means the current background task. */
+    /** 按公开编号取消任务；未指定编号时取消当前后台任务。 */
     public static boolean cancel(String publicId) {
         requireClientThread();
         return boundPlayer != null && brain != null && brain.cancel(boundPlayer, publicId);
     }
 
-    /** Cancel every occupied slot for the active local body. */
+    /** 取消当前本地身体所有已占用槽位中的任务。 */
     public static void cancelFor(LocalPlayer player) {
         requireClientThread();
         if (player != null && player == boundPlayer && brain != null) {
             brain.cancelAll(player);
         }
     }
-    /** Authorise one semantic task to survive the LocalPlayer replacement caused by a portal. */
+    /** 为当前语义任务登记一次传送门交接，使其可以跨越玩家对象替换继续执行。 */
     public static long prepareDimensionHandoff(
             String destinationDimension, BlockPos portalPosition, Block portalBlock) {
         // 先记住“这个玩家正在为这个任务走进这扇门”，换世界后才能认出该继续哪件事。
@@ -155,16 +152,15 @@ public final class CompanionTickDispatcher {
         return token;
     }
 
-    /** Revoke an unused portal handoff when the native portal action fails or is cancelled. */
+    /** 原生传送失败或被取消时，撤回尚未使用的传送门交接许可。 */
     public static void cancelDimensionHandoff(long token) {
         requireClientThread();
         if (expectedHandoff != null && expectedHandoff.token() == token) expectedHandoff = null;
     }
 
     /**
-     * Read-only proof for carrying an automation request across LocalPlayer replacement. UUID or
-     * connection equality alone is intentionally insufficient: an armed, live portal handoff must
-     * match the old source body and/or the pending destination body.
+     * 只读核对玩家对象替换时能否保留自动控制请求。
+     * 玩家 UUID 或连接相同还不够，必须有仍有效的传送门交接与源身体或目标身体匹配。
      */
     public static boolean preservesAutomationControl(
             LocalPlayer previousPlayer, LocalPlayer replacementPlayer) {
@@ -187,7 +183,7 @@ public final class CompanionTickDispatcher {
     }
 
 
-    /** Cancel and clean all work anchored to the active player/world. */
+    /** 清理绑定当前玩家和世界的任务，并保留仍可完成的传送门交接。 */
     public static void bodyGone() {
         requireClientThread();
         if (boundPlayer != null && brain != null) {
@@ -202,7 +198,7 @@ public final class CompanionTickDispatcher {
         abandonPendingIfDisconnected();
     }
 
-    /** Body-specific lifecycle overload for loader and compatibility callers. */
+    /** 加载器或兼容调用指定玩家离开时，只清理与当前绑定匹配的身体。 */
     public static void bodyGone(LocalPlayer player) {
         requireClientThread();
         if (player == null || player == boundPlayer) {
@@ -210,7 +206,7 @@ public final class CompanionTickDispatcher {
         }
     }
 
-    // ---- compatibility surface used by existing internal tools ----
+    // 兼容内部工具的查询和取消入口，仍须核对当前绑定的玩家。
 
     public static TaskRecord currentTaskFor(UUID playerUuid) {
         requireClientThread();

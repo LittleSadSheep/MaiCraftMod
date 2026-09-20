@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.task;
 
 import net.minecraft.client.player.LocalPlayer;
+import java.util.Map;
 
 /**
  * 一件想占用身体的事——<b>反射、同步动作、指令、常驻行为共用这一个接口</b>。
@@ -56,20 +57,17 @@ public interface Task {
     void stop(LocalPlayer companion, StopReason why);
 
     /**
-     * Whether this task has already submitted a native effect whose receipt and physical cleanup
-     * must be driven to a terminal state before a semantic parent may cancel it merely because the
-     * parent's final fact became true.
-     *
-     * <p>This is deliberately a narrow terminal barrier, not permission to finish arbitrary extra
-     * work. A task returns {@code true} only after the effect is committed/in flight (for example,
-     * a crafting-result click followed by closing its menu). Parents may then keep ticking that
-     * same child; ordinary replacement and survival preemption still use {@link #stop}.
+     * 判断子任务是否已有提交中的原生效果，必须先确认回执并完成实际收尾，
+     * 父任务才能因最终目标已满足而结束它。
+     * 仅在效果已提交后返回 {@code true}，例如点击合成结果后还需关闭菜单；
+     * 父任务只能继续驱动同一个子任务收尾，不能借此开始额外工作。
+     * 普通任务替换和自救抢占仍通过 {@link #stop} 处理。
      */
     default boolean mustSettleBeforeSatisfiedCancellation() {
         return false;
     }
 
-    /** The parent fact is satisfied: settle committed effects and cleanup without starting further work. */
+    /** 父目标已满足时，只结算已提交效果并清理现场，不再开始新的工作。 */
     default void requestSatisfiedSettlement() {}
 
     /**
@@ -85,9 +83,9 @@ public interface Task {
     /** 给日志和面板看的短名。 */
     String name();
 
-    /** Read-only live work evidence; keep values bounded and omit planned coordinates/actions. */
-    default java.util.Map<String, Object> progress() {
-        return java.util.Map.of("task", name());
+    /** 只读提供有界的当前工作证据，不暴露计划中的坐标或动作。 */
+    default Map<String, Object> progress() {
+        return Map.of("task", name());
     }
 
     /** 丢掉身体的原因。 */

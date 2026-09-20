@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Register a session-local reminder without occupying the player body. */
+/** 登记本次会话内的提醒，不为等待提醒占用玩家身体。 */
 public final class SetTimerTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

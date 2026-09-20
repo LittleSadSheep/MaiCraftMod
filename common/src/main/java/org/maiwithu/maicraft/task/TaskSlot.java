@@ -97,7 +97,7 @@ final class TaskSlot {
         try {
             task.stop(player, Task.StopReason.BODY_GONE);
         } catch (RuntimeException ignored) {
-            // The semantic record is retained; native child state is deliberately discarded.
+            // 暂停时保留语义记录供恢复，丢弃原生子任务状态，避免沿用失效动作。
         }
         TaskRecord suspended = record;
         task = null;
@@ -139,7 +139,7 @@ final class TaskSlot {
         try {
             task.stop(player, reason);
         } catch (RuntimeException ignored) {
-            // result/cleanup below is still the authoritative wind-down path
+            // 下方结果记录和资源清理仍是任务结束的统一收尾路径。
         }
         if (!record.getState().isTerminal()) {
             record.setState(TaskState.CANCELLED);
@@ -152,7 +152,7 @@ final class TaskSlot {
         try {
             task.result(TaskState.FAILED);
         } catch (RuntimeException ignored) {
-            // The explicit framework failure result is still delivered below.
+            // 即使停止任务时抛出异常，下方仍会交付明确的框架失败结果。
         }
     }
 

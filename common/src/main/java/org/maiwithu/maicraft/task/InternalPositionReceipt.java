@@ -2,8 +2,8 @@
 package org.maiwithu.maicraft.task;
 
 /**
- * Internal semantic provenance carried by a child record, never serialized in TaskResult.
- * This lets a later prior_result resolve a verified place without showing coordinates to the LLM.
+ * 子任务携带已验证位置的内部来源，不序列化到 TaskResult。
+ * 后续 prior_result 可据此复用真实地点，而不要求模型传递具体坐标。
  */
 public interface InternalPositionReceipt {
     record Position(int x, int y, int z, String dimension) {}

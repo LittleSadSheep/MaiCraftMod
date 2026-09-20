@@ -1,9 +1,10 @@
 package org.maiwithu.maicraft.task;
 
 import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.api.Internal;
 
 /** 没找到负责执行这类任务的代码时，返回这个对象，让任务明确失败，而不是一直等不到结果。 */
-@org.maiwithu.maicraft.api.Internal
+@Internal
 public final class UnsupportedTask implements Task {
 
     private final String toolName;

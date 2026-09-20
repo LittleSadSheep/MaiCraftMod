@@ -11,10 +11,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Session-local timers measured against the active client world's game clock.
- *
- * <p>They deliberately do not survive a body/world replacement. Due reminders
- * are shown locally and removed; no packet, saved data, or event bus is involved.</p>
+ * 按当前客户端世界的游戏时钟计时的会话提醒。
+ * 玩家或世界实例替换后清空；到期后只在本地展示并移除，不发送网络包或保存到世界。
  */
 public final class TimerRegistry {
 

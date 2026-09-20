@@ -5,19 +5,17 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Opaque, Mod-owned protection learned from an observed semantic area.
- *
- * <p>The public intent names an area; a child task discovers its real block footprint.  Concrete
- * cells stay in this receipt and are inherited by later children of the same semantic task.  They
- * are never copied into a public {@link TaskResult}.</p>
+ * 模组根据实际观察到的语义区域生成的内部保护回执。
+ * 子任务将真实方块范围保留在回执中，供同一语义任务的后续步骤继承；
+ * 这些坐标不写入对外的 {@link TaskResult}。
  */
 public interface InternalAreaProtectionReceipt {
 
     /**
-     * @param semanticLabel optional human label used only as internal provenance
-     * @param dimension dimension containing every packed {@code BlockPos}
-     * @param protectedMutationCells cells that later work must neither break nor replace
-     * @param forbiddenBodyCells feet cells that later navigation/precision stances must not occupy
+     * @param semanticLabel 可选的人类可读标签，仅用于内部追溯保护来源
+     * @param dimension 所有打包 {@code BlockPos} 坐标所属的维度
+     * @param protectedMutationCells 后续工作不能破坏或替换的方块位置
+     * @param forbiddenBodyCells 后续寻路和精确站位不能占据的脚部位置
      */
     record Footprint(
             String semanticLabel,

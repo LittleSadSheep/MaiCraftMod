@@ -6,13 +6,8 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Reflex-chain registry. The single local-player brain instantiates each
- * registered factory once and asks them in ascending {@code order}.
- * {@code order} 决定同 tick 平局时的先后(小者先,
- * 惯例:意图越硬的越小)。
- *
- * <p>Registration is init-time only; {@link #build()} runs when the local
- * client runtime binds a body.
+ * 启动时登记自救行为；绑定本地玩家身体时，{@link #build()} 为调度器各创建一个执行实例。
+ * 同一游戏刻出现多种危险时，按 {@code order} 从小到大检查，第一个能执行的行为优先接管。
  */
 public final class BrainChains {
 

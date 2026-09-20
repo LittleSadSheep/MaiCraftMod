@@ -37,7 +37,7 @@ public final class ReflexRegistry {
                 + "。这些行为会按触发条件和调度规则尝试执行；紧急自救可能暂时接管显式任务。";
     }
 
-    /** Test hook: wipe the roster. */
+    /** 测试结束后清空自救行为名册，避免影响下一个调度场景。 */
     static synchronized void resetForTest() {
         REFLEXES.clear();
     }

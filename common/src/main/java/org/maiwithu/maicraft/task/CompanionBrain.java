@@ -8,6 +8,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
+import org.maiwithu.maicraft.core.task.chain.MLGChain;
 
 /** 决定玩家这一刻做哪件事：先考虑自救，再考虑临时动作和当前任务；不能让两件事同时按键。 */
 final class CompanionBrain {
@@ -43,8 +45,8 @@ final class CompanionBrain {
         // 正在跳跃、下落或乘交通工具时，突然换人控制可能摔下去；通常先让当前动作走到能安全停下的位置。
         // 但如果原来的落地方案已经失败，而且自救任务准备好了，就允许它马上接手。
         if (holder != winner && (!EmbeddedBaritoneRuntime.canSafelySuspendActive()
-                || !org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.canSafelySuspendActive())) {
-            boolean rescue = winner instanceof org.maiwithu.maicraft.core.task.chain.MLGChain mlg
+                || !TransportRuntime.canSafelySuspendActive())) {
+            boolean rescue = winner instanceof MLGChain mlg
                     && EmbeddedBaritoneRuntime.canHandOffMissedLanding(player)
                     && mlg.prepareMissedLandingTakeover(player)
                     && EmbeddedBaritoneRuntime.handOffMissedLanding(player);
@@ -53,7 +55,7 @@ final class CompanionBrain {
         if (holder != null && holder != winner) {
             // 先停掉旧任务的自动走路和交通控制，再通知它暂停，避免旧路线继续按键干扰新任务。
             EmbeddedBaritoneRuntime.suspendActivePhysicalOutputs();
-            org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.suspendActive();
+            TransportRuntime.suspendActive();
             holder.stop(player, Task.StopReason.PREEMPTED);
         }
         holder = winner;
@@ -169,7 +171,7 @@ final class CompanionBrain {
         try {
             previousHolder.stop(player, reason);
         } catch (RuntimeException ignored) {
-            // Cancellation and slot settlement remain authoritative even if reflex cleanup fails.
+            // 即使自救行为清理失败，也继续完成任务取消和槽位结算。
         }
     }
 
@@ -181,7 +183,7 @@ final class CompanionBrain {
             try {
                 previousHolder.stop(player, Task.StopReason.BODY_GONE);
             } catch (RuntimeException ignored) {
-                // Slot cleanup and handoff must still complete.
+                // 自救行为收尾失败不能阻止任务槽位清理和身体交接。
             }
         }
         boolean hadWork = !sync.isEmpty() || !current.isEmpty();
@@ -201,7 +203,7 @@ final class CompanionBrain {
             try {
                 previousHolder.stop(player, Task.StopReason.BODY_GONE);
             } catch (RuntimeException ignored) {
-                // Slot settlement below must still run.
+                // 仍由下方统一完成任务槽位的结束处理。
             }
         }
         boolean hadWork = !sync.isEmpty() || !current.isEmpty();
