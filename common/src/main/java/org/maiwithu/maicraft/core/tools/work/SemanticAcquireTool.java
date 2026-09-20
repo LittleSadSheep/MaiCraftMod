@@ -12,8 +12,9 @@ import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 
-/** Internal semantic work tool; the public MCP exposes the ability, not this implementation. */
+/** 取物能力对应的内部工具；数量上限与真实任务一致，来源清单表达许可而非操作顺序。 */
 public final class SemanticAcquireTool implements MaiCraftTool {
     @Override
     public String name() {
@@ -28,7 +29,7 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                 + "as the fact is true, and owns source selection, recipe recursion, loaded-world "
                 + "evidence, progress-driven first-person source exploration, paths, menus and receipts. "
                 + "Defaults cover ordinary survival: inventory, "
-                + "provably unowned nearby drops, crafting, cooking and protection-aware mining. "
+                + "nearby drops proven to belong to the current player, crafting, cooking and protection-aware mining. "
                 + "Hunting may be identified as a possible source, but never starts without explicit "
                 + "allow_harm; if no acceptable source entity is loaded, the Mod performs a generic "
                 + "type-and-relationship entity search and re-verifies before attacking. Storage "
@@ -51,9 +52,9 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                 "Namespaced item tags whose live members form one acceptable alternative set.",
                 null));
         properties.put("count", boundedInteger(
-                "Required final aggregate main-inventory count (default 1).", 1, 256));
+                "Required final aggregate main-inventory count (default 1).", 1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT));
         properties.put("allowed_sources", arrayProperty("string",
-                "Source families the Mod may try automatically, in preferred order.",
+                "Permitted source families; the Mod chooses their order from current inventory and source facts.",
                 List.of("inventory", "nearby", "storage", "craft", "cook", "mine", "trade", "hunt")));
         properties.put("allow_harm", property("boolean",
                 "Explicit semantic consent to harm living entities. Default false."));

@@ -104,6 +104,7 @@ import org.maiwithu.maicraft.core.task.supply.BuildSupplyHandoffTest;
 import org.maiwithu.maicraft.core.task.supply.BuildSupplyUncertaintyTest;
 import org.maiwithu.maicraft.core.task.supply.MaterialSupplyReturnPolicyTest;
 import org.maiwithu.maicraft.intent.ChatAbilityTest;
+import org.maiwithu.maicraft.intent.AcquireGoalTest;
 import org.maiwithu.maicraft.intent.ExactInteractionTargetTest;
 import org.maiwithu.maicraft.intent.ShipTravelContractTest;
 
@@ -247,6 +248,7 @@ public final class GuiRegressionSuite {
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
         AcquisitionSourceInheritanceTest.main(args);
         AcquisitionRecipePlanningTest.main(args);
+        AcquireGoalTest.main(args);
         CreateStockObservationTest.main(args);
         Ae2ScreenAccessTest.main(args);
         Ae2WaterBucketFillTest.main(args);
