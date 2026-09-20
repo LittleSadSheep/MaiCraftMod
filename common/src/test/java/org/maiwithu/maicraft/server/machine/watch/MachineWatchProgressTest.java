@@ -10,6 +10,8 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.ProductionEventJournal;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
+import java.util.stream.Collectors;
+import org.maiwithu.maicraft.network.ServerOperationException;
 
 /** Uses the real retained journal and native wire shapes; no world writes or monitor-supplied events. */
 public final class MachineWatchProgressTest {
@@ -110,7 +112,7 @@ public final class MachineWatchProgressTest {
         Fixture() { this(specification()); }
         Fixture(JsonObject spec) {
             goal = WatchGoal.parse(spec); progress = new WatchProgress(goal);
-            positions = goal.positions().stream().map(ServerProductionEvents::key).collect(java.util.stream.Collectors.toSet());
+            positions = goal.positions().stream().map(ServerProductionEvents::key).collect(Collectors.toSet());
         }
         void arm(long tick, long stock) {
             check(journal.retain(this,positions), "native retention available"); long sequence = journal.latestSequence();
@@ -144,7 +146,7 @@ public final class MachineWatchProgressTest {
     private static JsonObject resource() { JsonObject value = new JsonObject(); value.add("identity",ITEM.deepCopy()); value.addProperty("resource_id",ResourceIdentity.key(ITEM)); value.addProperty("amount",1); return value; }
     private static void rejects(Runnable action, String message) {
         try { action.run(); throw new AssertionError(message); }
-        catch (IllegalArgumentException | org.maiwithu.maicraft.network.ServerOperationException expected) { }
+        catch (IllegalArgumentException | ServerOperationException expected) { }
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
 }

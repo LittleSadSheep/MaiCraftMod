@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import com.google.gson.JsonParser;
 
 public final class AttentionSnapshotTest {
     public static void main(String[] args) throws Exception {
@@ -89,7 +90,7 @@ public final class AttentionSnapshotTest {
         request.addProperty("after_cursor", 4_000_000_000L);
         check(normalize(request).get("after_cursor").getAsLong() == 4_000_000_000L, "cursor is not narrowed to int");
         for (String invalid : List.of("-1", "1.5", "9007199254740992", "1e40", "\"12\"")) {
-            request.add("after_cursor", com.google.gson.JsonParser.parseString(invalid));
+            request.add("after_cursor", JsonParser.parseString(invalid));
             rejected(request);
         }
         request.addProperty("after_cursor", 0);

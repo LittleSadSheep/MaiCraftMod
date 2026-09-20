@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.entity.HopperBlockEntity;
 import org.maiwithu.maicraft.server.inventory.NativeItemPort;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import net.minecraft.world.Container;
 
 /** 空桶供料前只证明组件样品能通过；方向、红石、缺失的内部通道及任一拒绝端口仍必须阻止肯定结论。 */
 public final class HopperConnectionInspectionTest {
@@ -109,7 +110,7 @@ public final class HopperConnectionInspectionTest {
         String api = "net.neoforged.neoforge.items.wrapper.InvWrapper";
         if (!NativeApi.present(api)) { check(!required, "installed NeoForge wrapper required for this test"); return; }
         var source = new SimpleContainer(2);
-        Object wrapper = NativeApi.type(api).getConstructor(net.minecraft.world.Container.class).newInstance(source);
+        Object wrapper = NativeApi.type(api).getConstructor(Container.class).newInstance(source);
         var route = new HopperConnectionInspection.Route(hopper(ORIGIN, Direction.DOWN, true), ORIGIN.above(), Direction.DOWN, true);
         var result = HopperItemRouteEvidence.probe(registries, route, new NativeItemPort.CapabilityPort(wrapper), request(new ItemStack(Items.IRON_INGOT)));
         check("verified".equals(result.get("status").getAsString()) && source.isEmpty() && route.hopper().isEmpty(),

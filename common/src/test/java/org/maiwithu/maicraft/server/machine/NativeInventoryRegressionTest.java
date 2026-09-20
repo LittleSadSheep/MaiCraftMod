@@ -15,6 +15,8 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.server.inventory.InventoryTransfer;
 import org.maiwithu.maicraft.server.inventory.NativeItemPort;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
+import net.minecraft.core.component.DataComponentType;
+import net.minecraft.network.codec.ByteBufCodecs;
 
 /** Exercises real vanilla stacks and inventories without a client, world, renderer or fabricated transaction result. */
 public final class NativeInventoryRegressionTest {
@@ -74,8 +76,8 @@ public final class NativeInventoryRegressionTest {
     }
 
     private static void transientComponentsRemainUnknown() {
-        var component = net.minecraft.core.component.DataComponentType.<String>builder()
-                .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.STRING_UTF8).build();
+        var component = DataComponentType.<String>builder()
+                .networkSynchronized(ByteBufCodecs.STRING_UTF8).build();
         ItemStack stack = new ItemStack(Items.IRON_INGOT);
         stack.set(component, "not-persistable-but-gameplay-significant");
         try {

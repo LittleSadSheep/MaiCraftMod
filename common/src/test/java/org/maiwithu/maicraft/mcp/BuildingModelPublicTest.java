@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.SemanticAbilityCatalog;
 import org.maiwithu.maicraft.intent.SemanticContractException;
+import com.google.gson.JsonArray;
 
 // 检查公开 MCP 的 plan/execute 接受模型目标，并把创建模型归为不控制身体的操作；知识地址沿用 perceive。
 public final class BuildingModelPublicTest {
@@ -67,7 +68,7 @@ public final class BuildingModelPublicTest {
         }
         // 组合目标也逐个检查子建筑，不能把没有图纸的建造藏进 sequence 后等角色走到现场才发现。
         var sequence = request("maicraft:sequence", "{}");
-        var children = new com.google.gson.JsonArray();
+        var children = new JsonArray();
         children.add(request("maicraft:build", "{}").getAsJsonObject("goal"));
         sequence.getAsJsonObject("goal").add("children", children);
         try {

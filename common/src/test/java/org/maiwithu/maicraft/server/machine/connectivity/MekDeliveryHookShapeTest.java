@@ -14,6 +14,8 @@ import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.VarInsnNode;
+import java.util.ArrayList;
+import org.objectweb.asm.tree.TypeInsnNode;
 
 /** Checks the installed optional mixin target, not actual game acceptance or resource delivery. */
 public final class MekDeliveryHookShapeTest {
@@ -123,7 +125,7 @@ public final class MekDeliveryHookShapeTest {
                 "getCapability", "()Ljava/lang/Object;");
         check(capabilities.size() == 1, "sorter home inventory must read exactly one native capability cache");
         AbstractInsnNode cast = next(capabilities.getFirst());
-        check(cast instanceof org.objectweb.asm.tree.TypeInsnNode type && type.getOpcode() == Opcodes.CHECKCAST
+        check(cast instanceof TypeInsnNode type && type.getOpcode() == Opcodes.CHECKCAST
                         && type.desc.equals(HANDLER) && next(cast).getOpcode() == Opcodes.ARETURN,
                 "sorter must return the captured home handler without substitution");
         MethodNode tick = method(sorter, "onUpdateServer", "()Z");
@@ -175,7 +177,7 @@ public final class MekDeliveryHookShapeTest {
     }
 
     private static List<MethodInsnNode> calls(MethodNode method, String owner, String name, String descriptor) {
-        var found = new java.util.ArrayList<MethodInsnNode>();
+        var found = new ArrayList<MethodInsnNode>();
         for (AbstractInsnNode instruction : method.instructions) {
             if (isCall(instruction, owner, name, descriptor)) found.add((MethodInsnNode) instruction);
         }

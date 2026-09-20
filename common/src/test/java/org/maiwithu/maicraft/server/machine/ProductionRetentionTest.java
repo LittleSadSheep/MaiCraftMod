@@ -7,6 +7,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.maiwithu.maicraft.network.ProtocolJson;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Unrelated factory traffic must not erase a long-running authorized production observation. */
 public final class ProductionRetentionTest {
@@ -159,7 +161,7 @@ public final class ProductionRetentionTest {
     }
     private static void serializedBytesAndSharedOwnersAreBounded() {
         ProductionEventJournal journal = new ProductionEventJournal("test:world");
-        java.util.List<Object> owners = new java.util.ArrayList<>();
+        List<Object> owners = new ArrayList<>();
         for (int i = 0; i < 64; i++) {
             Object owner = new Object(); owners.add(owner);
             check(journal.retain(owner, Set.of("shared")), "Sharing exceeded capacity before the declared owner limit");

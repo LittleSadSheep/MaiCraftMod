@@ -10,6 +10,8 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
+import net.minecraft.core.component.DataComponentType;
+import net.minecraft.network.codec.ByteBufCodecs;
 
 /** Real vanilla stack evidence remains exact when copied and counted by Mekanism production observers. */
 public final class MekanismResourceRegressionTest {
@@ -33,8 +35,8 @@ public final class MekanismResourceRegressionTest {
                 "Component-distinct outputs would be combined in the native production event");
         check(!original.get("id").getAsString().equals(ResourceIdentity.key(MekanismResourceStacks.identity(offered, registries))),
                 "The component difference was lost while serializing the resource");
-        var transientType = net.minecraft.core.component.DataComponentType.<String>builder()
-                .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.STRING_UTF8).build();
+        var transientType = DataComponentType.<String>builder()
+                .networkSynchronized(ByteBufCodecs.STRING_UTF8).build();
         offered.set(transientType, "unpersisted effect");
         boolean unknown = false;
         try { MekanismResourceStacks.identity(offered, registries); } catch (IllegalArgumentException expected) { unknown = true; }

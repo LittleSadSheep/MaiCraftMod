@@ -16,6 +16,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.integration.machine.runtime.ProductionEventCursor;
 import org.maiwithu.maicraft.server.machine.ProductionEventJournal;
+import com.google.gson.JsonArray;
+import java.util.function.BiConsumer;
 
 /** 核对真实消耗栈的事件编码与已有日志分页；被取消的生成不得计生产，读取别的池格不能收到本池事件。 */
 public final class TransformProductionCaptureTest {
@@ -28,7 +30,7 @@ public final class TransformProductionCaptureTest {
         ItemStack input = new ItemStack(Items.IRON_INGOT, 2); input.set(DataComponents.CUSTOM_NAME, Component.literal("投入的原料"));
         ItemStack output = new ItemStack(Items.BRICK, 3); output.set(DataComponents.CUSTOM_NAME, Component.literal("实际成品"));
         AtomicInteger emitted = new AtomicInteger(); UUID entity = UUID.randomUUID();
-        java.util.function.BiConsumer<com.google.gson.JsonArray, com.google.gson.JsonArray> sink = (inputs, outputs) -> {
+        BiConsumer<JsonArray, JsonArray> sink = (inputs, outputs) -> {
             JsonObject event = new JsonObject(); event.addProperty("producer", pool); event.addProperty("kind", "recipe_output");
             event.addProperty("completed", true); event.addProperty("recipe_id", "test:world_processing");
             event.addProperty("provenance", "native_recipe_output"); event.addProperty("tick", emitted.incrementAndGet());

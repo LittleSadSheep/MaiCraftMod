@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.core.blueprint.BuildingModelContract;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneBlocks;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneExport;
+import net.minecraft.nbt.Tag;
 import static org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibraryTest.*;
 
 /** 教材随包发布；所有围栏 JSON 都是可编译场景，实体、明确空气和未声明留白分别核验。 */
@@ -55,7 +56,7 @@ public final class BuildingTutorialResourcesTest {
                     check(blocks.put(cell.get("offset").toString(), cell) == null, "最终蓝图不能重复坐标");
                 }
                 check(!blocks.isEmpty(), "教材不能交付空模型");
-                check(BuildingSceneExport.structure(blueprint).getList("blocks", net.minecraft.nbt.Tag.TAG_COMPOUND).size() == blocks.size(), "导出不能丢目标");
+                check(BuildingSceneExport.structure(blueprint).getList("blocks", Tag.TAG_COMPOUND).size() == blocks.size(), "导出不能丢目标");
                 String name = scene.get("name").getAsString(); check(examples.put(name, blocks) == null, "案例名字须唯一");
                 var example = new JsonObject(); example.add("scene", scene); example.add("blueprint", blueprint); scenes.add(example);
             }

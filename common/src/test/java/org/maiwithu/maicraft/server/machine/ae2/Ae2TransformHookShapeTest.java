@@ -16,6 +16,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import java.util.Arrays;
 
 /** 对实际安装 AE2 JAR 检查原生注入位置与两条不同配方；只读字节码和资源，不加载或执行模组。 */
 public final class Ae2TransformHookShapeTest {
@@ -43,7 +44,7 @@ public final class Ae2TransformHookShapeTest {
             ClassNode recipe = read(jar, ROOT + "TransformRecipe");
             method(recipe, "getCircumstance", "()L" + ROOT + "TransformCircumstance;");
             method(recipe, "getResultItem", "(Lnet/minecraft/core/HolderLookup$Provider;)Lnet/minecraft/world/item/ItemStack;");
-            boolean waterDefault = recipe.methods.stream().flatMap(value -> java.util.Arrays.stream(value.instructions.toArray()))
+            boolean waterDefault = recipe.methods.stream().flatMap(value -> Arrays.stream(value.instructions.toArray()))
                     .anyMatch(value -> value instanceof FieldInsnNode field && field.getOpcode() == Opcodes.GETSTATIC
                             && field.owner.equals("net/minecraft/tags/FluidTags") && field.name.equals("WATER"));
             check(waterDefault, "省略 circumstance 的默认水标签规则发生变化");

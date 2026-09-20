@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.Set;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
+import org.maiwithu.maicraft.network.ServerOperationException;
 
 /** Server-only regressions for evidence identity, causal cursors and response bounds. */
 public final class ServerNativeRegressionTest {
@@ -88,7 +89,7 @@ public final class ServerNativeRegressionTest {
         check(ServerAccess.bool(body, "enabled"), "Valid boolean was rejected");
         body.addProperty("enabled", "false");
         try { ServerAccess.bool(body, "enabled"); throw new AssertionError("Text silently changed native configuration"); }
-        catch (org.maiwithu.maicraft.network.ServerOperationException expected) { /* Invalid input must not mutate. */ }
+        catch (ServerOperationException expected) { /* Invalid input must not mutate. */ }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }

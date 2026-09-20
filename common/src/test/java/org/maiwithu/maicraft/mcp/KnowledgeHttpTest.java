@@ -16,6 +16,8 @@ import org.maiwithu.maicraft.core.integration.ponder.PonderFixture;
 import org.maiwithu.maicraft.core.integration.ponder.PonderBlueprintStore;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.PonderKnowledgeSource;
+import java.util.HashMap;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelContract;
 
 /** Real JSON-RPC/HTTP checks against the actual embedded service, with no Minecraft world. */
 public final class KnowledgeHttpTest {
@@ -56,11 +58,11 @@ public final class KnowledgeHttpTest {
             check(attention && chatflow && scene != null && PonderFixture.compiled == 0,
                     "keep attention and chatflow, and discover foreign Ponder scenes");
             // 标准HTTP发现与资源读取必须保留完整Schema；纯资料查询不会委派世界感知或开始施工。
-            var contract = org.maiwithu.maicraft.core.blueprint.BuildingModelContract.current();
+            var contract = BuildingModelContract.current();
             check(allResources.asList().stream().anyMatch(value ->
-                    value.getAsJsonObject().get("uri").getAsString().equals(org.maiwithu.maicraft.core.blueprint.BuildingModelContract.INDEX_URI)),
+                    value.getAsJsonObject().get("uri").getAsString().equals(BuildingModelContract.INDEX_URI)),
                     "building contract index must be discoverable over HTTP");
-            var contractContent = send("resources/read",uri(org.maiwithu.maicraft.core.blueprint.BuildingModelContract.INDEX_URI))
+            var contractContent = send("resources/read",uri(BuildingModelContract.INDEX_URI))
                     .getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
             var contractIndex = json(contractContent.get("text").getAsString());
             check(contractIndex.get("design_schema_uri").getAsString().equals(contract.schemaUri()),"HTTP index must identify the exact current schema");
@@ -85,7 +87,7 @@ public final class KnowledgeHttpTest {
             check(!schemaFallback.get("isError").getAsBoolean() && schemaFallback.getAsJsonArray("content").get(0).getAsJsonObject()
                     .get("text").getAsString().equals(contract.schemaText()),"perceive fallback must return the same complete JSON schema");
             var templates = send("resources/templates/list", new JsonObject()).getAsJsonObject("result");
-            var templateMimes = new java.util.HashMap<String, String>();
+            var templateMimes = new HashMap<String, String>();
             templates.getAsJsonArray("resourceTemplates").forEach(element -> {
                 var row = element.getAsJsonObject(); templateMimes.put(row.get("name").getAsString(), row.get("mimeType").getAsString());
             });

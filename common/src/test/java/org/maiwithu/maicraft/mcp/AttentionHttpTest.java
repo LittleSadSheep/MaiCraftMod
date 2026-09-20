@@ -17,6 +17,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Real transport, cancellation and SSE reconnect, with an inert event-driven runtime. */
 public final class AttentionHttpTest {
@@ -52,7 +56,7 @@ public final class AttentionHttpTest {
             check(json(chatBody).get("stream").getAsString().equals("chat"), "chatflow resource reads the chat snapshot");
             var live = client.send(base(uri, session).header("Accept", "text/event-stream").GET().build(),
                     HttpResponse.BodyHandlers.ofInputStream());
-            var lineExecutor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+            var lineExecutor = Executors.newVirtualThreadPerTaskExecutor();
             try (var input = live.body()) {
                 var reader = new BufferedReader(new InputStreamReader(input));
                 var catchUp = readUris(reader, lineExecutor, 2);
@@ -93,7 +97,7 @@ public final class AttentionHttpTest {
         var request = base(uri, session).header("Accept", "text/event-stream").GET().build();
         var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         check(response.statusCode() == 200, "SSE connected");
-        var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
         try (var input = response.body()) {
             var reader = new BufferedReader(new InputStreamReader(input));
             String data = executor.submit(() -> {
@@ -108,9 +112,9 @@ public final class AttentionHttpTest {
         } finally { executor.shutdownNow(); }
     }
 
-    private static java.util.List<String> readUris(BufferedReader reader,
-            java.util.concurrent.ExecutorService executor, int count) throws Exception {
-        var uris = new java.util.ArrayList<String>();
+    private static List<String> readUris(BufferedReader reader,
+            ExecutorService executor, int count) throws Exception {
+        var uris = new ArrayList<String>();
         for (int i = 0; i < count; i++) {
             var submitted = executor.submit(() -> {
                 String line;
