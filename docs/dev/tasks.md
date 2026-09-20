@@ -14,6 +14,8 @@
 
 实现入口：[IntentTask.beginTool / beginNative](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentTask.java)、[TaskDispatch.captureNext](../../common/src/main/java/org/maiwithu/maicraft/task/TaskDispatch.java)。
 
+后一步说“去前面找到的营地”时，由 [PriorResultResolver](../../common/src/main/java/org/maiwithu/maicraft/intent/PriorResultResolver.java) 读取已完成步骤的内部位置证据。多个地点会根据关系文字匹配；无法区分时保留未知，让能力适配器继续处理。失败步骤不会成为后续位置依据。
+
 ## 接单不等于完成
 
 1. `MaiCraftRuntimeFacade` 把请求切到客户端线程，检查玩家和世界是否可用。
