@@ -24,7 +24,6 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,8 +32,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
-import com.google.gson.Gson;
-import com.google.gson.JsonElement;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.stream.Collectors;
@@ -426,7 +423,7 @@ final class IntentTask implements Task {
         // A failed/abandoned execution can never authorize a later prior_result binding.
         record.discardInternalStepPosition(record.stepIndex());
         captureMechanicalContinuation(currentGoal(), result);
-        TaskResult failure = withEffectLedger(semanticResult(
+        TaskResult failure = withEffectLedger(SemanticResultView.result(
                 result == null ? TaskResult.fail("internal action failed") : result));
         Goal failedGoal = currentGoal();
         record.addAttempt(new IntentTaskRecord.AttemptSnapshot(
@@ -465,7 +462,7 @@ final class IntentTask implements Task {
             }
             effect.put("success", step.success());
             effect.put("summary", SemanticResultView.message(step.message()));
-            Object confirmed = sanitizeJson(step.result());
+            Object confirmed = SemanticResultView.jsonValue(step.result());
             if (confirmed != null) effect.put("confirmed_effect", confirmed);
             effects.add(Map.copyOf(effect));
         }
@@ -560,7 +557,7 @@ final class IntentTask implements Task {
     }
 
     private void completeStep(TaskResult result) {
-        result = semanticResult(result);
+        result = SemanticResultView.result(result);
         int index = record.stepIndex();
         Goal goal = record.steps().get(index);
         record.addStepResult(new IntentTaskRecord.StepSnapshot(
@@ -797,7 +794,7 @@ final class IntentTask implements Task {
     }
 
     private void retainInterruptedChild(TaskState state, TaskResult result) {
-        interruptedChildResult = semanticResult(result == null ? TaskResult.fail(
+        interruptedChildResult = SemanticResultView.result(result == null ? TaskResult.fail(
                 "Child returned no effect evidence during interruption.",
                 Map.of("outcome_uncertain", true, "mechanical_retry_allowed", false)) : result);
         if (record.stepIndex() < record.steps().size()) {
@@ -808,7 +805,7 @@ final class IntentTask implements Task {
 
     /** Keep parent termination semantics and the child's exact partial-effect evidence together. */
     static TaskResult withInterruptedEffects(TaskResult parent, TaskResult child) {
-        TaskResult clean = semanticResult(child);
+        TaskResult clean = SemanticResultView.result(child);
         Map<String, Object> data = new LinkedHashMap<>(parent.data());
         data.put("interrupted_child", Map.of("message", clean.message(), "data", clean.data()));
         for (String key : List.of("outcome_uncertain", "effects_started", "mechanical_retry_allowed")) {
@@ -974,127 +971,6 @@ final class IntentTask implements Task {
                 : message;
     }
 
-    /**
-     * Internal tasks may use runtime entity ids, menu slots and concrete routes to keep native
-     * work stable across ticks. Those implementation details stop here: the public semantic task
-     * reports outcomes and evidence, never handles that the model could replay as micro-actions.
-     */
-    private static TaskResult semanticResult(TaskResult raw) {
-        if (raw == null) return TaskResult.fail("internal action failed");
-        return new TaskResult(
-                raw.success(),
-                SemanticResultView.message(raw.message()),
-                raw.timedOut(),
-                raw.interrupted(),
-                sanitizeMap(raw.data()));
-    }
-
-    private static Map<String, Object> sanitizeMap(Map<String, Object> source) {
-        // 对外回复前，按字段名删掉内部使用的坐标、路径、槽位等；嵌套的 Map、列表和 JSON 也继续检查。
-        if (source == null || source.isEmpty()) return Map.of();
-        Map<String, Object> clean = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : source.entrySet()) {
-            String key = entry.getKey();
-            if (key == null || SemanticResultView.internalKey(key)) continue;
-            Object value = sanitizeEntry(key, entry.getValue());
-            if (value != null) clean.put(key, value);
-        }
-        return Map.copyOf(clean);
-    }
-
-    private static Object sanitizeValue(Object value) {
-        if (value instanceof JsonElement json) {
-            return sanitizeJson(json);
-        }
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> clean = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                if (SemanticResultView.internalKey(key)) continue;
-                Object nested = sanitizeEntry(key, entry.getValue());
-                if (nested != null) clean.put(key, nested);
-            }
-            return Map.copyOf(clean);
-        }
-        if (value instanceof Collection<?> collection) {
-            List<Object> clean = new ArrayList<>();
-            for (Object element : collection) {
-                Object nested = sanitizeValue(element);
-                if (nested != null) clean.add(nested);
-            }
-            return List.copyOf(clean);
-        }
-        if (value instanceof String text) {
-            String stripped = text.strip();
-            if ((stripped.startsWith("{") && stripped.endsWith("}"))
-                    || (stripped.startsWith("[") && stripped.endsWith("]"))) {
-                try {
-                    return sanitizeJson(JsonParser.parseString(stripped));
-                } catch (RuntimeException ignored) {
-                    // Ordinary text that merely resembles JSON remains ordinary text.
-                }
-            }
-            return SemanticResultView.message(text);
-        }
-        return value;
-    }
-
-    private static Object sanitizeJson(JsonElement value) {
-        if (value == null || value.isJsonNull()) return null;
-        if (value.isJsonObject()) {
-            Map<String, Object> clean = new LinkedHashMap<>();
-            for (Map.Entry<String, JsonElement> entry
-                    : value.getAsJsonObject().entrySet()) {
-                if (SemanticResultView.internalKey(entry.getKey())) continue;
-                Object nested = sanitizeEntry(entry.getKey(), entry.getValue());
-                if (nested != null) clean.put(entry.getKey(), nested);
-            }
-            return Map.copyOf(clean);
-        }
-        if (value.isJsonArray()) {
-            List<Object> clean = new ArrayList<>();
-            for (JsonElement element : value.getAsJsonArray()) {
-                Object nested = sanitizeJson(element);
-                if (nested != null) clean.add(nested);
-            }
-            return List.copyOf(clean);
-        }
-        var primitive = value.getAsJsonPrimitive();
-        if (primitive.isBoolean()) return primitive.getAsBoolean();
-        if (primitive.isNumber()) return primitive.getAsNumber();
-        return SemanticResultView.message(primitive.getAsString());
-    }
-
-    private static Object sanitizeEntry(String key, Object value) {
-        // 已经实际挖过的方块是供人核查的事实，因此这个字段例外保留位置，最多列出三十二块。
-        if (!"confirmed_harvests".equals(key)) return sanitizeValue(value);
-        // Committed block changes are auditable world evidence, not a replayable planned route.
-        var json = new Gson().toJsonTree(value);
-        if (!json.isJsonArray()) return List.of();
-        List<Object> result = new ArrayList<>();
-        for (var entry : json.getAsJsonArray()) {
-            if (result.size() == 32) break;
-            if (!entry.isJsonObject()) continue;
-            var row = entry.getAsJsonObject();
-            Map<String, Object> clean = new LinkedHashMap<>();
-            for (String field : List.of("block_id", "block_state", "natural_tree_filter_enabled")) {
-                if (row.has(field)) clean.put(field, sanitizeJson(row.get(field)));
-            }
-            if (row.has("position") && row.get("position").isJsonObject()) {
-                var pos = row.getAsJsonObject("position");
-                Map<String, Integer> coordinates = new LinkedHashMap<>();
-                for (String axis : List.of("x", "y", "z")) {
-                    var number = pos.get(axis);
-                    if (number != null && number.isJsonPrimitive() && number.getAsJsonPrimitive().isNumber()
-                            && number.getAsDouble() == number.getAsInt()) coordinates.put(axis, number.getAsInt());
-                }
-                if (coordinates.size() == 3) clean.put("position", Map.copyOf(coordinates));
-            }
-            result.add(clean);
-        }
-        return List.copyOf(result);
-    }
-
     @Override
     public String name() {
         return "intent";
@@ -1102,7 +978,7 @@ final class IntentTask implements Task {
 
     @Override
     public Map<String, Object> progress() {
-        Map<String, Object> progress = new LinkedHashMap<>(child != null ? sanitizeMap(child.progress())
+        Map<String, Object> progress = new LinkedHashMap<>(child != null ? SemanticResultView.data(child.progress())
                 : Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"
                 : wait != null ? "waiting_for_condition" : "preparing_step"));
         addBuildProjects(progress);

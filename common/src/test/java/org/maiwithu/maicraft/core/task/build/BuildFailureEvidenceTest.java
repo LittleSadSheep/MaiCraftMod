@@ -9,6 +9,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.intent.IntentRuntime;
+import org.maiwithu.maicraft.intent.SemanticResultView;
 import org.maiwithu.maicraft.task.TaskResult;
 import com.google.gson.JsonObject;
 import java.util.Set;
@@ -23,9 +24,8 @@ public final class BuildFailureEvidenceTest {
         var raw = TaskResult.fail("Cannot continue", Map.of("build_diagnostics", List.of(evidence), "placed", 5,
                 "completed", 410, "temporary_supports_remaining", 3, "blocked_cells", List.of(Map.of("x", 307)),
                 "construction_navigation", Map.of("route_attempts", 3, "failed_stances", 2, "target_index", 17)));
-        var sanitizer = Class.forName("org.maiwithu.maicraft.intent.IntentTask").getDeclaredMethod("semanticResult", TaskResult.class);
-        sanitizer.setAccessible(true);
-        var clean = JsonParser.parseString(((TaskResult) sanitizer.invoke(null, raw)).toJson()).getAsJsonObject();
+        // 施工失败事实先转成对外结果，再进入简短通知，不能在任一层丢掉已施工的部分。
+        var clean = JsonParser.parseString(SemanticResultView.result(raw).toJson()).getAsJsonObject();
         var compact = IntentRuntime.class.getDeclaredMethod("compactAttentionResult", JsonObject.class);
         compact.setAccessible(true); clean = (JsonObject) compact.invoke(null, clean);
         var data = clean.getAsJsonObject("data"); var row = data.getAsJsonArray("build_diagnostics").get(0).getAsJsonObject();

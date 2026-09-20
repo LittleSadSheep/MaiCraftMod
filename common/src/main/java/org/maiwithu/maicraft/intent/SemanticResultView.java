@@ -1,10 +1,21 @@
 package org.maiwithu.maicraft.intent;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.api.Internal;
 import java.util.Locale;
 import java.util.Set;
 
 /** 整理对外任务结果中的文字和内部字段，不改变任务是否成功，也不修改已发生的游戏效果。 */
-final class SemanticResultView {
+@Internal
+public final class SemanticResultView {
     private static final Set<String> INTERNAL_RESULT_KEYS = Set.of(
             "entity_id", "entity_ids", "requested_entity_ids", "defeated_entity_ids",
             "lost_entity_ids", "unreachable_entity_ids", "combat_by_entity",
@@ -21,7 +32,7 @@ final class SemanticResultView {
     private SemanticResultView() { }
 
     /** 计划路线、操作槽位和运行时实体编号留在 Mod 内部，不作为下一次动作指令公开。 */
-    static boolean internalKey(String raw) {
+    private static boolean internalKey(String raw) {
         String key = raw.toLowerCase(Locale.ROOT);
         return INTERNAL_RESULT_KEYS.contains(key)
                 || key.endsWith("_cells")
@@ -70,5 +81,122 @@ final class SemanticResultView {
                         "the internally verified location")
                 .replaceAll("(?i)\\b[xyz]\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?",
                         "the internally verified coordinate");
+    }
+
+    /** 保留成功、超时和中断事实，只转换其对外文字与证据格式。 */
+    public static TaskResult result(TaskResult raw) {
+        if (raw == null) return TaskResult.fail("internal action failed");
+        return new TaskResult(
+                raw.success(),
+                message(raw.message()),
+                raw.timedOut(),
+                raw.interrupted(),
+                data(raw.data()));
+    }
+
+    public static Map<String, Object> data(Map<String, ?> source) {
+        // 对外回复前，按字段名删掉内部使用的坐标、路径、槽位等；嵌套的 Map、列表和 JSON 也继续检查。
+        if (source == null || source.isEmpty()) return Map.of();
+        Map<String, Object> clean = new LinkedHashMap<>();
+        for (Map.Entry<String, ?> entry : source.entrySet()) {
+            String key = entry.getKey();
+            if (key == null || internalKey(key)) continue;
+            Object value = sanitizeEntry(key, entry.getValue());
+            if (value != null) clean.put(key, value);
+        }
+        return Map.copyOf(clean);
+    }
+
+    private static Object sanitizeValue(Object value) {
+        if (value instanceof JsonElement json) {
+            return jsonValue(json);
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> clean = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                if (internalKey(key)) continue;
+                Object nested = sanitizeEntry(key, entry.getValue());
+                if (nested != null) clean.put(key, nested);
+            }
+            return Map.copyOf(clean);
+        }
+        if (value instanceof Collection<?> collection) {
+            List<Object> clean = new ArrayList<>();
+            for (Object element : collection) {
+                Object nested = sanitizeValue(element);
+                if (nested != null) clean.add(nested);
+            }
+            return List.copyOf(clean);
+        }
+        if (value instanceof String text) {
+            String stripped = text.strip();
+            if ((stripped.startsWith("{") && stripped.endsWith("}"))
+                    || (stripped.startsWith("[") && stripped.endsWith("]"))) {
+                try {
+                    return jsonValue(JsonParser.parseString(stripped));
+                } catch (RuntimeException ignored) {
+                    // 只是外形像 JSON 的普通说明仍按文字处理，不能因此丢掉任务结果。
+                }
+            }
+            return message(text);
+        }
+        return value;
+    }
+
+    /** JSON 形式的子任务证据同样经过字段整理，供已完成步骤及任务详情复用。 */
+    public static Object jsonValue(JsonElement value) {
+        if (value == null || value.isJsonNull()) return null;
+        if (value.isJsonObject()) {
+            Map<String, Object> clean = new LinkedHashMap<>();
+            for (Map.Entry<String, JsonElement> entry
+                    : value.getAsJsonObject().entrySet()) {
+                if (internalKey(entry.getKey())) continue;
+                Object nested = sanitizeEntry(entry.getKey(), entry.getValue());
+                if (nested != null) clean.put(entry.getKey(), nested);
+            }
+            return Map.copyOf(clean);
+        }
+        if (value.isJsonArray()) {
+            List<Object> clean = new ArrayList<>();
+            for (JsonElement element : value.getAsJsonArray()) {
+                Object nested = jsonValue(element);
+                if (nested != null) clean.add(nested);
+            }
+            return List.copyOf(clean);
+        }
+        var primitive = value.getAsJsonPrimitive();
+        if (primitive.isBoolean()) return primitive.getAsBoolean();
+        if (primitive.isNumber()) return primitive.getAsNumber();
+        return message(primitive.getAsString());
+    }
+
+    private static Object sanitizeEntry(String key, Object value) {
+        // 已经实际挖过的方块是供人核查的事实，因此这个字段例外保留位置，最多列出三十二块。
+        if (!"confirmed_harvests".equals(key)) return sanitizeValue(value);
+        var json = new Gson().toJsonTree(value);
+        if (!json.isJsonArray()) return List.of();
+        List<Object> result = new ArrayList<>();
+        for (var entry : json.getAsJsonArray()) {
+            if (result.size() == 32) break;
+            if (!entry.isJsonObject()) continue;
+            var row = entry.getAsJsonObject();
+            Map<String, Object> clean = new LinkedHashMap<>();
+            for (String field : List.of("block_id", "block_state", "natural_tree_filter_enabled")) {
+                if (row.has(field)) clean.put(field, jsonValue(row.get(field)));
+            }
+            if (row.has("position") && row.get("position").isJsonObject()) {
+                var pos = row.getAsJsonObject("position");
+                Map<String, Integer> coordinates = new LinkedHashMap<>();
+                for (String axis : List.of("x", "y", "z")) {
+                    var number = pos.get(axis);
+                    if (number != null && number.isJsonPrimitive() && number.getAsJsonPrimitive().isNumber()
+                            && number.getAsDouble() == number.getAsInt()) coordinates.put(axis, number.getAsInt());
+                }
+                if (coordinates.size() == 3) clean.put("position", Map.copyOf(coordinates));
+            }
+            result.add(clean);
+        }
+        return List.copyOf(result);
     }
 }

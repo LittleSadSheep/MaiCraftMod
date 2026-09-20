@@ -10,8 +10,9 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
+import org.maiwithu.maicraft.intent.SemanticResultView;
 
-/** Parent supply receipts preserve native source proof even if the material goal later fails. */
+/** 供料后来失败时仍保留已确认的原生到货事实，不能把部分到货当成目标已经凑齐。 */
 public final class MaterialSupplyReceiptTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -47,10 +48,9 @@ public final class MaterialSupplyReceiptTest {
     }
 
     private static void publicEvidenceSurvives(Map<?, ?> receipt) throws Exception {
-        var sanitize = Class.forName("org.maiwithu.maicraft.intent.IntentTask").getDeclaredMethod("sanitizeMap", Map.class);
-        sanitize.setAccessible(true);
+        // 子任务的 JSON 证据先经过对外结果整理，再核对通知与检查点是否仍保留实际到货数量。
         var gson = new Gson();
-        var value = gson.toJsonTree(sanitize.invoke(null, receipt));
+        var value = gson.toJsonTree(SemanticResultView.jsonValue(gson.toJsonTree(receipt)));
         var attention = Class.forName("org.maiwithu.maicraft.intent.IntentRuntime")
                 .getDeclaredMethod("sanitizeAttentionValue", JsonElement.class);
         attention.setAccessible(true); value = (JsonElement) attention.invoke(null, value);
