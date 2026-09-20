@@ -37,7 +37,8 @@ public final class SequenceProtectionTest {
             check(root.toJson().equals(original) && record.steps().get(1).toJson().equals(leaf.toJson()),
                     "scope metadata must not rewrite public goal parameters or the original request");
             IntentRuntime.get().validateGoal(record.steps().get(1));
-            record.steps().set(1, record.steps().get(1).withParameters(leaf.parameters()).withTarget(null));
+            // 修改目标走任务单接口，继承保护范围与保存通知不能被直接改列表绕开。
+            record.replaceCurrent(record.steps().get(1).withParameters(leaf.parameters()).withTarget(null));
             assertProtection(f, record, true);
             assertProtection(f, roundTrip(record), true);
 

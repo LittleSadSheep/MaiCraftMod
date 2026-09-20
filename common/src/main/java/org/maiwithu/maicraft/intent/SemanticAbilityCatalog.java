@@ -402,7 +402,7 @@ public final class SemanticAbilityCatalog {
                             field("condition", "string", "elapsed (default), day, night, health_full or not_hungry. Observe only; does not eat, heal or change time."),
                             field("after_s", "integer", "Minimum game-time seconds before checking the condition, 0-3600, default 1. Not a timeout; fractions and out-of-range values are rejected.")));
             case "maicraft:sequence" -> contract(
-                    "Run semantic child goals in order; each child remains independently observable and recoverable, while explicit area protection can span later children.",
+                    "Run semantic child goals in order; each child remains independently observable and recoverable, while explicit area protection can span later children. Explicitly skipped steps are marked skipped rather than successful. Finishing the remaining work may report all_steps_succeeded=false; inspect skipped_step_count and prior attempts for unresolved or partial effects.",
                     targets(),
                     fields(field("protected_labels", "array<string>",
                             "Remembered areas whose internally measured footprint every later child must preserve; never provide cells or coordinates.")));

@@ -98,7 +98,7 @@ final class IntentTask implements Task {
     private TaskState tickSemanticParent() {
         // 所有步骤都记为完成后，才报告整个目标成功。
         if (record.stepIndex() >= record.steps().size()) {
-            terminalResult = successResult();
+            terminalResult = completionResult();
             return TaskState.SUCCESS;
         }
 
@@ -116,9 +116,9 @@ final class IntentTask implements Task {
                 return TaskState.RUNNING;
             }
             if ("skip".equals(answer.choice())) {
-                // “跳过”也会把这一步记为已处理，结果文字注明是人为跳过，并不说明游戏里真的做成了。
+                // 用户明确跳过只推进清单，不把尚未确认的目标记为成功；已有尝试仍保留在历史中。
                 discardContinuation(currentGoal());
-                completeStep(TaskResult.ok("step skipped by explicit decision"));
+                completeStep(TaskResult.fail("step skipped by explicit decision", Map.of("skipped", true)), true);
                 return record.stepIndex() >= record.steps().size() ? TaskState.SUCCESS : TaskState.RUNNING;
             }
             if ("recover".equals(answer.choice()) || "replace_goal".equals(answer.choice())) {
@@ -442,6 +442,7 @@ final class IntentTask implements Task {
         Map<String, Object> data = new LinkedHashMap<>(failure.data());
         data.put("completed_effects", completedEffects());
         data.put("remaining_effects", remainingEffects());
+        data.put("skipped_steps", skippedSteps());
         return new TaskResult(
                 failure.success(), failure.message(), failure.timedOut(), failure.interrupted(),
                 Map.copyOf(data));
@@ -450,6 +451,8 @@ final class IntentTask implements Task {
     private List<Map<String, Object>> completedEffects() {
         List<Map<String, Object>> effects = new ArrayList<>();
         for (IntentTaskRecord.StepSnapshot step : record.stepResults()) {
+            // 跳过不提供完整目标的成功证明；既有部分效果仍在尝试历史中，跳过索引单独列出。
+            if (step.skipped()) continue;
             Map<String, Object> effect = new LinkedHashMap<>();
             effect.put("step_index", step.index());
             effect.put("ability", step.ability());
@@ -546,20 +549,25 @@ final class IntentTask implements Task {
 
     private TaskState afterImmediate() {
         if (record.stepIndex() >= record.steps().size()) {
-            terminalResult = successResult();
+            terminalResult = completionResult();
             return TaskState.SUCCESS;
         }
         return TaskState.RUNNING;
     }
 
     private void completeStep(TaskResult result) {
+        completeStep(result, false);
+    }
+
+    private void completeStep(TaskResult result, boolean skipped) {
         result = SemanticResultView.result(result);
         int index = record.stepIndex();
+        if (skipped) record.discardInternalStepPosition(index);
         Goal goal = record.steps().get(index);
         record.addStepResult(new IntentTaskRecord.StepSnapshot(
-                index, goal.ability(), result.success(), result.message(), result.toJson()));
-        runtime.stepCompleted(record);
-        if (!result.success()) terminalResult = result;
+                index, goal.ability(), result.success(), result.message(), result.toJson(), skipped));
+        runtime.stepProcessed(record);
+        if (!result.success() && !skipped) terminalResult = result;
     }
 
     private Goal currentGoal() {
@@ -633,7 +641,7 @@ final class IntentTask implements Task {
         TaskResult result = terminalResult;
         if (result == null) {
             result = switch (terminal) {
-                case SUCCESS -> successResult();
+                case SUCCESS -> completionResult();
                 case TIMEOUT -> TaskResult.timeout("semantic task timed out");
                 case CANCELLED -> TaskResult.cancelled("semantic task cancelled");
                 default -> TaskResult.fail("semantic task failed");
@@ -674,18 +682,29 @@ final class IntentTask implements Task {
         return new TaskResult(parent.success(), parent.message(), parent.timedOut(), parent.interrupted(), data);
     }
 
-    private TaskResult successResult() {
+    private TaskResult completionResult() {
         List<Map<String, Object>> steps = new ArrayList<>();
         for (IntentTaskRecord.StepSnapshot step : record.stepResults()) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("index", step.index());
             item.put("ability", step.ability());
             item.put("success", step.success());
+            item.put("skipped", step.skipped());
             item.put("message", step.message());
             steps.add(item);
         }
-        return TaskResult.ok(record.goal().outcome(),
-                Map.of("task_id", record.externalId().toString(), "steps", steps));
+        int skipped = record.skippedStepCount();
+        // 剩余清单执行结束不等于原始目标全部达成，不能把被略过的建造、采集或地点记忆写成成功。
+        String message = skipped == 0 ? record.goal().outcome()
+                : "Finished the remaining work; " + skipped + " step(s) were skipped by explicit decision.";
+        return TaskResult.ok(message, Map.of("task_id", record.externalId().toString(), "steps", steps,
+                "skipped_step_count", skipped, "skipped_steps", skippedSteps(),
+                "all_steps_succeeded", record.allStepsSucceeded()));
+    }
+
+    private List<Integer> skippedSteps() {
+        return record.stepResults().stream().filter(IntentTaskRecord.StepSnapshot::skipped)
+                .map(IntentTaskRecord.StepSnapshot::index).toList();
     }
 
     private static TaskResult parseImmediate(String json) {

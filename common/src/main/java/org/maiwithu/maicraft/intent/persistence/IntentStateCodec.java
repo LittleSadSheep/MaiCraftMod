@@ -155,6 +155,7 @@ public final class IntentStateCodec {
             item.addProperty("index", step.index());
             item.addProperty("ability", bounded(step.ability()));
             item.addProperty("success", step.success());
+            item.addProperty("skipped", step.skipped());
             item.addProperty("message", safeMessage(step.message()));
             item.add("result", safeObject(step.resultJson()));
             completed.add(item);
@@ -342,7 +343,10 @@ public final class IntentStateCodec {
                     bounded(text(item, "ability")),
                     item.has("success") && item.get("success").getAsBoolean(),
                     safeMessage(text(item, "message")),
-                    safeElement(item.get("result")).toString()));
+                    safeElement(item.get("result")).toString(),
+                    // 旧检查点没有专门字段；只识别原执行器的固定跳过说明，不把普通失败当成跳过。
+                    item.has("skipped") ? item.get("skipped").getAsBoolean()
+                            : "step skipped by explicit decision".equals(text(item, "message"))));
         }
         if (completed.size() > stepIndex) {
             throw new IllegalArgumentException(

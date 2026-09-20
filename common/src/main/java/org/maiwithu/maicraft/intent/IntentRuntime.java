@@ -73,6 +73,7 @@ public final class IntentRuntime {
             "waterfront_required", "max_distance", "farthest_body_distance",
             "target", "requested", "gathered", "confirmed_target_breaks", "scope",
             "last_probe", "suggestions", "recovery_options", "decision", "recovery", "steps",
+            "skipped_step_count", "skipped_steps", "all_steps_succeeded",
             "completed_effects", "remaining_effects", "landing_assist", "landing_assist_observed");
     private static final Set<String> ATTENTION_ISSUE_FACT_KEYS = Set.of(
             "failure_type", "recipe_id", "missing", "item_ids", "required_final_count",
@@ -624,11 +625,16 @@ public final class IntentRuntime {
         publish("resumed", record, "Task resumed", new JsonObject());
     }
 
-    void stepCompleted(IntentTaskRecord record) {
+    void stepProcessed(IntentTaskRecord record) {
         JsonObject data = new JsonObject();
         data.addProperty("completed_step_count", record.stepIndex());
         data.addProperty("step_count", record.steps().size());
-        publish("step_completed", record, "A semantic step finished; the parent task may still be running.", data);
+        boolean skipped = record.stepResults().getLast().skipped();
+        // 完成与跳过分别通知，避免调用者将“已处理”误认成“已经产生游戏效果”。
+        data.addProperty("skipped", skipped);
+        publish(skipped ? "step_skipped" : "step_completed", record, skipped
+                ? "A semantic step was skipped by explicit decision; its outcome was not confirmed."
+                : "A semantic step finished; the parent task may still be running.", data);
     }
 
     /** 玩家收回第一人称控制时，只暂停仍在执行的语义父任务，保留已有暂停或待答问题。 */

@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -118,9 +119,19 @@ public final class IntentTaskRecord extends TaskRecord {
     public UUID externalId() { return externalId; }
     public UUID planId() { return planId; }
     public Goal goal() { return goal; }
-    public List<Goal> steps() { return steps; }
+    /** 改目标必须经过任务单的方法，使保护范围和保存通知一起更新；查询者不能直接改步骤表。 */
+    public List<Goal> steps() { return Collections.unmodifiableList(steps); }
     public int stepIndex() { return stepIndex; }
     public List<StepSnapshot> stepResults() { return List.copyOf(stepResults); }
+    /** 用户明确略过的目标单独计数，不能混进游戏中已经完成的效果。 */
+    public int skippedStepCount() {
+        return (int) stepResults.stream().filter(StepSnapshot::skipped).count();
+    }
+    /** 原清单每一步都留下成功证据才算全部达成，处理完清单本身不足以证明这一点。 */
+    public boolean allStepsSucceeded() {
+        return stepIndex == steps.size() && stepResults.size() == steps.size()
+                && stepResults.stream().allMatch(StepSnapshot::success);
+    }
     public List<AttemptSnapshot> attempts() { return List.copyOf(attempts); }
     /** 供检查点保存内部位置，MCP 查询不序列化这份坐标表。 */
     public Map<Integer, Goal.WorldPosition> internalPositionReceipts() {
@@ -350,8 +361,14 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     public record StepSnapshot(int index, String ability, boolean success,
-                               String message, String resultJson) {
+                               String message, String resultJson, boolean skipped) {
+        public StepSnapshot(int index, String ability, boolean success, String message, String resultJson) {
+            this(index, ability, success, message, resultJson, false);
+        }
+
         public StepSnapshot {
+            // 跳过表示用户不再要求执行这一步，绝不能同时声称这一步已经在游戏里成功。
+            success = success && !skipped;
             resultJson = resultJson == null ? "{}" : resultJson;
         }
 

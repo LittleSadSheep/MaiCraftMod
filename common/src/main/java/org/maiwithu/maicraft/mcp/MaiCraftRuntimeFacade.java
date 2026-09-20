@@ -524,6 +524,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("internal_state", record.getState().name().toLowerCase());
         result.addProperty("step_index", record.stepIndex());
         result.addProperty("step_count", record.steps().size());
+        result.addProperty("skipped_step_count", record.skippedStepCount());
+        result.addProperty("all_steps_succeeded", record.allStepsSucceeded());
         result.add("goal", record.goal().toJson());
         Goal current = currentGoal(record);
         if (current != null) result.add("current_goal", current.toJson());
@@ -534,6 +536,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             item.addProperty("index", step.index());
             item.addProperty("ability", step.ability());
             item.addProperty("success", step.success());
+            item.addProperty("skipped", step.skipped());
             item.addProperty("message", step.message());
             item.add("result", step.result());
             steps.add(item);
@@ -587,7 +590,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         JsonObject failure = decisionContext.getAsJsonObject("failure");
         if (!failure.has("data") || !failure.get("data").isJsonObject()) return;
         JsonObject data = failure.getAsJsonObject("data");
-        for (String key : List.of("completed_effects", "remaining_effects")) {
+        for (String key : List.of("completed_effects", "remaining_effects", "skipped_steps")) {
             if (data.has(key) && data.get(key).isJsonArray()) {
                 target.add(key, data.get(key).deepCopy());
             }
@@ -603,6 +606,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         if (current != null) result.addProperty("current_outcome", current.outcome());
         result.addProperty("step_index", record.stepIndex());
         result.addProperty("step_count", record.steps().size());
+        result.addProperty("skipped_step_count", record.skippedStepCount());
+        result.addProperty("all_steps_succeeded", record.allStepsSucceeded());
         return result;
     }
 

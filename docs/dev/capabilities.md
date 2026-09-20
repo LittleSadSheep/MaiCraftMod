@@ -18,7 +18,7 @@
 
 | 能力 | 玩家要做什么 | 从哪个适配入口继续读 | 当前进度 |
 | --- | --- | --- | --- |
-| `sequence` | 依次做一组目标 | `Goal.executableSteps` → `IntentTask` | 入口核对 |
+| `sequence` | 依次做一组目标 | `Goal.executableSteps` → `IntentTask` | 完成重构；[编排与恢复规则](sequences.md) |
 | `remember_place` | 记住地点或区域 | `AbilityAdapter.remember` → `IntentRuntime.remember` | 入口核对 |
 | `wait_for_condition` | 等一段时间、天亮或身体条件 | `WaitAbilityAdapter` → `IntentTask.tickWait` | 完成重构；[实现与回归](waiting.md) |
 | `chat` | 在真实聊天框输入并提交 | `ChatAbilityAdapter` → `ChatTask` | 入口核对 |

@@ -30,7 +30,7 @@ public final class IntentStateStoreTest {
         Path workspace = Path.of("").toAbsolutePath().normalize();
         Path directory = Files.createTempDirectory(workspace, "semantic-state-regression-");
         try {
-            captureIsDetachedFromTasksAndJson(directory.resolve("capture"));
+            captureIsDetachedFromCallerJson(directory.resolve("capture"));
             repeatedSavesCoalesceAndRestoreLatest(directory.resolve("coalescing"));
             shutdownWaitsForDetachedCheckpoint(directory.resolve("shutdown"));
             shutdownCapturesAttachedCheckpoint(directory.resolve("attached-shutdown"));
@@ -49,7 +49,7 @@ public final class IntentStateStoreTest {
         }
     }
 
-    private static void captureIsDetachedFromTasksAndJson(Path directory) throws Exception {
+    private static void captureIsDetachedFromCallerJson(Path directory) throws Exception {
         ArrayDeque<Runnable> workers = new ArrayDeque<>();
         IntentStateStore store = new IntentStateStore(workers::add);
         StateIdentity identity = identity(directory, 1);
@@ -58,12 +58,12 @@ public final class IntentStateStoreTest {
         IntentTaskRecord task = new IntentTaskRecord(UUID.randomUUID(), null, goal);
         JsonObject root = IntentStateCodec.encode(identity.key(), List.of(), List.of(task), Map.of(), List.of());
         CompletableFuture<Void> saved = store.saveAsync(identity, root);
-        task.steps().clear();
+        // 保存提交后修改调用者仍持有的 JSON，后台也必须写入提交当刻的独立快照。
         root.remove("tasks");
         check(!Files.exists(directory), "save submission must not create a directory or write a file");
         var captured = IntentStateCodec.decode(store.load(identity).root());
         check(captured.tasks().size() == 1 && captured.tasks().getFirst().steps().size() == 1,
-                "a task or caller-owned JSON mutation escaped into the captured checkpoint");
+                "caller-owned JSON mutation escaped into the captured checkpoint");
         runWorker(workers);
         saved.get(5, TimeUnit.SECONDS);
         var disk = IntentStateCodec.decode(new IntentStateStore().load(identity).root());
