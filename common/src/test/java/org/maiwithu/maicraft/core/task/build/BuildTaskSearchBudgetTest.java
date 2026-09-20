@@ -42,6 +42,8 @@ public final class BuildTaskSearchBudgetTest {
             var initialPosition = h.player.position();
             BuildPlacementGeometry.PlanSearch retained = null;
             var previous = new BuildPlacementGeometry.PlanProgress(false, 0, 0, 0);
+            // 搜索预算从已落稳的施工阶段计量，落地观察本身不属于几何取样工作量。
+            BuildPlacementFootingTest.settle(h, task);
             for (int tick = 0; tick < 2; tick++) {
                 h.nextTick();
                 check(invoke(task, "placeNavTick") == TaskState.RUNNING, "an incomplete search remains running");

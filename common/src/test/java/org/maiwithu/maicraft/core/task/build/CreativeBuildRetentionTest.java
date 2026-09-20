@@ -44,9 +44,13 @@ public final class CreativeBuildRetentionTest {
             constructor.setAccessible(true);
             Object first = constructor.newInstance(a, List.of()), second = constructor.newInstance(b, List.of());
             field(task.getClass(), "queue").set(task, new ArrayList<>(List.of(first, second)));
+            // 真实身体已在平地站稳后再验证材料缓存复用，连续两格不应重新等待落地。
+            BuildPlacementFootingTest.settle(h, task);
 
             for (int index = 0; index < 2; index++) {
                 var target = index == 0 ? a : b;
+                // 第一格木板会遮住西侧看第二格的视线，改从真实空着的南侧验证同材质缓存，不能带空点击见证跳过重证。
+                if (index == 1) h.position(new Vec3(5.6, 1, 5.8));
                 field(task.getClass(), "cell").set(task, index == 0 ? first : second);
                 field(task.getClass(), "gesture").set(task, BuildPlacementGeometry.currentGesture(h.player, target, Map.of()));
                 h.nextTick();

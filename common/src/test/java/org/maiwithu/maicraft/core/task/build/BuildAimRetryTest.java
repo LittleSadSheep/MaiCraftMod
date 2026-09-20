@@ -35,6 +35,8 @@ public final class BuildAimRetryTest {
             cell.setAccessible(true);
             field("cell").set(task, cell.newInstance(target, List.of()));
             field("liveGestures").set(task, BuildPlacementGeometry.plan(h.player, target, Map.of()));
+            // 先提供连续落地样本，再专测真实准心拒绝；不能用新建夹具跳过身体交接阶段。
+            BuildPlacementFootingTest.settle(h, task);
             invoke(task, "placeNavTick");
             var chosen = (BuildPlacementGeometry.Gesture) field("gesture").get(task);
             check(chosen != null, "real geometry must offer an initial current-position shortcut");
@@ -75,6 +77,7 @@ public final class BuildAimRetryTest {
             field("useCount").setInt(partial, 1);
             h.set(target.pos(), Blocks.STONE_SLAB.defaultBlockState());
             h.position(new Vec3(3.12, 1, 4.8));
+            BuildPlacementFootingTest.settle(h, partial);
             invoke(partial, "placeNavTick");
             check(field("cell").get(partial) == active && field("useCount").getInt(partial) == 1,
                     "worksite selection must not abandon an already-confirmed half slab to place another cell");

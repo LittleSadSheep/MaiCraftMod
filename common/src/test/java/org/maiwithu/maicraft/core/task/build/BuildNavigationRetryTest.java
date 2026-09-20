@@ -41,6 +41,8 @@ public final class BuildNavigationRetryTest {
             var nav = PlayerNav.toGoal(h.player, () -> NavGoal.exact(stance), 1, () -> false, routes.contextFor(stance));
             Object transport = field(nav, "navigator").get(nav); field(transport, "stopped").setBoolean(transport, true);
             field(task, "nav").set(task, nav);
+            // 本例的路线已终止且玩家站在实地，先记录落稳再检查失败站位如何换下一条路线。
+            BuildPlacementFootingTest.settle(h, task);
             check(invoke(task, "placeNavTick") == TaskState.RUNNING, "failed navigation should move on within the construction task");
             check(!routes.allows(stance), "one failed route must reject all aim variants sharing that stance in the current pass");
             var diagnostic = (java.util.Map<?, ?>) task.progress().get("construction_navigation");

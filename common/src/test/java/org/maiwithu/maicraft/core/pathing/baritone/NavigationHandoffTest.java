@@ -125,6 +125,8 @@ public final class NavigationHandoffTest {
     private static void buildSelectionWaitsForReleasedNavigation() throws Exception {
         try (var world = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness();
              Fixture fixture = new Fixture(world.player)) {
+            // 交接测试也提供真实可达的地面点击；导航释放后要重证这一放法，不能用空见证直接进入瞄准。
+            world.position(new net.minecraft.world.phys.Vec3(3.12, 1, 4.8));
             world.inventory.setItem(0, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE));
             var target = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target(
                     net.minecraft.world.level.block.Blocks.STONE, net.minecraft.world.item.Items.STONE,
@@ -135,6 +137,10 @@ public final class NavigationHandoffTest {
             Object task = constructor.newInstance(world.player, record);
             var cellConstructor = Class.forName(type.getName() + "$CellPlan").getDeclaredConstructor(target.getClass(), java.util.List.class);
             cellConstructor.setAccessible(true); field(type, "cell").set(task, cellConstructor.newInstance(target, java.util.List.of()));
+            var geometry = Class.forName("org.maiwithu.maicraft.core.task.build.BuildPlacementGeometry");
+            var current = geometry.getDeclaredMethod("currentGesture", LocalPlayer.class, target.getClass(), java.util.Map.class);
+            current.setAccessible(true);
+            field(type, "gesture").set(task, current.invoke(null, world.player, target, java.util.Map.of()));
             var select = type.getDeclaredMethod("selectItemTick"); select.setAccessible(true);
             fixture.nav.stop();
             for (int tick = 0; tick < 3; tick++) {

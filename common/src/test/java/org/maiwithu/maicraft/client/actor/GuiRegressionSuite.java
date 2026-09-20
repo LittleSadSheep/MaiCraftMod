@@ -35,6 +35,9 @@ public final class GuiRegressionSuite {
         org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementGestureTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildAimRetryTest.main(args);
+        // 准心真实拒绝后同格只做少量微调，随后换脚下位置，防止用不同瞄点绕过重试预算。
+        org.maiwithu.maicraft.core.task.build.PlacementAttemptLedgerTest.main(args);
+        org.maiwithu.maicraft.core.task.build.BuildPlacementFootingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPrecisionAimTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementSettlingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementDestinationTest.main(args);

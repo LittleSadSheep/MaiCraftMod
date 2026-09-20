@@ -171,6 +171,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private FirstPersonActionGate selection = new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private final BuildPlacementSettling placementSettling = new BuildPlacementSettling();
+    // 镜头收敛不代表身体落稳；另记实际脚位，避免登阶半空的点击见证在落回后反复失败。
+    private final BuildPlacementFooting placementFooting = new BuildPlacementFooting();
+    private Vec3 placementProofFeet;
+    private BuildPlacementGeometry.Gesture placementProofGesture;
     private Map<String, Object> scaffoldDropRisk = Map.of();
     private final LinkedHashSet<Long> verifyFailed = new LinkedHashSet<>();
     private final List<ObservedCell> verifyFailureStates = new ArrayList<>();
@@ -866,7 +870,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState placeNavTick() {
         // 起跳或落地动作未交还控制时，只继续原导航；不能因路过可放位置而抢换槽、转头或取消腾空路线。
-        if (nav != null && !nav.isSafeToCancel()) {
+        if (nav != null && (!nav.isSafeToCancel() || !placementFooting.ready(player))) {
             nav.tick();
             return TaskState.RUNNING;
         }
@@ -880,6 +884,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (placementAccess != null) {
             TaskState access = drivePlacementAccess(); if (access != null) return access;
         }
+        // 普通登阶允许取消并不表示人已站上台面；没有导航时先自然落稳，有导航时由上方分支继续原路线。
+        if (!placementFooting.ready(player)) { InputDriver.halt(player); return TaskState.RUNNING; }
         if (seekRaisedFooting()) {
             footingSearchAfter = lastPlacedTarget; worksiteSearched = false;
             phase = Phase.WORKSITE; return TaskState.RUNNING;
@@ -966,7 +972,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             BlockPos stance = gesture.stance();
             if (!stanceNavigation.claimRoute(stance)) return deferOrFail();
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(stance), BuildStanceNavigation.PRECISE_WALK,
-                    () -> PlayerNav.playerFeet(player).equals(stance), stanceNavigation.contextFor(stance));
+                    () -> placementStanceReached(stance), stanceNavigation.contextFor(stance));
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
@@ -977,6 +983,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 gestureAt++; yield TaskState.RUNNING;
             }
         };
+    }
+
+    // 跳升时跨入目的格不算到站；真实落地后再交还导航，半砖与台阶仍使用导航原有的脚格映射。
+    private boolean placementStanceReached(BlockPos stance) {
+        return player.onGround() && PlayerNav.playerFeet(player).equals(stance);
     }
 
     // 一处站位连放的候选必须不用先清障、有材料、尚未完成且最新修改守卫允许；临时垫块另走自己的队列。
@@ -1034,6 +1045,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     // 先找当前伸手就够得着的待建格，最多验证十六格或约四毫秒；找到就移到队首，减少来回走路。
     private boolean selectNearbyPlacement(Vec3 approach) {
+        // 路过半空时看到可点击面不能抢走导航，否则停键潜行会使玩家掉回下一级台阶。
+        if (!placementFooting.ready(player)) return false;
         if (seekRaisedFooting()) return false;
         int proofs = 0;
         long deadline = System.nanoTime() + 4_000_000;
@@ -1193,7 +1206,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (nav == null) {
                 BlockPos destination = worksite.stance(); stanceNavigation.attempted();
                 nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), BuildStanceNavigation.PRECISE_WALK,
-                        () -> PlayerNav.playerFeet(player).equals(destination), this).walkingOnly();
+                        () -> placementStanceReached(destination), this).walkingOnly();
             }
             return switch (nav.tick()) {
                 case RUNNING -> TaskState.RUNNING;
@@ -1218,7 +1231,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             stanceNavigation.attempted();
             // 共线小段已合并：这一份导航持续走到拐角或最终站位，途中原生路径仍实时检查障碍和禁行格。
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), BuildStanceNavigation.PRECISE_WALK,
-                    () -> PlayerNav.playerFeet(player).equals(destination),
+                    () -> placementStanceReached(destination),
                     stanceNavigation.walkingContext((int) Math.floor(Math.min(player.getY(), next.y)))).walkingOnly();
         }
         return switch (nav.tick()) {
@@ -1242,13 +1255,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState selectItemTick() {
+        // 外界已完成这一格时仍优先退回实地，不为无需再点击的目标等待选物姿态。
+        if (currentPlacementComplete()) { finishPlaced(); return TaskState.RUNNING; }
+        // 原路线刚结束或身体意外腾空时先落稳，不能提前开背包、选物或用潜行截断登阶。
+        if (!placementFooting.ready(player)) { placementProofFeet = null; return holdWhileFootingSettles(); }
         if (!org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime
                 .yieldActiveForExternalAction(player)) return TaskState.RUNNING;
         placementPostureAndMotion();
-        if (currentPlacementComplete()) {
-            finishPlaced();
-            return TaskState.RUNNING;
-        }
         if (placementAccess != null && placementAccess.edgeActive()) {
             // 材料必须在锚点选好；檐边若被外来操作换掉手持物，就先退回，不在此处开背包松潜行。
             if (placementAccess.hold() == BuildPlacementAccessDrive.Status.FAILED
@@ -1258,6 +1271,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.RUNNING;
         }
         TaskState selected = prepareHeldItem(); if (selected != TaskState.SUCCESS) return selected;
+        TaskState footing = refreshPlacementFooting(); if (footing != null) return footing;
         phase = Phase.AIM; aimConvergence.reset(); aimProgress.reset(); lastAimObservation = Map.of();
         return TaskState.RUNNING;
     }
@@ -1306,6 +1320,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!player.getMainHandItem().is(cell.target().item())) {
             selection.reset(); phase = Phase.SELECT_ITEM; return TaskState.RUNNING;
         }
+        TaskState footing = refreshPlacementFooting(); if (footing != null) return footing;
         Vec3 eye = player.getEyePosition();
         Vec3 desired = gesture.point().subtract(eye).normalize();
         aimError = Math.toDegrees(Math.acos(Math.clamp(player.getViewVector(1).normalize().dot(desired), -1, 1)));
@@ -1358,6 +1373,47 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
                 confirmation(cell, frozen, placedPrimary), USE_TIMEOUT);
         phase = Phase.WAIT_USE; return TaskState.RUNNING;
+    }
+
+    // 停键 -> 落稳 -> 重证实际脚位。身体变化使旧证明失效时返回导航，不把下落造成的遮挡记成手法或站位失败。
+    private TaskState refreshPlacementFooting() {
+        if (!placementFooting.ready(player)) {
+            placementProofFeet = null;
+            aimWaitReason = "waiting_for_stable_footing";
+            return holdWhileFootingSettles();
+        }
+        if (gesture == placementProofGesture && placementProofFeet != null
+                && placementProofFeet.distanceToSqr(player.position()) <= .0001) return null;
+        var refreshed = BuildPlacementGeometry.recheckCurrentGesture(player, cell.target(), targets, gesture);
+        if (refreshed == null) {
+            // 檐边证明失效也先由原控制器保持潜行并退回锚点，不能当作普通地面重规划而先松开 Shift。
+            if (placementAccess != null && placementAccess.edgeActive())
+                return failAfterEdgeReturn("The actual edge placement could not be re-proved", "placement_footing_changed");
+            InputDriver.halt(player); stopNav(); selection.reset(); aimConvergence.reset();
+            gesture = null; gestureFromCurrent = false; placementProofFeet = null;
+            phase = Phase.PLACE_NAV; note = "placement footing changed; proving a new live approach";
+            return TaskState.RUNNING;
+        }
+        // 平地连续走放已有独立通道证明：只刷新当前射线证明，不因同层水平小步每刻重置镜头收敛。
+        boolean sameApproach = gesture == placementProofGesture && placementProofFeet != null
+                && Math.abs(placementProofFeet.y - player.getY()) <= .01
+                && gesture.stance().equals(player.blockPosition());
+        if (!sameApproach) {
+            // 同一脚下格的旧点击点仍成立就保留其身份，避免浮点重裁剪制造新的失败账条目。
+            if (!gesture.stance().equals(refreshed.stance()) || gesture.sneak() != refreshed.sneak()) gesture = refreshed;
+            aimConvergence.reset(); aimProgress.reset();
+        }
+        placementProofGesture = gesture; placementProofFeet = player.position();
+        return null;
+    }
+
+    // 普通实地等待可停键；檐边必须续原生潜行，保持失败则完整交还退回阶段，不能吞成普通等待。
+    private TaskState holdWhileFootingSettles() {
+        if (placementAccess != null && placementAccess.edgeActive()) {
+            if (placementAccess.hold() == BuildPlacementAccessDrive.Status.FAILED)
+                return failAfterEdgeReturn(placementAccess.failure(), "placement_edge_hold_failed");
+        } else InputDriver.halt(player);
+        return TaskState.RUNNING;
     }
 
     // 瞄准还在改善就继续等；视角已稳定且误差极小，或四十刻没有足够改善时，记录这次点击失败并换方案。
@@ -2476,7 +2532,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 "waiting_for", aimWaitReason, "crosshair", aimHit,
                 "angular_error_degrees", Math.round(aimError * 1000) / 1000.0,
                 "requested_sneak", gesture.sneak(), "observed_sneak", player.isShiftKeyDown(),
-                "rejected_gestures", placementAttempts.rejectedCount(cell.target()));
+                "rejected_gestures", placementAttempts.rejectedCount(cell.target()),
+                // 让现场回执能区分尝试新位置与原地换几个像素，不用看角色反复跳跃猜是否真的换站位。
+                "stance_retry", Map.of("failures", placementAttempts.stanceFailureCount(cell.target(), gesture.stance()),
+                        "limit", placementAttempts.maxFailuresPerStance(), "rejected_stances", placementAttempts.rejectedStanceCount(cell.target())));
     }
 
     private Map<String, Object> navigationDiagnostics() {

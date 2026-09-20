@@ -43,6 +43,8 @@ public final class BuildPlacementSettlingTest {
             var ctor = cellType.getDeclaredConstructor(BuildTaskRecord.Target.class, List.class); ctor.setAccessible(true);
             field("cell").set(task, ctor.newInstance(target, List.of()));
             field("gesture").set(task, gesture);
+            // 将身体落稳与之后的镜头收敛分开提供，避免用假定脚位掩盖两套真实门槛。
+            BuildPlacementFootingTest.settle(h, task);
             var select = task.getClass().getDeclaredMethod("selectItemTick"); select.setAccessible(true); select.invoke(task);
             var aim = task.getClass().getDeclaredMethod("aimTick"); aim.setAccessible(true);
             for (int tick = 0; tick < 3; tick++) {

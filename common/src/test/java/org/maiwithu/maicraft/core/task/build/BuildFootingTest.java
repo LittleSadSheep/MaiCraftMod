@@ -65,6 +65,8 @@ public final class BuildFootingTest {
             var constructor = type.getDeclaredConstructor(BuildTaskRecord.Target.class, List.class); constructor.setAccessible(true);
             Object cell = constructor.newInstance(target, List.of());
             field("cell").set(task, cell); field("queue").set(task, new java.util.ArrayList<>(List.of(cell)));
+            // 先站稳才比较登高与原地放置，不能把尚未建立的身体证据当成选站位失败。
+            BuildPlacementFootingTest.settle(h, task);
             invoke(task, "placeNavTick");
             check(field("phase").get(task).toString().equals("WORKSITE"),
                     "current-position reach must not bypass the raised-footing search");

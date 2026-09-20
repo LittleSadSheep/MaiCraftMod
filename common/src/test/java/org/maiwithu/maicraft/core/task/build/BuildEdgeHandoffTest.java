@@ -26,6 +26,7 @@ public final class BuildEdgeHandoffTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         rejectedReadyGestureCannotReplay();
         allCompletionEntrypointsReturnFirst();
+        footingWaitKeepsEdgeSneakAndPropagatesFailure();
         pauseDiscardsExpiredMotionAndPreparationWaitsForAnchor();
         System.out.println("BuildEdgeHandoffTest: passed");
     }
@@ -73,6 +74,36 @@ public final class BuildEdgeHandoffTest {
             h.position(ANCHOR.add(.6, 0, 0));
             for (int tick = 0; tick < 6; tick++) { drive.tick(); h.nextTick(); }
             check(preparations.get() == 0 && h.blockUses() == 0, "尚未实际对齐实地锚点时，不能提前取物或点击");
+        }
+    }
+    private static void footingWaitKeepsEdgeSneakAndPropagatesFailure() throws Exception {
+        for (String entry : List.of("selectItemTick", "aimTick", "refreshPlacementFooting")) try (var h = fixture()) {
+            h.inventory.setItem(0, new net.minecraft.world.item.ItemStack(Items.STONE));
+            var target = target();
+            var task = new FirstPersonBuildCompanionTask(h.player,
+                    new BuildTaskRecord("edge-footing-wait", 1000, List.of(target), false));
+            var type = Class.forName(FirstPersonBuildCompanionTask.class.getName() + "$CellPlan");
+            var constructor = type.getDeclaredConstructor(BuildTaskRecord.Target.class, List.class); constructor.setAccessible(true);
+            field(task, "cell").set(task, constructor.newInstance(target, List.of()));
+            var access = drive(h, new AtomicBoolean(true), new AtomicInteger());
+            var edge = new BuildEdgeMotion(ANCHOR, ANCHOR, LongSets.emptySet(), p -> true);
+            // 先用真实运动原语建立输入租约；随后施工稳定门尚无三刻样本，只能续持这份潜行控制。
+            check(edge.tick(h.player) != BuildEdgeMotion.Status.FAILED, "测试檐边必须先有真实有效的保持控制");
+            field(access, "edge").set(access, edge); field(task, "placementAccess").set(task, access);
+            var call = task.getClass().getDeclaredMethod(entry); call.setAccessible(true);
+            for (int tick = 0; tick < 2; tick++) {
+                h.nextTick();
+                check(call.invoke(task) == TaskState.RUNNING, "尚未落稳时保留等待或檐边控制");
+                var body = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(h.player).body();
+                var movement = (org.maiwithu.maicraft.client.actor.BodyControlPort.Movement) field(body, "movement").get(body);
+                check(movement.sneaking() && !movement.jumping() && h.blockUses() == 0,
+                        entry + " 等待不能用普通 halt 抹掉檐边 Shift，也不能提前点击");
+            }
+            // 支撑丢失时完整传播 failAfterEdgeReturn 的阶段变化，不能返回一个吞掉失败的布尔等待。
+            BuildPlacementFootingTest.grounded(h, false); h.nextTick();
+            check(call.invoke(task) == TaskState.RUNNING && field(task, "phase").get(task).toString().equals("EDGE_RETURN")
+                            && field(task, "edgeReturnFailureCode").get(task).equals("placement_edge_hold_failed"),
+                    entry + " 保持失败必须进入既有安全退回阶段");
         }
     }
     private static BuildPlacementAccessDrive drive(InteractionWorldTestHarness h, AtomicBoolean allowed, AtomicInteger preparations) {

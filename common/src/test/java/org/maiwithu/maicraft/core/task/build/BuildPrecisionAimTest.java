@@ -39,6 +39,8 @@ public final class BuildPrecisionAimTest {
             ctor.setAccessible(true);
             field("cell").set(task, ctor.newInstance(target, List.of()));
             field("gesture").set(task, gesture);
+            // 此回归只改变准星角度，身体须先像真实施工一样落稳。
+            BuildPlacementFootingTest.settle(h, task);
             var select = task.getClass().getDeclaredMethod("selectItemTick"); select.setAccessible(true);
             select.invoke(task);
             var aim = task.getClass().getDeclaredMethod("aimTick"); aim.setAccessible(true);

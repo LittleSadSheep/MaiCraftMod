@@ -126,6 +126,22 @@ final class BuildPlacementGeometry {
         return currentGesture(player, target, targets, ignored -> true);
     }
 
+    // 选物或落地后从真实脚位重证原点击点；保留檐边要求的潜行，但不能沿用半空时算出的视线和朝向。
+    static Gesture recheckCurrentGesture(LocalPlayer player, BuildTaskRecord.Target target,
+                                         Map<Long, BuildTaskRecord.Target> targets, Gesture previous) {
+        // 暂停或重新选格后若旧点击见证已丢失，就交回正常导航重新证明，不能凭空沿用放置姿态。
+        if (previous == null) return null;
+        var stage = new BuildPlacementStage(player.level(), player.level()::isLoaded, targets, target, false);
+        boolean direct = previous.clicked().equals(target.pos());
+        if (!bodyClearFrom(player, target, stage, player.position()) || (!direct && !stage.support(previous.clicked(), previous.face()))
+                || direct && stage.state(previous.clicked()).isAir()) return null;
+        var probe = faceProbe(stage, previous.clicked(), previous.face(), direct);
+        probe = new FaceProbe(probe.clicked(), probe.face(), probe.direct(), probe.sneak() || previous.sneak(), probe.shape());
+        // 原见证保存的是外形首个交点；向原面内缩回微量，避免复查射线只到表面就因浮点边界漏掉命中。
+        Vec3 inside = previous.point().subtract(Vec3.atLowerCornerOf(previous.face().getNormal()).scale(1e-4));
+        return gestureAtPoint(player, target, stage, probe, player.position(), inside, true, ignored -> true);
+    }
+
     // 从角色现在的真实脚高找点击方案，允许站在半砖上；多个方案都成立时，优先选转头幅度小的。
     static Gesture currentGesture(LocalPlayer player, BuildTaskRecord.Target target,
                                    Map<Long, BuildTaskRecord.Target> targets, Predicate<Gesture> allowed) {
