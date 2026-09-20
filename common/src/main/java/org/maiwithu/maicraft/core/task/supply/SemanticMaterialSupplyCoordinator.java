@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.client.Minecraft;
 
 /**
  * 按总任务的缺料需求取物，默认返回出发工位；建筑可明确接管后续站位，让角色在仓库继续取齐材料。
@@ -403,7 +404,7 @@ public final class SemanticMaterialSupplyCoordinator {
             // 不建返程导航、不瞬移，也不把当前位置说成原墙顶；先确认背包仍够且没有遗留菜单或鼠标物品。
             int carried = inventoryCount(player, demand.acceptableItemIds());
             boolean settled = player.containerMenu == player.inventoryMenu && player.inventoryMenu.getCarried() != null
-                    && player.inventoryMenu.getCarried().isEmpty() && net.minecraft.client.Minecraft.getInstance().screen == null;
+                    && player.inventoryMenu.getCarried().isEmpty() && Minecraft.getInstance().screen == null;
             if (!settled || carried < demand.requiredFinalCount()) {
                 receipt.put("goal_satisfied", false); receipt.put("caller_handoff", false);
                 receipt.put("observed_final_count", carried); receipt.put("missing", Math.max(0, demand.requiredFinalCount() - carried));

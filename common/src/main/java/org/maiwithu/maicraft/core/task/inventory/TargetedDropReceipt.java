@@ -13,6 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.ItemEntityReceipts;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import net.minecraft.world.level.material.FluidState;
 
 /** 一次投掷的来源扣减和接收区实体增量必须同刻吻合；只保存观察，不生成掉落或将附近整堆认作自有材料。 */
 final class TargetedDropReceipt implements NativeConfirmation {
@@ -23,7 +24,7 @@ final class TargetedDropReceipt implements NativeConfirmation {
     private final TargetedDropRegion region;
     private final ItemStack before, after, kind;
     private final int selected, inventoryBefore, amount;
-    private final net.minecraft.world.level.material.FluidState receiverFluid;
+    private final FluidState receiverFluid;
     private final long cursor;
     private final Map<UUID, ItemEntityReceipts.ObservedDrop> baseline = new LinkedHashMap<>();
     private List<Received> candidate = List.of();

@@ -56,6 +56,11 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Arrays;
+import java.util.Objects;
+import net.minecraft.world.inventory.DataSlot;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import org.maiwithu.maicraft.core.Constants;
 
 /**
  * 完成一批加工：挑配方和炉子、备原料和燃料、打开并装入、等烧好、确认收回成品，必要时再做下一批。
@@ -254,9 +259,9 @@ public final class SemanticCookCompanionTask
         // furnace is useful early evidence: either the batch completed or it needs attention.
         return now > closedWaitStartedTick + 2L
                 && state.hasProperty(
-                        net.minecraft.world.level.block.state.properties.BlockStateProperties.LIT)
+                        BlockStateProperties.LIT)
                 && !state.getValue(
-                        net.minecraft.world.level.block.state.properties.BlockStateProperties.LIT);
+                        BlockStateProperties.LIT);
     }
 
     // 先找能产出目标的配方，再估原料、燃料和设备的准备成本，从认为可行的组合里选择一组。
@@ -350,7 +355,7 @@ public final class SemanticCookCompanionTask
                 for (Item input : inputs) result.add(new Candidate(
                         holder.id(), cooking, device, input, Math.max(1, output.getCount())));
             } catch (RuntimeException brokenRecipe) {
-                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                Constants.LOG.debug(
                         "[maicraft-cook] skipped unusable cooking recipe {}: {}",
                         holder.id(), brokenRecipe.toString());
             }
@@ -409,7 +414,7 @@ public final class SemanticCookCompanionTask
         List<FuelChoice> fuels = choices.stream().distinct()
                 .filter(item -> !rejectedFuelItems.contains(item))
                 .map(item -> fuelChoice(cooking, item, raw))
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .toList();
         Comparator<FuelChoice> economical = Comparator
                 .comparingLong(FuelChoice::acquisitionCost)
@@ -486,7 +491,7 @@ public final class SemanticCookCompanionTask
                                 holder.id(), Math.max(1, output.getCount()),
                                 groups, workstation));
             } catch (RuntimeException brokenRecipe) {
-                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                Constants.LOG.debug(
                         "[maicraft-cook] skipped unusable acquisition-cost recipe {}: {}",
                         holder.id(), brokenRecipe.toString());
             }
@@ -503,7 +508,7 @@ public final class SemanticCookCompanionTask
         Map<List<Item>, Integer> uses = new LinkedHashMap<>();
         for (Ingredient ingredient : recipe.getIngredients()) {
             if (ingredient == null || ingredient.isEmpty()) continue;
-            List<Item> alternatives = java.util.Arrays.stream(ingredient.getItems())
+            List<Item> alternatives = Arrays.stream(ingredient.getItems())
                     .filter(stack -> stack != null && !stack.isEmpty())
                     .map(ItemStack::getItem)
                     .distinct()
@@ -1561,7 +1566,7 @@ public final class SemanticCookCompanionTask
 
     // 读取菜单同步的数据：燃烧剩余时间、燃料总时长、加工进度和单次总时长；未提供的下标按零处理。
     private int data(AbstractFurnaceMenu menu, int index) {
-        List<net.minecraft.world.inventory.DataSlot> data =
+        List<DataSlot> data =
                 ((MenuDataSlotsAccessor) (Object) menu).maicraft$dataSlots();
         return index >= 0 && index < data.size() ? data.get(index).get() : 0;
     }

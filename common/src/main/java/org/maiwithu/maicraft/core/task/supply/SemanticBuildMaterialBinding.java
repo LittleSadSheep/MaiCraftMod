@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import java.util.function.ToIntFunction;
 
 /**
  * Freezes a semantic building palette without performing acquisition to discover a variant.
@@ -85,7 +86,7 @@ final class SemanticBuildMaterialBinding {
     private SemanticBuildMaterialBinding() {}
 
     /** Registry membership proves compatibility only. Never mine a sample to decide a palette. */
-    static ResourceLocation select(Family family, java.util.function.ToIntFunction<ResourceLocation> carried) {
+    static ResourceLocation select(Family family, ToIntFunction<ResourceLocation> carried) {
         ResourceLocation selected = family.originals().getFirst();
         int best = Math.max(0, carried.applyAsInt(selected));
         for (ResourceLocation alternative : family.alternatives()) {

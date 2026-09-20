@@ -25,6 +25,12 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.intent.IntentRuntime;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 /** 只寻找已加载的木桶、箱子和潜影盒；箱内数量必须实际打开界面看过，不能从客户端方块实体猜。 */
 public final class ContainerSupplySources {
@@ -37,11 +43,11 @@ public final class ContainerSupplySources {
     public static List<Candidate> candidates(LocalPlayer player, BlockPos center, int radius,
             List<ResourceLocation> items, Set<BlockPos> visited, List<String> protectedLabels) {
         // 多箱取料时跳过已经尝试过的整只箱子，优先去最近看见有货的箱子；不为找货强行加载区块。
-        List<Candidate> found = new ArrayList<>(); Set<BlockPos> seen = new java.util.HashSet<>(); int examined = 0;
+        List<Candidate> found = new ArrayList<>(); Set<BlockPos> seen = new HashSet<>(); int examined = 0;
         int chunks = (radius + 15) / 16;
         outer: for (int x = -chunks; x <= chunks; x++) for (int z = -chunks; z <= chunks; z++) {
             var chunk = player.clientLevel.getChunkSource().getChunk((center.getX() >> 4) + x, (center.getZ() >> 4) + z,
-                    net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false);
+                    ChunkStatus.FULL, false);
             if (chunk == null) continue;
             for (BlockPos raw : List.copyOf(chunk.getBlockEntities().keySet())) {
                 if (++examined > MAX_SCANNED) break outer;
@@ -133,11 +139,11 @@ public final class ContainerSupplySources {
             return entry.stock;
         }
         Map<ResourceLocation, Long> observed(Object owner, Object level, BlockPos center, int radius, long tick,
-                java.util.function.Predicate<BlockPos> usable,
-                java.util.function.Function<BlockPos, Map<BlockPos, Object>> currentFootprint) {
+                Predicate<BlockPos> usable,
+                Function<BlockPos, Map<BlockPos, Object>> currentFootprint) {
             bind(owner, level); Map<ResourceLocation, Long> counts = new LinkedHashMap<>();
             // 一个大箱子虽然登记两个坐标，汇总备料时只计算一次里面的物品。
-            Set<Entry> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            Set<Entry> seen = Collections.newSetFromMap(new IdentityHashMap<>());
             for (Entry entry : List.copyOf(entries.values())) {
                 if (!seen.add(entry)) continue;
                 long age = tick - entry.stock.observedGameTick();

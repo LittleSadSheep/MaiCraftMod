@@ -10,6 +10,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskRecord;
+import java.util.Objects;
 
 /**
  * 保存存取目标、物品选择、数量、容器范围与保护地标；复制列表并检查相互冲突的参数。
@@ -146,13 +147,13 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
     public static SemanticContainerTaskRecord withdrawAvailableAt(String callId, long deadline, List<ResourceLocation> items,
             int finalCount, BlockPos source, ResourceLocation blockId, List<String> protectedLabels) {
         return new SemanticContainerTaskRecord(callId, deadline, Operation.WITHDRAW, items, null, null, finalCount,
-                blockId, null, Selection.NEAREST, protectedLabels, 1, java.util.Objects.requireNonNull(source));
+                blockId, null, Selection.NEAREST, protectedLabels, 1, Objects.requireNonNull(source));
     }
     /** 把已证明属于开挖余料的物品存入指定箱子；数量是上限，装不完时通过回执保留剩余量。 */
     public static SemanticContainerTaskRecord depositAvailableAt(String callId, long deadline, ResourceLocation item,
             int count, BlockPos destination, ResourceLocation blockId, List<String> protectedLabels) {
         return new SemanticContainerTaskRecord(callId, deadline, Operation.DEPOSIT, List.of(item), null, count, null,
-                blockId, null, Selection.NEAREST, protectedLabels, 1, java.util.Objects.requireNonNull(destination));
+                blockId, null, Selection.NEAREST, protectedLabels, 1, Objects.requireNonNull(destination));
     }
     public boolean storageSupply() { return supplyPosition != null; }
 

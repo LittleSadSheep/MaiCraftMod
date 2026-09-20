@@ -7,6 +7,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import java.util.ArrayList;
 
 /** 冻结上层实际审查过的格并支持只收窄的约束；硬接收域与瞄准偏好各持一份，包围盒里的缺角始终不是已审查格。 */
 public final class TargetedDropRegion {
@@ -40,7 +41,7 @@ public final class TargetedDropRegion {
         AABB narrowed = overlap(bounds, constraint);
         if (landingBounds != null && narrowed != null) narrowed = overlap(narrowed, landingBounds);
         if (narrowed == null) throw new IllegalArgumentException("targeted_drop_native_input_neighborhood_has_no_receiver");
-        var selected = new java.util.ArrayList<BlockPos>();
+        var selected = new ArrayList<BlockPos>();
         for (BlockPos cell : cells) if (overlap(new AABB(cell), narrowed) != null) selected.add(cell);
         if (selected.isEmpty()) throw new IllegalArgumentException("targeted_drop_native_input_neighborhood_has_no_receiver");
         return new TargetedDropRegion(selected, narrowed);

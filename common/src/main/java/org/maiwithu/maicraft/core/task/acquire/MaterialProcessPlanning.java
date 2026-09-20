@@ -12,6 +12,7 @@ import java.util.function.BiFunction;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.core.integration.emi.EmiRecipeKnowledge;
+import java.util.Locale;
 
 /** 普通有限获取路线耗尽后冻结知识交接；不创建机器、不调用LLM，也不把EMI展示证据升级为实物操作许可。 */
 public final class MaterialProcessPlanning {
@@ -82,7 +83,7 @@ public final class MaterialProcessPlanning {
         result.put("final_inventory_goal", Map.of("item_ids", request.itemIds.stream().map(ResourceLocation::toString).toList(),
                 "required_final_count", request.count, "observed_final_count", finalObserved,
                 "missing", Math.max(0, request.count - finalObserved)));
-        result.put("allowed_sources", request.allowedSources.stream().map(source -> source.name().toLowerCase(java.util.Locale.ROOT)).toList());
+        result.put("allowed_sources", request.allowedSources.stream().map(source -> source.name().toLowerCase(Locale.ROOT)).toList());
         result.put("effects_observed", effectsObserved); result.put("prior_attempts_field", "attempts");
         result.put("recipe_lineage_field", "recipe_trace"); result.put("knowledge_uris", List.copyOf(links));
         result.put("recipe_query_evidence", List.copyOf(queries)); result.put("unqueried_item_count", Math.max(0, items.size() - queries.size()));

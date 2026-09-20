@@ -13,6 +13,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.entity.Pose;
 
 /** 点射线确认接收面，物品宽高核验抛物线；审查格是落水硬边界，延迟反应的原料邻域只帮助选择瞄准点。 */
 public final class TargetedDropGeometry {
@@ -41,7 +42,7 @@ public final class TargetedDropGeometry {
     }
     public static boolean canReach(LocalPlayer player, Vec3 feet, BlockPos receiver, TargetedDropRegion region, TargetedDropRegion aimRegion) {
         // 站位预检只试算站立眼高，不移动角色；真正出手还要用实际相机与眼位复核。
-        return aimFrom(player,feet.add(0,player.getEyeHeight(net.minecraft.world.entity.Pose.STANDING),0),receiver,region,aimRegion).isPresent();
+        return aimFrom(player,feet.add(0,player.getEyeHeight(Pose.STANDING),0),receiver,region,aimRegion).isPresent();
     }
 
     private static Optional<Vec3> aimFrom(LocalPlayer player, Vec3 eye, BlockPos receiver, TargetedDropRegion region, TargetedDropRegion aimRegion) {

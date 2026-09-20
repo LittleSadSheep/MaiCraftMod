@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.LinkedHashMap;
 
 /**
  * 按给定菜单槽位逐笔搬物品：快速移动，或先拿到鼠标上再放入／交换，最后处理鼠标残留物品。
@@ -350,7 +351,7 @@ public final class ContainerTransferCompanionTask
         super.cleanup();
     }
     @Override protected Map<String, Object> resultData() {
-        var data = new java.util.LinkedHashMap<String, Object>();
+        var data = new LinkedHashMap<String, Object>();
         data.put("completed_moves", moveIndex); data.put("moved_counts", List.copyOf(moved));
         // 原生回执确认后才累计，计划七次或已经点出七次都不能直接当作七次成功。
         data.put("confirmed_split_clicks", confirmedSplitClicks);

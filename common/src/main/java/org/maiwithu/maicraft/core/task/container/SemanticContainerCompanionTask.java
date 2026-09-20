@@ -49,6 +49,9 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
+import org.maiwithu.maicraft.core.integration.machine.MachineSurvey;
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
 
 /**
  * 完成“往箱子存、从箱子取、把背包调整到指定数量”的整条流程。
@@ -351,10 +354,10 @@ public final class SemanticContainerCompanionTask
         openRequested = true;
         if (r.storageSupply()) {
             // 取料也要走到木桶前、准备空手并实际打开 GUI；沿用机器开菜单流程，避免手持工具误用在箱子上。
-            var request = new org.maiwithu.maicraft.core.integration.machine.MachineMenu.OpenRequest(
+            var request = new MachineMenu.OpenRequest(
                     player.level().dimension().location().toString(), target.position(), 0,
-                    org.maiwithu.maicraft.core.integration.machine.MachineSurvey.fingerprint(player, target.position(), 0), target.position());
-            return start(org.maiwithu.maicraft.core.integration.machine.MachineMenu.openTask(
+                    MachineSurvey.fingerprint(player, target.position(), 0), target.position());
+            return start(MachineMenu.openTask(
                     childId("open-storage"), childDeadline(30L * 20L), request), Purpose.OPEN);
         }
         return start(new InteractAtTaskRecord(childId("open"), childDeadline(30L * 20L),
@@ -369,7 +372,7 @@ public final class SemanticContainerCompanionTask
             var context = ClientRuntime.requireContext(player);
             if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
             AbstractContainerMenu menu = player.containerMenu;
-            if (r.storageSupply() && !org.maiwithu.maicraft.core.inventory.StockEvidence.isContainerSynchronized(player, menu)) {
+            if (r.storageSupply() && !StockEvidence.isContainerSynchronized(player, menu)) {
                 // 界面刚出现时的空槽可能尚未同步，不能因此判定仓库没货并转去别处找材料。
                 if (player.level().getGameTime() - waitMenuSince > MENU_WAIT_TICKS)
                     return failFinal("container_contents_unconfirmed", "The visible storage menu did not receive native item synchronization.", FailureType.TARGET_LOST);

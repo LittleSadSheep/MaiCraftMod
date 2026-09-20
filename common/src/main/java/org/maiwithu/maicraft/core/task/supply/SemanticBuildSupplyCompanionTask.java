@@ -29,6 +29,13 @@ import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Collection;
+import java.util.Set;
+import java.util.function.BiFunction;
+import net.minecraft.client.Minecraft;
+import org.maiwithu.maicraft.client.preview.PreviewSession;
+import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
+import org.maiwithu.maicraft.core.task.build.BuildSiteConstraints;
 
 /** 大建筑的供料父任务：先确定整份方案的材料，确认预览，再循环“取一批材料、建一批”，直到成品验收通过。 */
 final class SemanticBuildSupplyCompanionTask
@@ -69,17 +76,17 @@ final class SemanticBuildSupplyCompanionTask
     private final Map<ResourceLocation, ResourceLocation> selectedVariants =
             new LinkedHashMap<>();
     private final List<BlockPos> plannedMutationCells = new ArrayList<>();
-    private final java.util.function.BiFunction<TaskRecord, BuildTaskRecord,
-            org.maiwithu.maicraft.client.preview.PreviewSession.Decision> previewGate;
+    private final BiFunction<TaskRecord, BuildTaskRecord,
+            PreviewSession.Decision> previewGate;
 
     SemanticBuildSupplyCompanionTask(
             LocalPlayer player, SemanticBuildSupplyTaskRecord record) {
-        this(player, record, org.maiwithu.maicraft.core.task.build.BuildPreviewGate::await);
+        this(player, record, BuildPreviewGate::await);
     }
 
     SemanticBuildSupplyCompanionTask(LocalPlayer player, SemanticBuildSupplyTaskRecord record,
-            java.util.function.BiFunction<TaskRecord, BuildTaskRecord,
-                    org.maiwithu.maicraft.client.preview.PreviewSession.Decision> previewGate) {
+            BiFunction<TaskRecord, BuildTaskRecord,
+                    PreviewSession.Decision> previewGate) {
         super(player, record);
         activePlan = record.plan;
         this.previewGate = previewGate;
@@ -87,7 +94,7 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected void onStart() {
-        var terrain = org.maiwithu.maicraft.core.task.build.BuildSiteConstraints.conflicts(player, activePlan.targets);
+        var terrain = BuildSiteConstraints.conflicts(player, activePlan.targets);
         if (!terrain.isEmpty()) {
             stopWith("build_terrain_conflict", "The design intersects terrain that cannot be excavated: "
                     + String.join("; ", terrain) + ". Revise basement depth, raise the building or choose another site.",
@@ -141,9 +148,9 @@ final class SemanticBuildSupplyCompanionTask
 
         var preview = previewGate.apply(r, activePlan);
         // 材料型号先定好给玩家看，但真正获取材料要等玩家确认，避免还没同意方案就出去采集。
-        if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.WAITING)
+        if (preview == PreviewSession.Decision.WAITING)
             return TaskState.RUNNING;
-        if (preview == org.maiwithu.maicraft.client.preview.PreviewSession.Decision.CANCELLED)
+        if (preview == PreviewSession.Decision.CANCELLED)
             return TaskState.CANCELLED;
 
         // 新开或恢复项目、施工批次结束都检查旧土石；先出坑再存余料，真实存入确认后才取新建材。
@@ -250,7 +257,7 @@ final class SemanticBuildSupplyCompanionTask
         if (terminal != TaskState.SUCCESS || result == null || !result.success()) return false;
         if (result.data() != null && Boolean.TRUE.equals(result.data().get("supply_access_only"))) return false;
         Object remaining = result.data() == null ? null : result.data().get("remaining_scaffolds");
-        return remaining == null || remaining instanceof java.util.Collection<?> cells && cells.isEmpty();
+        return remaining == null || remaining instanceof Collection<?> cells && cells.isEmpty();
     }
 
     private void advanceMaterialBinding() {
@@ -431,7 +438,7 @@ final class SemanticBuildSupplyCompanionTask
     private boolean cargoMenuSettled() {
         return !spoilSupply.mustSettleBeforeSatisfiedCancellation() && player.containerMenu == player.inventoryMenu
                 && player.inventoryMenu.getCarried() != null && player.inventoryMenu.getCarried().isEmpty()
-                && net.minecraft.client.Minecraft.getInstance().screen == null;
+                && Minecraft.getInstance().screen == null;
     }
 
     private boolean canContinueWithCargo() {
@@ -451,7 +458,7 @@ final class SemanticBuildSupplyCompanionTask
         // 只观察已加载仓库的位置/身份和此前真实 GUI 缓存，绝不读取隐藏箱内物品；走路不会移动比较中心。
         return NavigationSafetyContext.withProtectedArea(plannedMutationCells, List.of(), () -> {
             Map<BlockPos, Object> containers = new LinkedHashMap<>();
-            for (var candidate : ContainerSupplySources.candidates(player, cargoSearchOrigin, 48, List.copyOf(excess.keySet()), java.util.Set.of(), r.protectedLabels))
+            for (var candidate : ContainerSupplySources.candidates(player, cargoSearchOrigin, 48, List.copyOf(excess.keySet()), Set.of(), r.protectedLabels))
                 for (BlockPos at : candidate.footprint()) containers.put(at, player.level().getBlockEntity(at));
             Map<ResourceLocation, Integer> stacks = new LinkedHashMap<>(); excess.forEach((item, count) -> stacks.put(item, (count + 63) / 64));
             return new CargoConditions(emptySlots(), Map.copyOf(stacks), Map.copyOf(containers),
@@ -777,7 +784,7 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override protected void cleanup() {
         // 总任务结束时，取料与施工小任务也要停止，并释放整份方案的预览记录。
-        org.maiwithu.maicraft.core.task.build.BuildPreviewGate.release(r);
+        BuildPreviewGate.release(r);
         if (supply.active()) {
             // 取料协调器取消时没有公开最终回执；若还在获取阶段，不能用旧的成功存入回执推断它已收尾。
             supplyOutcomeUncertain |= "acquiring_material".equals(supply.progress().get("phase"));

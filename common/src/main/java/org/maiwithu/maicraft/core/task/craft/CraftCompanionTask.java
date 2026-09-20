@@ -51,6 +51,9 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Comparator;
+import net.minecraft.world.item.Items;
+import org.maiwithu.maicraft.core.Constants;
 
 /** 实际合成：找或摆工作台，打开合成界面，一批批摆配方、拿成品、放回剩料并关界面，最后尝试收回自己的临时工作台。 */
 public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRecord> {
@@ -909,7 +912,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         temporaryStationBlock = owned;
         temporaryStationItem = owned.asItem();
         if (temporaryStationItem == null
-                || temporaryStationItem == net.minecraft.world.item.Items.AIR) {
+                || temporaryStationItem == Items.AIR) {
             stationRecoveryDetail = "the temporary crafting surface has no recoverable item form";
             return TaskState.SUCCESS;
         }
@@ -990,7 +993,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         stationDrops.prune(player.clientLevel);
         ItemEntity nearest = stationDrops.live(player.clientLevel, Set.of()).stream()
                 .filter(item -> item.getItem().is(temporaryStationItem))
-                .min(java.util.Comparator.comparingDouble(player::distanceToSqr))
+                .min(Comparator.comparingDouble(player::distanceToSqr))
                 .orElse(null);
 
         long now = player.level().getGameTime();
@@ -1361,7 +1364,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                         "the crafting task ended before its active menu transaction settled");
             }
         } catch (RuntimeException closeFailure) {
-            org.maiwithu.maicraft.core.Constants.LOG.warn(
+            Constants.LOG.warn(
                     "Could not schedule crafting GUI cleanup at the actor boundary", closeFailure);
         }
         menuReceipt = null;

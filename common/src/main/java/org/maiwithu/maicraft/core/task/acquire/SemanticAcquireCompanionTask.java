@@ -59,6 +59,13 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Locale;
+import java.util.stream.Collectors;
+import net.minecraft.world.item.crafting.ShapedRecipe;
+import org.maiwithu.maicraft.core.Constants;
 
 /**
  * 把“背包里最终要有这些物品”逐步做成：先看现货，再考虑捡取、库存、合成、烹饪、采矿、交易和狩猎。
@@ -370,7 +377,7 @@ public final class SemanticAcquireCompanionTask
 
         Set<Item> items = need.itemIds.stream()
                 .map(BuiltInRegistries.ITEM::get)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         // 实际交给拾取器的只有物品类型和范围，没有刚才核实过的具体物品实体名单。
         long now = player.level().getGameTime();
         CollectItemsTaskRecord record = new CollectItemsTaskRecord(
@@ -583,7 +590,7 @@ public final class SemanticAcquireCompanionTask
                 "missing_count", ingredient.missing(),
                 "observed_stock_material_hint", observedStockPriority(chosen, need) == 0,
                 "source_order", childSources.stream()
-                        .map(source -> source.name().toLowerCase(java.util.Locale.ROOT))
+                        .map(source -> source.name().toLowerCase(Locale.ROOT))
                         .toList()));
         needs.push(childNeed);
         // 把当前要补的原料压到栈顶，下一刻先解决它，原配方仍在下面等着。
@@ -683,7 +690,7 @@ public final class SemanticAcquireCompanionTask
         long budget = Math.max(MINE_MIN_TICKS, deficit * MINE_PER_UNIT_TICKS);
         Set<Item> progressItems = need.itemIds.stream()
                 .map(BuiltInRegistries.ITEM::get)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         boolean efficient = MineBlockTaskRecord.hasEfficientTool(player, blocks);
         need.efficientBatchStarted |= efficient && bootstrap == 0 && missing(need) >= WorkToolPreparation.BATCH_SIZE;
         MineBlockTaskRecord record = new MineBlockTaskRecord(
@@ -836,7 +843,7 @@ public final class SemanticAcquireCompanionTask
         facts.put("protected_or_ambiguous_candidate_count", protectedCandidates.size());
         facts.put("protected_candidate_samples", protectedCandidates.stream().limit(8).toList());
         facts.put("expected_item_ids", stringIds(expected));
-        facts.put("relation", relation.name().toLowerCase(java.util.Locale.ROOT));
+        facts.put("relation", relation.name().toLowerCase(Locale.ROOT));
         facts.put("searched_loaded_radius", loadedRadius);
         if (safe.isEmpty()) {
             // 暂时没看见可用生物时可以走出去找；同一位置和同一组事实已搜过又没变化，就停止重复搜索。
@@ -855,7 +862,7 @@ public final class SemanticAcquireCompanionTask
                         Map.of("search_attempts", need.huntSearchAttempts,
                                 "max_search_distance", HUNT_SEARCH_DISTANCE,
                                 "entity_type_ids", stringIds(hint.entityTypeIds()),
-                                "relation", relation.name().toLowerCase(java.util.Locale.ROOT)));
+                                "relation", relation.name().toLowerCase(Locale.ROOT)));
                 advanceSource(need);
                 return TaskState.RUNNING;
             }
@@ -1221,7 +1228,7 @@ public final class SemanticAcquireCompanionTask
         clearActive();
 
         harmlessHuntRetargets++;
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-task] harmless pre-strike hunt retarget type={} distance={} -> {}",
                 currentType, oldDistance, newDistance);
         long now = player.level().getGameTime();
@@ -1541,7 +1548,7 @@ public final class SemanticAcquireCompanionTask
             if (raw != null) {
                 try {
                     return FailureType.valueOf(
-                            String.valueOf(raw).toUpperCase(java.util.Locale.ROOT));
+                            String.valueOf(raw).toUpperCase(Locale.ROOT));
                 } catch (IllegalArgumentException ignored) {
                     // Fall through to the lifecycle-derived reason.
                 }
@@ -1816,7 +1823,7 @@ public final class SemanticAcquireCompanionTask
                 "internal_prerequisite", "crafting_surface",
                 "prerequisite_item_ids", itemStrings(itemIds),
                 "allowed_sources", prerequisiteSources.stream()
-                        .map(source -> source.name().toLowerCase(java.util.Locale.ROOT))
+                        .map(source -> source.name().toLowerCase(Locale.ROOT))
                         .toList()));
         needs.push(prerequisite);
         renewProgressLease();
@@ -1859,7 +1866,7 @@ public final class SemanticAcquireCompanionTask
                 String recipeId = holder.id().toString();
                 if (!need.committedRecipeIds.contains(recipeId)) excluded.add(recipeId);
             } catch (RuntimeException unusableRecipe) {
-                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                Constants.LOG.debug(
                         "[maicraft-acquire] skipped unusable committed-recipe probe {}: {}",
                         holder.id(), unusableRecipe.toString());
             }
@@ -1946,13 +1953,13 @@ public final class SemanticAcquireCompanionTask
             List<ObservedRecipeStockCost.Recipe> result = new ArrayList<>();
             for (CraftingRecipe recipe : structuralCraftRecipes().getOrDefault(output, List.of()).stream().limit(64).toList()) {
                 try {
-                    if (recipe.isSpecial() || recipe instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped
+                    if (recipe.isSpecial() || recipe instanceof ShapedRecipe shaped
                             && (shaped.getWidth() > 3 || shaped.getHeight() > 3)) continue;
                     ItemStack stack = RecipeProbe.resultOf(recipe, player.level().registryAccess()); if (stack.isEmpty()) continue;
                     List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
                     for (Ingredient ingredient : recipe.getIngredients()) {
                         if (ingredient == null || ingredient.isEmpty()) continue;
-                        var ids = java.util.Arrays.stream(ingredient.getItems()).filter(value -> value != null && !value.isEmpty())
+                        var ids = Arrays.stream(ingredient.getItems()).filter(value -> value != null && !value.isEmpty())
                                 .map(value -> BuiltInRegistries.ITEM.getKey(value.getItem())).distinct().toList();
                         ingredients.add(new ObservedRecipeStockCost.Need(ids, 1));
                     }
@@ -2087,7 +2094,7 @@ public final class SemanticAcquireCompanionTask
         }
         return new CraftFrontier(
                 frontier,
-                java.util.Collections.unmodifiableSet(recipeIds),
+                Collections.unmodifiableSet(recipeIds),
                 List.copyOf(outputItemIds));
     }
 
@@ -2363,7 +2370,7 @@ public final class SemanticAcquireCompanionTask
     private boolean cookInputReadyNow(Need need) {
         Set<Item> outputs = need.itemIds.stream()
                 .map(BuiltInRegistries.ITEM::get)
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
         int deficit = missing(need);
         for (var holder : ClientRuntime.requireContext(player)
                 .connection().getRecipeManager().getRecipes()) {
@@ -2404,7 +2411,7 @@ public final class SemanticAcquireCompanionTask
         if (allowed.contains(current)) return true;
 
         rememberDimensionBarrier(need, allowed, current);
-        addIssue(source.name().toLowerCase(java.util.Locale.ROOT), "requires_dimension",
+        addIssue(source.name().toLowerCase(Locale.ROOT), "requires_dimension",
                 "this physical source family is not valid in the current dimension; no movement "
                         + "or attack was started",
                 Map.of("target_item_family", itemStrings(need.itemIds),
@@ -2814,7 +2821,7 @@ public final class SemanticAcquireCompanionTask
             if (need.itemIds.size() == 1) data.put("item_id", need.itemIds.getFirst().toString());
         }
         if (activeChild != null) {
-            if (activeSource != null) data.put("source", activeSource.name().toLowerCase(java.util.Locale.ROOT));
+            if (activeSource != null) data.put("source", activeSource.name().toLowerCase(Locale.ROOT));
             data.put("child", activeChild.progress());
         }
         data.put("completed_attempt_count", attempts.size());
@@ -2860,7 +2867,7 @@ public final class SemanticAcquireCompanionTask
         String value = string(raw);
         if (value != null) {
             try {
-                return CraftPlanCost.Surface.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+                return CraftPlanCost.Surface.valueOf(value.toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException ignored) {
                 // Fall through to the backwards-compatible booleans below.
             }
@@ -2880,7 +2887,7 @@ public final class SemanticAcquireCompanionTask
         return ids.stream().map(ResourceLocation::toString).toList();
     }
 
-    private static List<String> stringIds(java.util.Collection<ResourceLocation> ids) {
+    private static List<String> stringIds(Collection<ResourceLocation> ids) {
         return ids.stream().map(ResourceLocation::toString).sorted().toList();
     }
 

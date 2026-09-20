@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * 把某种物品放到指定主手、副手或盔甲栏；没写栏位时使用该物品通常的装备位置。
@@ -137,8 +138,8 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
         }
         return -1;
     }
-    private static boolean same(net.minecraft.world.item.ItemStack a, net.minecraft.world.item.ItemStack b) {
-        return a.getCount() == b.getCount() && net.minecraft.world.item.ItemStack.isSameItemSameComponents(a, b);
+    private static boolean same(ItemStack a, ItemStack b) {
+        return a.getCount() == b.getCount() && ItemStack.isSameItemSameComponents(a, b);
     }
     // 结束物品使用和菜单操作，清掉局部记录；没有确认的动作仍需依赖对应接口正确收尾。
     @Override protected void cleanup() {

@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.List;
 
 /**
  * 只在创造能力开启时，通过原版创造物品槽位请求增加指定模板物品。
@@ -29,8 +30,8 @@ public final class CreativeTakeItemsCompanionTask
     public CreativeTakeItemsCompanionTask(LocalPlayer player, CreativeTakeItemsTaskRecord record) {
         super(player, record);
     }
-    @Override protected java.util.List<Precondition> preconditions() {
-        return java.util.List.of(() -> player.getAbilities().instabuild ? null
+    @Override protected List<Precondition> preconditions() {
+        return List.of(() -> player.getAbilities().instabuild ? null
                 : new Precondition.Failure("take_items is available only in creative mode",
                         FailureType.UNSUPPORTED));
     }
