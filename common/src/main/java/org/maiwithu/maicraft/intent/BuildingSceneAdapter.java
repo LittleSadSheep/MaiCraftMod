@@ -55,7 +55,7 @@ final class BuildingSceneAdapter {
             entry = store.load(p.get("scene_id").getAsString(), dimension);
             anchor = entry.anchor();
             if (goal.target() != null) {
-                var requested = SemanticBuildPlanner.investigationAnchor(goal, player, runtime);
+                var requested = BuildingAnchor.resolve(goal, player, runtime);
                 if (!anchor.equals(requested)) throw new IllegalArgumentException("scene_id retains its original anchor; omit target to reuse it");
             }
             // 查看定义时读取原场景中的具名组件，保留固定锚点，角色不走路、不取料或放置。
@@ -79,7 +79,7 @@ final class BuildingSceneAdapter {
                 blueprint = prepared.blueprint();
             } else blueprint = BuildingSceneCompiler.compile(source);
         } else {
-            anchor = SemanticBuildPlanner.investigationAnchor(goal, player, runtime);
+            anchor = BuildingAnchor.resolve(goal, player, runtime);
             if (anchor == null) throw new IllegalArgumentException("A new model needs an exact current_place, coordinates or remembered landmark target");
             anchor = new Goal.WorldPosition(anchor.x(), anchor.y(), anchor.z(), dimension);
             if (p.has("scene")) {
