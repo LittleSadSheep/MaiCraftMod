@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupply
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
+import org.maiwithu.maicraft.core.task.cook.CookingFuelTest;
 import org.maiwithu.maicraft.core.task.acquire.OrdinaryStorageAcquireTest;
 import org.maiwithu.maicraft.core.task.acquire.StorageSupplyRadiusTest;
 import org.maiwithu.maicraft.core.task.build.BuildAeSpoilReceiptTest;
@@ -248,6 +249,7 @@ public final class GuiRegressionSuite {
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
         AcquisitionSourceInheritanceTest.main(args);
         AcquisitionRecipePlanningTest.main(args);
+        CookingFuelTest.main(args);
         AcquireGoalTest.main(args);
         CreateStockObservationTest.main(args);
         Ae2ScreenAccessTest.main(args);

@@ -16,9 +16,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.inventory.AbstractFurnaceMenu;
-import net.minecraft.world.inventory.BlastFurnaceMenu;
-import net.minecraft.world.inventory.FurnaceMenu;
-import net.minecraft.world.inventory.SmokerMenu;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -27,7 +24,6 @@ import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -90,14 +86,8 @@ public final class SemanticCookCompanionTask
     private enum Purpose { ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION, PLACE_STATION,
         MOVE_STATION, OPEN_STATION, LOAD_INPUT, LOAD_FUEL, TAKE_OUTPUT,
         CLOSE_WAIT, CLEAN_INPUT, CLOSE, ABANDON_CLOSE }
-    private enum Device {
-        FURNACE(Blocks.FURNACE), BLAST_FURNACE(Blocks.BLAST_FURNACE),
-        SMOKER(Blocks.SMOKER), CAMPFIRE(Blocks.CAMPFIRE);
-        final Block block;
-        Device(Block block) { this.block = block; }
-    }
     private record Candidate(
-            ResourceLocation recipeId, AbstractCookingRecipe recipe, Device device,
+            ResourceLocation recipeId, AbstractCookingRecipe recipe, CookingDevice device,
             Item input, int outputCount) {}
     private record IngredientGroup(List<Item> alternatives, int uses) {}
     private record CraftRoute(
@@ -164,7 +154,7 @@ public final class SemanticCookCompanionTask
     private Map<Block, Long> nearbyBlockDistances = Map.of();
     private final Set<String> rejectedInputCandidates = new LinkedHashSet<>();
     private final Set<Item> rejectedFuelItems = new LinkedHashSet<>();
-    private final Set<Device> rejectedDevices = new LinkedHashSet<>();
+    private final Set<CookingDevice> rejectedDevices = new LinkedHashSet<>();
     private final List<Map<String, Object>> planningAttempts = new ArrayList<>();
 
     public SemanticCookCompanionTask(LocalPlayer player, SemanticCookTaskRecord record) {
@@ -274,7 +264,7 @@ public final class SemanticCookCompanionTask
         }
         // 能识别营火配方，但本版本不执行营火操作；明确要求营火时报告不支持，不改用炉子偷偷替代。
         if (r.preference == SemanticCookTaskRecord.Preference.CAMPFIRE) {
-            boolean available = candidates.stream().anyMatch(c -> c.device == Device.CAMPFIRE);
+            boolean available = candidates.stream().anyMatch(c -> c.device == CookingDevice.CAMPFIRE);
             return failOrClean(
                     available ? "campfire_execution_not_supported" : "no_preferred_recipe",
                     available
@@ -283,7 +273,7 @@ public final class SemanticCookCompanionTask
                             : "No campfire recipe produces " + r.itemId + ".",
                     FailureType.UNKNOWN);
         }
-        candidates.removeIf(c -> c.device == Device.CAMPFIRE || !preferred(c.device)
+        candidates.removeIf(c -> c.device == CookingDevice.CAMPFIRE || !preferred(c.device)
                 || rejectedDevices.contains(c.device)
                 || rejectedInputCandidates.contains(candidateKey(c)));
         if (candidates.isEmpty()) {
@@ -346,7 +336,7 @@ public final class SemanticCookCompanionTask
                 if (output.isEmpty() || !output.is(BuiltInRegistries.ITEM.get(r.itemId))) {
                     continue;
                 }
-                Device device = device(cooking.getType());
+                CookingDevice device = CookingDevice.forRecipe(cooking.getType());
                 if (device == null || cooking.getIngredients().isEmpty()) continue;
                 LinkedHashSet<Item> inputs = new LinkedHashSet<>();
                 for (ItemStack stack : cooking.getIngredients().getFirst().getItems()) {
@@ -382,21 +372,13 @@ public final class SemanticCookCompanionTask
                 : preparation.thenComparing(speed).thenComparing(stable);
     }
 
-    private boolean preferred(Device device) {
+    private boolean preferred(CookingDevice device) {
         return switch (r.preference) {
-            case SMELTING -> device == Device.FURNACE;
-            case BLASTING -> device == Device.BLAST_FURNACE;
-            case SMOKING -> device == Device.SMOKER;
+            case SMELTING -> device == CookingDevice.FURNACE;
+            case BLASTING -> device == CookingDevice.BLAST_FURNACE;
+            case SMOKING -> device == CookingDevice.SMOKER;
             default -> true;
         };
-    }
-
-    private static Device device(RecipeType<?> type) {
-        if (type == RecipeType.SMELTING) return Device.FURNACE;
-        if (type == RecipeType.BLASTING) return Device.BLAST_FURNACE;
-        if (type == RecipeType.SMOKING) return Device.SMOKER;
-        if (type == RecipeType.CAMPFIRE_COOKING) return Device.CAMPFIRE;
-        return null;
     }
 
     // 明确列出的燃料优先按许可范围选；没列时只考虑煤、木炭、木材、竹子等这里列出的普通燃料。
@@ -452,9 +434,9 @@ public final class SemanticCookCompanionTask
     }
 
     // 按“这一批所需烧制时间 ÷ 单份燃料时间”向上取整。
-    // 当前读取的是普通熔炉燃料表，没有对高炉／烟熏炉的实际燃烧时间减半，见 A57。
+    // 时间取自选定原生设备，不能把普通熔炉的一份煤时长套在高炉或烟熏炉上。
     private FuelChoice fuelChoice(Candidate cooking, Item item, int raw) {
-        int burn = AbstractFurnaceBlockEntity.getFuel().getOrDefault(item, 0);
+        int burn = cooking.device.burnDuration(new ItemStack(item));
         if (burn <= 0) return null;
         long neededTicks = (long) raw * cooking.recipe.getCookingTime();
         int needed = ceilDiv(neededTicks, burn);
@@ -888,16 +870,14 @@ public final class SemanticCookCompanionTask
     }
 
     // 先考虑剩余燃烧时间和燃料格里的存量，再补足本批需要的燃料。
-    // 燃料格也按普通熔炉表折算，所以高炉／烟熏炉在这里同样会多算可用时间（A57）。
+    // 已有燃料也按当前设备的原生规则折算，与备料时使用同一套时长。
     private TaskState loadFuel() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null) return menuLost();
         int availableBurn = Math.max(0, data(menu, 0));
         ItemStack fuelSlot = menu.getSlot(1).getItem();
         if (!fuelSlot.isEmpty()) {
-            availableBurn += fuelSlot.getCount()
-                    * AbstractFurnaceBlockEntity.getFuel()
-                            .getOrDefault(fuelSlot.getItem(), 0);
+            availableBurn += fuelSlot.getCount() * candidate.device.burnDuration(fuelSlot);
         }
         int neededTicks = batchRaw * candidate.recipe.getCookingTime();
         int toLoad = ceilDiv(
@@ -1556,12 +1536,7 @@ public final class SemanticCookCompanionTask
 
     // 当前只按普通炉、高炉或烟熏炉的菜单类型判断，没有绑定本次打开的菜单实例／编号；不同同类菜单也会通过（A60）。
     private boolean menuMatches() {
-        return switch (candidate.device) {
-            case FURNACE -> player.containerMenu instanceof FurnaceMenu;
-            case BLAST_FURNACE -> player.containerMenu instanceof BlastFurnaceMenu;
-            case SMOKER -> player.containerMenu instanceof SmokerMenu;
-            case CAMPFIRE -> false;
-        };
+        return candidate.device.matches(player.containerMenu);
     }
 
     // 读取菜单同步的数据：燃烧剩余时间、燃料总时长、加工进度和单次总时长；未提供的下标按零处理。
@@ -1584,7 +1559,7 @@ public final class SemanticCookCompanionTask
         r.extendDeadlineTo(player.level().getGameTime() + COOK_PROGRESS_LEASE_TICKS);
     }
 
-    private boolean stationReady(Device device) {
+    private boolean stationReady(CookingDevice device) {
         return nearbyBlockDistances.containsKey(device.block)
                 || PlayerInv.buildableCount(
                         player.getInventory(), device.block.asItem()) > 0;
