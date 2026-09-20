@@ -39,8 +39,11 @@ runs
 *.prompt.md
 *.generated.md
 .vscode
-# 临时报告集中在 docs/tmp；docs 继续沿用本地保留、不进入 Git 的规则。
+# 临时审阅和实验继续留在本地；面向贡献者的开发文档随实现一起维护。
 docs/
+!/docs/
+/docs/*
+!/docs/dev/
 # 项目工作规则只在根目录保留，不进入 Git 历史。
 AGENTS.md
 experiments/
