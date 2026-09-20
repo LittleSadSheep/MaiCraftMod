@@ -9,6 +9,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.inventory.DataSlot;
+import net.minecraft.world.inventory.FurnaceMenu;
+import net.minecraft.world.inventory.SimpleContainerData;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -22,6 +26,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
+import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 
 /** 炉子数量与收尾测试共用的已加载小世界；背包变化由场景显式给出，不连接服务端。 */
 final class CookingTestWorld implements AutoCloseable {
@@ -87,5 +92,16 @@ final class CookingTestWorld implements AutoCloseable {
         return field;
     }
     static ResourceLocation id(String path) { return ResourceLocation.withDefaultNamespace(path); }
+
+    // 离线测试显式提供菜单同步数据，与游戏里的 MenuDataSlotsAccessor 使用同一读取入口。
+    static final class Furnace extends FurnaceMenu implements MenuDataSlotsAccessor {
+        private final List<DataSlot> data;
+        Furnace(CookingTestWorld world, SimpleContainer contents, SimpleContainerData values) {
+            super(7, world.game.inventory, contents, values);
+            data = List.of(DataSlot.forContainer(values, 0), DataSlot.forContainer(values, 1),
+                    DataSlot.forContainer(values, 2), DataSlot.forContainer(values, 3));
+        }
+        @Override public List<DataSlot> maicraft$dataSlots() { return data; }
+    }
     @Override public void close() throws Exception { game.close(); }
 }

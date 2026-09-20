@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.actor.MenuSynchronization;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
@@ -89,6 +90,7 @@ public final class SemanticCookCompanionTask
     private ItemStack cleanupInputExpected = ItemStack.EMPTY;
     private long waitMenuSince;
     private long lastCookEvidenceTick;
+    private long inconsistentBatchSince = Long.MIN_VALUE;
     private String lastCookEvidence = "";
     private BlockPos openAttemptStation;
     private int openAttempts;
@@ -626,7 +628,7 @@ public final class SemanticCookCompanionTask
 
     /** 只核对本任务向初始空炉投入的数量，不认领来路不明的额外物品。 */
     // 核对本批账：装入量减去炉内剩余量，应等于已加工的原料数；对应成品应在结果槽或已经被本任务取走。
-    // 数量不合就停止触碰内容，避免把外来的物品当自己的；当前一次不合就报外部变化，未等待分批同步。
+    // 数量暂时不合先等同一炉的同步补齐；等待期间不碰槽位，超出窗口仍不守恒才停止认领。
     private TaskState reconcileBatch() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null || !menuMatches()) return menuLost();
@@ -652,6 +654,10 @@ public final class SemanticCookCompanionTask
         long expectedProduced = (long) consumed * candidate.outputCount();
         long observedOwned = (long) ownedOutputTaken + result.getCount();
         if (observedOwned != expectedProduced) {
+            long now = player.level().getGameTime();
+            if (inconsistentBatchSince == Long.MIN_VALUE) inconsistentBatchSince = now;
+            int window = Math.max(4, MenuSynchronization.windowTicks(ClientRuntime.requireContext(player)));
+            if (now - inconsistentBatchSince < window) return TaskState.RUNNING;
             String relation = observedOwned < expectedProduced
                     ? "Some cooked output was removed, likely by a hopper or player"
                     : "Additional cooked output appeared from outside this batch";
@@ -660,6 +666,7 @@ public final class SemanticCookCompanionTask
                             + observedOwned + "); MaiCraft did not take or replace anything.",
                     FailureType.UNKNOWN);
         }
+        inconsistentBatchSince = Long.MIN_VALUE;
         if (!result.isEmpty()) {
             takeInventoryBefore = outputCount();
             takeSlotCount = result.getCount();

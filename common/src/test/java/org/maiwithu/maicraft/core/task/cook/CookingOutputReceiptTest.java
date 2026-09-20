@@ -7,12 +7,9 @@ import net.minecraft.SharedConstants;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.SimpleContainer;
-import net.minecraft.world.inventory.DataSlot;
-import net.minecraft.world.inventory.FurnaceMenu;
 import net.minecraft.world.inventory.SimpleContainerData;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
@@ -36,7 +33,7 @@ public final class CookingOutputReceiptTest {
             var contents = new SimpleContainer(3);
             contents.setItem(0, new ItemStack(Items.RAW_IRON, 8));
             contents.setItem(2, new ItemStack(Items.IRON_INGOT, 8));
-            var menu = new TestMenu(world, contents, data);
+            var menu = new CookingTestWorld.Furnace(world, contents, data);
             world.game.player.containerMenu = menu;
             CookingTestWorld.set(task, "ownedMenu", menu); CookingTestWorld.set(task, "openedMenu", true);
             CookingTestWorld.set(task, "stationClaimed", true); CookingTestWorld.set(task, "effectsStarted", true);
@@ -82,7 +79,7 @@ public final class CookingOutputReceiptTest {
             var values = new SimpleContainerData(4);
             var contents = new SimpleContainer(3);
             contents.setItem(0, new ItemStack(Items.RAW_IRON, 16));
-            var menu = new TestMenu(world, contents, values); world.game.player.containerMenu = menu;
+            var menu = new CookingTestWorld.Furnace(world, contents, values); world.game.player.containerMenu = menu;
             CookingTestWorld.set(task, "ownedMenu", menu); CookingTestWorld.set(task, "openedMenu", true);
             CookingTestWorld.set(task, "stationClaimed", true); CookingTestWorld.set(task, "effectsStarted", true);
             CookingTestWorld.set(task, "batchOutstanding", true); CookingTestWorld.set(task, "ownedInputLoaded", 16);
@@ -101,14 +98,5 @@ public final class CookingOutputReceiptTest {
         }
     }
 
-    private static final class TestMenu extends FurnaceMenu implements MenuDataSlotsAccessor {
-        private final List<DataSlot> data;
-        TestMenu(CookingTestWorld world, SimpleContainer contents, SimpleContainerData values) {
-            super(7, world.game.inventory, contents, values);
-            data = List.of(DataSlot.forContainer(values, 0), DataSlot.forContainer(values, 1),
-                    DataSlot.forContainer(values, 2), DataSlot.forContainer(values, 3));
-        }
-        @Override public List<DataSlot> maicraft$dataSlots() { return data; }
-    }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }

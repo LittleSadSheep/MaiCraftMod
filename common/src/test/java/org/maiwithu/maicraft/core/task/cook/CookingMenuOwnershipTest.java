@@ -8,11 +8,8 @@ import net.minecraft.client.gui.screens.inventory.FurnaceScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.SimpleContainer;
-import net.minecraft.world.inventory.DataSlot;
-import net.minecraft.world.inventory.FurnaceMenu;
 import net.minecraft.world.inventory.SimpleContainerData;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
-import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 同类菜单被替换时，烹饪不能重新认领它；待执行搬运也必须在读新槽位前停止。 */
@@ -60,21 +57,11 @@ public final class CookingMenuOwnershipTest {
         }
     }
 
-    private static TestMenu show(CookingTestWorld world) {
-        var menu = new TestMenu(world, new SimpleContainerData(4));
+    private static CookingTestWorld.Furnace show(CookingTestWorld world) {
+        var menu = new CookingTestWorld.Furnace(world, new SimpleContainer(3), new SimpleContainerData(4));
         world.game.player.containerMenu = menu;
         Minecraft.getInstance().screen = new FurnaceScreen(menu, world.game.inventory, Component.literal("test furnace"));
         return menu;
-    }
-
-    private static final class TestMenu extends FurnaceMenu implements MenuDataSlotsAccessor {
-        private final List<DataSlot> synchronizedData;
-        TestMenu(CookingTestWorld world, SimpleContainerData data) {
-            super(7, world.game.inventory, new SimpleContainer(3), data);
-            synchronizedData = List.of(DataSlot.forContainer(data, 0), DataSlot.forContainer(data, 1),
-                    DataSlot.forContainer(data, 2), DataSlot.forContainer(data, 3));
-        }
-        @Override public List<DataSlot> maicraft$dataSlots() { return synchronizedData; }
     }
 
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }

@@ -272,7 +272,7 @@ public final class DefaultMenuPort implements MenuPort {
                     receipt.finish(MenuReceipt.Status.CONFIRMED_APPLIED,
                             "the exact synchronized menu postcondition confirmed the transaction");
                 } else if (receipt.kind() != MenuReceipt.Kind.BUTTON && receipt.appliedStableWithoutRevision(
-                        context.tickRevision(), unacknowledgedStabilityTicks(context))) {
+                        context.tickRevision(), MenuSynchronization.windowTicks(context))) {
                     // 没有菜单版本更新时，目前允许本地期望状态稳定一段时间后当作成功，不是收到了专门的服务器确认。
                     // 原版客户端先预测菜单点击结果，再接受服务端修正；不能把短暂的预测画面当成成功。
                     // 若点击没有带来 stateId 更新，需等待已观测往返延迟加少量游戏刻余量，
@@ -303,14 +303,6 @@ public final class DefaultMenuPort implements MenuPort {
         }
         if (receipt.terminal() && receipt.kind() != MenuReceipt.Kind.CLOSE) visibility.changed(context);
         return receipt;
-    }
-
-    /** 无回显时至少等完已观察到的往返时间和两刻余量，不能在高延迟下把预测画面提前当成成功。 */
-    private static int unacknowledgedStabilityTicks(LocalPlayerContext context) {
-        var info = context.connection().getPlayerInfo(context.player().getUUID());
-        long latencyMillis = info == null ? 0L : Math.max(0, info.getLatency());
-        int roundTripTicks = (int) ((latencyMillis + 49L) / 50L);
-        return Math.max(3, roundTripTicks + 2);
     }
 
     void revokeForBoundary(String reason) {
@@ -348,7 +340,7 @@ public final class DefaultMenuPort implements MenuPort {
         if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
         // 普通一秒超时不能比已知往返还短；留出首次观察和稳定检查的时间，关闭本地界面则沿用调用方预算。
         int budget = kind == MenuReceipt.Kind.CLOSE ? timeoutTicks
-                : Math.max(timeoutTicks, unacknowledgedStabilityTicks(context) + 3);
+                : Math.max(timeoutTicks, MenuSynchronization.windowTicks(context) + 3);
         MenuReceipt receipt = MenuReceipt.forMenu(kind, context, menu, budget, allowContainerChange, confirmation);
         active = receipt;
         return receipt;
