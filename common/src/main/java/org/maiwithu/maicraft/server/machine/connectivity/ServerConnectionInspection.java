@@ -40,6 +40,9 @@ public final class ServerConnectionInspection {
             // 请求的 system 仍用于协议配对；实际 items 边可由漏斗或传输管驱动，不能只看端点模组。
             ConnectionEvidence edge = nativeRead(() -> switch (adapter) {
                 case ConnectionAdapterDispatch.HOPPER -> HopperConnectionInspection.edge(player, entities.get(i), entities.get(i + 1), body);
+                // minecraft 是原版输送查询名，不是相邻容器的通行许可；实际边没有已支持设备时明确保留不支持。
+                case "minecraft" -> ConnectionEvidence.of("unsupported", false, false,
+                        "no_supported_native_item_transport_on_edge", "native_transport_dispatch");
                 case "create" -> CreateConnectionInspection.edge(path.medium(), entities.get(i), entities.get(i + 1), body.has("link_kind"));
                 case "ae2" -> Ae2ConnectionInspection.edge(path.medium(), entities.get(i), entities.get(i + 1));
                 case "mekanism" -> MekanismConnectionInspection.edge(path.medium(), entities.get(i), entities.get(i + 1),

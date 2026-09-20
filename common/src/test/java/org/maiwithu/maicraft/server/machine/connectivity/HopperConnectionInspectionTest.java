@@ -64,7 +64,8 @@ public final class HopperConnectionInspectionTest {
 
     private static void adapterAndTransitDoNotFollowMachineBrand() {
         var hopper = hopper(ORIGIN, Direction.DOWN, true);
-        for (String hint : List.of("create", "ae2", "mekanism"))
+        // 新中立查询与旧请求提示都要落到同一原生漏斗规则，避免升级后服务端只认识旧系统名。
+        for (String hint : List.of("minecraft", "create", "ae2", "mekanism"))
             check(ConnectionAdapterDispatch.HOPPER.equals(ConnectionAdapterDispatch.adapter(hint, "items", barrel(ORIGIN.above()), hopper)), "native items mechanism overrides endpoint hint");
         check("create".equals(ConnectionAdapterDispatch.adapter("create", "kinetic", hopper, barrel(ORIGIN.below()))), "kinetic queries keep their existing adapter");
         check(HopperConnectionInspection.transit(hopper).connected(), "native hopper has one transit inventory");

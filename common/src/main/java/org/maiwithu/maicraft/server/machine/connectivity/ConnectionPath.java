@@ -7,11 +7,11 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.maiwithu.maicraft.network.MachineConnectionSystems;
 
 /** Bounded explicit paths; geometry is a request constraint, never connection evidence. */
 record ConnectionPath(String system, String medium, List<Point> positions) {
     static final int MAX_POSITIONS = 128;
-    private static final Set<String> MEDIA = Set.of("items", "fluids", "chemicals", "energy", "kinetic");
     record Point(int x, int y, int z) {
         JsonObject json() {
             JsonObject value = new JsonObject();
@@ -28,7 +28,8 @@ record ConnectionPath(String system, String medium, List<Point> positions) {
 
     static ConnectionPath parse(JsonObject body) {
         String system = text(body, "system"), medium = text(body, "medium");
-        if (!Set.of("create", "ae2", "mekanism").contains(system) || !MEDIA.contains(medium)) {
+        // 客户端发现原版漏斗后可以申请 minecraft/items；这里只接纳查询，真正是否连通仍由逐边原生检查决定。
+        if (!MachineConnectionSystems.supports(system, medium)) {
             throw new IllegalArgumentException("Unknown system or medium");
         }
         if (!body.has("path") || !body.get("path").isJsonArray()) {
