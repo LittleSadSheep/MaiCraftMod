@@ -21,6 +21,10 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import java.lang.reflect.Proxy;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.dimension.DimensionType;
 
 /**
  * 回放给定高速下落，检查仍可抓住的放水机会；另覆盖半砖、草、水面选择、很高处的提早补料和异常射线范围。
@@ -32,9 +36,9 @@ public final class EmergencyWaterSelectionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var memory = (sun.misc.Unsafe) field(sun.misc.Unsafe.class, "theUnsafe").get(null);
-        var client = (net.minecraft.client.Minecraft) memory.allocateInstance(net.minecraft.client.Minecraft.class);
-        field(net.minecraft.client.Minecraft.class, "gameThread").set(client, Thread.currentThread());
-        var instance = field(net.minecraft.client.Minecraft.class, "instance"); Object previous = instance.get(null);
+        var client = (Minecraft) memory.allocateInstance(Minecraft.class);
+        field(Minecraft.class, "gameThread").set(client, Thread.currentThread());
+        var instance = field(Minecraft.class, "instance"); Object previous = instance.get(null);
         instance.set(null, client);
         try { reportedFall(); surfaces(); earlyProbe(); invalidNativeRay(); }
         finally { instance.set(null, previous); }
@@ -124,10 +128,10 @@ public final class EmergencyWaterSelectionTest {
 
         var tracked = (TrackedLevel) f.memory.allocateInstance(TrackedLevel.class);
         tracked.scene = f.world.scene; tracked.dimension = f.world.dimension;
-        field(net.minecraft.world.entity.Entity.class, "level").set(f.player, tracked);
-        var context = (org.maiwithu.maicraft.client.actor.LocalPlayerContext) java.lang.reflect.Proxy.newProxyInstance(
-                org.maiwithu.maicraft.client.actor.LocalPlayerContext.class.getClassLoader(),
-                new Class<?>[]{org.maiwithu.maicraft.client.actor.LocalPlayerContext.class},
+        field(Entity.class, "level").set(f.player, tracked);
+        var context = (LocalPlayerContext) Proxy.newProxyInstance(
+                LocalPlayerContext.class.getClassLoader(),
+                new Class<?>[]{LocalPlayerContext.class},
                 (proxy, method, arguments) -> method.getName().equals("level") ? tracked : method.invoke(f.context, arguments));
         f.position(2_000_000, -.08, false);
         assertWater(EmergencyLanding.find(context), "world-exterior altitude does not hide loaded ground");
@@ -173,11 +177,11 @@ public final class EmergencyWaterSelectionTest {
     }
     private static final class TrackedLevel extends ClientLevel {
         WaterLandingReplayTest.Scene scene;
-        net.minecraft.world.level.dimension.DimensionType dimension;
+        DimensionType dimension;
         int clips, groundProbes; double longestRay, highestStart; boolean unloaded;
         private TrackedLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
         public boolean isLoaded(BlockPos pos) { return !unloaded; }
-        public net.minecraft.world.level.dimension.DimensionType dimensionType() { return dimension; }
+        public DimensionType dimensionType() { return dimension; }
         public BlockHitResult clip(ClipContext context) {
             if (context.getTo().y == getMinBuildHeight()) groundProbes++;
             clips++; longestRay = Math.max(longestRay, context.getFrom().distanceTo(context.getTo()));

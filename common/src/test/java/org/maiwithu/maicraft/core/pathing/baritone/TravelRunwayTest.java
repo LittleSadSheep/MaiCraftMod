@@ -16,6 +16,8 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.world.phys.AABB;
 
 public final class TravelRunwayTest {
     public static void main(String[] args) {
@@ -59,7 +61,7 @@ public final class TravelRunwayTest {
                 "the production jump policy accepts smoothed open-ground travel");
         check(jumpPlan(world, direct, LongSets.emptySet(), PhysicalObstacleSnapshot.EMPTY) != null,
                 "the same production policy accepts arbitrary diagonal bearings");
-        var raisedObstacle = new PhysicalObstacleSnapshot(List.of(new net.minecraft.world.phys.AABB(1, 2.4, 0, 2, 3, 1)), 1, 0, "fixture");
+        var raisedObstacle = new PhysicalObstacleSnapshot(List.of(new AABB(1, 2.4, 0, 2, 3, 1)), 1, 0, "fixture");
         check(jumpPlan(world, flat, LongSets.emptySet(), raisedObstacle) == null,
                 "a structure above walking height still obstructs a full jump");
         var protectedAir = LongSets.singleton(new BlockPos(1, 2, 0).asLong());
@@ -85,7 +87,7 @@ public final class TravelRunwayTest {
     }
 
     private static TravelJumpPolicy.Plan jumpPlan(GroundPathSmoothingTest.Scene world, TravelRunway runway,
-                                                 it.unimi.dsi.fastutil.longs.LongSet forbidden, PhysicalObstacleSnapshot physical) {
+                                                 LongSet forbidden, PhysicalObstacleSnapshot physical) {
         return TravelJumpPolicy.plan(world, p -> true, forbidden, physical, runway,
                 new TravelJumpPhysics.Launch(.08, .42, .48, .13, .546, 1.8), .6,
                 runway.heading().scale(.28));

@@ -34,6 +34,9 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
+import java.io.File;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation;
 
 /**
  * 检查跳跃错过完整方块或半砖后如何交给救援；清掉旧路线按键、保留交通控制边界，站稳后重新编译原目标。
@@ -43,7 +46,7 @@ public final class MissedLandingHandoffTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var f = new WaterLandingReplayTest.Fixture(false);
         field(Minecraft.class, "gameThread").set(f.minecraft, Thread.currentThread());
-        field(Minecraft.class, "gameDirectory").set(f.minecraft, new java.io.File("missed-landing-settings-fixture"));
+        field(Minecraft.class, "gameDirectory").set(f.minecraft, new File("missed-landing-settings-fixture"));
         field(LocalPlayer.class, "clientLevel").set(f.player, f.world);
         var context = (IPlayerContext) Proxy.newProxyInstance(IPlayerContext.class.getClassLoader(),
                 new Class<?>[]{IPlayerContext.class}, (proxy, method, values) -> {
@@ -60,7 +63,7 @@ public final class MissedLandingHandoffTest {
                     throw new AssertionError(method.getName());
                 });
         var executor = (PathExecutor) f.memory.allocateInstance(PathExecutor.class);
-        field(PathExecutor.class, "groundJump").set(executor, new org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation());
+        field(PathExecutor.class, "groundJump").set(executor, new GroundJumpContinuation());
         field(PathExecutor.class, "path").set(executor, path);
         var backend = (Baritone) f.memory.allocateInstance(Baritone.class);
         var behavior = (PathingBehavior) f.memory.allocateInstance(PathingBehavior.class);
@@ -88,7 +91,7 @@ public final class MissedLandingHandoffTest {
         field(EmbeddedBaritoneNavigator.class, "pendingPause").setBoolean(navigator, true);
         var saved = new LinkedHashMap<Field, Object>();
         var policy = EmbeddedBaritonePolicy.snapshot();
-        var actor = org.maiwithu.maicraft.client.runtime.ClientRuntime.actor();
+        var actor = ClientRuntime.actor();
         var actorClient = field(actor.getClass(), "minecraft"); Object previousActorClient = actorClient.get(actor);
         try {
             actorClient.set(actor, f.minecraft);

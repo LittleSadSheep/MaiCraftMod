@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan;
+import java.util.Set;
 
 /**
  * 检查倒水许可、实际受影响的水格、含水楼梯和回收归属；末尾另查源码关键字是否仍走统一救援入口。
@@ -36,7 +37,7 @@ public final class WaterBucketFallTest {
         var policy = EmbeddedBaritonePolicy.capture(GoalCompiler.standOn(landing).sacred(),
                 LongSets.singleton(landing.below().asLong()), LongSets.emptySet());
         var ground = new Pool(landing,air,stone);
-        var inventory = new LandingAssistPlan.InventorySnapshot(java.util.Set.of(LandingAssistPlan.Kind.WATER),true,false,false);
+        var inventory = new LandingAssistPlan.InventorySnapshot(Set.of(LandingAssistPlan.Kind.WATER),true,false,false);
         check(!inventory.plans(ground,landing,pos -> policy.protects(pos.getX(),pos.getY(),pos.getZ())).isEmpty(),
                 "a protected support was mistaken for the water mutation cell");
         check(inventory.plans(ground,landing,landing::equals).isEmpty(), "protected water cell must fail before falling");

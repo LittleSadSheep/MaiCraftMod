@@ -20,6 +20,8 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.task.craft.CraftCompanionTask;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.List;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * 检查紧急落点改变、邻近水落点、现成船和原地补船的选择；用控制接口替身记录请求，不实际开启 AE2 或合成。
@@ -66,7 +68,7 @@ public final class AirRescueChoiceTest {
 
         f=new WaterLandingReplayTest.Fixture(false); f.position(12,-.08,false); f.player.inventory.setItem(0,ItemStack.EMPTY);
         var plan=LandingBoatRescue.plan(f.world,BlockPos.ZERO,.6,1.8);
-        rescue=LandingAssistSession.automatic(java.util.List.of(plan),true);
+        rescue=LandingAssistSession.automatic(List.of(plan),true);
         var boat=field(LandingAssistSession.class,"boat").get(rescue);
         var supply=(LandingMaterialSupply)field(LandingBoatRescue.class,"supply").get(boat);
         int[] starts={0},ticks={0};
@@ -106,7 +108,7 @@ public final class AirRescueChoiceTest {
                         && rescue.diagnostics().get("rescue_episode").equals(episode) && f.uses==0,
                 "changed native support redirects the same fall before any placement, without creating a second rescue episode");
     }
-    private static net.minecraft.world.level.block.state.BlockState trapdoor() {
+    private static BlockState trapdoor() {
         return Blocks.OAK_TRAPDOOR.defaultBlockState().setValue(BlockStateProperties.HALF,Half.TOP);
     }
     private static Field field(Class<?> type,String name) throws Exception {

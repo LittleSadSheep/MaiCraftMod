@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.client.actor.NativeActionPort;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.Items;
 
 /**
  * 把补料接入落地会话，检查站在出发处不会误判落地、落到别处仍等界面收尾，以及停止待确认水桶操作时先松开使用动作。
@@ -68,7 +70,7 @@ public final class LandingSupplyCleanupTest {
 
     private static void carriedHayKeepsTryingWater() throws Exception {
         var f = new WaterLandingReplayTest.Fixture(false);
-        f.position(12,0,true); f.player.inventory.setItem(0,new ItemStack(net.minecraft.world.item.Items.HAY_BLOCK));
+        f.position(12,0,true); f.player.inventory.setItem(0,new ItemStack(Items.HAY_BLOCK));
         var water = f.session.plan();
         var hay = new LandingAssistPlan(LandingAssistPlan.Kind.HAY,water.feet(),water.cell(),water.clicked(),water.face(),false);
         var session = LandingAssistSession.automatic(List.of(hay,water),false);
@@ -84,8 +86,8 @@ public final class LandingSupplyCleanupTest {
 
     private static void pendingBucketUsesPhysicalRelease() throws Exception {
         var f = new WaterLandingReplayTest.Fixture(false);
-        var instance = field(net.minecraft.client.Minecraft.class,"instance"); Object previous = instance.get(null);
-        field(net.minecraft.client.Minecraft.class,"gameThread").set(f.minecraft,Thread.currentThread());
+        var instance = field(Minecraft.class,"instance"); Object previous = instance.get(null);
+        field(Minecraft.class,"gameThread").set(f.minecraft,Thread.currentThread());
         instance.set(null,f.minecraft);
         try {
         f.position(2,-1,false); f.player.setXRot(90);

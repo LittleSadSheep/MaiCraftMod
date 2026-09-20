@@ -17,6 +17,9 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionPort;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
+import net.minecraft.core.Direction;
 
 /**
  * 给定船出现和乘坐确认的时序，检查上船请求应早于触地位置报告，晚出现的船不能补算救援成功；事件顺序由替身记录。
@@ -41,7 +44,7 @@ public final class BoatCatchReplayTest {
         var controller=new BoatLandingAssist(new BoatLandingSnapshot.Plan(new BlockPos(0,12,0),BlockPos.ZERO,
                 item,null,spawn,true),false);
         Boat[] entity={null}; int[] placed={0},mounted={0},exited={0};
-        var wire=new java.util.ArrayList<String>();
+        var wire=new ArrayList<String>();
         var actions=(NativeActionPort)Proxy.newProxyInstance(NativeActionPort.class.getClassLoader(),new Class<?>[]{NativeActionPort.class},
                 (proxy,method,values)->switch(method.getName()) {
                     case "useItem" -> {
@@ -62,7 +65,7 @@ public final class BoatCatchReplayTest {
                         var exit=BoatLandingGeometry.exit(f.world,pos->true,spawn,entity[0].getBbWidth(),f.player.getBbWidth(),f.player.getBbHeight(),f.player.getYRot());
                         check(exit!=null,"native dismount geometry has grounded room");
                         field(Entity.class,"vehicle").set(f.player,null);
-                        field(Entity.class,"passengers").set(entity[0],com.google.common.collect.ImmutableList.of());
+                        field(Entity.class,"passengers").set(entity[0],ImmutableList.of());
                         f.position(0,0,true);
                         field(Entity.class,"position").set(f.player,exit);
                         field(Entity.class,"blockPosition").set(f.player,BlockPos.containing(exit));
@@ -97,7 +100,7 @@ public final class BoatCatchReplayTest {
             check(controller.mountPending() && !controller.ready() && !f.player.isPassenger(),"submitting a catch is not a confirmed ride");
             check(!Boolean.TRUE.equals(controller.diagnostics().get("created_this_session")),"entity visibility alone does not authorize boat recovery");
             var rescue=new LandingBoatRescue(new LandingAssistPlan(LandingAssistPlan.Kind.BOAT,BlockPos.ZERO,BlockPos.ZERO,
-                    BlockPos.ZERO.below(),net.minecraft.core.Direction.UP,false,spawn),true);
+                    BlockPos.ZERO.below(),Direction.UP,false,spawn),true);
             field(LandingBoatRescue.class,"boat").set(rescue,controller);
             rescue.tick(context);
             check(!rescue.failed(),"client ground contact must not discard an already-submitted native catch");
@@ -121,7 +124,7 @@ public final class BoatCatchReplayTest {
     }
     private static void mount(WaterLandingReplayTest.Fixture f,Boat boat) throws Exception {
         field(Entity.class,"vehicle").set(f.player,boat);
-        field(Entity.class,"passengers").set(boat,com.google.common.collect.ImmutableList.of(f.player));
+        field(Entity.class,"passengers").set(boat,ImmutableList.of(f.player));
         f.player.fallDistance=0;
     }
     private static NativeActionReceipt receipt(WaterLandingReplayTest.Fixture f,NativeActionReceipt.Kind kind,NativeConfirmation evidence,int timeout) throws Exception {

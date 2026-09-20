@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.pathing;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalGoal;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalTerrain;
+import java.util.List;
 
 // 用给定高度和材质的简化地图，检查区域方向、分次取样、未知列记录，以及概览保留远处不同材质的表面。
 public final class RegionalTerrainTest {
@@ -27,7 +28,7 @@ public final class RegionalTerrainTest {
         check(scan.complete() && !scan.surfaces().isEmpty(),"loaded lower surfaces are discovered incrementally");
         check(scan.surfaces().stream().allMatch(s->s.point().y==92 && s.platform()),"distant unobserved floors are not invented");
         check((int)scan.summary().get("unloaded_columns")>0,"unknown columns remain explicit");
-        check(((java.util.List<?>)scan.summary().get("regions")).size()<=6,"the overview stays bounded");
+        check(((List<?>)scan.summary().get("regions")).size()<=6,"the overview stays bounded");
         var wide=RegionalTerrain.overview(origin);
         var distant=new RegionalTerrain.View() {
             public boolean known(Vec3 point) { return point.x<110; }

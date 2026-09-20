@@ -14,6 +14,9 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import sun.misc.Unsafe;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Abilities;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * 检查摔落生命预算、药效期限、黄心和原版飞行免摔，并把基础伤害公式与原版方法对照；附魔保护值直接传入，没有覆盖真实装备上的混合附魔读取。
@@ -60,10 +63,10 @@ public final class FallDamageBudgetTest {
 
     private static void nativeFlightImmunity() throws Exception {
         var memoryField = Unsafe.class.getDeclaredField("theUnsafe"); memoryField.setAccessible(true);
-        var player = (net.minecraft.client.player.LocalPlayer) ((Unsafe) memoryField.get(null))
-                .allocateInstance(net.minecraft.client.player.LocalPlayer.class);
-        var abilities = new net.minecraft.world.entity.player.Abilities(); abilities.mayfly = true;
-        var field = net.minecraft.world.entity.player.Player.class.getDeclaredField("abilities"); field.setAccessible(true);
+        var player = (LocalPlayer) ((Unsafe) memoryField.get(null))
+                .allocateInstance(LocalPlayer.class);
+        var abilities = new Abilities(); abilities.mayfly = true;
+        var field = Player.class.getDeclaredField("abilities"); field.setAccessible(true);
         field.set(player, abilities);
         check(!player.causeFallDamage(24, 1, null), "native Player.causeFallDamage grants mayfly immunity even while not flying");
         var immune = new FallDamageBudget(20, 0, 3, 1, 0, 0, 0, 0, 0.08, 0, true);

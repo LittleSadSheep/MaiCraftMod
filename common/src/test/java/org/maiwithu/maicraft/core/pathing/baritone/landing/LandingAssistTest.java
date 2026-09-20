@@ -41,6 +41,8 @@ import org.maiwithu.maicraft.client.actor.NativeActionPort;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import sun.misc.Unsafe;
+import net.minecraft.core.Direction;
+import net.minecraft.world.item.Items;
 
 /**
  * 检查不同落地用品的许可、依附位置、碰撞和回收规则，并直接调用部分原版蛛网、藤蔓和黏液块行为；最后验证准备被打断时先关好库存。
@@ -105,7 +107,7 @@ public final class LandingAssistTest {
     private static void geometry() {
         Scene scene = new Scene();
         var plan = new LandingAssistPlan(LandingAssistPlan.Kind.SLIME, BlockPos.ZERO, BlockPos.ZERO,
-                BlockPos.ZERO.below(), net.minecraft.core.Direction.UP, false);
+                BlockPos.ZERO.below(), Direction.UP, false);
         check(LandingAssistGeometry.safe(scene, pos -> true, plan, 0.6, 1.8, LongSets.emptySet()), "new slime validates the raised support height");
         scene.blocks.put(BlockPos.ZERO.above(2), Blocks.STONE.defaultBlockState());
         check(!LandingAssistGeometry.safe(scene, pos -> true, plan, 0.6, 1.8, LongSets.emptySet()), "raising slime into a low ceiling is unsafe");
@@ -194,7 +196,7 @@ public final class LandingAssistTest {
                     case "bodyEpoch", "controlRevision", "tickRevision" -> 1L;
                     default -> throw new AssertionError("unexpected preparation context access: " + method.getName());
                 });
-        var preparation = new LandingPreparation(net.minecraft.world.item.Items.WATER_BUCKET);
+        var preparation = new LandingPreparation(Items.WATER_BUCKET);
         field(LandingPreparation.class, "inventoryTouched").setBoolean(preparation, true);
         field(LandingPreparation.class, "selection").set(preparation, nativeCtor.newInstance(NativeActionReceipt.Kind.SELECT_HOTBAR,
                 context, 20, 2, NativeConfirmation.pending(), null, null));

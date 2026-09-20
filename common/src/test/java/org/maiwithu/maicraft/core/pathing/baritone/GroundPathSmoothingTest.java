@@ -28,6 +28,8 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import net.minecraft.core.Direction;
 
 // 在简化地形上检查能否把折线路段改成直走；覆盖中途墙、缺地板、危险支撑、未知区域、移动结构和读取预算，不只比较起终点。
 public final class GroundPathSmoothingTest {
@@ -49,7 +51,7 @@ public final class GroundPathSmoothingTest {
         scene.blocks.clear();
         check(!new GroundCorridor(scene, p -> p.getX() != 4, .6, 1.8, LongSets.emptySet(), PhysicalObstacleSnapshot.EMPTY)
                 .clear(from, to), "unknown middle chunks cannot become a shortcut");
-        var forbidden = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(); forbidden.add(new BlockPos(4, 0, 2).asLong());
+        var forbidden = new LongOpenHashSet(); forbidden.add(new BlockPos(4, 0, 2).asLong());
         check(!new GroundCorridor(scene, p -> true, .6, 1.8, forbidden, PhysicalObstacleSnapshot.EMPTY).clear(from, to),
                 "live protected body cells apply between endpoints");
         var dynamic = new PhysicalObstacleSnapshot(List.of(new AABB(4, 0, 0, 5, 2, 5)), 1, 0, "observed");
@@ -64,7 +66,7 @@ public final class GroundPathSmoothingTest {
         for (int x = 1; x <= 8; x++) {
             BetterBlockPos next = new BetterBlockPos(x, 0, Math.max(0, x - 5));
             Movement move = next.z == cell.z ? new MovementTraverse(baritone, cell, next)
-                    : new MovementDiagonal(baritone, cell, net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.SOUTH, 0);
+                    : new MovementDiagonal(baritone, cell, Direction.EAST, Direction.SOUTH, 0);
             move.override(5); steps.add(move); cell = next;
         }
         // 调用真实直线化入口后，检查起终点、时间预算和途中有效位置仍与原路线一致。
@@ -93,7 +95,7 @@ public final class GroundPathSmoothingTest {
         for (int x = 1; x <= 32; x++) {
             BetterBlockPos next = new BetterBlockPos(x, 0, Math.max(0, x - 15));
             Movement move = next.z == cell.z ? new MovementTraverse(baritone, cell, next)
-                    : new MovementDiagonal(baritone, cell, net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.SOUTH, 0);
+                    : new MovementDiagonal(baritone, cell, Direction.EAST, Direction.SOUTH, 0);
             move.override(5); steps.add(move); cell = next;
         }
         IPath longDirect = GroundPathSmoothing.smooth(baritone, path(steps), corridor, BlockPos.ZERO);

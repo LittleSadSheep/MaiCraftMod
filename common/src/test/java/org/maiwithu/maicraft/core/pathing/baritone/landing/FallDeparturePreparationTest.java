@@ -21,6 +21,11 @@ import org.maiwithu.maicraft.client.actor.DefaultLocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import java.io.File;
+import java.util.List;
+import java.util.Optional;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * 检查站在边缘时先准备物品和瞄准，真正离地后改为紧急救援；空中的准备不能继续等待挖开起点。
@@ -30,7 +35,7 @@ public final class FallDeparturePreparationTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var f = new WaterLandingReplayTest.Fixture(false);
         field(Minecraft.class, "gameThread").set(f.minecraft, Thread.currentThread());
-        field(Minecraft.class, "gameDirectory").set(f.minecraft, new java.io.File("fall-departure-settings-fixture"));
+        field(Minecraft.class, "gameDirectory").set(f.minecraft, new File("fall-departure-settings-fixture"));
         f.minecraft.player = f.player; f.minecraft.level = f.world;
         var instance = field(Minecraft.class, "instance"); Object oldClient = instance.get(null);
         instance.set(null, f.minecraft);
@@ -80,7 +85,7 @@ public final class FallDeparturePreparationTest {
 
     private static void airbornePrepping(WaterLandingReplayTest.Fixture f) throws Exception {
         f.position(24, -0.08, false); f.player.setXRot(0);
-        f.player.inventory.setItem(0,net.minecraft.world.item.ItemStack.EMPTY);
+        f.player.inventory.setItem(0,ItemStack.EMPTY);
         var movement = movement(f);
         var blocked = new BetterBlockPos(1, 23, 0);
         f.world.scene.blocks.put(blocked, Blocks.STONE.defaultBlockState());
@@ -94,11 +99,11 @@ public final class FallDeparturePreparationTest {
         var transaction = (Ae2ResourceSupply.Session)Proxy.newProxyInstance(
                 Ae2ResourceSupply.Session.class.getClassLoader(),new Class<?>[]{Ae2ResourceSupply.Session.class},
                 (proxy,method,args) -> switch (method.getName()) {
-                    case "tick" -> { supplyTicks[0]++; yield java.util.Optional.empty(); }
+                    case "tick" -> { supplyTicks[0]++; yield Optional.empty(); }
                     case "phase" -> "opening_wireless_terminal";
                     default -> throw new AssertionError(method.getName());
                 });
-        var supply = new LandingMaterialSupply(java.util.List.of(net.minecraft.resources.ResourceLocation.parse("minecraft:water_bucket")),
+        var supply = new LandingMaterialSupply(List.of(ResourceLocation.parse("minecraft:water_bucket")),
                 (player,request) -> { starts[0]++; return transaction; });
         field(LandingAssistSession.class,"materialSupply").set(movement.landingAssist(),supply);
         movement.landingAssist().tick(f.context);

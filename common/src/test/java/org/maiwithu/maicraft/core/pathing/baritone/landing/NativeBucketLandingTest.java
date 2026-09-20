@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionPort;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import net.minecraft.world.entity.Entity;
+import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /**
  * 在内存世界里真正调用原版水桶 use，检查花草、半砖侧面和植物顶部命中后的水格与回收；玩家触地和湿身反馈仍由测试设置。
@@ -42,7 +44,7 @@ public final class NativeBucketLandingTest {
         f.world.scene.blocks.put(BlockPos.ZERO,flower);
         if (slabSide) f.world.scene.blocks.put(BlockPos.ZERO.below(),Blocks.STONE_SLAB.defaultBlockState());
         var inventory = LandingAssistPlan.InventorySnapshot.capture(f.player,
-                org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.LANDING_ONLY,false);
+                TerrainPermit.LANDING_ONLY,false);
         var plan = inventory.plans(f.world,BlockPos.ZERO,pos -> false).getFirst();
         var source = slabSide ? BlockPos.ZERO.below() : plantTopHit ? BlockPos.ZERO.above() : BlockPos.ZERO;
         check(plan.cell().equals(slabSide ? BlockPos.ZERO.below() : BlockPos.ZERO),"initial source must be inside " + flower + "; actual plan=" + plan);
@@ -70,7 +72,7 @@ public final class NativeBucketLandingTest {
         f.position(2,-.4,false);
         if (slabSide) {
             f.world.scene.blocks.put(BlockPos.ZERO.below().west(),Blocks.AIR.defaultBlockState());
-            field(net.minecraft.world.entity.Entity.class,"position").set(f.player,new Vec3(-.4,-.25,.5));
+            field(Entity.class,"position").set(f.player,new Vec3(-.4,-.25,.5));
             look(f,new Vec3(0,-.75,.5));
             var hit = f.world.clip(new ClipContext(f.player.getEyePosition(),f.player.getEyePosition()
                     .add(f.player.getViewVector(1).scale(4.5)),ClipContext.Block.OUTLINE,ClipContext.Fluid.NONE,f.player));

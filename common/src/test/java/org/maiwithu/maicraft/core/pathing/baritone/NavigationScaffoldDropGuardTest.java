@@ -20,6 +20,12 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
+import baritone.api.pathing.movement.ActionCosts;
+import baritone.pathing.movement.CalculationContext;
+import java.nio.file.Path;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /** The real unprotected-support right-click path must consult the provider's positional policy. */
 public final class NavigationScaffoldDropGuardTest {
@@ -31,8 +37,8 @@ public final class NavigationScaffoldDropGuardTest {
         var oldPolicy = EmbeddedBaritonePolicy.snapshot(); Boolean oldPlace = null;
         try (var h = new InteractionWorldTestHarness()) {
             // Baritone boot reads its settings path and creates its private backend directory.
-            field(net.minecraft.client.Minecraft.class, "gameDirectory").set(net.minecraft.client.Minecraft.getInstance(),
-                    java.nio.file.Path.of("navigation-scaffold-settings-fixture").toAbsolutePath().toFile());
+            field(Minecraft.class, "gameDirectory").set(Minecraft.getInstance(),
+                    Path.of("navigation-scaffold-settings-fixture").toAbsolutePath().toFile());
             oldPlace = BaritoneAPI.getSettings().allowPlace.value;
             h.inventory.setItem(0, new ItemStack(Items.COBBLESTONE, 64));
             var hit = new BlockHitResult(new Vec3(4.5, 1, 4.5), Direction.UP, new BlockPos(4, 0, 4), false);
@@ -47,19 +53,19 @@ public final class NavigationScaffoldDropGuardTest {
                     (proxy, method, values) -> method.getName().equals("getPlayerContext") ? playerContext : null));
             owner.set(null, nav); provider.set(null, null); EmbeddedBaritonePolicy.clear(); BaritoneAPI.getSettings().allowPlace.value = true;
             var bridge = new EmbeddedBaritoneActionBridge();
-            var use = bridge.getClass().getDeclaredMethod("startUse", org.maiwithu.maicraft.client.actor.LocalPlayerContext.class,
+            var use = bridge.getClass().getDeclaredMethod("startUse", LocalPlayerContext.class,
                     EmbeddedBaritoneNavigator.class, boolean.class); use.setAccessible(true);
             use.invoke(bridge, ClientRuntime.requireContext(h.player), nav, false);
             check(policy.checked.equals(hit.getBlockPos().above()) && h.blockUses() == 0,
                     "unprotected support cannot bypass the exact destination's debris policy");
             var frozen = EmbeddedBaritonePolicy.capture(null, nav.protectedMutationCells(), null);
             Field unsafe = sun.misc.Unsafe.class.getDeclaredField("theUnsafe"); unsafe.setAccessible(true);
-            var calculation = (baritone.pathing.movement.CalculationContext) ((sun.misc.Unsafe) unsafe.get(null))
-                    .allocateInstance(baritone.pathing.movement.CalculationContext.class);
+            var calculation = (CalculationContext) ((sun.misc.Unsafe) unsafe.get(null))
+                    .allocateInstance(CalculationContext.class);
             field(calculation.getClass(), "hasThrowaway").setBoolean(calculation, true);
             field(calculation.getClass(), "maicraftPolicy").set(calculation, frozen);
-            check(calculation.costOfPlacingAt(4, 1, 4, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState())
-                            == baritone.api.pathing.movement.ActionCosts.COST_INF && !frozen.forbidsBody(4, 1, 4),
+            check(calculation.costOfPlacingAt(4, 1, 4, Blocks.AIR.defaultBlockState())
+                            == ActionCosts.COST_INF && !frozen.forbidsBody(4, 1, 4),
                     "native worker costs exclude the denied placement on replanning without forbidding walking");
             policy.allowed = true;
             nav = new EmbeddedBaritoneNavigator(h.player, () -> null, () -> false, policy, false); owner.set(null, nav);

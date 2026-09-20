@@ -17,6 +17,10 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
+import java.io.File;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 
 /**
  * 检查寻路能否先选“待准备辅助物”的落差，以及没有辅助物时怎样拒绝受伤落地；不会把计划能补料当作背包已经有料。
@@ -25,9 +29,9 @@ public final class AutomaticFallAdmissionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var f = new WaterLandingReplayTest.Fixture(false);
-        field(net.minecraft.client.Minecraft.class, "gameThread").set(f.minecraft, Thread.currentThread());
-        field(net.minecraft.client.Minecraft.class, "gameDirectory").set(f.minecraft, new java.io.File("automatic-fall-settings-fixture"));
-        var instance = field(net.minecraft.client.Minecraft.class, "instance"); Object previous = instance.get(null);
+        field(Minecraft.class, "gameThread").set(f.minecraft, Thread.currentThread());
+        field(Minecraft.class, "gameDirectory").set(f.minecraft, new File("automatic-fall-settings-fixture"));
+        var instance = field(Minecraft.class, "instance"); Object previous = instance.get(null);
         instance.set(null, f.minecraft);
         try { admission(f); } finally { instance.set(null, previous); }
         System.out.println("AutomaticFallAdmissionTest: passed");
@@ -76,8 +80,8 @@ public final class AutomaticFallAdmissionTest {
         field(CalculationContext.class, "waterLandingWindow").set(context,fast);
         f.world.scene.blocks.put(grassFeet,Blocks.TALL_GRASS.defaultBlockState());
         f.world.scene.blocks.put(grassFeet.above(),Blocks.TALL_GRASS.defaultBlockState().setValue(
-                net.minecraft.world.level.block.state.properties.BlockStateProperties.DOUBLE_BLOCK_HALF,
-                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER));
+                BlockStateProperties.DOUBLE_BLOCK_HALF,
+                DoubleBlockHalf.UPPER));
         check(!fast.permits(28) && context.landingPlans(grassFeet,28).stream().anyMatch(plan -> plan.kind() == LandingAssistPlan.Kind.WATER),
                 "planned bucket window uses the elevated grass hit face instead of the dry ground height");
         f.world.scene.blocks.remove(grassFeet); f.world.scene.blocks.remove(grassFeet.above());

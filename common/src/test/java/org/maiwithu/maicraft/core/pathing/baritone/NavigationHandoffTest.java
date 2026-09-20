@@ -21,6 +21,20 @@ import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import sun.misc.Unsafe;
+import baritone.api.Settings;
+import java.util.List;
+import java.util.Map;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.task.TaskState;
 
 /**
  * 检查导航暂让控制和停止时的收尾：动作还没到安全位置就继续驱动，到安全位置才清按键；测试直接设置安全状态。
@@ -82,12 +96,12 @@ public final class NavigationHandoffTest {
     }
 
     private static void precisionWalkingDoesNotPlanGapJumps() throws Exception {
-        var constructor = baritone.api.Settings.class.getDeclaredConstructor(); constructor.setAccessible(true);
+        var constructor = Settings.class.getDeclaredConstructor(); constructor.setAccessible(true);
         var settings = constructor.newInstance();
         // 施工短步、长途移动交替时，每次都覆盖自己的跑酷规则；禁跑酷仍允许普通上台阶和获准搭路。
         for (boolean travel : new boolean[]{true, false, true, false}) {
             EmbeddedBaritoneRuntime.configureWalking(settings, travel);
-            EmbeddedBaritoneRuntime.configureTerrain(settings, org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.TERRAFORM);
+            EmbeddedBaritoneRuntime.configureTerrain(settings, TerrainPermit.TERRAFORM);
             check(settings.allowSprint.value == travel && settings.allowParkour.value == travel,
                     "precision walking must not inherit a previous travel route's gap jumps");
             check(settings.allowPlace.value, "avoiding gap jumps must not remove authorized ordinary construction access");
@@ -95,18 +109,18 @@ public final class NavigationHandoffTest {
     }
 
     private static void buildKeepsAnUnfinishedApproach() throws Exception {
-        try (var world = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness(); Fixture fixture = new Fixture(world.player)) {
-            var target = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target(
-                    net.minecraft.world.level.block.Blocks.STONE, net.minecraft.world.item.Items.STONE,
-                    new net.minecraft.core.BlockPos(4, 1, 4), "nearby during jump", null, null, null);
-            var record = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord("active-jump", 1000, java.util.List.of(target), false);
+        try (var world = new InteractionWorldTestHarness(); Fixture fixture = new Fixture(world.player)) {
+            var target = new BuildTaskRecord.Target(
+                    Blocks.STONE, Items.STONE,
+                    new BlockPos(4, 1, 4), "nearby during jump", null, null, null);
+            var record = new BuildTaskRecord("active-jump", 1000, List.of(target), false);
             Class<?> type = Class.forName("org.maiwithu.maicraft.core.task.build.FirstPersonBuildCompanionTask");
             var constructor = type.getDeclaredConstructor(LocalPlayer.class, record.getClass()); constructor.setAccessible(true);
             Object task = constructor.newInstance(world.player, record);
-            var cellConstructor = Class.forName(type.getName() + "$CellPlan").getDeclaredConstructor(target.getClass(), java.util.List.class);
-            cellConstructor.setAccessible(true); Object cell = cellConstructor.newInstance(target, java.util.List.of());
-            field(type, "cell").set(task, cell); field(type, "queue").set(task, new ArrayList<>(java.util.List.of(cell)));
-            var navigation = PlayerNav.toGoal(world.player, () -> org.maiwithu.maicraft.core.pathing.calc.NavGoal.exact(target.pos()), .8, () -> false).walkingOnly();
+            var cellConstructor = Class.forName(type.getName() + "$CellPlan").getDeclaredConstructor(target.getClass(), List.class);
+            cellConstructor.setAccessible(true); Object cell = cellConstructor.newInstance(target, List.of());
+            field(type, "cell").set(task, cell); field(type, "queue").set(task, new ArrayList<>(List.of(cell)));
+            var navigation = PlayerNav.toGoal(world.player, () -> NavGoal.exact(target.pos()), .8, () -> false).walkingOnly();
             Object transport = field(PlayerNav.class, "navigator").get(navigation); set(transport, "ground", fixture.nav);
             field(type, "nav").set(task, navigation);
             var phase = field(type, "phase"); Object originalPhase = phase.get(task);
@@ -123,31 +137,31 @@ public final class NavigationHandoffTest {
     }
 
     private static void buildSelectionWaitsForReleasedNavigation() throws Exception {
-        try (var world = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness();
+        try (var world = new InteractionWorldTestHarness();
              Fixture fixture = new Fixture(world.player)) {
             // 交接测试也提供真实可达的地面点击；导航释放后要重证这一放法，不能用空见证直接进入瞄准。
-            world.position(new net.minecraft.world.phys.Vec3(3.12, 1, 4.8));
-            world.inventory.setItem(0, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE));
-            var target = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord.Target(
-                    net.minecraft.world.level.block.Blocks.STONE, net.minecraft.world.item.Items.STONE,
-                    new net.minecraft.core.BlockPos(4, 1, 4), "navigation handoff", null, null, null);
-            var record = new org.maiwithu.maicraft.core.task.build.BuildTaskRecord("handoff", 1000, java.util.List.of(target), false);
+            world.position(new Vec3(3.12, 1, 4.8));
+            world.inventory.setItem(0, new ItemStack(Items.STONE));
+            var target = new BuildTaskRecord.Target(
+                    Blocks.STONE, Items.STONE,
+                    new BlockPos(4, 1, 4), "navigation handoff", null, null, null);
+            var record = new BuildTaskRecord("handoff", 1000, List.of(target), false);
             Class<?> type = Class.forName("org.maiwithu.maicraft.core.task.build.FirstPersonBuildCompanionTask");
             var constructor = type.getDeclaredConstructor(LocalPlayer.class, record.getClass()); constructor.setAccessible(true);
             Object task = constructor.newInstance(world.player, record);
-            var cellConstructor = Class.forName(type.getName() + "$CellPlan").getDeclaredConstructor(target.getClass(), java.util.List.class);
-            cellConstructor.setAccessible(true); field(type, "cell").set(task, cellConstructor.newInstance(target, java.util.List.of()));
+            var cellConstructor = Class.forName(type.getName() + "$CellPlan").getDeclaredConstructor(target.getClass(), List.class);
+            cellConstructor.setAccessible(true); field(type, "cell").set(task, cellConstructor.newInstance(target, List.of()));
             var geometry = Class.forName("org.maiwithu.maicraft.core.task.build.BuildPlacementGeometry");
-            var current = geometry.getDeclaredMethod("currentGesture", LocalPlayer.class, target.getClass(), java.util.Map.class);
+            var current = geometry.getDeclaredMethod("currentGesture", LocalPlayer.class, target.getClass(), Map.class);
             current.setAccessible(true);
-            field(type, "gesture").set(task, current.invoke(null, world.player, target, java.util.Map.of()));
+            field(type, "gesture").set(task, current.invoke(null, world.player, target, Map.of()));
             var select = type.getDeclaredMethod("selectItemTick"); select.setAccessible(true);
             fixture.nav.stop();
             for (int tick = 0; tick < 3; tick++) {
                 world.nextTick();
-                check(select.invoke(task) == org.maiwithu.maicraft.task.TaskState.RUNNING,
+                check(select.invoke(task) == TaskState.RUNNING,
                         "construction waits while the stopped navigation still owns an unsafe movement");
-                var gate = (org.maiwithu.maicraft.core.task.FirstPersonActionGate) field(type, "selection").get(task);
+                var gate = (FirstPersonActionGate) field(type, "selection").get(task);
                 check(!gate.started(), "construction must not start a competing inventory transaction before native navigation yields");
                 check(fixture.nav.requiresOrphanContinuation() && fixture.inputs.isInputForcedDown(Input.MOVE_FORWARD),
                         "waiting construction must preserve orphan continuation and physical steering to safety");

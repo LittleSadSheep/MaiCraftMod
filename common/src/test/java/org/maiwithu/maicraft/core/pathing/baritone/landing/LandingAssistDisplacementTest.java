@@ -10,6 +10,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
+import net.minecraft.world.phys.AABB;
 
 /**
  * 检查角色落到计划之外后怎样收尾：必须持续站稳、入水或攀附，待确认的操作要处理完，原落点辅助物留在现场。
@@ -83,7 +84,7 @@ public final class LandingAssistDisplacementTest {
 
     private static void position(LocalPlayer player, boolean settled, String support) throws Exception {
         field(LocalPlayer.class, "position").set(player, new Vec3(4.5, settled ? 0 : 4, .5));
-        field(LocalPlayer.class, "bb").set(player, new net.minecraft.world.phys.AABB(4.2,settled ? 0 : 4,.2,4.8,settled ? 1.8 : 5.8,.8));
+        field(LocalPlayer.class, "bb").set(player, new AABB(4.2,settled ? 0 : 4,.2,4.8,settled ? 1.8 : 5.8,.8));
         field(LocalPlayer.class, "blockPosition").set(player, new BlockPos(4, settled ? 0 : 4, 0));
         field(LocalPlayer.class, "deltaMovement").set(player, new Vec3(0, settled ? 0 : -0.8, 0));
         field(LocalPlayer.class, "onGround").setBoolean(player, settled && support.equals("ground"));

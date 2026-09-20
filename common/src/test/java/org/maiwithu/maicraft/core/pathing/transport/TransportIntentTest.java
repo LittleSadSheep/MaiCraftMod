@@ -5,6 +5,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import java.util.Map;
 
 /**
  * 检查电梯提示使用实际候选楼层，逃离目标与不限高度目标不被中心点误导；途中改目标、加保护或交通已产生影响时要保留相应限制和失败原因。
@@ -35,7 +36,7 @@ public final class TransportIntentTest {
         check(!workstation.goal().isAt(upper), "fixture must be an occupied goal cell");
         check(TransportNavigator.compatibleGoal(workstation, upper, workstation.semanticFingerprint(), empty, empty),
                 "an intermediate elevator floor must not cancel an unchanged workstation approach");
-        String failure = TransportNavigator.exhaustedReason(List.of(java.util.Map.of("mode", "elevator", "success", false,
+        String failure = TransportNavigator.exhaustedReason(List.of(Map.of("mode", "elevator", "success", false,
                 "code", "no_proven_elevator_route", "detail", "no confirmed boarding doorway")), List.of());
         check(failure.contains("no_proven_elevator_route") && failure.contains("no confirmed boarding doorway"),
                 "an exhausted transport plan must preserve the actual session failure in the task result");

@@ -30,6 +30,7 @@ import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import org.maiwithu.maicraft.core.pathing.baritone.WaterBucketFall;
+import net.minecraft.world.item.Items;
 
 /**
  * 逐项检查草、半砖和楼梯上的落地辅助几何，包含实际含水与舀水方法；确认保护区也覆盖可能间接受影响的高草另一半。
@@ -142,7 +143,7 @@ public final class LandingSurfaceRulesTest {
         check(WaterBucketFall.sourceWater(wet) && WaterBucketFall.canRecover(wet,true,false)
                         && !WaterBucketFall.canRecover(wet,false,false),"source ownership is still required for waterlogged recovery");
         check(WaterBucketFall.dryGeometry(wet).equals(dry),"geometry never deletes the solid waterlogged support");
-        check(((BucketPickup)wet.getBlock()).pickupBlock(null,level,position,wet).is(net.minecraft.world.item.Items.WATER_BUCKET)
+        check(((BucketPickup)wet.getBlock()).pickupBlock(null,level,position,wet).is(Items.WATER_BUCKET)
                         && scene.getBlockState(position).equals(dry),"native pickup restores the original dry support state");
     }
     private static LandingAssistPlan water(Scene scene) { return WATER.plans(scene,FEET,pos -> false).getFirst(); }

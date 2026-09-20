@@ -8,6 +8,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Block;
 
 /**
  * 检查开门应选主手、潜行时暂不点击，以及挖掘重试不能把已有进展清零；这里调用选择规则，没有真正点门。
@@ -24,7 +25,7 @@ public final class NavigationActionPolicyTest {
         check(!EmbeddedBaritoneActionBridge.isHandOpenable(Blocks.STONE.defaultBlockState()), "solid obstacle");
         var pickaxe = new ItemStack(Items.IRON_PICKAXE);
         var blocks = new ItemStack(Items.COBBLESTONE);
-        for (var passage : new net.minecraft.world.level.block.Block[]{
+        for (var passage : new Block[]{
                 Blocks.OAK_DOOR, Blocks.COPPER_DOOR, Blocks.OAK_FENCE_GATE}) {
             check(EmbeddedBaritoneActionBridge.chooseUseHand(passage.defaultBlockState(), false,
                     pickaxe, blocks) == InteractionHand.MAIN_HAND, "offhand blocks must not replace door use");

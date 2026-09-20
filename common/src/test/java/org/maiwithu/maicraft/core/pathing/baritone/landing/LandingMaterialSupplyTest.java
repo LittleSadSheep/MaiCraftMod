@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import java.util.Set;
 
 /**
  * 用可控的 AE2 会话检查补料：已携带物品优先、同刻不重复、到期先收尾、换身体后停用，以及有干草时仍可尝试取得水。
@@ -104,7 +105,7 @@ public final class LandingMaterialSupplyTest {
             var pending = new Supply(); int[] begins = {0};
             var supply = new LandingMaterialSupply(List.of(HAY,WATER),(player,request) -> {
                 begins[0]++;
-                check(request.acceptedItemIds().equals(java.util.Set.of(WATER)),
+                check(request.acceptedItemIds().equals(Set.of(WATER)),
                         "carried hay stays a fallback instead of being requested again from AE");
                 return pending;
             });

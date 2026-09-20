@@ -18,6 +18,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import sun.misc.Unsafe;
+import net.minecraft.world.entity.Entity;
 
 /**
  * 检查实际支撑高度、已有摔落距离、半砖与未知地形怎样影响落地判断；再确认到达格子仍需要触地或入水。
@@ -78,11 +79,11 @@ public final class FallLandingTest {
                     default -> throw new AssertionError("unexpected live query " + method.getName());
                 });
         var air = Blocks.AIR.defaultBlockState();
-        set(net.minecraft.world.entity.Entity.class, player, "onGround", false);
+        set(Entity.class, player, "onGround", false);
         check(!MovementFall.reachedLanding(ctx, destination, air), "feet cell above a slab is not yet contact");
         check(MovementFall.reachedLanding(ctx, destination, Blocks.WATER.defaultBlockState()),
                 "water arrival must not wait for onGround in an ordinary or extended fall");
-        set(net.minecraft.world.entity.Entity.class, player, "onGround", true);
+        set(Entity.class, player, "onGround", true);
         check(MovementFall.reachedLanding(ctx, destination, air), "confirmed dry landing permits the next movement");
         check(!MovementFall.reachedLanding(ctx, destination.east(), air), "ground contact at a different cell is not arrival");
     }

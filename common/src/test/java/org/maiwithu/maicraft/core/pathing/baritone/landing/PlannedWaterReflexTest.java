@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import sun.misc.Unsafe;
+import org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation;
 
 /**
  * 检查已有落地救援时自救不会再开一套放水流程；原会话完成或导航失去控制后，新的紧急自救仍可启动。
@@ -54,7 +55,7 @@ public final class PlannedWaterReflexTest {
                     throw new AssertionError(method.getName());
                 });
         PathExecutor executor = (PathExecutor) memory.allocateInstance(PathExecutor.class);
-        field(PathExecutor.class, "groundJump").set(executor, new org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation());
+        field(PathExecutor.class, "groundJump").set(executor, new GroundJumpContinuation());
         field(PathExecutor.class, "path").set(executor, path);
         PathingBehavior behavior = (PathingBehavior) memory.allocateInstance(PathingBehavior.class);
         field(PathingBehavior.class, "current").set(behavior, executor);

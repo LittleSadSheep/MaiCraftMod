@@ -17,6 +17,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 import sun.misc.Unsafe;
+import java.util.List;
 
 /**
  * 把给定的位置样本交给真实移动更新：已批准的斜向跑跳可继续路线，普通长直行不应在格子边界停步或改变方向。位置由测试设置，不模拟完整移动物理。
@@ -48,7 +49,7 @@ public final class GroundMovementReplayTest {
         field(LocalPlayer.class, "position").set(player, apex);
         BetterBlockPos physical = context.playerFeet();
         check(jump.feet(diagonal, physical).equals(physical), "an arbitrary airborne body has no projected route permission");
-        jump.launch(-60, -60, java.util.List.of(diagonal, next)); jump.observe(false, apex.y);
+        jump.launch(-60, -60, List.of(diagonal, next)); jump.observe(false, apex.y);
         check(diagonal.updateState(running()).getStatus() == MovementStatus.SUCCESS,
                 "the native diagonal must advance at destination XZ during its verified hop instead of chasing it until landing");
         check(player.position().equals(apex), "route projection must never write the actual player's position");
@@ -65,7 +66,7 @@ public final class GroundMovementReplayTest {
         check(jump.feet(other, physical).equals(physical), "a later route or unverified interaction movement cannot inherit the hop");
         jump.observe(true, -60);
         check(jump.feet(diagonal, physical).equals(physical), "actual landing ends the hop's route layer");
-        jump.launch(-60, -60, java.util.List.of(diagonal)); jump.observe(false, -60.2);
+        jump.launch(-60, -60, List.of(diagonal)); jump.observe(false, -60.2);
         check(jump.feet(diagonal, physical).equals(physical), "falling below the runway hands back to ordinary recovery");
 
         Vec3 start = new Vec3(.5, 0, .5), end = new Vec3(32.5, 0, 17.5);
@@ -88,7 +89,7 @@ public final class GroundMovementReplayTest {
         field(LocalPlayer.class, "position").set(player, start.add(2, 1.2, 1));
         check(straight.updateState(running()).getStatus() == MovementStatus.UNREACHABLE,
                 "an unplanned airborne body cannot claim a straight travel hop");
-        jump.launch(0, 0, java.util.List.of(straight)); jump.observe(false, 1.2);
+        jump.launch(0, 0, List.of(straight)); jump.observe(false, 1.2);
         var airborne = straight.updateState(running());
         check(airborne.getStatus() == MovementStatus.RUNNING && airborne.getInputStates().get(Input.MOVE_FORWARD)
                 && airborne.getInputStates().get(Input.SPRINT) && !straight.safeToCancel(),

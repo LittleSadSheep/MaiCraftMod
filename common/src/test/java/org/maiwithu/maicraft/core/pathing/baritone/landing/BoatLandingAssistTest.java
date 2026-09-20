@@ -21,6 +21,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import java.lang.reflect.Proxy;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.util.Mth;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /**
  * 检查落地上船的放置范围、上船距离、实体归属、下船空间和回收条件；部分几何直接与原版帮助方法对照。
@@ -58,9 +63,9 @@ public final class BoatLandingAssistTest {
                 "ambiguous concurrent spawns must not assign ownership");
         check(snapshot.airborneWindow(4,.08,0),"a planned short descent has native spawn and mount steps");
         check(!snapshot.airborneWindow(200,.08,0),"a planned fatal leap cannot assume instant boat creation and boarding");
-        check(BoatLandingRecovery.capacity(net.minecraft.world.item.ItemStack.EMPTY, new net.minecraft.world.item.ItemStack(Items.OAK_BOAT)),
+        check(BoatLandingRecovery.capacity(ItemStack.EMPTY, new ItemStack(Items.OAK_BOAT)),
                 "empty main-inventory slot can receive the native boat drop");
-        check(!BoatLandingRecovery.capacity(new net.minecraft.world.item.ItemStack(Items.OAK_BOAT), new net.minecraft.world.item.ItemStack(Items.OAK_BOAT)),
+        check(!BoatLandingRecovery.capacity(new ItemStack(Items.OAK_BOAT), new ItemStack(Items.OAK_BOAT)),
                 "a full nonstackable boat slot is not pickup capacity");
         check(!BoatLandingRecovery.recoveredIntoInventory(false,0,1), "boat destruction alone must never confirm recovery");
         check(!BoatLandingRecovery.recoveredIntoInventory(true,1,1), "unrelated inventory growth cannot recover a still-existing boat");
@@ -75,18 +80,18 @@ public final class BoatLandingAssistTest {
     private static void rejectsCreativeRecovery() throws Exception {
         var memoryField = sun.misc.Unsafe.class.getDeclaredField("theUnsafe"); memoryField.setAccessible(true);
         var player = (CreativePlayer)((sun.misc.Unsafe)memoryField.get(null)).allocateInstance(CreativePlayer.class);
-        var ctx = (org.maiwithu.maicraft.client.actor.LocalPlayerContext)java.lang.reflect.Proxy.newProxyInstance(
-                org.maiwithu.maicraft.client.actor.LocalPlayerContext.class.getClassLoader(),
-                new Class<?>[]{org.maiwithu.maicraft.client.actor.LocalPlayerContext.class}, (proxy,method,args) -> {
+        var ctx = (LocalPlayerContext)Proxy.newProxyInstance(
+                LocalPlayerContext.class.getClassLoader(),
+                new Class<?>[]{LocalPlayerContext.class}, (proxy,method,args) -> {
                     if (method.getName().equals("player")) return player;
                     throw new AssertionError("creative recovery queried a world/action: " + method.getName());
                 });
-        var eligible = BoatLandingRecovery.class.getDeclaredMethod("eligible", org.maiwithu.maicraft.client.actor.LocalPlayerContext.class, Boat.class);
+        var eligible = BoatLandingRecovery.class.getDeclaredMethod("eligible", LocalPlayerContext.class, Boat.class);
         eligible.setAccessible(true);
         check(!(Boolean)eligible.invoke(new BoatLandingRecovery(UUID.randomUUID(),Items.OAK_BOAT),ctx,null),
                 "creative recovery must stop before any boat, inventory or native-action access");
     }
-    private static final class CreativePlayer extends net.minecraft.client.player.LocalPlayer {
+    private static final class CreativePlayer extends LocalPlayer {
         private CreativePlayer() { super(null,null,null,null,null,false,false); }
         public boolean isCreative() { return true; }
     }
@@ -94,7 +99,7 @@ public final class BoatLandingAssistTest {
     private static final class NativeEscape extends Entity {
         private NativeEscape() { super(EntityType.BOAT, null); }
         static Vec3 offset(double boat, double rider, float yaw) {
-            return getCollisionHorizontalEscapeVector(boat * net.minecraft.util.Mth.SQRT_OF_TWO, rider, yaw);
+            return getCollisionHorizontalEscapeVector(boat * Mth.SQRT_OF_TWO, rider, yaw);
         }
         protected void defineSynchedData(SynchedEntityData.Builder builder) { }
         protected void readAdditionalSaveData(CompoundTag tag) { }
