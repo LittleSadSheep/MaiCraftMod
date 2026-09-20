@@ -20,6 +20,7 @@ public final class KnowledgeLibrary {
     public static final String GUIDE = "maicraft://knowledge/guide";
     public static final String BLUEPRINT = "maicraft://knowledge/blueprint";
     public static final String PROCESSES = "maicraft://knowledge/processes";
+    public static final String RECIPES = "maicraft://knowledge/recipes";
     private static final int PAGE_SIZE = 16;
     public interface Source {
         List<KnowledgeDocument.Entry> entries();
@@ -37,7 +38,9 @@ public final class KnowledgeLibrary {
         builtins = Map.of(INDEX, load("index", "知识索引", "按需发现方块状态、Ponder 教程和实际执行能力。"),
                 GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"),
                 BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格建模 v1/v2、组件、阵列、镜像、三角形、斜坡、三棱柱、三角锥、空心、面棱材质、开孔、导出、续建和机器蓝图。"),
-                PROCESSES, load("processes", "统一机器生产与原生加工", "按需读取生产v1/v2、附魔报价和AE2水中转化机制契约。"));
+                PROCESSES, load("processes", "统一机器生产与原生加工", "按需读取生产v1/v2、附魔报价和AE2水中转化机制契约。"),
+                // 材料需求先选择工艺再考虑设备；入口说明保持独立，默认能力描述不展开整套配方。
+                RECIPES, load("recipes", "从材料需求规划工艺和机器", "EMI 配方树、工作站、Ponder 教程、已有设施复用与实际产出验收。"));
     }
     public static KnowledgeLibrary offline() {
         return new KnowledgeLibrary(new Source() {
@@ -144,7 +147,8 @@ public final class KnowledgeLibrary {
         JsonObject result = new JsonObject(); result.add("resources", hits);
         result.addProperty("total_matches", matches.size()); result.addProperty("truncated", matches.size() > limit);
         result.addProperty("provider_status", source.status()); result.addProperty("content_loaded", false);
-        result.addProperty("search_scope", "Registered component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; unrequested scene bodies are not compiled or searched.");
+        // 材料搜索也只看注册名称；不为了排序查询EMI配方或编译未请求的教程，正文在下一次按需读取时展开。
+        result.addProperty("search_scope", "Registered item/component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; recipe trees and unrequested scene bodies are not loaded or searched.");
         result.addProperty("next_step", "Read a returned URI with resources/read or perceive(view=knowledge, resource_uri=...). No matches do not prove no relevant mechanic exists.");
         return result;
     }

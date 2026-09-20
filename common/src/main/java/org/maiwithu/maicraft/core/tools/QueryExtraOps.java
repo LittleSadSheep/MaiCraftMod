@@ -185,8 +185,11 @@ String item_id,
         }
 
         if (recipes.isEmpty()) {
-            return TaskResult.ok("no recipe for " + name + " — it's obtained another way (mine it, or "
-                    + "trade), not crafted or smelted.").toJson();
+            // 普通工作台和炉子没查到时，模组机器仍可能加工该材料；交给按需工艺知识，不能误导角色去采矿或交易。
+            return TaskResult.ok("No ordinary crafting/cooking recipe was found for " + name
+                    + ". This does not prove that no recipe exists; inspect material/process knowledge at "
+                    + org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSource.uri(BuiltInRegistries.ITEM.getKey(target))
+                    + " before selecting another acquisition route.").toJson();
         }
         return TaskResult.ok("recipe(s) for " + name + ":\n\n" + String.join("\n\n", recipes) + "\n\n"
                 + "To make it —\n"

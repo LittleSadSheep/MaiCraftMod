@@ -19,11 +19,15 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
     public static final String BLOCK = "maicraft://knowledge/block/";
     private final PonderKnowledgeSource ponder = new PonderKnowledgeSource(new ReflectivePonderAccess(), MinecraftKnowledgeSource::displayName);
     private final CreateTooltipKnowledge tooltips = new CreateTooltipKnowledge();
+    private final RecipeKnowledgeSource recipes = new RecipeKnowledgeSource();
 
     @Override public List<KnowledgeDocument.Entry> entries() { return ponder.entries(); }
-    @Override public String status() { return ponder.status(); }
+    // 搜索没有查询EMI索引，不能把Ponder未安装的状态当作所有配方来源都不可用。
+    @Override public String status() { return "ponder=" + ponder.status() + "; recipes=read_on_demand"; }
     @Override public JsonArray templates() {
         JsonArray templates = ponder.templates();
+        // 配方模板只发布查询格式；实际材料页等调用者指定物品后才读取当前EMI索引。
+        templates.addAll(recipes.templates());
         templates.add(PonderKnowledgeSource.template(BLOCK + "{namespace}/{+path}", "registry.block", "安装版本中的方块状态、物品说明、Create Shift/Ctrl 用法和 Ponder 场景链接"));
         return templates;
     }
@@ -37,11 +41,19 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
                 var entry = blockEntry(id, block);
                 if (java.util.Arrays.stream(terms).allMatch(entry.searchable()::contains)) entries.add(entry);
             });
+            // 粉末等没有方块形态的材料也能按名称或ID发现配方入口，搜索时不预读合成树。
+            BuiltInRegistries.ITEM.forEach(item -> {
+                ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
+                String name = I18n.get(item.getDescriptionId());
+                String searchable = (id + " " + name).toLowerCase(Locale.ROOT);
+                if (java.util.Arrays.stream(terms).allMatch(searchable::contains)) entries.add(RecipeKnowledgeSource.entry(id, name));
+            });
         }
         return entries;
     }
 
     @Override public KnowledgeDocument read(String uri) {
+        if (uri.startsWith(RecipeKnowledgeSource.PREFIX)) return recipes.read(uri);
         if (!uri.startsWith(BLOCK)) return ponder.read(uri);
         String tail = uri.substring(BLOCK.length()); int slash = tail.indexOf('/');
         if (slash <= 0) return null;

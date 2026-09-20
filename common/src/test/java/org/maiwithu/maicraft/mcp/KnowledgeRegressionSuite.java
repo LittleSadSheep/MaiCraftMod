@@ -7,6 +7,9 @@ public final class KnowledgeRegressionSuite {
         net.minecraft.SharedConstants.tryDetectVersion();
         net.minecraft.server.Bootstrap.bootStrap();
         org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibraryTest.main(args);
+        // 材料配方页只读取所选工艺页并链接设备教程，缺失知识不能伪装成可执行配方。
+        org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSourceTest.main(args);
+        org.maiwithu.maicraft.core.integration.emi.EmiRecipeKnowledgeTest.main(args);
         org.maiwithu.maicraft.core.integration.create.CreateTooltipKnowledgeTest.main(args);
         org.maiwithu.maicraft.core.integration.ponder.PonderKnowledgeTest.main(args);
         // 同时确认知识 URI 能读出箱子的朝向属性，并拒绝把任意文件路径当成知识资源。

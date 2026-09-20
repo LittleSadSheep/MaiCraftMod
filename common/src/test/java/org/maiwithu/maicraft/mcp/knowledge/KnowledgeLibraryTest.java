@@ -35,12 +35,13 @@ public final class KnowledgeLibraryTest {
             if (!page.has("nextCursor")) break;
             list.add("cursor", page.get("nextCursor")); page = library.request(list);
         }
-        // 原生过程知识也只发布元数据，不在默认发现时展开机制契约或读取教程正文。
-        check(uris.size() == source.entries().size() + 6 && source.reads == 0
-                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES,
+        // 材料工艺和原生过程知识都只发布元数据，不在默认发现时展开合成树、机制契约或教程正文。
+        check(uris.size() == source.entries().size() + 7 && source.reads == 0
+                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES, KnowledgeLibrary.RECIPES,
                         "maicraft://attention", "maicraft://chatflow")),
                 "attention, chatflow, builtins and all extension resources discovered without bodies");
         check(library.read(KnowledgeLibrary.BLUEPRINT).text().contains("schema_version"), "shared blueprint format available on demand");
+        check(library.read(KnowledgeLibrary.RECIPES).text().contains("display_recipes"), "material planning guide available on demand");
         JsonObject search = request("search"); search.addProperty("query", "demo:machine"); search.addProperty("limit", 2);
         JsonObject hits = library.request(search);
         check(hits.getAsJsonArray("resources").size() == 2 && hits.get("truncated").getAsBoolean() && source.reads == 0, "bounded metadata search");
