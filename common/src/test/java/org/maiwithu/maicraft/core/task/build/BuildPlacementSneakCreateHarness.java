@@ -64,7 +64,8 @@ final class BuildPlacementSneakCreateHarness implements AutoCloseable {
         private FixturePlayer() { super(null, null, null, null, null, false, false); }
         @Override public boolean isShiftKeyDown() {
             // Explicit test bridge: validates the shared helper with real Create bytecode, not Mixin transformation.
-            return PlacementSneakProjection.project(this, super.isShiftKeyDown());
+            // 无启动器夹具复用同一只读潜行投影，仍由真实 Create 放置逻辑解释候选姿态。
+            return PlacementPlayerProjection.project(this, super.isShiftKeyDown());
         }
     }
 

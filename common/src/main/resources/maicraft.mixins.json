@@ -19,6 +19,7 @@
     "NavigationPathRenderMixin",
     "BuildPreviewRenderMixin",
     "PlacementSneakProjectionMixin",
+    "PlacementRotationProjectionMixin",
     "MouseHandlerControlMixin",
     "ContainerStockSyncMixin",
     "ScreenVisibilityMixin",

@@ -626,7 +626,8 @@ final class BuildPlacementGeometry {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
         Direction[] nearest = NativePlacementDirections.ordered(yaw, pitch);
         try {
-            return PlacementSneakProjection.withCandidate(player, sneak, () -> {
+            // 原生模组既可能读 context，也可能直接读 player；两条读取路径必须看到同一候选视角和潜行状态。
+            return PlacementPlayerProjection.withCandidate(player, sneak, yaw, pitch, () -> {
                 BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(
                         player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
                     // Only the hypothetical full support's destination differs; execution still uses the real context.
