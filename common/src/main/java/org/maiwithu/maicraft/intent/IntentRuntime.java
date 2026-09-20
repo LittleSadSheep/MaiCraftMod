@@ -57,6 +57,8 @@ public final class IntentRuntime {
             "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",
             "requires_narration", "outcome_uncertain", "recoverable", "goal",
             "item_ids", "required_final_count", "observed_final_count", "missing",
+            // 材料路线耗尽时让外部规划者看见卡住的子材料和按需工艺入口，不塞入整棵配方树。
+            "blocked_need", "planning_handoff",
             "allowed_sources", "achieved_coverage",
             "required_coverage", "dark_cell_count", "site_verified",
             "waterfront_required", "max_distance", "farthest_body_distance",

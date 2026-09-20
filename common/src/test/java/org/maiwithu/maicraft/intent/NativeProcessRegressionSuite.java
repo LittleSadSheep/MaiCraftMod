@@ -5,6 +5,10 @@ package org.maiwithu.maicraft.intent;
 public final class NativeProcessRegressionSuite {
     public static void main(String[] args) throws Exception {
         NativeProcessIntentTest.main(args);
+        // 普通材料路线耗尽时只交接按需工艺知识，外部恢复仍沿用原目标、权限和库存核验。
+        org.maiwithu.maicraft.core.task.acquire.MaterialProcessPlanningTest.main(args);
+        org.maiwithu.maicraft.core.task.acquire.MaterialAcquisitionHandoffTest.main(args);
+        MaterialPlanningRecoveryTest.main(args);
         // 调整材料预算或加工机制后，执行目标必须先写回存档，重启不能回到另一份尚可消费的旧意图。
         RetryIntentPersistenceTest.main(args);
         org.maiwithu.maicraft.core.integration.machine.process.NativeProcessTaskTest.main(args);

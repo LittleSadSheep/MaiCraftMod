@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.task.acquire.MaterialProcessPlanning;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +27,14 @@ final class RecoveryAdvisor {
         context.add("failure", resultJson(result));
         boolean retryAllowed = ordinaryRetryAllowed(result);
         addRetrySafety(context, retryAllowed);
+        boolean planning = materialPlanning(context.getAsJsonObject("failure"));
+        if (planning) {
+            addPlanningContext(context, retryAllowed);
+            return decision("Ordinary acquisition routes could not supply a needed material: " + safeMessage(result)
+                    + ". Inspect the linked recipe knowledge and current inventory. Use recover with authorized prerequisites in details.goal (which may be a sequence), then reassess the unchanged inventory goal."
+                    + (retryAllowed ? " Retry remains available after inventory or semantic parameters change." : " Preserve the existing no-retry safety restriction."),
+                    context, retryAllowed, true);
+        }
         return decision(
                 "The step could not continue: " + safeMessage(result)
                         + (retryAllowed
@@ -43,10 +52,12 @@ final class RecoveryAdvisor {
         boolean retryAllowed = ordinaryRetryAllowed(priorFailure);
         if (priorFailure != null) context.add("failure", priorFailure.deepCopy());
         addRetrySafety(context, retryAllowed);
+        boolean planning = materialPlanning(priorFailure);
+        if (planning) addPlanningContext(context, retryAllowed);
         return decision(
                 "That recovery answer was not a valid semantic Goal: " + issue,
                 context,
-                retryAllowed);
+                retryAllowed, planning);
     }
 
     static IntentTaskRecord.DecisionSnapshot retryRefused(Goal goal, JsonObject priorFailure) {
@@ -78,17 +89,25 @@ final class RecoveryAdvisor {
 
     private static IntentTaskRecord.DecisionSnapshot decision(
             String question, JsonObject context, boolean retryAllowed) {
+        return decision(question, context, retryAllowed, false);
+    }
+
+    private static IntentTaskRecord.DecisionSnapshot decision(
+            String question, JsonObject context, boolean retryAllowed, boolean materialPlanning) {
         // 不确定上次到底做了多少时，去掉直接重试；仍允许在看过现状后换目标、补前提或叫停。
         List<IntentTaskRecord.DecisionOption> options = new ArrayList<>();
-        if (retryAllowed) {
+        if (retryAllowed && !materialPlanning) {
             options.add(new IntentTaskRecord.DecisionOption(
                     "retry",
                     "Retry the same semantic step; details.parameters may refine its intent."));
         }
+        // 知识交接优先补工艺前提，但安全重查库存或带新语义参数的retry仍保留；不把规划缺口伪称消费结果不确定。
+        options.add(new IntentTaskRecord.DecisionOption("recover", materialPlanning
+                ? "Inspect recipe knowledge and current equipment; run authorized prerequisites from details.goal, optionally a maicraft:sequence, then reassess the unchanged inventory goal."
+                : "After inspecting current facts, run one semantic prerequisite from details.goal, then reassess this step."));
+        if (retryAllowed && materialPlanning) options.add(new IntentTaskRecord.DecisionOption("retry",
+                "Re-evaluate the same inventory goal after inventory or semantic parameters change; unchanged exhausted routes need new knowledge or a prerequisite."));
         options.addAll(List.of(
-                new IntentTaskRecord.DecisionOption(
-                        "recover",
-                        "After inspecting current facts, run one semantic prerequisite from details.goal, then reassess this step."),
                 new IntentTaskRecord.DecisionOption(
                         "replace_goal",
                         "Replace this step with the semantic Goal in details.goal."),
@@ -103,6 +122,22 @@ final class RecoveryAdvisor {
                 question,
                 options,
                 context.toString());
+    }
+
+    private static boolean materialPlanning(JsonObject failure) {
+        if (failure == null || !failure.has("data") || !failure.get("data").isJsonObject()) return false;
+        JsonObject data = failure.getAsJsonObject("data");
+        if (!data.has("planning_handoff") || !data.get("planning_handoff").isJsonObject()) return false;
+        JsonObject handoff = data.getAsJsonObject("planning_handoff");
+        return handoff.has("kind") && handoff.get("kind").isJsonPrimitive()
+                && MaterialProcessPlanning.KIND.equals(handoff.get("kind").getAsString());
+    }
+
+    private static void addPlanningContext(JsonObject context, boolean retryAllowed) {
+        context.addProperty("decision_kind", MaterialProcessPlanning.KIND);
+        context.addProperty("knowledge_only", true);
+        context.addProperty("planning_rule", "Discover the process, inspect and reuse compatible equipment, review/build only if needed, operate, then verify final inventory. Each semantic ability retains its own allow_use, materials and protection checks; EMI status does not prove execution support or the absence of recipes.");
+        if (retryAllowed) context.addProperty("retry_rule", "Do not loop over unchanged exhausted sources. Changed inventory or semantic parameters may be re-evaluated safely; otherwise use recover with authorized prerequisites in details.goal.");
     }
 
     private static void addRetrySafety(JsonObject context, boolean allowed) {
