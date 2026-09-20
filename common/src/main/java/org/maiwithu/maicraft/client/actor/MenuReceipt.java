@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.client.actor;
 
 import java.util.UUID;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 
 /** 一次菜单操作的等待记录：保存原菜单编号和版本、期望结果，以及何时算等待超时。 */
 public final class MenuReceipt {
@@ -18,6 +19,7 @@ public final class MenuReceipt {
     private final int beforeStateId;
     private final boolean allowContainerChange;
     private final MenuConfirmation confirmation;
+    private AbstractContainerMenu submittedMenu;
     private int synchronizationStateId;
     private Status status = Status.PENDING;
     private String detail = "awaiting the server-synchronized menu state";
@@ -52,6 +54,17 @@ public final class MenuReceipt {
     public boolean terminal() { return status != Status.PENDING; }
 
     boolean allowContainerChange() { return allowContainerChange; }
+    static MenuReceipt forMenu(Kind kind, LocalPlayerContext context, AbstractContainerMenu menu,
+                               int timeoutTicks, boolean allowContainerChange, MenuConfirmation confirmation) {
+        // 生产端口保存真实菜单对象，编号再次使用时也不能把新菜单的变化当成旧点击的确认。
+        MenuReceipt receipt = new MenuReceipt(kind, context, menu.containerId, menu.getStateId(), timeoutTicks,
+                allowContainerChange, confirmation);
+        receipt.submittedMenu = menu;
+        return receipt;
+    }
+    boolean matchesSubmittedMenu(AbstractContainerMenu menu) {
+        return menu.containerId == containerId && (submittedMenu == null || submittedMenu == menu);
+    }
     MenuConfirmation confirmation() { return confirmation; }
     int synchronizationStateId() { return synchronizationStateId; }
     void awaitButtonSynchronization(int clientStateId) {

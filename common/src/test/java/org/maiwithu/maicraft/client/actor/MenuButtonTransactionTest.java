@@ -23,6 +23,7 @@ public final class MenuButtonTransactionTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         submissionAndSynchronization(); rejectionAndExceptions(); submissionGates();
         timeoutAndRevocation(); synchronizedNegativeResults(); legacyPortCompatibility();
+        replacementWithSameIdCannotConfirm();
         System.out.println("MenuButtonTransactionTest: native button transaction boundaries passed");
     }
 
@@ -115,6 +116,18 @@ public final class MenuButtonTransactionTest {
             check(receipt.status() == (verdict == MenuConfirmation.Verdict.NOT_APPLIED
                     ? MenuReceipt.Status.CONFIRMED_NOT_APPLIED : MenuReceipt.Status.DIVERGED), "保留同步后的明确负面结果");
         }
+    }
+
+    private static void replacementWithSameIdCannotConfirm() throws Exception {
+        var h = new Harness(); h.ready();
+        var receipt = h.port.pressButton(h.context(), 0, (context, pending) -> MenuConfirmation.Verdict.APPLIED, 20);
+        var replacement = new TestMenu(h.actor.connection);
+        check(replacement.containerId == h.menu.containerId, "场景必须复用同一菜单编号");
+        replacement.setItem(0, 2, Items.ENCHANTED_BOOK.getDefaultInstance());
+        h.actor.player.containerMenu = replacement;
+        h.next(true); h.port.poll(h.context(), receipt);
+        check(receipt.status() == MenuReceipt.Status.UNCERTAIN && h.actor.connection.packets.size() == 1,
+                "同编号新菜单的版本与物品变化不能确认旧菜单的按钮，也不能导致重新提交");
     }
 
     private static void legacyPortCompatibility() throws Exception {

@@ -247,7 +247,7 @@ public final class DefaultMenuPort implements MenuPort {
             }
         }
         AbstractContainerMenu menu = context.player().containerMenu;
-        boolean containerChanged = menu.containerId != receipt.containerId();
+        boolean containerChanged = !receipt.matchesSubmittedMenu(menu);
         // 按钮排除本地报价校验改变的版本；其他菜单事务仍从提交前版本开始等服务端同步。
         boolean stateChanged = !containerChanged && menu.getStateId() != receipt.synchronizationStateId();
         if (containerChanged && !receipt.allowContainerChange()) {
@@ -345,9 +345,7 @@ public final class DefaultMenuPort implements MenuPort {
     private MenuReceipt create(MenuReceipt.Kind kind, LocalPlayerContext context,
                                AbstractContainerMenu menu, int timeoutTicks,
                                boolean allowContainerChange, MenuConfirmation confirmation) {
-        MenuReceipt receipt = new MenuReceipt(
-                kind, context, menu.containerId, menu.getStateId(), timeoutTicks,
-                allowContainerChange, confirmation);
+        MenuReceipt receipt = MenuReceipt.forMenu(kind, context, menu, timeoutTicks, allowContainerChange, confirmation);
         active = receipt;
         return receipt;
     }
