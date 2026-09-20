@@ -3,6 +3,21 @@ package org.maiwithu.maicraft.core.build;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
+import java.util.ArrayList;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.component.DataComponentType;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.component.TypedDataComponent;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.EntityBlock;
+import org.maiwithu.maicraft.core.init.InitTag;
 
 /**
  * 图纸的<b>安全白名单</b>:方块实体数据哪些可以照搬、实体哪些算建筑的
@@ -34,8 +49,8 @@ public final class BlueprintSafety {
      */
     // 先要求方块属于配置的白名单标签，再复制数据并去掉位置。
     // 告示牌还拒绝物品扩展和可点击文字，其他成员检查是否只有管理员能设置 NBT；没有标签时直接不保留。
-    public static net.minecraft.nbt.CompoundTag safeBlockEntityData(
-            BlockState state, net.minecraft.nbt.CompoundTag data) {
+    public static CompoundTag safeBlockEntityData(
+            BlockState state, CompoundTag data) {
         if (state == null || data == null || data.isEmpty()) {
             return null;
         }
@@ -49,7 +64,7 @@ public final class BlueprintSafety {
         // 陶罐没进这个标签。纹样碎片是刷沙刷砾石考古刷出来的稀有掉落,一只四片碎片的
         // 罐子收一件普通陶罐的料就是白送四件稀有物;而按组件精确收又要求玩家先有一只
         // 一模一样的罐子——那还不如让他自己拼。摆一只素罐,纹样留给人。
-        if (!state.is(org.maiwithu.maicraft.core.init.InitTag.SAFE_BLOCK_ENTITY_DATA)) {
+        if (!state.is(InitTag.SAFE_BLOCK_ENTITY_DATA)) {
             return null;
         }
         // 硬底线用<b>原版自己的判据</b>:{@code BlockEntity#onlyOpCanSetNbt()}。命令方块、
@@ -58,7 +73,7 @@ public final class BlueprintSafety {
         //
         // 此前这里是我列的一张十一个键的黑名单(Items/LootTable/Command……)。黑名单是
         // 开放集合,每来一个新方块实体就得被咬一次;而这个问题原版早就回答过了。
-        net.minecraft.nbt.CompoundTag out = data.copy();
+        CompoundTag out = data.copy();
         // 坐标由落位方按落位点重写,存的那份是导出世界的
         for (String positional : new String[]{"x", "y", "z"}) {
             out.remove(positional);
@@ -70,17 +85,17 @@ public final class BlueprintSafety {
         // 检查的是<b>点击事件</b>:牌子的文本能挂 clickEvent,而 clickEvent 能跑命令。
         // 图纸里一块写着"点我领奖"的牌子就是一个可执行的口子。带事件的整份丢掉——不是
         // 只丢那一行,因为我们无从判断哪一行是作者的本意。带物品的牌子(某些模组的)同理。
-        if (state.is(net.minecraft.tags.BlockTags.ALL_SIGNS)) {
+        if (state.is(BlockTags.ALL_SIGNS)) {
             if (out.contains("front_item") || out.contains("back_item")) {
                 return null;
             }
             for (String side : new String[]{"front_text", "back_text"}) {
-                net.minecraft.nbt.CompoundTag text = out.getCompound(side);
-                if (!text.contains("messages", net.minecraft.nbt.Tag.TAG_LIST)) {
+                CompoundTag text = out.getCompound(side);
+                if (!text.contains("messages", Tag.TAG_LIST)) {
                     continue;
                 }
-                for (net.minecraft.nbt.Tag line
-                        : text.getList("messages", net.minecraft.nbt.Tag.TAG_STRING)) {
+                for (Tag line
+                        : text.getList("messages", Tag.TAG_STRING)) {
                     if (hasClickEvent(line.getAsString())) {
                         return null;
                     }
@@ -96,11 +111,11 @@ public final class BlueprintSafety {
 
     /** 这种方块实体的 NBT 只有管理员能设置吗——命令方块、结构方块、拼图方块那一档。 */
     private static boolean opOnlyNbt(BlockState state) {
-        if (!(state.getBlock() instanceof net.minecraft.world.level.block.EntityBlock holder)) {
+        if (!(state.getBlock() instanceof EntityBlock holder)) {
             return false;
         }
         try {
-            var be = holder.newBlockEntity(net.minecraft.core.BlockPos.ZERO, state);
+            var be = holder.newBlockEntity(BlockPos.ZERO, state);
             return be != null && be.onlyOpCanSetNbt();
         } catch (RuntimeException e) {
             return true;   // 造不出来就当它不安全
@@ -110,8 +125,8 @@ public final class BlueprintSafety {
     /** 这段文本组件里有点击事件吗(递归看子组件)——有就是个能跑命令的口子。 */
     private static boolean hasClickEvent(String json) {
         try {
-            var component = net.minecraft.network.chat.Component.Serializer.fromJson(
-                    json.isEmpty() ? "\"\"" : json, net.minecraft.core.RegistryAccess.EMPTY);
+            var component = Component.Serializer.fromJson(
+                    json.isEmpty() ? "\"\"" : json, RegistryAccess.EMPTY);
             return component != null && hasClickEvent(component);
         } catch (RuntimeException e) {
             return true;   // 读不懂的文本按有事件处理
@@ -119,7 +134,7 @@ public final class BlueprintSafety {
     }
 
     // 检查这段文字和它的兄弟片段是否附带点击事件，不把可执行点击行为当成纯装饰文本。
-    private static boolean hasClickEvent(net.minecraft.network.chat.Component component) {
+    private static boolean hasClickEvent(Component component) {
         if (component.getStyle() != null && component.getStyle().getClickEvent() != null) {
             return true;
         }
@@ -149,9 +164,9 @@ public final class BlueprintSafety {
      * @return 可以生成的那部分;不收返回 null
      */
     // 只允许物品展示框、发光展示框、盔甲架和画；清理携带物品与位置锚点，其余实体类型不复制。
-    public static net.minecraft.nbt.CompoundTag safeEntityData(
-            net.minecraft.nbt.CompoundTag data,
-            net.minecraft.core.HolderLookup.Provider registries) {
+    public static CompoundTag safeEntityData(
+            CompoundTag data,
+            HolderLookup.Provider registries) {
         if (data == null || !data.contains("id")) {
             return null;
         }
@@ -160,7 +175,7 @@ public final class BlueprintSafety {
                 && !id.equals("minecraft:armor_stand") && !id.equals("minecraft:painting")) {
             return null;
         }
-        net.minecraft.nbt.CompoundTag out = data.copy();
+        CompoundTag out = data.copy();
         // 身上带的东西:组件按白名单剥一遍,<b>就地改掉这份 NBT</b>。
         //
         // 落在数据本身上而不是只落在计价上——计价与落位读同一份,账才是平的。别处是在
@@ -199,20 +214,20 @@ public final class BlueprintSafety {
      * @return 要收的那些叠(空的槽位不计);没有返回空表
      */
     // 从已知载荷字段读取物品，用于列出展示框或盔甲架携带的东西；读不出的条目被略过。
-    public static List<net.minecraft.world.item.ItemStack> payloadStacks(
-            net.minecraft.nbt.CompoundTag data,
-            net.minecraft.core.HolderLookup.Provider registries) {
+    public static List<ItemStack> payloadStacks(
+            CompoundTag data,
+            HolderLookup.Provider registries) {
         if (data == null) {
             return List.of();
         }
-        List<net.minecraft.world.item.ItemStack> out = new java.util.ArrayList<>();
+        List<ItemStack> out = new ArrayList<>();
         for (String key : PAYLOAD_KEYS) {
-            net.minecraft.nbt.Tag tag = data.get(key);
-            if (tag instanceof net.minecraft.nbt.CompoundTag one) {
+            Tag tag = data.get(key);
+            if (tag instanceof CompoundTag one) {
                 addStack(out, one, registries);
-            } else if (tag instanceof net.minecraft.nbt.ListTag many) {
-                for (net.minecraft.nbt.Tag slot : many) {
-                    if (slot instanceof net.minecraft.nbt.CompoundTag c) {
+            } else if (tag instanceof ListTag many) {
+                for (Tag slot : many) {
+                    if (slot instanceof CompoundTag c) {
                         addStack(out, c, registries);
                     }
                 }
@@ -230,36 +245,36 @@ public final class BlueprintSafety {
      * 一次定完,此后任何新组件自动落在安全的一侧。这四样的共性是<b>它们不装东西</b>。
      */
     public static boolean unsafeItemComponent(
-            net.minecraft.core.component.DataComponentType<?> type) {
-        return !(type.equals(net.minecraft.core.component.DataComponents.ENCHANTMENTS)
-                || type.equals(net.minecraft.core.component.DataComponents.POTION_CONTENTS)
-                || type.equals(net.minecraft.core.component.DataComponents.DAMAGE)
-                || type.equals(net.minecraft.core.component.DataComponents.CUSTOM_NAME));
+            DataComponentType<?> type) {
+        return !(type.equals(DataComponents.ENCHANTMENTS)
+                || type.equals(DataComponents.POTION_CONTENTS)
+                || type.equals(DataComponents.DAMAGE)
+                || type.equals(DataComponents.CUSTOM_NAME));
     }
 
     /** 剥掉不安全的组件,只留白名单那四样。 */
     // 当前只要存在组件补丁，就遍历并删减全部有效组件，连物品原版默认组件也会移除。
     // 例如仅命名的钻石剑也会失去最大耐久和默认攻击属性；应区分默认值与外来补丁，见 A65。
-    public static net.minecraft.world.item.ItemStack withUnsafeComponentsDiscarded(
-            net.minecraft.world.item.ItemStack stack) {
+    public static ItemStack withUnsafeComponentsDiscarded(
+            ItemStack stack) {
         if (stack.getComponentsPatch().isEmpty()) {
             return stack;
         }
-        net.minecraft.world.item.ItemStack copy = stack.copy();
+        ItemStack copy = stack.copy();
         stack.getComponents().stream()
                 .filter(c -> unsafeItemComponent(c.type()))
-                .map(net.minecraft.core.component.TypedDataComponent::type)
+                .map(TypedDataComponent::type)
                 .forEach(copy::remove);
         return copy;
     }
 
-    private static void addStack(List<net.minecraft.world.item.ItemStack> out,
-                                 net.minecraft.nbt.CompoundTag tag,
-                                 net.minecraft.core.HolderLookup.Provider registries) {
+    private static void addStack(List<ItemStack> out,
+                                 CompoundTag tag,
+                                 HolderLookup.Provider registries) {
         if (tag.isEmpty()) {
             return;   // 空槽位
         }
-        net.minecraft.world.item.ItemStack.parse(registries, tag)
+        ItemStack.parse(registries, tag)
                 .map(BlueprintSafety::withUnsafeComponentsDiscarded)
                 .filter(s -> !s.isEmpty())
                 .ifPresent(out::add);
@@ -267,37 +282,37 @@ public final class BlueprintSafety {
 
     /** 把载荷里每一叠的组件按白名单剥一遍,就地写回——计价和落位读的因此是同一份。 */
     // 载荷是单个物品就清理该物品；是装备列表则逐格重建，无法保留的格用空标签占位，避免改变栏位顺序。
-    private static void sanitizePayload(net.minecraft.nbt.CompoundTag data,
-                                        net.minecraft.core.HolderLookup.Provider registries) {
+    private static void sanitizePayload(CompoundTag data,
+                                        HolderLookup.Provider registries) {
         for (String key : PAYLOAD_KEYS) {
-            net.minecraft.nbt.Tag tag = data.get(key);
-            if (tag instanceof net.minecraft.nbt.CompoundTag one) {
-                net.minecraft.nbt.Tag fixed = sanitizeItemTag(one, registries);
+            Tag tag = data.get(key);
+            if (tag instanceof CompoundTag one) {
+                Tag fixed = sanitizeItemTag(one, registries);
                 if (fixed == null) {
                     data.remove(key);
                 } else {
                     data.put(key, fixed);
                 }
-            } else if (tag instanceof net.minecraft.nbt.ListTag many) {
+            } else if (tag instanceof ListTag many) {
                 // 槽位顺序有意义(四甲两手),空槽位留成空复合标签占位
-                net.minecraft.nbt.ListTag rebuilt = new net.minecraft.nbt.ListTag();
-                for (net.minecraft.nbt.Tag slot : many) {
-                    net.minecraft.nbt.Tag fixed = slot instanceof net.minecraft.nbt.CompoundTag c
+                ListTag rebuilt = new ListTag();
+                for (Tag slot : many) {
+                    Tag fixed = slot instanceof CompoundTag c
                             ? sanitizeItemTag(c, registries) : null;
-                    rebuilt.add(fixed == null ? new net.minecraft.nbt.CompoundTag() : fixed);
+                    rebuilt.add(fixed == null ? new CompoundTag() : fixed);
                 }
                 data.put(key, rebuilt);
             }
         }
     }
 
-    private static net.minecraft.nbt.Tag sanitizeItemTag(
-            net.minecraft.nbt.CompoundTag tag,
-            net.minecraft.core.HolderLookup.Provider registries) {
+    private static Tag sanitizeItemTag(
+            CompoundTag tag,
+            HolderLookup.Provider registries) {
         if (tag.isEmpty()) {
             return null;
         }
-        var cleaned = net.minecraft.world.item.ItemStack.parse(registries, tag)
+        var cleaned = ItemStack.parse(registries, tag)
                 .map(BlueprintSafety::withUnsafeComponentsDiscarded)
                 .filter(s -> !s.isEmpty());
         return cleaned.isEmpty() ? null : cleaned.get().save(registries);
@@ -305,7 +320,7 @@ public final class BlueprintSafety {
 
     /** 把摆设身上带的东西整个拿掉——付不起的时候用,框空着比框里凭空多件东西好。 */
     // 完全去掉已知的携带物品字段，保留实体的其他说明数据。
-    public static void stripPayload(net.minecraft.nbt.CompoundTag data) {
+    public static void stripPayload(CompoundTag data) {
         if (data == null) {
             return;
         }

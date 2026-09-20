@@ -10,6 +10,24 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.List;
+import java.util.Collections;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.DirtPathBlock;
+import net.minecraft.world.level.block.FarmBlock;
+import net.minecraft.world.level.block.FlowerPotBlock;
+import net.minecraft.world.level.block.piston.MovingPistonBlock;
+import net.minecraft.world.level.block.piston.PistonHeadBlock;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.block.state.properties.IntegerProperty;
 
 /**
  * 建筑和蓝图共同使用的方块规则：哪些状态改成初始值、哪些方块不支持建造，以及每格需要什么材料。
@@ -39,9 +57,9 @@ public final class BuildStates {
         // 把名为 age 的整数属性改成它允许的最小值，例如成熟小麦改成刚种下的阶段。
         // 这里按属性名识别，没有逐个确认模组是否也用 age 表示植物生长。
         for (Property<?> p : state.getProperties()) {
-            if (p instanceof net.minecraft.world.level.block.state.properties.IntegerProperty age
+            if (p instanceof IntegerProperty age
                     && "age".equals(age.getName())) {
-                state = state.setValue(age, java.util.Collections.min(age.getPossibleValues()));
+                state = state.setValue(age, Collections.min(age.getPossibleValues()));
                 break;   // 一块方块只会有一种 age
             }
         }
@@ -87,21 +105,21 @@ public final class BuildStates {
         }
         if (state.hasProperty(BlockStateProperties.BED_PART)
                 && state.getValue(BlockStateProperties.BED_PART)
-                        == net.minecraft.world.level.block.state.properties.BedPart.HEAD) {
+                        == BedPart.HEAD) {
             return true;
         }
         return state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
                 && state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)
-                        == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER;
+                        == DoubleBlockHalf.UPPER;
     }
 
     /**
      * 没有世界信息时使用的材料查询：耕地和土径按土计，其余取方块自己的物品。
      * 返回空气表示这里没有找到材料；是否跳过或报错由调用者决定。
      */
-    public static net.minecraft.world.item.Item materialItem(
-            net.minecraft.world.level.block.Block block) {
-        net.minecraft.world.item.Item override = overrideItem(block);
+    public static Item materialItem(
+            Block block) {
+        Item override = overrideItem(block);
         return override != null ? override : block.asItem();
     }
 
@@ -110,13 +128,13 @@ public final class BuildStates {
      * 带方块实体的方块跳过中键查询，避免误读目标坐标上原有旗帜、箱子等的数据。
      * 没有世界、回答为空或查询抛异常时，退回方块自己的物品；因此不是所有模组方块都保证能找到材料。
      */
-    public static net.minecraft.world.item.Item materialItem(
-            BlockState state, net.minecraft.world.level.LevelReader level,
-            net.minecraft.core.BlockPos pos) {
+    public static Item materialItem(
+            BlockState state, LevelReader level,
+            BlockPos pos) {
         if (state == null) {
-            return net.minecraft.world.item.Items.AIR;
+            return Items.AIR;
         }
-        net.minecraft.world.item.Item override = overrideItem(state.getBlock());
+        Item override = overrideItem(state.getBlock());
         if (override != null) {
             return override;
         }
@@ -143,13 +161,13 @@ public final class BuildStates {
     }
 
     /** 耕地和土径要在土上使用工具形成，所以材料准备按土来算。 */
-    private static net.minecraft.world.item.Item overrideItem(
-            net.minecraft.world.level.block.Block block) {
+    private static Item overrideItem(
+            Block block) {
         // 耕地与土径是拿锄/锹在土上加工出来的。它们自述的是自己(那两件物品存在),
         // 但人手上没有"一块耕地"可放。
-        if (block instanceof net.minecraft.world.level.block.FarmBlock
-                || block instanceof net.minecraft.world.level.block.DirtPathBlock) {
-            return net.minecraft.world.item.Items.DIRT;
+        if (block instanceof FarmBlock
+                || block instanceof DirtPathBlock) {
+            return Items.DIRT;
         }
         return null;
     }
@@ -159,31 +177,31 @@ public final class BuildStates {
      * 有花纹数据的旗帜需要对应花纹的旗帜物品。返回空列表表示沿用目标本身的默认材料数量。
      */
     public static List<BuildTaskRecord.CellNeed> cellNeeds(
-            BlockState state, net.minecraft.nbt.CompoundTag safeData,
-            net.minecraft.world.level.LevelReader level, net.minecraft.core.BlockPos probe,
-            net.minecraft.core.HolderLookup.Provider registries) {
+            BlockState state, CompoundTag safeData,
+            LevelReader level, BlockPos probe,
+            HolderLookup.Provider registries) {
         if (state == null) {
             return List.of();
         }
         // 带花的花盆:盆一件,花一件。盆里那株是什么,问方块自己——中键取方块给的正是
         // 那株植物。不写死一张"哪个盆装哪种花"的对照表(那张表在别处是二十多行的
         // switch),模组的花盆也照样认。
-        if (state.getBlock() instanceof net.minecraft.world.level.block.FlowerPotBlock pot
+        if (state.getBlock() instanceof FlowerPotBlock pot
                 && pot.getPotted() != Blocks.AIR) {
-            net.minecraft.world.item.Item plant = materialItem(state, level, probe);
-            if (plant == net.minecraft.world.item.Items.AIR) {
+            Item plant = materialItem(state, level, probe);
+            if (plant == Items.AIR) {
                 plant = pot.getPotted().asItem();
             }
-            if (plant == net.minecraft.world.item.Items.AIR
-                    || plant == net.minecraft.world.item.Items.FLOWER_POT) {
+            if (plant == Items.AIR
+                    || plant == Items.FLOWER_POT) {
                 return List.of();   // 空盆,或者问不出盆里是什么:按一件盆走默认口径
             }
             return List.of(
-                    new BuildTaskRecord.CellNeed(new net.minecraft.world.item.ItemStack(
-                            net.minecraft.world.item.Items.FLOWER_POT), false),
-                    new BuildTaskRecord.CellNeed(new net.minecraft.world.item.ItemStack(plant), false));
+                    new BuildTaskRecord.CellNeed(new ItemStack(
+                            Items.FLOWER_POT), false),
+                    new BuildTaskRecord.CellNeed(new ItemStack(plant), false));
         }
-        net.minecraft.world.item.ItemStack exact = strictItem(state, safeData, registries);
+        ItemStack exact = strictItem(state, safeData, registries);
         return exact == null ? List.of() : List.of(new BuildTaskRecord.CellNeed(exact, true));
     }
 
@@ -191,25 +209,25 @@ public final class BuildStates {
      * 用蓝图里的旗帜颜色和花纹拼出所需物品，让后续选料可以比较物品组件。
      * 没有花纹数据、不是旗帜或物品解析失败时返回 null，表示这里没有给出精确物品要求。
      */
-    public static net.minecraft.world.item.ItemStack strictItem(
-            BlockState state, net.minecraft.nbt.CompoundTag safeData,
-            net.minecraft.core.HolderLookup.Provider registries) {
-        if (state == null || safeData == null || !state.is(net.minecraft.tags.BlockTags.BANNERS)
+    public static ItemStack strictItem(
+            BlockState state, CompoundTag safeData,
+            HolderLookup.Provider registries) {
+        if (state == null || safeData == null || !state.is(BlockTags.BANNERS)
                 || !safeData.contains("patterns")) {
             return null;
         }
-        net.minecraft.world.item.Item item = state.getBlock().asItem();
-        if (item == net.minecraft.world.item.Items.AIR) {
+        Item item = state.getBlock().asItem();
+        if (item == Items.AIR) {
             return null;
         }
-        net.minecraft.nbt.CompoundTag itemTag = new net.minecraft.nbt.CompoundTag();
-        itemTag.putString("id", net.minecraft.core.registries.BuiltInRegistries.ITEM
+        CompoundTag itemTag = new CompoundTag();
+        itemTag.putString("id", BuiltInRegistries.ITEM
                 .getKey(item).toString());
         itemTag.putInt("count", 1);
-        net.minecraft.nbt.CompoundTag components = new net.minecraft.nbt.CompoundTag();
+        CompoundTag components = new CompoundTag();
         components.put("minecraft:banner_patterns", safeData.get("patterns").copy());
         itemTag.put("components", components);
-        return net.minecraft.world.item.ItemStack.parse(registries, itemTag)
+        return ItemStack.parse(registries, itemTag)
                 .filter(s -> !s.isEmpty())
                 .orElse(null);
     }
@@ -228,8 +246,8 @@ public final class BuildStates {
         }
         // 活塞头与移动中的活塞是活塞自己伸出去的产物,不是能摆的东西。我们在
         // normalize 里已经把 EXTENDED 归一成收回,照放一个头就是一块无主的孤块。
-        if (state.getBlock() instanceof net.minecraft.world.level.block.piston.PistonHeadBlock
-                || state.getBlock() instanceof net.minecraft.world.level.block.piston.MovingPistonBlock) {
+        if (state.getBlock() instanceof PistonHeadBlock
+                || state.getBlock() instanceof MovingPistonBlock) {
             return "a piston head belongs to an extended piston, not to a build";
         }
         if (state.getBlock() instanceof LiquidBlock) {

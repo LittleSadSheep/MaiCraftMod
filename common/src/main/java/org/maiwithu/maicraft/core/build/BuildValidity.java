@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.world.level.block.FenceGateBlock;
 
 /** Shared block-state validity rules for construction scans, placement, and path costs. */
 public final class BuildValidity {
@@ -100,7 +101,7 @@ public final class BuildValidity {
         List<String> ignoredProps = settings.buildIgnoreProperties();
         // 推开栅栏门可能让它转向相反方向，所以这里直接跳过其朝向。
         // 当前也会放过转错九十度的门，并没有只忽略开门造成的一百八十度翻转。
-        boolean gate = first.getBlock() instanceof net.minecraft.world.level.block.FenceGateBlock;
+        boolean gate = first.getBlock() instanceof FenceGateBlock;
         for (Property<?> property : AUTHORED_PROPERTIES) {
             if (!first.hasProperty(property) || !second.hasProperty(property)) {
                 continue;

@@ -14,6 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * 把盒子、墙、线、圆柱、球、撒点和屋顶参数展开成需要施工的位置。这里只计算计划，不改游戏世界。
@@ -414,7 +415,7 @@ public final class BuildShapes {
         tries.add(p + "_slab");
         for (String t : tries) {
             Block b = BuiltInRegistries.BLOCK.get(
-                    net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(id.getNamespace(), t));
+                    ResourceLocation.fromNamespaceAndPath(id.getNamespace(), t));
             if (b instanceof SlabBlock) {
                 return b;
             }

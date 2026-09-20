@@ -11,6 +11,8 @@ import net.minecraft.world.level.block.Blocks;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * 把材料字符串变成选料规则，例如 stone_bricks*8,mossy_stone_bricks*2 表示大约八成石砖、两成苔石砖。
@@ -86,21 +88,21 @@ public final class BuildPalette {
                     + " — block_id takes a plain block id; put the state in `properties`"
                     + " (e.g. block_id \"spruce_stairs\" with properties {facing: south})");
         }
-        var rl = net.minecraft.resources.ResourceLocation.tryParse(trimmed);
+        var rl = ResourceLocation.tryParse(trimmed);
         if (rl == null) {
             throw new IllegalArgumentException("not a valid block id: " + trimmed);
         }
-        if (!net.minecraft.core.registries.BuiltInRegistries.BLOCK.containsKey(rl)) {
+        if (!BuiltInRegistries.BLOCK.containsKey(rl)) {
             throw new IllegalArgumentException("unknown block: " + trimmed);
         }
-        Block block = net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(rl);
+        Block block = BuiltInRegistries.BLOCK.get(rl);
         // 能不能建走同一个判据(图纸入口那边拿它当跳过条件,这边拿它当拒绝理由)
-        String no = org.maiwithu.maicraft.core.build.BuildStates
+        String no = BuildStates
                 .unbuildableReason(block.defaultBlockState());
         if (no != null) {
             throw new IllegalArgumentException(trimmed + " — " + no);
         }
-        Item item = org.maiwithu.maicraft.core.build.BuildStates.materialItem(block);
+        Item item = BuildStates.materialItem(block);
         if (item == Items.AIR && block != Blocks.AIR) {
             throw new IllegalArgumentException(trimmed + " is not a placeable block");
         }
