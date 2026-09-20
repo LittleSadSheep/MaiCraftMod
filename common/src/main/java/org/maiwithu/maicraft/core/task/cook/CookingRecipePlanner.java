@@ -12,6 +12,10 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
 import org.maiwithu.maicraft.core.tools.ToolParse;
 import java.util.ArrayList;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import java.util.Objects;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -45,6 +49,7 @@ final class CookingRecipePlanner {
     private final SemanticCookTaskRecord request;
     private Map<Block, Long> nearbyBlockDistances = Map.of();
     private Map<Item, List<CraftRoute>> craftRoutes;
+    private final Set<Item> rejectedFuelItems = new LinkedHashSet<>();
 
     CookingRecipePlanner(LocalPlayer player, SemanticCookTaskRecord request) {
         this.player = player;
@@ -230,6 +235,76 @@ final class CookingRecipePlanner {
             total += value;
         }
         return total;
+    }
+
+
+    record FuelChoice(
+            Item item, int burnTicks, int count, long waste, long acquisitionCost) {}
+
+    void rejectFuel(Item item) { rejectedFuelItems.add(item); }
+
+    // 明确列出的燃料优先按许可范围选；没列时只考虑煤、木炭、木材、竹子等这里列出的普通燃料。
+    // 主要比较获取成本和烧剩的时间；PRESERVE_RARE 改用固定燃料优先表，不是真正读取物品稀有度。
+    FuelChoice chooseFuel(CookingRecipe cooking, int raw) {
+        List<Item> choices = new ArrayList<>();
+        if (!request.allowedFuelIds.isEmpty()) {
+            request.allowedFuelIds.forEach(id -> choices.add(BuiltInRegistries.ITEM.get(id)));
+        } else {
+            for (Item item : AbstractFurnaceBlockEntity.getFuel().keySet()) {
+                if (safeDefaultFuel(item)) choices.add(item);
+            }
+        }
+        List<FuelChoice> fuels = choices.stream().distinct()
+                .filter(item -> !rejectedFuelItems.contains(item))
+                .map(item -> fuelChoice(cooking, item, raw))
+                .filter(Objects::nonNull)
+                .toList();
+        Comparator<FuelChoice> economical = Comparator
+                .comparingLong(FuelChoice::acquisitionCost)
+                .thenComparingLong(FuelChoice::waste)
+                .thenComparingInt(FuelChoice::count)
+                .thenComparingInt(choice -> fuelPriority(choice.item()))
+                .thenComparing(choice -> BuiltInRegistries.ITEM.getKey(
+                        choice.item()).toString());
+        if (request.preference == SemanticCookTaskRecord.Preference.PRESERVE_RARE) {
+            economical = Comparator
+                    .comparingLong(FuelChoice::acquisitionCost)
+                    .thenComparingInt(choice -> fuelPriority(choice.item()))
+                    .thenComparingLong(FuelChoice::waste)
+                    .thenComparingInt(FuelChoice::count)
+                    .thenComparing(choice -> BuiltInRegistries.ITEM.getKey(
+                            choice.item()).toString());
+        }
+        return fuels.stream().min(economical).orElse(null);
+    }
+
+    private static boolean safeDefaultFuel(Item item) {
+        return item == Items.COAL || item == Items.CHARCOAL || item == Items.STICK
+                || item == Items.BAMBOO || item == Blocks.DRIED_KELP_BLOCK.asItem()
+                || item.builtInRegistryHolder().is(ItemTags.PLANKS)
+                || item.builtInRegistryHolder().is(ItemTags.LOGS);
+    }
+
+    private int fuelPriority(Item item) {
+        if (item == Items.COAL) return 0;
+        if (item == Items.CHARCOAL) return 1;
+        if (item.builtInRegistryHolder().is(ItemTags.PLANKS)) return 2;
+        if (item.builtInRegistryHolder().is(ItemTags.LOGS)) return 3;
+        if (item == Blocks.DRIED_KELP_BLOCK.asItem()) return 4;
+        return item == Items.STICK ? 5 : 6;
+    }
+
+    // 按“这一批所需烧制时间 ÷ 单份燃料时间”向上取整。
+    // 时间取自选定原生设备，不能把普通熔炉的一份煤时长套在高炉或烟熏炉上。
+    FuelChoice fuelChoice(CookingRecipe cooking, Item item, int raw) {
+        CookingBatch batch = CookingBatch.plan(cooking, item, raw, player.level().registryAccess());
+        if (batch == null) return null;
+        int burn = batch.burnTicks();
+        long neededTicks = (long) batch.inputCount() * cooking.recipe().getCookingTime();
+        int needed = batch.fuelCount();
+        long cost = acquisitionCost(item, needed);
+        long waste = (long) needed * burn - neededTicks;
+        return new FuelChoice(item, burn, needed, waste, cost);
     }
 
 }

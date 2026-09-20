@@ -14,7 +14,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.ItemTags;
 import net.minecraft.world.inventory.AbstractFurnaceMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -33,6 +32,7 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.MouseButton;
+import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.FuelChoice;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
@@ -71,8 +71,6 @@ public final class SemanticCookCompanionTask
     private enum Purpose { ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION, PLACE_STATION,
         MOVE_STATION, OPEN_STATION, LOAD_INPUT, LOAD_FUEL, TAKE_OUTPUT,
         CLOSE_WAIT, CLEAN_INPUT, CLOSE, ABANDON_CLOSE }
-    private record FuelChoice(
-            Item item, int burnTicks, int count, long waste, long acquisitionCost) {}
     private record ResolvedCandidate(
             CookingRecipe candidate,
             FuelChoice fuel,
@@ -131,7 +129,6 @@ public final class SemanticCookCompanionTask
     /** Minimum squared loaded-world distance for each observed block type. */
     private Map<Block, Long> nearbyBlockDistances = Map.of();
     private final Set<String> rejectedInputCandidates = new LinkedHashSet<>();
-    private final Set<Item> rejectedFuelItems = new LinkedHashSet<>();
     private final Set<CookingDevice> rejectedDevices = new LinkedHashSet<>();
     private final List<Map<String, Object>> planningAttempts = new ArrayList<>();
 
@@ -275,7 +272,7 @@ public final class SemanticCookCompanionTask
             long inputCost = recipePlanner.acquisitionCost(option.input(), raw);
             boolean ready = stationReady(option.device());
             long stationCost = ready ? 0L : recipePlanner.acquisitionCost(option.device().block.asItem(), 1);
-            FuelChoice fuelChoice = chooseFuel(option);
+            FuelChoice fuelChoice = recipePlanner.chooseFuel(option, rawRemaining(option));
             if (fuelChoice == null) continue;
             long preparationCost = CookingRecipePlanner.addCost(
                     inputCost, stationCost, fuelChoice.acquisitionCost());
@@ -362,71 +359,6 @@ public final class SemanticCookCompanionTask
             case SMOKING -> device == CookingDevice.SMOKER;
             default -> true;
         };
-    }
-
-    // 明确列出的燃料优先按许可范围选；没列时只考虑煤、木炭、木材、竹子等这里列出的普通燃料。
-    // 主要比较获取成本和烧剩的时间；PRESERVE_RARE 改用固定燃料优先表，不是真正读取物品稀有度。
-    private FuelChoice chooseFuel(CookingRecipe cooking) {
-        List<Item> choices = new ArrayList<>();
-        if (!r.allowedFuelIds.isEmpty()) {
-            r.allowedFuelIds.forEach(id -> choices.add(BuiltInRegistries.ITEM.get(id)));
-        } else {
-            for (Item item : AbstractFurnaceBlockEntity.getFuel().keySet()) {
-                if (safeDefaultFuel(item)) choices.add(item);
-            }
-        }
-        int raw = rawRemaining(cooking);
-        List<FuelChoice> fuels = choices.stream().distinct()
-                .filter(item -> !rejectedFuelItems.contains(item))
-                .map(item -> fuelChoice(cooking, item, raw))
-                .filter(Objects::nonNull)
-                .toList();
-        Comparator<FuelChoice> economical = Comparator
-                .comparingLong(FuelChoice::acquisitionCost)
-                .thenComparingLong(FuelChoice::waste)
-                .thenComparingInt(FuelChoice::count)
-                .thenComparingInt(choice -> fuelPriority(choice.item()))
-                .thenComparing(choice -> BuiltInRegistries.ITEM.getKey(
-                        choice.item()).toString());
-        if (r.preference == SemanticCookTaskRecord.Preference.PRESERVE_RARE) {
-            economical = Comparator
-                    .comparingLong(FuelChoice::acquisitionCost)
-                    .thenComparingInt(choice -> fuelPriority(choice.item()))
-                    .thenComparingLong(FuelChoice::waste)
-                    .thenComparingInt(FuelChoice::count)
-                    .thenComparing(choice -> BuiltInRegistries.ITEM.getKey(
-                            choice.item()).toString());
-        }
-        return fuels.stream().min(economical).orElse(null);
-    }
-
-    private static boolean safeDefaultFuel(Item item) {
-        return item == Items.COAL || item == Items.CHARCOAL || item == Items.STICK
-                || item == Items.BAMBOO || item == Blocks.DRIED_KELP_BLOCK.asItem()
-                || item.builtInRegistryHolder().is(ItemTags.PLANKS)
-                || item.builtInRegistryHolder().is(ItemTags.LOGS);
-    }
-
-    private int fuelPriority(Item item) {
-        if (item == Items.COAL) return 0;
-        if (item == Items.CHARCOAL) return 1;
-        if (item.builtInRegistryHolder().is(ItemTags.PLANKS)) return 2;
-        if (item.builtInRegistryHolder().is(ItemTags.LOGS)) return 3;
-        if (item == Blocks.DRIED_KELP_BLOCK.asItem()) return 4;
-        return item == Items.STICK ? 5 : 6;
-    }
-
-    // 按“这一批所需烧制时间 ÷ 单份燃料时间”向上取整。
-    // 时间取自选定原生设备，不能把普通熔炉的一份煤时长套在高炉或烟熏炉上。
-    private FuelChoice fuelChoice(CookingRecipe cooking, Item item, int raw) {
-        CookingBatch batch = CookingBatch.plan(cooking, item, raw, player.level().registryAccess());
-        if (batch == null) return null;
-        int burn = batch.burnTicks();
-        long neededTicks = (long) batch.inputCount() * cooking.recipe().getCookingTime();
-        int needed = batch.fuelCount();
-        long cost = recipePlanner.acquisitionCost(item, needed);
-        long waste = (long) needed * burn - neededTicks;
-        return new FuelChoice(item, burn, needed, waste, cost);
     }
 
     // 一次读取周围已加载的小范围方块，按种类记最近距离，供估价和判断有没有设备；不读取未加载地形。
@@ -1197,7 +1129,7 @@ public final class SemanticCookCompanionTask
             }
             case ACQUIRE_FUEL -> {
                 if (fuel == null) return false;
-                rejectedFuelItems.add(fuel);
+                recipePlanner.rejectFuel(fuel);
             }
             case ACQUIRE_STATION -> {
                 if (candidate == null) return false;
