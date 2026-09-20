@@ -1,3 +1,5 @@
+import java.time.Duration
+
 plugins {
     id 'multiloader-common'
     id 'net.neoforged.moddev'
@@ -6,7 +8,7 @@ plugins {
 // 公共模块借助 NeoForm 编译 Minecraft API，使用指定映射；有访问转换配置时才额外启用。
 neoForge {
     neoFormVersion = neo_form_version
-    // Automatically enable AccessTransformers if the file exists
+    // 存在访问转换配置时才启用，让测试与游戏编译遵守同一可见性要求。
     def at = file('src/main/resources/META-INF/accesstransformer.cfg')
     if (at.exists()) {
         accessTransformers.from(at.absolutePath)
@@ -22,14 +24,14 @@ dependencies {
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
     compileOnly group: 'org.ow2.asm', name: 'asm', version: '9.7.1'
     compileOnly group: 'org.ow2.asm', name: 'asm-tree', version: '9.7.1'
-    // Vendored Baritone sources retain their upstream nullability annotations.
+    // 内置 Baritone 保留上游可空性注解，公共编译仍需要对应注解类型。
     compileOnly group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
-    // fabric and neoforge both bundle mixinextras, so it is safe to use it in common
+    // 两个加载器都提供 MixinExtras，公共源码可使用同一套注入扩展。
     compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
     annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
-    // MeshData index-order regressions exercise native buffers without opening an OpenGL window.
-    def nativeOs = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT)
-    def nativeArch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+    // 预览网格排序测试使用原生缓冲区，因此按当前系统选择 LWJGL 运行库，无须打开游戏窗口。
+    def nativeOs = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+    def nativeArch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
     def nativePlatform = nativeOs.contains('win') ? 'windows' : nativeOs.contains('mac') ? 'macos' : 'linux'
     def nativeSuffix = nativeArch in ['aarch64', 'arm64'] ? '-arm64' :
             nativeArch in ['x86', 'i386', 'i686'] ? '-x86' : nativeArch.startsWith('arm') ? '-arm32' : ''
@@ -53,201 +55,96 @@ artifacts {
     commonResources sourceSets.main.resources.sourceDirectories.singleFile
 }
 
-// Run the machine boundary regressions without introducing a test-framework dependency.
-// NeoForm exposes Minecraft on main's compile classpath only; standalone tests need the same types.
-// 独立 main 测试也需要 Minecraft 类型，把公共编译类路径补给测试；它们不依赖 JUnit 自动发现。
+// 独立 main 测试也需要 Minecraft 类型；普通 Gradle test 不会自动发现这些回归入口。
 sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
 sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
-// 机器与建造测试由这个入口顺序运行，并纳入 check。工作目录放在 build 下，避免测试日志散落项目根目录。
-tasks.register('machineRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks machine evidence, design contracts and native request boundaries.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.intent.MachineRegressionSuite'
-    maxHeapSize = '512m'
-    def regressionDirectory = layout.buildDirectory.dir('machine-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
-tasks.named('check') { dependsOn tasks.named('machineRegression') }
 
-// 配置验证独立运行，涵盖调低拒绝、提高后接通及旧进度保护；普通游戏实例不会参与测试。
-tasks.register('buildingBudgetRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks configurable building budgets across public contracts, import, preview and persistence.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite'
-    maxHeapSize = '768m'
-    timeout = java.time.Duration.ofMinutes(2)
-    def regressionDirectory = layout.buildDirectory.dir('building-budget-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
+// 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
+// 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
+def regressionSuites = [
+    machineRegression: [
+        entry: 'org.maiwithu.maicraft.intent.MachineRegressionSuite',
+        heap: '512m', directory: 'machine-regression',
+        purpose: '验证机器证据、设计契约与请求边界'
+    ],
+    buildingBudgetRegression: [
+        entry: 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite',
+        heap: '768m', directory: 'building-budget-regression', timeoutSeconds: 120,
+        purpose: '验证建筑预算、导入、预览与持久化'
+    ],
+    largeBuildingRegression: [
+        entry: 'org.maiwithu.maicraft.intent.LargeBuildingBudgetTest',
+        heap: '2g', directory: 'large-building-regression', timeoutSeconds: 180,
+        purpose: '验证大型建筑编译、导出与进度恢复'
+    ],
+    enchantRegression: [
+        entry: 'org.maiwithu.maicraft.intent.EnchantRegressionSuite',
+        heap: '768m', directory: 'enchant-regression', timeoutSeconds: 120,
+        purpose: '验证附魔报价、消费日志与单次提交'
+    ],
+    nativeProcessRegression: [
+        entry: 'org.maiwithu.maicraft.intent.NativeProcessRegressionSuite',
+        heap: '1g', directory: 'native-process-regression', timeoutSeconds: 180,
+        purpose: '验证原生机器工序、有限配方与物品归因'
+    ],
+    navigationRegression: [
+        entry: 'org.maiwithu.maicraft.core.pathing.NavigationRegressionSuite',
+        heap: '512m', directory: 'navigation-regression', timeoutSeconds: 45,
+        purpose: '验证导航取消、路径推进、开门与落地'
+    ],
+    guiRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.GuiRegressionSuite',
+        heap: '512m', directory: 'gui-regression', timeoutSeconds: 45,
+        purpose: '验证可见菜单、身体动作与任务收尾'
+    ],
+    knowledgeRegression: [
+        entry: 'org.maiwithu.maicraft.mcp.KnowledgeRegressionSuite',
+        heap: '512m', directory: 'knowledge-regression', timeoutSeconds: 45,
+        purpose: '验证知识资源、教程提取与只读请求'
+    ],
+    attentionRegression: [
+        entry: 'org.maiwithu.maicraft.mcp.AttentionRegressionSuite',
+        heap: '512m', directory: 'attention-regression', timeoutSeconds: 45,
+        purpose: '验证任务事件、状态查询与等待'
+    ],
+    combatRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.CombatThreatsTest',
+        heap: '512m', directory: 'combat-regression', timeoutSeconds: 45,
+        purpose: '验证受伤证据与自动自卫'
+    ],
+    optionalServerRegression: [
+        entry: 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite',
+        heap: '768m', directory: 'optional-server-regression', timeoutSeconds: 90,
+        purpose: '验证可选服务端协商、资源与生产证据'
+    ],
+    portalRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.dimension.PortalRegressionSuite',
+        heap: '512m', directory: 'portal-regression', timeoutSeconds: 45,
+        purpose: '验证传送门准备、权限与原生激活'
+    ],
+]
 
-// 大厅夹具超过旧数量和文件上限，单独给两GiB堆核对全量往返，不把它塞进普通512MiB测试进程。
-tasks.register('largeBuildingRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks a 172800-target terminal through compilation, exports, preview data and saved-project recovery.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.intent.LargeBuildingBudgetTest'
-    maxHeapSize = '2g'
-    timeout = java.time.Duration.ofMinutes(3)
-    def regressionDirectory = layout.buildDirectory.dir('large-building-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
-
-tasks.named('check') { dependsOn tasks.named('buildingBudgetRegression'), tasks.named('largeBuildingRegression') }
-
-// 附魔报价、按钮和消费日志单独验证；窗口和真实物品修改只会出现在另行授权的实机验收中。
-tasks.register('enchantRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks visible enchantment transactions, exact costs and durable one-shot submission boundaries.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.intent.EnchantRegressionSuite'
-    maxHeapSize = '768m'
-    timeout = java.time.Duration.ofMinutes(2)
-    def regressionDirectory = layout.buildDirectory.dir('enchant-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
-
-tasks.named('check') { dependsOn tasks.named('enchantRegression') }
-
-// 用同一组回归检查机器原生过程、旧附魔兼容、真实投料和拾取归因；可选读取已安装AE2包核对实际注入位置。
-tasks.register('nativeProcessRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks shared native machine processes, finite world recipes and attributed player actions.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.intent.NativeProcessRegressionSuite'
-    maxHeapSize = '1g'
-    timeout = java.time.Duration.ofMinutes(3)
-    def regressionDirectory = layout.buildDirectory.dir('native-process-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-    if (providers.gradleProperty('maicraftAe2Jar').isPresent()) systemProperty 'maicraft.test.ae2Jar', providers.gradleProperty('maicraftAe2Jar').get()
-}
-tasks.named('check') { dependsOn tasks.named('nativeProcessRegression') }
-
-// 导航回归入口，限制整组运行时间，检查路径、取消、移动、落地和交通相关行为。
-tasks.register('navigationRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks path cancellation, bounded tick execution, door passage and physical progress.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.core.pathing.NavigationRegressionSuite'
-    maxHeapSize = '512m'
-    timeout = java.time.Duration.ofSeconds(45)
-    def regressionDirectory = layout.buildDirectory.dir('navigation-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
+// 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。
+regressionSuites.each { name, suite ->
+    def regression = tasks.register(name, JavaExec) {
+        group = 'verification'
+        description = suite.purpose
+        dependsOn tasks.named('testClasses')
+        classpath = sourceSets.test.runtimeClasspath
+        classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
+        mainClass = suite.entry
+        maxHeapSize = suite.heap
+        if (suite.timeoutSeconds != null) timeout = Duration.ofSeconds(suite.timeoutSeconds)
+        def directory = layout.buildDirectory.dir(suite.directory)
+        workingDir directory.get().asFile
+        doFirst { directory.get().asFile.mkdirs() }
+    }
+    tasks.named('check') { dependsOn regression }
 }
 
-tasks.named('check') { dependsOn tasks.named('navigationRegression') }
-
-// 菜单与输入回归入口，检查可见界面、动作确认、物品选择及任务收尾。
-tasks.register('guiRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks rendered GUI gates, menu timing and task cleanup boundaries.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.client.actor.GuiRegressionSuite'
-    maxHeapSize = '512m'
-    timeout = java.time.Duration.ofSeconds(45)
-    def regressionDirectory = layout.buildDirectory.dir('gui-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
+// 提供实际安装的 AE2 包时，原生工序回归还会核对注入位置；其他回归组不依赖该可选路径。
+tasks.named('nativeProcessRegression', JavaExec) {
+    if (providers.gradleProperty('maicraftAe2Jar').isPresent()) {
+        systemProperty 'maicraft.test.ae2Jar', providers.gradleProperty('maicraftAe2Jar').get()
+    }
 }
-
-tasks.named('check') { dependsOn tasks.named('guiRegression') }
-
-// 知识资源与只读 HTTP 回归入口；资源包加入类路径，让原版注册信息能在无游戏窗口时初始化。
-tasks.register('knowledgeRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks progressive MCP resources, Ponder extraction and read-only HTTP behavior.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.mcp.KnowledgeRegressionSuite'
-    maxHeapSize = '512m'
-    timeout = java.time.Duration.ofSeconds(45)
-    def regressionDirectory = layout.buildDirectory.dir('knowledge-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
-
-tasks.named('check') { dependsOn tasks.named('knowledgeRegression') }
-
-// 事件通知和等待回归入口。check 依赖这几组 JavaExec，而不是只依赖 Gradle 默认 test。
-tasks.register('attentionRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks attention delivery, task state and event-driven waiting.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.mcp.AttentionRegressionSuite'
-    maxHeapSize = '512m'
-    timeout = java.time.Duration.ofSeconds(45)
-    def regressionDirectory = layout.buildDirectory.dir('attention-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
-tasks.named('check') { dependsOn tasks.named('attentionRegression') }
-
-tasks.register('combatRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks client damage evidence and automatic self-defense.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.client.actor.CombatThreatsTest'
-    maxHeapSize = '512m'
-    timeout = java.time.Duration.ofSeconds(45)
-    def regressionDirectory = layout.buildDirectory.dir('combat-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
-
-tasks.named('check') { dependsOn tasks.named('combatRegression') }
-
-tasks.register('optionalServerRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks optional server negotiation, native resources and production evidence.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite'
-    maxHeapSize = '768m'
-    timeout = java.time.Duration.ofSeconds(90)
-    def regressionDirectory = layout.buildDirectory.dir('optional-server-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
-tasks.named('check') { dependsOn tasks.named('optionalServerRegression') }
-
-tasks.register('portalRegression', JavaExec) {
-    group = 'verification'
-    description = 'Checks portal preparation geometry, permissions and native activation evidence.'
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    classpath(tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact })
-    mainClass = 'org.maiwithu.maicraft.core.task.dimension.PortalRegressionSuite'
-    maxHeapSize = '512m'
-    timeout = java.time.Duration.ofSeconds(45)
-    def regressionDirectory = layout.buildDirectory.dir('portal-regression')
-    workingDir regressionDirectory.get().asFile
-    doFirst { regressionDirectory.get().asFile.mkdirs() }
-}
-tasks.named('check') { dependsOn tasks.named('portalRegression') }
