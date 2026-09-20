@@ -49,19 +49,6 @@ import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
  */
 final class IntentTask implements Task {
 
-    private static final Set<String> INTERNAL_RESULT_KEYS = Set.of(
-            "entity_id", "entity_ids", "requested_entity_ids", "defeated_entity_ids",
-            "lost_entity_ids", "unreachable_entity_ids", "combat_by_entity",
-            "runtime_id", "runtime_ids", "target_runtime_id", "target_runtime_ids",
-            "button", "click", "clicks", "slot", "slots", "inventory_slots",
-            "slot_clicks", "click_sequence", "route", "waypoints", "path_nodes",
-            "block_ops", "placements", "cells", "continuation_token",
-            "continuation_prefix_hash", "verified_position", "failure_position",
-            "final_position", "site_min", "site_max", "remaining_scaffolds",
-            "origin", "observed_loaded_bounds", "explored_centers",
-            "observed_unloaded_frontier_samples", "failed_legs",
-            "x", "y", "z", "position", "center", "location", "destination", "bounds");
-
     private final LocalPlayer player;
     private final IntentTaskRecord record;
     private final IntentRuntime runtime;
@@ -474,10 +461,10 @@ final class IntentTask implements Task {
             effect.put("step_index", step.index());
             effect.put("ability", step.ability());
             if (step.index() >= 0 && step.index() < record.steps().size()) {
-                effect.put("outcome", sanitizeMessage(record.steps().get(step.index()).outcome()));
+                effect.put("outcome", SemanticResultView.message(record.steps().get(step.index()).outcome()));
             }
             effect.put("success", step.success());
-            effect.put("summary", sanitizeMessage(step.message()));
+            effect.put("summary", SemanticResultView.message(step.message()));
             Object confirmed = sanitizeJson(step.result());
             if (confirmed != null) effect.put("confirmed_effect", confirmed);
             effects.add(Map.copyOf(effect));
@@ -493,7 +480,7 @@ final class IntentTask implements Task {
             effect.put("step_index", index);
             effect.put("state", index == record.stepIndex() ? "failed_current" : "pending");
             effect.put("ability", pending.ability());
-            effect.put("outcome", sanitizeMessage(pending.outcome()));
+            effect.put("outcome", SemanticResultView.message(pending.outcome()));
             effects.add(Map.copyOf(effect));
         }
         return List.copyOf(effects);
@@ -996,7 +983,7 @@ final class IntentTask implements Task {
         if (raw == null) return TaskResult.fail("internal action failed");
         return new TaskResult(
                 raw.success(),
-                sanitizeMessage(raw.message()),
+                SemanticResultView.message(raw.message()),
                 raw.timedOut(),
                 raw.interrupted(),
                 sanitizeMap(raw.data()));
@@ -1008,7 +995,7 @@ final class IntentTask implements Task {
         Map<String, Object> clean = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : source.entrySet()) {
             String key = entry.getKey();
-            if (key == null || internalResultKey(key)) continue;
+            if (key == null || SemanticResultView.internalKey(key)) continue;
             Object value = sanitizeEntry(key, entry.getValue());
             if (value != null) clean.put(key, value);
         }
@@ -1023,7 +1010,7 @@ final class IntentTask implements Task {
             Map<String, Object> clean = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
-                if (internalResultKey(key)) continue;
+                if (SemanticResultView.internalKey(key)) continue;
                 Object nested = sanitizeEntry(key, entry.getValue());
                 if (nested != null) clean.put(key, nested);
             }
@@ -1047,7 +1034,7 @@ final class IntentTask implements Task {
                     // Ordinary text that merely resembles JSON remains ordinary text.
                 }
             }
-            return sanitizeMessage(text);
+            return SemanticResultView.message(text);
         }
         return value;
     }
@@ -1058,7 +1045,7 @@ final class IntentTask implements Task {
             Map<String, Object> clean = new LinkedHashMap<>();
             for (Map.Entry<String, JsonElement> entry
                     : value.getAsJsonObject().entrySet()) {
-                if (internalResultKey(entry.getKey())) continue;
+                if (SemanticResultView.internalKey(entry.getKey())) continue;
                 Object nested = sanitizeEntry(entry.getKey(), entry.getValue());
                 if (nested != null) clean.put(entry.getKey(), nested);
             }
@@ -1075,7 +1062,7 @@ final class IntentTask implements Task {
         var primitive = value.getAsJsonPrimitive();
         if (primitive.isBoolean()) return primitive.getAsBoolean();
         if (primitive.isNumber()) return primitive.getAsNumber();
-        return sanitizeMessage(primitive.getAsString());
+        return SemanticResultView.message(primitive.getAsString());
     }
 
     private static Object sanitizeEntry(String key, Object value) {
@@ -1106,58 +1093,6 @@ final class IntentTask implements Task {
             result.add(clean);
         }
         return List.copyOf(result);
-    }
-
-    private static boolean internalResultKey(String raw) {
-        String key = raw.toLowerCase(Locale.ROOT);
-        return INTERNAL_RESULT_KEYS.contains(key)
-                || key.endsWith("_cells")
-                || key.endsWith("_ops")
-                || key.endsWith("_placements")
-                || key.endsWith("_receipts")
-                || key.endsWith("_routes")
-                || key.endsWith("_waypoints")
-                || key.endsWith("_path_nodes")
-                || key.endsWith("_position")
-                || key.endsWith("_center")
-                || key.endsWith("_location")
-                || key.endsWith("_destination")
-                || key.endsWith("_bounds")
-                || key.endsWith("_x")
-                || key.endsWith("_y")
-                || key.endsWith("_z")
-                || key.endsWith("_entity_id")
-                || key.endsWith("_entity_ids")
-                || key.endsWith("_runtime_id")
-                || key.endsWith("_runtime_ids");
-    }
-
-    private static String sanitizeMessage(String raw) {
-        if (raw == null) return "";
-        return raw
-                // 教学消息的既定句式先整句归形,再做通用坐标清洗——否则
-                // "reached the exact cell -399,65,331." 会被洗成
-                // "reached the exact cell the internally verified location." 这样的病句
-                // (MoveTo 的成功文案 + 坐标隐私清洗叠加的实锅)。
-                .replaceFirst(
-                        "(?i)reached the exact cell -?\\d+\\s*,\\s*-?\\d+\\s*,\\s*-?\\d+\\.",
-                        "reached the exact target cell.")
-                .replaceFirst(
-                        "(?i)arrived at location x\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\s+z\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?,"
-                                + "\\s*standing on the ground at y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\.",
-                        "arrived at the target location, standing on solid ground.")
-                .replaceFirst(
-                        "(?i)The exact cell y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)? wasn't reachable",
-                        "The exact requested cell wasn't reachable")
-                .replaceAll("(?i)entity\\s*#?\\s*\\d+", "selected entity")
-                .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target")
-                .replaceAll(
-                        "(?i)(?:location\\s+)?x\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\s+z\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?(?:,?\\s*standing\\s+on\\s+the\\s+ground\\s+at\\s+y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?)?",
-                        "the internally verified location")
-                .replaceAll("(?<!\\d)-?\\d+\\s*,\\s*-?\\d+\\s*,\\s*-?\\d+(?!\\d)",
-                        "the internally verified location")
-                .replaceAll("(?i)\\b[xyz]\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?",
-                        "the internally verified coordinate");
     }
 
     @Override
