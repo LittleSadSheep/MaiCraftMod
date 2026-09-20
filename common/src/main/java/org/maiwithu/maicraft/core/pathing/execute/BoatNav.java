@@ -15,6 +15,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Collections;
+import org.maiwithu.maicraft.core.Constants;
 
 /**
  * 玩家已经坐在船上时，先规划一段同高度水路并划向终点。最多搜索四千零九十六次，找不到目标就驶向已找到的最近水格。
@@ -205,10 +207,10 @@ public final class BoatNav {
         for (long k = endKey; k != startKey; k = nodes.get(k)[0]) {
             cells.add(new BlockPos(unpackX(k), surfaceY, unpackZ(k)));
         }
-        java.util.Collections.reverse(cells);
+        Collections.reverse(cells);
         path = cells;
         wpIndex = 0;
-        org.maiwithu.maicraft.core.Constants.LOG.debug(
+        Constants.LOG.debug(
                 "[maicraft-boat] 航线 {} 点,{} 展开,{}", path.size(), expanded,
                 goalKey != null ? "直达目标水域" : "至最近靠岸点");
         return null;

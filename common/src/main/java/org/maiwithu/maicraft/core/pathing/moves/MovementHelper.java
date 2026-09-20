@@ -50,6 +50,10 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import java.util.List;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.border.WorldBorder;
 
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 
@@ -109,7 +113,7 @@ public final class MovementHelper {
     }
 
     private static Ternary canWalkThroughBlockState(
-            BlockState state, java.util.List<Block> blocksToAvoid) {
+            BlockState state, List<Block> blocksToAvoid) {
         Block block = state.getBlock();
         if (block instanceof AirBlock) {
             return Ternary.YES;
@@ -554,7 +558,7 @@ public final class MovementHelper {
     }
 
     public static boolean canPlaceAgainst(BlockGetter level, BlockPos pos) {
-        if (level instanceof net.minecraft.world.level.Level live
+        if (level instanceof Level live
                 && !placeableWithinBorder(live.getWorldBorder(), pos.getX(), pos.getZ())) {
             return false;
         }
@@ -573,7 +577,7 @@ public final class MovementHelper {
     /**
      * Live client-thread overload for direct execution-time geometry checks.
      */
-    public static boolean placeableWithinBorder(net.minecraft.world.level.border.WorldBorder border,
+    public static boolean placeableWithinBorder(WorldBorder border,
                                                 int x, int z) {
         if (border == null) {
             return true;
@@ -630,11 +634,11 @@ public final class MovementHelper {
         var facing = blockState.getValue(HorizontalDirectionalBlock.FACING).getAxis();
         boolean open = blockState.getValue(propertyOpen);
 
-        net.minecraft.core.Direction.Axis playerFacing;
+        Direction.Axis playerFacing;
         if (playerPos.north().equals(blockPos) || playerPos.south().equals(blockPos)) {
-            playerFacing = net.minecraft.core.Direction.Axis.Z;
+            playerFacing = Direction.Axis.Z;
         } else if (playerPos.east().equals(blockPos) || playerPos.west().equals(blockPos)) {
-            playerFacing = net.minecraft.core.Direction.Axis.X;
+            playerFacing = Direction.Axis.X;
         } else {
             return true;
         }

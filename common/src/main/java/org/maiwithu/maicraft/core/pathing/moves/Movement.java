@@ -20,6 +20,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import java.util.Comparator;
+import net.minecraft.world.level.BlockGetter;
 
 /**
  * 旧移动执行器的共用部分：保存起终点、计算费用、处理挡路方块，并把每次更新想按的键交给执行代理。
@@ -180,13 +182,13 @@ public abstract class Movement {
         if (player.onGround()) {
             double playerX = player.position().x;
             double playerZ = player.position().z;
-            java.util.List<BlockPos> closest = new java.util.ArrayList<>();
+            List<BlockPos> closest = new ArrayList<>();
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     closest.add(new BlockPos(feet.getX() + dx, feet.getY(), feet.getZ() + dz));
                 }
             }
-            closest.sort(java.util.Comparator.comparingDouble(pos ->
+            closest.sort(Comparator.comparingDouble(pos ->
                     ((pos.getX() + 0.5) - playerX) * ((pos.getX() + 0.5) - playerX)
                     + ((pos.getZ() + 0.5) - playerZ) * ((pos.getZ() + 0.5) - playerZ)));
             for (int i = 0; i < 4; i++) {
@@ -528,7 +530,7 @@ public abstract class Movement {
     }
 
     /** 此刻仍不可穿行、需要挖掉的格(缓存到 {@link #resetBlockCache()})。 */
-    public List<BlockPos> toBreak(net.minecraft.world.level.BlockGetter level) {
+    public List<BlockPos> toBreak(BlockGetter level) {
         if (toBreakCached != null) {
             return toBreakCached;
         }
@@ -543,7 +545,7 @@ public abstract class Movement {
     }
 
     /** 此刻仍不可站立、需要放上方块的格(缓存到 {@link #resetBlockCache()})。 */
-    public List<BlockPos> toPlace(net.minecraft.world.level.BlockGetter level) {
+    public List<BlockPos> toPlace(BlockGetter level) {
         if (toPlaceCached != null) {
             return toPlaceCached;
         }
@@ -556,7 +558,7 @@ public abstract class Movement {
     }
 
     /** 会用身体挤进去的格(基类恒空;对角移动覆写产出切角柱)。 */
-    public List<BlockPos> toWalkInto(net.minecraft.world.level.BlockGetter level) {
+    public List<BlockPos> toWalkInto(BlockGetter level) {
         if (toWalkIntoCached == null) {
             toWalkIntoCached = new ArrayList<>();
         }

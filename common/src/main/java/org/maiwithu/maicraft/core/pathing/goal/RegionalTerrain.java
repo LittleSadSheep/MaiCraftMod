@@ -5,6 +5,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.world.phys.Vec3;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
+import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 
 /**
  * 分多次少量读取周围地形，记录能站的表面、相邻支撑、可见性和材质。稀疏取样用于挑候选，不证明整个平台连续或路线能走通。
@@ -36,33 +48,33 @@ public final class RegionalTerrain {
     // 概览把取样扩大到一百二十八格、向下二百五十六格；远处采得更疏。
     public static RegionalTerrain overview(Vec3 origin) { return new RegionalTerrain(origin,128,256,OVERVIEW_OFFSETS); }
     // 向下碰到表面后再检查身体与禁入区域；当前 known 使用 hasChunkAt，在原版客户端不能识别未加载区块。
-    public static View observed(net.minecraft.client.player.LocalPlayer player) {
+    public static View observed(LocalPlayer player) {
         var level=player.clientLevel;
         return new View() {
-            private final Map<Vec3,String> materials=new java.util.HashMap<>();
+            private final Map<Vec3,String> materials=new HashMap<>();
             public boolean known(Vec3 point) {
                 return point.y>=level.getMinBuildHeight() && point.y<level.getMaxBuildHeight()
-                        && level.hasChunkAt(net.minecraft.core.BlockPos.containing(point));
+                        && level.hasChunkAt(BlockPos.containing(point));
             }
             public Vec3 surfaceBelow(Vec3 point, int depth) {
                 if(!known(point)) return null;
-                var hit=level.clip(new net.minecraft.world.level.ClipContext(point,point.add(0,-depth,0),
-                        net.minecraft.world.level.ClipContext.Block.COLLIDER,
-                        net.minecraft.world.level.ClipContext.Fluid.NONE,player));
-                if(hit.getType()!=net.minecraft.world.phys.HitResult.Type.BLOCK) return null;
-                var feet=org.maiwithu.maicraft.core.pathing.util.BlockHelper.playerFeet(level,point.x,hit.getLocation().y,point.z);
-                var probe=org.maiwithu.maicraft.core.pathing.transport.TransportLanding.inspect(level,level::hasChunkAt,
+                var hit=level.clip(new ClipContext(point,point.add(0,-depth,0),
+                        ClipContext.Block.COLLIDER,
+                        ClipContext.Fluid.NONE,player));
+                if(hit.getType()!=HitResult.Type.BLOCK) return null;
+                var feet=BlockHelper.playerFeet(level,point.x,hit.getLocation().y,point.z);
+                var probe=TransportLanding.inspect(level,level::hasChunkAt,
                         feet,player.getBbWidth(),player.getBbHeight(),
-                        org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.forbiddenBodyCells());
+                        NavigationSafetyContext.forbiddenBodyCells());
                 if(probe.destination()==null) return null;
                 Vec3 surface=probe.destination().landingPoint();
-                materials.put(surface,net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit.getBlockPos()).getBlock()).toString());
+                materials.put(surface,BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit.getBlockPos()).getBlock()).toString());
                 return surface;
             }
             public boolean visible(Vec3 from, Vec3 to) {
-                return level.clip(new net.minecraft.world.level.ClipContext(from,to,
-                        net.minecraft.world.level.ClipContext.Block.COLLIDER,
-                        net.minecraft.world.level.ClipContext.Fluid.NONE,player)).getType()==net.minecraft.world.phys.HitResult.Type.MISS;
+                return level.clip(new ClipContext(from,to,
+                        ClipContext.Block.COLLIDER,
+                        ClipContext.Fluid.NONE,player)).getType()==HitResult.Type.MISS;
             }
             public String material(Vec3 surface) { return materials.getOrDefault(surface,"unknown"); }
         };
@@ -92,7 +104,7 @@ public final class RegionalTerrain {
     private static List<Vec3> offsets() {
         var points=new ArrayList<Vec3>();
         for(int x=-RADIUS;x<=RADIUS;x+=STRIDE) for(int z=-RADIUS;z<=RADIUS;z+=STRIDE) points.add(new Vec3(x,0,z));
-        points.sort(java.util.Comparator.comparingDouble(Vec3::lengthSqr)); return List.copyOf(points);
+        points.sort(Comparator.comparingDouble(Vec3::lengthSqr)); return List.copyOf(points);
     }
     // 近、中、远取样交替安排，避免近处还没看完就完全没有远处信息。
     private static List<Vec3> overviewOffsets() {
@@ -100,9 +112,9 @@ public final class RegionalTerrain {
         for(int x=-32;x<=32;x+=8) for(int z=-32;z<=32;z+=8) medium.add(new Vec3(x,0,z));
         for(int x=-128;x<=128;x+=32) for(int z=-128;z<=128;z+=32)
             if(x*x+z*z<=128*128) far.add(new Vec3(x,0,z));
-        medium.sort(java.util.Comparator.comparingDouble(Vec3::lengthSqr));
-        far.sort(java.util.Comparator.comparingDouble(Vec3::lengthSqr));
-        var merged=new java.util.LinkedHashSet<Vec3>();
+        medium.sort(Comparator.comparingDouble(Vec3::lengthSqr));
+        far.sort(Comparator.comparingDouble(Vec3::lengthSqr));
+        var merged=new LinkedHashSet<Vec3>();
         for(int i=0;i<Math.max(OFFSETS.size(),Math.max(medium.size(),far.size()));i++) {
             if(i<OFFSETS.size()) merged.add(OFFSETS.get(i));
             if(i<far.size()) merged.add(far.get(i));
@@ -121,10 +133,10 @@ public final class RegionalTerrain {
             groups.computeIfAbsent(sector+":"+(int)Math.floor(delta.y/4)+":"+surface.material(),ignored->new ArrayList<>()).add(surface);
         }
         var regions=new ArrayList<Map<String,Object>>();
-        var ordered=groups.entrySet().stream().sorted(java.util.Comparator.comparingDouble(entry -> entry.getValue().stream()
+        var ordered=groups.entrySet().stream().sorted(Comparator.comparingDouble(entry -> entry.getValue().stream()
                 .mapToDouble(s->s.point().distanceToSqr(origin)).min().orElseThrow())).toList();
-        var selected=new java.util.LinkedHashSet<Map.Entry<String,List<Surface>>>();
-        var materials=new java.util.HashSet<String>();
+        var selected=new LinkedHashSet<Map.Entry<String,List<Surface>>>();
+        var materials=new HashSet<String>();
         for(var entry:ordered) if(entry.getValue().stream().anyMatch(Surface::platform)
                 && materials.add(entry.getValue().getFirst().material()) && selected.size()<12) selected.add(entry);
         for(var entry:ordered) if(selected.size()<12) selected.add(entry);

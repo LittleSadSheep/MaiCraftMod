@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorTravel;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackPlatform;
 
 /** 将当前观察到能尝试的飞行／电梯方案按估计耗时排序；只是挑候选，实际整段路是否可走还要执行时验证。 */
 final class TransportPlan {
@@ -27,7 +28,7 @@ final class TransportPlan {
         if (targets.destinations().isEmpty()) unavailable.add("no supported, unobstructed landing satisfies the destination; " + targets.diagnostic());
         var floors = new HashSet<Integer>();
         if (mode != TransportMode.ELEVATOR && mode != TransportMode.GROUND) {
-            for (var platform : org.maiwithu.maicraft.core.integration.jetpack.JetpackPlatform.collect(targets.destinations())) {
+            for (var platform : JetpackPlatform.collect(targets.destinations())) {
                 var destination = platform.anchor();
                 var flight = JetpackFlightSession.probe(context, destination.landingPoint(), forbidden);
                 if (flight.available()) offers.add(new Offer("jetpack", destination.feet(), flight.estimatedTicks(),

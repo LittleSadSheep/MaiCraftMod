@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.Constants;
 
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.JUMP_ONE_BLOCK_COST;
@@ -215,7 +216,7 @@ public class MovementPillar extends Movement {
             AimGeometry.moveTowards(player, state, against);
             if (player.tickCount % 10 == 0) {
                 // 爬梯分支得留声:没有它,卡在这里时外面只看到"垫柱毫无动静"。
-                org.maiwithu.maicraft.core.Constants.LOG.debug(
+                Constants.LOG.debug(
                         "[maicraft-pillar] 爬梯 src={} 贴面={} 身位={} y={} 竖速={} 攀附={}",
                         src.toShortString(), against.toShortString(),
                         feet(player).toShortString(), String.format("%.2f", player.getY()),
@@ -288,14 +289,14 @@ public class MovementPillar extends Movement {
                     if (crouched && looking && highEnough) {
                         // 已蹲稳、看准、跳够高度:放块
                         state.setInput(Input.CLICK_RIGHT, true);
-                        org.maiwithu.maicraft.core.Constants.LOG.info(
+                        Constants.LOG.info(
                                 "[maicraft-pillar] 放置尝试 src={} y={} sneak={} dist={}",
                                 src.toShortString(),
                                 String.format("%.2f", player.getY()), player.isShiftKeyDown(),
                                 String.format("%.2f", dist));
                     } else if (player.tickCount % 10 == 0) {
                         // 插桩:跳搭三条件逐值(500ms 限频)——之前这里全哑,只能猜
-                        org.maiwithu.maicraft.core.Constants.LOG.info(
+                        Constants.LOG.info(
                                 "[maicraft-pillar] 未就绪 src={} 蹲={} 看准={} 高度够={} y={} dy={} dist={} "
                                         + "横速={} 在地={} 请求跳={} 竖速={} 手持={}",
                                 src.toShortString(), crouched, looking, highEnough,
@@ -312,7 +313,7 @@ public class MovementPillar extends Movement {
         }
 
         if (feet(player).equals(dest) && blockIsThere) {
-            org.maiwithu.maicraft.core.Constants.LOG.info(
+            Constants.LOG.info(
                     "[maicraft-pillar] 垫柱成功 src={} feet={}", src.toShortString(),
                     feet(player).toShortString());
             return state.setStatus(MovementStatus.SUCCESS);

@@ -10,6 +10,7 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.BlockGetter;
+import org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView;
 
 /**
  * 为现用挖矿与方块查询准备费用计算环境：forExecution 只读取当前已加载的现场。
@@ -48,8 +49,8 @@ public final class ContextFactory {
                                                   LongSet deniedPlace, LongSet forbiddenBodyCells,
                                                   TerrainPermit permit, ContextBuilder builder) {
         // 现用挖矿等查询读最新现场，只限制为已加载区块；这里不是搜索快照。
-        var view = org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView.of(player.level());
-        ChunkLoadedTest loaded = view instanceof org.maiwithu.maicraft.core.pathing.cache.LoadedOnlyView v
+        var view = LoadedOnlyView.of(player.level());
+        ChunkLoadedTest loaded = view instanceof LoadedOnlyView v
                 ? v::isLoaded : ChunkLoadedTest.ALWAYS;
         return builder.create(player, view, loaded, false, protectedSacred(sacred), deniedPlace,
                 forbiddenBodyCells, permit);

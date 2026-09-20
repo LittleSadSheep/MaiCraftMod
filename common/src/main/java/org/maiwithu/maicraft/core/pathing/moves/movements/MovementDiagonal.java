@@ -18,6 +18,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import java.util.ArrayList;
+import java.util.List;
+import net.minecraft.world.level.BlockGetter;
 
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.CENTER_AFTER_FALL_COST;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
@@ -284,11 +287,11 @@ public class MovementDiagonal extends Movement {
 
     /** 对角的待挖集只含终点柱两格(切角柱是挤过去的,不是挖穿的)。 */
     @Override
-    public java.util.List<BlockPos> toBreak(net.minecraft.world.level.BlockGetter level) {
+    public List<BlockPos> toBreak(BlockGetter level) {
         if (toBreakCached != null) {
             return toBreakCached;
         }
-        java.util.List<BlockPos> result = new java.util.ArrayList<>();
+        List<BlockPos> result = new ArrayList<>();
         for (int i = 4; i < 6; i++) {
             if (!MovementHelper.canWalkThrough(level, positionsToBreak[i])) {
                 result.add(positionsToBreak[i]);
@@ -300,11 +303,11 @@ public class MovementDiagonal extends Movement {
 
     /** 四个切角柱里此刻仍不通透的格:身体会硬挤着蹭过去的位置。 */
     @Override
-    public java.util.List<BlockPos> toWalkInto(net.minecraft.world.level.BlockGetter level) {
+    public List<BlockPos> toWalkInto(BlockGetter level) {
         if (toWalkIntoCached == null) {
-            toWalkIntoCached = new java.util.ArrayList<>();
+            toWalkIntoCached = new ArrayList<>();
         }
-        java.util.List<BlockPos> result = new java.util.ArrayList<>();
+        List<BlockPos> result = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
             if (!MovementHelper.canWalkThrough(level, positionsToBreak[i])) {
                 result.add(positionsToBreak[i]);

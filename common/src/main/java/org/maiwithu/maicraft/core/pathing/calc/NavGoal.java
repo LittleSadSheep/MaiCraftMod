@@ -265,7 +265,7 @@ public interface NavGoal {
      * whole field of ore at once instead of greedily picking the nearest (which is
      * often the one walled in and unreachable).
      */
-    static NavGoal composite(java.util.List<NavGoal> goals) {
+    static NavGoal composite(List<NavGoal> goals) {
         return new Composite(goals);
     }
 
@@ -614,11 +614,11 @@ public interface NavGoal {
      * 一组候选中满足任意一个就算到达，搜索取最有希望的一项；平均位置只用于定位和诊断。
      */
     final class Composite implements NavGoal {
-        public final java.util.List<NavGoal> members;
+        public final List<NavGoal> members;
         private final BlockPos centroid;
 
-        Composite(java.util.List<NavGoal> goals) {
-            java.util.List<NavGoal> gs = java.util.List.copyOf(goals);
+        Composite(List<NavGoal> goals) {
+            List<NavGoal> gs = List.copyOf(goals);
             if (gs.isEmpty()) {
                 throw new IllegalArgumentException("composite goal needs at least one member");
             }

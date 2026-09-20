@@ -6,6 +6,8 @@ import java.util.function.Consumer;
 import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot;
 
 /** 同一时刻只允许一段交通控制玩家；任务取消后，必要的落地或出梯收尾仍由这里继续推进。 */
 public final class TransportRuntime {
@@ -54,7 +56,7 @@ public final class TransportRuntime {
     public static boolean occupied() { return active != null; }
 
     /** Client-thread observation only; never acquires or ticks a transport. */
-    public static org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() {
+    public static NavigationPathSnapshot debugPath() {
         return active == null ? null : active.session.debugPath();
     }
 
@@ -142,7 +144,7 @@ public final class TransportRuntime {
         if (lease == null) return;
         try { lease.session.abandon(); }
         catch (RuntimeException failure) {
-            org.maiwithu.maicraft.core.Constants.LOG.warn("Transport local cleanup failed", failure);
+            Constants.LOG.warn("Transport local cleanup failed", failure);
         } finally {
             lease.result = TransportSession.Result.failed("transport_control_transferred",
                     "transport stopped observing this body; any changed equipment modes need fresh observation", true, true);
@@ -162,9 +164,9 @@ public final class TransportRuntime {
         description.put("damage_observed", lease.damageObserved);
         last = Map.copyOf(description);
         try { lease.body.releaseAll(); }
-        catch (RuntimeException failure) { org.maiwithu.maicraft.core.Constants.LOG.warn("Transport input cleanup failed", failure); }
+        catch (RuntimeException failure) { Constants.LOG.warn("Transport input cleanup failed", failure); }
         try { lease.completed.accept(lease.result); }
-        catch (RuntimeException failure) { org.maiwithu.maicraft.core.Constants.LOG.warn("Transport result callback failed", failure); }
+        catch (RuntimeException failure) { Constants.LOG.warn("Transport result callback failed", failure); }
     }
 
     public static Map<String, Object> diagnosticState() {

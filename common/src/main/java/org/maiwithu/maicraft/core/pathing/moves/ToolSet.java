@@ -25,6 +25,8 @@ import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.world.item.enchantment.effects.EnchantmentAttributeEffect;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * 用创建时的九格快捷栏估算不同方块的挖掘速度，当前供方块费用判断使用；这里不会实际把工具拿到手上。
@@ -125,8 +127,8 @@ public class ToolSet {
     );
 
     private static TagKey<Item> materialTag(String name) {
-        return TagKey.create(net.minecraft.core.registries.Registries.ITEM,
-                net.minecraft.resources.ResourceLocation.withDefaultNamespace(name));
+        return TagKey.create(Registries.ITEM,
+                ResourceLocation.withDefaultNamespace(name));
     }
 
     private static int getMaterialCost(ItemStack itemStack) {

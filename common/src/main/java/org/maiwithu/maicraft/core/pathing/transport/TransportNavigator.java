@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationStep;
 
 /**
  * 决定这一段用走路、背包飞行还是电梯；普通走路交给 Baritone，交通完成后再检查原来的目的地。
@@ -169,7 +171,7 @@ public final class TransportNavigator {
         return status;
     }
 
-    private PlayerNav.Status beginTransport(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
+    private PlayerNav.Status beginTransport(LocalPlayerContext context) {
         // 停止旧步行并保存已改地形记录，重新开始找符合总目标且不侵入保护区的交通落点。
         var compiled = goals.get();
         if (compiled == null) { failure = "navigation destination is unavailable"; return PlayerNav.Status.FAILED; }
@@ -226,7 +228,7 @@ public final class TransportNavigator {
                 || player.level().getGameTime() - progressTick <= ticks || ground.hasRecentPhysicalProgress(ticks);
     }
     public boolean planningInFlight() { return targets != null || session != null && session.phase().contains("plan") || ground.planningInFlight(); }
-    public org.maiwithu.maicraft.core.pathing.execute.NavigationStep executionStep(long clientRevision) {
+    public NavigationStep executionStep(long clientRevision) {
         return session == null && targets == null ? ground.executionStep(clientRevision) : null;
     }
     public String outcomeSummary() { return ground.outcomeSummary() + "; transport=" + attempts + (targets == null ? "" : targets.diagnostic()); }

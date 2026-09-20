@@ -26,6 +26,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.Item;
+import org.maiwithu.maicraft.core.WorkProfile;
 
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 
@@ -142,7 +145,7 @@ public class CalculationContext {
                 && player.level().dimension() != Level.NETHER;
         // 无饥饿画像(创造)不受饱食度门限——否则 food≤6 时被切创造会永久锁死疾跑
         this.canSprint = settings.allowSprint
-                && (!org.maiwithu.maicraft.core.WorkProfile.of(player).hasHunger()
+                && (!WorkProfile.of(player).hasHunger()
                         || player.getFoodData().getFoodLevel() > 6);
         this.placeBlockCost = settings.blockPlacementPenalty;
         // 这份费用判断同时受本次地形许可和导航设置影响；后面还有允许例外破坏的方块列表。
@@ -234,7 +237,7 @@ public class CalculationContext {
      * {@code allowInventory} 开启才查背包深处(9-35)。
      */
     private static boolean hasGenericThrowaway(LocalPlayer player, NavSettings settings) {
-        List<net.minecraft.world.item.Item> acceptable = ScaffoldMaterials.of(player);
+        List<Item> acceptable = ScaffoldMaterials.of(player);
         var inv = player.getInventory();
         for (int i = 0; i < 9; i++) {
             ItemStack stack = inv.getItem(i);
@@ -249,7 +252,7 @@ public class CalculationContext {
             for (int i = 0; i < 9; i++) {
                 ItemStack stack = inv.getItem(i);
                 if (stack.isEmpty() || stack.getItem().components()
-                        .has(net.minecraft.core.component.DataComponents.TOOL)) {
+                        .has(DataComponents.TOOL)) {
                     return true;
                 }
             }
@@ -281,7 +284,7 @@ public class CalculationContext {
         for (int slot = 0; slot < 9; slot++) {
             ItemStack main = inventory.getItem(slot);
             if (main.isEmpty() || main.getItem().components().has(
-                    net.minecraft.core.component.DataComponents.TOOL)) {
+                    DataComponents.TOOL)) {
                 return true;
             }
         }

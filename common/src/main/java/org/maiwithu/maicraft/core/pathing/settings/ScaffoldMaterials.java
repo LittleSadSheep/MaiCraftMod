@@ -19,6 +19,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.List;
 import java.util.Set;
+import java.util.Locale;
 
 /**
  * 保存允许消耗来垫路的物品清单，供导航和施工支撑选料。标签在读取时展开，空清单表示不允许用任何清单材料。
@@ -87,7 +88,7 @@ public final class ScaffoldMaterials {
             if (raw == null || raw.isBlank()) {
                 continue;
             }
-            String trimmed = raw.trim().toLowerCase(java.util.Locale.ROOT);
+            String trimmed = raw.trim().toLowerCase(Locale.ROOT);
             if (InitTag.parseRef(Registries.ITEM, trimmed) != null) {
                 out.add(trimmed);   // 认得出是标签形式就留着,内容留到用时再查
                 continue;
@@ -105,7 +106,7 @@ public final class ScaffoldMaterials {
         if (raw == null || raw.isBlank()) {
             return null;
         }
-        ResourceLocation id = ResourceLocation.tryParse(raw.trim().toLowerCase(java.util.Locale.ROOT));
+        ResourceLocation id = ResourceLocation.tryParse(raw.trim().toLowerCase(Locale.ROOT));
         if (id == null) {
             return null;
         }

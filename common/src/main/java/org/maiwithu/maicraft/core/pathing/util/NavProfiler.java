@@ -9,6 +9,7 @@ import java.lang.management.ManagementFactory;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.LinkedHashSet;
 
 /**
  * 调试客户端卡顿：记录少量工作耗时，并在开启 profile 时由后台定期查看主线程正在执行什么。
@@ -170,7 +171,7 @@ public final class NavProfiler {
 
     /** 把 (from, to] 区间内采到的、去重后的栈样本打成日志(最多 3 条,防刷屏)。 */
     private static void dumpStallStacks(long from, long to, long gap) {
-        java.util.LinkedHashSet<String> distinct = new java.util.LinkedHashSet<>();
+        LinkedHashSet<String> distinct = new LinkedHashSet<>();
         for (int i = 0; i < STALL_SAMPLES; i++) {
             long t = sampleTimes[i];
             String s = sampleStacks[i];

@@ -12,6 +12,8 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import java.util.Map;
+import org.maiwithu.maicraft.core.pathing.moves.Movement;
 
 /** 给走路、挖矿、施工等任务用的统一导航入口，实际交给 TransportNavigator 协调步行与交通，再由 Baritone 走路线。 */
 public final class PlayerNav {
@@ -141,7 +143,7 @@ public final class PlayerNav {
 
     /** Shared feet convention for navigation and interaction stances. */
     public static BlockPos playerFeet(LocalPlayer player) {
-        return org.maiwithu.maicraft.core.pathing.moves.Movement.feet(player);
+        return Movement.feet(player);
     }
 
     public Status tick() { return navigator.tick(); }
@@ -160,6 +162,6 @@ public final class PlayerNav {
     public void stop() { navigator.stop(); }
     public void pause() { navigator.pause(); }
     public void abandon() { navigator.abandon(); }
-    public java.util.Map<String, Object> transportDiagnostics() { return navigator.diagnostics(); }
+    public Map<String, Object> transportDiagnostics() { return navigator.diagnostics(); }
     public boolean yieldForExternalAction() { return navigator.yieldForExternalAction(); }
 }

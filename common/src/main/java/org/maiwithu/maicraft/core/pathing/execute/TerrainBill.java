@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import baritone.pathing.movement.Movement;
 
 /**
  * 按方块种类保存要挖／要放或已确认挖／放的位置。是否只是提案由创建它的调用者决定，名单本身不授权改世界。
@@ -39,7 +40,7 @@ public final class TerrainBill {
         Objects.requireNonNull(frozenBlocks, "frozenBlocks");
         TerrainBill bill = new TerrainBill();
         for (IMovement raw : path.movements()) {
-            if (!(raw instanceof baritone.pathing.movement.Movement movement)) {
+            if (!(raw instanceof Movement movement)) {
                 throw new IllegalArgumentException(
                         "embedded Baritone path contains an unsupported movement: "
                                 + raw.getClass().getName());

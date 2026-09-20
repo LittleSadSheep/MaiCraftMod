@@ -20,6 +20,13 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.BlockHitResult;
 
 import java.util.function.Predicate;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials;
 
 /**
  * 登记当前施工任务希望怎样放方块，以及实际导航确认垫块放下或拆除后的通知。Provider 和确认回调仍由现用 Baritone 使用。
@@ -44,20 +51,20 @@ public final class BuildPlacementRegistry {
         /** Called only after the owning embedded navigator obtains a confirmed placement receipt. */
         default void confirmedScaffold(BlockPos placeAt, BlockState state) {}
         default void confirmedScaffoldRemoval(BlockPos placeAt) {}
-        default java.util.Map<Item, Integer> scaffoldReservations() { return java.util.Map.of(); }
+        default Map<Item, Integer> scaffoldReservations() { return Map.of(); }
     }
 
     /** One first-person client body exists in a process; never retain that LocalPlayer here. */
     private static Provider activeProvider;
-    private static final java.util.Set<BlockPos> SCAFFOLD = new java.util.LinkedHashSet<>();
+    private static final Set<BlockPos> SCAFFOLD = new LinkedHashSet<>();
 
     private BuildPlacementRegistry() {}
 
     public static boolean hasScaffoldMaterialPolicy() { return activeProvider != null; }
 
-    public static org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials.Choice scaffoldChoice(LocalPlayer player) {
+    public static BuildTemporarySupportMaterials.Choice scaffoldChoice(LocalPlayer player) {
         if (activeProvider == null || player == null) return null;
-        return org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials.inventoryChoice(
+        return BuildTemporarySupportMaterials.inventoryChoice(
                 player.getInventory().items, ScaffoldMaterials.of(player), activeProvider.scaffoldReservations());
     }
 
@@ -89,14 +96,14 @@ public final class BuildPlacementRegistry {
     /**
      * 取走并清空旧流程累计的位置名单。这份名单是全局当前施工登记，不按传入玩家分别存储。
      */
-    public static java.util.Set<BlockPos> drainScaffold(LocalPlayer player) {
-        java.util.Set<BlockPos> out = java.util.Set.copyOf(SCAFFOLD);
+    public static Set<BlockPos> drainScaffold(LocalPlayer player) {
+        Set<BlockPos> out = Set.copyOf(SCAFFOLD);
         SCAFFOLD.clear();
         return out;
     }
 
     public static void register(LocalPlayer player, Provider provider) {
-        activeProvider = java.util.Objects.requireNonNull(provider, "provider");
+        activeProvider = Objects.requireNonNull(provider, "provider");
     }
 
     public static void unregister(LocalPlayer player, Provider provider) {
@@ -225,7 +232,7 @@ public final class BuildPlacementRegistry {
         }
         Vec3 look = MovementPlacement.direction(yaw, pitch);
         Direction[] nearest = Direction.values();
-        java.util.Arrays.sort(nearest, java.util.Comparator.comparingDouble(direction ->
+        Arrays.sort(nearest, Comparator.comparingDouble(direction ->
                 -(direction.getStepX() * look.x
                         + direction.getStepY() * look.y
                         + direction.getStepZ() * look.z)));

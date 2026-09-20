@@ -2,6 +2,8 @@ package org.maiwithu.maicraft.core.pathing.transport;
 
 import java.util.Map;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
+import org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot;
 
 /** 一段实际交通动作的共同接口，例如飞到落点或乘梯到某层；总导航负责把这些段接成完整旅行。 */
 public interface TransportSession {
@@ -41,10 +43,10 @@ public interface TransportSession {
     Map<String, Object> diagnostics();
 
     /** Selected route for the optional developer overlay; null means no route is active. */
-    default org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() { return null; }
+    default NavigationPathSnapshot debugPath() { return null; }
 
     /** 普通界面会暂停交通；实现可为自己正在处理的物品栏操作开放例外。 */
     default boolean allowsCurrentScreen(LocalPlayerContext context) {
-        return org.maiwithu.maicraft.client.actor.DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen);
+        return DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen);
     }
 }

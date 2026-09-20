@@ -30,6 +30,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import java.util.function.Predicate;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import org.maiwithu.maicraft.core.pathing.execute.AimProcessor;
 
 /**
  * 旧移动执行器的垫块帮助代码：找可点击面、预测视角、选材料，再告诉旧执行器是否可以按右键。
@@ -62,8 +66,8 @@ final class MovementPlacement {
      * 理想目标转角折算成"这一 tick 头实际能转到哪"再 raytrace。单例即可,
      * 纯数学、无状态。
      */
-    private static final org.maiwithu.maicraft.core.pathing.execute.AimProcessor AIM =
-            new org.maiwithu.maicraft.core.pathing.execute.AimProcessor();
+    private static final AimProcessor AIM =
+            new AimProcessor();
 
     /** 放置可行性回退的六个面中心系数(先方块中心,再六面心)。 */
     private static final double[][] FACE_OFFSETS = {
@@ -115,7 +119,7 @@ final class MovementPlacement {
             Vec3 aim = shapePoint(level, placeAt, off[0], off[1], off[2]);
             float yaw = AimGeometry.yawTo(eye, aim);
             float pitch = AimGeometry.pitchTo(eye, aim);
-            org.maiwithu.maicraft.core.pathing.execute.AimProcessor.Rotation peek =
+            AimProcessor.Rotation peek =
                     AIM.step(currentYaw, currentPitch, yaw, pitch);
             BlockHitResult hit = rayTrace(player, eye, peek.yaw(), peek.pitch(), reach);
             if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(placeAt)) {
@@ -146,7 +150,7 @@ final class MovementPlacement {
             float yaw = AimGeometry.yawTo(eye, face);
             float pitch = AimGeometry.pitchTo(eye, face);
             // 转速受限:把理想目标转角折算成这一 tick 头实际能转到哪再 raytrace
-            org.maiwithu.maicraft.core.pathing.execute.AimProcessor.Rotation peek =
+            AimProcessor.Rotation peek =
                     AIM.step(currentYaw, currentPitch, yaw, pitch);
             BlockHitResult hit = rayTrace(player, eye, peek.yaw(), peek.pitch(), reach);
             if (hit.getType() == HitResult.Type.BLOCK
@@ -241,9 +245,9 @@ final class MovementPlacement {
     }
     /** 方块碰撞形状上按 (mx,my,mz) 比例取点;空形状退回满格方块。 */
     private static Vec3 shapePoint(Level level, BlockPos pos, double mx, double my, double mz) {
-        net.minecraft.world.phys.shapes.VoxelShape shape = level.getBlockState(pos).getShape(level, pos);
+        VoxelShape shape = level.getBlockState(pos).getShape(level, pos);
         if (shape.isEmpty()) {
-            shape = net.minecraft.world.phys.shapes.Shapes.block();
+            shape = Shapes.block();
         }
         double x = shape.min(Direction.Axis.X) * mx + shape.max(Direction.Axis.X) * (1 - mx);
         double y = shape.min(Direction.Axis.Y) * my + shape.max(Direction.Axis.Y) * (1 - my);
@@ -256,7 +260,7 @@ final class MovementPlacement {
             LocalPlayer player, boolean select, Movement.ItemSelector selector) {
         List<Item> acceptable = ScaffoldMaterials.of(player);
         for (Item item : acceptable) {
-            java.util.function.Predicate<ItemStack> desired =
+            Predicate<ItemStack> desired =
                     stack -> !stack.isEmpty() && stack.getItem() == item;
             Movement.ItemSelection outcome = select
                     ? selector.select(desired)
@@ -270,7 +274,7 @@ final class MovementPlacement {
 
     // 这里只检查是否携带匹配物品，旧实际选择仍由执行代理完成；当前没有该代理的绑定入口。
     private static Movement.ItemSelection containsMaterial(
-            LocalPlayer player, java.util.function.Predicate<ItemStack> desired) {
+            LocalPlayer player, Predicate<ItemStack> desired) {
         Inventory inventory = player.getInventory();
         int upper = NavSettings.get().allowInventory
                 ? Math.min(36, inventory.items.size()) : 9;

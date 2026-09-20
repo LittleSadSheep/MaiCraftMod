@@ -11,6 +11,11 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.Direction;
+import net.minecraft.util.Mth;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
 
 /**
  * 计算方块瞄准点和视角角度。角度、碰撞中心和交互距离仍被挖掘等现用代码使用。
@@ -28,7 +33,7 @@ public final class AimGeometry {
     /**
      * 旧移动流程先看当前准星，再试目标外形中心和各面；按旧鼠标角度量化规则模拟转向，射线命中才返回该瞄准点。
      */
-    public static Vec3 reachableAimPoint(net.minecraft.client.player.LocalPlayer player, BlockPos pos) {
+    public static Vec3 reachableAimPoint(LocalPlayer player, BlockPos pos) {
         var level = player.level();
         Vec3 eye = player.getEyePosition();
         double reach = blockReachDistance(player);
@@ -82,14 +87,14 @@ public final class AimGeometry {
     }
 
     /** 碰撞形状中点;无碰撞体取整格心;火把 y 压到格底(看火的根部)。 */
-    public static Vec3 collisionCenter(net.minecraft.world.level.Level level, BlockPos pos, BlockState state) {
+    public static Vec3 collisionCenter(Level level, BlockPos pos, BlockState state) {
         VoxelShape shape = state.getCollisionShape(level, pos);
         if (shape.isEmpty()) {
             return new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
         }
-        double x = (shape.min(net.minecraft.core.Direction.Axis.X) + shape.max(net.minecraft.core.Direction.Axis.X)) / 2;
-        double y = (shape.min(net.minecraft.core.Direction.Axis.Y) + shape.max(net.minecraft.core.Direction.Axis.Y)) / 2;
-        double z = (shape.min(net.minecraft.core.Direction.Axis.Z) + shape.max(net.minecraft.core.Direction.Axis.Z)) / 2;
+        double x = (shape.min(Direction.Axis.X) + shape.max(Direction.Axis.X)) / 2;
+        double y = (shape.min(Direction.Axis.Y) + shape.max(Direction.Axis.Y)) / 2;
+        double z = (shape.min(Direction.Axis.Z) + shape.max(Direction.Axis.Z)) / 2;
         if (state.getBlock() instanceof BaseFireBlock) {
             y = 0;
         }
@@ -97,35 +102,35 @@ public final class AimGeometry {
     }
 
     /** 方块触及距离:创造 5.0,生存按设置(默认 4.5)。 */
-    public static double blockReachDistance(net.minecraft.client.player.LocalPlayer player) {
+    public static double blockReachDistance(LocalPlayer player) {
         return player.isCreative() ? 5.0 : NavSettings.get().blockReachDistance;
     }
 
     /** 从眼位沿给定 yaw/pitch 的轮廓射线(不穿流体);方向向量按原版 float 三角。 */
-    private static BlockHitResult clipAlongRotation(net.minecraft.client.player.LocalPlayer player,
+    private static BlockHitResult clipAlongRotation(LocalPlayer player,
                                                     float yaw, float pitch, double reach) {
         Vec3 eye = player.getEyePosition();
         float f = pitch * ((float) Math.PI / 180F);
         float g = -yaw * ((float) Math.PI / 180F);
-        float h = net.minecraft.util.Mth.cos(g);
-        float i = net.minecraft.util.Mth.sin(g);
-        float j = net.minecraft.util.Mth.cos(f);
-        float k = net.minecraft.util.Mth.sin(f);
+        float h = Mth.cos(g);
+        float i = Mth.sin(g);
+        float j = Mth.cos(f);
+        float k = Mth.sin(f);
         Vec3 dir = new Vec3(i * j, -k, h * j);
         Vec3 end = eye.add(dir.scale(reach));
-        return player.level().clip(new net.minecraft.world.level.ClipContext(
-                eye, end, net.minecraft.world.level.ClipContext.Block.OUTLINE,
-                net.minecraft.world.level.ClipContext.Fluid.NONE, player));
+        return player.level().clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE,
+                ClipContext.Fluid.NONE, player));
     }
 
     /** 方块碰撞形状上按比例取点(m 为各轴的 min↔max 插值系数)。 */
     static Vec3 shapePoint(BlockPos pos, VoxelShape shape, double mx, double my, double mz) {
-        double x = shape.min(net.minecraft.core.Direction.Axis.X) * mx
-                + shape.max(net.minecraft.core.Direction.Axis.X) * (1 - mx);
-        double y = shape.min(net.minecraft.core.Direction.Axis.Y) * my
-                + shape.max(net.minecraft.core.Direction.Axis.Y) * (1 - my);
-        double z = shape.min(net.minecraft.core.Direction.Axis.Z) * mz
-                + shape.max(net.minecraft.core.Direction.Axis.Z) * (1 - mz);
+        double x = shape.min(Direction.Axis.X) * mx
+                + shape.max(Direction.Axis.X) * (1 - mx);
+        double y = shape.min(Direction.Axis.Y) * my
+                + shape.max(Direction.Axis.Y) * (1 - my);
+        double z = shape.min(Direction.Axis.Z) * mz
+                + shape.max(Direction.Axis.Z) * (1 - mz);
         return new Vec3(pos.getX() + x, pos.getY() + y, pos.getZ() + z);
     }
 
@@ -133,7 +138,7 @@ public final class AimGeometry {
     public static float yawTo(Vec3 from, Vec3 to) {
         double dx = from.x - to.x;
         double dz = from.z - to.z;
-        return (float) Math.toDegrees(net.minecraft.util.Mth.atan2(dx, -dz));
+        return (float) Math.toDegrees(Mth.atan2(dx, -dz));
     }
 
     /** 从 from 看向 to 的 pitch(度,向下为正;用 Mth.atan2 多项式近似)。 */
@@ -142,7 +147,7 @@ public final class AimGeometry {
         double dy = from.y - to.y;
         double dz = from.z - to.z;
         double horizontal = Math.sqrt(dx * dx + dz * dz);
-        return (float) Math.toDegrees(net.minecraft.util.Mth.atan2(dy, horizontal));
+        return (float) Math.toDegrees(Mth.atan2(dy, horizontal));
     }
 
     /**

@@ -32,6 +32,8 @@ import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.item.Items;
+import org.maiwithu.maicraft.core.init.InitTag;
 
 /**
  * 多种任务共用的方块判断：哪里可以作为站位、怎样表示半砖上的脚位、方块是否危险、挖开会不会放出液体、工具能否取得掉落物。
@@ -158,7 +160,7 @@ public final class BlockHelper {
     /** Is this cell water (source or flowing)? */
     public static boolean isWater(BlockGetter level, BlockPos pos) {
         return level.getBlockState(pos).getFluidState()
-                .is(net.minecraft.tags.FluidTags.WATER);
+                .is(FluidTags.WATER);
     }
 
     /**
@@ -281,7 +283,7 @@ public final class BlockHelper {
         if (!fluid.isEmpty()) {
             // Lava is the dangerous fluid. Water we simply don't enter (above),
             // but it isn't a damage hazard.
-            return fluid.getType().getBucket() == net.minecraft.world.item.Items.LAVA_BUCKET;
+            return fluid.getType().getBucket() == Items.LAVA_BUCKET;
         }
         // The non-fluid hazard set — blocks we must never
         // path into (magma included: it damages on contact).
@@ -434,7 +436,7 @@ public final class BlockHelper {
     public static boolean shouldAvoidBreaking(BlockGetter level, BlockPos pos) {
         // 标签成员测试只读不可变 BlockState holder,off-thread 搜索可安全调用。
         BlockState state = level.getBlockState(pos);
-        return state.is(org.maiwithu.maicraft.core.init.InitTag.DO_NOT_BREAK);
+        return state.is(InitTag.DO_NOT_BREAK);
     }
 
     /**

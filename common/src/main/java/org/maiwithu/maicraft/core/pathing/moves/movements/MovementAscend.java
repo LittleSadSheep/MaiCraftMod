@@ -19,6 +19,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.core.Constants;
 
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.COST_INF;
 import static org.maiwithu.maicraft.core.pathing.moves.ActionCosts.JUMP_ONE_BLOCK_COST;
@@ -203,7 +204,7 @@ public class MovementAscend extends Movement {
         double lateralMotion = xAxis * player.getDeltaMovement().z + zAxis * player.getDeltaMovement().x;
         if (player.tickCount % 10 == 0) {
             // 上台阶的四道闸门逐值:卡在这一步时外面只看到"人不动",全靠猜
-            org.maiwithu.maicraft.core.Constants.LOG.debug(
+            Constants.LOG.debug(
                     "[maicraft-ascend] src={} dest={} 身位={} 前距={} 侧偏={} 横漂={} 头顶通={} 在地={} 踩={}",
                     src.toShortString(), dest.toShortString(), feet.toShortString(),
                     String.format("%.2f", flatDistToNext), String.format("%.2f", sideDist),
