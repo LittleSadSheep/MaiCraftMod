@@ -136,7 +136,6 @@ public final class MaiCraftCore {
         ToolRegistry.register(new org.maiwithu.maicraft.core.tools.work.RegionalTravelTool());
         org.maiwithu.maicraft.core.tools.work.SemanticAcquireApi.register();
         org.maiwithu.maicraft.core.tools.work.SemanticLightAreaApi.register();
-        org.maiwithu.maicraft.core.tools.work.SemanticBuildSiteInvestigationApi.register();
         org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower.install();
         ToolRegistry.register(new org.maiwithu.maicraft.core.integration.create.CreateMechanicalPowerTool());
     }

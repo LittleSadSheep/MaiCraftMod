@@ -17,7 +17,7 @@ final class BuildingSceneContract {
 
     private BuildingSceneContract() {}
 
-    // 在这两个能力里，只要带 scene、scene_id、blueprint 或 operation，就采用这一套模型规则，不再走普通房屋模板参数。
+    // 带模型来源或操作时校验作者设计；单独的 project_id 则由续建契约读取冻结施工单。
     static boolean supports(Goal goal) {
         if (!"maicraft:build".equals(goal.ability()) && !BuildDesignAdapter.ABILITY.equals(goal.ability())) return false;
         var p = goal.parameters();

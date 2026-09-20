@@ -41,7 +41,8 @@ public final class BuildDesignPreviewTest {
         field(Entity.class, "position").set(player, new Vec3(.5, 64, .5));
         field(Entity.class, "blockPosition").set(player, new BlockPos(0, 64, 0));
         field(Player.class, "inventory").set(player, new Inventory(player));
-        Goal design = goal(BuildDesignAdapter.ABILITY, "[\"windows\",\"door\",\"roof\"]");
+        // 预览只展示作者给出的方块；不依赖用途、风格或房屋模板生成额外结构。
+        Goal design = goal(BuildDesignAdapter.ABILITY);
         SemanticGoalContract.validate(design, IntentRuntime.KNOWN_ABILITIES);
         AtomicReference<PreviewSession> published = new AtomicReference<>();
         IntentAction action = BuildDesignAdapter.design(design, player, null, session -> {
@@ -70,7 +71,7 @@ public final class BuildDesignPreviewTest {
         Class<?> brainType = Class.forName("org.maiwithu.maicraft.task.CompanionBrain");
         Class<?> slotType = Class.forName("org.maiwithu.maicraft.task.TaskSlot");
         Object existingBrain = memory.allocateInstance(brainType), existingSlot = memory.allocateInstance(slotType);
-        var bodyRecord = new IntentTaskRecord(java.util.UUID.randomUUID(), null, goal("maicraft:build", "[]"));
+        var bodyRecord = new IntentTaskRecord(java.util.UUID.randomUUID(), null, goal("maicraft:build"));
         bodyRecord.setState(TaskState.RUNNING);
         field(slotType, "record").set(existingSlot, bodyRecord);
         field(brainType, "current").set(existingBrain, existingSlot);
@@ -107,27 +108,24 @@ public final class BuildDesignPreviewTest {
         check(published.get().cells().get(new BlockPos(-2, 64, 3)).is(Blocks.SPRUCE_PLANKS),
                 "model preview must not move the origin or replace the selected material");
         level.loaded = false;
-        action = BuildDesignAdapter.design(design, player, null, ignored -> {
-            throw new AssertionError("missing site must not publish a speculative blueprint");
+        // 图纸涉及未加载格时只返回失败，不能让角色先出去找地或把模型搬到其他位置。
+        var unavailable = runtime.execute(player, design, null, "unloaded-preview", ignored -> {
+            throw new AssertionError("unloaded model cells must not publish a speculative blueprint");
         });
-        check(action instanceof IntentAction.Report report && !report.result().success()
-                        && "preview_site_unavailable".equals(report.result().data().get("failure_code")),
-                "missing site must stop explicitly without starting site investigation");
-        for (String ability : List.of("maicraft:build", BuildDesignAdapter.ABILITY)) {
-            for (String features : List.of("[\"automatic_turret\"]", "\"windows\"", "[17]", "[\"\"]")) {
-                try {
-                    SemanticGoalContract.validate(goal(ability, features), IntentRuntime.KNOWN_ABILITIES);
-                    throw new AssertionError("invalid features accepted during planning: " + features);
-                } catch (SemanticContractException expected) { }
-            }
-        }
-        System.out.println("BuildDesignPreviewTest: read-only blueprint and pre-plan feature validation passed");
+        check(unavailable.getState() == TaskState.FAILED
+                        && JsonParser.parseString(unavailable.terminalSnapshot().resultJson()).getAsJsonObject()
+                                .get("message").getAsString().contains("loaded buildable terrain"),
+                "unloaded model cells must stop explicitly without site investigation");
+        check(player.position().equals(new Vec3(.5, 64, .5)) && player.getInventory().isEmpty(),
+                "failed preview must not move the player or acquire materials");
+        System.out.println("BuildDesignPreviewTest: authored blueprint previews preserve read-only execution");
     }
 
-    private static Goal goal(String ability, String features) {
-        var p = JsonParser.parseString("{\"purpose\":\"small_house\",\"size\":\"small\","
-                + "\"style\":\"simple wooden hut\",\"material_policy\":\"specified\","
-                + "\"preferred_materials\":[\"minecraft:oak_planks\"],\"features\":" + features + "}");
+    private static Goal goal(String ability) {
+        // 固定蓝图原点和材质，预览与施工入口共同使用同一份设计。
+        var p = JsonParser.parseString("""
+                {"blueprint":{"blocks":[{"offset":[0,0,0],"block_id":"minecraft:oak_planks"}]}}
+                """);
         return new Goal(ability, "Preview my house without construction",
                 new Goal.SemanticTarget("current_place", null, null, null),
                 p.toString(), "{}", List.of(), List.of());
