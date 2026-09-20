@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.client.server.ClientOperation;
 import org.maiwithu.maicraft.client.server.ClientRequestRouter;
 import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
 import sun.misc.Unsafe;
+import java.util.HashMap;
 
 /** Inert menu/AE host fixture: only the production actor visibility and session state machines run. */
 final class Ae2ServerMenuFixture implements AutoCloseable {
@@ -54,7 +55,7 @@ final class Ae2ServerMenuFixture implements AutoCloseable {
         field(Level.class, "isClientSide").setBoolean(world.level, true);
         Object chunks = field(world.level.getClass(), "chunks").get(world.level), chunk = field(chunks.getClass(), "chunk").get(chunks);
         field(chunk.getClass(), "level").set(chunk, world.level); field(ChunkAccess.class, "levelHeightAccessor").set(chunk, world.level);
-        field(chunk.getClass(), "blockEntities").set(chunk, new java.util.HashMap<>(Map.of(position, cable)));
+        field(chunk.getClass(), "blockEntities").set(chunk, new HashMap<>(Map.of(position, cable)));
         world.set(position, Blocks.BARREL.defaultBlockState()); cable.setLevel(world.level); world.position(new Vec3(5.5, 1, 4.5));
         field(Ae2ReflectionBridge.class, "storageMenuClass").set(bridge, Storage.class);
         field(Ae2ReflectionBridge.class, "craftAmountMenuClass").set(bridge, String.class);

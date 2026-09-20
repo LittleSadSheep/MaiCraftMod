@@ -21,6 +21,7 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import net.minecraft.client.player.LocalPlayer;
 
 /** 使用真实 DefaultMenuPort 与渲染等待，网络观察单独注入；不以假 MenuPort 绕过首帧和点击后的可见性门槛。 */
 public final class Ae2DepositVisibilityTest {
@@ -87,7 +88,7 @@ public final class Ae2DepositVisibilityTest {
                 public Object repository(AbstractContainerMenu menu) { return repository; }
                 public boolean connected(AbstractContainerMenu menu) { return true; }
                 public List<Ae2ReflectionBridge.Entry> entries(AbstractContainerMenu menu) { return List.of(new Ae2ReflectionBridge.Entry(DIRT, 1, network, false, new ItemStack(Items.DIRT))); }
-                public Map<Integer, Integer> playerSlots(AbstractContainerMenu menu, net.minecraft.client.player.LocalPlayer player) {
+                public Map<Integer, Integer> playerSlots(AbstractContainerMenu menu, LocalPlayer player) {
                     Map<Integer, Integer> result = new LinkedHashMap<>();
                     for (int i = 0; i < menu.slots.size(); i++) if (menu.getSlot(i).container == world.inventory) result.put(menu.getSlot(i).getContainerSlot(), i);
                     return result;

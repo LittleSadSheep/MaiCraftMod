@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
+import com.google.gson.JsonPrimitive;
+import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 import static org.maiwithu.maicraft.core.integration.machine.runtime.ProductionConnectionFixture.*;
 
 /** Spatial scheduling changes visitation only; native request bodies, identity, coverage and clocks stay exact. */
@@ -63,9 +65,9 @@ public final class ProductionConnectionOrderingTest {
                 for (String key : List.of("id", "node", "from", "to"))
                     if (copy.has(key)) copy.addProperty(key, copy.get(key).getAsString() + "_far");
                 if (copy.has("offset")) copy.getAsJsonArray("offset").set(0,
-                        new com.google.gson.JsonPrimitive(copy.getAsJsonArray("offset").get(0).getAsInt() + 40));
+                        new JsonPrimitive(copy.getAsJsonArray("offset").get(0).getAsInt() + 40));
                 if (copy.has("path")) for (var point : copy.getAsJsonArray("path")) point.getAsJsonArray().set(0,
-                        new com.google.gson.JsonPrimitive(point.getAsJsonArray().get(0).getAsInt() + 40));
+                        new JsonPrimitive(point.getAsJsonArray().get(0).getAsInt() + 40));
                 combined.getAsJsonArray(kind).add(copy);
             }
         }
@@ -100,7 +102,7 @@ public final class ProductionConnectionOrderingTest {
     }
 
     private static JsonObject settle(ProductionConnectionFixture f, ProductionConnectionSurvey survey,
-                                     org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Link link) {
+                                     ProductionManifest.Link link) {
         for (int i = 0; i < 20000; i++) { f.tick++; JsonObject result = survey.tick(link); if (result != null) return result; }
         throw new AssertionError("spatial survey did not settle");
     }

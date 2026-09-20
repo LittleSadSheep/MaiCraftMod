@@ -9,6 +9,9 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.server.machine.ProductionEventJournal;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 
 final class ProductionObserverFixture implements ProductionWork {
     final ProductionRunPlan plan;
@@ -17,7 +20,7 @@ final class ProductionObserverFixture implements ProductionWork {
     long tick = 100, stock;
     int eventRequests;
     final Object connection = new Object();
-    final java.util.List<JsonObject> eventBodies = new java.util.ArrayList<>();
+    final List<JsonObject> eventBodies = new ArrayList<>();
     BlockPos observed;
     boolean delay;
     String pending;
@@ -135,7 +138,7 @@ final class ProductionObserverFixture implements ProductionWork {
         observation.add("ports", ports); observations.add(observation); result.add("observations", observations); return result;
     }
 
-    static java.util.Set<String> endpoints(JsonObject arguments) {
+    static Set<String> endpoints(JsonObject arguments) {
         var positions = new LinkedHashSet<String>();
         arguments.getAsJsonArray("positions").forEach(raw -> { var p = raw.getAsJsonObject(); positions.add(p.get("x") + "," + p.get("y") + "," + p.get("z")); });
         return positions;

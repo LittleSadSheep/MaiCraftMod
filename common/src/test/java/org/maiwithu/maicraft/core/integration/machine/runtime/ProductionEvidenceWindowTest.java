@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine.runtime;
 
 import java.math.BigDecimal;
 import java.util.Set;
+import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 import static org.maiwithu.maicraft.core.integration.machine.runtime.ProductionEvidenceWindow.*;
 
 public final class ProductionEvidenceWindowTest {
@@ -50,7 +51,7 @@ public final class ProductionEvidenceWindowTest {
         var manifest = ProductionObserverFixture.manifest(1); var settings = manifest.getAsJsonObject("observation");
         settings.addProperty("window_ticks",20); settings.addProperty("max_idle_ticks",600);
         settings.addProperty("minimum_events",2); settings.addProperty("minimum_output",2);
-        var parsed = org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.parse(manifest).observation();
+        var parsed = ProductionManifest.parse(manifest).observation();
         var sample = new ProductionEvidenceWindow("world-A",Set.of("press"),new Requirement("items:create:iron_sheet",BigDecimal.valueOf(2),
                 parsed.minimumEvents(),parsed.windowTicks(),parsed.maxIdleTicks()));
         sample.accept(event("world-A",1,10,Provenance.NATIVE_RECIPE_OUTPUT));
@@ -58,7 +59,7 @@ public final class ProductionEvidenceWindowTest {
         sample.accept(event("world-A",2,137,Provenance.NATIVE_RECIPE_OUTPUT));
         check(sample.hasVerifiedRun(),"two normal machine cycles need not land exactly on the minimum sample span");
         settings.addProperty("max_idle_ticks",72001);
-        try { org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.parse(manifest); throw new AssertionError("Unbounded idle allowance"); }
+        try { ProductionManifest.parse(manifest); throw new AssertionError("Unbounded idle allowance"); }
         catch (IllegalArgumentException bounded) { /* Independent time limits remain bounded. */ }
     }
 

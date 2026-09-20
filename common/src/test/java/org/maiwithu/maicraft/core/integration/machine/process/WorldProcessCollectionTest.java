@@ -31,19 +31,28 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.HashMap;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
+import org.maiwithu.maicraft.task.TaskFactory;
 
 /** 注入此前已核实的产物快照，回归通用收取子任务结束与下一帧真实Take/背包同步的边界；不运行或伪造一次配方加工。 */
 public final class WorldProcessCollectionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         // 独立回归未启动MaiCraftCore，只登记它在实机启动时已有的通用拾取工厂，不替换任何原生动作。
-        org.maiwithu.maicraft.task.TaskFactory.register(CollectItemsTaskRecord.class, CollectItemsCompanionTask::new);
+        TaskFactory.register(CollectItemsTaskRecord.class, CollectItemsCompanionTask::new);
         // 独立Bootstrap不加载水的数据包标签；本夹具显式提供并恢复标签，按实机浅水规则建立场地。
-        var fluids = net.minecraft.core.registries.BuiltInRegistries.FLUID;
-        Map<net.minecraft.tags.TagKey<net.minecraft.world.level.material.Fluid>,List<net.minecraft.core.Holder<net.minecraft.world.level.material.Fluid>>> tags = new java.util.HashMap<>();
+        var fluids = BuiltInRegistries.FLUID;
+        Map<TagKey<Fluid>,List<Holder<Fluid>>> tags = new HashMap<>();
         fluids.getTags().forEach(pair -> tags.put(pair.getFirst(), pair.getSecond().stream().toList()));
-        var previous = new java.util.HashMap<>(tags);
-        tags.put(net.minecraft.tags.FluidTags.WATER,List.of(fluids.wrapAsHolder(net.minecraft.world.level.material.Fluids.WATER),fluids.wrapAsHolder(net.minecraft.world.level.material.Fluids.FLOWING_WATER)));
+        var previous = new HashMap<>(tags);
+        tags.put(FluidTags.WATER,List.of(fluids.wrapAsHolder(Fluids.WATER),fluids.wrapAsHolder(Fluids.FLOWING_WATER)));
         fluids.bindTags(tags);
         try { delayedReceiptAfterChildEnds(); childSuccessIsNotPickupProof(); wrongComponentsAndPureReport(); scopedCollector(); }
         finally { fluids.bindTags(previous); }
@@ -111,7 +120,7 @@ public final class WorldProcessCollectionTest {
         final ItemEntity entity;
         final WorldTransformTask task;
         Fixture() throws Exception {
-            var at = new BlockPos(5, 1, 5); world.set(at, net.minecraft.world.level.block.Blocks.WATER.defaultBlockState());
+            var at = new BlockPos(5, 1, 5); world.set(at, Blocks.WATER.defaultBlockState());
             world.inventory.setItem(0, new ItemStack(Items.REDSTONE));
             var plan = WorldProcessBatchPlan.compile(recipe, WorldProcessInventory.snapshot(world.player), 1, List.of(recipe));
             var inventory = new WorldProcessInventory(world.player, plan, output);
@@ -155,7 +164,7 @@ public final class WorldProcessCollectionTest {
             public ResourceLocation id() { return ResourceLocation.parse("test:collection_boundary"); }
             public List<Ingredient> inputs() { return List.of(Ingredient.of(Items.REDSTONE)); }
             public ItemStack result() { return new ItemStack(Items.BRICK, 2); }
-            public boolean supports(FluidState fluid) { return fluid.is(net.minecraft.tags.FluidTags.WATER); }
+            public boolean supports(FluidState fluid) { return fluid.is(FluidTags.WATER); }
             public boolean isFluid() { return true; }
             public JsonObject describe() { return new JsonObject(); }
             public int triggerInputIndex() { return 0; }

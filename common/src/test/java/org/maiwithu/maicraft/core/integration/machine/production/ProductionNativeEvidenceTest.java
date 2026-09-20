@@ -6,6 +6,8 @@ import com.google.gson.JsonParser;
 import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.*;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonPrimitive;
 
 public final class ProductionNativeEvidenceTest {
     public static void main(String[] args) {
@@ -100,7 +102,7 @@ public final class ProductionNativeEvidenceTest {
         JsonObject second = input.getAsJsonArray("links").get(0).getAsJsonObject().deepCopy(); second.addProperty("id","second_feed"); second.addProperty("from","second_supply"); second.remove("path"); input.getAsJsonArray("links").add(second);
         ProductionManifest manifest = ProductionManifest.parse(input); var ledger = new ProductionSupplyEvidence(manifest);
         Node a = manifest.nodes().get(0), b = manifest.nodes().get(manifest.nodes().size()-1); Resource resource = new Resource("items",ProductionNativeFixture.IRON_KEY);
-        JsonObject bank = new JsonObject(); var rows = new com.google.gson.JsonArray(); rows.add(ProductionNativeFixture.stock(ProductionNativeFixture.IRON,1,"east","one-grid"));
+        JsonObject bank = new JsonObject(); var rows = new JsonArray(); rows.add(ProductionNativeFixture.stock(ProductionNativeFixture.IRON,1,"east","one-grid"));
         rows.add(ProductionNativeFixture.stock(ProductionNativeFixture.IRON,1,"north","one-grid")); bank.add("resources",rows);
         Map<String,JsonObject> snapshots = Map.of(a.id(),bank,b.id(),bank);
         rejects(() -> ledger.initial(a,resource,2,snapshots), "two sided views are not two inventory copies");
@@ -136,8 +138,8 @@ public final class ProductionNativeEvidenceTest {
         check(ProductionDesignCompiler.compile(input,evidence).canEnter("start"), "readback restores readiness without replaying writer or expiring freshly read links");
         read.addProperty("status","mismatch"); read.addProperty("verified_configuration",false); evidence.observeConfiguration("finished_only",read);
         check(!ProductionDesignCompiler.compile(input,evidence).canEnter("start") && evidence.configurationActionConfirmed("finished_only"), "changed configuration overrides old success without erasing history");
-        check(ProductionNativeJson.sameScalar(new com.google.gson.JsonPrimitive(16),new com.google.gson.JsonPrimitive(16.0)), "numeric readback uses numeric equality");
-        check(!ProductionNativeJson.sameScalar(new com.google.gson.JsonPrimitive(16),new com.google.gson.JsonPrimitive("16")), "numeric string is not a numeric value");
+        check(ProductionNativeJson.sameScalar(new JsonPrimitive(16),new JsonPrimitive(16.0)), "numeric readback uses numeric equality");
+        check(!ProductionNativeJson.sameScalar(new JsonPrimitive(16),new JsonPrimitive("16")), "numeric string is not a numeric value");
     }
     private static void connectionSurveyFailureIsNotMistakenForExpiry() {
         // 漏斗尚未触发查询时保留明确失败原因；真正的旧回执过期仍要求刷新，不能把诊断当连接事实。

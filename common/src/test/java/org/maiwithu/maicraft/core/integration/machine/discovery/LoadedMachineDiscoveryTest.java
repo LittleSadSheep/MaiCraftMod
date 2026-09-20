@@ -33,7 +33,7 @@ public final class LoadedMachineDiscoveryTest {
                     "the native loaded-chunk block-entity index must produce a real container candidate");
             h.set(pos, Blocks.AIR.defaultBlockState()); entities.remove(pos);
             for (int tick = 0; tick < 20 && sink.removed.isEmpty(); tick++) { h.nextTick(); discovery.tick(h.player, sink); }
-            check(sink.removed.equals(java.util.List.of(pos)), "loaded native air must reconcile the old candidate");
+            check(sink.removed.equals(List.of(pos)), "loaded native air must reconcile the old candidate");
             check(h.blockUses() == 0 && h.itemUses() == 0, "passive discovery must not operate the player or world");
             discovery.clear(sink); check(discovery.status().session() == null, "disconnect clears the scanner context");
         }

@@ -7,6 +7,10 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.concurrent.Executor;
+import com.google.gson.JsonObject;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.concurrent.RejectedExecutionException;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** Catalog memory/file contracts only: no client, world, input driver or game action is created. */
@@ -75,7 +79,7 @@ public final class MachineCatalogTest {
         check(!Files.exists(file) && first.isCancelled() && !last.isDone(), "Coalescing claimed an unsaved checkpoint or performed synchronous I/O");
         io.runAll(); catalog.poll(); check(last.isDone() && !last.isCompletedExceptionally(), "Atomic catalog save failed");
         byte[] original = Files.readAllBytes(file);
-        check(!new String(original, java.nio.charset.StandardCharsets.UTF_8).contains("session-1"), "Session freshness token was persisted");
+        check(!new String(original, StandardCharsets.UTF_8).contains("session-1"), "Session freshness token was persisted");
         var reloadIo = new ManualExecutor(); var reloaded = ready(directory, reloadIo);
         check(reloaded.device(id, 11).orElseThrow().currentState() == CurrentState.HISTORICAL
                 && reloaded.device(id, 11).orElseThrow().device().lastObservedGameTick() == 11, "Restart lost history or restored current authorization");
@@ -83,7 +87,7 @@ public final class MachineCatalogTest {
         Files.writeString(file, broken.toString()); byte[] corrupt = Files.readAllBytes(file);
         var badIo = new ManualExecutor(); var bad = new MachineCatalog(directory, badIo); bad.bind(IDENTITY, "after-corruption"); badIo.runAll(); bad.poll();
         check(bad.status().state() == MachineCatalog.State.FAILED, "Foreign/corrupt catalog was treated as an empty database");
-        rejects(bad::saveAsync, "catalog_not_ready"); check(java.util.Arrays.equals(corrupt, Files.readAllBytes(file)), "Failed load overwrote the prior file");
+        rejects(bad::saveAsync, "catalog_not_ready"); check(Arrays.equals(corrupt, Files.readAllBytes(file)), "Failed load overwrote the prior file");
         try (var files = Files.list(directory)) { check(files.noneMatch(path -> path.getFileName().toString().endsWith(".tmp")), "Atomic save leaked a temporary checkpoint"); }
     }
 
@@ -139,13 +143,13 @@ public final class MachineCatalogTest {
     static final class ManualExecutor implements Executor {
         private final ArrayDeque<Runnable> pending = new ArrayDeque<>();
         boolean reject;
-        public void execute(Runnable action) { if (reject) throw new java.util.concurrent.RejectedExecutionException("fixture executor rejected"); pending.add(action); }
+        public void execute(Runnable action) { if (reject) throw new RejectedExecutionException("fixture executor rejected"); pending.add(action); }
         int size() { return pending.size(); }
         void runAll() { int count = 0; while (!pending.isEmpty()) { if (++count > 100) throw new AssertionError("Unbounded catalog I/O scheduling"); pending.remove().run(); } }
     }
     private static void rejects(Runnable action, String text) { try { action.run(); throw new AssertionError("Expected " + text); } catch (IllegalArgumentException | IllegalStateException expected) { check(expected.getMessage().contains(text), "Unexpected failure: " + expected); } }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
-    private static com.google.gson.JsonObject manifest() {
+    private static JsonObject manifest() {
         return JsonParser.parseString("""
                 {"schema_version":1,"nodes":[{"id":"source","kind":"source","offset":[0,0,0],"material_policy":"inventory_only"},
                 {"id":"press","kind":"process","offset":[2,2,0],"recipe_id":"create:pressing/iron_ingot","batches":4},{"id":"sink","kind":"sink","offset":[4,0,0]}],

@@ -23,6 +23,8 @@ import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuPort;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 
 /** 使用真实玩家槽模拟两类服务器更新的先后到达；这里只验证确认边界，真实 AE 网络仍由私有客户端验收。 */
 public final class Ae2DepositTransferTest {
@@ -136,15 +138,15 @@ public final class Ae2DepositTransferTest {
                 default -> throw new AssertionError("unexpected context access " + method.getName());
             });
             view = new Ae2DepositTransfer.View() {
-                public Object repository(net.minecraft.world.inventory.AbstractContainerMenu value) { return repository; }
-                public boolean connected(net.minecraft.world.inventory.AbstractContainerMenu value) { return connected; }
-                public List<Ae2ReflectionBridge.Entry> entries(net.minecraft.world.inventory.AbstractContainerMenu value) { return List.of(new Ae2ReflectionBridge.Entry(DIRT, 1, network, false, new ItemStack(Items.DIRT))); }
-                public Map<Integer, Integer> playerSlots(net.minecraft.world.inventory.AbstractContainerMenu value, net.minecraft.client.player.LocalPlayer player) {
+                public Object repository(AbstractContainerMenu value) { return repository; }
+                public boolean connected(AbstractContainerMenu value) { return connected; }
+                public List<Ae2ReflectionBridge.Entry> entries(AbstractContainerMenu value) { return List.of(new Ae2ReflectionBridge.Entry(DIRT, 1, network, false, new ItemStack(Items.DIRT))); }
+                public Map<Integer, Integer> playerSlots(AbstractContainerMenu value, LocalPlayer player) {
                     Map<Integer, Integer> result = new LinkedHashMap<>();
                     for (int i = 0; i < value.slots.size(); i++) if (value.getSlot(i).container == world.inventory) result.put(value.getSlot(i).getContainerSlot(), i);
                     return result;
                 }
-                public boolean safeFallback(net.minecraft.world.inventory.AbstractContainerMenu value, ItemStack sample) { return true; }
+                public boolean safeFallback(AbstractContainerMenu value, ItemStack sample) { return true; }
             };
             reset(request);
         }

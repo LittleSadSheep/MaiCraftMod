@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import com.google.gson.JsonPrimitive;
 
 /**
  * 检查压机和搅拌器与接料设备的距离、传动部件、AE2 组合、感应矩阵边界与施工洞口，以及不支持的模块选项；只验证生成计划。
@@ -130,7 +131,7 @@ public final class MachineLayoutModulesTest {
         check(distance(path.get(path.size()-1).getAsJsonArray(),route.getAsJsonArray("destination_offset"))==1,"transport reaches the exact internal module port");
     }
     private static void checkGapReserved(SemanticMachineLayout.Result plan,JsonObject receiver) {
-        JsonArray gap=receiver.getAsJsonArray("offset").deepCopy(); gap.set(1,new com.google.gson.JsonPrimitive(gap.get(1).getAsInt()+1));
+        JsonArray gap=receiver.getAsJsonArray("offset").deepCopy(); gap.set(1,new JsonPrimitive(gap.get(1).getAsInt()+1));
         check(plan.report().getAsJsonArray("clearance_cells").asList().contains(gap),"processing head travel space is explicit required clearance");
         check(targets(plan).stream().noneMatch(c->c.get("offset").equals(gap)),"no transport or module block obstructs process head movement");
     }

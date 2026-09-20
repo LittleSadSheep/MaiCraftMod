@@ -23,6 +23,15 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import sun.misc.Unsafe;
+import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
+import java.util.function.Consumer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.server.ClientOperation;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** Component-exact authoritative stock enters the established planner without inventing resource keys. */
 public final class Ae2ServerSupplyTest {
@@ -181,11 +190,11 @@ public final class Ae2ServerSupplyTest {
         field(Ae2ServerSupply.class, "requested").set(supply, 1);
         field(Ae2ServerSupply.class, "destinationBefore").set(supply, ItemStack.EMPTY);
         var constructor = ClientRequestReceipt.class.getDeclaredConstructor(
-                org.maiwithu.maicraft.client.server.ClientOperation.class, JsonObject.class, long.class, long.class,
-                Runnable.class, java.util.function.Consumer.class);
+                ClientOperation.class, JsonObject.class, long.class, long.class,
+                Runnable.class, Consumer.class);
         constructor.setAccessible(true);
-        var receipt = constructor.newInstance(new org.maiwithu.maicraft.client.server.ClientOperation("inventory.ae2_supply", 1, true, null),
-                new JsonObject(), 1L, 1L, (Runnable) () -> {}, (java.util.function.Consumer<Runnable>) Runnable::run);
+        var receipt = constructor.newInstance(new ClientOperation("inventory.ae2_supply", 1, true, null),
+                new JsonObject(), 1L, 1L, (Runnable) () -> {}, (Consumer<Runnable>) Runnable::run);
         field(Ae2ServerSupply.class, "pending").set(supply, receipt);
         var session = (Ae2SupplySession) memory.allocateInstance(Ae2SupplySession.class);
         field(Ae2SupplySession.class, "serverSupply").set(session, supply);
@@ -204,8 +213,8 @@ public final class Ae2ServerSupplyTest {
                 "inventory arriving before the next child tick cannot discard the unconsumed authoritative receipt");
         check(!field(Ae2ServerSupply.class, "settlingSatisfied").getBoolean(supply), "barrier inspection is read-only");
         task.requestSatisfiedSettlement();
-        var context = (org.maiwithu.maicraft.client.actor.LocalPlayerContext) java.lang.reflect.Proxy.newProxyInstance(
-                getClassLoader(), new Class<?>[]{org.maiwithu.maicraft.client.actor.LocalPlayerContext.class},
+        var context = (LocalPlayerContext) Proxy.newProxyInstance(
+                getClassLoader(), new Class<?>[]{LocalPlayerContext.class},
                 (proxy, method, args) -> { if (method.getName().equals("tickRevision")) return 10L;
                     throw new AssertionError("receipt reconciliation must not perform another native action: " + method.getName()); });
         check(supply.tick(context).state() == Ae2ServerSupply.State.RUNNING && allocation.confirmedCount() == 1,
@@ -216,7 +225,7 @@ public final class Ae2ServerSupplyTest {
                         && inventory.getItem(7).getCount() == 1,
                 "one server receipt produces one audited transfer and settles without another extraction");
         check(task.mustSettleBeforeSatisfiedCancellation(), "the parent also waits for the owned session cleanup");
-        field(Ae2SupplyTask.class, "terminal").set(task, org.maiwithu.maicraft.task.TaskState.SUCCESS);
+        field(Ae2SupplyTask.class, "terminal").set(task, TaskState.SUCCESS);
         check(!task.mustSettleBeforeSatisfiedCancellation(), "settled task releases its terminal barrier");
     }
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -237,8 +246,8 @@ public final class Ae2ServerSupplyTest {
                 "a completed first group never authorizes extraction or crafting for another group during settlement");
 
         var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
-        try (var world = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness()) {
-            field(net.minecraft.world.inventory.AbstractContainerMenu.class, "carried")
+        try (var world = new InteractionWorldTestHarness()) {
+            field(AbstractContainerMenu.class, "carried")
                     .set(world.player.inventoryMenu, ItemStack.EMPTY);
             var bridge = (Ae2ReflectionBridge) memory.allocateInstance(Ae2ReflectionBridge.class);
             for (String phaseName : List.of("SUBMIT_CRAFT_AMOUNT", "WAIT_CRAFT_PLAN")) {
@@ -251,7 +260,7 @@ public final class Ae2ServerSupplyTest {
                 var task = new Ae2SupplyTask(world.player, null); field(Ae2SupplyTask.class, "session").set(task, session);
                 check(task.mustSettleBeforeSatisfiedCancellation(), "existing native menu transaction requires cleanup");
                 task.requestSatisfiedSettlement();
-                session.tick(org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(world.player));
+                session.tick(ClientRuntime.requireContext(world.player));
                 check(session.phase().equals("clean_close")
                                 && field(Ae2SupplySession.class, "craftingJobsSubmitted").getInt(session) == 0,
                         "an externally satisfied inventory skips native crafting submission and enters physical cleanup");
@@ -267,7 +276,7 @@ public final class Ae2ServerSupplyTest {
                 ClientRequestReceipt.Backend.SERVER, ClientRequestReceipt.Status.SUCCEEDED,
                 ClientRequestReceipt.Effect.APPLIED, false, "", "", 10, result);
     }
-    private static java.lang.reflect.Field field(Class<?> type, String name) throws Exception {
+    private static Field field(Class<?> type, String name) throws Exception {
         var field = type.getDeclaredField(name); field.setAccessible(true); return field;
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }

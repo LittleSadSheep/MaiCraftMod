@@ -6,6 +6,9 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.task.TaskState;
+import java.io.File;
+import net.minecraft.client.Minecraft;
+import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
 
 /** Drive the real startup transition after admission, without opening a server session. */
 public final class ProductionStartupTransitionTest {
@@ -15,12 +18,12 @@ public final class ProductionStartupTransitionTest {
     }
 
     private static void verify(String entryPhase, boolean startAction) throws Exception {
-        var runtime = org.maiwithu.maicraft.client.server.ServerSessionRuntime.class;
+        var runtime = ServerSessionRuntime.class;
         var router = runtime.getDeclaredField("router"); router.setAccessible(true); Object priorRouter = router.get(null);
         var journal = runtime.getDeclaredField("journal"); journal.setAccessible(true); Object priorJournal = journal.get(null);
         try (var world = new InteractionWorldTestHarness()) {
-            var directory = net.minecraft.client.Minecraft.class.getDeclaredField("gameDirectory"); directory.setAccessible(true);
-            directory.set(net.minecraft.client.Minecraft.getInstance(),new java.io.File("production-startup-settings-fixture"));
+            var directory = Minecraft.class.getDeclaredField("gameDirectory"); directory.setAccessible(true);
+            directory.set(Minecraft.getInstance(),new File("production-startup-settings-fixture"));
             var manifest = ProductionObserverFixture.manifest(1);
             if (startAction) manifest.getAsJsonArray("configurations").add(JsonParser.parseString("""
                     {"id":"start_motor","node":"p0","operation":"machine.configure","stage":"start",

@@ -10,6 +10,7 @@ import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import sun.misc.Unsafe;
+import java.util.function.Predicate;
 
 /** 新的存入范围约束要传到会话并随时可撤销，不能改变旧取料／网络准备的默认终端选择。 */
 public final class Ae2DepositAccessPolicyTest {
@@ -22,7 +23,7 @@ public final class Ae2DepositAccessPolicyTest {
             var request = new Ae2ResourceSupply.Request(groups, false, Ae2ResourceSupply.Operation.DEPOSIT);
             BlockPos origin = new BlockPos(2, 1, 2), inside = origin.east(), outside = origin.east(9);
             AtomicBoolean enabled = new AtomicBoolean(true);
-            java.util.function.Predicate<BlockPos> scope = at -> enabled.get() && at.distSqr(origin) <= 16;
+            Predicate<BlockPos> scope = at -> enabled.get() && at.distSqr(origin) <= 16;
             var record = Ae2ResourceSupply.taskRecord("deposit-scope", 1000, request, scope);
             check(record.depositAccess.test(inside) && !record.depositAccess.test(outside), "task-record factory preserves the caller's fixed access scope");
             var deposit = new Ae2SupplySession(world.player, request, bridge, false, record.depositAccess);

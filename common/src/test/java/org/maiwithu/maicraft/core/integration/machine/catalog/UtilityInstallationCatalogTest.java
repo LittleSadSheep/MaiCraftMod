@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import java.nio.file.Files;
 import java.util.List;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import net.minecraft.core.Direction;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** Ports must survive reconnect without inventing a producing line or a current connection. */
@@ -25,7 +26,7 @@ public final class UtilityInstallationCatalogTest {
         catalog.recordInstallationBuilt(" minecraft:overworld ",anchor,inputs,2000); catalog.saveAsync().join();
         var loaded = new MachineCatalog(directory,Runnable::run); loaded.bind(identity,"second"); check(loaded.ready(),"reload after dimension normalization");
         var built = loaded.installation("minecraft:overworld",anchor).orElseThrow();
-        check(built.builtAtMillis() == 2000 && built.inputs().getFirst().face() == net.minecraft.core.Direction.DOWN,"port geometry and historical build survive reconnect");
+        check(built.builtAtMillis() == 2000 && built.inputs().getFirst().face() == Direction.DOWN,"port geometry and historical build survive reconnect");
         var view = built.json(false); var port = view.getAsJsonArray("external_inputs").get(0).getAsJsonObject();
         check(!view.get("current_connection_verified").getAsBoolean() && !view.get("machine_production_verified").getAsBoolean()
                 && !view.get("operation_authorized").getAsBoolean() && !view.has("anchor") && !port.has("offset")

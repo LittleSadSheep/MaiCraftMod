@@ -20,6 +20,8 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionNativ
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidence.*;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.HashSet;
+import java.util.function.ToDoubleFunction;
 
 /** Finite scheduling and real wire-shape tests; travel numbers model read-target order, not actual game completion. */
 public final class ProductionReadScheduleTest {
@@ -29,7 +31,7 @@ public final class ProductionReadScheduleTest {
         sharedSnapshotsAndFrozenRequests(); truncationSplitsOnlyOnce(); stageDeadlineDoesNotDependOnNavigationProgress();
         compareOrder(fixture(), ignored -> 8);
         if (args.length == 1) {
-            Path file = Path.of(args[0]); var create = new java.util.HashSet<BlockPos>();
+            Path file = Path.of(args[0]); var create = new HashSet<BlockPos>();
             var blueprint = JsonParser.parseString(Files.readString(file.resolveSibling("blueprint.json"))).getAsJsonObject();
             for (var raw : blueprint.getAsJsonArray("blocks")) {
                 var block = raw.getAsJsonObject(); if (!block.get("block_id").getAsString().startsWith("create:")) continue;
@@ -71,7 +73,7 @@ public final class ProductionReadScheduleTest {
         check(!ProductionDesignCompiler.compile(plan.authoredJson(), evidence).canEnter("supply"), "Missing/invalid native recipe evidence became ready");
     }
 
-    private static void compareOrder(JsonObject authored, java.util.function.ToDoubleFunction<BlockPos> nativeRadius) {
+    private static void compareOrder(JsonObject authored, ToDoubleFunction<BlockPos> nativeRadius) {
         var plan = plan(authored); var old = new ArrayList<BlockPos>();
         plan.manifest().nodes().forEach(node -> old.add(plan.at(node)));
         plan.manifest().ports().forEach(port -> old.add(plan.at(port.offset())));

@@ -1,5 +1,7 @@
 package org.maiwithu.maicraft.core.integration.machine.control;
 
+import org.maiwithu.maicraft.intent.VehicleMachineContractTest;
+
 public final class VehicleRegressionSuite {
     public static void main(String[] args) {
         ControlCircuitTest.main(args);
@@ -10,6 +12,6 @@ public final class VehicleRegressionSuite {
         ControlInspectionReportTest.main(args);
         VehicleControlPlanTest.main(args);
         VehicleFeedbackPilotTest.main(args);
-        org.maiwithu.maicraft.intent.VehicleMachineContractTest.main(args);
+        VehicleMachineContractTest.main(args);
     }
 }

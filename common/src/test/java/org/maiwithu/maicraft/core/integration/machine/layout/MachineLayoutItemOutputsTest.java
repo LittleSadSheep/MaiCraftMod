@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 
 /**
  * 检查分拣机是否背对取货容器、正面接出管线、过滤绑定正确成品；连接指定的中间产物优先，未知产物则保持输出关闭。
@@ -30,7 +31,7 @@ public final class MachineLayoutItemOutputsTest {
         JsonObject sorter=blocks.stream().filter(c->c.has("block_id")&&c.get("block_id").getAsString().equals("mekanism:logistical_sorter")).findFirst().orElseThrow();
         JsonObject receiver=blocks.stream().filter(c->c.has("block_id")&&c.get("block_id").getAsString().equals("create:depot")).findFirst().orElseThrow();
         var source=MachineLayoutModules.from(receiver.getAsJsonArray("offset"));var at=MachineLayoutModules.from(sorter.getAsJsonArray("offset"));
-        var facing=MachineLayoutRouting.Side.valueOf(sorter.getAsJsonObject("properties").get("facing").getAsString().toUpperCase(java.util.Locale.ROOT));
+        var facing=MachineLayoutRouting.Side.valueOf(sorter.getAsJsonObject("properties").get("facing").getAsString().toUpperCase(Locale.ROOT));
         check(source.step(facing).equals(at),"sorter reads the process receiver directly behind its facing");
         JsonArray route=p.report().getAsJsonArray("connections").get(0).getAsJsonObject().getAsJsonArray("route");
         check(MachineLayoutModules.from(route.get(0).getAsJsonArray()).equals(at),"sorter is the first physical output-route element");

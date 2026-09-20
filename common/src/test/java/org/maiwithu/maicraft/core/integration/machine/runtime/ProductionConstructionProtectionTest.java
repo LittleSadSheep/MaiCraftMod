@@ -23,16 +23,21 @@ import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import java.io.PrintStream;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.chunk.ChunkAccess;
 
 /** Exercises real descendant constructor capture and placement preflight, without placing blocks or opening MCP. */
 public final class ProductionConstructionProtectionTest {
     private static final BlockPos TARGET = new BlockPos(4, 1, 4), USER_PROTECTED = new BlockPos(10, 1, 10);
 
     public static void main(String[] args) throws Exception {
-        java.io.PrintStream errors = System.err;
-        java.io.PrintStream output = System.out;
+        PrintStream errors = System.err;
+        PrintStream output = System.out;
         try {
-            net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+            SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
             preflightPreservesOnlyInheritedUserProtection(false, false);
             preflightPreservesOnlyInheritedUserProtection(true, false);
             preflightPreservesOnlyInheritedUserProtection(false, true);
@@ -48,7 +53,7 @@ public final class ProductionConstructionProtectionTest {
             Object chunks = field(harness.level.getClass(), "chunks").get(harness.level);
             Object chunk = field(chunks.getClass(), "chunk").get(chunks);
             field(chunk.getClass(), "level").set(chunk, harness.level);
-            field(net.minecraft.world.level.chunk.ChunkAccess.class, "levelHeightAccessor").set(chunk, harness.level);
+            field(ChunkAccess.class, "levelHeightAccessor").set(chunk, harness.level);
             harness.inventory.setItem(0, new ItemStack(Items.STONE, 1));
             var layout = new SemanticMachineLayout.Result(true, JsonParser.parseString("""
                     {"blocks":[{"offset":[0,0,0],"block_id":"minecraft:stone"}]}
@@ -71,7 +76,7 @@ public final class ProductionConstructionProtectionTest {
             check(arranged, "Construction boundary is required; this fixture never starts backend negotiation");
             field(MachineProductionTask.class, "construction").set(root, child);
             BlockPos protectedCell = userProtectsTarget ? TARGET : USER_PROTECTED;
-            var before = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(NavigationSafetyContext.protectedMutationCells());
+            var before = new LongOpenHashSet(NavigationSafetyContext.protectedMutationCells());
             NavigationSafetyContext.withProtectedArea(List.of(protectedCell), List.of(), () -> {
                 TaskState state = root.tick(harness.player);
                 check(state == (childFails ? TaskState.FAILED : TaskState.RUNNING), "Root must execute the supplied construction child");

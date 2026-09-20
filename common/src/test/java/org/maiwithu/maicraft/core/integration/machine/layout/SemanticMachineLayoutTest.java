@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 
 /**
  * 用假定物品与状态都存在的注册表，检查布局连接、动力换向、AE2 部件、空间限制、可重复结果和取消；实际模组接口与游戏施工另需验证。
@@ -159,7 +160,7 @@ public final class SemanticMachineLayoutTest {
         try {
             SemanticMachineLayout.compile(graph(new String[][] {{"storage", "minecraft:barrel"}}, new String[][] {}), 8, REGISTRY);
             throw new AssertionError("interrupted compiler returned a construction plan");
-        } catch (java.util.concurrent.CancellationException expected) {
+        } catch (CancellationException expected) {
             check(Thread.currentThread().isInterrupted(), "cancellation preserves the caller's interruption state");
         } finally { Thread.interrupted(); }
     }

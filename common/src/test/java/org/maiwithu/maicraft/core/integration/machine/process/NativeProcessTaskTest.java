@@ -15,6 +15,8 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.function.Supplier;
+import net.minecraft.client.player.LocalPlayer;
 
 /** 用记录型子任务检查建造包装的顺序、消费屏障与生命周期，不操作方块、菜单或投料。 */
 public final class NativeProcessTaskTest {
@@ -125,14 +127,14 @@ public final class NativeProcessTaskTest {
         boolean throwOnStop, protectedContext;
         TaskState next = TaskState.RUNNING;
         TaskResult receipt;
-        java.util.function.Supplier<TaskState> action;
+        Supplier<TaskState> action;
         private void protection() {
             if (protectedContext) check(NavigationSafetyContext.protectsMutation(PROTECTED) && NavigationSafetyContext.protectsUse(PROTECTED)
                     && NavigationSafetyContext.forbiddenBodyCells().contains(PROTECTED.asLong()), "子任务实际保留父任务的修改、使用和身体通行保护");
         }
-        @Override public void start(net.minecraft.client.player.LocalPlayer player) { protection(); starts++; }
-        @Override public TaskState tick(net.minecraft.client.player.LocalPlayer player) { protection(); return action == null ? next : action.get(); }
-        @Override public void stop(net.minecraft.client.player.LocalPlayer player, StopReason reason) {
+        @Override public void start(LocalPlayer player) { protection(); starts++; }
+        @Override public TaskState tick(LocalPlayer player) { protection(); return action == null ? next : action.get(); }
+        @Override public void stop(LocalPlayer player, StopReason reason) {
             protection(); stops++; if (throwOnStop) throw new IllegalStateException("fixture stop failure");
         }
         @Override public TaskResult result(TaskState state) { protection(); results++; return receipt != null ? receipt : state == TaskState.SUCCESS ? TaskResult.ok("child completed") : TaskResult.fail("child stopped"); }

@@ -15,6 +15,8 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 /** Actual production approach/observe paths; only walking arrival and fixture movement are controlled. */
 public final class ProductionInteractionNavigationTest {
@@ -26,7 +28,7 @@ public final class ProductionInteractionNavigationTest {
             h.set(first, Blocks.STONE.defaultBlockState()); h.set(second, Blocks.STONE.defaultBlockState());
             h.position(new Vec3(10.5, 1, 8.5));
             var routes = new ArrayList<BlockPos>();
-            var arrivalChecks = new ArrayList<java.util.function.BooleanSupplier>();
+            var arrivalChecks = new ArrayList<BooleanSupplier>();
             MachineProductionTask task = new MachineProductionTask(h.player, record(), (stance, reached) -> {
                 routes.add(stance);
                 arrivalChecks.add(reached);
@@ -52,7 +54,7 @@ public final class ProductionInteractionNavigationTest {
             check(routes.size() == 2 && !newStance.equals(oldStance)
                             && Vec3.atBottomCenterOf(newStance).distanceToSqr(second.getCenter()) <= 9,
                     "approach after observation must select a close stance for the second machine, never route back to the first");
-            @SuppressWarnings("unchecked") var rejected = (java.util.Set<Long>) field(task.getClass(), "rejectedStances").get(task);
+            @SuppressWarnings("unchecked") var rejected = (Set<Long>) field(task.getClass(), "rejectedStances").get(task);
             check(rejected.contains(newStance.asLong()), "premature arrival must release that stance for bounded alternatives");
             var requests = (ProductionRequestSlot) field(task.getClass(), "requests").get(task);
             check(!requests.pending() && requests.report().isEmpty(), "navigation cannot enqueue a remote effect before range is valid");

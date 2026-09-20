@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import org.maiwithu.maicraft.client.server.ClientRequestRouter;
 import org.maiwithu.maicraft.network.ServerFeature;
 import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
+import java.util.UUID;
 
 /** Native job lifecycle contract: planning, one start, status polling, and uncertainty/cancellation. */
 public final class Ae2ServerCraftJobTest {
@@ -77,7 +78,7 @@ public final class Ae2ServerCraftJobTest {
         public ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating) {
             return router.submit(operation, arguments, mutating);
         }
-        public void cancel(java.util.UUID request) { router.cancel(request); }
+        public void cancel(UUID request) { router.cancel(request); }
         public boolean mayCancel() { return true; }
         public String dimension() { return "minecraft:overworld"; }
         public long tick() { return tick; }

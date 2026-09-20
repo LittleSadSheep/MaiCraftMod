@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
+import com.google.gson.JsonPrimitive;
 
 public final class ProductionRunPlanBindingTest {
     private static final String AUTHORED_RECIPE = "minecraft:iron_ingot_from_smelting_raw_iron";
@@ -48,7 +49,7 @@ public final class ProductionRunPlanBindingTest {
                 value -> value.getAsJsonArray("nodes").get(1).getAsJsonObject().addProperty("batches", 4),
                 value -> value.getAsJsonArray("nodes").get(0).getAsJsonObject().addProperty("material_policy", "ordinary"),
                 value -> value.getAsJsonArray("nodes").get(2).getAsJsonObject().addProperty("id", "renamed-sink"),
-                value -> value.getAsJsonArray("nodes").get(1).getAsJsonObject().getAsJsonArray("offset").set(0, new com.google.gson.JsonPrimitive(3)),
+                value -> value.getAsJsonArray("nodes").get(1).getAsJsonObject().getAsJsonArray("offset").set(0, new JsonPrimitive(3)),
                 value -> value.getAsJsonArray("ports").get(0).getAsJsonObject().addProperty("face", "up"),
                 value -> value.getAsJsonArray("ports").get(0).getAsJsonObject().addProperty("direction", "input"),
                 value -> value.getAsJsonArray("links").get(0).getAsJsonObject().addProperty("amount", 64),

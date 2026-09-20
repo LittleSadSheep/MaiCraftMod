@@ -18,6 +18,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.actor.ItemEntityReceipts;
 import org.maiwithu.maicraft.client.actor.ItemEntityReceiptsTest;
+import java.util.Collections;
 
 /** 只读位置与真实实体包围盒夹具验证反应场地和瞄准偏好；有效流体累计超过60刻才原生尝试，首次入水不宣称反应。 */
 public final class WorldProcessFeedRegionTest {
@@ -55,7 +56,7 @@ public final class WorldProcessFeedRegionTest {
     private static WorldProcessRecipe recipe(int inputs, OptionalDouble radius) {
         return new WorldProcessRecipe() {
             public ResourceLocation id() { return ResourceLocation.parse("test:bounded_trigger"); }
-            public List<Ingredient> inputs() { return java.util.Collections.nCopies(inputs, Ingredient.of(Items.REDSTONE)); }
+            public List<Ingredient> inputs() { return Collections.nCopies(inputs, Ingredient.of(Items.REDSTONE)); }
             public ItemStack result() { return new ItemStack(Items.BRICK); }
             public boolean supports(FluidState state) { return !state.isEmpty(); }
             public boolean isFluid() { return true; }

@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvide
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.function.UnaryOperator;
 
 /** Native wire shapes for orchestration tests; these fixtures never claim a running Minecraft server. */
 final class ProductionConnectionFixture implements ProductionWork {
@@ -28,7 +29,7 @@ final class ProductionConnectionFixture implements ProductionWork {
     BlockPos observed, navigationTarget;
     JsonObject pending;
     int progressUpdates;
-    java.util.function.UnaryOperator<JsonObject> replyEdit = java.util.function.UnaryOperator.identity();
+    UnaryOperator<JsonObject> replyEdit = UnaryOperator.identity();
 
     ProductionConnectionFixture(List<BlockPos> path, String medium, String adapter) {
         this.adapter = adapter;

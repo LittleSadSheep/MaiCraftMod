@@ -23,6 +23,9 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.lang.reflect.Field;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.level.block.state.BlockState;
 
 /** 让 L 形多源池与普通结构混排，检查蓝图、材料和准备清空都保留源格真实语义，不固定成单格池。 */
 public final class MachineFluidConstructionTest {
@@ -99,19 +102,19 @@ public final class MachineFluidConstructionTest {
                     "原生子动作单独给出的禁重试也须向上传递");
         }
     }
-    private static java.lang.reflect.Field field(String name) throws Exception {
+    private static Field field(String name) throws Exception {
         var field = MachineBuildTask.class.getDeclaredField(name); field.setAccessible(true); return field;
     }
     private static final class ReceiptProbe implements Task {
         final Map<String,Object> data; int stops, results;
         ReceiptProbe(Map<String,Object> data) { this.data=data; }
-        @Override public TaskState tick(net.minecraft.client.player.LocalPlayer player) { return TaskState.FAILED; }
-        @Override public void stop(net.minecraft.client.player.LocalPlayer player, StopReason reason) { stops++; }
+        @Override public TaskState tick(LocalPlayer player) { return TaskState.FAILED; }
+        @Override public void stop(LocalPlayer player, StopReason reason) { stops++; }
         @Override public TaskResult result(TaskState terminal) { results++; return TaskResult.fail("unconfirmed native bucket",data); }
         @Override public String name() { return "bucket-receipt-probe"; }
     }
     private static JsonObject blueprint() {
-        Map<BlockPos, net.minecraft.world.level.block.state.BlockState> cells = new LinkedHashMap<>();
+        Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
         // 源格和围挡交错加入，普通施工仍应自行分出液体安装阶段。
         for (BlockPos at : SOURCES) {
             cells.put(at, Blocks.WATER.defaultBlockState()); cells.put(at.below(), Blocks.STONE.defaultBlockState());

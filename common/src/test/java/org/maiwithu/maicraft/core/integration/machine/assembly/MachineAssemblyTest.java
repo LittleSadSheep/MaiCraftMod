@@ -12,6 +12,10 @@ import net.minecraft.core.BlockPos;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 
 /**
  * 检查部件安装的确认规则、模式循环、矩阵模板和同步记录的世界归属。模组状态使用替身或直接参数，测试通过不等于已完成装载模组后的真实安装。
@@ -94,7 +98,7 @@ public final class MachineAssemblyTest {
         expectFailure(() -> MekanismMatrixTemplate.compile("creative", ignored -> true, ignored -> true));
         expectFailure(() -> MekanismMatrixTemplate.compile("basic", id -> !id.endsWith("induction_provider"), ignored -> true));
         expectFailure(() -> MekanismMatrixTemplate.compile("basic", ignored -> true, id -> !id.endsWith("configurator")));
-        var largeOptions = new com.google.gson.JsonObject();
+        var largeOptions = new JsonObject();
         largeOptions.addProperty("width", 18); largeOptions.addProperty("height", 18); largeOptions.addProperty("depth", 18);
         largeOptions.addProperty("cell_count", 4000); largeOptions.addProperty("provider_count", 96);
         var large = MekanismMatrixTemplate.compile("ultimate", largeOptions, ignored -> true, ignored -> true);
@@ -135,16 +139,16 @@ public final class MachineAssemblyTest {
     // 制造两个独立客户端世界对象，证明同步编号不能跨世界借用、旧消息不能完成新观察、繁忙更新不能挤掉正在等待的位置。
     private static void serverReceiptScopes() {
         try {
-            net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredMethod("handleBlockEntityData",
-                    net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket.class);
-            net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredMethod("handleContainerContent",
-                    net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket.class);
-            check(net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredField("level").getType()
-                    == net.minecraft.client.multiplayer.ClientLevel.class, "packet mixin matches the installed Minecraft client API");
+            ClientPacketListener.class.getDeclaredMethod("handleBlockEntityData",
+                    ClientboundBlockEntityDataPacket.class);
+            ClientPacketListener.class.getDeclaredMethod("handleContainerContent",
+                    ClientboundContainerSetContentPacket.class);
+            check(ClientPacketListener.class.getDeclaredField("level").getType()
+                    == ClientLevel.class, "packet mixin matches the installed Minecraft client API");
             var field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe"); field.setAccessible(true);
             var memory = (sun.misc.Unsafe) field.get(null);
-            var first = (net.minecraft.client.multiplayer.ClientLevel) memory.allocateInstance(net.minecraft.client.multiplayer.ClientLevel.class);
-            var second = (net.minecraft.client.multiplayer.ClientLevel) memory.allocateInstance(net.minecraft.client.multiplayer.ClientLevel.class);
+            var first = (ClientLevel) memory.allocateInstance(ClientLevel.class);
+            var second = (ClientLevel) memory.allocateInstance(ClientLevel.class);
             check(ServerBlockEntityReceipts.revision(first, BlockPos.ZERO) == 0, "unsynchronized geometry has no receipt");
             ServerBlockEntityReceipts.received(first, BlockPos.ZERO);
             long before = ServerBlockEntityReceipts.revision(first, BlockPos.ZERO);

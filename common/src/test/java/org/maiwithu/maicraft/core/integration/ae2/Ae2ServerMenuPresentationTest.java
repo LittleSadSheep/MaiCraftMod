@@ -8,6 +8,8 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
+import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import static org.maiwithu.maicraft.core.integration.ae2.Ae2ServerMenuFixture.field;
 
 /** Real menu ownership/render gates and session transitions; the fixture does not claim a rendered Minecraft game. */
@@ -62,7 +64,7 @@ public final class Ae2ServerMenuPresentationTest {
             check(session.phase().equals("server_supply") && f.world.blockUses() == 1, "same-host visible menu enters the server path without a second click");
             var supply = (Ae2ServerSupply) field(Ae2SupplySession.class, "serverSupply").get(session);
             var bodyMethod = Ae2ServerSupply.class.getDeclaredMethod("targetBody"); bodyMethod.setAccessible(true);
-            var body = (com.google.gson.JsonObject) bodyMethod.invoke(supply);
+            var body = (JsonObject) bodyMethod.invoke(supply);
             check(body.get("container_id").getAsInt() == 7 && body.get("side").getAsString().equals("east")
                             && body.getAsJsonObject("position").get("x").getAsInt() == 4,
                     "server requests bind the opened container and exact terminal side/position");
@@ -81,7 +83,7 @@ public final class Ae2ServerMenuPresentationTest {
             field(Ae2SupplySession.class, "terminalAccess").set(session, "server_fixed_terminal");
             field(Ae2SupplySession.class, "accessBeforeServer").set(session, "fixed_terminal");
             var fallback = field(Ae2SupplySession.class, "serverFallbackPhase"); fallback.set(session, Enum.valueOf((Class) fallback.getType(), "WAIT_REPOSITORY"));
-            var tick = Ae2SupplySession.class.getDeclaredMethod("tickServerSupply", org.maiwithu.maicraft.client.actor.LocalPlayerContext.class);
+            var tick = Ae2SupplySession.class.getDeclaredMethod("tickServerSupply", LocalPlayerContext.class);
             tick.setAccessible(true); tick.invoke(session, f.context());
             check(session.phase().equals("wait_repository") && field(Ae2SupplySession.class, "serverSupply").get(session) == null
                             && field(Ae2SupplySession.class, "terminalAccess").get(session).equals("fixed_terminal")
@@ -95,11 +97,11 @@ public final class Ae2ServerMenuPresentationTest {
             f.show(f.menu);
             var supply = new Ae2ServerSupply(f.world.player, f.request, f.target, Set.of(), ignored -> 0, 7);
             var target = Ae2ServerSupply.class.getDeclaredMethod("targetBody"); target.setAccessible(true);
-            var body = (com.google.gson.JsonObject) target.invoke(supply);
+            var body = (JsonObject) target.invoke(supply);
             var job = new Ae2ServerCraftJob(body, "exact", "network", 1);
             field(Ae2ServerCraftJob.class, "jobId").set(job, "job");
             var jobBody = Ae2ServerCraftJob.class.getDeclaredMethod("jobBody"); jobBody.setAccessible(true);
-            var request = (com.google.gson.JsonObject) jobBody.invoke(job);
+            var request = (JsonObject) jobBody.invoke(job);
             check(request.get("container_id").getAsInt() == 7 && request.get("position").equals(body.get("position"))
                             && request.get("side").equals(body.get("side")) && request.get("job_id").getAsString().equals("job"),
                     "craft start/status/cancel must retain the originating physical terminal binding");

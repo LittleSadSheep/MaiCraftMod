@@ -8,6 +8,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
+import com.google.gson.JsonPrimitive;
 
 /** Contract validation does not need a world, installed mod or a powered network. */
 public final class MachineUtilityInputsTest {
@@ -27,7 +28,7 @@ public final class MachineUtilityInputsTest {
         check(MachineUtilityInputs.parseStoredDeclarations(rows).getFirst().offset().getX() == oldOffset, "old catalog offset survives a smaller current planning radius");
         try { MachineUtilityInputs.parseDeclarations(rows); throw new AssertionError("current design accepted an over-budget offset"); }
         catch (IllegalArgumentException expected) { checks++; }
-        at.set(0, new com.google.gson.JsonPrimitive(30_000_001));
+        at.set(0, new JsonPrimitive(30_000_001));
         try { MachineUtilityInputs.parseStoredDeclarations(rows); throw new AssertionError("catalog accepted unsupported world coordinates"); }
         catch (IllegalArgumentException expected) { checks++; }
     }

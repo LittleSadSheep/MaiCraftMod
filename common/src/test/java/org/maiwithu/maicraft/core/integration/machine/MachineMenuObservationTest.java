@@ -18,6 +18,7 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import sun.misc.Unsafe;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /**
  * 构造原版箱子菜单检查只读观察：没有动作控制权也能读取，但无来源绑定就不能取得存取许可；结束后恢复替换过的客户端字段。
@@ -92,7 +93,7 @@ public final class MachineMenuObservationTest {
             check(acceptable(player).isEmpty(), "an item id must not be listed when all carried variants are rejected");
 
             inventory.clearContent();
-            var items = net.minecraft.core.registries.BuiltInRegistries.ITEM.stream()
+            var items = BuiltInRegistries.ITEM.stream()
                     .filter(item -> item != Items.AIR).limit(17).toList();
             for (int i = 0; i < items.size(); i++) {
                 ItemStack stack = new ItemStack(items.get(i));

@@ -9,6 +9,8 @@ import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.client.server.ServerAssistClient;
 
 public final class UtilityConnectionTaskGuardTest {
     public static void main(String[] args) throws Exception {
@@ -42,7 +44,7 @@ public final class UtilityConnectionTaskGuardTest {
                 state = task.tick(fixture.world.player); fixture.advance();
                 // 即使连接回执刚返回，端点被别的施工替换后也必须按当前世界拒绝，不能套用先前的接触关系。
                 if (changedEndpoint && fixture.sent.stream().anyMatch(row -> row.has("body") && row.getAsJsonObject("body").has("path")))
-                    fixture.world.set(fixture.target, net.minecraft.world.level.block.Blocks.DIRT.defaultBlockState());
+                    fixture.world.set(fixture.target, Blocks.DIRT.defaultBlockState());
             }
             var result = task.result(state);
             if (connected && exports && !changedEndpoint) {
@@ -59,8 +61,8 @@ public final class UtilityConnectionTaskGuardTest {
     }
     private static void rejectsClientOnlySnapshots() throws Exception {
         try (var fixture = new UtilityConnectionReplayFixture(false)) {
-            check(org.maiwithu.maicraft.client.server.ServerAssistClient.supported("machine.snapshot"), "fixture must reproduce positive fallback support");
-            check(!org.maiwithu.maicraft.client.server.ServerAssistClient.serverSupported("machine.snapshot"), "fixture has no enhanced server");
+            check(ServerAssistClient.supported("machine.snapshot"), "fixture must reproduce positive fallback support");
+            check(!ServerAssistClient.serverSupported("machine.snapshot"), "fixture has no enhanced server");
             var task = kineticTask(fixture); task.start(fixture.world.player);
             check(task.tick(fixture.world.player) == TaskState.FAILED, "fallback support must not pass the server-only utility gate");
             check("utility_server_snapshot_required".equals(task.result(TaskState.FAILED).data().get("failure_code")), "failure must identify missing server support");

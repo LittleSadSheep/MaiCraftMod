@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.server.*;
+import java.util.HashMap;
 
 /** Simulated server observations exercise the real router and task states, not Create's physical APIs. */
 final class UtilityConnectionReplayFixture implements AutoCloseable {
@@ -42,9 +43,9 @@ final class UtilityConnectionReplayFixture implements AutoCloseable {
         Object chunks = field(world.level.getClass(), "chunks").get(world.level), chunk = field(chunks.getClass(), "chunk").get(chunks);
         field(chunk.getClass(), "level").set(chunk, world.level);
         field(ChunkAccess.class, "levelHeightAccessor").set(chunk, world.level);
-        field(chunk.getClass(), "blockEntities").set(chunk, new java.util.HashMap<>());
+        field(chunk.getClass(), "blockEntities").set(chunk, new HashMap<>());
         // Native absent-BE lookup consults this queue before deciding that a plain block has no entity.
-        field(chunk.getClass(), "pendingBlockEntities").set(chunk, new java.util.HashMap<>());
+        field(chunk.getClass(), "pendingBlockEntities").set(chunk, new HashMap<>());
         if (!energy) world.set(target.above(), Blocks.STONE.defaultBlockState());
         router = new ClientRequestRouter(() -> enhanced, envelope -> { sent.add(envelope.deepCopy()); return true; },
                 () -> {}, Runnable::run, (receipt, send) -> { throw new AssertionError("idempotent utility check must never submit mutations"); });
