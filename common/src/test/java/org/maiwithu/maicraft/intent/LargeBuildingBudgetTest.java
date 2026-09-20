@@ -28,6 +28,10 @@ import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import java.util.Arrays;
+import java.util.Locale;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.Items;
 
 /** 独立以 2 GiB 堆验证大建筑的数据链路；只读预览不等于真实加载或渲染，更不启动身体施工。 */
 public final class LargeBuildingBudgetTest {
@@ -107,10 +111,10 @@ public final class LargeBuildingBudgetTest {
         var nbt = NbtIo.readCompressed(path, NbtAccounter.create(BuildingBudgets.current().maxImportNbtBytes()));
         var size = nbt.getList("size", Tag.TAG_INT); int[] origin = nbt.getIntArray("maicraft_offset");
         check(size.size() == 3 && size.getInt(0) == 120 && size.getInt(1) == 18 && size.getInt(2) == 80
-                && java.util.Arrays.equals(origin, new int[]{-60, 0, -40}), "NBT尺寸或原模型负偏移丢失");
+                && Arrays.equals(origin, new int[]{-60, 0, -40}), "NBT尺寸或原模型负偏移丢失");
         var palette = nbt.getList("palette", Tag.TAG_COMPOUND); var tally = new Tally();
         for (var value : nbt.getList("blocks", Tag.TAG_COMPOUND)) {
-            var cell = (net.minecraft.nbt.CompoundTag) value; var at = cell.getList("pos", Tag.TAG_INT);
+            var cell = (CompoundTag) value; var at = cell.getList("pos", Tag.TAG_INT);
             var state = palette.getCompound(cell.getInt("state"));
             check(state.getCompound("Properties").isEmpty(), "无属性石墙导出产生了额外验收状态");
             tally.add(ANCHOR.x() + origin[0] + at.getInt(0), ANCHOR.y() + origin[1] + at.getInt(1),
@@ -146,7 +150,7 @@ public final class LargeBuildingBudgetTest {
         for (var target : targets) {
             check(target.strictIdentity() && !target.itemPlace() && target.exactProperties().isEmpty()
                     && target.finalProperties() != null && target.finalProperties().isEmpty(), "冻结目标的精确材料或最终属性要求改变");
-            check(target.item() == (target.desiredState().isAir() ? net.minecraft.world.item.Items.AIR : net.minecraft.world.item.Items.STONE), "目标携带错误建材");
+            check(target.item() == (target.desiredState().isAir() ? Items.AIR : Items.STONE), "目标携带错误建材");
             var at = target.pos(); tally.add(at.getX(), at.getY(), at.getZ(), BuiltInRegistries.BLOCK.getKey(target.block()).toString());
         }
         return tally.finish();
@@ -168,7 +172,7 @@ public final class LargeBuildingBudgetTest {
         Summary finish() { return new Summary(count, air, new BlockPos(minX, minY, minZ), new BlockPos(maxX, maxY, maxZ), HexFormat.of().formatHex(digest.digest())); }
     }
     private static void stage(String name, long started, Summary summary, String extra) {
-        System.out.printf(java.util.Locale.ROOT, "LargeBuildingBudgetTest stage=%s elapsed_ms=%.3f targets=%d air=%d solids=%d %s%n",
+        System.out.printf(Locale.ROOT, "LargeBuildingBudgetTest stage=%s elapsed_ms=%.3f targets=%d air=%d solids=%d %s%n",
                 name, (System.nanoTime() - started) / 1_000_000.0, summary.cells, summary.air, summary.cells - summary.air, extra);
     }
     private static JsonObject json(String source) { return JsonParser.parseString(source).getAsJsonObject(); }

@@ -16,6 +16,11 @@ import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneExport;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
+import net.minecraft.nbt.Tag;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.SlabType;
+import org.maiwithu.maicraft.task.TaskResult;
 
 /** 从模型操作走到实际预览和施工参数，核对同一份v2蓝图；测试不提交建造身体任务或制造材料。 */
 public final class BuildingModelV2RuntimeTest {
@@ -61,7 +66,7 @@ public final class BuildingModelV2RuntimeTest {
             var file = BuildingSceneExport.write(directory,id,compiled,"json");
             check(JsonParser.parseString(Files.readString(file)).equals(compiled), "JSON导出与同一模型的编译结果一致");
             var nbt = BuildingSceneExport.structure(compiled);
-            check(nbt.getList("blocks",net.minecraft.nbt.Tag.TAG_COMPOUND).size() == 32, "NBT也保留同一批最终目标");
+            check(nbt.getList("blocks",Tag.TAG_COMPOUND).size() == 32, "NBT也保留同一批最终目标");
             var edit = parameters("update_scene",id);
             edit.add("edits",json("{\"objects\":[{\"name\":\"Panels\",\"array\":{\"count\":[3,1,1],\"step\":[8,0,0]}}]}"));
             var revised = report(BuildingSceneAdapter.adapt(goal(edit,false),h.player,null,session -> false,() -> store));
@@ -97,14 +102,14 @@ public final class BuildingModelV2RuntimeTest {
             check(targets.size() == 16 && actual.equals(preview.get().cells()),"预览与施工须包括相同空气格或半砖状态");
             check(!arguments.get("replace_existing").getAsBoolean(),"图案留孔不能暗中批准挖掉现场已有方块");
             var first = actual.get(new BlockPos(0,1,0)); var second = actual.get(new BlockPos(1,1,0));
-            if (version == 0) check(first.isAir() && second.is(net.minecraft.world.level.block.Blocks.STONE_BRICKS),"零开头面板应先留孔再放方块");
-            else check(first.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)
-                            == net.minecraft.world.level.block.state.properties.SlabType.BOTTOM
-                    && second.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)
-                            == net.minecraft.world.level.block.state.properties.SlabType.TOP,"半砖版本应以下半砖开头");
+            if (version == 0) check(first.isAir() && second.is(Blocks.STONE_BRICKS),"零开头面板应先留孔再放方块");
+            else check(first.getValue(BlockStateProperties.SLAB_TYPE)
+                            == SlabType.BOTTOM
+                    && second.getValue(BlockStateProperties.SLAB_TYPE)
+                            == SlabType.TOP,"半砖版本应以下半砖开头");
             var saved = store.load(id,"minecraft:overworld");
             var compiled = BuildingSceneCompiler.compile(saved.scene());
-            check(BuildingSceneExport.structure(compiled).getList("blocks",net.minecraft.nbt.Tag.TAG_COMPOUND).size() == 16,"导出不丢掉网格的留孔或半砖目标");
+            check(BuildingSceneExport.structure(compiled).getList("blocks",Tag.TAG_COMPOUND).size() == 16,"导出不丢掉网格的留孔或半砖目标");
             if (version == 0) {
                 var edit = parameters("update_scene",id);
                 edit.add("edits",json("{\"objects\":[{\"name\":\"Screen\",\"material\":\"Upper\",\"pattern\":{\"axes\":[\"x\",\"y\"],\"rows\":[\"01\"],\"materials\":{\"0\":\"Lower\"}}}]}"));
@@ -120,7 +125,7 @@ public final class BuildingModelV2RuntimeTest {
         if (target) root.add("target",json("{\"kind\":\"coordinates\",\"position\":{\"x\":0,\"y\":1,\"z\":0,\"dimension\":\"minecraft:overworld\"}}"));
         Goal goal = Goal.fromJson(root); IntentRuntime.get().compile(goal,100); return goal;
     }
-    private static org.maiwithu.maicraft.task.TaskResult report(IntentAction action) {
+    private static TaskResult report(IntentAction action) {
         check(action instanceof IntentAction.Report, "只读模型操作必须返回报告"); var result = ((IntentAction.Report)action).result();
         check(result.success(), "模型操作应成功: " + result.message()); return result;
     }

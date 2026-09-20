@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
+import java.lang.reflect.Field;
 
 /** 模拟重启后收紧建筑预算：保留旧世界的完整任务，恢复之前不接新施工，提高预算后恢复原编号和地标。 */
 public final class IntentRecoveryBudgetTest {
@@ -155,7 +156,7 @@ public final class IntentRecoveryBudgetTest {
         var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class); restore.setAccessible(true); restore.invoke(runtime, 30L);
         field(IntentRuntime.class, "bodyAttached").set(runtime, true);
     }
-    private static java.lang.reflect.Field field(Class<?> type, String name) throws Exception {
+    private static Field field(Class<?> type, String name) throws Exception {
         var field = type.getDeclaredField(name); field.setAccessible(true); return field;
     }
     private static void configure(Path directory, String text) throws Exception {

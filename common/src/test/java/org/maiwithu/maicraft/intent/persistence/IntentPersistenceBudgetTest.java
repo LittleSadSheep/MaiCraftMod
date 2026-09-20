@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
+import java.util.Arrays;
 
 /** 请求准入和真实检查点文件共用启动预算；验证超过旧四 MiB 的记录可保存，中文按 UTF-8 字节计费。 */
 public final class IntentPersistenceBudgetTest {
@@ -49,7 +50,7 @@ public final class IntentPersistenceBudgetTest {
         configure(directory, 4 * 1024 * 1024);
         var blocked = new IntentStateStore(Runnable::run);
         check(blocked.load(identity).status() == IntentStateStore.Status.OVER_BUDGET && Files.exists(file)
-                        && java.util.Arrays.equals(Files.readAllBytes(file),root.toString().getBytes(StandardCharsets.UTF_8)),
+                        && Arrays.equals(Files.readAllBytes(file),root.toString().getBytes(StandardCharsets.UTF_8)),
                 "调低限额只标记容量不足，不能移动或改写仍然合法的旧进度文件");
         rejectSave(blocked,identity,root(identity));
         configure(directory, 8 * 1024 * 1024);

@@ -9,11 +9,14 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.blueprint.BuildingModelContract;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
 import org.maiwithu.maicraft.task.TaskResult;
+import java.nio.file.Path;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
 
 /** 使用真实建模适配器验证版本凭据与不可变修订；拒绝时不能产生可执行施工请求或新场景文件。 */
 public final class BuildingSceneVersionRuntimeTest {
     public static void main(String[] args) throws Exception {
-        net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var root = Files.createTempDirectory("versioned-building-runtime-"); String world = "e".repeat(64), dimension = "minecraft:overworld";
         var store = new BuildingSceneStore(root,world); var contract = BuildingModelContract.current();
         var source = json("""
@@ -63,7 +66,7 @@ public final class BuildingSceneVersionRuntimeTest {
             check(h.blockUses() == 0 && h.itemUses() == 0,"创建、核对、预览和生成参数都没有实际世界操作");
         }
         String output = System.getProperty("maicraft.building.contract.output");
-        if (output != null) { var directory = java.nio.file.Path.of(output); Files.createDirectories(directory); Files.writeString(directory.resolve("operation-examples.json"),examples.toString()); }
+        if (output != null) { var directory = Path.of(output); Files.createDirectories(directory); Files.writeString(directory.resolve("operation-examples.json"),examples.toString()); }
         System.out.println("BuildingSceneVersionRuntimeTest: guarded create/update/preview/build and legacy revalidation passed");
     }
     private static JsonObject guardedUpdate(String id) { var value = guarded("update_scene",id); value.add("edits",json("{\"objects\":[{\"name\":\"Wall\",\"material\":\"Wall\"}]}")); return value; }

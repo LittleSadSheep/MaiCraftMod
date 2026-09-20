@@ -15,11 +15,15 @@ import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskState;
 import sun.misc.Unsafe;
+import java.util.function.Supplier;
+import net.minecraft.SharedConstants;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.server.Bootstrap;
 
 /** 走公开执行的接管边界与真实 IntentRuntime，确保身体施工中也能保存、改图和查询而不抢占角色。 */
 public final class BuildingDesignConcurrencyTest {
     public static void main(String[] args) throws Exception {
-        net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var root = Files.createTempDirectory("concurrent-building-design-"); String world = "9".repeat(64);
         var store = new BuildingSceneStore(root,world);
         var constructor = IntentRuntime.class.getDeclaredConstructor(); constructor.setAccessible(true);
@@ -67,10 +71,10 @@ public final class BuildingDesignConcurrencyTest {
     private static IntentTaskRecord execute(IntentRuntime runtime,BuildingSceneStore store,InteractionWorldTestHarness h,
                                            JsonObject parameters,boolean target,String key) throws Exception {
         var goal = goal(parameters,target);
-        var boundary = MaiCraftRuntimeFacade.class.getDeclaredMethod("dispatchExecution",Goal.class,net.minecraft.client.player.LocalPlayer.class,java.util.function.Supplier.class);
+        var boundary = MaiCraftRuntimeFacade.class.getDeclaredMethod("dispatchExecution",Goal.class,LocalPlayer.class,Supplier.class);
         boundary.setAccessible(true);
         var record = (IntentTaskRecord)boundary.invoke(null,goal,h.player,
-                (java.util.function.Supplier<IntentTaskRecord>)() -> runtime.execute(h.player,goal,null,key,preview -> true,() -> store));
+                (Supplier<IntentTaskRecord>)() -> runtime.execute(h.player,goal,null,key,preview -> true,() -> store));
         check(record.getState() == TaskState.SUCCESS && record.terminalSnapshot() != null,"设计操作必须保留可查询的真实终态: "+record.describe());
         return record;
     }

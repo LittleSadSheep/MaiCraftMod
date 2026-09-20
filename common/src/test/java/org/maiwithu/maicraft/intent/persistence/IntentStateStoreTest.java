@@ -22,6 +22,7 @@ import java.util.concurrent.TimeoutException;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /** Real file storage and the production mailbox, with worker dispatch held until assertions run. */
 public final class IntentStateStoreTest {
@@ -223,9 +224,9 @@ public final class IntentStateStoreTest {
         // 越界回归使用小的显式检查点限额，不随正式大工程默认值申请几百 MiB 的测试字符串或文件。
         Path config = directory.resolve("limits/config/maicraft-building.properties");
         Files.createDirectories(config.getParent()); Files.writeString(config, "maxIntentStateBytes=65536\n");
-        org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory.resolve("limits"));
+        BuildingBudgets.initialize(directory.resolve("limits"));
         try { rejectOversizeAtCurrentBudget(directory); }
-        finally { org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory.resolve("defaults")); }
+        finally { BuildingBudgets.initialize(directory.resolve("defaults")); }
     }
 
     private static void rejectOversizeAtCurrentBudget(Path directory) throws Exception {

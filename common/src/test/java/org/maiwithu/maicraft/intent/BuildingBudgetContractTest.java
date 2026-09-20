@@ -7,11 +7,14 @@ import java.nio.file.Files;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
+import java.nio.file.Path;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
 
 /** 调整配置后从实际公共契约复核能力说明、建筑目标与机器预算，避免只改显示或误放宽其他能力。 */
 public final class BuildingBudgetContractTest {
     public static void main(String[] args) throws Exception {
-        net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var directory = Files.createTempDirectory("building-contract-");
         var restore = Files.createTempDirectory("building-contract-defaults-");
         try {
@@ -42,7 +45,7 @@ public final class BuildingBudgetContractTest {
         } finally { BuildingBudgets.initialize(restore); }
         System.out.println("BuildingBudgetContractTest: passed");
     }
-    private static void configure(java.nio.file.Path directory,String text) throws Exception {
+    private static void configure(Path directory,String text) throws Exception {
         Files.createDirectories(directory.resolve("config")); Files.writeString(directory.resolve(BuildingBudgets.CONFIG_PATH),text);
         BuildingBudgets.initialize(directory);
     }

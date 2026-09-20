@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.core.blueprint.BuildProjectTargets;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
+import net.minecraft.core.Direction;
 
 // 从建模材料一路转换并保存工程，检查未声明门开关时不强加要求、已声明属性保留到最终验收，以及旧工程迁移不会丢要求。
 public final class BuildingStatePolicyTest {
@@ -28,7 +29,7 @@ public final class BuildingStatePolicyTest {
         var target = BuildTool.resolvedExactTargets(argsJson.getAsJsonArray("ops")).getFirst();
         var open = target.desiredState().setValue(BlockStateProperties.OPEN, true);
         check(target.matches(open), "unimportant door use does not obstruct completion");
-        var rotated = open.setValue(BlockStateProperties.HORIZONTAL_FACING, net.minecraft.core.Direction.EAST);
+        var rotated = open.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST);
         check(target.constructionMatches(rotated) && !target.matches(rotated), "important state discrepancies wait for final verification");
         check(!target.acceptsPlacedState(rotated), "a new placement still tries the important authored orientation");
         check(BuildProjectTargets.decode(BuildProjectTargets.encode(List.of(target))).getFirst().equals(target), "importance survives persisted project replay");

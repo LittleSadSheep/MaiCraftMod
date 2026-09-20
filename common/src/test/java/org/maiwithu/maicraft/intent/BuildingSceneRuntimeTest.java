@@ -15,6 +15,20 @@ import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneExport;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
+import java.nio.file.Files;
+import java.util.UUID;
+import java.util.function.Function;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.nbt.NbtAccounter;
+import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.Tag;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneBlocks;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 检查模型目标能经过真实语义校验，保持世界锚点、指定材料、精确状态和导出内容；不会在游戏里实际施工。 */
 public final class BuildingSceneRuntimeTest {
@@ -53,20 +67,20 @@ public final class BuildingSceneRuntimeTest {
         var snow = BuildTool.resolvedTargets(exact.getAsJsonArray("ops"), true).getFirst();
         check(snow.exactProperties().contains("layers") && !snow.matchesExactProperties(Blocks.SNOW.defaultBlockState()), "authored layers are part of completion verification");
         var structure = BuildingSceneExport.structure(blueprint);
-        check(structure.getList("blocks", net.minecraft.nbt.Tag.TAG_COMPOUND).size() == 6
+        check(structure.getList("blocks", Tag.TAG_COMPOUND).size() == 6
                 && structure.getIntArray("maicraft_offset")[2] == -1, "NBT export retains all cells and origin translation");
         // 用临时目录分别导出 NBT 和 JSON，再读回比较；另检查树叶的防腐烂默认值在两种导出中一致。
-        var directory = java.nio.file.Files.createTempDirectory("maicraft-scene-export-");
-        String id = java.util.UUID.randomUUID().toString();
+        var directory = Files.createTempDirectory("maicraft-scene-export-");
+        String id = UUID.randomUUID().toString();
         var file = BuildingSceneExport.write(directory, id, blueprint, "nbt");
-        check(net.minecraft.nbt.NbtIo.readCompressed(file, net.minecraft.nbt.NbtAccounter.unlimitedHeap()).equals(structure), "compressed NBT export round trips");
+        check(NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap()).equals(structure), "compressed NBT export round trips");
         var json = BuildingSceneExport.write(directory, id, blueprint, "json");
-        check(JsonParser.parseString(java.nio.file.Files.readString(json)).equals(blueprint), "JSON preserves negative offsets and exact materials");
+        check(JsonParser.parseString(Files.readString(json)).equals(blueprint), "JSON preserves negative offsets and exact materials");
         JsonObject leaves = JsonParser.parseString("{\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:oak_leaves\"}]}").getAsJsonObject();
-        var leafBlueprint = org.maiwithu.maicraft.core.blueprint.BuildingSceneBlocks.export(leaves);
+        var leafBlueprint = BuildingSceneBlocks.export(leaves);
         check(leafBlueprint.getAsJsonArray("blocks").get(0).getAsJsonObject().getAsJsonObject("properties")
                 .get("persistent").getAsString().equals("true"), "export must retain the same non-decaying leaf default as construction");
-        check(BuildingSceneExport.structure(leaves).getList("palette", net.minecraft.nbt.Tag.TAG_COMPOUND)
+        check(BuildingSceneExport.structure(leaves).getList("palette", Tag.TAG_COMPOUND)
                 .getCompound(0).getCompound("Properties").getString("persistent").equals("true"), "NBT and JSON must share effective defaults");
         JsonObject bad = p.deepCopy(); bad.addProperty("style", "replace author's palette"); rejects(runtime, bad);
         bad = p.deepCopy(); bad.getAsJsonObject("scene").getAsJsonArray("objects").get(0).getAsJsonObject().add("clicks", new JsonArray()); rejects(runtime, bad);
@@ -83,18 +97,18 @@ public final class BuildingSceneRuntimeTest {
     }
 
     private static void createAndUpdateCompileOnce(JsonObject scene) throws Exception {
-        var root = java.nio.file.Files.createTempDirectory("scene-compilation-");
+        var root = Files.createTempDirectory("scene-compilation-");
         String world = "c".repeat(64), dimension = "minecraft:overworld";
         int[] compilations = {0};
-        java.util.function.Function<JsonObject, JsonObject> compiler = source -> {
+        Function<JsonObject, JsonObject> compiler = source -> {
             compilations[0]++;
             return BuildingSceneCompiler.compile(source);
         };
-        var constructor = org.maiwithu.maicraft.core.blueprint.BuildingSceneStore.class.getDeclaredConstructor(
-                org.maiwithu.maicraft.intent.persistence.StateIdentity.class, java.util.function.Function.class);
+        var constructor = BuildingSceneStore.class.getDeclaredConstructor(
+                StateIdentity.class, Function.class);
         constructor.setAccessible(true);
-        var store = constructor.newInstance(new org.maiwithu.maicraft.intent.persistence.StateIdentity(world, root), compiler);
-        try (var f = new org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness()) {
+        var store = constructor.newInstance(new StateIdentity(world, root), compiler);
+        try (var f = new InteractionWorldTestHarness()) {
             JsonObject create = new JsonObject(); create.addProperty("operation", "create_scene"); create.add("scene", scene);
             var first = sceneReport(goal(create), f.player, store);
             check(compilations[0] == 1, "create_scene must perform one complete compilation across adapter and storage");
@@ -115,7 +129,7 @@ public final class BuildingSceneRuntimeTest {
                 sceneReport(goal(missing), f.player, store);
                 throw new AssertionError("an unresolvable model was saved before native-state validation");
             } catch (IllegalArgumentException expected) { }
-            try (var files = java.nio.file.Files.list(root.resolve("build-scenes").resolve(world))) {
+            try (var files = Files.list(root.resolve("build-scenes").resolve(world))) {
                 check(files.count() == 2, "a failed registry check cannot publish another scene revision");
             }
             check(f.blockUses() == 0 && f.itemUses() == 0, "scene compilation and storage must not issue game interactions");
@@ -124,20 +138,20 @@ public final class BuildingSceneRuntimeTest {
     private static void projectRevisionIsExplicitAndIdle(IntentRuntime runtime) {
         // 采用模型修订必须单独声明项目和新模型，不能混进普通续建请求或悄悄改变取料权限。
         JsonObject parameters=new JsonObject();parameters.addProperty("operation","revise_project");
-        parameters.addProperty("scene_id",java.util.UUID.randomUUID().toString());parameters.addProperty("project_id",java.util.UUID.randomUUID().toString());
+        parameters.addProperty("scene_id",UUID.randomUUID().toString());parameters.addProperty("project_id",UUID.randomUUID().toString());
         Goal revision=goal(parameters).withTarget(null);runtime.compile(revision,100);
         check(IntentRuntime.isReadOnlyDesign(revision),"adopting a scene revision cannot submit body work");
         try { runtime.compile(goal(parameters),100);throw new AssertionError("a revision moved the site"); } catch(IllegalArgumentException expected) { }
         var bad=parameters.deepCopy();bad.addProperty("material_policy","ordinary");
         try { runtime.compile(goal(bad).withTarget(null),100);throw new AssertionError("a revision changed supply policy"); } catch(IllegalArgumentException expected) { }
         bad=parameters.deepCopy();bad.addProperty("operation","build");rejects(runtime,bad);
-        var active=new org.maiwithu.maicraft.core.task.build.BuildTaskRecord("active-revision",100,List.of(),false);
+        var active=new BuildTaskRecord("active-revision",100,List.of(),false);
         try { BuildingSceneAdapter.requireRevisionIdle(active);throw new AssertionError("pending body work was ignored"); } catch(IllegalArgumentException expected) { }
-        active.setState(org.maiwithu.maicraft.task.TaskState.CANCELLED);BuildingSceneAdapter.requireRevisionIdle(active);BuildingSceneAdapter.requireRevisionIdle(null);
+        active.setState(TaskState.CANCELLED);BuildingSceneAdapter.requireRevisionIdle(active);BuildingSceneAdapter.requireRevisionIdle(null);
     }
 
-    private static org.maiwithu.maicraft.task.TaskResult sceneReport(Goal goal, net.minecraft.client.player.LocalPlayer player,
-            org.maiwithu.maicraft.core.blueprint.BuildingSceneStore store) {
+    private static TaskResult sceneReport(Goal goal, LocalPlayer player,
+            BuildingSceneStore store) {
         var action = BuildingSceneAdapter.adapt(goal, player, null,
                 preview -> { throw new AssertionError("create/update must not publish a preview"); }, () -> store);
         check(action instanceof IntentAction.Report, "create/update must return a report instead of construction work");

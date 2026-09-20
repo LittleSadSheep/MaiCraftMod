@@ -26,6 +26,9 @@ import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskState;
 import sun.misc.Unsafe;
+import java.nio.file.Path;
+import java.util.UUID;
+import java.util.function.Supplier;
 
 /** Real compiler path, with a publisher capture; any body/tool work is a regression. */
 public final class BuildDesignPreviewTest {
@@ -62,16 +65,16 @@ public final class BuildDesignPreviewTest {
         var constructor = IntentRuntime.class.getDeclaredConstructor(); constructor.setAccessible(true);
         IntentRuntime runtime = constructor.newInstance();
         field(IntentRuntime.class, "stateIdentity").set(runtime,
-                new StateIdentity("0".repeat(64), java.nio.file.Path.of("build/preview-test-unused")));
+                new StateIdentity("0".repeat(64), Path.of("build/preview-test-unused")));
         var dispatch = MaiCraftRuntimeFacade.class.getDeclaredMethod("dispatchExecution",
-                Goal.class, LocalPlayer.class, java.util.function.Supplier.class);
+                Goal.class, LocalPlayer.class, Supplier.class);
         dispatch.setAccessible(true);
         Field brainField = field(CompanionTickDispatcher.class, "brain");
         Object previousBrain = brainField.get(null);
         Class<?> brainType = Class.forName("org.maiwithu.maicraft.task.CompanionBrain");
         Class<?> slotType = Class.forName("org.maiwithu.maicraft.task.TaskSlot");
         Object existingBrain = memory.allocateInstance(brainType), existingSlot = memory.allocateInstance(slotType);
-        var bodyRecord = new IntentTaskRecord(java.util.UUID.randomUUID(), null, goal("maicraft:build"));
+        var bodyRecord = new IntentTaskRecord(UUID.randomUUID(), null, goal("maicraft:build"));
         bodyRecord.setState(TaskState.RUNNING);
         field(slotType, "record").set(existingSlot, bodyRecord);
         field(brainType, "current").set(existingBrain, existingSlot);
@@ -81,7 +84,7 @@ public final class BuildDesignPreviewTest {
         IntentTaskRecord record;
         try {
             record = (IntentTaskRecord) dispatch.invoke(null, design, player,
-                (java.util.function.Supplier<IntentTaskRecord>) () -> runtime.execute(player, design, null,
+                (Supplier<IntentTaskRecord>) () -> runtime.execute(player, design, null,
                         "read-only-request", preview -> { published.set(preview); return true; }));
             check(brainField.get(null) == existingBrain && field(slotType, "record").get(existingSlot) == bodyRecord
                             && bodyRecord.getState() == TaskState.RUNNING,
