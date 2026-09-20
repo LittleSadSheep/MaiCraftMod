@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.chat;
 
+import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.actor.ChatSession;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
-import java.util.Map;
 
 /**
  * 把一次聊天接入任务调度。输入时松开移动按键；暂时被自救打断就保留进度，其他结束原因则取消。
@@ -37,7 +37,7 @@ public final class ChatTask implements Task {
                 case FAILED, UNCERTAIN -> TaskState.FAILED;
             };
         } catch (RuntimeException failure) {
-            // cancel preserves an uncertain native submission instead of enabling a resend.
+            // 已开始提交但结果未知时保留未知状态，不能因取消而重新允许发送同一句话。
             session.cancel("Chat stopped before submission: " + failure.getClass().getSimpleName());
             return TaskState.FAILED;
         }

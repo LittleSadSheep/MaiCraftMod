@@ -95,7 +95,7 @@ final class ChatFlow {
         // 每个订阅者拿到自己的副本；某个订阅者处理失败，也不影响其他人或聊天继续送达。
         for (Consumer<JsonElement> listener : listeners) {
             try { listener.accept(signal.deepCopy()); }
-            catch (RuntimeException ignored) { /* A subscriber cannot break chat delivery. */ }
+            catch (RuntimeException ignored) { /* 单个订阅者出错不能阻断其他聊天消息的交付。 */ }
         }
     }
 }

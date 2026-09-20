@@ -3,28 +3,12 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.BlockPos;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
-import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
-import org.maiwithu.maicraft.agent.tool.ToolRegistry;
-import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.entity.InputDriver;
-import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
-import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
-import org.maiwithu.maicraft.task.Task;
-import org.maiwithu.maicraft.task.TaskDispatch;
-import org.maiwithu.maicraft.task.TaskFactory;
-import org.maiwithu.maicraft.task.InternalPositionReceipt;
-import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
-import org.maiwithu.maicraft.task.TaskRecord;
-import org.maiwithu.maicraft.task.TaskResult;
-import org.maiwithu.maicraft.task.TaskState;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -32,11 +16,26 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
-import java.util.LinkedHashSet;
 import java.util.stream.Collectors;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
+import org.maiwithu.maicraft.agent.tool.ToolRegistry;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
+import org.maiwithu.maicraft.entity.InputDriver;
+import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
+import org.maiwithu.maicraft.task.InternalPositionReceipt;
+import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.task.TaskDispatch;
+import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.task.TaskState;
 
 /**
  * 把“我想做成这件事”一步步做出来，例如先取材料，再建房子。
@@ -59,7 +58,7 @@ final class IntentTask implements Task {
     private TaskResult interruptedChildResult;
     private boolean terminalPublished;
     private long childSerial;
-    /** Opaque one-use receipts stay inside the Mod; the model only chooses semantic retry. */
+    /** 单次机械续建凭据只保留在 Mod 内部，调用方仍通过语义重试选择下一步。 */
     private final Map<String, UUID> mechanicalContinuations = new LinkedHashMap<>();
     private String cachedProtectionDimension;
     private int cachedProtectionStep = -1;
@@ -82,16 +81,15 @@ final class IntentTask implements Task {
         try {
             return tickSemanticParent();
         } catch (RuntimeException failure) {
-            // A malformed adapter result or unexpected internal capability failure must
-            // still enter the semantic recovery protocol. Fatal VM errors are deliberately
-            // not caught here.
+            // 适配器结果异常或内部能力出错时，仍记录失败并进入语义恢复流程。
+            // 这里只处理运行异常；虚拟机级错误不被包装成普通任务失败。
             abandonChildAfterUnexpectedFailure();
             wait = null;
             return failStep(TaskState.FAILED,
                     TaskResult.fail("semantic step failed safely: " + safeMessage(failure)));
         } finally {
-            // Attention and explicit inspection see the actual observed active child.
-            // Diagnostic failures must never interrupt physical work or replace its real result.
+            // 查询和 Attention 使用实际观察到的当前子任务进度。
+            // 诊断失败不能打断角色动作，也不能覆盖真正的任务结果。
             try { record.observeExecution(progress(), player.level().getGameTime()); }
             catch (RuntimeException ignoredDiagnosticFailure) { }
         }
@@ -113,9 +111,8 @@ final class IntentTask implements Task {
                 return TaskState.CANCELLED;
             }
             if ("respawn".equals(answer.choice()) || "spectate".equals(answer.choice())) {
-                // Death-screen actions are executed natively by the runtime facade.  Once a
-                // restored task is explicitly resumed, re-evaluate its semantic step instead of
-                // passing a transport/lifecycle answer to an ability adapter.
+                // 复活或旁观已由运行入口执行；恢复任务后重新检查当前语义步骤，
+                // 不把这份身体生命周期答复再次交给业务适配器执行。
                 return TaskState.RUNNING;
             }
             if ("skip".equals(answer.choice())) {
@@ -419,7 +416,7 @@ final class IntentTask implements Task {
     private TaskState failStep(TaskState state, TaskResult result) {
         // 记下这次为什么失败，再询问接下来怎么办；保留总目标，等待重试、补条件、换目标或取消。
         TaskState failureState = state == null ? TaskState.FAILED : state;
-        // A failed/abandoned execution can never authorize a later prior_result binding.
+        // 当前步骤失败或被放弃后，其位置不能再成为后续 prior_result 的依据。
         record.discardInternalStepPosition(record.stepIndex());
         captureMechanicalContinuation(currentGoal(), result);
         TaskResult failure = withEffectLedger(SemanticResultView.result(
@@ -439,7 +436,7 @@ final class IntentTask implements Task {
                 failedGoal, failureState, failure));
     }
 
-    /** Add one stable semantic effect ledger to every failed step before it crosses MCP. */
+    /** 失败离开 Mod 前，统一附上已经发生和仍未完成的语义效果。 */
     private TaskResult withEffectLedger(TaskResult failure) {
         // 失败时一起告诉调用者：前面哪些事已经做了，当前和后面还有哪些没做，避免重复开工。
         Map<String, Object> data = new LinkedHashMap<>(failure.data());
@@ -482,7 +479,7 @@ final class IntentTask implements Task {
         return List.copyOf(effects);
     }
 
-    /** Return only the failed result for this exact still-current semantic step. */
+    /** 只取仍对应当前步骤和当前目标的最近失败，避免修改目标后误用旧错误。 */
     private JsonObject currentFailureResult() {
         // 只有“当前这一步、当前这个目标”的失败才能拿来决定重试；改过目标后不能误用旧原因。
         List<IntentTaskRecord.AttemptSnapshot> attempts = record.attempts();
@@ -594,7 +591,7 @@ final class IntentTask implements Task {
             try {
                 withExplicitAreaProtection(() -> { stoppingChild.stop(player, reason); return null; });
             } catch (RuntimeException ignoredFailure) {
-                // The logical child is deliberately retained for resume.
+                // 保留同一个子任务及其逻辑进度，等待恢复后继续。
             } finally {
                 releaseBody();
             }
@@ -605,7 +602,7 @@ final class IntentTask implements Task {
             try {
                 withExplicitAreaProtection(() -> { stoppingChild.stop(player, reason); return null; });
             } catch (RuntimeException ignoredFailure) {
-                // result() below remains the authoritative logical cleanup path.
+                // 即使停止动作失败，下方仍尝试取得结果并清理逻辑资源。
             }
             if (stoppingRecord != null && !stoppingRecord.getState().isTerminal()) {
                 stoppingRecord.setState(TaskState.CANCELLED);
@@ -666,7 +663,7 @@ final class IntentTask implements Task {
         }
     }
 
-    /** Keep parent termination semantics and the child's exact partial-effect evidence together. */
+    /** 保留父任务的结束原因，同时带上子任务已经发生的部分效果。 */
     static TaskResult withInterruptedEffects(TaskResult parent, TaskResult child) {
         TaskResult clean = SemanticResultView.result(child);
         Map<String, Object> data = new LinkedHashMap<>(parent.data());
@@ -722,10 +719,7 @@ final class IntentTask implements Task {
         reobserveAfterChild=false;
     }
 
-    /**
-     * Apply only receipts whose human label is explicitly present in the current goal's
-     * protected_labels.  Observing an area never silently turns it into a constraint.
-     */
+    /** 只应用当前目标在 protected_labels 中明确点名的保护范围，观察过区域本身不代表要求保护它。 */
     private <T> T withExplicitAreaProtection(Supplier<T> operation) {
         refreshProtectionCache();
         return NavigationSafetyContext.withProtectedArea(
@@ -794,7 +788,7 @@ final class IntentTask implements Task {
             try {
                 failed.stop(player, StopReason.REPLACED);
             } catch (RuntimeException ignoredFailure) {
-                // result() below still gets a chance to release logical resources.
+                // 停止动作出错后，仍给结果收尾一次释放逻辑资源的机会。
             }
             TaskState cleanupState = TaskState.FAILED;
             if (failedRecord != null) {
@@ -807,7 +801,7 @@ final class IntentTask implements Task {
                     failedRecord.setResult(cleanupResult);
                 }
             } catch (RuntimeException ignoredFailure) {
-                // Recovery must remain available even when child cleanup itself is broken.
+                // 子任务收尾本身失败，也不能让整个语义任务失去询问和恢复入口。
             }
         } finally {
             releaseBody();
@@ -815,7 +809,7 @@ final class IntentTask implements Task {
         }
     }
 
-    /** Terminal body release is idempotent and must survive either half failing. */
+    /** 结束时分别尝试停导航输入与身体按键，任一失败都不妨碍另一项收尾。 */
     private void releaseBody() {
         try {
             InputDriver.halt(player);

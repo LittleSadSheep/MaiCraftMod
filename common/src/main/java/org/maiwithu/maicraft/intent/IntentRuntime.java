@@ -5,9 +5,30 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.client.preview.PreviewController;
+import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.intent.persistence.IntentStateStore;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
@@ -15,28 +36,6 @@ import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
-
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.io.IOException;
-import java.time.Duration;
-import java.util.Collections;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
-import org.maiwithu.maicraft.client.preview.PreviewController;
-import org.maiwithu.maicraft.client.preview.PreviewSession;
-import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
-import org.maiwithu.maicraft.core.build.BuildingBudgets;
-import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
 
 /**
  * 保存客户端业务任务的计划、公开 ID、进度、决策和持久化状态，供 MCP 查询。
@@ -107,7 +106,7 @@ public final class IntentRuntime {
             WaitAbilityAdapter.ABILITY,
             "maicraft:sequence");
 
-    /** Immutable startup snapshot: core and general adapters cannot drift after publication. */
+    /** 启动时固定公开能力名单，避免对外发布后与核心、通用适配器的登记范围不一致。 */
     public static final Set<String> KNOWN_ABILITIES = Stream.concat(
                     CORE_ABILITIES.stream(), GeneralAbilityAdapter.abilities().stream())
             .collect(Collectors.toUnmodifiableSet());
@@ -236,7 +235,7 @@ public final class IntentRuntime {
         return tasks.get(id);
     }
 
-    /** Resolve an idempotent execute request without asking the model to guess a task id. */
+    /** 用调用方保留的请求编号找回原任务，网络重试无需猜测任务 UUID。 */
     public IntentTaskRecord taskForRequestKey(String requestKey) {
         if (requestKey == null || requestKey.isBlank()) return null;
         UUID id = requestKeys.get(requestKey);
@@ -279,9 +278,8 @@ public final class IntentRuntime {
     }
 
     /**
-     * Bind semantic memory after the scheduler has bound the current player/world for this tick.
-     * A different identity is a hard boundary; a same-identity portal handoff keeps the exact
-     * semantic parent only when it also survived in the scheduler.
+     * 调度器处理完玩家与世界交接后，再绑定当前世界的任务记忆。
+     * 世界身份不同就重新恢复；身份相同时，只复用调度器确实保留下来的传送父任务。
      */
     public void tickPersistence(Minecraft minecraft, LocalPlayer player) {
         StateIdentity next = StateIdentity.resolve(minecraft).orElse(null);
@@ -312,7 +310,7 @@ public final class IntentRuntime {
                 && System.nanoTime() >= nextSaveNanos) captureCheckpoint(false);
     }
 
-    /** Bind an MCP request without racing a pending body/world replacement. */
+    /** MCP 接单前核对世界记忆，正在交接玩家或世界时先拒绝请求，避免任务落到旧身体上。 */
     public void bindForRequest(Minecraft minecraft, LocalPlayer player) {
         StateIdentity next = StateIdentity.resolve(minecraft).orElseThrow(
                 () -> new IllegalStateException("semantic state has no active game identity"));
@@ -330,9 +328,8 @@ public final class IntentRuntime {
     }
 
     /**
-     * Save the old connection before the body scheduler observes a replacement world.  Marking the
-     * body detached after capturing a checkpoint prevents cancellation cleanup from overwriting the
-     * resumable semantic snapshot; the normal post-scheduler bind then clears the old read model.
+     * 发现新的世界身份时先截取旧进度，再标记身体已脱离。
+     * 随后取消旧身体任务产生的状态变化，不能覆盖用于恢复的交接快照。
      */
     public void beforeBodyTick(Minecraft minecraft) {
         StateIdentity next = StateIdentity.resolve(minecraft).orElse(null);
@@ -342,29 +339,26 @@ public final class IntentRuntime {
         }
     }
 
-    /** Save before the body scheduler cancels records during disconnect or replacement. */
+    /** 断线或玩家替换时，先截取任务进度，再让身体调度器取消旧任务。 */
     public void bodyUnavailable() {
         captureCheckpoint(true);
         bodyAttached = false;
         gameEvent("runtime.unavailable", "The controlled body disconnected; task state must be resynchronized.", new JsonObject());
     }
 
-    /** Capture the exact checkpoint before death cleanup; disk persistence continues asynchronously. */
+    /** 死亡清理前保留当刻任务进度，磁盘写入仍由后台完成。 */
     public boolean checkpointDeath() {
         return captureCheckpoint(true);
     }
 
-    /**
-     * Capture and detach before a native respawn replaces LocalPlayer in the same world identity.
-     * The next normal persistence bind restores the non-terminal task in a paused state.
-     */
+    /** 原生复活替换玩家对象前先保留进度并脱离旧身体；下次绑定时以暂停状态恢复未完成任务。 */
     public boolean prepareRespawnHandoff() {
         boolean saved = captureCheckpoint(true);
         bodyAttached = false;
         return saved;
     }
 
-    /** Install a task-scoped death decision without creating a death-specific public ability. */
+    /** 为当前总任务记录死亡后要回答的问题，继续使用既有任务答复入口。 */
     public void requestDeathDecision(
             IntentTaskRecord record, boolean hardcore, boolean spectator,
             JsonObject suppliedContext) {
@@ -562,13 +556,12 @@ public final class IntentRuntime {
                 data);
     }
 
-    /** Returns whether a detached in-process checkpoint is available, not a disk durability receipt. */
+    /** 返回是否已保留可供本进程交接的快照；磁盘是否写完仍以保存回执为准。 */
     private boolean captureCheckpoint(boolean force) {
         if (stateIdentity == null) return false;
         // 未恢复的旧任务不能被空状态覆盖，也不能把尚未接受的保存冒充为可供死亡或重连使用的交接快照。
         if (stateStore.recoveryProblem(stateIdentity) != null) return false;
-        // Body teardown mutates old task records after the checkpoint. Never replace the
-        // detached handoff with those cancellation side effects, including on shutdown.
+        // 已经脱离身体的交接快照必须保留；旧任务后续被取消或客户端退出，不能把它改写为取消后的状态。
         if (!bodyAttached) return stateStore.hasSnapshot(stateIdentity);
         if (!force && !dirty && !stateStore.hasFailedSave(stateIdentity)) return true;
         try {
@@ -638,7 +631,7 @@ public final class IntentRuntime {
         publish("step_completed", record, "A semantic step finished; the parent task may still be running.", data);
     }
 
-    /** Pause only an otherwise-running semantic parent while first-person control is unavailable. */
+    /** 玩家收回第一人称控制时，只暂停仍在执行的语义父任务，保留已有暂停或待答问题。 */
     public void controlUnavailable(LocalPlayer player, String reason) {
         if (player == null) return;
         if (!(CompanionTickDispatcher.current() instanceof IntentTaskRecord record)
@@ -654,7 +647,7 @@ public final class IntentRuntime {
                 "Task paused because first-person automation control is unavailable.", data);
     }
 
-    /** Resume only the pause installed by {@link #controlUnavailable}; preserve every other pause. */
+    /** 控制权归还后只解除 {@link #controlUnavailable} 设置的暂停，其他暂停仍等明确继续。 */
     public void controlAvailable() {
         if (!(CompanionTickDispatcher.current() instanceof IntentTaskRecord record)
                 || record.getState().isTerminal() || record.decisionSnapshot() != null
@@ -678,7 +671,7 @@ public final class IntentRuntime {
         rejectMicroInstructions(goal);
     }
 
-    /** Validate public decision details before the answer can unpause or mutate a task record. */
+    /** 先校验答复的目标与参数，再允许它解除暂停或修改当前任务。 */
     public void validateDecisionAnswer(
             IntentTaskRecord record, String choice, JsonObject details) {
         JsonObject supplied = details == null ? new JsonObject() : details;
@@ -782,7 +775,7 @@ public final class IntentRuntime {
         return attention.subscribe(listener);
     }
 
-    /** Route one received chat-area message into the dedicated chat flow; task attention stays chat-free. */
+    /** 收到的聊天进入独立聊天流，任务 Attention 继续只报告任务和身体事件。 */
     public void chatEvent(String type, String message, JsonObject data) {
         if (type == null || type.isBlank()) {
             throw new IllegalArgumentException("chat event type is required");
@@ -798,7 +791,7 @@ public final class IntentRuntime {
         return chatFlow.subscribe(listener);
     }
 
-    /** Publish a concise game-side fact that may require the LLM's attention. */
+    /** 发布可能需要调用方处理的游戏事实，例如受伤、死亡或控制权变化。 */
     public void gameEvent(String type, String message, JsonObject data) {
         if (type == null || type.isBlank()) {
             throw new IllegalArgumentException("game event type is required");
@@ -993,7 +986,7 @@ public final class IntentRuntime {
         }
     }
 
-    /** Typed area meaning; human landmark labels are never interpreted as policy. */
+    /** 区域用途由明确类型决定，不能只凭玩家起的地标名字推断保护规则。 */
     public enum LandmarkAreaRole {
         ORDINARY("ordinary"),
         MANAGED_SETTLEMENT("managed_settlement");
@@ -1008,7 +1001,7 @@ public final class IntentRuntime {
             return id;
         }
 
-        /** Missing, malformed and future values remain ordinary instead of granting protection. */
+        /** 旧存档缺失、不认识或损坏的区域类型按普通地点恢复，不能凭空授予保护含义。 */
         public static LandmarkAreaRole fromPersisted(String value) {
             if (MANAGED_SETTLEMENT.id.equals(value)) return MANAGED_SETTLEMENT;
             return ORDINARY;

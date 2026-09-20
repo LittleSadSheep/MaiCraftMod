@@ -3,8 +3,8 @@ package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 import java.util.Set;
+import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 
 /** 合法蓝图本来就有方块坐标，检查目标时不能把这些坐标误当成鼠标脚本一概拒绝。 */
 public final class BlueprintGoalData {
@@ -45,7 +45,7 @@ public final class BlueprintGoalData {
                     && operation.isJsonPrimitive() && operation.getAsJsonPrimitive().isString()
                     && Set.of("run_production","watch_production").contains(operation.getAsString());
         if (productionDeclared && parameters.has("production")) {
-            // Anchored ports and paths are typed design data. Their strict parser still rejects slot/click scripts.
+            // 锚定接口和路线属于明确的机器设计数据，严格解析仍会拒绝槽位点击脚本。
             MachineProductionIntent.validate(parameters);
             parameters.remove("production");
         }

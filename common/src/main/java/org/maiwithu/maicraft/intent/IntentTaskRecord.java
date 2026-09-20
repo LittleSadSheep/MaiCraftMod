@@ -1,21 +1,20 @@
 package org.maiwithu.maicraft.intent;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import org.maiwithu.maicraft.task.TaskRecord;
-import org.maiwithu.maicraft.task.TaskResult;
-import org.maiwithu.maicraft.task.TaskState;
-import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import java.util.LinkedHashSet;
+import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
+import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** MCP 总任务的任务单：记住总目标、做到了哪一步、为什么暂停，以及正在等调用者回答什么。 */
 public final class IntentTaskRecord extends TaskRecord {
@@ -30,10 +29,10 @@ public final class IntentTaskRecord extends TaskRecord {
     private final String bindingKey;
     private final List<StepSnapshot> stepResults = new ArrayList<>();
     private final List<AttemptSnapshot> attempts = new ArrayList<>();
-    /** Opaque verified positions used only for semantic prior_result binding. */
+    /** 已确认位置仅供后续语义目标引用，不把这些内部坐标放进公开任务结果。 */
     private final LinkedHashMap<Integer, Goal.WorldPosition> internalStepPositions =
             new LinkedHashMap<>();
-    /** Opaque measured area protections; public task snapshots deliberately omit them. */
+    /** 实测保护范围留给后续步骤和检查点使用，公开任务快照不输出具体方块格。 */
     private final LinkedHashMap<Integer, List<InternalAreaProtectionReceipt.Footprint>>
             internalAreaProtections = new LinkedHashMap<>();
 
@@ -44,7 +43,7 @@ public final class IntentTaskRecord extends TaskRecord {
     private TerminalSnapshot terminal;
     private boolean restoredDetached;
     private Runnable dirty = () -> {};
-    /** Live diagnostics only; neither task/world references nor stale restored progress are retained. */
+    /** 只保存最近一次观察的诊断副本；不持有世界对象，也不把旧进度当成重启后的现场事实。 */
     private JsonObject activeExecution;
 
     public IntentTaskRecord(UUID externalId, UUID planId, Goal goal) {
@@ -100,7 +99,7 @@ public final class IntentTaskRecord extends TaskRecord {
         }
         record.attempts.addAll(attempts.stream().skip(
                 Math.max(0, attempts.size() - MAX_ATTEMPTS)).toList());
-        // Older checkpoints could retain a pending decision beside a terminal receipt.
+        // 旧检查点可能同时留下终态和待答问题；已经结束的任务不能再被旧问题恢复。
         record.decision = terminal == null ? decision : null;
         record.pendingAnswer = terminal == null ? pendingAnswer : null;
         record.terminal = terminal;
@@ -123,11 +122,11 @@ public final class IntentTaskRecord extends TaskRecord {
     public int stepIndex() { return stepIndex; }
     public List<StepSnapshot> stepResults() { return List.copyOf(stepResults); }
     public List<AttemptSnapshot> attempts() { return List.copyOf(attempts); }
-    /** Persistence-only snapshot; the MCP facade deliberately never serializes this map. */
+    /** 供检查点保存内部位置，MCP 查询不序列化这份坐标表。 */
     public Map<Integer, Goal.WorldPosition> internalPositionReceipts() {
         return Map.copyOf(internalStepPositions);
     }
-    /** Persistence-only snapshot; concrete cells never enter the MCP facade. */
+    /** 供检查点保存保护范围，MCP 查询不输出这里的具体方块格。 */
     public Map<Integer, List<InternalAreaProtectionReceipt.Footprint>>
             internalAreaProtectionReceipts() {
         return Map.copyOf(internalAreaProtections);
@@ -211,9 +210,7 @@ public final class IntentTaskRecord extends TaskRecord {
         Goal scoped = stepIndex < steps.size()
                 ? recovery.withInheritedProtection(steps.get(stepIndex).inheritedProtectionLabels()) : recovery;
         List<Goal> expanded = expandedSteps(scoped, "recovery");
-        // Insert every prerequisite before the failed step in one semantic-plan mutation. The
-        // original step stays immediately after the expansion, so it is retried only after the
-        // complete recovery sequence succeeds.
+        // 一次把全部前置步骤插在失败步骤之前；原步骤紧随其后，等整组前置工作完成再重试。
         List<Goal> updated = new ArrayList<>(steps.size() + expanded.size());
         updated.addAll(steps.subList(0, stepIndex));
         updated.addAll(expanded);
@@ -248,7 +245,7 @@ public final class IntentTaskRecord extends TaskRecord {
         changed();
     }
 
-    /** Freeze the physical design once compilation has produced an executable project. */
+    /** 建筑编译成可执行工程后保留冻结设计，恢复时沿用原来的几何与材料。 */
     void retainBuildProject(String id) {
         retainBuildProject(id, List.of());
     }

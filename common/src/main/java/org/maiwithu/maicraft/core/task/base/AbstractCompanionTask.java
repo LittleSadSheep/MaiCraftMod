@@ -1,23 +1,21 @@
 package org.maiwithu.maicraft.core.task.base;
 
-import org.maiwithu.maicraft.entity.InputDriver;
-
-import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
-import org.maiwithu.maicraft.task.Task;
-import org.maiwithu.maicraft.core.FailureType;
-import org.maiwithu.maicraft.task.TaskRecord;
-import org.maiwithu.maicraft.task.TaskState;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.task.TaskResult;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.LinkedHashMap;
-import java.util.Locale;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
+import org.maiwithu.maicraft.entity.InputDriver;
+import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.task.TaskState;
 
 /**
  * 具体任务共用的执行外壳：开始前检查条件，每个游戏刻做一点，结束时停导航并整理结果。
@@ -51,21 +49,17 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     private final TerrainBill journey =
             new TerrainBill();
 
-    /** Model-facing reason for a terminal FAILED; also the fallback result message. */
+    /** 这次任务失败的说明，也作为缺少专门结果时的回退消息。 */
     private String doneReason = "done";
-    /** Structured cause of the last failure, for a parent ladder to branch on. */
+    /** 最近失败的类型，供父任务判断应该补材料、换办法还是停止。 */
     private FailureType failType = FailureType.UNKNOWN;
-    /**
-     * A terminal state decided out-of-band (a start-time precondition, or a
-     * {@link #fail} called from anywhere): {@link #tick} returns it verbatim
-     * instead of running {@link #onTick()}.
-     */
+    /** 开始前检查或 {@link #fail} 已确定终态时，下一次更新直接返回它，不再执行新动作。 */
     private TaskState pendingTerminal;
 
-    // ---- sub-task composition state (see runChild) ----
-    /** The child sub-goal currently being delegated to, or {@code null}. */
+    // 记录当前交给子任务处理的步骤及其准备进度。
+    /** 当前正在推进的子任务，例如施工前的取料；没有时为 {@code null}。 */
     private Task child;
-    /** Whether {@link #child}'s {@code start()} has been called yet. */
+    /** 记住子任务是否已经做过一次性准备，恢复时不重新开始。 */
     private boolean childStarted;
 
     protected AbstractCompanionTask(LocalPlayer player, R record) {
@@ -74,7 +68,7 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     }
 
     // ---------------------------------------------------------------------
-    // Lifecycle (final — the frozen contract)
+    // 接单检查 → 分刻执行 → 收取结果并收尾。
     // ---------------------------------------------------------------------
 
     @Override
@@ -145,12 +139,12 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
             case SUCCESS   -> TaskResult.ok(successMessage() + enRoute, data);
             case TIMEOUT   -> new TaskResult(false, timeoutMessage() + enRoute, true, false, data);
             case CANCELLED -> new TaskResult(false, cancelledMessage() + enRoute, false, true, data);
-            default        -> TaskResult.fail(doneReason + enRoute, data);   // FAILED and any stray state
+            default        -> TaskResult.fail(doneReason + enRoute, data);   // 失败或其他未预期状态统一报告失败。
         };
     }
 
     // ---------------------------------------------------------------------
-    // Hooks (override the ones a concrete task needs)
+    // 具体任务提供自己的前置条件、动作和结果说明。
     // ---------------------------------------------------------------------
 
     /** 具体任务可以列出开始前的必需条件，例如目标是否存在；默认没有额外条件。 */
@@ -174,28 +168,24 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         return new HashMap<>();
     }
 
-    /** Message for a SUCCESS result. */
+    /** 任务确实成功后向调用者说明完成了什么。 */
     protected abstract String successMessage();
 
-    /** Message for a TIMEOUT result. Default: {@code "timed out"}. */
+    /** 任务超过期限时的说明，具体任务可补充当前停在哪一步。 */
     protected String timeoutMessage() {
         return "timed out";
     }
 
-    /** Message for a CANCELLED result. Default: {@code "interrupted"}. */
+    /** 任务被取消时的说明，具体任务可补充已发生的部分效果。 */
     protected String cancelledMessage() {
         return "interrupted";
     }
 
     // ---------------------------------------------------------------------
-    // Failure plumbing
+    // 记录失败原因，供当前任务结束和父任务恢复使用。
     // ---------------------------------------------------------------------
 
-    /**
-     * Record a failure: stash the model-facing reason and structured cause, and
-     * park a terminal FAILED for {@link #tick} to surface. Callers in
-     * {@link #onTick()} pair this with {@code return TaskState.FAILED;}.
-     */
+    /** 记下失败原因和类型，并让下一次更新停止执行；在 onTick 中发现失败时也应返回 FAILED。 */
     protected void fail(String why, FailureType t) {
         // 终局必须留声:任务凭什么收场是排障的第一现场,不能只活在返回值里
         Constants.LOG.info("[maicraft-task] {} FAILED({}) {}",
@@ -205,27 +195,23 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         this.pendingTerminal = TaskState.FAILED;
     }
 
-    /**
-     * Park a terminal SUCCESS — the mirror of {@link #fail} for one-shot tasks whose
-     * whole job happens in {@link #onStart()} (drop, equip): {@link #tick} surfaces
-     * it, and {@link #start} stamps it on the record for same-tick finalization.
-     */
+    /** 丢物、装备等任务可能在准备阶段完成；立即记录成功，避免同刻的取消把已完成动作误报为未完成。 */
     protected void succeed() {
         this.pendingTerminal = TaskState.SUCCESS;
     }
 
-    /** The structured cause of the most recent failure (or {@link FailureType#UNKNOWN}). */
+    /** 返回最近失败的类型；还没有具体原因时为 {@link FailureType#UNKNOWN}。 */
     protected FailureType lastFailure() {
         return failType;
     }
 
-    /** The model-facing reason recorded by the most recent {@link #fail}. */
+    /** 返回最近一次 {@link #fail} 留下的失败说明。 */
     protected String doneReason() {
         return doneReason;
     }
 
     // ---------------------------------------------------------------------
-    // Nav ownership
+    // 本任务的导航与沿途地形改动记录。
     // ---------------------------------------------------------------------
 
     /** 记下路上改过的地形，再停止并移走导航；重复调用不会重复记账。 */
@@ -242,7 +228,7 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     }
 
     // ---------------------------------------------------------------------
-    // Sub-task composition — one of the two recovery-boundary primitives
+    // 推进当前子任务；其停止和结果收尾仍由调用方负责。
     // ---------------------------------------------------------------------
 
     /**
@@ -270,11 +256,11 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
             childStarted = false;
             return st;
         }
-        return null;   // still running
+        return null;   // 子任务还没有结束。
     }
 
     // ---------------------------------------------------------------------
-    // Suspendable (scheduler preemption)
+    // 身体被更高优先级的任务抢占时暂停输出。
     // ---------------------------------------------------------------------
 
     /** 暂停时先松开按键，记住任务做到哪；永久结束时还要由 result 调用 cleanup 做完整收尾。 */
@@ -282,14 +268,12 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     public void stop(LocalPlayer companion, StopReason why) {
         // 暂停走路，但不删掉任务进度；这里没有把 stop 自动转发给 runChild 保存的小任务。
         if (nav != null) {
-            // Preserve the calculated route, but release every physical Baritone output before
-            // the higher-priority winner starts. This is the only safe point to stop a path-owned
-            // native break; doing it later in the frame-finally block could cancel the new
-            // winner's own action instead.
+            // 保留已计算的路线，但必须在新任务开始前释放 Baritone 的实际输出和挖掘动作。
+            // 若拖到本刻最后再停旧挖掘，可能误停新任务刚刚开始的动作。
             nav.pause();
         }
         InputDriver.halt(player);
-        // MCP cancellation can arrive between actor ticks; halt already revokes that body's lease.
+        // MCP 取消可能发生在两次身体更新之间，halt 已撤销该玩家的导航输入授权。
         ClientRuntime.actor().activeContext().filter(context -> context.player() == player)
                 .ifPresent(context -> context.body().releaseAll());
     }
