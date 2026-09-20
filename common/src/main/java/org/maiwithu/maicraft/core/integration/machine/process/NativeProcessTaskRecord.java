@@ -3,13 +3,13 @@ package org.maiwithu.maicraft.core.integration.machine.process;
 
 import java.util.Objects;
 import net.minecraft.core.BlockPos;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /** 建造后仍使用同一固定锚点加工；包装与原生子任务共享消费命名空间和持久屏障。 */
-public final class NativeProcessTaskRecord extends NativeConsumptionTaskRecord implements InternalPositionReceipt {
+public final class NativeProcessTaskRecord extends NativeSubmissionTaskRecord implements InternalPositionReceipt {
     static { TaskFactory.register(NativeProcessTaskRecord.class, NativeProcessTask::new); }
     public final NativeProcessRequest request;
     public final BlockPos anchor;

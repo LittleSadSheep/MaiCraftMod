@@ -9,15 +9,15 @@ import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.core.task.base.NativeConsumptionJournal;
 
 /** 用持久总任务身份绑定单次原生提交；先保存任务再预留操作编号，重启或补前置步骤都不能重复放行。 */
 final class NativeSubmissionBinding {
     private NativeSubmissionBinding() {}
 
-    static void bind(NativeConsumptionTaskRecord child, IntentTaskRecord parent, IntentRuntime runtime) {
-        String namespace = child.consumptionNamespace();
+    static void bind(NativeSubmissionTaskRecord child, IntentTaskRecord parent, IntentRuntime runtime) {
+        String namespace = child.submissionNamespace();
         var journal = new NativeConsumptionJournal(runtime.requiredStateIdentity(), operationId(parent, namespace), namespace);
         child.submissionBarrier(barrier(parent, runtime, namespace, journal::prepare));
     }

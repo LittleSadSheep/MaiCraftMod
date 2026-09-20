@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Collections;
 
@@ -44,8 +44,8 @@ public final class NativeProcessRegistry {
         if (!adapter.matches(player, position)) throw new IllegalArgumentException("native_process_site_mismatch: " + request.process());
         TaskRecord task = adapter.createTask(callId, deadline, player, position, request.parameters());
         // 当前注册机制都包含一次不可盲重试的原生消费，必须交回能绑定同一持久屏障的任务单。
-        if (!(task instanceof NativeConsumptionTaskRecord consumption)
-                || !consumption.consumptionNamespace().equals(consumptionNamespace(request.process())))
+        if (!(task instanceof NativeSubmissionTaskRecord consumption)
+                || !consumption.submissionNamespace().equals(consumptionNamespace(request.process())))
             throw new IllegalStateException("native process task has no matching consumption boundary");
         return task;
     }

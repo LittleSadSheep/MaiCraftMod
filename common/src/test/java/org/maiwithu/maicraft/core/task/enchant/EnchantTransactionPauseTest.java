@@ -158,7 +158,7 @@ public final class EnchantTransactionPauseTest {
                         case "bodyEpoch", "controlRevision" -> 1L;
                         default -> throw new AssertionError("unexpected receipt context: " + method.getName());
                     });
-            flow = new EnchantMenuFlow(world.player, record, menu, inventory, record::prepareNativeConsumptionBoundary);
+            flow = new EnchantMenuFlow(world.player, record, menu, inventory, record::prepareSubmission);
             transaction = (EnchantTransaction) field(EnchantMenuFlow.class, "transaction").get(flow);
         }
 

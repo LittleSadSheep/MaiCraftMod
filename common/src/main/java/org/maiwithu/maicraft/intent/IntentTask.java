@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
 import org.maiwithu.maicraft.entity.InputDriver;
@@ -265,7 +265,7 @@ final class IntentTask implements Task {
 
     private TaskState beginNative(TaskRecord nextRecord) {
             // 原生加工消费前统一留下跨重启边界；附魔仍保留旧命名空间，水中转化与包装子任务也不能重复投料。
-            if (nextRecord instanceof NativeConsumptionTaskRecord consumption)
+            if (nextRecord instanceof NativeSubmissionTaskRecord consumption)
                 NativeSubmissionBinding.bind(consumption, record, runtime);
             retainBuildProject(nextRecord);
             // 记住这一步的任务单，创建对应执行代码，只做第一次准备；后续每刻继续同一个对象。

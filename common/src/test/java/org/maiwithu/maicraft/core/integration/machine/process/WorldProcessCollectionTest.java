@@ -131,7 +131,7 @@ public final class WorldProcessCollectionTest {
             settlement.acceptNative(new WorldProcessEventEvidence.Output(entity.getUUID(), output));
             settlement.observe(ItemEntityReceipts.snapshot(world.player, new AABB(at)), true);
             var record = new WorldTransformTaskRecord("collection-boundary", 1000, recipe.id(), at, 1);
-            record.submissionBarrier(() -> true); record.prepareNativeConsumptionBoundary();
+            record.submissionBarrier(() -> true); record.prepareSubmission();
             task = new WorldTransformTask(world.player, record);
             field(WorldTransformTask.class, "world").set(task, world.level);
             field(WorldTransformTask.class, "settlement").set(task, settlement);

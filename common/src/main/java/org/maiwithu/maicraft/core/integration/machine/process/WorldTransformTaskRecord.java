@@ -3,11 +3,11 @@ package org.maiwithu.maicraft.core.integration.machine.process;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.task.TaskFactory;
 
 /** 固定配方、加工位置和有限批数；首次投料前沿用总任务的持久消费屏障，中断后不会再投入一整批。 */
-public final class WorldTransformTaskRecord extends NativeConsumptionTaskRecord {
+public final class WorldTransformTaskRecord extends NativeSubmissionTaskRecord {
     public final ResourceLocation recipeId;
     public final BlockPos receiver;
     public final int batches;

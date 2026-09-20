@@ -16,7 +16,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
 import org.maiwithu.maicraft.core.task.base.NativeConsumptionJournal;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.intent.persistence.IntentStateStore;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
@@ -54,12 +54,12 @@ public final class RetryIntentPersistenceTest {
         check(namespace.equals("world-process"), "消费命名空间来自写回后的实际工序");
         var journal = new TestJournal(h.identity, operation, namespace, h.queue); var consumer = new ConsumerRecord(namespace);
         consumer.submissionBarrier(NativeSubmissionBinding.barrier(h.parent, h.runtime, namespace, journal::prepare));
-        check(!consumer.prepareNativeConsumptionBoundary(), "先等待包含新工序的父检查点"); h.queue.runNext();
+        check(!consumer.prepareSubmission(), "先等待包含新工序的父检查点"); h.queue.runNext();
         IntentTaskRecord restored = h.restore();
         check(current(h).toJson().equals(restored.steps().get(restored.stepIndex()).toJson())
                 && namespace(restored.steps().get(restored.stepIndex())).equals(namespace), "磁盘恢复的实际目标和namespace必须与消费任务一致");
-        check(!consumer.prepareNativeConsumptionBoundary(), "父目标落盘后再排预约写入"); h.queue.runNext();
-        check(consumer.prepareNativeConsumptionBoundary(), "两份真实文件完成后才能消费");
+        check(!consumer.prepareSubmission(), "父目标落盘后再排预约写入"); h.queue.runNext();
+        check(consumer.prepareSubmission(), "两份真实文件完成后才能消费");
         UUID recovered = NativeSubmissionBinding.operationId(restored, namespace);
         check(recovered.equals(operation), "恢复后必须落到实际工序同一个预约编号");
         var replay = new TestJournal(h.identity, recovered, namespace, h.queue);
@@ -150,7 +150,7 @@ public final class RetryIntentPersistenceTest {
     private static final class TestJournal extends NativeConsumptionJournal {
         TestJournal(StateIdentity identity, UUID operation, String namespace, Executor executor) { super(identity, operation, namespace, executor); }
     }
-    private static final class ConsumerRecord extends NativeConsumptionTaskRecord {
+    private static final class ConsumerRecord extends NativeSubmissionTaskRecord {
         ConsumerRecord(String namespace) { super("retry-test", "retry-test", 1000, namespace); }
     }
     private static Field field(String name) throws Exception { Field field = IntentRuntime.class.getDeclaredField(name); field.setAccessible(true); return field; }

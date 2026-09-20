@@ -100,8 +100,8 @@ final class EnchantTransaction {
     Map<String, Object> data() {
         var data = new LinkedHashMap<String, Object>();
         data.put("button_attempted", attempted); data.put("enchantment_confirmed", confirmed);
-        data.put("native_consumption_reserved", record.nativeConsumptionReserved());
-        data.put("mechanical_retry_allowed", !attempted && !record.nativeConsumptionReserved());
+        data.put("native_consumption_reserved", record.submissionReserved());
+        data.put("mechanical_retry_allowed", !attempted && !record.submissionReserved());
         if (quote != null) data.put("quote", quote.describe());
         if (offer != null) data.put("selected_offer", offer.describe());
         if (confirmed) {

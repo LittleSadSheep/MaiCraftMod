@@ -88,7 +88,7 @@ public final class EnchantCompanionTask extends AbstractCompanionTask<EnchantTas
                     if (!context.menus().ensureVisible(context)) yield TaskState.RUNNING;
                     // 绑定这一张已可见、两格均为空的原生附魔菜单；后续换菜单或报价都不能沿用旧操作。
                     MachineMenu.rememberNativeOpened(player, menu, r.table);
-                    flow = new EnchantMenuFlow(player, r, menu, inventory, r::prepareNativeConsumptionBoundary);
+                    flow = new EnchantMenuFlow(player, r, menu, inventory, r::prepareSubmission);
                     phase = Phase.ENCHANT; yield TaskState.RUNNING;
                 }
                 if (player.containerMenu != player.inventoryMenu)
@@ -155,7 +155,7 @@ public final class EnchantCompanionTask extends AbstractCompanionTask<EnchantTas
         var data = new LinkedHashMap<String, Object>();
         data.put("item_id", r.itemId.toString()); data.put("requested_count", 1); data.put("offer_tier", r.offerTier);
         data.put("max_levels_spent", r.maxLevelsSpent); data.put("max_lapis", r.maxLapis);
-        data.put("mechanical_retry_allowed", !r.nativeConsumptionReserved()); data.put("outcome_uncertain", false);
+        data.put("mechanical_retry_allowed", !r.submissionReserved()); data.put("outcome_uncertain", false);
         if (issue != null) data.put("issue_code", issue);
         if (flow != null) data.putAll(flow.data());
         return data;

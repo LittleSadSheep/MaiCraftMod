@@ -10,7 +10,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
@@ -33,15 +33,15 @@ public final class NativeProcessTaskTest {
         var worker = new Probe(); worker.protectedContext = true;
         var ready = new AtomicBoolean(); var barrierCalls = new AtomicInteger(); var factoryCalls = new AtomicInteger();
         var record = wrapper(build); record.submissionBarrier(() -> { barrierCalls.incrementAndGet(); return ready.get(); });
-        worker.action = () -> operation.prepareNativeConsumptionBoundary() ? TaskState.SUCCESS : TaskState.RUNNING;
+        worker.action = () -> operation.prepareSubmission() ? TaskState.SUCCESS : TaskState.RUNNING;
         var task = new NativeProcessTask(null, record, () -> { factoryCalls.incrementAndGet(); return operation; },
                 (player, child) -> child == build ? builder : worker, () -> 1, () -> true);
         var cells = new LongOpenHashSet(); cells.add(PROTECTED.asLong());
         NavigationSafetyContext.withProtectedArea(cells, cells, () -> {
             check(task.tick(null) == TaskState.RUNNING && builder.results == 1 && factoryCalls.get() == 0,
                     "建造已确认后也要等下一刻才创建加工子任务");
-            check(task.tick(null) == TaskState.RUNNING && barrierCalls.get() == 1 && record.nativeConsumptionReserved()
-                    && operation.nativeConsumptionReserved(), "子任务必须等待包装任务同一消费屏障");
+            check(task.tick(null) == TaskState.RUNNING && barrierCalls.get() == 1 && record.submissionReserved()
+                    && operation.submissionReserved(), "子任务必须等待包装任务同一消费屏障");
             check(worker.starts == 1 && task.progress().get("marker").equals("child-progress"), "逐刻转发原生子任务进度");
             ready.set(true);
             check(task.tick(null) == TaskState.SUCCESS && worker.starts == 1 && barrierCalls.get() == 2,
@@ -107,7 +107,7 @@ public final class NativeProcessTaskTest {
             builder.next = TaskState.RUNNING; task.tick(null); task.stop(null, Task.StopReason.REPLACED);
         } else check(task.tick(null) == state, "施工终态必须透传给包装");
         var result = task.result(state);
-        check(!result.success() && !record.nativeConsumptionReserved()
+        check(!result.success() && !record.submissionReserved()
                 && Boolean.FALSE.equals(result.data().get("native_consumption_reserved")) && builder.results == 1,
                 "施工失败不触发加工预约，且只收取一次原生回执");
         return result;
@@ -119,7 +119,7 @@ public final class NativeProcessTaskTest {
         return new NativeProcessTaskRecord("wrapper-test", 100, request, BlockPos.ZERO, "minecraft:overworld", construction);
     }
     private static final class PlainRecord extends TaskRecord { PlainRecord(long deadline) { super("construction-probe", "probe", deadline); } }
-    private static final class ConsumerRecord extends NativeConsumptionTaskRecord {
+    private static final class ConsumerRecord extends NativeSubmissionTaskRecord {
         ConsumerRecord(String namespace, long deadline) { super("native-probe", "probe", deadline, namespace); }
     }
     private static final class Probe implements Task {

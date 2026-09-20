@@ -8,7 +8,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -48,11 +48,11 @@ final class NativeProcessTask implements Task {
             if (child == null) {
                 childRecord = constructionDone ? processFactory.get() : record.construction;
                 if (constructionDone) {
-                    if (!(childRecord instanceof NativeConsumptionTaskRecord consumption)
-                            || !consumption.consumptionNamespace().equals(record.consumptionNamespace()))
+                    if (!(childRecord instanceof NativeSubmissionTaskRecord consumption)
+                            || !consumption.submissionNamespace().equals(record.submissionNamespace()))
                         throw new IllegalStateException("native process child must preserve its consumption namespace");
                     // 子任务再次等待的是包装任务同一屏障；这里绝不能返回固定true，也不能创建第二个消费编号。
-                    consumption.submissionBarrier(record::prepareNativeConsumptionBoundary); processStarted = true;
+                    consumption.submissionBarrier(record::prepareSubmission); processStarted = true;
                 }
                 child = tasks.apply(player, childRecord); childRecord.setState(TaskState.RUNNING); childRecord.markStarted(clock.getAsLong());
                 child.start(player);
@@ -108,8 +108,8 @@ final class NativeProcessTask implements Task {
         var data = new LinkedHashMap<String, Object>(detail == null ? Map.of() : detail.data());
         data.put("process", record.request.process()); data.put("construction_completed", constructionDone);
         if (constructionResult != null) data.put("construction", constructionResult.data());
-        data.put("native_consumption_reserved", record.nativeConsumptionReserved());
-        if (record.nativeConsumptionReserved()) data.put("mechanical_retry_allowed", false);
+        data.put("native_consumption_reserved", record.submissionReserved());
+        if (record.submissionReserved()) data.put("mechanical_retry_allowed", false);
         boolean success = state == TaskState.SUCCESS && terminal == TaskState.SUCCESS && processResult != null && processResult.success();
         return new TaskResult(success, detail == null ? "native process stopped before a result was available" : detail.message(),
                 state == TaskState.TIMEOUT || detail != null && detail.timedOut(),
@@ -120,7 +120,7 @@ final class NativeProcessTask implements Task {
         var data = new LinkedHashMap<String, Object>(child == null ? Map.of() : child.progress());
         data.put("process", record.request.process());
         data.put("process_stage", terminal != null ? "complete" : !constructionDone ? "construction" : processStarted ? "processing" : "preparing_process");
-        data.put("native_consumption_reserved", record.nativeConsumptionReserved()); return data;
+        data.put("native_consumption_reserved", record.submissionReserved()); return data;
     }
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return child != null && child.mustSettleBeforeSatisfiedCancellation(); }
     @Override public void requestSatisfiedSettlement() { if (child != null) child.requestSatisfiedSettlement(); }

@@ -148,7 +148,7 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         // AE2在有效流体累计超过60刻后才尝试反应，期间物品会漂移；朝新鲜交集瞄准，但首次入水只要求完整池域。
         if (!TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), region, preference))
             throw new IllegalStateException(trigger ? "world_process_trigger_region_unreachable" : "world_process_input_region_unreachable");
-        if (!r.prepareNativeConsumptionBoundary()) return TaskState.RUNNING;
+        if (!r.prepareSubmission()) return TaskState.RUNNING;
         // 整个有限任务只保留一次消费边界；每份原料仍由独立原生投料回执精确确认，轮询不重发Q。
         ItemStack input = batchInputs.get(feedIndex);
         triggerStepStarted |= trigger;
@@ -284,8 +284,8 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         data.put("trigger_step_started", triggerStepStarted);
         if (settlement != null && !settlement.outputEvidence().isEmpty()) data.put("pending_output", settlement.outputEvidence());
         if (collectionDetail != null) data.put("collection_detail", collectionDetail);
-        data.put("native_consumption_reserved", r.nativeConsumptionReserved()); data.put("mechanical_retry_allowed", !r.nativeConsumptionReserved());
-        data.put("output_collected", phase == Phase.COMPLETE); data.put("outcome_uncertain", r.nativeConsumptionReserved() && phase != Phase.COMPLETE);
+        data.put("native_consumption_reserved", r.submissionReserved()); data.put("mechanical_retry_allowed", !r.submissionReserved());
+        data.put("output_collected", phase == Phase.COMPLETE); data.put("outcome_uncertain", r.submissionReserved() && phase != Phase.COMPLETE);
         boolean nativeVerified = events != null && events.nativeEvents && phase == Phase.COMPLETE;
         data.put("native_recipe_verified", nativeVerified); data.put("machine_production_verified", nativeVerified);
         data.put("evidence_scope", events != null && events.nativeEvents ? "native_recipe_event_and_player_pickup" : "client_observed_output_and_inventory");

@@ -6,10 +6,10 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskFactory;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 
 /** 固定已有附魔台、单件物品、报价档位和本次成本上限；缺料或结果未知时不自动重复消费。 */
-public final class EnchantTaskRecord extends NativeConsumptionTaskRecord {
+public final class EnchantTaskRecord extends NativeSubmissionTaskRecord {
     public static final String TOOL_NAME = "enchant";
     public final ResourceLocation itemId;
     public final BlockPos table;

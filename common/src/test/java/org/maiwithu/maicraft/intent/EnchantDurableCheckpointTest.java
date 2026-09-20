@@ -35,13 +35,13 @@ public final class EnchantDurableCheckpointTest {
         h.child.submissionBarrier(NativeSubmissionBinding.barrier(h.parent, h.runtime, "enchant", () -> {
             verifyRestored(h); reservations.incrementAndGet(); return markerReady.get();
         }));
-        check(!h.child.prepareNativeConsumptionBoundary() && !h.child.prepareNativeConsumptionBoundary(), "父任务未落盘时持续等待");
+        check(!h.child.prepareSubmission() && !h.child.prepareSubmission(), "父任务未落盘时持续等待");
         check(reservations.get() == 0 && h.queue.submitted == 1 && !Files.exists(h.file()), "不能因内存已有父任务就提前预留或发按钮");
-        check(h.child.nativeConsumptionReserved(), "屏障启动后保留普通重试禁令");
+        check(h.child.submissionReserved(), "屏障启动后保留普通重试禁令");
         h.queue.runNext();
-        check(!h.child.prepareNativeConsumptionBoundary() && reservations.get() == 1, "父检查点成功后仍须等待独立附魔预约");
+        check(!h.child.prepareSubmission() && reservations.get() == 1, "父检查点成功后仍须等待独立附魔预约");
         markerReady.set(true);
-        check(h.child.prepareNativeConsumptionBoundary() && reservations.get() == 2 && h.queue.submitted == 1,
+        check(h.child.prepareSubmission() && reservations.get() == 2 && h.queue.submitted == 1,
                 "父检查点与预约均完成才放行，等待预约不能重复保存父任务");
     }
 
@@ -50,16 +50,16 @@ public final class EnchantDurableCheckpointTest {
         h.child.submissionBarrier(NativeSubmissionBinding.barrier(h.parent, h.runtime, "enchant", () -> {
             verifyRestored(h); reservations.incrementAndGet(); return true;
         }));
-        check(!h.child.prepareNativeConsumptionBoundary(), "先等待强制捕获的父任务检查点");
+        check(!h.child.prepareSubmission(), "先等待强制捕获的父任务检查点");
         var first = h.store.latestSaveCompletion(h.identity);
         h.requestKeys.put("newer-checkpoint-key", h.parent.externalId());
         check(h.captureOrdinary(), "普通检查点已接受进程内快照");
         var latest = h.store.latestSaveCompletion(h.identity);
         check(first.isCancelled() && !latest.isDone() && !Files.exists(h.file()), "合并取消旧future不代表磁盘保存成功");
-        check(!h.child.prepareNativeConsumptionBoundary() && reservations.get() == 0
+        check(!h.child.prepareSubmission() && reservations.get() == 0
                 && h.store.latestSaveCompletion(h.identity) == latest, "消费屏障跟随最新写入，不取消它重新写盘");
         h.queue.runNext();
-        check(h.child.prepareNativeConsumptionBoundary() && reservations.get() == 1, "最新完整检查点写完才允许预约");
+        check(h.child.prepareSubmission() && reservations.get() == 1, "最新完整检查点写完才允许预约");
         check(read(h).requestKeys().get("newer-checkpoint-key").equals(h.parent.externalId()), "实际磁盘必须保留合并后的最新请求去重键");
     }
 
@@ -67,7 +67,7 @@ public final class EnchantDurableCheckpointTest {
         // 文件占据检查点目录，实际后台写入必然失败；覆盖旧future后的失败也必须保留，不能自动再捕获重试。
         Files.writeString(blocked, "not a directory"); var h = new Harness(blocked); var reservations = new AtomicInteger();
         h.child.submissionBarrier(NativeSubmissionBinding.barrier(h.parent, h.runtime, "enchant", () -> { reservations.incrementAndGet(); return true; }));
-        check(!h.child.prepareNativeConsumptionBoundary(), "失败也须由实际后台写入回执决定");
+        check(!h.child.prepareSubmission(), "失败也须由实际后台写入回执决定");
         if (coalesced) check(h.captureOrdinary(), "普通保存可以合并消费屏障的旧future");
         var latest = h.store.latestSaveCompletion(h.identity); h.queue.runNext();
         rejects(h.child); rejects(h.child);
@@ -132,7 +132,7 @@ public final class EnchantDurableCheckpointTest {
         void runNext() { tasks.removeFirst().run(); }
     }
     private static void rejects(EnchantTaskRecord record) {
-        try { record.prepareNativeConsumptionBoundary(); }
+        try { record.prepareSubmission(); }
         catch (IllegalStateException rejected) { check(rejected.getMessage().startsWith("enchantment_parent_checkpoint_failed"), rejected.getMessage()); return; }
         throw new AssertionError("检查点失败后应明确停止消费");
     }
