@@ -112,6 +112,7 @@ import org.maiwithu.maicraft.core.task.supply.BuildSupplyUncertaintyTest;
 import org.maiwithu.maicraft.core.task.supply.MaterialSupplyReturnPolicyTest;
 import org.maiwithu.maicraft.intent.ChatAbilityTest;
 import org.maiwithu.maicraft.intent.AcquireGoalTest;
+import org.maiwithu.maicraft.intent.CookGoalTest;
 import org.maiwithu.maicraft.intent.ExactInteractionTargetTest;
 import org.maiwithu.maicraft.intent.ShipTravelContractTest;
 
@@ -263,6 +264,7 @@ public final class GuiRegressionSuite {
         CookingMenuOwnershipTest.main(args);
         CookingSettlementTest.main(args);
         AcquireGoalTest.main(args);
+        CookGoalTest.main(args);
         CreateStockObservationTest.main(args);
         Ae2ScreenAccessTest.main(args);
         Ae2WaterBucketFillTest.main(args);

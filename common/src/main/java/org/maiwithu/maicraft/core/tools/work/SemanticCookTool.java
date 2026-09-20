@@ -4,17 +4,13 @@ package org.maiwithu.maicraft.core.tools.work;
 import static org.maiwithu.maicraft.task.TaskDispatch.ctx;
 import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
-import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 
 /**
@@ -64,33 +60,7 @@ public final class SemanticCookTool implements MaiCraftTool {
     // 解析目标、燃料与来源策略，按数量给初始时限，再建立持续加工任务；这里不会直接往炉子里放物品。
     public void onGameCall(
             String toolCallId, JsonObject args, LocalPlayer player, Consumer<String> reply) {
-        ResourceLocation itemId = resource(args.get("item_id"), "item_id");
-        int count = integer(args, "count", 1, 1, SemanticCookTaskRecord.MAX_FINAL_COUNT);
-        String rawPreference = text(args, "recipe_preference");
-        List<ResourceLocation> fuels = new ArrayList<>();
-        for (String value : strings(args.get("allowed_fuels"), "allowed_fuels")) {
-            ResourceLocation id = ResourceLocation.tryParse(value);
-            if (id == null) throw new IllegalArgumentException(
-                    "allowed_fuels contains an invalid resource id: " + value);
-            fuels.add(id);
-        }
-        List<SemanticAcquireTaskRecord.Source> sources = new ArrayList<>();
-        for (String value : strings(args.get("allowed_sources"), "allowed_sources")) {
-            sources.add(SemanticAcquireTaskRecord.Source.parse(value));
-        }
-        long ticks = Math.clamp(5L * 60L * 20L + (long) count * 260L,
-                5L * 60L * 20L, 45L * 60L * 20L);
-        var context = ctx(toolCallId, player);
-        var record = new SemanticCookTaskRecord(
-                context.toolCallId(),
-                context.deadline(ticks),
-                itemId,
-                count,
-                SemanticCookTaskRecord.Preference.parse(rawPreference),
-                fuels,
-                sources,
-                bool(args, "allow_harm", false),
-                strings(args.get("protected_labels"), "protected_labels"));
+        var record = SemanticCookApi.newRecord(ctx(toolCallId, player), args);
         setTask(player, record, args, reply);
     }
 
@@ -107,50 +77,4 @@ public final class SemanticCookTool implements MaiCraftTool {
         result.put("items", items); return result;
     }
 
-    private static ResourceLocation resource(JsonElement value, String key) {
-        if (value == null || value.isJsonNull() || !value.isJsonPrimitive()) {
-            throw new IllegalArgumentException(key + " must be a namespaced item id");
-        }
-        ResourceLocation id = ResourceLocation.tryParse(value.getAsString());
-        if (id == null) throw new IllegalArgumentException(key + " must be a namespaced item id");
-        return id;
-    }
-
-    private static String text(JsonObject object, String key) {
-        return object.has(key) && !object.get(key).isJsonNull()
-                && object.get(key).isJsonPrimitive() ? object.get(key).getAsString() : null;
-    }
-
-    // 当前先用 getAsInt 转数值，再压到允许范围；小数仍可能被截断，不是严格整数校验。
-    private static int integer(JsonObject object, String key, int fallback, int min, int max) {
-        if (!object.has(key) || object.get(key).isJsonNull()) return fallback;
-        try { return Math.clamp(object.get(key).getAsInt(), min, max); }
-        catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(key + " must be an integer");
-        }
-    }
-
-    private static boolean bool(JsonObject object, String key, boolean fallback) {
-        if (!object.has(key) || object.get(key).isJsonNull()) return fallback;
-        if (!object.get(key).isJsonPrimitive()) {
-            throw new IllegalArgumentException(key + " must be a boolean");
-        }
-        try { return object.get(key).getAsBoolean(); }
-        catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(key + " must be a boolean");
-        }
-    }
-
-    private static List<String> strings(JsonElement value, String key) {
-        if (value == null || value.isJsonNull()) return List.of();
-        if (!value.isJsonArray()) throw new IllegalArgumentException(key + " must be an array");
-        List<String> result = new ArrayList<>();
-        for (JsonElement element : value.getAsJsonArray()) {
-            if (!element.isJsonPrimitive() || element.getAsString().isBlank()) {
-                throw new IllegalArgumentException(key + " must contain only non-blank strings");
-            }
-            result.add(element.getAsString().trim());
-        }
-        return List.copyOf(result);
-    }
 }
