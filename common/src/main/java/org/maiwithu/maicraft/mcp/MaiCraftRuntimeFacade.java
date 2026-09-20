@@ -64,7 +64,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         this.intents = IntentRuntime.get();
     }
 
-    /** Stable loader entry point; construction also idempotently registers IntentTaskRecord. */
+    /** 加载器共用此入口；创建时也确保语义总任务的执行器已登记，重复取得入口不会重复登记。 */
     public static MaiCraftRuntimeFacade instance() {
         return INSTANCE;
     }
@@ -606,7 +606,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    /** The request stays immutable; replacements and recovery steps live in the execution plan. */
+    /** 保留原始请求，当前要做的事从实际步骤读取，包含后来替换或插入的恢复目标。 */
     private static Goal currentGoal(IntentTaskRecord record) {
         int index = record.stepIndex();
         return !record.getState().isTerminal() && record.terminalSnapshot() == null
@@ -766,9 +766,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         // 记录“还在排队”还是“已经开始”，网络超时时才知道能否保证这次请求没改变任何事情。
         private static final int QUEUED = 0;
         private static final int RUNNING = 1;
-        private static final int WAITING = 2;
-        private static final int SETTLED = 3;
-        private static final int CANCELLED = 4;
+        private static final int SETTLED = 2;
+        private static final int CANCELLED = 3;
 
         private final AtomicInteger state = new AtomicInteger(QUEUED);
 
@@ -793,11 +792,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         }
 
         private boolean settle() {
-            while (true) {
-                int current = state.get();
-                if (current != RUNNING && current != WAITING) return false;
-                if (state.compareAndSet(current, SETTLED)) return true;
-            }
+            // 普通客户端调用只从执行中进入已结算；等待任务消息的挂起由 AttentionWait 单独管理。
+            return state.compareAndSet(RUNNING, SETTLED);
         }
 
         @Override
@@ -808,10 +804,6 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 if (current == QUEUED && state.compareAndSet(QUEUED, CANCELLED)) {
                     super.cancel(false);
                     return RuntimeFacade.CancellationDisposition.CANCELLED_BEFORE_START;
-                }
-                if (current == WAITING && state.compareAndSet(WAITING, CANCELLED)) {
-                    super.cancel(false);
-                    return RuntimeFacade.CancellationDisposition.CANCELLED_WHILE_WAITING;
                 }
                 if (current == RUNNING) {
                     return RuntimeFacade.CancellationDisposition.ALREADY_STARTED;

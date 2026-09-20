@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonElement;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -9,6 +10,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
@@ -18,6 +23,8 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
+import org.maiwithu.maicraft.mcp.RuntimeFacade.CancellationDisposition;
+import org.maiwithu.maicraft.mcp.RuntimeFacade.ManagedCall;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
@@ -31,6 +38,7 @@ public final class McpTaskLifecycleTest {
         repeatedExecutionLeavesHumanControlAlone();
         restoredCancellationPreservesCurrentWork();
         fullHistoryRejectsBeforeAcceptingMoreWork();
+        networkCancellationRespectsClientDispatch();
         System.out.println("McpTaskLifecycleTest: passed");
     }
 
@@ -141,6 +149,46 @@ public final class McpTaskLifecycleTest {
                 throw new AssertionError("编码器截断超量任务后仍然返回成功");
             } catch (IllegalArgumentException expected) { }
         }
+    }
+
+    private static void networkCancellationRespectsClientDispatch() throws Exception {
+        try (var f = new Fixture()) {
+            // 模拟网络线程排队到游戏线程：尚未执行的请求可撤回，撤回后不能接管或登记任务。
+            var queue = new ConcurrentLinkedQueue<Runnable>();
+            field(Minecraft.class, "pendingRunnables").set(Minecraft.getInstance(), queue);
+            var request = new JsonObject();
+            request.add("goal", f.goal.toJson());
+            var pending = fromNetwork(() -> f.facade.execute(request));
+            check(((ManagedCall) pending).cancelCall() == CancellationDisposition.CANCELLED_BEFORE_START,
+                    "还在游戏线程队列中的请求应能撤回");
+            queue.remove().run();
+            check(pending.toCompletableFuture().isCancelled() && f.tasks().isEmpty()
+                    && !ClientRuntime.actor().automationControlRequested(), "被撤回的排队请求不能开始游戏工作");
+
+            // 已经开始接单时，网络取消只能报告已经开始；真正停止任务要用 task(cancel)。
+            var running = new AtomicReference<CompletionStage<JsonElement>>();
+            var cancellation = new AtomicReference<CancellationDisposition>();
+            try (var subscription = f.runtime.subscribeAttention(event -> cancellation.compareAndSet(null,
+                    ((ManagedCall) running.get()).cancelCall()))) {
+                running.set(fromNetwork(() -> f.facade.execute(request)));
+                queue.remove().run();
+            }
+            check(cancellation.get() == CancellationDisposition.ALREADY_STARTED,
+                    "发布开始事件时不能把执行中的请求说成已经撤回");
+            check(running.get().toCompletableFuture().join().getAsJsonObject().get("accepted").getAsBoolean()
+                    && f.tasks().size() == 1, "已经开始的请求仍交付真实接单结果");
+            check(((ManagedCall) running.get()).cancelCall() == CancellationDisposition.SETTLED,
+                    "请求交付完成后不再撤回任何游戏工作");
+        }
+    }
+
+    private static CompletionStage<JsonElement> fromNetwork(Supplier<CompletionStage<JsonElement>> request)
+            throws InterruptedException {
+        var result = new AtomicReference<CompletionStage<JsonElement>>();
+        Thread network = new Thread(() -> result.set(request.get()), "mcp-request-test");
+        network.start();
+        network.join();
+        return result.get();
     }
 
     private static final class Fixture implements AutoCloseable {
