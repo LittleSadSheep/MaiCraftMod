@@ -375,7 +375,7 @@ public final class SemanticCookCompanionTask
                 if (safeDefaultFuel(item)) choices.add(item);
             }
         }
-        int raw = Math.min(rawRemaining(cooking), Math.max(1, 64 / cooking.outputCount()));
+        int raw = rawRemaining(cooking);
         List<FuelChoice> fuels = choices.stream().distinct()
                 .filter(item -> !rejectedFuelItems.contains(item))
                 .map(item -> fuelChoice(cooking, item, raw))
@@ -419,10 +419,11 @@ public final class SemanticCookCompanionTask
     // 按“这一批所需烧制时间 ÷ 单份燃料时间”向上取整。
     // 时间取自选定原生设备，不能把普通熔炉的一份煤时长套在高炉或烟熏炉上。
     private FuelChoice fuelChoice(CookingRecipe cooking, Item item, int raw) {
-        int burn = cooking.device().burnDuration(new ItemStack(item));
-        if (burn <= 0) return null;
-        long neededTicks = (long) raw * cooking.recipe().getCookingTime();
-        int needed = ceilDiv(neededTicks, burn);
+        CookingBatch batch = CookingBatch.plan(cooking, item, raw, player.level().registryAccess());
+        if (batch == null) return null;
+        int burn = batch.burnTicks();
+        long neededTicks = (long) batch.inputCount() * cooking.recipe().getCookingTime();
+        int needed = batch.fuelCount();
         long cost = recipePlanner.acquisitionCost(item, needed);
         long waste = (long) needed * burn - neededTicks;
         return new FuelChoice(item, burn, needed, waste, cost);
@@ -476,12 +477,12 @@ public final class SemanticCookCompanionTask
             phase = Phase.CLEANUP;
             return TaskState.RUNNING;
         }
-        int raw = rawRemaining();
-        int maxByOutput = Math.max(1, 64 / candidate.outputCount());
-        int maxByFuel = Math.max(1,
-                (int) Math.min(64L, 64L * fuelBurnTicks / candidate.recipe().getCookingTime()));
-        batchRaw = Math.min(raw, Math.min(maxByOutput, maxByFuel));
-        batchFuel = ceilDiv((long) batchRaw * candidate.recipe().getCookingTime(), fuelBurnTicks);
+        CookingBatch batch = CookingBatch.plan(candidate, fuel, rawRemaining(), player.level().registryAccess());
+        if (batch == null) return failOrClean("cooking_batch_unavailable",
+                "The selected input, output or fuel cannot fit one supported cooking batch.", FailureType.UNSUPPORTED);
+        batchRaw = batch.inputCount();
+        batchFuel = batch.fuelCount();
+        fuelBurnTicks = batch.burnTicks();
         // 原料和燃料是同种物品时，实际准备要求两份用途的数量相加。
         // 但前面的估价把同一库存分别算给了原料和燃料，可能选错燃料并误要求补料，见 A61。
         if (candidate.input() == fuel) {

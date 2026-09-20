@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
 import org.maiwithu.maicraft.core.task.cook.CookingFuelTest;
+import org.maiwithu.maicraft.core.task.cook.CookingBatchTest;
 import org.maiwithu.maicraft.core.task.cook.CookingQuantityTest;
 import org.maiwithu.maicraft.core.task.cook.CookingMenuCloseTest;
 import org.maiwithu.maicraft.core.task.cook.CookingMenuOwnershipTest;
@@ -254,6 +255,7 @@ public final class GuiRegressionSuite {
         AcquisitionSourceInheritanceTest.main(args);
         AcquisitionRecipePlanningTest.main(args);
         CookingFuelTest.main(args);
+        CookingBatchTest.main(args);
         CookingQuantityTest.main(args);
         CookingMenuCloseTest.main(args);
         CookingMenuOwnershipTest.main(args);
