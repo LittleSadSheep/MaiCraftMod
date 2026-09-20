@@ -13,6 +13,10 @@ final class BuildingModelMaterialRules {
     static void validate(JsonObject palette, JsonObject node, BuildingModelShape shape, boolean cutter) {
         if (!cutter && !node.has("material")) throw bad("solid model needs material: " + node.get("name").getAsString());
         for (String field : Set.of("material", "edge_material")) if (node.has(field)) material(palette, node.get(field).getAsString());
+        // 未摆出的网格组件也必须引用真实材质，不能等复制到工地后才发现半砖或孔洞绑定写错。
+        if (node.has("pattern") && node.getAsJsonObject("pattern").has("materials"))
+            for (var entry : node.getAsJsonObject("pattern").getAsJsonObject("materials").entrySet())
+                material(palette, entry.getValue().getAsString());
         var faceIds = new HashSet<String>(); shape.faces().forEach(face -> faceIds.add(face.id()));
         var edgeIds = new HashSet<String>(); shape.edges().forEach(edge -> edgeIds.add(edge.id()));
         if (node.has("face_materials")) for (var entry : node.getAsJsonObject("face_materials").entrySet()) {

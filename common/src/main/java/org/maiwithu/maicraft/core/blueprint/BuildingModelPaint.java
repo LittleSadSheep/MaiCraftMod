@@ -21,9 +21,13 @@ final class BuildingModelPaint {
     private final boolean hollow;
     private final double thickness, edgeWidth;
     private final String body, allEdges;
+    private final BuildingModelPattern pattern;
 
     BuildingModelPaint(BuildingModelExpansion model, BuildingModelExpansion.Leaf leaf, Map<String, JsonObject> cache) {
         this.model = model; this.leaf = leaf; this.cache = cache; JsonObject node = leaf.node();
+        // 图案在对象局部格网上选材；半砖上下状态继续交给现有原生旋转与镜像规则处理。
+        boolean blender = !model.scene.has("coordinate_system") || model.scene.get("coordinate_system").getAsString().equals("blender_z_up");
+        pattern = node.has("pattern") ? new BuildingModelPattern(node.getAsJsonObject("pattern"), BuildingModelTransform.dimensions(node, blender)) : null;
         body = node.has("material") ? node.get("material").getAsString() : null;
         if (body == null && !model.cutterLeaves.contains(leaf.name())) throw bad("solid model needs material: " + leaf.name());
         allEdges = node.has("edge_material") ? node.get("edge_material").getAsString() : null;
@@ -47,6 +51,7 @@ final class BuildingModelPaint {
         }
         if (body != null) checkMaterial(body); if (allEdges != null) checkMaterial(allEdges);
         faces.values().forEach(this::checkMaterial); edges.values().forEach(this::checkMaterial);
+        if (pattern != null) pattern.materials.values().forEach(this::checkMaterial);
     }
 
     JsonObject at(Vec3 local) {
@@ -74,10 +79,12 @@ final class BuildingModelPaint {
                 edgeDistance = distance; nearestEdge = edge.id(); explicitEdge = explicit; chosen = material;
             }
         }
-        return resolve(chosen);
+        // 先完成面与包边涂装，再按图案留孔或覆盖指定材质；空孔与布尔开孔一样不会抹掉独立窗框。
+        if (pattern != null) chosen = pattern.materialAt(local, chosen);
+        return chosen == null ? null : resolve(chosen);
     }
 
-    int sampleCost() { return leaf.shape().faces().size() * 2 + (allEdges != null || !edges.isEmpty() ? leaf.shape().edges().size() : 0); }
+    int sampleCost() { return leaf.shape().faces().size() * 2 + (allEdges != null || !edges.isEmpty() ? leaf.shape().edges().size() : 0) + (pattern != null ? 2 : 0); }
     private String mapped(String name) {
         for (JsonObject map : leaf.materialMaps()) if (map.has(name)) name = map.get(name).getAsString();
         return name;
