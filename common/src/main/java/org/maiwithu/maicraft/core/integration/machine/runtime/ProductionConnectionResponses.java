@@ -7,8 +7,8 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.network.MachineConnectionSystems;
 
 /** Local conjunction of individually authorized native observations; never an atomic world snapshot. */
 final class ProductionConnectionResponses {
@@ -44,7 +44,8 @@ final class ProductionConnectionResponses {
         }
         try {
             require(start >= 0 && end > start && end < path.size() && end - start + 1 <= 128, "invalid_segment_range");
-            require(expectedSystem != null && Set.of("create", "ae2", "mekanism").contains(expectedSystem), "invalid_system");
+            // 原版漏斗的 items 回执与原有模组回执同样逐段校验；不能以 minecraft 名称接纳能源或未知介质。
+            require(MachineConnectionSystems.supports(expectedSystem, medium), "invalid_system");
             require(system == null || system.equals(expectedSystem), "mixed_connection_systems");
             List<BlockPos> subpath = path.subList(start, end + 1);
             Segment segment = decode(subpath, dimension, medium, expectedSystem, Objects.requireNonNull(reply));

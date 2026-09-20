@@ -19,6 +19,8 @@ public final class ProductionConnectionSurveyTest {
         nativeRepliesCanLeadTheClientClock();
         ProductionConnectionOrderingTest.main(args);
         ProductionConnectionRangeTest.main(args);
+        // 漏斗不依赖相邻处理机的模组名称；补验原生发现一路送到连接请求、再接受或拒绝对应回执。
+        ProductionConnectionMinecraftTest.main(args);
         System.out.println("ProductionConnectionSurveyTest: 7 orchestration groups passed; native game connections are not exercised");
     }
 

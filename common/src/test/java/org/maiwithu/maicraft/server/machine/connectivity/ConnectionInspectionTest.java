@@ -17,7 +17,8 @@ public final class ConnectionInspectionTest {
         anyUnverifiedEdgeKeepsWholePathUnverified();
         topologyNeverProvesFlowOrProduction();
         largeReportsRetainEveryVerdictInsideReceiptBudget();
-        System.out.println("ConnectionInspectionTest: 6 policy groups passed");
+        minecraftItemsKeepTheExplicitPathContract();
+        System.out.println("ConnectionInspectionTest: 7 policy groups passed");
     }
 
     private static void missingAndUnboundedPathsAreRejected() {
@@ -108,6 +109,18 @@ public final class ConnectionInspectionTest {
                     && edge.getAsJsonObject().has("native_support"), "all actionable verdicts survive compaction");
         }
         check(route.has("sample_resource_id"), "exact component identity key survives large component omission");
+    }
+
+    private static void minecraftItemsKeepTheExplicitPathContract() {
+        // 接纳中立系统只解开协议入口，仍要求完整相邻路径、正确端点面和物品介质，不能让漏斗运送能源。
+        String path = "path:[{x:0,y:2,z:0},{x:0,y:1,z:0},{x:0,y:0,z:0}]";
+        ConnectionPath request = parse("{system:'minecraft',medium:'items',from_face:'down',to_face:'up'," + path + "}");
+        check(request.system().equals("minecraft") && request.positions().size() == 3, "native hopper query reaches the server parser");
+        for (String medium : List.of("fluids", "chemicals", "energy", "kinetic"))
+            rejects("{system:'minecraft',medium:'" + medium + "'," + path + "}");
+        rejects("{system:'minecraft',medium:'items',path:[]}");
+        rejects("{system:'minecraft',medium:'items',path:[{x:0,y:2,z:0},{x:0,y:0,z:0}]}");
+        rejects("{system:'minecraft',medium:'items',from_face:'east'," + path + "}");
     }
 
     private static void rejects(String text) {

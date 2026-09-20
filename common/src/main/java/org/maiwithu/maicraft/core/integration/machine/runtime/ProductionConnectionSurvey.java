@@ -10,14 +10,20 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.HopperBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Link;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Port;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import org.maiwithu.maicraft.network.MachineConnectionSystems;
 
-/** Walks an entire declared path through bounded native queries, keeping one immutable request in flight. */
+/** 沿完整声明路径分段观察并保持单个请求在途；发现真实输送设备后才向服务端申请原生连接检查。 */
 public final class ProductionConnectionSurvey {
     private final ProductionRunPlan plan;
     private final ProductionWork work;
@@ -227,18 +233,28 @@ public final class ProductionConnectionSurvey {
 
     private String selectSystem(Link link, ProductionConnectionPath.Segment segment, List<BlockPos> path) {
         if (link.resource().medium().equals("kinetic")) return "create";
-        boolean ae = false, create = false;
+        boolean ae = false, create = false, hopper = false;
         for (BlockPos position : segment.points(path)) {
             String adapter = nativeSystem.apply(position);
             if ("mekanism".equals(adapter)) return "mekanism";
             ae |= "ae2".equals(adapter); create |= "create".equals(adapter);
+            hopper |= MachineConnectionSystems.MINECRAFT.equals(adapter);
         }
+        // 原版漏斗驱动物品时使用自己的系统名；末端是石磨或粉碎机，不改变这段链实际由漏斗输送的事实。
+        if (hopper && link.resource().medium().equals("items")) return MachineConnectionSystems.MINECRAFT;
         return ae ? "ae2" : create ? "create" : null;
     }
 
     private static String nativeSystemAt(LocalPlayer player, BlockPos position) {
         if (!player.level().isLoaded(position)) return null;
-        Object entity = player.level().getBlockEntity(position);
+        return nativeSystemAt(player.level().getBlockState(position), player.level().getBlockEntity(position));
+    }
+
+    static String nativeSystemAt(BlockState state, BlockEntity entity) {
+        // 方块状态和原生实体必须同时是漏斗。普通桶、箱子或孤立的实体记录不能成为主动运输设备。
+        if (state != null && state.is(Blocks.HOPPER) && state.getBlock() instanceof HopperBlock
+                && entity instanceof HopperBlockEntity && entity.getBlockState().is(Blocks.HOPPER))
+            return MachineConnectionSystems.MINECRAFT;
         if (NativeApi.is(entity, "mekanism.common.tile.transmitter.TileEntityTransmitter")
                 || NativeApi.is(entity, "mekanism.common.tile.TileEntityLogisticalSorter")) return "mekanism";
         if (NativeApi.is(entity, "appeng.api.networking.IInWorldGridNodeHost")) return "ae2";

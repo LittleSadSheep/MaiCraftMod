@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.network.MachineConnectionSystems;
 
 /** Strict wire decoding: compressed indices remain bound to the exact request path. */
 final class ProductionConnectionResponseRows {
@@ -16,6 +17,8 @@ final class ProductionConnectionResponseRows {
     private ProductionConnectionResponseRows() {}
 
     static Segment decode(List<BlockPos> path, String dimension, String medium, String system, JsonObject reply) {
+        // 直接解码入口也执行同一系统／介质约束，避免绕过外层汇总后接受伪造的原版能源链。
+        require(MachineConnectionSystems.supports(system, medium), "invalid_system_or_medium");
         require("maicraft.connection_inspection.v1".equals(text(reply, "schema")), "wrong_schema");
         require(dimension.equals(text(reply, "dimension")) && medium.equals(text(reply, "medium"))
                 && system.equals(text(reply, "system")), "wrong_connection_context");
