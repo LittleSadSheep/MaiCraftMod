@@ -29,7 +29,7 @@ public final class CookingSynchronizationTest {
             world.game.player.containerMenu = menu;
             CookingTestWorld.set(task, "ownedMenu", menu); CookingTestWorld.set(task, "openedMenu", true);
             CookingTestWorld.set(task, "stationClaimed", true); CookingTestWorld.set(task, "effectsStarted", true);
-            CookingTestWorld.set(task, "batchOutstanding", true); CookingTestWorld.set(task, "ownedInputLoaded", 16);
+            CookingTestWorld.set(task, "batchOutstanding", true); CookingTestWorld.ledger(task).begin(16);
             CookingTestWorld.phase(task, "RECONCILE");
             check(task.tick(world.game.player) == TaskState.RUNNING && CookingTestWorld.read(task, "activeChild") == null
                     && CookingTestWorld.read(task, "failureCode") == null, "第一份包不完整时只等待，不关菜单、不拿东西");

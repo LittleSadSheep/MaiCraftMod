@@ -83,9 +83,7 @@ public final class SemanticCookCompanionTask
     private long nextCookCheckTick;
     private long closedWaitStartedTick;
     // 本批装入多少原料、已经取回多少成品，单独记账；背包目标总数还包含开工前已有的物品。
-    private int ownedInputLoaded;
-    private int ownedInputReturned;
-    private int ownedOutputTaken;
+    private final CookingBatchLedger batchLedger = new CookingBatchLedger();
     private int takeInventoryBefore;
     private int takeSlotCount;
     private int cleanupInventoryBefore;
@@ -188,7 +186,7 @@ public final class SemanticCookCompanionTask
                 || phase == Phase.VERIFY_OUTPUT || phase == Phase.VERIFY_CLEAN_INPUT) {
             return;
         }
-        if (!stationClaimed || ownedInputLoaded <= 0) {
+        if (!stationClaimed || batchLedger.loaded() <= 0) {
             phase = Phase.CLEANUP;
             return;
         }
@@ -291,7 +289,7 @@ public final class SemanticCookCompanionTask
 
     // 还欠上一炉的结果时先回到原设备核对；新批次则根据产物和燃料堆叠上限决定装多少原料。
     private TaskState prepare() {
-        if (stationClaimed && ownedInputLoaded > 0) {
+        if (stationClaimed && batchLedger.loaded() > 0) {
             if (stationPos == null) {
                 return closeWithoutClaimingContents("station_target_lost",
                         "The exact claimed workstation position was lost while its batch was outstanding.",
@@ -400,7 +398,7 @@ public final class SemanticCookCompanionTask
             return failOrClean("cooking_station_protected", "The selected workstation is protected from use.", FailureType.UNSUPPORTED);
         if (stationPos == null || (player.level().isLoaded(stationPos)
                 && !player.level().getBlockState(stationPos).is(candidate.device().block))) {
-            if (stationClaimed && ownedInputLoaded > 0) {
+            if (stationClaimed && batchLedger.loaded() > 0) {
                 return closeWithoutClaimingContents("station_replaced_while_cooking",
                         "The exact claimed workstation was removed or replaced before it could be reopened.",
                         FailureType.TARGET_LOST);
@@ -547,9 +545,7 @@ public final class SemanticCookCompanionTask
         }
         stationClaimed = true;
         // 认领空设备还不等于原料已经入炉，装入量必须等 LOAD_INPUT 的原生搬运回执确认。
-        ownedInputLoaded = 0;
-        ownedInputReturned = 0;
-        ownedOutputTaken = 0;
+        batchLedger.reset();
         takeInventoryBefore = 0;
         takeSlotCount = 0;
         phase = Phase.LOAD_INPUT;
@@ -599,7 +595,7 @@ public final class SemanticCookCompanionTask
                     FailureType.UNKNOWN);
         }
         // 极快配方或已经热着的炉子可能在第一次取进度前就产出，先核对数量账而不是误报没点火。
-        if (!result.isEmpty() || input.getCount() < ownedInputLoaded) {
+        if (!result.isEmpty() || input.getCount() < batchLedger.loaded()) {
             phase = Phase.RECONCILE;
             return TaskState.RUNNING;
         }
@@ -699,14 +695,13 @@ public final class SemanticCookCompanionTask
                     FailureType.UNKNOWN);
         }
         int currentInput = input.isEmpty() ? 0 : input.getCount();
-        if (currentInput > ownedInputLoaded - ownedInputReturned) {
+        if (currentInput > batchLedger.outstandingInput()) {
             return closeWithoutClaimingContents("workstation_input_inserted",
                     "More recipe input appeared than MaiCraft loaded; external automation or a player changed the batch.",
                     FailureType.UNKNOWN);
         }
-        int consumed = ownedInputLoaded - ownedInputReturned - currentInput;
-        long expectedProduced = (long) consumed * candidate.outputCount();
-        long observedOwned = (long) ownedOutputTaken + result.getCount();
+        long expectedProduced = batchLedger.expectedOutput(currentInput, candidate.outputCount());
+        long observedOwned = batchLedger.observedOutput(result.getCount());
         if (observedOwned != expectedProduced) {
             long now = player.level().getGameTime();
             if (inconsistentBatchSince == Long.MIN_VALUE) inconsistentBatchSince = now;
@@ -766,7 +761,7 @@ public final class SemanticCookCompanionTask
                             + "MaiCraft stopped before touching the remaining workstation contents.",
                     FailureType.UNKNOWN);
         }
-        ownedOutputTaken += takeSlotCount;
+        batchLedger.recordCollection(takeSlotCount);
         takeInventoryBefore = 0;
         takeSlotCount = 0;
         if (failureMessage != null) return closeWithoutClaimingContents(failureCode, failureMessage, failureType);
@@ -868,7 +863,7 @@ public final class SemanticCookCompanionTask
                             + "gain; MaiCraft stopped before touching any remaining contents.",
                     FailureType.UNKNOWN);
         }
-        ownedInputReturned += cleanupTransferCount;
+        batchLedger.recordReturn(cleanupTransferCount);
         cleanupInventoryBefore = 0;
         cleanupTransferCount = 0;
         cleanupInputExpected = ItemStack.EMPTY;
@@ -892,9 +887,7 @@ public final class SemanticCookCompanionTask
             return TaskState.RUNNING;
         }
         openMode = OpenMode.NEW_BATCH;
-        ownedInputLoaded = 0;
-        ownedInputReturned = 0;
-        ownedOutputTaken = 0;
+        batchLedger.reset();
         takeInventoryBefore = 0;
         takeSlotCount = 0;
         cleanupInventoryBefore = 0;
@@ -1012,7 +1005,7 @@ public final class SemanticCookCompanionTask
                 // 父目标提前满足时，分堆可能只装完第一小堆；本炉只认原生回执确认的量。
                 effectsStarted |= loaded > 0;
                 batchOutstanding = loaded > 0;
-                ownedInputLoaded = loaded;
+                batchLedger.begin(loaded);
                 batchRaw = loaded;
                 phase = Phase.LOAD_FUEL;
             }
@@ -1171,7 +1164,7 @@ public final class SemanticCookCompanionTask
     private TaskState failOrClean(String code, String message, FailureType type) {
         rememberFailure(code, message, type);
         if (openedMenu && player.containerMenu instanceof AbstractFurnaceMenu) {
-            if (stationClaimed && ownedInputLoaded > 0) {
+            if (stationClaimed && batchLedger.loaded() > 0) {
                 cleanupSnapshotReady = false;
                 cleanupInputExpected = ItemStack.EMPTY;
                 phase = Phase.RECONCILE;
@@ -1412,7 +1405,7 @@ public final class SemanticCookCompanionTask
         // 背包可能先更新，回执和关菜单却还没结束；让父任务继续同一炉的收尾，避免遗留鼠标物品。
         // 已准备好终态时也再推进一次，如实交付成功或失败，而不是仅因数量够了就改写成取消。
         if (phase == Phase.COMPLETE) return true;
-        if (stationClaimed && ownedInputLoaded > 0) return true;
+        if (stationClaimed && batchLedger.loaded() > 0) return true;
         if (phase == Phase.CLEANUP || (openedMenu && effectsStarted)) return true;
         if (activeChild == null || activePurpose == null) return false;
         return switch (activePurpose) {
@@ -1501,9 +1494,9 @@ public final class SemanticCookCompanionTask
         data.put("batch_outstanding", batchOutstanding);
         data.put("stopped_because_parent_satisfied", parentSatisfied);
         if (batchOutstanding) {
-            data.put("owned_input_loaded", ownedInputLoaded);
-            data.put("owned_input_returned", ownedInputReturned);
-            data.put("owned_output_taken", ownedOutputTaken);
+            data.put("owned_input_loaded", batchLedger.loaded());
+            data.put("owned_input_returned", batchLedger.returned());
+            data.put("owned_output_taken", batchLedger.collected());
         }
         data.put("outcome_uncertain", outcomeUncertain);
         if (failedChildStage != null) {

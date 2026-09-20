@@ -40,7 +40,7 @@ public final class CookingSettlementTest {
             CookingTestWorld.set(waiting, "effectsStarted", true);
             CookingTestWorld.set(waiting, "stationClaimed", true);
             CookingTestWorld.set(waiting, "batchOutstanding", true);
-            CookingTestWorld.set(waiting, "ownedInputLoaded", 16);
+            CookingTestWorld.ledger(waiting).begin(16);
             var result = waiting.result(TaskState.CANCELLED);
             check(Boolean.TRUE.equals(result.data().get("outcome_uncertain"))
                     && Boolean.TRUE.equals(result.data().get("batch_outstanding"))
@@ -76,7 +76,7 @@ public final class CookingSettlementTest {
             CookingTestWorld.set(cook, "stationClaimed", true);
             CookingTestWorld.set(cook, "effectsStarted", true);
             CookingTestWorld.set(cook, "batchOutstanding", true);
-            CookingTestWorld.set(cook, "ownedInputLoaded", 44);
+            CookingTestWorld.ledger(cook).begin(44);
             world.inventory(256, 0, 6);
             world.game.inventory.setItem(10, new ItemStack(Items.GOLD_INGOT, 44));
             check(parent.tick(world.game.player) == TaskState.RUNNING
@@ -106,7 +106,7 @@ public final class CookingSettlementTest {
             check(CookingTestWorld.read(task, "activeChild") != null, "已经建立装料单，但还没有发出点击");
             task.requestSatisfiedSettlement();
             task.tick(world.game.player);
-            check(CookingTestWorld.read(task, "ownedInputLoaded").equals(0)
+            check(CookingTestWorld.ledger(task).loaded() == 0
                     && Boolean.FALSE.equals(CookingTestWorld.read(task, "batchOutstanding"))
                     && contents.getItem(0).isEmpty(), "原始计划十六份不能在零次搬运后被记成已入炉");
             check(((List<?>) CookingTestWorld.read(world.game.player.connection, "packets")).isEmpty(),

@@ -71,6 +71,9 @@ final class CookingTestWorld implements AutoCloseable {
     }
 
     static Object read(Object target, String name) throws Exception { return field(target.getClass(), name).get(target); }
+    static CookingBatchLedger ledger(SemanticCookCompanionTask task) throws Exception {
+        return (CookingBatchLedger) read(task, "batchLedger");
+    }
     static void set(Object target, String name, Object value) throws Exception { field(target.getClass(), name).set(target, value); }
     static void phase(Object target, String phase) throws Exception {
         enumValue(target, "phase", phase);
