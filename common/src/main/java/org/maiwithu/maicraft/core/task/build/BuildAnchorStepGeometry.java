@@ -14,6 +14,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
+import java.util.List;
 
 /** 锚点内最多半格的原生踏阶证明；微小高阶接触只在此使用，不降低水平檐边的支撑余量。 */
 final class BuildAnchorStepGeometry {
@@ -63,7 +64,7 @@ final class BuildAnchorStepGeometry {
         return rise > EPS || drift.distanceToSqr(from) < EPS * EPS
                 || safe(player, loaded, forbidden, permitted, physical, from, drift, from, height);
     }
-    private static boolean covered(java.util.List<AABB> terrain, Vec3 from, Vec3 to, double width) {
+    private static boolean covered(List<AABB> terrain, Vec3 from, Vec3 to, double width) {
         // 原生 step 由碰到半阶的水平移动触发；两种实际台面在整段上必须连续覆盖，不能借抬高身体越过空隙。
         var intervals = new ArrayList<double[]>();
         for (AABB shape : terrain) if (Math.abs(shape.maxY - from.y) < EPS || Math.abs(shape.maxY - to.y) < EPS) {
@@ -73,7 +74,7 @@ final class BuildAnchorStepGeometry {
         for (double[] span : intervals) { if (span[0] > covered + EPS) return false; covered = Math.max(covered, span[1]); }
         return covered >= 1 - EPS;
     }
-    private static boolean supported(java.util.List<AABB> shapes, Vec3 feet, double width) {
+    private static boolean supported(List<AABB> shapes, Vec3 feet, double width) {
         return shapes.stream().anyMatch(s -> Math.abs(s.maxY - feet.y) < EPS && s.maxX > feet.x - width / 2 + EPS
                 && s.minX < feet.x + width / 2 - EPS && s.maxZ > feet.z - width / 2 + EPS && s.minZ < feet.z + width / 2 - EPS);
     }

@@ -12,6 +12,7 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.EmptyBlockGetter;
+import java.util.TreeMap;
 
 /** Geometric work regions: vertical bodies remain separate across shared floors and roof plates. */
 final class BuildRegions {
@@ -128,7 +129,7 @@ final class BuildRegions {
             BlockPos pos = target.pos();
             stacks.computeIfAbsent(BlockPos.asLong(pos.getX(), 0, pos.getZ()), ignored -> new ArrayList<>()).add(pos);
         }
-        var out = new java.util.TreeMap<Long, Column>();
+        var out = new TreeMap<Long, Column>();
         stacks.forEach((key, stack) -> {
             stack.sort(Comparator.comparingInt(BlockPos::getY));
             int start = 0, bestStart = 0, bestSize = 0;

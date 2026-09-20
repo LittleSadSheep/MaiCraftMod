@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
+import org.maiwithu.maicraft.core.FailureType;
 
 /**
  * 负责创造模式的取料和清理动作：打开可见背包、申请原版改槽、等待确认，再更新材料归属。
@@ -28,7 +29,7 @@ final class CreativeBuildMaterialSupply {
     private ItemStack expected = ItemStack.EMPTY;
     private String failure, phase = "idle";
     private boolean uncertain;
-    private org.maiwithu.maicraft.core.FailureType failureType = org.maiwithu.maicraft.core.FailureType.UNKNOWN;
+    private FailureType failureType = FailureType.UNKNOWN;
     private Map<String, Integer> retained = Map.of();
 
     // 先等待上一次改槽结束，再找所需材料。已有材料可直接选用；需要腾位时先清空自有材料，下次再取新材料。
@@ -45,7 +46,7 @@ final class CreativeBuildMaterialSupply {
             phase = "ready"; return Status.READY;
         }
         if (selection.kind() == CreativeBuildInventory.Kind.BLOCKED) {
-            failureType = org.maiwithu.maicraft.core.FailureType.NO_SPACE;
+            failureType = FailureType.NO_SPACE;
             return fail("creative inventory has no empty slot or unchanged task-owned material to evict", false);
         }
         ItemStack after = selection.kind() == CreativeBuildInventory.Kind.EVICT
@@ -110,7 +111,7 @@ final class CreativeBuildMaterialSupply {
     int slot() { return selectedSlot; }
     String failure() { return failure; }
     boolean uncertain() { return uncertain; }
-    org.maiwithu.maicraft.core.FailureType failureType() { return failureType; }
+    FailureType failureType() { return failureType; }
 
     /** 失败或取消时结束尚未结清的改槽并清理界面；这里保留背包材料，不再另发清空槽位操作。 */
     void stop(LocalPlayer player) {

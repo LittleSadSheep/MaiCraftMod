@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.core.task.inventory.EatItemTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
 
 /** 施工安全间隙先吃随身普通食物，再有限等待低血量恢复；只观察身体和物品，实际持用交给原生进食任务。 */
 final class BuildFoodPreparation {
@@ -135,7 +136,7 @@ final class BuildFoodPreparation {
                 && delta == 1 && foodAfter > foodBefore && !player.isUsingItem();
         var receipt = new LinkedHashMap<String, Object>();
         receipt.put("item_id", BuiltInRegistries.ITEM.getKey(meal.item).toString());
-        receipt.put("terminal_state", terminal.name().toLowerCase(java.util.Locale.ROOT));
+        receipt.put("terminal_state", terminal.name().toLowerCase(Locale.ROOT));
         receipt.put("confirmed", verified); receipt.put("observed_count_before", countBefore); receipt.put("observed_count_after", after);
         receipt.put("observed_consumed", Math.max(0, delta)); receipt.put("food_before", foodBefore); receipt.put("food_after", foodAfter);
         receipt.put("health_before", healthBefore); receipt.put("health_after", player.getHealth());

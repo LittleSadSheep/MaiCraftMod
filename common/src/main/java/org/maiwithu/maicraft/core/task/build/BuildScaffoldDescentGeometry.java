@@ -21,6 +21,8 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
+import java.util.Collections;
+import java.util.Comparator;
 
 /** 只投影移除自有柱，证明一格竖直扫掠及柱底连片地面；不会写入原生世界。 */
 final class BuildScaffoldDescentGeometry {
@@ -67,10 +69,10 @@ final class BuildScaffoldDescentGeometry {
             if (reached.size() < 9 || reached.keySet().stream().noneMatch(pos -> reached.containsKey(pos.east())
                     && reached.containsKey(pos.south()) && reached.containsKey(pos.east().south()))) return List.of();
             Node end = reached.values().stream().filter(node -> node.feet.distanceToSqr(origin) >= 1)
-                    .min(java.util.Comparator.comparingDouble(node -> node.feet.distanceToSqr(origin))).orElse(null);
+                    .min(Comparator.comparingDouble(node -> node.feet.distanceToSqr(origin))).orElse(null);
             if (end == null) return List.of();
             var route = new ArrayList<Vec3>(); for (Node at = end; at != null; at = at.previous) route.add(at.feet);
-            java.util.Collections.reverse(route); return List.copyOf(route);
+            Collections.reverse(route); return List.copyOf(route);
         }
         private record Node(Vec3 feet, Node previous) {}
     }

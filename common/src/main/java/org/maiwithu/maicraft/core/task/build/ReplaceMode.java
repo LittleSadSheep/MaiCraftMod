@@ -1,6 +1,8 @@
 package org.maiwithu.maicraft.core.task.build;
 
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.EmptyBlockGetter;
 
 /**
  * 决定目标格已有方块时，是否允许替换，以及是否处理蓝图中的空气。
@@ -41,7 +43,7 @@ public enum ReplaceMode {
         }
         // 到这里当前方块已经不是可直接覆盖的；REPLACE_SOLID 还要求新目标占满整个方块碰撞空间。
         return this == REPLACE_SOLID && desired.isCollisionShapeFullBlock(
-                net.minecraft.world.level.EmptyBlockGetter.INSTANCE,
-                net.minecraft.core.BlockPos.ZERO);
+                EmptyBlockGetter.INSTANCE,
+                BlockPos.ZERO);
     }
 }

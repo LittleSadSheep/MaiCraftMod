@@ -14,6 +14,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import java.util.Collections;
 
 /** Incremental existing-footing graph; turning and one-block steps need no hypothetical floor. */
 final class BuildFootingSearch {
@@ -81,7 +82,7 @@ final class BuildFootingSearch {
         Node node = best.get(cell); if (node == null) return null;
         var points = new ArrayList<Vec3>();
         for (Node step = node; step != null; step = step.previous()) points.add(step.feet());
-        java.util.Collections.reverse(points);
+        Collections.reverse(points);
         // 一条已证明的直线交给同一个导航走完，不再把每个格心变成“停下再起步”的小终点。
         return new Route(node.feet(), node.distance(), node.lowestY(), BuildWorksiteRoute.compact(points));
     }

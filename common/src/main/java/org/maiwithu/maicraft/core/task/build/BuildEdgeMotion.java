@@ -20,6 +20,9 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /** 已有安全前缀之后的小段原生挪位：完整支撑优先站立，真实临边或低顶才潜行；不寻路、不改地形或身体位置。 */
 public final class BuildEdgeMotion {
@@ -141,7 +144,7 @@ public final class BuildEdgeMotion {
     public String postureReason() { return postureReason; }
     public Map<String, Object> evidence() {
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("state", status.name().toLowerCase(java.util.Locale.ROOT)); out.put("failure", failure);
+        out.put("state", status.name().toLowerCase(Locale.ROOT)); out.put("failure", failure);
         out.put("alignment", alignment);
         out.put("requested_sneak", requestedSneak); out.put("posture_reason", postureReason);
         out.put("approach", coordinates(approach)); out.put("target", coordinates(target));
@@ -156,7 +159,7 @@ public final class BuildEdgeMotion {
             var world = player.level(); double width = player.getBbWidth();
             if (!dimensions(width, height)) return false;
             var physical = PhysicalObstacleSnapshot.capture(player.clientLevel, from);
-            if (!java.util.Set.of("not_installed", "ready", "ready_empty").contains(physical.state())) return false;
+            if (!Set.of("not_installed", "ready", "ready_empty").contains(physical.state())) return false;
             var boxes = new ArrayList<>(physical.boxes());
             AABB sweep = body(from, width, height).minmax(body(to, width, height)).minmax(body(drift, width, height));
             for (var shape : world.getEntityCollisions(player, sweep)) {
@@ -233,5 +236,5 @@ public final class BuildEdgeMotion {
     private static double horizontal(Vec3 v) { return Math.sqrt(v.x * v.x + v.z * v.z); }
     private static boolean dimensions(double width, double height) { return Double.isFinite(width + height) && width > 0 && width <= 2 && height > 0 && height <= 4; }
     private static boolean finite(Vec3 v) { return v != null && Double.isFinite(v.x) && Double.isFinite(v.y) && Double.isFinite(v.z); }
-    private static java.util.List<Double> coordinates(Vec3 v) { return java.util.List.of(v.x, v.y, v.z); }
+    private static List<Double> coordinates(Vec3 v) { return List.of(v.x, v.y, v.z); }
 }

@@ -8,6 +8,10 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Pose;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 
 /**
  * 对整组站位依次尝试保持高度、已有地形和施工导航；单个站位失败不能提前放宽为搭支撑。
@@ -50,10 +54,10 @@ final class BuildStanceNavigation {
         attempted(); return true;
     }
     boolean requiresExistingFooting() { return pass < 2; }
-    boolean existingFooting(net.minecraft.client.player.LocalPlayer player, BlockPos stance) {
-        var corridor = new org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor(player.level(), player.level()::isLoaded,
-                player.getBbWidth(), Math.max(player.getBbHeight(), player.getDimensions(net.minecraft.world.entity.Pose.STANDING).height()),
-                construction.embeddedForbiddenBodyCells(), org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles());
+    boolean existingFooting(LocalPlayer player, BlockPos stance) {
+        var corridor = new GroundCorridor(player.level(), player.level()::isLoaded,
+                player.getBbWidth(), Math.max(player.getBbHeight(), player.getDimensions(Pose.STANDING).height()),
+                construction.embeddedForbiddenBodyCells(), EmbeddedBaritoneRuntime.physicalObstacles());
         var feet = corridor.stance(stance);
         return feet != null && Math.abs(feet.y - stance.getY()) < 1e-5;
     }

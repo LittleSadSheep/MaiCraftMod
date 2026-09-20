@@ -8,6 +8,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.IronBarsBlock;
 
 /**
  * 决定先盖哪一层，再决定这一层先放边角还是中间：本层未完成时先不去上层，层内的边角优先只是排序偏好。
@@ -35,8 +37,8 @@ final class BuildLayerFrontier {
     static int boundaryPriority(BuildTaskRecord.Target target, Map<Long, BuildTaskRecord.Target> targets) {
         if (BuildCellRules.isAirTarget(target)) return 0;
         var state = target.desiredState();
-        if (BuildOrder.needsSupport(state) || state.getBlock() instanceof net.minecraft.world.level.block.DoorBlock
-                || state.getBlock() instanceof net.minecraft.world.level.block.IronBarsBlock) return 4;
+        if (BuildOrder.needsSupport(state) || state.getBlock() instanceof DoorBlock
+                || state.getBlock() instanceof IronBarsBlock) return 4;
         if (state.getBlock() instanceof RotatedPillarBlock
                 && state.getValue(BlockStateProperties.AXIS) == Direction.Axis.Y) return 1;
         BlockPos pos = target.pos();

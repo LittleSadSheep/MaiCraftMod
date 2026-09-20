@@ -6,6 +6,19 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 import java.util.Comparator;
+import net.minecraft.world.level.block.BasePressurePlateBlock;
+import net.minecraft.world.level.block.BaseRailBlock;
+import net.minecraft.world.level.block.BaseTorchBlock;
+import net.minecraft.world.level.block.BushBlock;
+import net.minecraft.world.level.block.CarpetBlock;
+import net.minecraft.world.level.block.DiodeBlock;
+import net.minecraft.world.level.block.FaceAttachedHorizontalDirectionalBlock;
+import net.minecraft.world.level.block.FlowerPotBlock;
+import net.minecraft.world.level.block.GrindstoneBlock;
+import net.minecraft.world.level.block.LadderBlock;
+import net.minecraft.world.level.block.RedStoneWireBlock;
+import net.minecraft.world.level.block.SignBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
 
 /**
  * 提供建筑目标的排序规则。当前施工和供料仍使用这个比较器。
@@ -46,20 +59,20 @@ public final class BuildOrder {
             return true;   // 挂着的灯笼与告示牌
         }
         var b = state.getBlock();
-        return b instanceof net.minecraft.world.level.block.LadderBlock
-                || b instanceof net.minecraft.world.level.block.BaseTorchBlock
-                || b instanceof net.minecraft.world.level.block.SignBlock
-                || b instanceof net.minecraft.world.level.block.BasePressurePlateBlock
-                || b instanceof net.minecraft.world.level.block.BaseRailBlock
-                || b instanceof net.minecraft.world.level.block.DiodeBlock
-                || b instanceof net.minecraft.world.level.block.RedStoneWireBlock
-                || b instanceof net.minecraft.world.level.block.CarpetBlock
-                || b instanceof net.minecraft.world.level.block.BushBlock
-                || b instanceof net.minecraft.world.level.block.FlowerPotBlock
-                || b instanceof net.minecraft.world.level.block.SnowLayerBlock
+        return b instanceof LadderBlock
+                || b instanceof BaseTorchBlock
+                || b instanceof SignBlock
+                || b instanceof BasePressurePlateBlock
+                || b instanceof BaseRailBlock
+                || b instanceof DiodeBlock
+                || b instanceof RedStoneWireBlock
+                || b instanceof CarpetBlock
+                || b instanceof BushBlock
+                || b instanceof FlowerPotBlock
+                || b instanceof SnowLayerBlock
                 // 按钮、拉杆这类贴面件;砂轮同属这一族但它自己立得住
-                || (b instanceof net.minecraft.world.level.block.FaceAttachedHorizontalDirectionalBlock
-                        && !(b instanceof net.minecraft.world.level.block.GrindstoneBlock));
+                || (b instanceof FaceAttachedHorizontalDirectionalBlock
+                        && !(b instanceof GrindstoneBlock));
     }
 
     /** 层内阶段:清障 0 → 骨架 1 → 贴附 2。 */

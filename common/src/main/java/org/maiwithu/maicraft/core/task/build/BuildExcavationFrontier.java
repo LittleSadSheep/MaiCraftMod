@@ -11,6 +11,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
+import net.minecraft.core.Direction;
+import org.maiwithu.maicraft.core.integration.ultimine.UltimineNative;
+import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy;
+import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 
 /** 先从露出的地表往下刨坑，清掉蓝图中的阻挡物，再铺地下室地板，避免直接寻路到埋在土里的底层。 */
 public final class BuildExcavationFrontier {
@@ -54,8 +58,8 @@ public final class BuildExcavationFrontier {
         var level = player.level();
         var landing = target.below();
         return level.isLoaded(landing) && level.getBlockState(landing).getFluidState().isEmpty()
-                && !org.maiwithu.maicraft.core.pathing.util.BlockHelper.isHazard(level, landing)
-                && level.getBlockState(landing).isFaceSturdy(level, landing, net.minecraft.core.Direction.UP);
+                && !BlockHelper.isHazard(level, landing)
+                && level.getBlockState(landing).isFaceSturdy(level, landing, Direction.UP);
     }
 
     /** 保留旧的只读出口查询入口；未知出口返回空，不能拿当前柱顶假装已经离场。 */
@@ -66,8 +70,8 @@ public final class BuildExcavationFrontier {
     BlockPos next(LocalPlayer player) {
         // 优先保留能一并连锁的完整土方，减少先挖散边角再来回换站位；最终选区仍由原生准星决定。
         pending.removeIf(pos -> player.level().isLoaded(pos) && player.level().getBlockState(pos).isAir());
-        if (org.maiwithu.maicraft.core.integration.ultimine.UltimineNative.available()
-                && org.maiwithu.maicraft.core.integration.ultimine.UltimineNative.serverAvailable()) {
+        if (UltimineNative.available()
+                && UltimineNative.serverAvailable()) {
             var clusters = clusters(pending, player.blockPosition());
             BlockPos clustered = select(clusters, rejected, player.blockPosition());
             if (clustered != null) return clustered;
@@ -80,7 +84,7 @@ public final class BuildExcavationFrontier {
         Set<BlockPos> result = new LinkedHashSet<>();
         for (BlockPos center : pending) {
             if (center.getY() != layer) continue;
-            var square = org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy.square(center, net.minecraft.core.Direction.UP);
+            var square = UltimineSelectionPolicy.square(center, Direction.UP);
             if (!square.contains(feet.below()) && pending.containsAll(square)) result.add(center);
         }
         return result;
@@ -115,9 +119,9 @@ public final class BuildExcavationFrontier {
                     || !level.isLoaded(feet.below())) continue;
             var floor = level.getBlockState(feet.below());
             if (floor.getCollisionShape(level, feet.below()).isEmpty() || !floor.getFluidState().isEmpty()) continue;
-            if (org.maiwithu.maicraft.core.pathing.util.BlockHelper.isHazard(level, feet.below())
-                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet)
-                    || org.maiwithu.maicraft.core.pathing.util.BlockHelper.avoidWalkingInto(level, feet.above())) continue;
+            if (BlockHelper.isHazard(level, feet.below())
+                    || BlockHelper.avoidWalkingInto(level, feet)
+                    || BlockHelper.avoidWalkingInto(level, feet.above())) continue;
             Vec3 body = Vec3.atBottomCenterOf(feet);
             AABB box = player.getBoundingBox().move(body.subtract(player.position()));
             if (!level.noCollision(player, box)) continue;

@@ -31,6 +31,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
+import net.minecraft.util.Mth;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.IntegerProperty;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
 /**
  * 为每个施工格寻找能从第一人称完成的点击：人站在哪里、点哪块的哪个面、看向哪里，以及是否要蹲下。
@@ -162,7 +167,7 @@ final class BuildPlacementGeometry {
                 gesturesAt(player, target, stage, clicked, face, player.position(), false, true, false, allowed, candidates);
         }
         return candidates.stream().min(Comparator.comparingDouble(g ->
-                Math.abs(net.minecraft.util.Mth.wrapDegrees(g.yaw() - player.getYRot()))
+                Math.abs(Mth.wrapDegrees(g.yaw() - player.getYRot()))
                         + Math.abs(g.pitch() - player.getXRot()))).orElse(null);
     }
 
@@ -213,18 +218,18 @@ final class BuildPlacementGeometry {
 
     /** A hypothetical support view can prove access, but never replaces the live placement/acknowledgement gate. */
     static Gesture projectedGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
-                                         net.minecraft.world.level.BlockGetter projected,
+                                         BlockGetter projected,
                                          Predicate<BlockPos> loaded, Vec3 feet) {
         return projectedGestureFrom(player, target, projected, loaded, feet, false);
     }
     static Gesture projectedGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
-                                         net.minecraft.world.level.BlockGetter projected,
+                                         BlockGetter projected,
                                          Predicate<BlockPos> loaded, Vec3 feet, boolean forceSneak) {
         return projectedGestureFrom(player, target, projected, loaded, feet, forceSneak, ignored -> true);
     }
     // 站位仍可用时允许换新的点击面内位置，但先排除已经被真实原生确认拒绝的放法。
     static Gesture projectedGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
-                                         net.minecraft.world.level.BlockGetter projected,
+                                         BlockGetter projected,
                                          Predicate<BlockPos> loaded, Vec3 feet, boolean forceSneak, Predicate<Gesture> allowed) {
         if (!(target.item() instanceof BlockItem) || !loaded.test(target.pos())) return null;
         var stage = new BuildPlacementStage(projected, loaded, Map.of(), target, false, true);
@@ -361,7 +366,7 @@ final class BuildPlacementGeometry {
         // 雪、蜡烛等可能要逐次增加；这里统一按整数属性判断，不逐个识别哪些模组整数确实代表数量。
         boolean advanced = false;
         for (var property : desired.getProperties()) {
-            if (!(property instanceof net.minecraft.world.level.block.state.properties.IntegerProperty p)
+            if (!(property instanceof IntegerProperty p)
                     || !after.hasProperty(p)) continue;
             int want = desired.getValue(p);
             int now = after.getValue(p);
@@ -487,7 +492,7 @@ final class BuildPlacementGeometry {
         if (predicted != null && (target.itemPlace() || target.acceptsPlacedState(predicted)
                 || isProgress(target, player.level().isLoaded(target.pos())
                         ? player.level().getBlockState(target.pos())
-                        : net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), predicted))) {
+                        : Blocks.AIR.defaultBlockState(), predicted))) {
             return true;
         }
 
@@ -528,7 +533,7 @@ final class BuildPlacementGeometry {
         BlockState desired = target.desiredState();
         BlockState adjusted = state;
         for (var property : desired.getProperties()) {
-            if (property instanceof net.minecraft.world.level.block.state.properties.IntegerProperty p
+            if (property instanceof IntegerProperty p
                     && adjusted.hasProperty(p)) {
                 adjusted = adjusted.setValue(p, desired.getValue(p));
             }
@@ -655,7 +660,7 @@ final class BuildPlacementGeometry {
                 // 例如点同类半砖可能补成点击格的双层砖，而不是放到邻格；必须连落点也匹配本次目标。
                 BlockPos destination = context.getClickedPos();
                 return new NativePlacement(destination, destination.equals(target)
-                        ? org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems.projectedFinalState(stack,
+                        ? MachinePlacementItems.projectedFinalState(stack,
                             player.level(), destination, context.getHorizontalDirection(), blockItem.getBlock().getStateForPlacement(context)) : null);
             });
         } catch (RuntimeException ignored) {

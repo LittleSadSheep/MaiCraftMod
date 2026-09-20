@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.entity.InputDriver;
+import net.minecraft.world.phys.Vec3;
 
 /** 已证明的实地路线 -> 安全锚点 -> 原生潜行贴边 -> 等点击回执后退回；不向空中格心寻路，也不改地形。 */
 final class BuildPlacementAccessDrive {
@@ -30,7 +31,7 @@ final class BuildPlacementAccessDrive {
     private BuildPlacementGeometry.Gesture gesture;
     private PlayerNav nav;
     private BuildEdgeMotion edge, returning, anchorAlignment;
-    private net.minecraft.world.phys.Vec3 alignmentTarget;
+    private Vec3 alignmentTarget;
     private boolean approached, prepared, itemPrepared, required, anchorAligned, paused, resumeFromEdge, anchorSneak;
     private int routes;
     private long deadline;

@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.entity.InputDriver;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /** 对齐柱心 -> 验证整柱退路 -> 原生拆一格 -> 自然落稳；每格后交回清理队列，先收身边能碰到的支撑。 */
 final class BuildScaffoldDescentDrive {
@@ -112,7 +113,7 @@ final class BuildScaffoldDescentDrive {
         if (!acknowledged && first.equals(digger.current())) {
             // 暂停边界也可能刚收到服务器确认；只结算已有回执，绝不把空气本身当作本次挖掘成功。
             if (player.level().isLoaded(first) && player.level().getBlockState(first).isAir()
-                    && org.maiwithu.maicraft.client.runtime.ClientRuntime.actor().activeContext()
+                    && ClientRuntime.actor().activeContext()
                     .filter(context -> context.player() == player && context.isCurrent()).isPresent()
                     && digger.settleGone(true) == BlockDigger.DigResult.BROKE_TARGET) {
                 acknowledged = true; confirmed.accept(first);

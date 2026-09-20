@@ -5,6 +5,7 @@ import java.util.List;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Blocks;
 
 /** 按现场已加载方块检查地下室能否开挖；基岩和世界高度都读实际存档，不针对超平坦写特例。 */
 public final class BuildSiteConstraints {
@@ -18,7 +19,7 @@ public final class BuildSiteConstraints {
             var pos = target.pos();
             boolean outside = level.isOutsideBuildHeight(pos);
             if (!outside && !level.isLoaded(pos)) continue;
-            BlockState live = outside ? net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()
+            BlockState live = outside ? Blocks.AIR.defaultBlockState()
                     : level.getBlockState(pos);
             String code = conflict(target.constructionMatches(live), outside,
                     level.getWorldBorder().isWithinBounds(pos), live.getDestroySpeed(level, pos));

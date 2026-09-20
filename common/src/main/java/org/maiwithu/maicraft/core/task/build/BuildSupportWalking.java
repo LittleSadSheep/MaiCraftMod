@@ -9,6 +9,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
+import java.util.function.Predicate;
+import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 
 /** Existing/proposed footing only: cardinal walking and one-block steps, never digging or extra supports. */
 final class BuildSupportWalking {
@@ -17,9 +19,9 @@ final class BuildSupportWalking {
     private final LongSet forbidden;
     private final PhysicalObstacleSnapshot physical;
     private final double width, height;
-    private final java.util.function.Predicate<BlockPos> loaded;
+    private final Predicate<BlockPos> loaded;
 
-    BuildSupportWalking(BlockGetter world, java.util.function.Predicate<BlockPos> loaded,
+    BuildSupportWalking(BlockGetter world, Predicate<BlockPos> loaded,
                         double width, double height, LongSet forbidden, PhysicalObstacleSnapshot physical) {
         this.world = world; this.width = width; this.height = height;
         this.forbidden = forbidden; this.physical = physical;
@@ -47,7 +49,7 @@ final class BuildSupportWalking {
                 BlockPos.containing(area.maxX, area.maxY, area.maxZ))) {
             BlockState state = world.getBlockState(pos);
             if ((forbidden.contains(pos.asLong())
-                    || org.maiwithu.maicraft.core.pathing.transport.TransportLanding.unsafe(world, pos, state))
+                    || TransportLanding.unsafe(world, pos, state))
                     && touches(new AABB(pos).inflate(EPS * 2), from, to)) return false;
             for (AABB box : state.getCollisionShape(world, pos).toAabbs())
                 if (touches(box.move(pos), from, to)) return false;

@@ -13,6 +13,8 @@ import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
+import java.util.function.Predicate;
+import net.minecraft.world.entity.Pose;
 
 /**
  * 短距离接近目标时，若放置前后都不会撞上结构或踩空，就允许边走边瞄准。
@@ -25,12 +27,12 @@ final class BuildPlacementMotion {
         LocalPlayer player = context.player();
         // 只处理站立、落地且未蹲下的短路段：小于 0.3 格已经够近，大于 5 格交给普通导航。
         if (destination == null || !player.onGround() || player.isInWater() || player.isPassenger()
-                || player.getPose() != net.minecraft.world.entity.Pose.STANDING
+                || player.getPose() != Pose.STANDING
                 || player.isShiftKeyDown() || player.position().distanceToSqr(destination) < .09
                 || player.position().distanceToSqr(destination) > 25) return false;
         var world = player.level();
         var obstacles = EmbeddedBaritoneRuntime.physicalObstacles();
-        java.util.function.Predicate<BlockPos> loaded = pos -> world.isLoaded(pos) && world.getWorldBorder().isWithinBounds(pos);
+        Predicate<BlockPos> loaded = pos -> world.isLoaded(pos) && world.getWorldBorder().isWithinBounds(pos);
         var live = new GroundCorridor(world, loaded, player.getBbWidth(), player.getBbHeight(), forbidden, obstacles);
         var after = new GroundCorridor(afterPlacement(world, effects), loaded,
                 player.getBbWidth(), player.getBbHeight(), forbidden, obstacles);

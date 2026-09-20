@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Comparator;
 
 /** 将施工确认可存的余料通过真实木桶界面分箱存好；保留工具、建材和返程安排，不直接清包或丢物。 */
 public final class BuildExcavationSpoilSupply {
@@ -72,7 +73,7 @@ public final class BuildExcavationSpoilSupply {
                 throw new IllegalArgumentException("excavation_spoil_quantity_not_carried");
             proved.put(item, count); retained.put(item, count(player, item) - count);
         }
-        items = proved.keySet().stream().sorted(java.util.Comparator.comparing(ResourceLocation::toString)).toList();
+        items = proved.keySet().stream().sorted(Comparator.comparing(ResourceLocation::toString)).toList();
         status = items.isEmpty() ? Status.DEPOSITED : Status.RUNNING;
     }
     public Tick tick(LocalPlayer player, Function<Task, TaskState> runChild) {
@@ -90,7 +91,7 @@ public final class BuildExcavationSpoilSupply {
         if (attempts >= ContainerSupplySources.MAX_ATTEMPTS) return tryAeStorage("excavation_spoil_no_verified_storage_capacity");
         var candidates = ContainerSupplySources.candidates(player, searchOrigin, radius, List.of(item), visited, protectedLabels).stream()
                 .filter(candidate -> candidate.footprint().stream().allMatch(at -> at.distSqr(searchOrigin) <= (long) radius * radius))
-                .sorted(java.util.Comparator.comparingDouble(candidate -> candidate.position().distSqr(player.blockPosition()))).toList();
+                .sorted(Comparator.comparingDouble(candidate -> candidate.position().distSqr(player.blockPosition()))).toList();
         if (candidates.isEmpty()) return tryAeStorage("excavation_spoil_no_safe_loaded_container");
         var target = candidates.getFirst(); visited.addAll(target.footprint()); attempts++; childItem = item; childLimit = remaining;
         childBefore = count(player, item);

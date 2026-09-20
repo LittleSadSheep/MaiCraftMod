@@ -16,6 +16,7 @@ import java.util.function.BiPredicate;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.Direction;
 
 /**
  * 寻找能从一个站位连续放多格的位置，减少每放一块就重新走路。这里只选站位和点击方案，不执行动作。
@@ -134,7 +135,7 @@ final class BuildWorksitePlanner {
             if (!player.level().isLoaded(target.pos())) return false;
             var stage = new BuildPlacementStage(player.level(), player.level()::isLoaded, targets, target, false);
             if (!stage.state(target.pos()).isAir()) return true;
-            for (var direction : net.minecraft.core.Direction.values())
+            for (var direction : Direction.values())
                 if (stage.support(target.pos().relative(direction), direction.getOpposite())) return true;
             return false;
         }

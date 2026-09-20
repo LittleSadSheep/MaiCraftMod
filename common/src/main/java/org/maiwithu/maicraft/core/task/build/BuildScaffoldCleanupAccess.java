@@ -24,6 +24,8 @@ import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 import org.maiwithu.maicraft.entity.InputDriver;
+import java.util.LinkedHashMap;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /** 一次有界回收接近：原生搭垫脚块到已验证站位，途中所有观察到的现成方块均禁止拆改。 */
 final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, BuildPlacementRegistry.Provider {
@@ -151,7 +153,7 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
     @Override public void confirmedScaffoldRemoval(BlockPos pos) { owner.confirmedScaffoldRemoval(pos); }
 
     Map<String, Object> evidence() {
-        var out = new java.util.LinkedHashMap<String, Object>();
+        var out = new LinkedHashMap<String, Object>();
         out.put("phase", phase); out.put("failure", failure); out.put("read_blocks", totalReads);
         out.put("snapshot_cells", scope.volume); out.put("snapshot_complete", scope.complete()); out.put("protected_observed_blocks", scope.protectedCells.size());
         out.put("scope_min", List.of(scope.min.getX(), scope.min.getY(), scope.min.getZ()));
@@ -187,7 +189,7 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
             min = new BlockPos(minX, minY, minZ); max = new BlockPos(maxX, maxY, maxZ);
             volume = ((long) maxX - minX + 1) * ((long) maxY - minY + 1) * ((long) maxZ - minZ + 1);
             // 大厅清理仍分帧观察完整通行范围；其容量独立于目标数，并明确由客户端配置限制。
-            if (volume <= 0 || volume > org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxCleanupAccessCells()
+            if (volume <= 0 || volume > BuildingBudgets.current().maxCleanupAccessCells()
                     || cells.stream().anyMatch(pos -> !inside(pos)))
                 throw new IllegalArgumentException("cleanup access requires a bounded loaded local region");
             pending = BlockPos.betweenClosed(min, max).iterator();

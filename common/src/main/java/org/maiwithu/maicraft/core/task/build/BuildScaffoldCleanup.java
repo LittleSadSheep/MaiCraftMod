@@ -26,6 +26,8 @@ import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
+import java.util.LinkedHashSet;
+import net.minecraft.world.level.block.BaseFireBlock;
 
 /** Read-only cleanup stances. The native navigator still has to prove and walk each route. */
 final class BuildScaffoldCleanup {
@@ -35,7 +37,7 @@ final class BuildScaffoldCleanup {
     private final LongSet inheritedForbidden;
     private final List<BlockPos> cells = new ArrayList<>();
     private final Set<BlockPos> rejected = new HashSet<>();
-    private final Set<BlockPos> routeCells = new java.util.LinkedHashSet<>();
+    private final Set<BlockPos> routeCells = new LinkedHashSet<>();
     private int cursor, offered;
     private int failedRoutes;
     private String lastRouteFailure = "";
@@ -144,7 +146,7 @@ final class BuildScaffoldCleanup {
             // would promise a shot that the native digger cannot subsequently reproduce.
             List<Vec3> aims = new ArrayList<>();
             Vec3 center = collision.isEmpty() ? Vec3.atCenterOf(target) : point(collision, .5, .5, .5);
-            if (!collision.isEmpty() && state.getBlock() instanceof net.minecraft.world.level.block.BaseFireBlock)
+            if (!collision.isEmpty() && state.getBlock() instanceof BaseFireBlock)
                 center = new Vec3(center.x, target.getY(), center.z);
             aims.add(center);
             for (Direction face : Direction.values()) aims.add(point(shape,

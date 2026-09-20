@@ -12,16 +12,17 @@ import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.ArrayList;
 
 /** 大面积挖掘前先备好合适工具；取料和合成都复用正常可见界面，并遵守本次建造允许的材料来源。 */
 final class BuildExcavationTools {
     private final SemanticMaterialSupplyCoordinator supply = new SemanticMaterialSupplyCoordinator();
     private final List<BlockPos> protection;
     private String failure;
-    private final java.util.List<Map<String, Object>> receipts = new java.util.ArrayList<>();
+    private final List<Map<String, Object>> receipts = new ArrayList<>();
 
     BuildExcavationTools(BuildTaskRecord record) {
-        var cells = new java.util.ArrayList<>(record.targets.stream().map(BuildTaskRecord.Target::pos).toList());
+        var cells = new ArrayList<>(record.targets.stream().map(BuildTaskRecord.Target::pos).toList());
         cells.addAll(record.materialSupplyProtection());
         protection = List.copyOf(cells);
     }

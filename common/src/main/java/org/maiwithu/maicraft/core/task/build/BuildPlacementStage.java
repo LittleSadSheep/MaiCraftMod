@@ -9,6 +9,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.material.FluidState;
 
 /**
  * 为放置检查提供一份只读的“施工到这一步时会是什么样”的世界视图。
@@ -51,16 +54,16 @@ final class BuildPlacementStage implements BlockGetter {
     }
 
     @Override public BlockState getBlockState(BlockPos pos) { return state(pos); }
-    @Override public net.minecraft.world.level.block.entity.BlockEntity getBlockEntity(BlockPos pos) {
+    @Override public BlockEntity getBlockEntity(BlockPos pos) {
         return world.getBlockEntity(pos);
     }
-    @Override public net.minecraft.world.level.material.FluidState getFluidState(BlockPos pos) {
+    @Override public FluidState getFluidState(BlockPos pos) {
         return state(pos).getFluidState();
     }
     @Override public int getHeight() { return world.getHeight(); }
     @Override public int getMinBuildHeight() { return world.getMinBuildHeight(); }
 
-    boolean support(BlockPos pos, net.minecraft.core.Direction face) {
+    boolean support(BlockPos pos, Direction face) {
         if (!loaded.test(pos)) return false;
         BlockState state = state(pos);
         if (state.isAir() || state.canBeReplaced()) return false;

@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * 检查一格能否施工：是否允许替换、是否有箱子等需要保护、是否越界或不可挖，以及是否挡住玩家或生物。
@@ -31,7 +32,7 @@ final class BuildCellRules {
     }
 
     static boolean isAirTarget(BuildTaskRecord.Target target) {
-        return target.block() == net.minecraft.world.level.block.Blocks.AIR;
+        return target.block() == Blocks.AIR;
     }
 
     /** 计费判据在 {@link BuildTaskRecord.Target#costsMaterial()}——盘点工具与这里共用。 */

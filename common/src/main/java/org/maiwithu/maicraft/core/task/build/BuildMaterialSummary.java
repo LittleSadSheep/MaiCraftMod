@@ -4,6 +4,7 @@ import net.minecraft.world.item.Item;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /** 把已算好的材料缺口写成简短提示；不统计施工进度，也不决定如何备料。 */
 final class BuildMaterialSummary {
@@ -45,6 +46,6 @@ final class BuildMaterialSummary {
     }
 
     private static String label(Item item) {
-        return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).getPath();
+        return BuiltInRegistries.ITEM.getKey(item).getPath();
     }
 }

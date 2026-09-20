@@ -11,6 +11,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.build.BuildValidity;
+import java.util.LinkedHashMap;
+import org.maiwithu.maicraft.core.PlayerInv;
 
 /**
  * 记录一次放置前的方块状态，并检查点击后是否有预期变化，包括床头、门上半等随之生成的格子。
@@ -43,7 +45,7 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
         var projection = new BuildTaskRecord.Target(predicted, target.item(), target.pos(), target.label(), null, null, null);
         var nativeEffects = BuildPlacementGeometry.generatedBy(projection);
         var effects = new ArrayList<BuildPlacementGeometry.GeneratedCell>();
-        var contracts = new java.util.LinkedHashMap<Long, BuildTaskRecord.Target>();
+        var contracts = new LinkedHashMap<Long, BuildTaskRecord.Target>();
         for (var effect : generated) {
             effects.add(nativeEffects.stream().filter(value -> value.pos().equals(effect.pos())).findFirst().orElse(effect));
             var authored = declared.get(effect.pos().asLong());
@@ -67,12 +69,12 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
     BuildPlacementConfirmation trackMaterial(LocalPlayer player) {
         // 门、床等一件物品生成两格：生存放置须同时看到扣一件，不按上下两半重复收费，也不改背包制造证据。
         if (!player.getAbilities().instabuild && !generated.isEmpty() && target.materialCount() == 1)
-            materialObserved = materialBefore = org.maiwithu.maicraft.core.PlayerInv.carriedCount(player.getInventory(), target.item());
+            materialObserved = materialBefore = PlayerInv.carriedCount(player.getInventory(), target.item());
         return this;
     }
     private Verdict materialVerdict(LocalPlayerContext context, Verdict world) {
         if (materialBefore < 0) return world;
-        materialObserved = org.maiwithu.maicraft.core.PlayerInv.carriedCount(context.player().getInventory(), target.item());
+        materialObserved = PlayerInv.carriedCount(context.player().getInventory(), target.item());
         int consumed = materialBefore - materialObserved;
         if (world == Verdict.DIVERGED || consumed < 0 || consumed > 1 || world == Verdict.NOT_APPLIED && consumed != 0) return Verdict.DIVERGED;
         // 方块确认和库存同步可能先后到达；少了扣物证据就继续等同一个回执，不能再点一次或直接报成功。
@@ -121,7 +123,7 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
         List<Map<String, Object>> effects = new ArrayList<>();
         effects.add(effect(target.pos(), predicted, loaded, states));
         generated.forEach(value -> effects.add(effect(value.pos(), value.expected(), loaded, states)));
-        var data = new java.util.LinkedHashMap<String, Object>();
+        var data = new LinkedHashMap<String, Object>();
         data.put("predicted_primary", predicted.toString()); data.put("effects", effects); data.put("requires_server_acknowledgement", true);
         if (materialBefore >= 0) data.put("material_confirmation", Map.of("expected_consumed", 1,
                 "carried_before", materialBefore, "last_observed_carried", materialObserved));

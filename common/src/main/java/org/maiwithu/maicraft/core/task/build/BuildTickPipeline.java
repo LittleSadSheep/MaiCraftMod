@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.build;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.function.LongSupplier;
 
 /**
  * 把不需要等待游戏变化的相邻阶段接着处理，例如整理完队列后马上进入选目标。
@@ -17,7 +18,7 @@ final class BuildTickPipeline {
     }
 
     static <P> TaskState advance(Supplier<P> phase, Supplier<TaskState> step, BooleanSupplier canContinue,
-                                java.util.function.LongSupplier clock) {
+                                LongSupplier clock) {
         long deadline = clock.getAsLong() + 4_000_000;
         for (int budget = 0; budget < 8; budget++) {
             P before = phase.get();

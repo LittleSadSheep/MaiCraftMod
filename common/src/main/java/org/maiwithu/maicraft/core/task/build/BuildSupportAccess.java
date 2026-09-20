@@ -15,6 +15,10 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
+import net.minecraft.core.registries.BuiltInRegistries;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 
 /** 逐块证明支撑自身能放下，再证明最终目标；每一步只使用此前支撑前缀和真实地面，不借未来平台。 */
 final class BuildSupportAccess {
@@ -46,7 +50,7 @@ final class BuildSupportAccess {
                        PhysicalObstacleSnapshot physical) {
         this.player = player; this.target = target; this.material = material; this.allowed = allowed; this.physical = physical;
         this.supports = supports.stream().map(BlockPos::immutable).toList(); origin = player.position();
-        this.forbidden = it.unimi.dsi.fastutil.longs.LongSets.unmodifiable(new it.unimi.dsi.fastutil.longs.LongOpenHashSet(forbidden));
+        this.forbidden = LongSets.unmodifiable(new LongOpenHashSet(forbidden));
         Map<BlockPos, BlockState> added = new LinkedHashMap<>();
         this.supports.forEach(pos -> added.put(pos, material));
         world = new BuildSupportWorld(player.level(), player.level()::isLoaded, added);
@@ -95,7 +99,7 @@ final class BuildSupportAccess {
             boolean full = state.isCollisionShapeFullBlock(world, neighbor);
             if (full) closed++;
             faces.add(Map.of("face", direction.getName(), "full_collision", full,
-                    "block_id", net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
+                    "block_id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
                     "proposed_support", supports.contains(neighbor)));
         }
         if (world.sawUnloaded()) { reject("support_access_unloaded"); return; }
@@ -124,7 +128,7 @@ final class BuildSupportAccess {
     }
     private String environmentIssue() {
         // 先检查世界和权限，再区分只是身体起点变了；真实环境变化不能伪装成惯性位移而获得重试许可。
-        if (!physical.boxes().equals(org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime.physicalObstacles().boxes())) return "support_access_physical_changed";
+        if (!physical.boxes().equals(EmbeddedBaritoneRuntime.physicalObstacles().boxes())) return "support_access_physical_changed";
         for (BlockPos pos : supports) if (!allowed.test(pos) || !player.level().isLoaded(pos)
                 || !player.level().getBlockState(pos).isAir()) return "support_projection_site_changed";
         if (!world.unchanged()) return "support_access_world_changed";

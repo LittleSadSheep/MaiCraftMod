@@ -14,6 +14,8 @@ import net.minecraft.world.entity.Pose;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
+import java.util.Collections;
+import java.util.function.Supplier;
 
 /** 只从当前真实可达落脚点找放置见证；檐边保留连续坐标、完整支撑扫掠和潜行姿态，不把空中格心交给导航。 */
 final class BuildPlacementAccessSearch {
@@ -28,7 +30,7 @@ final class BuildPlacementAccessSearch {
     private final BuildSupportWorld world;
     private final Vec3 origin;
     private final BuildSupportWalking walking;
-    private final java.util.function.Supplier<GroundCorridor> corridors;
+    private final Supplier<GroundCorridor> corridors;
     private GroundCorridor corridor;
     private final boolean edgesOnly;
     private final int visitLimit;
@@ -128,7 +130,7 @@ final class BuildPlacementAccessSearch {
         }
         if (gesture == null) return;
         var route = new ArrayList<Vec3>(); for (Node at = node; at != null; at = at.previous()) route.add(at.feet());
-        java.util.Collections.reverse(route);
+        Collections.reverse(route);
         if (!route.getLast().equals(anchor)) route.add(anchor);
         access = new Access(anchor, feet, BuildWorksiteRoute.compact(route), gesture, edge);
         complete = true; reason = edge ? "reachable_crouching_edge_verified"
