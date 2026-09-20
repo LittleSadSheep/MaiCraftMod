@@ -18,8 +18,9 @@ import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
  * 把命名的盒子和开孔关系变成逐格蓝图。例如先定义墙，再用另一个盒子从这面墙里扣出窗洞。
  */
 public final class BuildingSceneCompiler {
-    private static final Set<String> FIELDS = Set.of("schema_version", "name", "coordinate_system", "materials", "objects");
-    private static final Set<String> OBJECT_FIELDS = Set.of("name", "type", "primitive", "role", "location", "dimensions", "rotation_euler", "material", "modifiers");
+    // 旧版对象仍可读取；格式导出复用相同字段表，避免新客户端把旧模型误判为可自由扩展对象。
+    static final Set<String> FIELDS = Set.of("schema_version", "name", "coordinate_system", "materials", "objects");
+    static final Set<String> OBJECT_FIELDS = Set.of("name", "type", "primitive", "role", "location", "dimensions", "rotation_euler", "material", "modifiers");
     private record Mesh(String name, Box box, String material, boolean cutter, List<String> cuts) {}
     private record Model(Map<String, JsonObject> materials, Map<String, Mesh> meshes, Set<String> cutters, String coordinates, int limit) {}
     private BuildingSceneCompiler() {}

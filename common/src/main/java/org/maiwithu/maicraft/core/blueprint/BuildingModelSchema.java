@@ -13,10 +13,12 @@ import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 public final class BuildingModelSchema {
     static final Set<String> PRIMITIVES = Set.of("cube", "panel", "triangle", "wedge", "triangular_prism",
             "tetrahedron", "triangular_pyramid", "pyramid", "prism", "cylinder", "cone", "convex_polyhedron");
-    private static final Set<String> COMMON = Set.of("name", "type", "location", "rotation_euler", "mirror", "array", "modifiers", "block_state_axes");
-    private static final Set<String> MESH = Set.of("primitive", "dimensions", "role", "material", "fill", "wall_thickness",
+    // 公开 Schema 与运行时校验共用字段集合；新增建模字段时不能只让其中一端认识它。
+    static final Set<String> FIELDS = Set.of("schema_version", "name", "coordinate_system", "materials", "objects", "components", "block_state_axes", "overlap_policy");
+    static final Set<String> COMMON = Set.of("name", "type", "location", "rotation_euler", "mirror", "array", "modifiers", "block_state_axes");
+    static final Set<String> MESH = Set.of("primitive", "dimensions", "role", "material", "fill", "wall_thickness",
             "face_materials", "edge_material", "edge_materials", "edge_width", "open_faces", "segments", "vertices", "faces", "pattern");
-    private static final Set<String> INSTANCE = Set.of("component", "material_map");
+    static final Set<String> INSTANCE = Set.of("component", "material_map");
     private BuildingModelSchema() {}
 
     public static boolean applies(JsonObject scene) {
@@ -26,7 +28,7 @@ public final class BuildingModelSchema {
     }
 
     static void validate(JsonObject scene) {
-        keys(scene, Set.of("schema_version", "name", "coordinate_system", "materials", "objects", "components", "block_state_axes", "overlap_policy"), "v2 scene");
+        keys(scene, FIELDS, "v2 scene");
         integer(scene.get("schema_version"), 2, 2, "schema_version");
         choice(scene, "coordinate_system", Set.of("minecraft_y_up", "blender_z_up"));
         choice(scene, "block_state_axes", Set.of("local", "minecraft_world"));
@@ -37,7 +39,11 @@ public final class BuildingModelSchema {
         if (scene.has("components")) {
             JsonObject components = object(scene.get("components"), "components");
             if (components.size() > limit()) throw bad("too many component definitions");
-            for (var entry : components.entrySet()) { name(entry.getKey()); validateComponent(object(entry.getValue(), "component")); }
+            for (var entry : components.entrySet()) {
+                name(entry.getKey());
+                try { validateComponent(object(entry.getValue(), "component")); }
+                catch (IllegalArgumentException invalid) { throw bad("scene.components[" + entry.getKey() + "]: " + invalid.getMessage()); }
+            }
         }
     }
 
@@ -48,9 +54,18 @@ public final class BuildingModelSchema {
 
     static void nodes(JsonArray objects, boolean complete) {
         var names = new HashSet<String>();
-        for (var entry : objects) {
-            JsonObject node = object(entry, "model node"); validateNode(node, complete);
-            if (!names.add(name(node.get("name")))) throw bad("duplicate object name in the same component");
+        for (int index = 0; index < objects.size(); index++) {
+            // 格式错误带源对象下标和可用名称，设计 Agent 能修指定组件，不必猜测是哪一面墙被拒绝。
+            JsonElement entry = objects.get(index); String label = "objects[" + index + "]";
+            if (entry.isJsonObject() && entry.getAsJsonObject().has("name")) {
+                var candidate = entry.getAsJsonObject().get("name");
+                if (candidate.isJsonPrimitive() && candidate.getAsJsonPrimitive().isString() && candidate.getAsString().length() <= 64)
+                    label += "(" + candidate.getAsString() + ")";
+            }
+            try {
+                JsonObject node = object(entry, "model node"); validateNode(node, complete);
+                if (!names.add(name(node.get("name")))) throw bad("duplicate object name in the same component");
+            } catch (IllegalArgumentException invalid) { throw bad(label + ": " + invalid.getMessage()); }
         }
     }
     public static void validateNodePatch(JsonObject node) { validateNode(node, false); }
