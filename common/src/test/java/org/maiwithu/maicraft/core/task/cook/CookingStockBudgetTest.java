@@ -20,6 +20,7 @@ import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 每条方案共用一份库存：原料不能再当燃料，合成余料可继续使用，同组替代材料可以混合供给。 */
 public final class CookingStockBudgetTest {
@@ -43,6 +44,18 @@ public final class CookingStockBudgetTest {
             task.start(world.game.player);
             task.tick(world.game.player);
             check(CookingTestWorld.read(task, "fuel") == Items.COAL, "必须留住唯一原木做原料，不能因燃烧浪费少就把它选作燃料");
+            // 选方案时有两根原木，随后一根离开背包；剩下的一根仍足够做原料，应换煤作燃料，而不是排除木炭配方。
+            world.game.inventory.setItem(1, new ItemStack(Items.OAK_LOG, 2));
+            var changed = new SemanticCookCompanionTask(world.game.player, request);
+            changed.start(world.game.player);
+            changed.tick(world.game.player);
+            check(CookingTestWorld.read(changed, "fuel") == Items.OAK_LOG, "两份原木充足时允许选择低浪费燃料");
+            world.game.inventory.setItem(1, new ItemStack(Items.OAK_LOG));
+            for (int tick = 0; tick < 8 && CookingTestWorld.read(changed, "fuel") != Items.COAL; tick++) {
+                world.game.nextTick();
+                check(changed.tick(world.game.player) == TaskState.RUNNING, "燃料不足不应误删仍可制作的配方");
+            }
+            check(CookingTestWorld.read(changed, "fuel") == Items.COAL, "共用物品的额外燃料份额拿不到时应换已允许的煤");
 
             world.inventory(0, 0, 1);
             world.recipes(List.of(craft(Items.RAW_IRON, 1, Ingredient.of(Items.COAL))));

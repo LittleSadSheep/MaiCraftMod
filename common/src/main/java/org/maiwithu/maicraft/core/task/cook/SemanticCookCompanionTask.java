@@ -54,11 +54,7 @@ import org.maiwithu.maicraft.core.Constants;
  */
 public final class SemanticCookCompanionTask
         extends AbstractCompanionTask<SemanticCookTaskRecord> {
-    /**
-     * Furnace progress is live server evidence, so each observed change renews a
-     * no-progress lease instead of spending one fixed wall-clock budget for the
-     * whole (possibly multi-batch, Mod-recipe) cooking goal.
-     */
+    /** 炉子进度确实变化时续上无进展期限，不能让仍在正常加工的多炉目标被最初总时长截断。 */
     private static final long COOK_PROGRESS_LEASE_TICKS = 30L * 20L;
     private enum Phase { RESOLVE, PREPARE, OPEN, WAIT_MENU, VALIDATE, LOAD_INPUT,
         LOAD_FUEL, CONFIRM_START, CLOSE_WAIT, WAIT_CLOSED, RECONCILE,
@@ -170,11 +166,6 @@ public final class SemanticCookCompanionTask
         };
     }
 
-    /**
-     * A satisfied inventory fact does not erase a batch already committed to a closed machine.
-     * Reopen and reconcile that exact batch before normal cleanup; only an uncommitted cook may
-     * jump directly to the terminal cleanup phase.
-     */
     // 数量够了只是不再开新批次；炉里还有本任务的原料时，要回去核对并收尾，不能直接丢下正在加工的这一批。
     private void routeFinishRequest() {
         if (!finishRequested || phase == Phase.CLEANUP || phase == Phase.COMPLETE
@@ -214,8 +205,7 @@ public final class SemanticCookCompanionTask
         if (stationPos == null || !companion.level().isLoaded(stationPos)) return false;
         var state = companion.level().getBlockState(stationPos);
         if (candidate == null || !state.is(candidate.device().block)) return true;
-        // Once the close has had a couple of server ticks to settle, an extinguished loaded
-        // furnace is useful early evidence: either the batch completed or it needs attention.
+        // 等关闭稳定两刻后，炉子熄火就是提前检查的线索：可能已经烧完，也可能缺燃料。
         return now > closedWaitStartedTick + 2L
                 && state.hasProperty(
                         BlockStateProperties.LIT)
@@ -449,8 +439,7 @@ public final class SemanticCookCompanionTask
                         childId("wrong-menu-close"), childDeadline(30L * 20L), ownedMenu),
                         Purpose.ABANDON_CLOSE);
             }
-            // This counter is a consecutive confirmation retry budget for one
-            // open operation, not a lifetime cap across later cooking batches.
+            // 这只限制连续开门确认失败；下一炉重新打开时，不累计此前正常打开的次数。
             openAttempts = 0;
             openedMenu = true;
             phase = openMode == OpenMode.RESUME_BATCH
@@ -499,7 +488,7 @@ public final class SemanticCookCompanionTask
                     FailureType.UNKNOWN);
         }
         stationClaimed = true;
-        // Ownership begins only after LOAD_INPUT's native receipt confirms the deposit.
+        // 认领空设备还不等于原料已经入炉，装入量必须等 LOAD_INPUT 的原生搬运回执确认。
         ownedInputLoaded = 0;
         ownedOutputTaken = 0;
         takeInventoryBefore = 0;
@@ -533,7 +522,7 @@ public final class SemanticCookCompanionTask
         return transferTo(fuel, toLoad, 1, Purpose.LOAD_FUEL);
     }
 
-    /** Loading a slot is not proof that the server accepted and started the recipe. */
+    /** 物品进了槽，不等于服务端已经接受配方并点火。 */
     // 看到原料减少或成品出现就核对产出；否则等燃烧时间和加工进度真的开始，再关界面等待。
     private TaskState confirmStart() {
         AbstractFurnaceMenu menu = furnaceMenu();
@@ -550,7 +539,7 @@ public final class SemanticCookCompanionTask
                     "The synchronized workstation input changed after MaiCraft loaded the batch.",
                     FailureType.UNKNOWN);
         }
-        // Very short or already-hot recipes can finish before the first progress sample.
+        // 极快配方或已经热着的炉子可能在第一次取进度前就产出，先核对数量账而不是误报没点火。
         if (!result.isEmpty() || input.getCount() < ownedInputLoaded) {
             phase = Phase.RECONCILE;
             return TaskState.RUNNING;
@@ -610,7 +599,7 @@ public final class SemanticCookCompanionTask
         openedMenu = false;
         if (!closedWaitDue(player)) return TaskState.RUNNING;
         if (player.containerMenu != player.inventoryMenu) {
-            // A human or another higher-level action currently owns a GUI. Never close it here.
+            // 玩家或更高层任务正在操作别的界面时等待，不能为了看炉子先关掉它。
             return TaskState.RUNNING;
         }
         if (stationPos == null) {
@@ -641,7 +630,7 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** Reconcile only quantities this task can prove it put into an initially empty machine. */
+    /** 只核对本任务向初始空炉投入的数量，不认领来路不明的额外物品。 */
     // 核对本批账：装入量减去炉内剩余量，应等于已加工的原料数；对应成品应在结果槽或已经被本任务取走。
     // 数量不合就停止触碰内容，避免把外来的物品当自己的；当前一次不合就报外部变化，未等待分批同步。
     private TaskState reconcileBatch() {
@@ -779,17 +768,14 @@ public final class SemanticCookCompanionTask
         }
         if (!menuMatches()) return menuLost();
         if (!cleanupSnapshotReady) {
-            // A failure may have routed here while the furnace was still open. Re-enter the
-            // ownership ledger before touching any slot instead of blindly "cleaning" it.
+            // 失败时炉子可能还开着，先回到本批账核对，不能因为进入清理阶段就直接拿取槽内物品。
             phase = Phase.RECONCILE;
             return TaskState.RUNNING;
         }
         ItemStack result = menu.getSlot(2).getItem();
         ItemStack input = menu.getSlot(0).getItem();
         if (!result.isEmpty() || !sameStack(input, cleanupInputExpected)) {
-            // A smelt may complete between reconciliation and cleanup. Reconcile again so a
-            // legitimate new result is taken through TAKE_OUTPUT -> VERIFY_OUTPUT and any
-            // external mutation is rejected by the conservation equation.
+            // 核对后到清理前可能又烧好一件；重新对账，让新成品经过正常取出与背包增量确认。
             cleanupSnapshotReady = false;
             cleanupInputExpected = ItemStack.EMPTY;
             phase = Phase.RECONCILE;
@@ -803,9 +789,7 @@ public final class SemanticCookCompanionTask
                     new ContainerTransferTaskRecord.Move(
                             0, -1, cleanupTransferCount)), Purpose.CLEAN_INPUT);
         }
-        // Remaining fuel stays in the machine. After closing the menu its identity cannot be
-        // distinguished from same-kind fuel inserted by a player or hopper, so reclaiming it
-        // would be an ownership guess.
+        // 当前没有完整燃料归属账；关过界面后不能排除玩家或漏斗补入同类燃料，因此不猜着取回。
         return start(new CloseMenuTaskRecord(
                 childId("close"), childDeadline(30L * 20L), ownedMenu), Purpose.CLOSE);
     }
@@ -869,19 +853,14 @@ public final class SemanticCookCompanionTask
         TaskState terminal;
         if (activeRecord != null
                 && player.level().getGameTime() >= activeRecord.getDeadlineGameTime()) {
-            // Nested tasks are not driven by TaskSlot, so enforce the child's
-            // own no-progress lease here and let its timeout receipt flow back
-            // through the semantic cooking failure instead of timing out the
-            // parent first with no prerequisite context.
+            // 内部子任务没有自己的 TaskSlot，在这里判定它的期限，让失败仍能说明是哪项前置工作超时。
             activeChild.stop(player, Task.StopReason.REPLACED);
             terminal = TaskState.TIMEOUT;
         } else {
             terminal = runChild(activeChild);
         }
         if (terminal == null) {
-            // Long prerequisite/navigation children own their liveness evidence.
-            // Carry their renewed no-progress lease into this semantic parent so
-            // the parent cannot time out while the child is still advancing.
+            // 备料或导航仍在产生进展时，把它的续时带回父任务，避免父任务先到期丢掉具体进度。
             if (activeRecord != null) {
                 extendParentPast(activeRecord.getDeadlineGameTime());
             }
@@ -1031,15 +1010,17 @@ public final class SemanticCookCompanionTask
                     || Boolean.TRUE.equals(result.data().get("effects_started")));
     }
 
-    /** A pre-effect prerequisite failure rejects only that finite plan and re-runs cost selection. */
     // 还没装入加工材料、没有菜单待处理且上次结果不确定性未置位时，可换配方原料、燃料或设备重试。
-    // 当前“原料准备失败”会排除整个原料候选，即使真正短缺来自它同时被选作燃料（A61）。
+    // 原料和燃料共用一种物品时，若原料份额仍够，只排除这次燃料选择，保留本来能做的配方。
     private boolean retryAnotherPreparationPlan(Purpose purpose, TaskResult result) {
         if (effectsStarted || openedMenu || uncertain(result)) return false;
         switch (purpose) {
             case ACQUIRE_INPUT -> {
                 if (candidate == null) return false;
-                rejectedInputCandidates.add(candidateKey(candidate));
+                if (candidate.input() == fuel
+                        && PlayerInv.buildableCount(player.getInventory(), candidate.input()) >= batchRaw) {
+                    recipePlanner.rejectFuel(fuel);
+                } else rejectedInputCandidates.add(candidateKey(candidate));
             }
             case ACQUIRE_FUEL -> {
                 if (fuel == null) return false;
@@ -1132,7 +1113,7 @@ public final class SemanticCookCompanionTask
                 && ItemStack.isSameItemSameComponents(left, right);
     }
 
-    /** Close a menu after ownership evidence diverged, without moving any machine slot. */
+    /** 数量归属无法继续确认时只安排关闭已绑定菜单，不再移动炉内任何槽位。 */
     // 停止认领和回收当前槽里的东西，仅尝试关闭相符类型的菜单，避免在来源已不明时继续拿取。
     private TaskState closeWithoutClaimingContents(
             String code, String message, FailureType type) {
@@ -1326,9 +1307,7 @@ public final class SemanticCookCompanionTask
     }
 
     private long childDeadline(long ticks) {
-        // `ticks` is this child's initial no-progress lease, not a slice of the
-        // parent's original total duration. Healthy children may renew it and
-        // tickChild propagates that renewal back to the parent.
+        // 给子任务自己的初始无进展期限；它正常推进时可续时，再由 tickChild 同步到父任务。
         long lease = player.level().getGameTime() + ticks;
         extendParentPast(lease);
         return lease;
@@ -1336,8 +1315,6 @@ public final class SemanticCookCompanionTask
 
     // 父任务至少比子任务晚一刻到期，留给父任务读取和处理子任务超时结果，避免同时截止先被外层截走。
     private void extendParentPast(long childDeadline) {
-        // One extra tick lets the parent observe and report a child lease expiry;
-        // equality would make TaskSlot time out the parent before tickChild runs.
         r.extendDeadlineTo(childDeadline == Long.MAX_VALUE
                 ? Long.MAX_VALUE : childDeadline + 1L);
     }
@@ -1345,13 +1322,8 @@ public final class SemanticCookCompanionTask
     @Override
     // 上层发现材料已够时，正在装料、收货、退料或处理已认领批次，仍必须先让本类完成必要的确认与收尾。
     public boolean mustSettleBeforeSatisfiedCancellation() {
-        // Once a synchronized workstation mutation has started, an inventory fact can become
-        // visible before its receipt and the close/cleanup tail settle. Let the semantic parent
-        // keep ticking this child through that terminal tail instead of cancelling on the first
-        // optimistic inventory frame and leaving a cursor stack or open workstation behind.
-        // A semantic parent checks its inventory fact before advancing this child. Give a
-        // terminal-ready cook one final tick so SUCCESS/FAILED is recorded truthfully instead of
-        // being rewritten as CANCELLED merely because the output already reached the inventory.
+        // 背包可能先更新，回执和关菜单却还没结束；让父任务继续同一炉的收尾，避免遗留鼠标物品。
+        // 已准备好终态时也再推进一次，如实交付成功或失败，而不是仅因数量够了就改写成取消。
         if (phase == Phase.COMPLETE) return true;
         if (stationClaimed && ownedInputLoaded > 0) return true;
         if (phase == Phase.CLEANUP || (openedMenu && effectsStarted)) return true;
