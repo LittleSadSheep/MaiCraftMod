@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
-// 关闭执行时正在打开的菜单并等待确认。记录没有绑定某个旧菜单，调用方要负责确认当前菜单确实归它处理。
+// 关闭任务指定的菜单并等待确认；绑定对象被替换时停止，避免跨游戏刻把另一个炉子或箱子关掉。
 public final class CloseMenuCompanionTask extends AbstractCompanionTask<CloseMenuTaskRecord> {
     private MenuReceipt receipt;
     public CloseMenuCompanionTask(LocalPlayer player, CloseMenuTaskRecord record) { super(player, record); }
@@ -15,6 +15,12 @@ public final class CloseMenuCompanionTask extends AbstractCompanionTask<CloseMen
     @Override protected TaskState onTick() {
         var context = ClientRuntime.requireContext(player);
         if (receipt == null) {
+            // 菜单已经由玩家关好就直接完成；换成另一份菜单时，即使编号复用也不能向它发关闭请求。
+            if (r.expectedMenu != null && player.containerMenu != r.expectedMenu) {
+                if (player.containerMenu == player.inventoryMenu) return TaskState.SUCCESS;
+                fail("the requested menu was replaced before closing", FailureType.TARGET_LOST);
+                return TaskState.FAILED;
+            }
             receipt = context.menus().close(context, 20);
             return TaskState.RUNNING;
         }
@@ -25,6 +31,6 @@ public final class CloseMenuCompanionTask extends AbstractCompanionTask<CloseMen
         return TaskState.FAILED;
     }
     @Override protected void cleanup() { receipt = null; }
-    @Override protected String successMessage() { return "closed the active menu"; }
+    @Override protected String successMessage() { return "the requested menu is closed"; }
     @Override protected String cancelledMessage() { return "menu close interrupted"; }
 }
