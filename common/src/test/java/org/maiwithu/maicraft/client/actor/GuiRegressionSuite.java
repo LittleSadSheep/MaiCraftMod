@@ -38,6 +38,8 @@ public final class GuiRegressionSuite {
         // 准心真实拒绝后同格只做少量微调，随后换脚下位置，防止用不同瞄点绕过重试预算。
         org.maiwithu.maicraft.core.task.build.PlacementAttemptLedgerTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementFootingTest.main(args);
+        // 模组可能直接读玩家角度，候选放置也要按该视角求状态，同时保证真实角色完全不动。
+        org.maiwithu.maicraft.core.task.build.BuildPlacementPlayerRotationTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPrecisionAimTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementSettlingTest.main(args);
         org.maiwithu.maicraft.core.task.build.BuildPlacementDestinationTest.main(args);
