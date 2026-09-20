@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuPort;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 用原版 ChestMenu 快速搬运验证部分容量；源格先同步也不能先报告整堆已经进背包。 */
 public final class QuickMoveEvidenceTest {
@@ -36,6 +37,9 @@ public final class QuickMoveEvidenceTest {
             check(f.task.resultData().get("moved_counts").equals(List.of(7)), "背包只容七件时不能记成整堆六十四件");
             var phase = f.task.getClass().getDeclaredField("phase"); phase.setAccessible(true);
             check(phase.get(f.task).toString().equals("FAILING"), "部分快速搬运不能把完整要求报成成功");
+            var active = f.task.getClass().getDeclaredField("receipt"); active.setAccessible(true); active.set(f.task, null);
+            f.task.result(TaskState.FAILED);
+            check(f.world.player.containerMenu == f.menu, "组合搬运失败后仍把菜单留给父任务核对部分数量");
         }
         try (var f = new Fixture()) {
             f.begin();
@@ -110,6 +114,7 @@ public final class QuickMoveEvidenceTest {
                     });
         }
         void begin() throws Exception {
+            var bound = task.getClass().getDeclaredField("menu"); bound.setAccessible(true); bound.set(task, menu);
             var begin = task.getClass().getDeclaredMethod("beginMove", ContainerTransferTaskRecord.Move.class);
             begin.setAccessible(true); begin.invoke(task, move);
             var quick = task.getClass().getDeclaredMethod("submitQuick", LocalPlayerContext.class, ContainerTransferTaskRecord.Move.class);

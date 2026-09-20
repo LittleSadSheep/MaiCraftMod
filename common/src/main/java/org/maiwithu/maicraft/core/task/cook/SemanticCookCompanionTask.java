@@ -692,7 +692,7 @@ public final class SemanticCookCompanionTask
         return TaskState.RUNNING;
     }
 
-    // 结果槽原来有多少，主背包就应准确增加多少；低层快速搬运说完成也不能替代这一步。
+    // 原生搬运实际确认多少，主背包就应增加多少；不能用点击前旧快照忽略后来烧好的成品。
     private TaskState verifyOutputTake() {
         AbstractFurnaceMenu menu = furnaceMenu();
         if (menu == null || !menuMatches()) return menuLost();
@@ -707,6 +707,7 @@ public final class SemanticCookCompanionTask
         ownedOutputTaken += takeSlotCount;
         takeInventoryBefore = 0;
         takeSlotCount = 0;
+        if (failureMessage != null) return closeWithoutClaimingContents(failureCode, failureMessage, failureType);
         phase = Phase.RECONCILE;
         return TaskState.RUNNING;
     }
@@ -868,6 +869,14 @@ public final class SemanticCookCompanionTask
             if (uncertain(result)) rememberFailure("cooking_child_outcome_uncertain",
                     "A cooking prerequisite or menu operation ended with unconfirmed effects; further work stopped.",
                     FailureType.UNKNOWN);
+            if (purpose == Purpose.TAKE_OUTPUT && !uncertain(result) && confirmedSingleMove(result) > 0) {
+                // 背包只装下一部分时先核实已经收到的数量，再停止本炉；不能抹掉已确认收货，也不能继续连点满背包。
+                takeSlotCount = confirmedSingleMove(result);
+                rememberFailure("cooking_output_partial", "Only part of the cooked output could be collected; remaining output was left in the workstation.",
+                        FailureType.NO_SPACE);
+                phase = Phase.VERIFY_OUTPUT;
+                return TaskState.RUNNING;
+            }
             if (purpose == Purpose.ABANDON_CLOSE) {
                 outcomeUncertain = true;
                 openedMenu = player.containerMenu != player.inventoryMenu;
@@ -955,7 +964,10 @@ public final class SemanticCookCompanionTask
                 phase = Phase.CONFIRM_START;
                 markCookEvidence();
             }
-            case TAKE_OUTPUT -> phase = Phase.VERIFY_OUTPUT;
+            case TAKE_OUTPUT -> {
+                takeSlotCount = confirmedSingleMove(result);
+                phase = Phase.VERIFY_OUTPUT;
+            }
             case CLOSE_WAIT -> {
                 openedMenu = false;
                 ownedMenu = null;
@@ -993,6 +1005,13 @@ public final class SemanticCookCompanionTask
             if (value != null) safe.put(key, value);
         }
         return Map.copyOf(safe);
+    }
+
+    private static int confirmedSingleMove(TaskResult result) {
+        if (result == null || result.data() == null) return -1;
+        Object counts = result.data().get("moved_counts");
+        return counts instanceof List<?> values && values.size() == 1 && values.getFirst() instanceof Integer count
+                && count > 0 ? count : -1;
     }
 
     private static boolean prerequisiteEffects(TaskResult result) {

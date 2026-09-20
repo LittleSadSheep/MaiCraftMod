@@ -44,6 +44,7 @@ public final class ContainerTransferCompanionTask
     private AbstractContainerMenu menu;
     private boolean completed;
     private boolean preserveUnexpectedCursor;
+    private boolean outcomeUncertain;
 
     public ContainerTransferCompanionTask(LocalPlayer player, ContainerTransferTaskRecord record) {
         super(player, record);
@@ -64,6 +65,8 @@ public final class ContainerTransferCompanionTask
             receipt = context.menus().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
             if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
+                outcomeUncertain |= receipt.status() == MenuReceipt.Status.UNCERTAIN
+                        || receipt.status() == MenuReceipt.Status.DIVERGED;
                 String detail = receipt.detail();
                 receipt = null;
                 if (phase == Phase.RETURN_CURSOR) {
@@ -357,7 +360,9 @@ public final class ContainerTransferCompanionTask
     // 只有仍在同一个菜单、且没有标记外来游标时才安排收尾关闭；换成别的界面时不向它回退或点击。
     @Override protected void cleanup() {
         if (split != null && split.preserveMenu()) preserveUnexpectedCursor = true;
-        if (!preserveUnexpectedCursor && menu != null && player.containerMenu == menu && (!completed || r.closeAfter)
+        outcomeUncertain |= receipt != null && !receipt.terminal();
+        // 组合任务明确保留菜单时，失败也把界面交回父任务核对；不能抢先关闭，让父层丢掉已确认的部分数量。
+        if (r.closeAfter && !preserveUnexpectedCursor && menu != null && player.containerMenu == menu
                 && (receipt == null || receipt.terminal() || receipt.kind() != MenuReceipt.Kind.CLOSE)) {
             try {
                 var context = ClientRuntime.requireContext(player);
@@ -373,6 +378,8 @@ public final class ContainerTransferCompanionTask
         data.put("completed_moves", moveIndex); data.put("moved_counts", List.copyOf(moved));
         // 原生回执确认后才累计，计划七次或已经点出七次都不能直接当作七次成功。
         data.put("confirmed_split_clicks", confirmedSplitClicks);
+        data.put("outcome_uncertain", outcomeUncertain || Boolean.TRUE.equals(splitEvidence.get("outcome_uncertain")));
+        data.put("preserve_menu", preserveUnexpectedCursor || !r.closeAfter);
         if (!splitEvidence.isEmpty()) data.put("split_transfer", splitEvidence);
         return Map.copyOf(data);
     }
