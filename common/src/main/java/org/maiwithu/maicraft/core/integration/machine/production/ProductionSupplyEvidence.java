@@ -9,6 +9,8 @@ import java.util.Set;
 import java.util.function.Function;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.*;
+import com.google.gson.JsonArray;
+import java.util.Collection;
 
 /** Current stock and confirmed window injections remain separate; aliased sided views are never added together. */
 final class ProductionSupplyEvidence {
@@ -35,7 +37,7 @@ final class ProductionSupplyEvidence {
 
     /** Caller already binds a successful native DEPOSIT response to its request/player/world and exact link ingress. */
     void confirmed(String linkId, String requestId, JsonObject result) {
-        Link link = graph.outgoing.values().stream().flatMap(java.util.Collection::stream).filter(l -> l.id().equals(linkId)).findFirst().orElseThrow();
+        Link link = graph.outgoing.values().stream().flatMap(Collection::stream).filter(l -> l.id().equals(linkId)).findFirst().orElseThrow();
         confirmedSource(graph.nodes.get(graph.ports.get(link.from()).node()),resolve.apply(link.resource()),requestId,result);
     }
     void confirmedSource(Node source, Resource resource, String requestId, JsonObject result) {
@@ -77,7 +79,7 @@ final class ProductionSupplyEvidence {
                 "server_native_stock_and_confirmed_deposit_receipts",detail);
     }
     JsonObject report() {
-        JsonObject result = new JsonObject(); var sources = new com.google.gson.JsonArray();
+        JsonObject result = new JsonObject(); var sources = new JsonArray();
         for (Node node : graph.nodes.values()) if (node.kind().equals("source")) for (Resource resource : graph.outgoing.get(node.id()).stream().map(l -> resolve.apply(l.resource())).distinct().toList()) {
             String key = node.id()+"\n"+resource; JsonObject row = ProductionDesignCompiler.resource(resource); row.addProperty("source",node.id());
             row.addProperty("confirmed_injected",delivered.getOrDefault(key,0L)); row.addProperty("initial_stock_credited_once",initial.getOrDefault(key,0L)); sources.add(row);

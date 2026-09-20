@@ -10,6 +10,9 @@ import org.maiwithu.maicraft.client.actor.*;
 import org.maiwithu.maicraft.core.integration.machine.assembly.ServerBlockEntityReceipts;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 import org.maiwithu.maicraft.entity.InputDriver;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlCircuit.Kind.*;
 
@@ -20,7 +23,7 @@ public final class NativeVehicleControls {
     private final VehicleControlPlan plan;
     private final Map<String,Double> applied=new LinkedHashMap<>();
     private final Map<BlockPos,Boolean> typewriters=new LinkedHashMap<>();
-    private final java.util.Set<String> submitted=new java.util.LinkedHashSet<>();
+    private final Set<String> submitted=new LinkedHashSet<>();
     private NativeActionReceipt receipt;
     private ServerBlockEntityReceipts.Watch watch;
     private LocalPlayerContext last;
@@ -118,7 +121,7 @@ public final class NativeVehicleControls {
     /** Release only this session's held gestures; persistent throttle position belongs to the real machine. */
     public void releaseGestures() {
         if(receipt!=null && last!=null) {
-            org.maiwithu.maicraft.client.runtime.ClientRuntime.actor().activeContext()
+            ClientRuntime.actor().activeContext()
                     .filter(c->c.player()==last.player()).ifPresent(c->c.actions().retireOneShotForTaskBoundary(c,receipt,"vehicle control ended"));
             receipt=null;
         }

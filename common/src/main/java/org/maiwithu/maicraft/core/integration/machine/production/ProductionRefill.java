@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.function.Function;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Recipe;
+import java.util.LinkedHashSet;
 
 /** A window budget need not fit a source buffer; admit one batch, while retaining the finite cumulative cap. */
 final class ProductionRefill {
@@ -22,7 +23,7 @@ final class ProductionRefill {
         return Math.min(link.amount(),Math.max(quantity,catalysts));
     }
     static Set<String> consumers(Link link, ProductionGraph graph, Function<Resource,Resource> resolve) {
-        Set<String> result = new java.util.LinkedHashSet<>();
+        Set<String> result = new LinkedHashSet<>();
         consumers(graph.ports.get(link.to()).node(),resolve.apply(link.resource()),graph,resolve,result,new HashSet<>()); return result;
     }
     private static void consumers(String id, Resource resource, ProductionGraph graph, Function<Resource,Resource> resolve, Set<String> found, Set<String> seen) {

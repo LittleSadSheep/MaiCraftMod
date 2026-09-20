@@ -8,6 +8,8 @@ import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.entity.InputDriver;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.core.BlockPos;
 
 /** Seat confirmation and native control share one cancellable transport lease. */
 public final class VehicleDriveSession implements TransportSession {
@@ -90,8 +92,8 @@ public final class VehicleDriveSession implements TransportSession {
     private boolean clearAhead(LocalPlayerContext ctx,SableStructureBridge.Structure structure,Vec3 delta) {
         if(structure.worldBounds()==null) return false;
         var next=structure.worldBounds().expandTowards(delta.scale(12)).deflate(.08);
-        return ctx.level().hasChunksAt(net.minecraft.core.BlockPos.containing(next.minX,next.minY,next.minZ),
-                net.minecraft.core.BlockPos.containing(next.maxX,next.maxY,next.maxZ)) && ctx.level().noCollision(ctx.player(),next);
+        return ctx.level().hasChunksAt(BlockPos.containing(next.minX,next.minY,next.minZ),
+                BlockPos.containing(next.maxX,next.maxY,next.maxZ)) && ctx.level().noCollision(ctx.player(),next);
     }
     private Result finish(boolean success,String code,String detail,boolean uncertain) {
         hand.reset();
@@ -105,7 +107,7 @@ public final class VehicleDriveSession implements TransportSession {
     @Override public boolean safeToInterrupt() { return terminal!=null || !seated && mount==null; }
     @Override public boolean livenessActive() { return terminal==null; }
     @Override public boolean allowsCurrentScreen(LocalPlayerContext ctx) {
-        return hand.started() && ctx.minecraft().screen instanceof net.minecraft.client.gui.screens.inventory.InventoryScreen
+        return hand.started() && ctx.minecraft().screen instanceof InventoryScreen
                 || TransportSession.super.allowsCurrentScreen(ctx);
     }
     @Override public String phase() { return !seated ? "boarding_driver_seat":pilot.phase().name().toLowerCase(); }

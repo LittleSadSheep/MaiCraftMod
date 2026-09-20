@@ -19,6 +19,7 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.material.FluidState;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import java.util.OptionalDouble;
 
 /** 按原生配方类型读取世界转化；保留 Ingredient 条件和完整产物组件，不按某一材料链重新编造配方。 */
 public final class NativeTransformRecipes {
@@ -85,7 +86,7 @@ public final class NativeTransformRecipes {
         // AE2 只让匹配第一项原料的掉落物启动流体转化，由通用流程据此安排最后一项投放。
         public int triggerInputIndex() { return 0; }
         // AE2 的 TransformLogic 按触发物底部坐标各扩一格查询实体；最后投料须与已入池原料的实际碰撞体相交。
-        @Override public java.util.OptionalDouble inputSearchRadius() { return java.util.OptionalDouble.of(1); }
+        @Override public OptionalDouble inputSearchRadius() { return OptionalDouble.of(1); }
         public boolean isFluid() { return environment.has("type") && "fluid".equals(environment.get("type").getAsString()); }
         public boolean supports(FluidState state) { return isFluid() && state != null && !state.isEmpty() && fluidMatch.test(state); }
 

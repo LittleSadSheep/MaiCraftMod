@@ -9,6 +9,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 
 /** Associates a real seat with reachable controls; proximity to an arbitrary structure is insufficient. */
@@ -42,7 +43,7 @@ public record DriverStation(BlockPos seat,List<BlockPos> controls) {
         if(ControlReflection.is(player.level().getBlockEntity(pos),SIM+"steering_wheel.SteeringWheelBlockEntity")) {
             String name=Boolean.parseBoolean(property(state,"on_floor"))?"STEERING_WHEEL_FLOOR":"STEERING_WHEEL_CEILING";
             Object shaper=ControlReflection.field(ControlReflection.type("dev.simulated_team.simulated.index.SimBlockShapes"),name);
-            shape=(net.minecraft.world.phys.shapes.VoxelShape)ControlReflection.call(shaper,"get",ControlSignals.facing(state));
+            shape=(VoxelShape)ControlReflection.call(shaper,"get",ControlSignals.facing(state));
         }
         Vec3 local=shape.isEmpty() ? Vec3.atCenterOf(pos) : shape.bounds().getCenter().add(Vec3.atLowerCornerOf(pos));
         if(!shape.isEmpty()) local=shape.toAabbs().stream().map(box->box.getCenter().add(Vec3.atLowerCornerOf(pos)))

@@ -7,6 +7,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.material.FluidState;
+import java.util.OptionalDouble;
 
 /** 世界内加工配方的只读规则：先按原生原料谓词备料，再把触发物最后投入匹配环境，最终核对实际产物。 */
 public interface WorldProcessRecipe {
@@ -21,5 +22,5 @@ public interface WorldProcessRecipe {
     int triggerInputIndex();
 
     /** 原生机制以触发物底部位置为中心搜集原料的半径；未知时不能假定整个水池里的原料都会参与反应。 */
-    default java.util.OptionalDouble inputSearchRadius() { return java.util.OptionalDouble.empty(); }
+    default OptionalDouble inputSearchRadius() { return OptionalDouble.empty(); }
 }

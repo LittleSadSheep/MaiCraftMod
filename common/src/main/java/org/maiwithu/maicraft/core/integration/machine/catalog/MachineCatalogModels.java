@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Objects;
+import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 
 /** Durable descriptions and historical proofs. None of these records grants a world-operation capability. */
 public final class MachineCatalogModels {
@@ -69,7 +70,7 @@ public final class MachineCatalogModels {
             manifestJson = CatalogLimits.manifest(CatalogLimits.parseManifest(manifestJson)); fingerprint(manifestFingerprint);
             if (!CatalogLimits.hash(manifestJson).equals(manifestFingerprint)) throw new IllegalArgumentException("Catalog manifest fingerprint mismatch");
             CatalogLimits.nonnegative(registeredAtMillis, "registration time");
-            var shape = org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.parse(JsonParser.parseString(manifestJson).getAsJsonObject());
+            var shape = ProductionManifest.parse(JsonParser.parseString(manifestJson).getAsJsonObject());
             for (var node : shape.nodes()) anchor.plus(node.offset().x(), node.offset().y(), node.offset().z());
             for (var port : shape.ports()) anchor.plus(port.offset().x(), port.offset().y(), port.offset().z());
             for (var link : shape.links()) for (var point : link.path()) anchor.plus(point.x(), point.y(), point.z());

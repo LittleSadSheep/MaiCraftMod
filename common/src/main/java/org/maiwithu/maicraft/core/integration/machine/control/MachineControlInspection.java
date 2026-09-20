@@ -11,6 +11,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import java.util.HashSet;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 
 /** Inspect the actual control circuit in fixed-world or physical-structure coordinates. */
@@ -30,7 +31,7 @@ public final class MachineControlInspection {
             out.addProperty("scope",structureId==null ? "surveyed_world_volume" : "selected_physical_structure");
             if(structureId!=null) out.addProperty("structure_id",structureId.toString());
             out.addProperty("complete",complete && circuit.analyze().complete());
-            var referenced=new java.util.HashSet<String>();
+            var referenced=new HashSet<String>();
             circuit.edges().forEach(edge->{ referenced.add(edge.from()); referenced.add(edge.to()); });
             out.add("components",gson.toJsonTree(circuit.nodes().stream()
                     .filter(n->n.kind()!=ControlCircuit.Kind.OTHER || referenced.contains(n.id())).toList()));

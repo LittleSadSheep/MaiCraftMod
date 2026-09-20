@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.*;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
+import java.math.BigDecimal;
 
 /** Decodes machine.recipe v1, retaining opaque component-sensitive resource IDs and recipe completeness. */
 final class ProductionNativeRecipes {
@@ -37,7 +38,7 @@ final class ProductionNativeRecipes {
             if (resource.medium().equals("energy") && (required.has("rate") || required.has("duration_ticks"))) {
                 Long duration = number(required,"duration_ticks"); Double rate = decimal(required,"rate");
                 if (duration == null || duration <= 0 || rate == null || rate < 0 || text(required,"rate_unit") == null
-                        || required.get("rate").getAsBigDecimal().multiply(java.math.BigDecimal.valueOf(duration)).compareTo(java.math.BigDecimal.valueOf(amount)) != 0)
+                        || required.get("rate").getAsBigDecimal().multiply(BigDecimal.valueOf(duration)).compareTo(BigDecimal.valueOf(amount)) != 0)
                     throw new IllegalArgumentException("Native energy amount must be per-operation rate times duration, in the same resource unit");
             }
             if (power.put(resource, amount) != null) throw new IllegalArgumentException("Duplicate native power requirement");

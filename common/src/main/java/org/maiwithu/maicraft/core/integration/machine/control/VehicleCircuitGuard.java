@@ -8,6 +8,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import java.util.TreeMap;
+import net.minecraft.core.registries.BuiltInRegistries;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 
 /** Detects rewiring, frequency changes and altered configuration before continued control. */
@@ -54,10 +56,10 @@ public final class VehicleCircuitGuard {
         return result;
     }
     static String signature(BlockState state) {
-        var properties=new java.util.TreeMap<String,String>();
+        var properties=new TreeMap<String,String>();
         state.getValues().forEach((property,value)-> {
             if(!Set.of("powered","power","lit").contains(property.getName())) properties.put(property.getName(),value.toString());
         });
-        return net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock())+properties.toString();
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock())+properties.toString();
     }
 }

@@ -6,6 +6,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import com.google.gson.JsonElement;
 
 /** 使用机器只声明机制、锚点内位置和语义参数；不接受按钮号、点击序列或调用者伪造的执行回执。 */
 public final class NativeProcessRequest {
@@ -49,7 +50,7 @@ public final class NativeProcessRequest {
         return new BlockPos(Math.addExact(anchor.getX(), offset.getX()), Math.addExact(anchor.getY(), offset.getY()),
                 Math.addExact(anchor.getZ(), offset.getZ()));
     }
-    private static int integer(com.google.gson.JsonElement value, String field) {
+    private static int integer(JsonElement value, String field) {
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) throw new IllegalArgumentException(field + " must be an integer");
         try { return value.getAsBigDecimal().intValueExact(); }
         catch (ArithmeticException | NumberFormatException invalid) { throw new IllegalArgumentException(field + " must be a bounded integer", invalid); }

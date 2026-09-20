@@ -12,6 +12,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.CodingErrorAction;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardOpenOption;
+import java.util.concurrent.CompletionException;
 
 /** Background bounded JSON loading and coalesced atomic saves. File failures leave the previous catalog intact. */
 final class MachineCatalogStore {
@@ -34,15 +40,15 @@ final class MachineCatalogStore {
             try {
                 long size;
                 try { size = Files.size(path); }
-                catch (java.nio.file.NoSuchFileException absent) { return new Loaded(new CatalogCodec.Snapshot(key, List.of(), List.of()), false); }
+                catch (NoSuchFileException absent) { return new Loaded(new CatalogCodec.Snapshot(key, List.of(), List.of()), false); }
                 if (size > CatalogLimits.FILE_BYTES) throw new IOException("catalog_file_too_large");
                 byte[] bytes;
                 try (var input = Files.newInputStream(path)) { bytes = input.readNBytes(CatalogLimits.FILE_BYTES + 1); }
                 if (bytes.length == 0 || bytes.length > CatalogLimits.FILE_BYTES) throw new IOException("catalog_file_size_invalid");
-                String json = StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+                String json = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
                 return new Loaded(CatalogCodec.decode(json, key), false);
-            } catch (IOException | RuntimeException failure) { throw new java.util.concurrent.CompletionException("catalog_load_failed", failure); }
+            } catch (IOException | RuntimeException failure) { throw new CompletionException("catalog_load_failed", failure); }
         }, executor);
     }
     synchronized CompletableFuture<Void> save(CatalogCodec.Snapshot snapshot) {
@@ -79,8 +85,8 @@ final class MachineCatalogStore {
         Files.createDirectories(directory);
         Path target = path(snapshot.identityKey()), temporary = Files.createTempFile(directory, snapshot.identityKey() + "-", ".tmp");
         try {
-            try (var channel = java.nio.channels.FileChannel.open(temporary, java.nio.file.StandardOpenOption.WRITE)) {
-                var buffer = java.nio.ByteBuffer.wrap(bytes); while (buffer.hasRemaining()) channel.write(buffer); channel.force(true);
+            try (var channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
+                var buffer = ByteBuffer.wrap(bytes); while (buffer.hasRemaining()) channel.write(buffer); channel.force(true);
             }
             try { Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
             catch (AtomicMoveNotSupportedException unavailable) { throw new IOException("catalog_atomic_move_unavailable", unavailable); }

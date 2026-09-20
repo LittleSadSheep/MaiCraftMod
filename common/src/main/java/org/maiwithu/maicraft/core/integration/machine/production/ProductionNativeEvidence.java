@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
+import com.google.gson.JsonArray;
+import java.util.ArrayList;
+import java.util.HashSet;
 
 /** Owner-thread native-response accumulator. Protocol/session/authorization checks remain the runtime router's responsibility. */
 public final class ProductionNativeEvidence implements ProductionEvidence {
@@ -26,7 +29,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     private final Map<String,JsonObject> links = new LinkedHashMap<>(), configurations = new LinkedHashMap<>();
     private final Map<String,JsonObject> configurationReads = new LinkedHashMap<>();
     private final Map<String,String> recipeIds = new LinkedHashMap<>();
-    private final Set<ObservationKey> attempted = new java.util.HashSet<>();
+    private final Set<ObservationKey> attempted = new HashSet<>();
     private final Map<String,Long> invalidatedLinkTicks = new LinkedHashMap<>();
     private Set<String> operations = Set.of();
     private String dimension;
@@ -100,7 +103,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     /** Bounded by the manifest's existing node/port/link budgets; never replaces historical supply or recipe bindings. */
     public List<ObservationFreshness> freshness(long serverTick) {
         advance(serverTick);
-        var result = new java.util.ArrayList<ObservationFreshness>();
+        var result = new ArrayList<ObservationFreshness>();
         for (Node node : manifest.nodes()) {
             result.add(freshness(ObservationKind.NODE,node.id(),nodes.get(node.id()),false));
             if (node.kind().equals("process")) result.add(freshness(ObservationKind.RECIPE,node.id(),recipes.get(node.id()),false));
@@ -328,7 +331,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     private Map<String,JsonObject> sourceObservations() {
         Map<String,JsonObject> current = new LinkedHashMap<>();
         for (Node node : manifest.nodes()) if (node.kind().equals("source")) {
-            JsonObject row = new JsonObject(); var resources = new com.google.gson.JsonArray();
+            JsonObject row = new JsonObject(); var resources = new JsonArray();
             if (fresh(nodes.get(node.id()))) resources.addAll(array(nodes.get(node.id()),"resources"));
             for (Port port : manifest.ports()) if (port.node().equals(node.id()) && port.direction().equals("output") && fresh(ports.get(port.id()))) resources.addAll(array(ports.get(port.id()),"resources"));
             row.add("resources",resources); current.put(node.id(),row);

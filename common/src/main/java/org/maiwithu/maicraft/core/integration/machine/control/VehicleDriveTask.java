@@ -10,6 +10,9 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTask;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.LinkedHashMap;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.task.Task;
 
 /** Inspection precedes all movement; the selected structure is never inferred from its bounds alone. */
 public final class VehicleDriveTask extends AbstractCompanionTask<VehicleDriveTaskRecord> {
@@ -32,7 +35,7 @@ public final class VehicleDriveTask extends AbstractCompanionTask<VehicleDriveTa
             station=DriverStation.select(player,observation,plan);
             if(!station.seated(player) && observation.world(station.seat()).distanceTo(player.getEyePosition())>player.blockInteractionRange()-1)
                 boarding=new BoardStructureTask(player,new BoardStructureTaskRecord(r.getToolCallId(),r.getDeadlineGameTime(),r.structureId,
-                        net.minecraft.world.phys.Vec3.atCenterOf(station.seat())));
+                        Vec3.atCenterOf(station.seat())));
             } catch(IllegalArgumentException unavailable) {
                 fail(unavailable.getMessage(),FailureType.NO_PATH); return TaskState.FAILED;
             }
@@ -55,12 +58,12 @@ public final class VehicleDriveTask extends AbstractCompanionTask<VehicleDriveTa
         if(boarding!=null) { boarding.result(TaskState.CANCELLED); boarding=null; }
         TransportRuntime.cancel(this); super.cleanup();
     }
-    @Override public void stop(LocalPlayer player,org.maiwithu.maicraft.task.Task.StopReason why) {
+    @Override public void stop(LocalPlayer player,Task.StopReason why) {
         if(boarding!=null) boarding.stop(player,why);
         TransportRuntime.cancel(this); super.stop(player,why);
     }
     @Override protected Map<String,Object> resultData() {
-        var result=new java.util.LinkedHashMap<String,Object>();
+        var result=new LinkedHashMap<String,Object>();
         if(observation!=null) result.put("control_analysis",observation.report());
         if(plan!=null) result.put("control_limitations",plan.limitations());
         if(session!=null) result.put("vehicle",session.diagnostics());

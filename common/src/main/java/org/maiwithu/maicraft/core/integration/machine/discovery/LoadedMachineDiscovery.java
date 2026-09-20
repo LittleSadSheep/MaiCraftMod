@@ -11,12 +11,13 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
+import java.util.Objects;
 
 /** Native adapter reads existing client chunk indexes; it never requests chunks, movement, menus or server mutations. */
 public final class LoadedMachineDiscovery {
     private final MachineDiscoveryScanner scanner;
     public LoadedMachineDiscovery() { this(new MachineDiscoveryScanner()); }
-    LoadedMachineDiscovery(MachineDiscoveryScanner scanner) { this.scanner = java.util.Objects.requireNonNull(scanner); }
+    LoadedMachineDiscovery(MachineDiscoveryScanner scanner) { this.scanner = Objects.requireNonNull(scanner); }
     public MachineDiscoveryScanner.Status status() { return scanner.status(); }
     public UUID requestRegion(BlockPos center, int radius) { requireThread(); return scanner.requestRegion(center, radius); }
     public void clear(MachineDiscoveryScanner.Sink sink) { requireThread(); scanner.clear(sink); }

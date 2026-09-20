@@ -14,6 +14,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import java.util.HashSet;
+import net.minecraft.tags.FluidTags;
 
 /** 从实际连通流体发现加工区域和地面站位；池子形状由蓝图或现有地形决定，不内置某种材料的固定池模板。 */
 final class WorldProcessSite {
@@ -31,7 +33,7 @@ final class WorldProcessSite {
 
     static WorldProcessSite inspect(LocalPlayer player, BlockPos anchor, WorldProcessRecipe recipe) {
         Level world = player.level();
-        var seen = new java.util.HashSet<BlockPos>(); var queue = new ArrayDeque<BlockPos>(); queue.add(anchor);
+        var seen = new HashSet<BlockPos>(); var queue = new ArrayDeque<BlockPos>(); queue.add(anchor);
         Map<BlockPos, BlockState> structure = new LinkedHashMap<>(); var cells = new ArrayList<BlockPos>(); AABB bounds = null;
         while (!queue.isEmpty()) {
             BlockPos at = queue.remove().immutable(); if (!seen.add(at)) continue;
@@ -105,7 +107,7 @@ final class WorldProcessSite {
                 || !world.getFluidState(feet.above()).isEmpty()) return false;
         // 确认成品后可以在有坚实底部、头顶露出水面的浅水里捡取；投料等待仍只站干地，其他流体不按水处理。
         var fluid = world.getFluidState(feet);
-        if (!fluid.isEmpty() && !(collecting && fluids.contains(feet) && fluid.is(net.minecraft.tags.FluidTags.WATER))) return false;
+        if (!fluid.isEmpty() && !(collecting && fluids.contains(feet) && fluid.is(FluidTags.WATER))) return false;
         return world.getBlockState(feet.below()).isCollisionShapeFullBlock(world, feet.below())
                 && world.noCollision(player, bodyBox(player, Vec3.atBottomCenterOf(feet)));
     }

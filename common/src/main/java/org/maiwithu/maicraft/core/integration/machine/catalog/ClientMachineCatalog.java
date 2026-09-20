@@ -16,6 +16,12 @@ import org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import net.minecraft.core.registries.BuiltInRegistries;
+import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** Client lifecycle and presentation bridge; the catalog and discovery never acquire the player's body. */
@@ -65,8 +71,8 @@ public final class ClientMachineCatalog {
         try {
             var state = player.level().getBlockState(center); var entity = player.level().getBlockEntity(center);
             if (!state.isAir()) catalog.observe(new DeviceObservation(player.level().dimension().location().toString(), position(center),
-                    net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
-                    entity == null ? null : net.minecraft.core.registries.BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString(),
+                    BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
+                    entity == null ? null : BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString(),
                     label, List.of(), EvidenceStatus.NATIVE_OBSERVED, "explicit_machine_inspection", player.level().getGameTime(), System.currentTimeMillis()));
             if (discovery.status().region() == null || !discovery.status().region().status().equals("scanning")) discovery.requestRegion(center, radius);
         } catch (RuntimeException unavailable) { reportIssue(unavailable); }
@@ -79,7 +85,7 @@ public final class ClientMachineCatalog {
         catch (RuntimeException unavailable) { reportIssue(unavailable); return null; }
     }
     public static boolean registerInstallation(LocalPlayer player, String label,
-            org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan plan) {
+            MachineConstructionPlan plan) {
         if (plan.utilityInputs().isEmpty()) return true;
         if (!ready(player)) {
             if (catalog != null && catalog.status().state() == MachineCatalog.State.FAILED)
@@ -89,7 +95,7 @@ public final class ClientMachineCatalog {
         catalog.registerInstallation(label,player.level().dimension().location().toString(),position(plan.anchor()),plan.utilityInputs(),System.currentTimeMillis());
         return true;
     }
-    public static void installationBuilt(LocalPlayer player, org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan plan) {
+    public static void installationBuilt(LocalPlayer player, MachineConstructionPlan plan) {
         if (plan.utilityInputs().isEmpty() || !ready(player)) return;
         try { catalog.recordInstallationBuilt(player.level().dimension().location().toString(),position(plan.anchor()),plan.utilityInputs(),System.currentTimeMillis()); }
         catch (RuntimeException unavailable) { reportIssue(unavailable); }
@@ -99,11 +105,11 @@ public final class ClientMachineCatalog {
         return catalog.installation(player.level().dimension().location().toString(),position(anchor))
                 .orElseThrow(() -> new IllegalArgumentException("machine_external_inputs_unknown: build or register a blueprint with external_inputs first"));
     }
-    public static void commissioned(LocalPlayer player, String label, ProductionRunPlan plan, java.util.Map<String, Object> observed) {
+    public static void commissioned(LocalPlayer player, String label, ProductionRunPlan plan, Map<String, Object> observed) {
         String id = registerPlan(player, label, plan); if (id == null) return;
         try {
-            var production = (java.util.Map<?, ?>) observed.get("production"); var run = (java.util.Map<?, ?>) production.get("verified_run");
-            var flow = (java.util.Map<?, ?>) observed.get("flow");
+            var production = (Map<?, ?>) observed.get("production"); var run = (Map<?, ?>) production.get("verified_run");
+            var flow = (Map<?, ?>) observed.get("flow");
             if (!Boolean.TRUE.equals(production.get("machine_production_verified")) || !Boolean.TRUE.equals(flow.get("delivery_verified"))) return;
             catalog.recordCommission(id, new CommissionEvidence("native_recipe_output_and_endpoint_delivery", production.get("resource_key").toString(),
                     number(run.get("from_tick")), number(run.get("through_tick")), number(run.get("events")), number(run.get("output")),
@@ -114,7 +120,7 @@ public final class ClientMachineCatalog {
         JsonObject result = MachineSnapshots.summaries(player); JsonArray devices = new JsonArray(), lines = new JsonArray(), installations = new JsonArray();
         result.add("remembered_devices", devices); result.add("production_lines", lines);
         result.add("utility_installations",installations);
-        result.addProperty("catalog_status", catalog == null ? "unbound" : catalog.status().state().name().toLowerCase(java.util.Locale.ROOT));
+        result.addProperty("catalog_status", catalog == null ? "unbound" : catalog.status().state().name().toLowerCase(Locale.ROOT));
         result.addProperty("automatic_discovery", "loaded_nearby_chunks_only"); result.addProperty("automatic_factory_inference", false);
         if (!issue.isEmpty()) result.addProperty("catalog_issue", issue);
         if (!ready(player)) return result;
@@ -144,7 +150,7 @@ public final class ClientMachineCatalog {
     }
     public static Goal.WorldPosition resolveLabel(LocalPlayer player, String label) {
         if (!ready(player) || label == null) return null;
-        var utilityLocations = new java.util.LinkedHashSet<Goal.WorldPosition>();
+        var utilityLocations = new LinkedHashSet<Goal.WorldPosition>();
         for (var value : catalog.installations()) {
             if (value.id().equals(label) || value.label().equalsIgnoreCase(label)) utilityLocations.add(world(value.dimension(),value.anchor()));
             for (var input : value.inputs()) if ((value.label()+"/"+input.id()).equals(label) || (value.id()+"/"+input.id()).equals(label))
@@ -162,7 +168,7 @@ public final class ClientMachineCatalog {
         var device = catalog.findLabel(label, player.level().getGameTime());
         if (device.size() == 1 && device.getFirst().currentState() != CurrentState.CURRENT_ABSENT)
             return world(device.getFirst().device().dimension(), device.getFirst().device().position());
-        var matches = new java.util.LinkedHashSet<Goal.WorldPosition>();
+        var matches = new LinkedHashSet<Goal.WorldPosition>();
         for (var line : catalog.lines()) for (String prefix : List.of(line.id()+"/",line.label()+"/"))
             if (label.startsWith(prefix)) catalog.node(line.id(),label.substring(prefix.length()),player.level().getGameTime())
                     .ifPresent(node -> matches.add(world(line.dimension(),node.position())));
@@ -170,7 +176,7 @@ public final class ClientMachineCatalog {
     }
     public static void shutdown() {
         if (catalog != null && catalog.ready()) {
-            try { catalog.saveAsync().get(2, java.util.concurrent.TimeUnit.SECONDS); }
+            try { catalog.saveAsync().get(2, TimeUnit.SECONDS); }
             catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
             catch (Exception unavailable) { reportIssue(unavailable); }
         }

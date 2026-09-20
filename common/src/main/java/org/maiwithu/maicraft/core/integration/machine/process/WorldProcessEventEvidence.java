@@ -15,11 +15,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
+import java.util.Objects;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /** 将原生世界加工日志与本批实体、完整原料和机器位置对账；只返回已验证生成的成品快照，不代替后续实体与拾取核验。 */
 public final class WorldProcessEventEvidence {
     public record Output(UUID uuid, ItemStack stack) {
-        public Output { java.util.Objects.requireNonNull(uuid); stack = stack.copy(); }
+        public Output { Objects.requireNonNull(uuid); stack = stack.copy(); }
         @Override public ItemStack stack() { return stack.copy(); }
     }
     private WorldProcessEventEvidence() {}
@@ -66,7 +68,7 @@ public final class WorldProcessEventEvidence {
         JsonObject identity = object(row, "identity"); int amount = integer(row, "amount");
         ItemStack template = recipe.result();
         if (template.isEmpty() || amount != template.getCount()
-                || !net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(template.getItem()).toString().equals(text(identity, "id")))
+                || !BuiltInRegistries.ITEM.getKey(template.getItem()).toString().equals(text(identity, "id")))
             throw invalid("output_item_or_quantity_mismatch");
         JsonObject encoded = new JsonObject(); encoded.add("id", identity.get("id").deepCopy()); encoded.addProperty("count", amount);
         encoded.add("components", identity.get("components").deepCopy());

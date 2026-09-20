@@ -10,6 +10,13 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.DiodeBlock;
+import net.minecraft.world.level.block.RedStoneWireBlock;
+import net.minecraft.world.level.block.RedstoneTorchBlock;
+import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.phys.AABB;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlCircuit.Kind.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 
@@ -38,8 +45,8 @@ public final class ControlComponents {
                 || is(be,"dev.eriksonn.aeronautics.content.blocks.propeller.small.BasePropellerBlockEntity")) return PROPELLER;
         if (is(be,CREATE+"contraptions.bearing.MechanicalBearingBlockEntity")) return JOINT;
         if (is(be,CREATE+"kinetics.base.KineticBlockEntity")) return TRANSMISSION;
-        if (block instanceof net.minecraft.world.level.block.RedStoneWireBlock) return WIRE;
-        if (block instanceof net.minecraft.world.level.block.DiodeBlock || block instanceof net.minecraft.world.level.block.RedstoneTorchBlock) return RELAY;
+        if (block instanceof RedStoneWireBlock) return WIRE;
+        if (block instanceof DiodeBlock || block instanceof RedstoneTorchBlock) return RELAY;
         return OTHER;
     }
     public static List<Link> read(Level level, Cell cell, ControlCircuit circuit) {
@@ -51,7 +58,7 @@ public final class ControlComponents {
         try {
             Object be=cell.entity();
             if(kind==SEAT) {
-                facts.put("occupied",level.getEntities((net.minecraft.world.entity.Entity)null,new net.minecraft.world.phys.AABB(cell.pos()),
+                facts.put("occupied",level.getEntities((Entity)null,new AABB(cell.pos()),
                         e->is(e,CREATE+"contraptions.actors.seat.SeatEntity")&&!e.getPassengers().isEmpty()).size()>0);
             } else if (kind==KEY) {
                 facts.put("in_use",call(be,"isInUse"));
@@ -121,14 +128,14 @@ public final class ControlComponents {
                 .map(e->serialized(e.getKey(),e.getValue())).findFirst().orElse("");
     }
     @SuppressWarnings({"rawtypes","unchecked"})
-    private static String serialized(net.minecraft.world.level.block.state.properties.Property property,Comparable value) {
+    private static String serialized(Property property,Comparable value) {
         return property.getName(value);
     }
     private static List<Map<String,Object>> frequency(Object pair) {
         List<Map<String,Object>> result=new ArrayList<>();
         for(String half:List.of("getFirst","getSecond")) {
             ItemStack stack=(ItemStack)call(call(pair,half),"getStack");
-            var color=stack.get(net.minecraft.core.component.DataComponents.DYED_COLOR);
+            var color=stack.get(DataComponents.DYED_COLOR);
             result.add(Map.of("item",BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),"dyed_color",color==null?-1:color.rgb()));
         }
         return result;

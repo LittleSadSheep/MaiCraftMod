@@ -9,6 +9,8 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
 import org.maiwithu.maicraft.core.integration.machine.runtime.ProductionEventCursor;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /** 世界内加工复用现有生产日志；投料前固定证据模式并登记完整区域，运行中缺页或失去后端时不能静默降低证明标准。 */
 final class WorldProcessEvents {
@@ -18,7 +20,7 @@ final class WorldProcessEvents {
     private final String dimension;
     final boolean nativeEvents;
     private ClientRequestReceipt pending;
-    private final java.util.Set<Integer> requestedGroups = new java.util.LinkedHashSet<>();
+    private final Set<Integer> requestedGroups = new LinkedHashSet<>();
     private int group, retained;
     private boolean baselineDone, closed;
 

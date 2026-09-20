@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine.production;
 
 import com.google.gson.JsonObject;
 import java.util.Set;
+import java.util.ArrayList;
 
 /** Mutation admission and live-running diagnostics; a false observe gate never forbids reading historical native evidence. */
 public final class ProductionStageReadiness {
@@ -22,7 +23,7 @@ public final class ProductionStageReadiness {
         if (!Set.of("supply","start","observe").contains(stage)) throw new IllegalArgumentException("Unknown production admission stage");
         if (!Boolean.TRUE.equals(ProductionNativeJson.bool(report,"valid")))
             return "Production design is invalid; inspect the structured preparation errors";
-        var reasons = new java.util.ArrayList<String>();
+        var reasons = new ArrayList<String>();
         int blocked = 0;
         for (var value : ProductionNativeJson.array(report,"requirements")) {
             JsonObject row = value.getAsJsonObject();

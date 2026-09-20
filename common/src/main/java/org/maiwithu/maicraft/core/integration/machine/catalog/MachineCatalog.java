@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** Owner-thread catalog memory with background persistence; this service never reads or changes a Minecraft world. */
@@ -134,7 +135,7 @@ public final class MachineCatalog {
     }
     public Optional<Line> line(String id) { requireReady(); return Optional.ofNullable(lines.get(id)); }
     public String registerInstallation(String label, String dimension, Position anchor,
-            List<org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.Input> inputs, long now) {
+            List<MachineUtilityInputs.Input> inputs, long now) {
         requireReady(); dimension = CatalogLimits.registry(dimension,"dimension"); label = CatalogLimits.text(label,160,"installation label");
         String id = UtilityInstallation.locationId(binding.identityKey(),dimension,anchor);
         if (!installations.containsKey(id) && installations.size() >= CatalogLimits.LINES) throw new IllegalStateException("catalog_installation_capacity");
@@ -147,7 +148,7 @@ public final class MachineCatalog {
     }
     public List<UtilityInstallation> installations() { requireReady(); return List.copyOf(installations.values()); }
     public void recordInstallationBuilt(String dimension, Position anchor,
-            List<org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.Input> inputs, long now) {
+            List<MachineUtilityInputs.Input> inputs, long now) {
         requireReady(); dimension = CatalogLimits.registry(dimension,"dimension");
         var value = installation(dimension,anchor).orElseThrow(() -> new IllegalArgumentException("catalog_installation_missing"));
         if (!value.inputsJson().equals(UtilityInstallation.encode(inputs))) throw new IllegalArgumentException("catalog_installation_changed");

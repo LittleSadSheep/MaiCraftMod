@@ -6,6 +6,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.TreeMap;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Point;
+import com.google.gson.JsonPrimitive;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.StringJoiner;
 
 /** Strict decoders: a string such as "unknown" never becomes a false boolean or a numeric zero. */
 final class ProductionNativeJson {
@@ -49,16 +55,16 @@ final class ProductionNativeJson {
     static String identityKey(JsonObject identity) {
         if (identity == null || text(identity, "kind") == null || text(identity, "id") == null || object(identity, "components") == null) return null;
         try {
-            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(canonical(identity).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return text(identity,"kind") + ":" + text(identity,"id") + "#" + java.util.HexFormat.of().formatHex(digest);
-        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(canonical(identity).getBytes(StandardCharsets.UTF_8));
+            return text(identity,"kind") + ":" + text(identity,"id") + "#" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
     private static String canonical(JsonElement value) {
         if (value == null || value.isJsonNull()) return "null";
         if (value.isJsonPrimitive()) return value.toString();
-        java.util.StringJoiner joined = new java.util.StringJoiner(",", value.isJsonArray() ? "[" : "{", value.isJsonArray() ? "]" : "}");
+        StringJoiner joined = new StringJoiner(",", value.isJsonArray() ? "[" : "{", value.isJsonArray() ? "]" : "}");
         if (value.isJsonArray()) value.getAsJsonArray().forEach(v -> joined.add(canonical(v)));
-        else new TreeMap<>(value.getAsJsonObject().asMap()).forEach((k,v) -> joined.add(new com.google.gson.JsonPrimitive(k) + ":" + canonical(v)));
+        else new TreeMap<>(value.getAsJsonObject().asMap()).forEach((k,v) -> joined.add(new JsonPrimitive(k) + ":" + canonical(v)));
         return joined.toString();
     }
 }

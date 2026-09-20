@@ -11,6 +11,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import java.util.LinkedHashMap;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 
@@ -48,7 +49,7 @@ final class ExternalRadioEvidence {
                     if(project(player,cell.pos(),!frame.state().equals("not_installed")).distanceTo(observation.world(localPos))>=range) continue;
                     String id="external/"+remote.node();
                     if(graph.node(id)==null) {
-                        var facts=new java.util.LinkedHashMap<>(remoteGraph.node(remote.node()).facts()); facts.put("external_to_survey",true);
+                        var facts=new LinkedHashMap<>(remoteGraph.node(remote.node()).facts()); facts.put("external_to_survey",true);
                         graph.add(new ControlCircuit.Node(id,remote.receiver()?ControlCircuit.Kind.RECEIVER:ControlCircuit.Kind.OTHER,facts));
                     }
                     if(remote.receiver()) graph.connect(new ControlCircuit.Edge(local.node(),id,"wireless","external_receiver_actuation_not_surveyed",false));

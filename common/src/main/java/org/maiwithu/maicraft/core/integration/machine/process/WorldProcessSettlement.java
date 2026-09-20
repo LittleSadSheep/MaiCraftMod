@@ -6,6 +6,7 @@ import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.ItemEntityReceipts;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /** 冻结本批真实成品，再以同UUID本人拾取与完整组件库存增量结算；暂停不能把已确认历史降回待生成状态。 */
 final class WorldProcessSettlement {
@@ -85,7 +86,7 @@ final class WorldProcessSettlement {
 
     private void retainOutputEvidence() {
         outputEvidence = Map.of("entity_uuid", output.uuid().toString(),
-                "item_id", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(output.stack().getItem()).toString(),
+                "item_id", BuiltInRegistries.ITEM.getKey(output.stack().getItem()).toString(),
                 "count", output.stack().getCount(), "native_recipe_verified", nativeEvents, "collected", collected);
     }
 }

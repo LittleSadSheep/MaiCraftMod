@@ -25,6 +25,15 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import java.util.Locale;
+import java.util.Set;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
+import org.maiwithu.maicraft.core.task.build.BuildEdgeMotion;
+import org.maiwithu.maicraft.core.task.inventory.TargetedDropGeometry;
+import org.maiwithu.maicraft.core.task.inventory.TargetedDropRegion;
+import org.maiwithu.maicraft.entity.InputDriver;
 
 /** 验配方与备料 -> 安全站位 -> 定量投料 -> 等待原生转化 -> 本人拾取；不预制产物，也不在失败后重复投入材料。 */
 final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskRecord> {
@@ -52,7 +61,7 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
     private boolean approachDispatched, triggerStepStarted;
     private boolean collectionStarted;
     private String collectionDetail;
-    private org.maiwithu.maicraft.core.task.build.BuildEdgeMotion alignment;
+    private BuildEdgeMotion alignment;
 
     WorldTransformTask(LocalPlayer player, WorldTransformTaskRecord record) { super(player, record); }
 
@@ -87,7 +96,7 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
             case PREPARE -> {
                 if (candidateIndex >= candidates.size()) throw new IllegalStateException("world_process_safe_throw_stand_missing");
                 var candidate = candidates.get(candidateIndex++);
-                if (org.maiwithu.maicraft.core.task.inventory.TargetedDropGeometry.canReach(player, Vec3.atBottomCenterOf(candidate.feet()), candidate.receiver(), site.fluids)) {
+                if (TargetedDropGeometry.canReach(player, Vec3.atBottomCenterOf(candidate.feet()), candidate.receiver(), site.fluids)) {
                     stand = candidate; phase = Phase.APPROACH;
                 }
                 yield TaskState.RUNNING;
@@ -96,12 +105,12 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
                 // 到达导航格不等于格心；先用实际身体判断能否安全投料，只有必要时复用施工的有界微动对齐。
                 context.body().releaseAll();
                 if (player.getDeltaMovement().horizontalDistanceSqr() > .0004) yield TaskState.RUNNING;
-                if (site.safeWaiting(player) && org.maiwithu.maicraft.core.task.inventory.TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), site.fluids)) {
+                if (site.safeWaiting(player) && TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), site.fluids)) {
                     phase = Phase.BASELINE; yield TaskState.RUNNING;
                 }
                 if (!approachDispatched) { approachDispatched = true; yield move(stand.feet()); }
                 if (!align(stand.feet())) yield TaskState.RUNNING;
-                if (!site.safeWaiting(player) || !org.maiwithu.maicraft.core.task.inventory.TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), site.fluids))
+                if (!site.safeWaiting(player) || !TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), site.fluids))
                     throw new IllegalStateException("world_process_actual_throw_stand_not_usable");
                 phase = Phase.BASELINE; yield TaskState.RUNNING;
             }
@@ -134,10 +143,10 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         if (!site.safeWaiting(player)) throw new IllegalStateException("world_process_input_pickup_risk");
         inventory.requireUnchanged(); var present = inputs.requirePresent();
         boolean trigger = feedIndex == batchInputs.size() - 1;
-        var region = org.maiwithu.maicraft.core.task.inventory.TargetedDropRegion.ofCells(site.fluids);
+        var region = TargetedDropRegion.ofCells(site.fluids);
         var preference = WorldProcessFeedRegion.forInput(player, recipe, site.fluids, inputs.entities(), present, trigger);
         // AE2在有效流体累计超过60刻后才尝试反应，期间物品会漂移；朝新鲜交集瞄准，但首次入水只要求完整池域。
-        if (!org.maiwithu.maicraft.core.task.inventory.TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), region, preference))
+        if (!TargetedDropGeometry.canReach(player, player.position(), stand.receiver(), region, preference))
             throw new IllegalStateException(trigger ? "world_process_trigger_region_unreachable" : "world_process_input_region_unreachable");
         if (!r.prepareNativeConsumptionBoundary()) return TaskState.RUNNING;
         // 整个有限任务只保留一次消费边界；每份原料仍由独立原生投料回执精确确认，轮询不重发Q。
@@ -155,12 +164,12 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         var drops = ItemEntityReceipts.snapshot(player, site.region);
         // 最后入池后平滑看回真实物品或接收区，留在原站位观看原生转化；暂停与手动接管不会执行这一刻。
         var watching = drops.stream().filter(drop -> drop.stack().is(recipe.result().getItem())).findFirst().orElse(drops.isEmpty() ? null : drops.getFirst());
-        org.maiwithu.maicraft.entity.InputDriver.lookAt(player, watching == null ? stand.receiver().getCenter() : watching.position());
+        InputDriver.lookAt(player, watching == null ? stand.receiver().getCenter() : watching.position());
         // 反应期间不巡视也不靠近原料；看到成品后才查询原生生产记录，并以相同UUID继续收取。
         boolean candidate = drops.stream().anyMatch(drop -> !inputs.entities().containsKey(drop.uuid()) && drop.stack().is(recipe.result().getItem()));
         if (events.nativeEvents && (candidate || world.getGameTime() >= nextEventRead)) {
             for (JsonObject event : events.poll()) {
-                var found = WorldProcessEventEvidence.confirm(player, event, recipe, inputs.entities(), inputs.delivered(), java.util.Set.copyOf(site.fluids));
+                var found = WorldProcessEventEvidence.confirm(player, event, recipe, inputs.entities(), inputs.delivered(), Set.copyOf(site.fluids));
                 settlement.acceptNative(found);
             }
             nextEventRead = world.getGameTime() + 20;
@@ -188,8 +197,8 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         if (collectionStarted) { phase = Phase.VERIFY_PICKUP; return TaskState.RUNNING; }
         collectionStarted = true;
         // 复用通用拾取的真实接触、同格短靠近与20刻同步窗口，只授权已冻结产物UUID，不重新择格或重投原料。
-        return start(new CollectItemsTaskRecord(id(), deadline(600), java.util.Set.of(output.stack().getItem()), 16,
-                output.stack().getHoverName().getString(), java.util.Set.of(output.uuid())));
+        return start(new CollectItemsTaskRecord(id(), deadline(600), Set.of(output.stack().getItem()), 16,
+                output.stack().getHoverName().getString(), Set.of(output.uuid())));
     }
 
     private TaskState verifyPickup() {
@@ -201,7 +210,7 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
     private TaskState completeBatch() {
         var output = settlement.output();
         // 只在真实原料、冻结成品、本人拾取及完整组件账本全部对上后换批，不再消费已经完成的批次。
-        completed.add(Map.of("batch", batchIndex + 1, "item_id", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(output.stack().getItem()).toString(),
+        completed.add(Map.of("batch", batchIndex + 1, "item_id", BuiltInRegistries.ITEM.getKey(output.stack().getItem()).toString(),
                 "count", output.stack().getCount(), "native_recipe_verified", events.nativeEvents));
         if (++batchIndex == r.batches) { phase = Phase.COMPLETE; return TaskState.SUCCESS; }
         approachDispatched = false; phase = Phase.APPROACH; return TaskState.RUNNING;
@@ -225,7 +234,7 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         if (phase == Phase.COLLECT) {
             // 子任务成功不代表父任务已收取，失败也可能先于同帧Take/背包同步；先结算，再给既有20刻同步窗口。
             if (settlement.collect()) return completeBatch();
-            collectionDetail = state.name().toLowerCase(java.util.Locale.ROOT) + ": " + result.message();
+            collectionDetail = state.name().toLowerCase(Locale.ROOT) + ": " + result.message();
             phase = Phase.VERIFY_PICKUP; waitUntil = deadline(20); return TaskState.RUNNING;
         }
         if (state != TaskState.SUCCESS && !(phase == Phase.FEED && state == TaskState.TIMEOUT))
@@ -241,13 +250,13 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
     }
 
     private boolean align(BlockPos at) {
-        if (alignment == null) alignment = org.maiwithu.maicraft.core.task.build.BuildEdgeMotion.alignAt(Vec3.atBottomCenterOf(at),
-                new it.unimi.dsi.fastutil.longs.LongOpenHashSet(), cell -> world.isLoaded(cell)
+        if (alignment == null) alignment = BuildEdgeMotion.alignAt(Vec3.atBottomCenterOf(at),
+                new LongOpenHashSet(), cell -> world.isLoaded(cell)
                         && world.getFluidState(cell).isEmpty() && !NavigationSafetyContext.protectsMutation(cell));
         var state = alignment.tick(player);
-        if (state == org.maiwithu.maicraft.core.task.build.BuildEdgeMotion.Status.FAILED)
+        if (state == BuildEdgeMotion.Status.FAILED)
             throw new IllegalStateException("world_process_anchor_alignment_failed: " + alignment.failure());
-        if (state != org.maiwithu.maicraft.core.task.build.BuildEdgeMotion.Status.ARRIVED) return false;
+        if (state != BuildEdgeMotion.Status.ARRIVED) return false;
         alignment.release(player); alignment = null; return true;
     }
 
@@ -263,14 +272,14 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
     @Override protected void cleanup() {
         if (child != null) { child.stop(player, Task.StopReason.REPLACED); child.result(TaskState.CANCELLED); child = null; childRecord = null; }
         if (alignment != null) { alignment.release(player); alignment = null; }
-        if (events != null && net.minecraft.client.Minecraft.getInstance().player == player && player.level() == world) events.close();
+        if (events != null && Minecraft.getInstance().player == player && player.level() == world) events.close();
         // 取消后留下已经投出的真实物品供观察，不再自动补料或捡走不能证明属于本次加工的东西。
         menus.cleanup(player); super.cleanup();
     }
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>();
         data.put("recipe_id", r.recipeId.toString()); data.put("requested_batches", r.batches); data.put("completed_batches", batchIndex);
-        data.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT)); data.put("batches", List.copyOf(completed));
+        data.put("phase", phase.name().toLowerCase(Locale.ROOT)); data.put("batches", List.copyOf(completed));
         data.put("confirmed_input_count", inputs == null ? 0 : inputs.delivered().stream().mapToInt(ItemStack::getCount).sum());
         data.put("trigger_step_started", triggerStepStarted);
         if (settlement != null && !settlement.outputEvidence().isEmpty()) data.put("pending_output", settlement.outputEvidence());

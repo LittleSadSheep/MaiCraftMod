@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Ingredient;
+import org.maiwithu.maicraft.core.tools.ResourceAllocation;
 
 /** 网络生产与世界内加工共用有限资源分配，避免把同一份库存重复分给重叠标签原料。 */
 final class ProductionRecipeBalance {
@@ -29,7 +30,7 @@ final class ProductionRecipeBalance {
             // 数量检查保留原先语义，具体匹配分配交给共用求解器。
             available[r] = amount;
         }
-        return org.maiwithu.maicraft.core.tools.ResourceAllocation.allocate(available, required,
+        return ResourceAllocation.allocate(available, required,
                 (r, i) -> ingredients.get(i).alternatives().contains(resources.get(r))) != null;
     }
 }

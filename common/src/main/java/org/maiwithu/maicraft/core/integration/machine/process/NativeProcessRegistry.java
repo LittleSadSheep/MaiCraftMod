@@ -9,6 +9,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
 import org.maiwithu.maicraft.task.TaskRecord;
+import java.util.Collections;
 
 /** 统一使用机器按原生机制分派；同一水中转化适配器处理安装配方表中的不同产物，不新增逐配方能力。 */
 public final class NativeProcessRegistry {
@@ -21,7 +22,7 @@ public final class NativeProcessRegistry {
         var out = new LinkedHashMap<String, Entry>();
         register(out, new MinecraftEnchantProcessAdapter(), "enchant");
         register(out, new WorldTransformProcessAdapter(), "world-process");
-        return java.util.Collections.unmodifiableMap(out);
+        return Collections.unmodifiableMap(out);
     }
     private static void register(Map<String, Entry> entries, NativeProcessAdapter adapter, String namespace) {
         if (entries.putIfAbsent(adapter.id(), new Entry(adapter, namespace)) != null)

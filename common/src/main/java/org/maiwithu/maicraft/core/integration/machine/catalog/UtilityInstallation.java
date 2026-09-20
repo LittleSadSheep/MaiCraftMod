@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import java.util.Objects;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** Remembered boundary ports and historical construction, independent of any production manifest. */
@@ -13,7 +14,7 @@ public record UtilityInstallation(String id, String label, String dimension, Pos
                                   String inputsFingerprint, long registeredAtMillis, long builtAtMillis) {
     public UtilityInstallation {
         id = CatalogLimits.text(id, 80, "installation id"); label = CatalogLimits.text(label, 160, "installation label");
-        dimension = CatalogLimits.registry(dimension, "dimension"); java.util.Objects.requireNonNull(anchor);
+        dimension = CatalogLimits.registry(dimension, "dimension"); Objects.requireNonNull(anchor);
         if (inputsJson == null || inputsJson.length() > 16384) throw new IllegalArgumentException("catalog_utility_inputs_budget");
         CatalogLimits.jsonDepth(inputsJson);
         var inputs = MachineUtilityInputs.parseStoredDeclarations(JsonParser.parseString(inputsJson).getAsJsonArray());

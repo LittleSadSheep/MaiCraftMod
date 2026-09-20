@@ -12,6 +12,8 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.TreeMap;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
+import com.google.gson.JsonPrimitive;
+import java.util.StringJoiner;
 
 final class CatalogLimits {
     static final int DEVICES = 2048, LINES = 128, ROLES = 8, MANIFEST_BYTES = 131_072, FILE_BYTES = 4 * 1024 * 1024;
@@ -67,9 +69,9 @@ final class CatalogLimits {
     private static String canonical(JsonElement value) {
         if (value == null || value.isJsonNull()) return "null";
         if (value.isJsonPrimitive()) return value.toString();
-        var joined = new java.util.StringJoiner(",", value.isJsonArray() ? "[" : "{", value.isJsonArray() ? "]" : "}");
+        var joined = new StringJoiner(",", value.isJsonArray() ? "[" : "{", value.isJsonArray() ? "]" : "}");
         if (value.isJsonArray()) value.getAsJsonArray().forEach(child -> joined.add(canonical(child)));
-        else new TreeMap<>(value.getAsJsonObject().asMap()).forEach((key, child) -> joined.add(new com.google.gson.JsonPrimitive(key) + ":" + canonical(child)));
+        else new TreeMap<>(value.getAsJsonObject().asMap()).forEach((key, child) -> joined.add(new JsonPrimitive(key) + ":" + canonical(child)));
         return joined.toString();
     }
 }

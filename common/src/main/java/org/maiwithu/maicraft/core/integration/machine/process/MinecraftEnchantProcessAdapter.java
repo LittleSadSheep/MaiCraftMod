@@ -10,6 +10,10 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.core.task.enchant.EnchantParameters;
 import org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord;
 import org.maiwithu.maicraft.task.TaskRecord;
+import com.google.gson.Gson;
+import net.minecraft.world.inventory.EnchantmentMenu;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
+import org.maiwithu.maicraft.core.task.enchant.EnchantmentQuote;
 
 /** 把附魔作为已有台子上的原生加工机制；共用原来的可见GUI、报价、费用、成品与返还执行器。 */
 public final class MinecraftEnchantProcessAdapter implements NativeProcessAdapter {
@@ -41,11 +45,11 @@ public final class MinecraftEnchantProcessAdapter implements NativeProcessAdapte
         JsonObject out = new JsonObject(); out.addProperty("matched", matches(player, position));
         out.addProperty("evidence_source", "loaded_client_block"); out.addProperty("quote_available", false);
         out.addProperty("next_observation", "真实报价需在该过程装入自有物品后的可见附魔菜单中观察；此处不打开菜单或移动材料。");
-        if (player.containerMenu instanceof net.minecraft.world.inventory.EnchantmentMenu menu
-                && org.maiwithu.maicraft.core.integration.machine.MachineMenu.openedAt(player, position)) {
+        if (player.containerMenu instanceof EnchantmentMenu menu
+                && MachineMenu.openedAt(player, position)) {
             // 只读已经同步到匹配菜单的可见线索；观察不锁定报价，也不能代替消费前再次校验。
-            var quote = org.maiwithu.maicraft.core.task.enchant.EnchantmentQuote.capture(player, menu);
-            out.add("quote", new com.google.gson.Gson().toJsonTree(quote.describe()));
+            var quote = EnchantmentQuote.capture(player, menu);
+            out.add("quote", new Gson().toJsonTree(quote.describe()));
             out.addProperty("quote_evidence_source", "native_client_menu");
             out.addProperty("quote_available", quote.offers().stream().anyMatch(offer -> offer.requiredLevel() > 0 && !offer.clue().isEmpty() && offer.clueLevel() > 0));
         }

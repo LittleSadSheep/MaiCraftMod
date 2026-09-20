@@ -7,6 +7,7 @@ import java.util.List;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.maiwithu.maicraft.core.tools.ResourceAllocation;
+import java.util.stream.Collectors;
 
 /** 从真实背包和原生原料谓词编译有限批次；先证明材料够用且早投物不能触发，再逐批投入最后的触发物。 */
 public final class WorldProcessBatchPlan {
@@ -33,7 +34,7 @@ public final class WorldProcessBatchPlan {
                     throw new IllegalArgumentException("world_process_trigger_order_ambiguous: allocated earlier input " + i
                             + " also matches the trigger ingredient; cannot confirm every input before transformation");
         var batches = new ArrayList<List<ItemStack>>();
-        List<ItemStack> simulated = inventory.stream().map(ItemStack::copy).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        List<ItemStack> simulated = inventory.stream().map(ItemStack::copy).collect(Collectors.toCollection(ArrayList::new));
         for (int batch = 0; batch < count; batch++) {
             var nativeOrder = new ArrayList<ItemStack>();
             for (int i = 0; i < demand.length; i++) {
@@ -68,7 +69,7 @@ public final class WorldProcessBatchPlan {
 
     static void requireSpace(List<ItemStack> inventory, List<ItemStack> inputs, ItemStack result) {
         // 暂停期间别的物品可能占走空位；每批消费前再次检查该批原料离包后的实际成品容量。
-        var simulated = inventory.stream().map(ItemStack::copy).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        var simulated = inventory.stream().map(ItemStack::copy).collect(Collectors.toCollection(ArrayList::new));
         for (ItemStack input : inputs) for (int n = 0; n < input.getCount(); n++) remove(simulated, input);
         addResult(simulated, result);
     }

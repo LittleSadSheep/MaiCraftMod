@@ -10,6 +10,8 @@ import java.util.UUID;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.world.item.ItemStack;
+import java.util.Arrays;
+import org.maiwithu.maicraft.core.tools.ResourceAllocation;
 
 /** 读取原生投料任务已经冻结的入池证据；恢复时即使原料已转化，也不能丢掉此前确认的实体身份和数量。 */
 final class WorldProcessDropReceipt {
@@ -20,8 +22,8 @@ final class WorldProcessDropReceipt {
     static boolean sameItems(List<ItemStack> expected, List<ItemStack> actual) {
         long[] available = actual.stream().mapToLong(ItemStack::getCount).toArray();
         long[] demand = expected.stream().mapToLong(ItemStack::getCount).toArray();
-        if (java.util.Arrays.stream(available).sum() != java.util.Arrays.stream(demand).sum()) return false;
-        return org.maiwithu.maicraft.core.tools.ResourceAllocation.allocate(available, demand,
+        if (Arrays.stream(available).sum() != Arrays.stream(demand).sum()) return false;
+        return ResourceAllocation.allocate(available, demand,
                 (r, i) -> ItemStack.isSameItemSameComponents(actual.get(r), expected.get(i))) != null;
     }
 
