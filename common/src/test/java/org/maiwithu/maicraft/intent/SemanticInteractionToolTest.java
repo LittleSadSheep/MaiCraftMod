@@ -8,6 +8,8 @@ import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.UseTool;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.tools.BlockActionOps;
+import com.google.gson.JsonObject;
+import java.util.Set;
 
 public final class SemanticInteractionToolTest {
     public static void main(String[] args) {
@@ -48,15 +50,15 @@ public final class SemanticInteractionToolTest {
 
     private static void equipmentLocationContract() {
         for (String location : List.of("mainhand", "offhand", "head", "chest", "legs", "feet", "armor")) {
-            var json = new com.google.gson.JsonObject();
+            var json = new JsonObject();
             json.addProperty("ability", GeneralAbilityAdapter.EQUIP);
             json.addProperty("outcome", "remove the requested equipment");
-            var parameters = new com.google.gson.JsonObject();
+            var parameters = new JsonObject();
             parameters.addProperty("action", "unequip");
             parameters.addProperty("equipment_location", location);
             json.add("parameters", parameters);
             Goal goal = Goal.fromJson(json);
-            SemanticGoalContract.validate(goal, java.util.Set.of(GeneralAbilityAdapter.EQUIP));
+            SemanticGoalContract.validate(goal, Set.of(GeneralAbilityAdapter.EQUIP));
             IntentAction result = AbilityAdapter.adapt(goal, null, null);
             check(result instanceof IntentAction.Tool, "the complete ability entry point must preserve equipment_location until native compilation");
             var command = (IntentAction.Tool) result;

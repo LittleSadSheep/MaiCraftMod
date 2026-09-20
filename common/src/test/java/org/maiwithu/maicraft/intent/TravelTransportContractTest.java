@@ -7,6 +7,9 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.tools.work.MoveToTool;
 import org.maiwithu.maicraft.core.tools.work.SemanticExploreApi;
 import org.maiwithu.maicraft.core.tools.work.SemanticExploreTool;
+import java.util.Set;
+import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
+import org.maiwithu.maicraft.core.tools.MovementOps;
 
 /** Semantic mode requests survive adaptation; an unknown destination cannot pretend to be a forced transport trip. */
 public final class TravelTransportContractTest {
@@ -94,8 +97,8 @@ public final class TravelTransportContractTest {
         JsonObject near = ((IntentAction.Tool) AbilityAdapter.adapt(known, null, null)).arguments();
         check(near.get("y").getAsInt() == 115 && !near.get("exact").getAsBoolean(),
                 "ordinary travel keeps a known floor height without turning it into one exact cell");
-        var movement = new org.maiwithu.maicraft.core.tools.MovementOps();
-        var defaults = (org.maiwithu.maicraft.core.task.move.MoveToTaskRecord) movement.moveTo(
+        var movement = new MovementOps();
+        var defaults = (MoveToTaskRecord) movement.moveTo(
                 120D, 115D, -40D, null, false, false, "auto", false,
                 null, null, null, new ToolContext("approximate", 0));
         check(!defaults.exact && defaults.horizontalRadius == 3 && defaults.verticalTolerance == 2 && defaults.y == 115D,
@@ -113,7 +116,7 @@ public final class TravelTransportContractTest {
         parameters.addProperty("horizontal_radius", 20);
         parameters.addProperty("vertical_tolerance", 8);
         Goal horizontal = Goal.fromJson(goal(parameters).toJson());
-        SemanticGoalContract.validate(horizontal, java.util.Set.of("maicraft:travel"));
+        SemanticGoalContract.validate(horizontal, Set.of("maicraft:travel"));
         JsonObject column = ((IntentAction.Tool) AbilityAdapter.adapt(horizontal, null, null)).arguments();
         check(!column.has("y") && column.get("x").getAsDouble() == 120.5
                         && column.get("horizontal_radius").getAsInt() == 20 && column.get("vertical_tolerance").getAsInt() == 8,
@@ -152,7 +155,7 @@ public final class TravelTransportContractTest {
     }
 
     private static void reject(JsonObject parameters, String reason) {
-        try { SemanticGoalContract.validate(goal(parameters), java.util.Set.of("maicraft:travel")); }
+        try { SemanticGoalContract.validate(goal(parameters), Set.of("maicraft:travel")); }
         catch (SemanticContractException expected) { return; }
         throw new AssertionError(reason);
     }

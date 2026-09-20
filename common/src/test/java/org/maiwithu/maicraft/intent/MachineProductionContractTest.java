@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.Set;
+import java.util.List;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
 
 /** Public requests retain construction-only behavior and cannot smuggle slot scripts into production plans. */
 public final class MachineProductionContractTest {
@@ -11,7 +14,7 @@ public final class MachineProductionContractTest {
             MachineAbilityAdapter.OPERATE, MachineAbilityAdapter.INSPECT);
 
     public static void main(String[] args) {
-        net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         JsonObject build = JsonParser.parseString("""
                 {"snapshot_id":"receipt","allow_modify":true,"blueprint":{"schema_version":1,
                  "blocks":[{"offset":[0,0,0],"block_id":"minecraft:stone"}]}}
@@ -68,7 +71,7 @@ public final class MachineProductionContractTest {
         unsafeWatch.getAsJsonObject("production").getAsJsonArray("nodes").get(0).getAsJsonObject().addProperty("slot",1);
         rejects(MachineAbilityAdapter.OPERATE,unsafeWatch);
         runtime.compile(new Goal("maicraft:sequence", "review and build production", null, "{}", "{}",
-                java.util.List.of(), java.util.List.of(reviewed, goal(MachineAbilityAdapter.BUILD, build))), 100);
+                List.of(), List.of(reviewed, goal(MachineAbilityAdapter.BUILD, build))), 100);
         JsonObject missing = run.deepCopy(); missing.remove("production"); rejects(MachineAbilityAdapter.OPERATE, missing);
 
         JsonObject reversed = build.deepCopy();
@@ -114,7 +117,7 @@ public final class MachineProductionContractTest {
         var target = ability.equals(MachineAbilityAdapter.DESIGN) && !parameters.has("snapshot_id")
                 ? null : new Goal.SemanticTarget("landmark", "factory", null, null);
         return new Goal(ability, "Run the declared machine", target,
-                parameters.toString(), "{}", java.util.List.of(), java.util.List.of());
+                parameters.toString(), "{}", List.of(), List.of());
     }
     private static void accepts(String ability, JsonObject parameters) {
         Goal goal = goal(ability, parameters);

@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.tools.interact.InteractAtTool;
 import org.maiwithu.maicraft.task.TaskDispatch;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Complete semantic entry through native task compilation, using the real loaded section index. */
 public final class ExactInteractionTargetTest {
@@ -98,7 +99,7 @@ public final class ExactInteractionTargetTest {
         IntentAction.Tool tool = action instanceof IntentAction.Tool direct ? direct
                 : action instanceof IntentAction.Chain chain ? chain.actions().getLast() : null;
         check(tool != null && tool.toolName().equals("interact_at"), "the exact target must compile to native interaction: " + action);
-        var result = new java.util.concurrent.atomic.AtomicReference<InteractAtTaskRecord>();
+        var result = new AtomicReference<InteractAtTaskRecord>();
         TaskDispatch.captureNext(record -> result.set((InteractAtTaskRecord) record),
                 () -> new InteractAtTool().onGameCall("exact-target", tool.arguments(), f.player,
                         ignored -> { throw new AssertionError("captured internal interaction replied directly"); }));

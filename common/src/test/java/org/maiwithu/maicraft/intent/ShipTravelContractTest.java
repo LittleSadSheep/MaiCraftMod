@@ -10,6 +10,8 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.BoardStructureTool;
 import org.maiwithu.maicraft.task.TaskDispatch;
+import com.google.gson.JsonParser;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class ShipTravelContractTest {
     public static void main(String[] args) throws Exception {
@@ -24,7 +26,7 @@ public final class ShipTravelContractTest {
                 check(action instanceof IntentAction.Tool tool && tool.toolName().equals("board_structure"),
                         "observed UUID must compile into boarding instead of a static goto");
                 var tool = (IntentAction.Tool) action;
-                var record = new java.util.concurrent.atomic.AtomicReference<BoardStructureTaskRecord>();
+                var record = new AtomicReference<BoardStructureTaskRecord>();
                 TaskDispatch.captureNext(value -> record.set((BoardStructureTaskRecord)value),
                         () -> new BoardStructureTool().onGameCall("ship-test",tool.arguments(),f.player,
                                 ignored -> { throw new AssertionError("unexpected direct reply"); }));
@@ -32,7 +34,7 @@ public final class ShipTravelContractTest {
             }
             parameters.addProperty("transport_mode","ground"); reject(parameters,f);
             parameters.addProperty("transport_mode","jetpack");
-            parameters.add("destination",com.google.gson.JsonParser.parseString("{\"x\":1,\"y\":2,\"z\":3}")); reject(parameters,f);
+            parameters.add("destination",JsonParser.parseString("{\"x\":1,\"y\":2,\"z\":3}")); reject(parameters,f);
             parameters.remove("destination"); parameters.addProperty("structure_id","not-an-observed-uuid"); reject(parameters,f);
         }
         System.out.println("ShipTravelContractTest: passed");

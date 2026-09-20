@@ -7,14 +7,18 @@ import org.maiwithu.maicraft.core.task.chat.ChatTaskRecord;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.List;
+import com.google.gson.JsonParser;
+import java.util.Set;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
 
 public final class ChatAbilityTest {
     public static void main(String[] args) throws Exception {
-        net.minecraft.SharedConstants.tryDetectVersion();
-        net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
         check(IntentRuntime.KNOWN_ABILITIES.contains("maicraft:chat"), "chat is discoverable");
         check(SemanticAbilityCatalog.parameterNames("maicraft:chat").equals(
-                java.util.Set.of("text", "typing_interval_ms")), "bounded semantic contract");
+                Set.of("text", "typing_interval_ms")), "bounded semantic contract");
         for (String text : List.of("你好 👋", "/home")) {
             JsonObject parameters = new JsonObject(); parameters.addProperty("text", text);
             Goal goal = goal(parameters);
@@ -31,14 +35,14 @@ public final class ChatAbilityTest {
             check(!RecoveryAdvisor.ordinaryRetryAllowed(cancelled), "human cancellation cannot silently resend");
             var compact = IntentRuntime.class.getDeclaredMethod("compactAttentionResult", JsonObject.class);
             compact.setAccessible(true);
-            var json = com.google.gson.JsonParser.parseString(cancelled.toJson()).getAsJsonObject();
+            var json = JsonParser.parseString(cancelled.toJson()).getAsJsonObject();
             var data = ((JsonObject) compact.invoke(null, json)).getAsJsonObject("data");
             check(data.get("delivery_status").getAsString().equals("not_submitted")
                     && !data.get("mechanical_retry_allowed").getAsBoolean(), "Attention preserves submission and retry evidence");
         }
         for (String invalid : List.of("{}", "{\"text\":\"\"}", "{\"text\":42}",
                 "{\"text\":\"hello\",\"typing_interval_ms\":1}", "{\"text\":\"hello\",\"keys\":[\"ENTER\"]}")) {
-            var parameters = com.google.gson.JsonParser.parseString(invalid).getAsJsonObject();
+            var parameters = JsonParser.parseString(invalid).getAsJsonObject();
             try { IntentRuntime.get().compile(goal(parameters), 0); throw new AssertionError("invalid chat plan accepted"); }
             catch (IllegalArgumentException expected) { }
         }

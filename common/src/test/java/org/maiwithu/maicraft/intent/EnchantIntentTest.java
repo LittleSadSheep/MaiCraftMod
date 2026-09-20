@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.enchant.EnchantParameters;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord;
 
 /** 从公开目标检查真实台子绑定与成本契约；操作编号只测试持久身份，不模拟一次真实附魔。 */
 public final class EnchantIntentTest {
@@ -53,9 +54,9 @@ public final class EnchantIntentTest {
             IntentAction action=EnchantAbilityAdapter.adapt(targeted,h.player,runtime);
             check(action instanceof IntentAction.Native,"观察到真实台子后才转换为统一原生过程任务");
             var nativeRecord = ((IntentAction.Native) action).record();
-            check(nativeRecord instanceof org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord,
+            check(nativeRecord instanceof EnchantTaskRecord,
                     "旧入口必须复用已验收的附魔执行器");
-            var enchant = (org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord) nativeRecord;
+            var enchant = (EnchantTaskRecord) nativeRecord;
             check(enchant.table.equals(table) && enchant.offerTier == 1 && enchant.maxLapis == 1,
                     "固定目标与预算没有改成裸菜单指令");
             h.set(table,Blocks.STONE.defaultBlockState());

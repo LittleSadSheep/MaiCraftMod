@@ -11,6 +11,8 @@ import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.task.Task;
 
 /** Cancelling a decision-waiting task must expose one terminal state through get, list and restore. */
 public final class IntentTerminalStateTest {
@@ -108,9 +110,9 @@ public final class IntentTerminalStateTest {
         var task = new IntentTask(null, record, null);
         var field = IntentTask.class.getDeclaredField("child");
         field.setAccessible(true);
-        field.set(task, new org.maiwithu.maicraft.task.Task() {
-            public TaskState tick(net.minecraft.client.player.LocalPlayer player) { throw new AssertionError("read-only progress"); }
-            public void stop(net.minecraft.client.player.LocalPlayer player, StopReason reason) { throw new AssertionError("read-only progress"); }
+        field.set(task, new Task() {
+            public TaskState tick(LocalPlayer player) { throw new AssertionError("read-only progress"); }
+            public void stop(LocalPlayer player, StopReason reason) { throw new AssertionError("read-only progress"); }
             public String name() { return "supply"; }
             public Map<String, Object> progress() {
                 return Map.of("phase", "material_supply", "child", Map.of("source", "mine",

@@ -8,6 +8,49 @@ import org.maiwithu.maicraft.core.integration.machine.MachineControlTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReviewTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurveyModelTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintStateTest;
+import java.util.Map;
+import org.maiwithu.maicraft.agent.tool.ToolRegistryTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingConvexMeshTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelBlockStatesTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelCompositionTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelContractTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelGuardTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelInspectionTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelPatternTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelShapeTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelShowcaseTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelSurfaceTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompilerTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneInspectionTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneStoreTest;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneV2StoreTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocumentTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineBuildCompletionTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlanTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuObservationTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuPolicyTest;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudgetTest;
+import org.maiwithu.maicraft.core.integration.machine.assembly.MachineAssemblyTest;
+import org.maiwithu.maicraft.core.integration.machine.control.VehicleRegressionSuite;
+import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutAeNetworksTest;
+import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutInstanceIdentityTest;
+import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutItemOutputsTest;
+import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutModulesTest;
+import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayoutTest;
+import org.maiwithu.maicraft.core.scan.SearchGeometryTest;
+import org.maiwithu.maicraft.core.scan.TargetIndexInvalidationTest;
+import org.maiwithu.maicraft.core.task.acquire.StorageSettlementTest;
+import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparationTest;
+import org.maiwithu.maicraft.core.task.build.BuildExecutionContextTest;
+import org.maiwithu.maicraft.core.task.build.MachineBlueprintGeometryTest;
+import org.maiwithu.maicraft.core.task.supply.BuildBatchCompletionTest;
+import org.maiwithu.maicraft.core.task.supply.BuildSupplyPreviewTest;
+import org.maiwithu.maicraft.core.task.supply.MaterialSupplyReceiptTest;
+import org.maiwithu.maicraft.mcp.BuildingModelPublicTest;
+import org.maiwithu.maicraft.mcp.BuildingModelV2PublicTest;
+import org.maiwithu.maicraft.mcp.NearbySignPerceptionTest;
+import org.maiwithu.maicraft.mcp.PerceiveSectionsTest;
+import org.maiwithu.maicraft.task.TaskResult;
 
 /** No game launch required; actual server receipts still require in-game acceptance tests. */
 public final class MachineRegressionSuite {
@@ -24,71 +67,71 @@ public final class MachineRegressionSuite {
         catch (Exception failure) { throw new AssertionError(failure); }
         try { HarvestEvidenceContractTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
-        org.maiwithu.maicraft.core.scan.SearchGeometryTest.main(args);
-        try { org.maiwithu.maicraft.core.scan.TargetIndexInvalidationTest.main(args); }
+        SearchGeometryTest.main(args);
+        try { TargetIndexInvalidationTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
         MachineSurveyModelTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.control.VehicleRegressionSuite.main(args);
+        VehicleRegressionSuite.main(args);
         MachineDesignReviewTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayoutTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutModulesTest.main(args);
+        SemanticMachineLayoutTest.main(args);
+        MachineLayoutModulesTest.main(args);
         MachineLayoutJobsTest.main(args);
         MachineBlueprintAbilityTest.main(args);
         BlueprintRuntimeEntryTest.main(args);
         BuildingStatePolicyTest.main(args);
-        org.maiwithu.maicraft.core.blueprint.BuildingSceneCompilerTest.main(args);
-        org.maiwithu.maicraft.core.blueprint.BuildingSceneInspectionTest.main(args);
+        BuildingSceneCompilerTest.main(args);
+        BuildingSceneInspectionTest.main(args);
         // 快速图元、组件复制和原生状态变换先独立验证，再从公共建模入口检查保存与查询。
-        org.maiwithu.maicraft.core.blueprint.BuildingModelShapeTest.main(args);
-        org.maiwithu.maicraft.core.blueprint.BuildingConvexMeshTest.main(args);
-        org.maiwithu.maicraft.core.blueprint.BuildingModelBlockStatesTest.main(args);
-        org.maiwithu.maicraft.core.blueprint.BuildingModelSurfaceTest.main(args);
+        BuildingModelShapeTest.main(args);
+        BuildingConvexMeshTest.main(args);
+        BuildingModelBlockStatesTest.main(args);
+        BuildingModelSurfaceTest.main(args);
         // 网格孔洞与交替半砖也必须经由同一编译器展开，再检查组件变换和材料状态。
-        org.maiwithu.maicraft.core.blueprint.BuildingModelPatternTest.main(args);
-        try { org.maiwithu.maicraft.core.blueprint.BuildingModelContractTest.main(args); }
+        BuildingModelPatternTest.main(args);
+        try { BuildingModelContractTest.main(args); }
         catch (Exception failure) { throw new AssertionError("versioned building contract regression",failure); }
         try { BuildingSceneVersionRuntimeTest.main(args); }
         catch (Exception failure) { throw new AssertionError("versioned scene operation regression",failure); }
         try { BuildingDesignConcurrencyTest.main(args); }
         catch (Exception failure) { throw new AssertionError("concurrent building design regression",failure); }
-        org.maiwithu.maicraft.core.blueprint.BuildingModelCompositionTest.main(args);
-        org.maiwithu.maicraft.core.blueprint.BuildingModelGuardTest.main(args);
-        org.maiwithu.maicraft.core.blueprint.BuildingModelInspectionTest.main(args);
-        try { org.maiwithu.maicraft.core.blueprint.BuildingModelShowcaseTest.main(args); }
+        BuildingModelCompositionTest.main(args);
+        BuildingModelGuardTest.main(args);
+        BuildingModelInspectionTest.main(args);
+        try { BuildingModelShowcaseTest.main(args); }
         catch (Exception failure) { throw new AssertionError("quick model showcase compilation", failure); }
-        try { org.maiwithu.maicraft.core.blueprint.BuildingSceneV2StoreTest.main(args); }
+        try { BuildingSceneV2StoreTest.main(args); }
         catch (Exception failure) { throw new AssertionError("component scene revision regression", failure); }
-        org.maiwithu.maicraft.mcp.BuildingModelV2PublicTest.main(args);
+        BuildingModelV2PublicTest.main(args);
         try { BuildingModelV2RuntimeTest.main(args); }
         catch (Exception failure) { throw new AssertionError("quick model public preview and build regression", failure); }
-        org.maiwithu.maicraft.mcp.BuildingModelPublicTest.main(args);
-        try { org.maiwithu.maicraft.core.blueprint.BuildingSceneStoreTest.main(args); }
+        BuildingModelPublicTest.main(args);
+        try { BuildingSceneStoreTest.main(args); }
         catch (Exception failure) { throw new AssertionError("building scene revision regression", failure); }
         try { BuildingSceneRuntimeTest.main(args); }
         catch (Exception failure) { throw new AssertionError("building model entry and export regression", failure); }
         try { BuildProjectContinuationTest.main(args); }
         catch (Exception failure) { throw new AssertionError("durable building continuation regression", failure); }
-        org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocumentTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.MachineBuildCompletionTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudgetTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutAeNetworksTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutInstanceIdentityTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutItemOutputsTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.assembly.MachineAssemblyTest.main(args);
+        MachineBlueprintDocumentTest.main(args);
+        MachineBuildCompletionTest.main(args);
+        MachinePlanningBudgetTest.main(args);
+        MachineLayoutAeNetworksTest.main(args);
+        MachineLayoutInstanceIdentityTest.main(args);
+        MachineLayoutItemOutputsTest.main(args);
+        MachineAssemblyTest.main(args);
         MachineControlTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.MachineMenuPolicyTest.main(args);
-        try { org.maiwithu.maicraft.core.integration.machine.MachineMenuObservationTest.main(args); }
+        MachineMenuPolicyTest.main(args);
+        try { MachineMenuObservationTest.main(args); }
         catch (Exception failure) { throw new AssertionError("menu observation regression", failure); }
         MachineBlueprintStateTest.main(args);
-        org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlanTest.main(args);
-        org.maiwithu.maicraft.core.task.build.MachineBlueprintGeometryTest.main(args);
-        org.maiwithu.maicraft.core.task.build.BuildExecutionContextTest.main(args);
-        org.maiwithu.maicraft.core.task.supply.BuildBatchCompletionTest.main(args);
-        try { org.maiwithu.maicraft.core.task.supply.MaterialSupplyReceiptTest.main(args); }
+        MachineConstructionPlanTest.main(args);
+        MachineBlueprintGeometryTest.main(args);
+        BuildExecutionContextTest.main(args);
+        BuildBatchCompletionTest.main(args);
+        try { MaterialSupplyReceiptTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
-        try { org.maiwithu.maicraft.core.task.acquire.StorageSettlementTest.main(args); }
+        try { StorageSettlementTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
-        try { org.maiwithu.maicraft.core.task.supply.BuildSupplyPreviewTest.main(args); }
+        try { BuildSupplyPreviewTest.main(args); }
         catch (Exception failure) { throw new AssertionError("preview before material supply", failure); }
         // 作者蓝图预览必须保持只读；模板生成与外出找地已不属于建筑入口。
         try { BuildDesignPreviewTest.main(args); }
@@ -115,8 +158,8 @@ public final class MachineRegressionSuite {
         rejects("maicraft:design_machine", "null", "{\"design\":{\"components\":[{\"name\":\"buffer\",\"block_id\":\"minecraft:chest\",\"count\":1,\"role\":\"storage\"}],\"connections\":[],\"blueprint\":{}}}");
         // 模拟中途取消，要求保留已发生的数量变化和不确定性，同时不把内部槽号直接公开。
         var interrupted = IntentTask.withInterruptedEffects(
-                org.maiwithu.maicraft.task.TaskResult.cancelled("cancelled"),
-                org.maiwithu.maicraft.task.TaskResult.fail("partial deposit", java.util.Map.of(
+                TaskResult.cancelled("cancelled"),
+                TaskResult.fail("partial deposit", Map.of(
                         "actual_player_delta", -2, "outcome_uncertain", true,
                         "mechanical_retry_allowed", false, "slot", 3)));
         JsonObject interruption = JsonParser.parseString(interrupted.toJson()).getAsJsonObject();
@@ -125,11 +168,11 @@ public final class MachineRegressionSuite {
                 || childData.has("slot") || !interruption.getAsJsonObject("data").get("outcome_uncertain").getAsBoolean()) {
             throw new AssertionError("Cancellation lost or leaked native partial-effect evidence");
         }
-        org.maiwithu.maicraft.core.task.acquire.WorkToolPreparationTest.main(args);
+        WorkToolPreparationTest.main(args);
         SemanticInteractionToolTest.main(args);
-        org.maiwithu.maicraft.agent.tool.ToolRegistryTest.main(args);
-        org.maiwithu.maicraft.mcp.NearbySignPerceptionTest.main(args);
-        org.maiwithu.maicraft.mcp.PerceiveSectionsTest.main(args);
+        ToolRegistryTest.main(args);
+        NearbySignPerceptionTest.main(args);
+        PerceiveSectionsTest.main(args);
         System.out.println("MachineRegressionSuite: semantic contracts passed");
     }
 
