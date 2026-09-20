@@ -473,10 +473,8 @@ public final class SemanticAcquireCompanionTask
         Set<String> lineageRecipes = new LinkedHashSet<>(need.lineageRecipes);
         lineageRecipes.addAll(frontier.recipeIds());
         int ingredientFinal = count(ingredient.itemIds()) + ingredient.missing();
-        boolean mergedAlternativeFrontier = frontier.recipeIds().size() > 1;
-        List<SemanticAcquireTaskRecord.Source> childSources = mergedAlternativeFrontier
-                ? prioritizeDirectAlternativeSources(need.allowedSources)
-                : need.allowedSources;
+        // 原料继承相同来源许可；真正先用哪种来源，统一由当前实物条件排序。
+        List<SemanticAcquireTaskRecord.Source> childSources = need.allowedSources;
         AcquisitionNeed childNeed = new AcquisitionNeed(
                 ingredient.itemIds(), ingredientFinal, need.depth + 1,
                 lineageItems, lineageRecipes, frontier.recipeIds(), childSources);
@@ -490,7 +488,7 @@ public final class SemanticAcquireCompanionTask
                 "missing_item_ids", itemStrings(ingredient.itemIds()),
                 "missing_count", ingredient.missing(),
                 "observed_stock_material_hint", recipePlanner.stockPriority(chosen, need) == 0,
-                "source_order", childSources.stream()
+                "allowed_sources", childSources.stream()
                         .map(source -> source.name().toLowerCase(Locale.ROOT))
                         .toList()));
         needs.push(childNeed);
@@ -1715,47 +1713,6 @@ public final class SemanticAcquireCompanionTask
         return Set.copyOf(excluded);
     }
 
-    /**
-     * A merged one-unit frontier means every listed item is already a complete way to unlock one
-     * parent recipe. Inspect the permitted direct world source before recursively manufacturing
-     * whichever member happened to sort first. This is a stable reordering of permissions, not a
-     * new permission: inventory, loose-item, storage and direct-mine sources form a stable prefix
-     * ahead of craft/cook, while trade/hunt keep their existing side-effect order.
-     */
-    private static List<SemanticAcquireTaskRecord.Source> prioritizeDirectAlternativeSources(
-            List<SemanticAcquireTaskRecord.Source> sources) {
-        int craft = sources.indexOf(SemanticAcquireTaskRecord.Source.CRAFT);
-        int cook = sources.indexOf(SemanticAcquireTaskRecord.Source.COOK);
-        int firstTransformation;
-        if (craft < 0) firstTransformation = cook;
-        else if (cook < 0) firstTransformation = craft;
-        else firstTransformation = Math.min(craft, cook);
-        if (firstTransformation < 0) return sources;
-
-        List<SemanticAcquireTaskRecord.Source> ordered = new ArrayList<>(sources);
-        List<SemanticAcquireTaskRecord.Source> lateDirect = sources.subList(
-                        firstTransformation + 1, sources.size()).stream()
-                .filter(SemanticAcquireCompanionTask::isDirectAlternativeSource)
-                .toList();
-        if (lateDirect.isEmpty()) return sources;
-        ordered.removeAll(lateDirect);
-        craft = ordered.indexOf(SemanticAcquireTaskRecord.Source.CRAFT);
-        cook = ordered.indexOf(SemanticAcquireTaskRecord.Source.COOK);
-        if (craft < 0) firstTransformation = cook;
-        else if (cook < 0) firstTransformation = craft;
-        else firstTransformation = Math.min(craft, cook);
-        ordered.addAll(firstTransformation, lateDirect);
-        return List.copyOf(ordered);
-    }
-
-    private static boolean isDirectAlternativeSource(
-            SemanticAcquireTaskRecord.Source source) {
-        return source == SemanticAcquireTaskRecord.Source.INVENTORY
-                || source == SemanticAcquireTaskRecord.Source.NEARBY
-                || source == SemanticAcquireTaskRecord.Source.STORAGE
-                || source == SemanticAcquireTaskRecord.Source.MINE;
-    }
-
     private NearbySurvey surveyNearby(List<ResourceLocation> ids) {
         // 当前只接受 getOwner 明确返回自己的掉落物；原版客户端通常拿不到这项信息，null 也会计入不安全组。
         Set<ResourceLocation> accepted = Set.copyOf(ids);
@@ -1827,34 +1784,16 @@ public final class SemanticAcquireCompanionTask
                 : inferred;
     }
 
-    /**
-     * {@code allowed_sources} is a permission set. Rank sources once for this AcquisitionNeed from live,
-     * side-effect-free readiness facts. Exhausted sources are tracked by identity, so re-ranking
-     * after a live fact changes cannot skip or repeat a source by numeric cursor. In particular, a
-     * live raw cooking input may outrank recursive crafting, while a
-     * hypothetical tool/armour smelt may not outrank an executable ordinary recipe.
-     */
     private List<SemanticAcquireTaskRecord.Source> executionSourceOrder(AcquisitionNeed need) {
-        // allowed_sources 是允许集合，不保证按填写顺序执行；每项需求根据当前能否直接合成／烹饪等事实重新排序。
+        // 许可只决定能用哪些来源；每次库存进展或来源耗尽后，再根据现场条件重排剩余来源。
         if (need.plannedSourceOrder != null) return need.plannedSourceOrder;
         SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
         boolean naturalMine = !hint.blockRefs().isEmpty();
         boolean directHunt = r.allowHarm && !hint.entityTypeIds().isEmpty();
-        boolean craftReady = craftExecutableNow(need);
-        boolean cookReady = cookInputReadyNow(need);
-        need.plannedSourceOrder = need.allowedSources.stream()
-                .filter(source -> !need.exhaustedSources.contains(source))
-                .sorted(Comparator.comparingInt(source -> switch (source) {
-                    case INVENTORY -> 0;
-                    case NEARBY -> 10;
-                    case STORAGE -> 20;
-                    case CRAFT -> craftReady ? 25 : 50;
-                    case COOK -> cookReady ? 26 : 55;
-                    case MINE -> naturalMine ? 30 : 60;
-                    case HUNT -> directHunt ? 35 : 80;
-                    case TRADE -> 70;
-                }))
-                .toList();
+        boolean craftReady = need.canTry(SemanticAcquireTaskRecord.Source.CRAFT) && craftExecutableNow(need);
+        boolean cookReady = need.canTry(SemanticAcquireTaskRecord.Source.COOK) && cookInputReadyNow(need);
+        need.plannedSourceOrder = AcquisitionSources.order(need,
+                new AcquisitionSources.Readiness(craftReady, cookReady, naturalMine, directHunt));
         return need.plannedSourceOrder;
     }
 

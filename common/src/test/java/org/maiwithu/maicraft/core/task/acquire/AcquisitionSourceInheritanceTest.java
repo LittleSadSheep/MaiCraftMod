@@ -37,6 +37,8 @@ public final class AcquisitionSourceInheritanceTest {
                 Set.of(Source.INVENTORY, Source.STORAGE));
         // 铁已经带在身上也不等于允许合成；背包观察与制造权限是两件事。
         prepareTool(List.of(Source.MINE), false, 64, "iron_shovel", Set.of(Source.INVENTORY));
+        inventoryOnlyDoesNotPrepareCrafting();
+        sourceOrderUsesCurrentFacts();
         System.out.println("AcquisitionSourceInheritanceTest: passed");
     }
 
@@ -78,6 +80,34 @@ public final class AcquisitionSourceInheritanceTest {
         remember.invoke(cache, world.player, world.level, Map.of(), new StockEvidence.Snapshot(
                 StockEvidence.Source.CONTAINER, Map.of(ResourceLocation.withDefaultNamespace("iron_ingot"), 64L),
                 Set.of(), world.level.getGameTime()));
+    }
+
+    private static void inventoryOnlyDoesNotPrepareCrafting() throws Exception {
+        // 此夹具没有配方管理器；只盘点背包应能正常报告缺料，不应查询合成或烹饪配方。
+        try (var world = new InteractionWorldTestHarness()) {
+            var record = new SemanticAcquireTaskRecord("inventory-only", 1000,
+                    List.of(ResourceLocation.withDefaultNamespace("dirt")), 1, List.of(Source.INVENTORY),
+                    false, SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
+            var task = new SemanticAcquireCompanionTask(world.player, record);
+            task.start(world.player);
+            TaskState state = TaskState.RUNNING;
+            for (int i = 0; i < 3 && state == TaskState.RUNNING; i++) state = task.tick(world.player);
+            check(state == TaskState.FAILED && "allowed_sources_exhausted".equals(
+                    task.result(state).data().get("failure_code")), "背包不足应正常耗尽来源，不能因准备未授权合成而崩溃");
+        }
+    }
+
+    private static void sourceOrderUsesCurrentFacts() {
+        var item = ResourceLocation.withDefaultNamespace("dirt");
+        var need = new AcquisitionNeed(List.of(item), 1, 0, Set.of(item), Set.of(), Set.of(),
+                List.of(Source.COOK, Source.MINE, Source.CRAFT, Source.STORAGE, Source.INVENTORY));
+        var ready = new AcquisitionSources.Readiness(true, false, true, false);
+        check(AcquisitionSources.order(need, ready).equals(
+                List.of(Source.INVENTORY, Source.STORAGE, Source.CRAFT, Source.MINE, Source.COOK)),
+                "现货与已经能合成的配方优先，不能照来源参数书写顺序行动");
+        need.exhaustedSources.add(Source.CRAFT);
+        check(AcquisitionSources.order(need, ready).equals(
+                List.of(Source.INVENTORY, Source.STORAGE, Source.MINE, Source.COOK)), "重排不能复活已经耗尽的来源");
     }
 
     private static Object field(Object target, String name) throws Exception {
