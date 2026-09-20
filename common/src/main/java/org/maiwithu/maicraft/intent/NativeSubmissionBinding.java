@@ -10,7 +10,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
 import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionJournal;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionJournal;
 
 /** 用持久总任务身份绑定单次原生提交；先保存任务再预留操作编号，重启或补前置步骤都不能重复放行。 */
 final class NativeSubmissionBinding {
@@ -18,7 +18,7 @@ final class NativeSubmissionBinding {
 
     static void bind(NativeSubmissionTaskRecord child, IntentTaskRecord parent, IntentRuntime runtime) {
         String namespace = child.submissionNamespace();
-        var journal = new NativeConsumptionJournal(runtime.requiredStateIdentity(), operationId(parent, namespace), namespace);
+        var journal = new NativeSubmissionJournal(runtime.requiredStateIdentity(), operationId(parent, namespace), namespace);
         child.submissionBarrier(barrier(parent, runtime, namespace, journal::prepare));
     }
 

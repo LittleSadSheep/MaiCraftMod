@@ -19,8 +19,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 
-/** 原生加工先持久化本次消费编号；已有记录只禁止重发，不能证明材料已经投入或加工成功。 */
-public class NativeConsumptionJournal {
+/** 提交原生操作前持久化本次编号；已有记录只禁止重发，不能证明游戏或服务端已接受操作。 */
+public class NativeSubmissionJournal {
     // 所有原生机制共用有界写入线程；队列满时停止，不在游戏线程同步磁盘。
     private static final Executor WRITER = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(32), task -> {
@@ -35,13 +35,13 @@ public class NativeConsumptionJournal {
     private final MarkerWriter writer;
     private CompletableFuture<Void> preparation;
 
-    public NativeConsumptionJournal(StateIdentity identity, UUID operationId, String namespace) {
-        this(identity, operationId, namespace, WRITER, NativeConsumptionJournal::writeMarker);
+    public NativeSubmissionJournal(StateIdentity identity, UUID operationId, String namespace) {
+        this(identity, operationId, namespace, WRITER, NativeSubmissionJournal::writeMarker);
     }
-    protected NativeConsumptionJournal(StateIdentity identity, UUID operationId, String namespace, Executor executor) {
-        this(identity, operationId, namespace, executor, NativeConsumptionJournal::writeMarker);
+    protected NativeSubmissionJournal(StateIdentity identity, UUID operationId, String namespace, Executor executor) {
+        this(identity, operationId, namespace, executor, NativeSubmissionJournal::writeMarker);
     }
-    protected NativeConsumptionJournal(StateIdentity identity, UUID operationId, String namespace, Executor executor, MarkerWriter writer) {
+    protected NativeSubmissionJournal(StateIdentity identity, UUID operationId, String namespace, Executor executor, MarkerWriter writer) {
         Objects.requireNonNull(identity, "world identity"); this.operationId = Objects.requireNonNull(operationId, "operation id");
         if (namespace == null || !namespace.matches("[a-z][a-z0-9-]{0,63}")) throw new IllegalArgumentException("invalid native consumption namespace");
         this.executor = Objects.requireNonNull(executor, "executor"); this.writer = Objects.requireNonNull(writer, "writer");

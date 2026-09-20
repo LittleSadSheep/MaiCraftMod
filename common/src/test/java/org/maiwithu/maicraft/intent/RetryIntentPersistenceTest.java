@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionJournal;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionJournal;
 import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.intent.persistence.IntentStateStore;
@@ -147,7 +147,7 @@ public final class RetryIntentPersistenceTest {
         @Override public void execute(Runnable action) { tasks.addLast(action); }
         void runNext() { tasks.removeFirst().run(); }
     }
-    private static final class TestJournal extends NativeConsumptionJournal {
+    private static final class TestJournal extends NativeSubmissionJournal {
         TestJournal(StateIdentity identity, UUID operation, String namespace, Executor executor) { super(identity, operation, namespace, executor); }
     }
     private static final class ConsumerRecord extends NativeSubmissionTaskRecord {

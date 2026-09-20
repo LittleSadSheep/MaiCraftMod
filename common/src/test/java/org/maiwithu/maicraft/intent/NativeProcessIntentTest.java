@@ -16,7 +16,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
 import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRequest;
-import org.maiwithu.maicraft.core.task.base.NativeConsumptionJournal;
+import org.maiwithu.maicraft.core.task.base.NativeSubmissionJournal;
 import org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
@@ -95,7 +95,7 @@ public final class NativeProcessIntentTest {
         var parent = new IntentTaskRecord(parentId, null, first); UUID operation = NativeSubmissionBinding.operationId(parent, "enchant");
         var identity = new StateIdentity("e".repeat(64), Files.createTempDirectory("native-process-identity-"));
         ArrayDeque<Runnable> writes = new ArrayDeque<>(); Executor executor = writes::addLast;
-        var constructor = NativeConsumptionJournal.class.getDeclaredConstructor(StateIdentity.class, UUID.class, String.class, Executor.class);
+        var constructor = NativeSubmissionJournal.class.getDeclaredConstructor(StateIdentity.class, UUID.class, String.class, Executor.class);
         constructor.setAccessible(true); var journal = constructor.newInstance(identity, operation, "enchant", executor);
         check(!journal.prepare(), "先等待真实预约写入"); writes.removeFirst().run(); check(journal.prepare(), "预约已同步");
         Goal refreshed = machine(UUID.randomUUID().toString()); parent.replaceCurrent(refreshed);
