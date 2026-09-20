@@ -1,0 +1,57 @@
+[
+  {
+    "id": "house/design-method", "title": "建房设计方法：约束、构图与差异化",
+    "summary": "每次设计先读。用短设计纲要确定用途、体量、风格和变化轴；选择其他教材，避免盲目堆细节或照抄案例。",
+    "load_policy": "task_start", "requires": ["scene.v2"]
+  },
+  {
+    "id": "house/structure/circulation", "title": "房间、入口与通行",
+    "summary": "多房间、多层、院落先读：从可走的空区反推墙体，预留门洞、楼梯和净高；含有入口的房间骨架。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "boolean.difference"]
+  },
+  {
+    "id": "house/structure/roofs", "title": "坡屋顶、屋檐与山墙",
+    "summary": "坡顶、阁楼或欧式小屋先读：空屋顶截面、屋脊方向、山墙填充与屋檐层次；含完整坡顶组件。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "named_components", "component_arrays"]
+  },
+  {
+    "id": "house/technique/materials", "title": "材质角色与立面进深",
+    "summary": "配色、墙面单调或材质替换时读：结构、填充、屋顶、细节分工；用进退面和有位置依据的纹理增强层次。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "primitive.panel", "boolean.difference"]
+  },
+  {
+    "id": "house/technique/lattice", "title": "镂空格栅与交替半砖",
+    "summary": "网状结构、花窗、屏风、通风面板时读：二进制 panel.pattern、孔洞合成、上下半砖映射；含两份完整场景。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.panel", "panel.binary_pattern", "exact_block_states"]
+  },
+  {
+    "id": "house/style/european-timber", "title": "欧式木构小屋与街屋",
+    "summary": "欧式、木骨架、酒馆、村屋：深色承重框架、浅色墙面、坡顶和尺度变化；三种体量路线及可复用窗间。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "primitive.panel", "named_components", "component_arrays", "boolean.difference"]
+  },
+  {
+    "id": "house/style/european-stone", "title": "欧式石造宅邸与门廊",
+    "summary": "石造、庄园、城堡风：厚重基座、竖向窗洞、入口主次和克制的塔体；含阶梯拱门廊示例。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "boolean.difference"]
+  },
+  {
+    "id": "house/style/east-asian-courtyard", "title": "东亚意向院落与回廊",
+    "summary": "中式、日式意向、庭院：先选轴线院落或偏置庭园，统一柱网和屋檐；含可走回廊组件，不混搭全部符号。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "primitive.panel", "named_components", "component_arrays"]
+  },
+  {
+    "id": "house/style/modern", "title": "现代住宅与退台庭院",
+    "summary": "现代、极简、别墅：错动体量、遮阳、玻璃进退和有限悬挑；含深窗与遮阳框，不堆白盒子。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "primitive.panel", "boolean.difference"]
+  },
+  {
+    "id": "house/style/industrial", "title": "工业厂房与生存工坊",
+    "summary": "工业、仓库、机器工坊：设备区、检修通道、重复结构和高窗；含有车辆尺度开口的厂房端墙，设备功能另行核实。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "primitive.panel", "boolean.difference"]
+  },
+  {
+    "id": "house/example/timber-cottage", "title": "完整案例：带门廊的木构小屋外壳",
+    "summary": "需要完整建房示范时读：7×7 主屋、入口、门扇、四面采光、空屋顶与小门廊；说明如何由需求组合构件并产生变体。",
+    "load_policy": "on_demand", "requires": ["scene.v2", "primitive.cube", "primitive.panel", "named_components", "component_arrays", "boolean.difference", "exact_block_states"]
+  }
+]
