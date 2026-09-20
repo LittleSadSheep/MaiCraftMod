@@ -38,7 +38,7 @@
 | `sleep` | 找到床并睡觉 | `AbilityAdapter.sleep` | 入口核对 |
 | `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |
 | `craft` | 根据配方制作物品 | `AbilityAdapter.craft` | 入口核对 |
-| `cook` | 烹饪或烧炼所需物品 | `AbilityAdapter.cook` | 入口核对 |
+| `cook` | 烹饪或烧炼所需物品 | `CookAbilityAdapter` | 主执行器已通读，数量、估价和菜单收尾已重构；[已验证与待审范围](cooking.md) |
 | `trade` | 与村民完成指定交易 | `AbilityAdapter.trade` | 入口核对 |
 | `enchant` | 使用附魔台完成一次有预算的附魔 | `EnchantAbilityAdapter` | 入口核对；兼容入口 |
 | `design_build` | 保存、检查、修改或预览建筑设计 | `BuildDesignAdapter`、`BuildingSceneAdapter` | 入口核对 |

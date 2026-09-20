@@ -9,10 +9,10 @@ import net.minecraft.world.inventory.FurnaceMenu;
 import net.minecraft.world.inventory.SimpleContainerData;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireCompanionTask;
-import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 父目标完成只允许收尾已开始的炉次；取消等待中的炉次必须报告仍在炉内的材料。 */
 public final class CookingSettlementTest {

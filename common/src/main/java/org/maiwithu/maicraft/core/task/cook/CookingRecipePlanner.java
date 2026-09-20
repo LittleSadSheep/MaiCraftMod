@@ -1,40 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.cook;
 
-import java.util.Set;
-import java.util.LinkedHashSet;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.level.block.Block;
-import org.maiwithu.maicraft.core.PlayerInv;
-import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
-import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
-import org.maiwithu.maicraft.core.tools.ToolParse;
 import java.util.ArrayList;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.item.crafting.AbstractCookingRecipe;
-import net.minecraft.tags.ItemTags;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
-import java.util.Objects;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.ShapedRecipe;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
+import org.maiwithu.maicraft.core.tools.ToolParse;
 
 /** 只读比较加工配方、燃料和准备路线；选定后由烹饪执行器操作同一台炉子并确认实际结果。 */
 final class CookingRecipePlanner {
@@ -127,7 +127,6 @@ final class CookingRecipePlanner {
                 .map(entry -> new IngredientGroup(entry.getKey(), entry.getValue()))
                 .toList();
     }
-
 
     // 先扣除当前背包已有量，再估直接来源或递归合成的成本；递归最多四层，并阻止沿同一路径绕回同一物品。
     // 一条方案共用一份临时库存；试别的配方时复制它，选定后才保留该方案的消耗，不写玩家背包。
@@ -271,7 +270,6 @@ final class CookingRecipePlanner {
         return total;
     }
 
-
     record FuelChoice(Item item, int burnTicks, int count, long waste, long acquisitionCost,
                       long inputCost, long stationCost) {
         long preparationCost() { return addCost(acquisitionCost, inputCost, stationCost); }
@@ -347,7 +345,6 @@ final class CookingRecipePlanner {
         long waste = (long) needed * burn - neededTicks;
         return new FuelChoice(item, burn, needed, waste, cost, inputCost, stationCost);
     }
-
 
     record ResolvedCandidate(
             CookingRecipe candidate,

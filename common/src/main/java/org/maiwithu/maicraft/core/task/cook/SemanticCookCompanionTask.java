@@ -2,7 +2,6 @@
 package org.maiwithu.maicraft.core.task.cook;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -12,14 +11,13 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.AbstractFurnaceMenu;
+import net.minecraft.world.inventory.DataSlot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -28,12 +26,12 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.MouseButton;
-import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.FuelChoice;
-import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.ResolvedCandidate;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
+import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.FuelChoice;
+import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.ResolvedCandidate;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.task.menu.CloseMenuTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
@@ -42,10 +40,6 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
-import java.util.Objects;
-import net.minecraft.world.inventory.DataSlot;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import org.maiwithu.maicraft.core.Constants;
 
 /**
  * 完成一批加工：挑配方和炉子、备原料和燃料、打开并装入、等烧好、确认收回成品，必要时再做下一批。
@@ -79,7 +73,6 @@ public final class SemanticCookCompanionTask
     private boolean batchOutstanding;
     private boolean finishRequested;
     private boolean parentSatisfied;
-    private boolean replenishAfterClose;
     private OpenMode openMode = OpenMode.NEW_BATCH;
     private BlockPos stationReturnStance;
     private long nextCookCheckTick;
@@ -366,7 +359,6 @@ public final class SemanticCookCompanionTask
     // 去掉 COOK 来源，避免为了本次加工原料又递归开启加工任务。
     private TaskState acquire(Item item, int finalCount, Purpose purpose) {
         if (openedMenu) {
-            replenishAfterClose = true;
             phase = Phase.CLEANUP;
             return TaskState.RUNNING;
         }
@@ -834,7 +826,6 @@ public final class SemanticCookCompanionTask
             phase = Phase.COMPLETE;
             return TaskState.RUNNING;
         }
-        replenishAfterClose = false;
         openMode = OpenMode.NEW_BATCH;
         ownedInputLoaded = 0;
         ownedOutputTaken = 0;

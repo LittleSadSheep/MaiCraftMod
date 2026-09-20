@@ -8,9 +8,9 @@ import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
-import org.maiwithu.maicraft.core.tools.work.SemanticCookApi;
-import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
+import org.maiwithu.maicraft.core.tools.work.SemanticCookApi;
 
 /** 要烧到三百件就保留三百，原料许可与燃料清单也不能被宽松类型转换改成另一种行动。 */
 public final class CookGoalTest {

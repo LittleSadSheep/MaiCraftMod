@@ -1,9 +1,9 @@
 package org.maiwithu.maicraft.core.task.menu;
 
-import org.maiwithu.maicraft.task.TaskFactory;
-import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Objects;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import org.maiwithu.maicraft.task.TaskFactory;
+import org.maiwithu.maicraft.task.TaskRecord;
 
 // 组合任务可绑定自己打开的菜单；菜单换掉后不能关闭新界面。无绑定构造保留“关闭当前菜单”的显式用途。
 public final class CloseMenuTaskRecord extends TaskRecord {

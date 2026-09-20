@@ -5,8 +5,8 @@ import java.util.List;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireCompanionTask;
-import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 总目标可超过一炉的容量；每炉仍分批处理，已经有 256 件也不能擅自结束 300 件的任务。 */
