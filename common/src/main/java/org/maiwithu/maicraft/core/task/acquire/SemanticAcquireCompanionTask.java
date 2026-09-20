@@ -415,7 +415,8 @@ public final class SemanticAcquireCompanionTask
         Ae2ResourceSupply.Group group = new Ae2ResourceSupply.Group(
                 need.itemIds.getFirst(), need.itemIds, missing,
                 Ae2ResourceSupply.SelectionMode.AGGREGATE);
-        boolean allowNetworkCrafting = r.allowedSources.contains(
+        // 网络制造也受当前前置需求约束，不能从顶层任务重新取回已经收窄的制造许可。
+        boolean allowNetworkCrafting = need.allowedSources.contains(
                 SemanticAcquireTaskRecord.Source.CRAFT);
         Ae2ResourceSupply.Request request = new Ae2ResourceSupply.Request(
                 List.of(group), allowNetworkCrafting);
@@ -622,7 +623,7 @@ public final class SemanticAcquireCompanionTask
         }
         WorkToolPreparation.Choice workTool = WorkToolPreparation.missing(player, blocks,
                 need.efficientBatchStarted ? Math.max(WorkToolPreparation.BATCH_SIZE, missing(need)) : missing(need),
-                toolMaterialBudget(Items.IRON_INGOT), toolMaterialBudget(Items.DIAMOND),
+                toolMaterialBudget(need, Items.IRON_INGOT), toolMaterialBudget(need, Items.DIAMOND),
                 need.preferredToolTierCap);
         int bootstrap = workTool != null && !workTool.stockOnly()
                 ? WorkToolPreparation.bootstrapLimit(player, blocks) : 0;
@@ -654,16 +655,8 @@ public final class SemanticAcquireCompanionTask
             }
             Set<ResourceLocation> lineage = new LinkedHashSet<>(need.lineageItems);
             lineage.addAll(toolItems);
-            List<SemanticAcquireTaskRecord.Source> toolSources = new ArrayList<>(need.allowedSources);
-            // 当前认为“只许采矿”只约束目标材料，不约束工作工具，所以会额外开放合成工具。
-            if (!toolSources.contains(SemanticAcquireTaskRecord.Source.CRAFT))
-                toolSources.add(SemanticAcquireTaskRecord.Source.CRAFT);
-            if (stockOnlyUpgrade) {
-                toolSources = new ArrayList<>(List.of(SemanticAcquireTaskRecord.Source.INVENTORY,
-                        SemanticAcquireTaskRecord.Source.CRAFT));
-                if (StockEvidence.latest(player).map(StockEvidence.Snapshot::supportsToolSupply).orElse(false))
-                    toolSources.add(SemanticAcquireTaskRecord.Source.STORAGE);
-            }
+            List<SemanticAcquireTaskRecord.Source> toolSources =
+                    AcquisitionSources.forTool(need.allowedSources, stockOnlyUpgrade);
             Need toolNeed = new Need(
                     toolItems, count(toolItems) + 1,
                     need.depth + 1, lineage, need.lineageRecipes, Set.of(),
@@ -700,13 +693,17 @@ public final class SemanticAcquireCompanionTask
                 record, "mine BlockItem-derived or semantic source blocks");
     }
 
-    private long toolMaterialBudget(Item item) {
+    private long toolMaterialBudget(Need need, Item item) {
         // 升级工具前扣掉已经被其他需求预留的铁锭／钻石，避免为了造工具先花掉最终目标要保留的材料。
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
-        int reserved = needs.stream().filter(need -> need.itemIds.contains(id))
-                .mapToInt(need -> need.requiredFinalCount).max().orElse(0);
+        int reserved = needs.stream().filter(pending -> pending.itemIds.contains(id))
+                .mapToInt(pending -> pending.requiredFinalCount).max().orElse(0);
         long carried = PlayerInv.buildableCount(player.getInventory(), item);
-        long external = StockEvidence.latest(player).map(stock -> stock.storedCount(id)).orElse(0L);
+        // 看见过库存不等于可以取用；仅把已获准且接通取料流程的仓库计入升级预算。
+        long external = need.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)
+                ? StockEvidence.latest(player).filter(StockEvidence.Snapshot::supportsToolSupply)
+                        .map(stock -> stock.storedCount(id)).orElse(0L)
+                : 0L;
         return Math.max(0, carried + Math.min(external, Long.MAX_VALUE - carried) - reserved);
     }
 
@@ -728,9 +725,8 @@ public final class SemanticAcquireCompanionTask
                 player.getInventory(), BuiltInRegistries.ITEM.get(output));
         int selectedFinal = Math.min(
                 SemanticCookTaskRecord.MAX_FINAL_COUNT, currentSelected + missing(need));
-        List<SemanticAcquireTaskRecord.Source> childSources = r.allowedSources.stream()
-                .filter(source -> source != SemanticAcquireTaskRecord.Source.COOK)
-                .toList();
+        List<SemanticAcquireTaskRecord.Source> childSources =
+                AcquisitionSources.forCookingInputs(need.allowedSources);
         long now = player.level().getGameTime();
         SemanticCookTaskRecord child = new SemanticCookTaskRecord(
                 childId("cook"),

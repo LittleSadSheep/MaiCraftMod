@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicyTe
 import org.maiwithu.maicraft.core.inventory.StockEvidenceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
 import org.maiwithu.maicraft.core.task.acquire.OrdinaryStorageAcquireTest;
 import org.maiwithu.maicraft.core.task.acquire.StorageSupplyRadiusTest;
 import org.maiwithu.maicraft.core.task.build.BuildAeSpoilReceiptTest;
@@ -242,6 +243,8 @@ public final class GuiRegressionSuite {
         SleepSafetyTest.main(args);
         FishingBiteTest.main(args);
         StockEvidenceTest.main(args);
+        // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
+        AcquisitionSourceInheritanceTest.main(args);
         CreateStockObservationTest.main(args);
         Ae2ScreenAccessTest.main(args);
         Ae2WaterBucketFillTest.main(args);
