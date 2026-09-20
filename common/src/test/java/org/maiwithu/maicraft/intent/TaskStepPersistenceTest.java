@@ -107,7 +107,7 @@ public final class TaskStepPersistenceTest {
             List<Goal> children = new ArrayList<>();
             for (int index = start; index < Math.min(count, start + 32); index++) {
                 children.add(new Goal("maicraft:wait_for_condition", prefix + " " + index, null,
-                        "{\"condition\":\"daytime\"}", "{}", List.of(), List.of()));
+                        "{\"condition\":\"day\"}", "{}", List.of(), List.of()));
             }
             groups.add(new Goal("maicraft:sequence", "group " + start, null, "{}", "{}", List.of(), children));
         }

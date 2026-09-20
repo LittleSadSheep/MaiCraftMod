@@ -98,7 +98,7 @@ public final class SequenceProtectionTest {
 
     private static Goal waitGoal(String outcome) {
         return new Goal("maicraft:wait_for_condition", outcome, null,
-                "{\"condition\":\"daytime\"}", "{}", List.of(), List.of());
+                "{\"condition\":\"day\"}", "{}", List.of(), List.of());
     }
 
     private static Goal sequence(String parameters, Goal... children) {

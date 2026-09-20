@@ -16,6 +16,7 @@ public final class WaitGoalTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        rejectsAmbiguousParameters();
         elapsedTimeContinuesWhilePaused();
         observesLiveConditions();
         sequenceAdvancesOneGoalAtATime();
@@ -26,6 +27,27 @@ public final class WaitGoalTest {
         var constructor = IntentRuntime.class.getDeclaredConstructor();
         constructor.setAccessible(true);
         return constructor.newInstance();
+    }
+
+    private static void rejectsAmbiguousParameters() throws Exception {
+        var runtime = runtime();
+        // 计划不能把错误时长悄悄改成别的数值，也不能接受执行时才发现不认识的条件。
+        for (String parameters : List.of("{\"after_s\":1.5}", "{\"after_s\":-1}", "{\"after_s\":3601}",
+                "{\"after_s\":2147483648}", "{\"after_s\":\"2\"}", "{\"after_s\":null}", "{\"after_s\":{}}",
+                "{\"condition\":true}", "{\"condition\":null}", "{\"condition\":[]}", "{\"condition\":\"daytime\"}")) {
+            try {
+                runtime.compile(goal(parameters), 0);
+                throw new AssertionError("等待计划接受了不明确的参数: " + parameters);
+            } catch (SemanticContractException expected) {
+                check(expected.getMessage().contains("after_s") || expected.getMessage().contains("condition"),
+                        "应指出出错的等待字段");
+            }
+        }
+        for (String parameters : List.of("{}", "{\"after_s\":0}", "{\"after_s\":3600}",
+                "{\"condition\":\"elapsed\"}", "{\"condition\":\"day\"}", "{\"condition\":\"night\"}",
+                "{\"condition\":\"health_full\"}", "{\"condition\":\"not_hungry\"}")) {
+            check(runtime.compile(goal(parameters), 0).steps().size() == 1, "合法等待目标应保留为一步");
+        }
     }
 
     private static void elapsedTimeContinuesWhilePaused() throws Exception {

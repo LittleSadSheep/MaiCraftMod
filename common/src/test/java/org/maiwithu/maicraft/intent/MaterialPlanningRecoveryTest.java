@@ -77,7 +77,7 @@ public final class MaterialPlanningRecoveryTest {
         return new Goal("maicraft:acquire_items", "背包里有两个钻石", null,
                 "{\"item_id\":\"minecraft:diamond\",\"count\":2,\"allowed_sources\":[\"craft\"]}", "{}", List.of(), List.of(), List.of("Farm"));
     }
-    private static Goal waiting(String outcome) { return new Goal("maicraft:wait_for_condition", outcome, null, "{\"condition\":\"daytime\"}", "{}", List.of(), List.of()); }
+    private static Goal waiting(String outcome) { return new Goal("maicraft:wait_for_condition", outcome, null, "{\"condition\":\"day\"}", "{}", List.of(), List.of()); }
     private static JsonObject json(TaskResult result) { return JsonParser.parseString(result.toJson()).getAsJsonObject(); }
     private static boolean hasRetry(IntentTaskRecord.DecisionSnapshot decision) { return decision.options().stream().anyMatch(option -> option.choice().equals("retry")); }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

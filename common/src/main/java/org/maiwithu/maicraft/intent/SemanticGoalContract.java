@@ -15,10 +15,15 @@ final class SemanticGoalContract {
     private SemanticGoalContract() {}
 
     static void validate(Goal goal, Set<String> knownAbilities) {
-        validate(goal, knownAbilities, "goal");
+        validate(goal, knownAbilities, "goal", false);
     }
 
-    private static void validate(Goal goal, Set<String> knownAbilities, String path) {
+    /** 旧等待参数曾被宽松接收；保留历史供查询、取消和修订，重新执行时仍须通过当前参数检查。 */
+    static void validateRestored(Goal goal, Set<String> knownAbilities) {
+        validate(goal, knownAbilities, "goal", true);
+    }
+
+    private static void validate(Goal goal, Set<String> knownAbilities, String path, boolean restoredHistory) {
         // 不认识的能力或参数名立即报错，错误中带完整位置，方便调用者找到需要修改的字段。
         String ability = goal.ability();
         if (!knownAbilities.contains(ability)) {
@@ -37,6 +42,13 @@ final class SemanticGoalContract {
             try { ChatMessage.parse(goal.parameters()); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_chat_contract", path + ".parameters", ability, invalid.getMessage());
+            }
+        }
+        // 等待的时长和条件在接单前确定，不能等到角色已经暂停干活才发现参数被误读。
+        if (!restoredHistory && WaitAbilityAdapter.ABILITY.equals(ability)) {
+            try { WaitAbilityAdapter.validate(goal); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_wait_contract", path + ".parameters", ability, invalid.getMessage());
             }
         }
         // 附魔成本必须在计划阶段明确；菜单按钮与槽位仍由执行器根据真实报价解析。
@@ -102,7 +114,7 @@ final class SemanticGoalContract {
 
         for (int i = 0; i < goal.children().size(); i++) {
             // 组合目标的每个子目标也要经过同样检查，不能把不合法参数藏到子步骤里。
-            validate(goal.children().get(i), knownAbilities, path + ".children[" + i + "]");
+            validate(goal.children().get(i), knownAbilities, path + ".children[" + i + "]", restoredHistory);
         }
     }
 

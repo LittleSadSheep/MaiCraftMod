@@ -92,7 +92,7 @@ public final class BuildProjectContinuationTest {
         IntentTaskRecord record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
         record.retainBuildProject(id);
         record.insertRecovery(new Goal("maicraft:wait_for_condition", "wait", null,
-                "{\"condition\":\"daytime\"}", "{}", List.of(), List.of()));
+                "{\"condition\":\"day\"}", "{}", List.of(), List.of()));
         record.terminal(TaskState.CANCELLED, TaskResult.cancelled("interrupted"), 20);
         var snapshot = IntentStateCodec.decode(IntentStateCodec.encode(world, List.of(), List.of(record), Map.of(), List.of()))
                 .tasks().getFirst();

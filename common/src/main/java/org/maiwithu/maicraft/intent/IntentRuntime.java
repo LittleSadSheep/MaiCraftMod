@@ -103,7 +103,7 @@ public final class IntentRuntime {
             "maicraft:modify_machine",
             "maicraft:build_machine",
             "maicraft:acquire_items",
-            "maicraft:wait_for_condition",
+            WaitAbilityAdapter.ABILITY,
             "maicraft:sequence");
 
     /** Immutable startup snapshot: core and general adapters cannot drift after publication. */
@@ -488,16 +488,16 @@ public final class IntentRuntime {
             try {
                 IntentStateCodec.Decoded decoded = IntentStateCodec.decode(loaded.root());
                 for (Plan plan : decoded.plans()) {
-                    validateGoal(plan.goal());
+                    validateRestoredGoal(plan.goal());
                     if (plans.putIfAbsent(plan.id(), plan) != null) {
                         throw new IllegalArgumentException("duplicate persisted plan id");
                     }
                 }
                 for (IntentStateCodec.TaskSnapshot snapshot : decoded.tasks()) {
-                    validateGoal(snapshot.goal());
-                    for (Goal step : snapshot.steps()) validateGoal(step);
+                    validateRestoredGoal(snapshot.goal());
+                    for (Goal step : snapshot.steps()) validateRestoredGoal(step);
                     for (IntentTaskRecord.AttemptSnapshot attempt : snapshot.attempts()) {
-                        validateGoal(attempt.goal());
+                        validateRestoredGoal(attempt.goal());
                     }
                     IntentTaskRecord record = IntentTaskRecord.restored(
                             snapshot.id(), snapshot.planId(), snapshot.goal(),
@@ -666,6 +666,13 @@ public final class IntentRuntime {
 
     void validateGoal(Goal goal) {
         SemanticGoalContract.validate(goal, KNOWN_ABILITIES);
+        IntentStateCodec.requirePersistableGoal(goal);
+        rejectMicroInstructions(goal);
+    }
+
+    /** 恢复历史不等于重新批准执行；仍保留结构、容量与内部动作边界，避免旧记录锁住整个世界的任务。 */
+    private void validateRestoredGoal(Goal goal) {
+        SemanticGoalContract.validateRestored(goal, KNOWN_ABILITIES);
         IntentStateCodec.requirePersistableGoal(goal);
         rejectMicroInstructions(goal);
     }

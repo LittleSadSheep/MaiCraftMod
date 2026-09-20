@@ -395,12 +395,12 @@ public final class SemanticAbilityCatalog {
                             field("allowed_sources", "array<string>", "Permitted semantic material sources; storage is tried before crafting."),
                             field("allow_harm", "boolean", "Explicit harmful acquisition permission; never inferred."),
                             field("protected_labels", "array<string>", "Remembered resources or areas that material acquisition must preserve.")));
-            case "maicraft:wait_for_condition" -> contract(
+            case WaitAbilityAdapter.ABILITY -> contract(
                     "Wait without inventing body work until an observable condition is true.",
                     targets("current_place"),
                     fields(
-                            field("condition", "string", "Elapsed, day, night, health_full or not_hungry."),
-                            field("after_s", "integer", "Minimum elapsed seconds when relevant.")));
+                            field("condition", "string", "elapsed (default), day, night, health_full or not_hungry. Observe only; does not eat, heal or change time."),
+                            field("after_s", "integer", "Minimum game-time seconds before checking the condition, 0-3600, default 1. Not a timeout; fractions and out-of-range values are rejected.")));
             case "maicraft:sequence" -> contract(
                     "Run semantic child goals in order; each child remains independently observable and recoverable, while explicit area protection can span later children.",
                     targets(),

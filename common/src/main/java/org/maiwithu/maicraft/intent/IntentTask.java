@@ -11,7 +11,6 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
@@ -558,16 +557,8 @@ final class IntentTask implements Task {
     private TaskState tickWait() {
         // 先等到允许检查的时间，再看天色、血量或饱食度；条件没满足就继续等，不主动做其他事。
         if (player.level().getGameTime() < wait.notBeforeGameTime()) return TaskState.RUNNING;
-        boolean satisfied = switch (wait.condition()) {
-            case "elapsed" -> true;
-            case "day" -> WorldTimeSemantics.isDaytime(player.level());
-            case "night" -> WorldTimeSemantics.isNighttime(player.level());
-            case "health_full" -> player.getHealth() >= player.getMaxHealth();
-            case "not_hungry" -> player.getFoodData().getFoodLevel() >= 18;
-            default -> false;
-        };
-        if (!satisfied) return TaskState.RUNNING;
-        String condition = wait.condition();
+        if (!wait.condition().satisfiedBy(player)) return TaskState.RUNNING;
+        String condition = wait.condition().id();
         wait = null;
         completeStep(TaskResult.ok("wait condition satisfied: " + condition));
         return afterImmediate();

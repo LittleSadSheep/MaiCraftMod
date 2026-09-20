@@ -69,7 +69,7 @@ final class AbilityAdapter {
             case "maicraft:connect_mechanical_power" ->
                     connectPower(goal, player, runtime, continuationToken);
             case "maicraft:acquire_items" -> acquire(goal);
-            case "maicraft:wait_for_condition" -> waitFor(goal, player);
+            case WaitAbilityAdapter.ABILITY -> WaitAbilityAdapter.adapt(goal, player);
             default -> decision(goal,
                     "No semantic adapter is registered for " + goal.ability() + ". Choose explicitly.",
                     List.of(
@@ -836,20 +836,6 @@ final class AbilityAdapter {
         return new IntentAction.Tool("acquire_items", args.toString());
     }
 
-    private static IntentAction waitFor(Goal goal, LocalPlayer player) {
-        // after_s 表示至少先等多久，不是最长等多久；到点后条件还没满足，仍会继续等。
-        JsonObject parameters = goal.parameters();
-        int seconds = integer(parameters, "after_s", 1, 0, 3600);
-        String condition = string(parameters, "condition");
-        if (condition == null) condition = "elapsed";
-        if (!List.of("elapsed", "day", "night", "health_full", "not_hungry").contains(condition)) {
-            return decision(goal, "Unsupported wait condition: " + condition,
-                    List.of(option("skip", "Skip this wait."),
-                            option("cancel", "Cancel the task.")));
-        }
-        return new IntentAction.Wait(condition, player.level().getGameTime() + seconds * 20L);
-    }
-
     private static IntentAction.Decision decision(Goal goal, String question,
                                                    List<IntentTaskRecord.DecisionOption> options) {
         // 给这一个问题分配新编号，附上所属目标；后面的答复必须带回这个编号才能被接受。
@@ -1055,7 +1041,7 @@ sealed interface IntentAction {
             String label, Goal.WorldPosition position,
             IntentRuntime.LandmarkAreaRole areaRole) implements IntentAction {}
     /** 到指定游戏刻后开始查条件，满足才完成。 */
-    record Wait(String condition, long notBeforeGameTime) implements IntentAction {}
+    record Wait(WaitAbilityAdapter.Condition condition, long notBeforeGameTime) implements IntentAction {}
     /** 当前无法自行继续，暂停并等待调用者回答这个问题。 */
     record Decision(IntentTaskRecord.DecisionSnapshot snapshot) implements IntentAction {}
 }
